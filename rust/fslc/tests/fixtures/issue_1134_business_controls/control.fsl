@@ -1,0 +1,24 @@
+// The declared-and-satisfied catalog stays accepted and warning-free (#1134).
+business SatisfiedControl {
+  actor Agent
+  entity Item
+
+  process Item {
+    stages Open, Done
+    initial Open
+    transition finish Open -> Done by Agent
+  }
+
+  control CTRL-CLOSURE
+    "Every opened item must reach a closed outcome"
+    owner Agent
+    severity high
+    applies_to Item
+
+  policy REQ-CLOSE "every opened item is eventually finished"
+    satisfies CTRL-CLOSURE
+    every Item in Open must eventually be Done
+}
+verify {
+  instances Item = 2
+}

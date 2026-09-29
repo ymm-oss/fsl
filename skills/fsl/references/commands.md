@@ -69,9 +69,12 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    contract**. If implementation conformance is also required, anchor to the
    implementation with `testgen` (pytest via an Adapter) / `replay` (matching
    against execution logs).
-   For scope-sensitive failures, use `fslc sweep file.fsl --instances Case=1..3
-   --depth 1..8 [--property Name]`; it reports each run under `sweep.results` and
-   the first true failing scope under `sweep.minimal_counterexample`. A grid
+   For scope-sensitive failures, use `fslc sweep file.fsl --depth 1..8
+   [--property Name]`; it reports each run under `sweep.results` and the first
+   true failing scope under `sweep.minimal_counterexample`. For specs that
+   declare an entity or number, optionally extend the sweep with
+   `--instances <Entity>=1..3` and/or `--values <Number>=…` (replace the
+   placeholders with declared names). A grid
    with only `insufficient_depth` reachability observations is
    `sweep_inconclusive`/exit 1 (and has a null minimal counterexample); a grid
    with a determinate success and no true failure is `sweep_passed`/exit 0.

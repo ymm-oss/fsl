@@ -144,8 +144,9 @@ independent lanes succeed:
    execution through `eval` or a variable-expanded command word is outside the static-detection
    boundary and is not included in the detection claim. Selftests pin literal `eval` and variable
    command examples as expected non-detections so this boundary cannot be mistaken for implicit
-   coverage. Local macOS development requires `brew install shellcheck`; a missing executable fails
-   the lane instead of skipping it. CI's ShellCheck version is authoritative; CI detects findings
+   coverage. Local macOS development requires `brew install shellcheck`; a missing executable is
+   reported as a skipped step and still fails the lane, and in CI it is a hard failure (see
+   "Run every step, then fail" below). CI's ShellCheck version is authoritative; CI detects findings
    that a different local version does not report, and the checker records the version it used.
    Repository-root `CHANGELOG.md` is deliberately outside that scope because it is an immutable
    historical record whose old section names must not make current automation fail.
@@ -159,6 +160,54 @@ verified product.
 Superseded runs for the same pull request are cancelled. Merge-group runs are not cancelled and the
 workflow handles GitHub's `merge_group` event directly, so a merge queue can validate the combined
 candidate against current `main`.
+
+### Run every step, then fail
+
+`tools/check-merge-readiness.sh` runs every step of a lane and fails afterwards if any of them
+failed (issue #1135). In CI the lane is a gate, where stopping at the first failure is correct and
+cheap; locally it is a checklist, and `check_automation`'s 31 steps made a checklist that stops at
+item 1 useless -- three pull requests shipped defects that its later steps would have caught
+locally. `--fail-fast` restores the stop-at-the-first-failure behaviour.
+
+`set -e` stays on. The only command exempted from it is the measured one inside the `step` helper,
+whose exit status is recorded and re-raised by the summary, so the change adds exactly one place
+where a non-zero status does not abort the lane -- and that place reports it.
+
+A step whose tool is absent is neither a pass nor a failure. It is reported as `SKIP`, listed
+separately in the summary, and the lane still exits non-zero, because a skip is not a pass. In CI
+skipping is not offered at all: a missing tool is a hard failure. CI is detected from
+`GITHUB_ACTIONS`, `CI`, or an explicit `FSL_READINESS_CI`, and there is deliberately no variable
+that re-enables skipping, because a CI image that quietly loses a tool and still goes green is the
+false-green class this document exists to prevent.
+
+### Link-target resolution
+
+`tools/check-doc-links.py` runs in the automation lane as a selftest, a repository-wide live audit
+(`check .`), and the accepting/rejecting controls in `tests/test_doc_links.py` (issue #1127). It uses
+no network and no build; the live audit reads every Markdown document in the working tree in
+about 0.1s.
+
+What it checks: that a Markdown **link target** resolves. A path target is resolved relative to the
+linking document, a directory target resolves, an `#anchor` is resolved against GitHub's heading-slug
+algorithm **in the document the link names** -- `docs/` is read on GitHub, and a configured mystmd
+resolves a wrong-file `other.md#anchor` against a project-wide label namespace with no diagnostic
+(`docs/DESIGN-myst-spike.md`). A `.fsl` target may carry a `#<kind>:<name>` fragment naming an element
+declared in that specification; it is resolved against the declarations in that file, which is the
+forward direction of issue #1124 -- a link to a specification element that no longer exists fails the
+lane. `http(s):`, `mailto:` and other schemes are ignored.
+
+What it does not check: a bare path written in prose. `See docs/OLD-NAME.md for details` is not a
+link, and neither this gate nor a configured mystmd reports it. That is the shape of issue #1124's six
+original breakages, handled there by a naming convention rather than by a checker.
+
+What it does not claim: the backward direction. That every FSL element is discussed by some
+hand-written document is not asserted by this gate, and a specification element with no prose
+anywhere passes it. That direction is issue #1138.
+
+Scope of the file walk: every Markdown document in the working tree except generated output under
+`docs/_build/`. Unlike the citation gate, repository-root `CHANGELOG.md` is inside it -- a historical
+entry may name an old heading, but a link it makes must still resolve, and the aggregated file is
+green today (214 documents, 396 in-repository link targets, 0 findings).
 
 ## Product gate contract
 
@@ -1311,9 +1360,10 @@ on every pull request with no path filter — `.github/workflows/site-reference-
 `pull_request`/`merge_group` triggers carry no `paths:` restriction — so requiring it cannot
 deadlock a pull request the way requiring `native Z3 4.16` or `product gate` would; those stay
 deferred precisely because they never report on an ordinary pull request.
-`strict_required_status_checks_policy` is `true` and `bypass_actors` is empty, so
-`current_user_can_bypass` is `"never"` for every account — an administrator cannot merge past a
-failing or missing required context.
+`bypass_actors` is empty, so `current_user_can_bypass` is `"never"` for every account — an
+administrator cannot merge past a failing or missing required context.
+`strict_required_status_checks_policy` is `false`; see "Required contexts no longer have to run
+against current `main`" below.
 
 ### Site reference context scope
 
@@ -1445,6 +1495,13 @@ would have caught pre-merge, or the review policy changes such that the merge qu
 enqueueable. The first two are observable from the failure-issue history; the third is the condition
 the section above already names.
 
+The ruleset was changed first and this section recorded it (#1079), but `.github/ruleset-contract.json`
+and the checker still expected `true`, so the daily drift audit reported the intended change as
+drift (#1081). The contract now records `false`, the fixture is re-captured from the live ruleset,
+and `compareRuleset` reads the expected value from the contract entry instead of hardcoding `true`.
+Reversing the decision therefore means changing the live ruleset, the contract, the fixture, and
+this section together.
+
 ### Ruleset drift audit
 
 Issue #707 has two halves. The first — making the Linux evidence *required*, not merely running —
@@ -1500,7 +1557,8 @@ contract/fixture agreement — editing one without the other fails pre-merge), t
 (a dropped context; a renamed context, which must surface as one `missing` plus one `unexpected`
 rather than being silently satisfied by name), the blind control above, and the fail-closed guards
 (empty rules, empty required-context list, missing/added `bypass_actors`, an unexpected rule type,
-wrong enforcement, flipped strict policy, retargeted conditions, a schema-invalid contract) —
+wrong enforcement, a strict policy that differs from the contract's value, retargeted conditions, a
+schema-invalid contract, including a missing or non-boolean strict policy) —
 including, for the network-facing wrapper, an injected fetch failure and a 404 against a fake
 client, both of which must still create the failure issue. This suite runs in
 `tools/check-merge-readiness.sh`'s `check_automation` lane (so a contract, fixture, or checker

@@ -130,7 +130,7 @@ independently safe:
    only — every other claim kind's heading argument is a property name or case id,
    which have no glossary namespace at all in v1). `metadata_header` gained one new
    parameter, `glossary_label: Option<&str>`; when present, the heading becomes
-   `#### {kind}: {label}（`{id}`）` (ja) / `#### {kind}: {label} (`{id}`)` (en) —
+   ``#### {kind}: {label}（`{id}`）`` (ja) / ``#### {kind}: {label} (`{id}`)`` (en) —
    label first, canonical identifier always retained in a parenthesized code span,
    never replaced outright. The identifier is the join key back to the FSL source,
    `explain`, and every trace; hiding it would work against the document's own

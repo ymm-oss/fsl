@@ -622,6 +622,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 - 有限バインダー: `x: T`、`x in lo..hi`、または `x in set_or_seq`。それぞれ省略
   可能な `where predicate` を後置できます。述語は `Bool` で、`x` が束縛された後に
   スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。
+  `x` のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
+  なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
+  充足した `exists` が witness を外側の束縛へ出すことはありません。
 - 量化(有界): 正準形は `forall binder { expr }` と `exists binder { expr }`
   です。`forall i in lo..hi: expr` のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス
@@ -1565,8 +1568,13 @@ fslc refine bot.fsl  mid.fsl bot_refines_mid.fsl  top.fsl mid_refines_top.fsl --
 stutter)、bottom ⊒ top を検査します。成功時は合成された `action_map` とレイヤーの
 順序 `chain` を返します。失敗時は最初に壊れたリンク
 `failed_link: {from, to, kind}` を返します。有界の refinement は同じ深さで推移的
-なので、合成の検査はすべての隣接リンクが成立することと等価です
-(`docs/DESIGN-refinement.md` §7、例 `examples/refinement_chain`)。
+です。深さ K で隣接するすべてのリンクが成立すれば合成も成立しますが、逆は
+成り立ちません。直接の端点間チェックが成功しても、中間レイヤーの契約適合は示され
+ません。たとえば Low は1ステップで止まり、Mid は Top が許さない2ステップ目を許す
+ため、Low→Top は成功しても Mid→Top と chain は失敗します。chain は各隣接契約の
+成立を要求します (`docs/DESIGN-refinement.md` §7、例 `examples/refinement_chain`)。
+マニフェストによる `fslc chain` ではリンクごとに `refine_depth` を指定でき、端から
+端までの保守的な検査深度は各リンクの深度の最小値です。
 引数の式が中間レイヤーの状態を読むケースだけが未対応です。
 
 推奨ワークフロー: **人間/LLM が abs をレビュー → LLM が impl を詳細化 →
@@ -2176,6 +2184,12 @@ invariant / leadsTo へ、kpi はメタデータとして記録される宣言�
 診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
 すべて機械的に検出できます。
 
+business の process は純粋なステージグラフなので、`transition` が取るのは名前、
+遷移元と遷移先のステージ、actor、`covers` 注釈だけです。`with` / `when` / `set`
+を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
+クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
+ためです。意味を与えるには `requirements` spec(§13.4)で process を宣言します。
+
 PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:
 
@@ -2270,6 +2284,13 @@ policy PAY-2 "every request is eventually decided"
   satisfies CTRL-DECISION
   every Return in Requested must eventually be Approved or Rejected or Refunded
 ```
+
+このカタログは検査されます。宣言されていないコントロールを `satisfies` が指した
+場合は位置付きのエラーとなり、その `satisfies` を書いた policy / goal の位置で
+報告されます。どの policy / goal からも satisfies されない `control` は、宣言の
+位置を持つ `unused_control` 警告として JSON の `warnings` に出ます。どちらも、
+以前は宣言も参照も構文解析されたあと捨てられ、書かれていないコントロールに対して
+`check` が `ok` と答えていたために設けられた検査です。
 
 business の spec をまたいで再利用されるコントロールには、`governance` カタログを
 使います:

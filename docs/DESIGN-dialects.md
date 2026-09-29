@@ -254,6 +254,11 @@ verify {
       requirement is also acceptable — for implementation simplicity it is fine
       to put "by Manager" into meta.text)
    - duplicate transition labels with the same name are a type error.
+   - `with`, `when` and `set` on a transition are a located error (issue
+     #1109). They carry data and this expansion has nowhere to put them, so
+     accepting and dropping them would lower a model the author never wrote.
+     The `requirements` dialect's `process` gives them meaning; `covers` is
+     consumed here and stays accepted.
 3. `kpi k = count X in S` follows the same typed `ProjectionDef`/
    `Aggregate::Count` path as requirements KPI declarations. Unknown entities
    and stages are rejected before model construction; native `explain` exposes
@@ -268,6 +273,15 @@ verify {
    declared but unused controls produce an `unused_control` warning. When a
    satisfied policy/goal fails, the JSON `requirement` object includes
    `controls: [{id, text}, ...]`.
+   Both checks are located (issue #1134): the unknown-reference error is
+   positioned at the policy or goal that wrote the `satisfies`, and the
+   `unused_control` warning at the `control` declaration nobody satisfies.
+   The native lowering reports them; before #1134 it dropped
+   `BusinessItem::Control` and every `satisfies` with it, so `check` answered
+   `ok` for a control that did not exist. The `controls` projection on the
+   `requirement` object is still emitted by the Python front end only; the
+   native lowering does not carry it yet (declared-but-unimplemented census:
+   #782).
    `policy ... responds { P ~> Q }` → leadsTo (with meta).
    `policy ... every <Entity> in <Stage> must eventually be <Stage> [or <Stage> ...]`
    is a readable alias for the common stage-response rule and expands to

@@ -644,7 +644,11 @@ variable capture instead of inventing internal binder names. See
   only the selected branch, while name and type checking always visits both.
 - Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each optionally
   followed by `where predicate`. The predicate is `Bool` and is scoped after
-  `x` is bound. Maps and unbounded collections are not binder domains.
+  `x` is bound. Maps and unbounded collections are not binder domains. `x`'s
+  scope is exactly that predicate and the quantifier/aggregate body: naming it
+  outside is a type error, and when it shadows an enclosing name (an action
+  parameter, say) the shadowing is confined to that scope — a satisfied
+  `exists` never exports its witness to the enclosing bindings.
 - Quantification (bounded): the canonical forms are `forall binder { expr }`
   and `exists binder { expr }`. The 2.x legacy colon/no-braces spelling such as
   `forall i in lo..hi: expr` remains accepted but is non-canonical. A Seq binder
@@ -1616,9 +1620,15 @@ fslc refine bot.fsl  mid.fsl bot_refines_mid.fsl  top.fsl mid_refines_top.fsl --
 It composes the adjacent mappings (state α_AC = α_BC ∘ α_AB, actions a→b→c /
 stutter) and checks bottom ⊒ top. On success it returns the composed
 `action_map` and the layer ordering `chain`; on failure it returns the first
-broken link `failed_link: {from, to, kind}`. Bounded refinement is transitive at
-the same depth, so a composition check is equivalent to all adjacent links
-holding (`docs/DESIGN-refinement.md` §7, example `examples/refinement_chain`).
+broken link `failed_link: {from, to, kind}`. At the same depth K, if every
+adjacent link refines, their composition refines; the converse does not hold,
+because a direct endpoint success does not establish the middle layer's
+contract. For example, Low may stop after one step while Mid permits a second
+step that Top forbids, so direct Low→Top succeeds while Mid→Top and the chain
+fail. The chain requires every adjacent contract to hold
+(`docs/DESIGN-refinement.md` §7, example `examples/refinement_chain`). For
+manifest-driven `fslc chain`, links may use different `refine_depth` values;
+the minimum link depth is the conservative end-to-end bound.
 Only the case where an argument expression reads the state of an intermediate
 layer is unsupported.
 
@@ -2246,6 +2256,13 @@ an invariant violation, a dead process step = a coverage diagnosis, an
 unreachable business goal = reachable_failed, and a case left unattended = a
 leadsTo counterexample — all can be detected mechanically.
 
+A business process is a pure stage graph, so a `transition` accepts only its
+name, source and target stages, actor and `covers` annotations. Writing `with`,
+`when` or `set` on one is a located error: those clauses carry data, the
+business dialect has nowhere to lower them, and silently dropping them would
+verify a model the author never wrote. Declare the process in a `requirements`
+spec (§13.4) to give them meaning.
+
 For PM/consulting-facing files, use the readable stage syntax for common
 response policies and goals:
 
@@ -2339,6 +2356,13 @@ policy PAY-2 "every request is eventually decided"
   satisfies CTRL-DECISION
   every Return in Requested must eventually be Approved or Rejected or Refunded
 ```
+
+The catalog is checked. A `satisfies` naming a control the document does not
+declare is a located error, reported at the policy or goal that wrote it, and a
+`control` that no policy or goal satisfies raises an `unused_control` warning in
+JSON `warnings`, located at the declaration. Both exist because the declaration
+and the reference used to be parsed and then dropped, so `check` answered `ok`
+for a control that was never written.
 
 For controls reused across business specs, use a `governance` catalog:
 

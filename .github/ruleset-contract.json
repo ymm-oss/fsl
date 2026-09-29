@@ -10,7 +10,7 @@
       "ref_name_include": ["refs/heads/main"],
       "ref_name_exclude": [],
       "rule_types": ["deletion", "non_fast_forward", "pull_request", "required_status_checks"],
-      "strict_required_status_checks_policy": true,
+      "strict_required_status_checks_policy": false,
       "do_not_enforce_on_create": false,
       "required_status_checks": [
         { "context": "merge readiness", "integration_id": 15368 },

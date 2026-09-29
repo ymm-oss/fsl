@@ -180,7 +180,7 @@ verify { instances Return = 3 }</code></pre>
       <p style="margin:0"><b><code>verify { ... }</code> の配置:</b> 業務層・要件層の有限範囲は、同じファイルのトップレベルに置く別ブロックです。<code>spec</code> の中には置きません。</p>
     </div>
     <div class="callout reveal" style="margin-top:16px">
-      <p style="margin:0"><b>範囲を掃引する:</b> <code>fslc sweep spec.fsl --instances Case=1..3 --depth 1..8 --property AtMostOne</code> は、各検証結果を <code>sweep.results</code> に、最初に失敗した範囲を <code>sweep.minimal_counterexample</code> に出します。</p>
+      <p style="margin:0"><b>範囲を掃引する:</b> <code>fslc sweep spec.fsl --depth 1..8 --property AtMostOne</code> は、各検証結果を <code>sweep.results</code> に、最初に失敗した範囲を <code>sweep.minimal_counterexample</code> に出します。<code>--instances &lt;Entity&gt;=1..3</code> や <code>--values &lt;Number&gt;=…</code> は、spec が entity または number を宣言している場合に限り、宣言名を指定して追加します。</p>
     </div>
   </div>
 </section>

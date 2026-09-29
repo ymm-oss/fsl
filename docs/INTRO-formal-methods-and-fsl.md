@@ -146,7 +146,7 @@ At this granularity, the realistic use of FSL is not as a formal design document
 
 For example, the unsaved-changes confirmation on an edit screen can be treated as the following small state machine.
 
-```fsl
+```fsl check
 spec EditScreenFlow {
   enum Screen { List, Detail, Edit, Confirm }
 

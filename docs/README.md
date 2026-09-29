@@ -63,6 +63,7 @@
 | [`DESIGN-inline-range.md`](DESIGN-inline-range.md) | Inline anonymous range types (`x: lo..hi`) |
 | [`DESIGN-spec-domains.md`](DESIGN-spec-domains.md) | `entity` / `number` in the kernel `spec` (decoupling a domain from the verification bound) |
 | [`DESIGN-def.md`](DESIGN-def.md) | Non-recursive named predicate frontend sugar, expansion order, capture and diagnostic contract |
+| [`DESIGN-pattern-binding-scope.md`](DESIGN-pattern-binding-scope.md) | `x is some(v)` binding vs match and its shadowing confinement (#1132), and why the `def` capture check stays (#1139) |
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
@@ -120,6 +121,51 @@
 | [`DESIGN-ai-hard.md`](DESIGN-ai-hard.md) | fsl-ai (`ai_component` / recursive `agent`) dialect: tool authority, human approval, forbidden tools, fallback, event replay, agent scope/grant/orchestration/visibility analysis, finding schema, and guarantee boundaries |
 | [`DESIGN-stochastic.md`](DESIGN-stochastic.md) | fsl-stochastic external evidence layer: precomputed eval JSONL, Wilson-bound threshold rules, statistical result schema, status priority, multiple-slice boundary, and external stochastic boundaries |
 | [`DESIGN-docs-site.md`](DESIGN-docs-site.md) | This manual site's information architecture, navigation chrome, and the generated-reference-page template (`intro/language.*.html`, `intro/cli.*.html`) — produced with the Relational Design plugin |
+| [`DESIGN-myst-spike.md`](DESIGN-myst-spike.md) | **Spike record for #1126 (mystmd over these documents): recommendation not to adopt**. Stage 1 measures the destruction-case table for missing local documents, unresolved cross-references and heading anchors, the same rows before `error_rules` (all zero under `--strict` alone), and the `fslc` literate line-number row. Stage 2 configures away every stage-1 objection — key-scoped `error_rules`, a GitHub-slug plugin, an offline local template, one document fix — builds all 105 documents clean, adds a typed FSL reference plugin (and the role-versus-transform exit-code difference), finds that a wrong-file `other.md#anchor` resolves silently in stock mystmd, and re-decides against adoption on cost rather than capability. `tools/spike-1126-myst/` holds the configuration and plugins; `tools/check-doc-links.py` is the counter-proposal |
+| [`DESIGN-claim-binding-spike.md`](DESIGN-claim-binding-spike.md) | **Spike record for #1128 (binding one hand-written claim to one FSL element)**: one claim annotated in `DESIGN-testplan.md`, bound to `specs/job_pipeline.fsl#action:submit`, with the calibration that separates a change to the bound element from a change elsewhere in the same specification; the decision that a prose-only rewrite must raise the claim under its own reason; GitHub's rendering of the three annotation syntaxes; and the measured interaction with `tools/check-doc-links.py` and `tools/check-design-citation-headings.py`. `tools/spike-1128-claim-binding/` holds the projector; nothing is wired to a gate |
+| [`DESIGN-backward-doc-coverage.md`](DESIGN-backward-doc-coverage.md) | **Spike record for #1138 (the backward documentation direction): measured, reported, deliberately not gated**. Defines the denominator (every FSL element under `examples/` except `examples/gallery/` — 516 elements in 120 files) with each exclusion and its reason, the three mechanical readings of "discussed" (file / non-index file / element link), the first measurement (0 / 267 / 444 discussed respectively), and why that number makes the outcome a periodic report rather than a gate or a ratchet. `tools/report-doc-backward-coverage.py` is the report |
+
+## Path conventions in this directory
+
+An FSL path written in `docs/**.md` **with a repository directory prefix** —
+`specs/...`, `examples/...` — names a file that exists in this repository, in
+running prose and inside fenced code blocks alike. A command shown with such a
+path is meant to run as written from the repository root.
+
+An **illustrative** FSL path is written **without** that prefix: a bare
+`spec.fsl`, or `<spec.fsl>` where the reader substitutes a name. This is the
+existing habit throughout the design documents — `fslc ledger spec.fsl`
+([`DESIGN-ledger.md`](DESIGN-ledger.md)), `fslc analyze spec.fsl --projection tsg`
+([`DESIGN-analysis.md`](DESIGN-analysis.md)), `fslc document generate <spec.fsl>`
+([`DESIGN-document-cli.md`](DESIGN-document-cli.md)), and the layer filenames in
+[`DESIGN-layers.md`](DESIGN-layers.md)'s `fsl-project.toml` example, which match
+the runnable `tests/fixtures/chain/fsl-project.toml`. A document that needs to
+talk about a path that will never exist — a hypothetical rename destination, for
+instance — describes it in words, such as "a `git mv` into `specs/` as a `.fsl`",
+instead of inventing a filename.
+
+The absence of the prefix is the whole signal, so the two cases separate
+mechanically. From the repository root:
+
+```bash
+grep -rhoE '(specs|examples)/[A-Za-z0-9_/-]+\.fsl' docs --include='*.md' |
+  sort -u | while read -r p; do [ -f "$p" ] || echo "MISSING $p"; done
+```
+
+**Claimed and not claimed.** This convention is enforced by the one-liner above,
+run by hand; no CI gate implements it yet (issue #1124), unlike the doc-to-doc
+citation gate [`tools/check-design-citation-headings.py`](../tools/check-design-citation-headings.py)
+that `tools/check-merge-readiness.sh` runs. The **backward** direction — every
+FSL element being discussed by at least one hand-written document — is still
+**not claimed**, but it is now *measured*:
+[`tools/report-doc-backward-coverage.py`](../tools/report-doc-backward-coverage.py)
+reports it, and [`DESIGN-backward-doc-coverage.md`](DESIGN-backward-doc-coverage.md)
+records the denominator, its exclusions, and the first numbers — 516 in-scope
+elements, of which **0** are discussed at element granularity and 444 at file
+granularity. No CI gate runs that report either, and the reason is written down
+there: at 0/516 a gate would stop all work, so the outcome of the #1138 spike is
+a periodic report, with a file-level ratchet deferred until the 35 currently
+unnamed files are named.
 
 ## Evidence policy
 

@@ -22,7 +22,8 @@ Download the `.vsix` from the [GitHub Releases](https://github.com/ymm-oss/fsl/r
 page and install it:
 
 ```bash
-code --install-extension fsl-vscode-<version>.vsix
+code --install-extension fsl-vscode.vsix
 ```
 
-or use **Extensions: Install from VSIX…** from the Command Palette.
+or use **Extensions: Install from VSIX…** from the Command Palette. Unlike the
+native binaries, the extension is published without a `.sha256` checksum file.

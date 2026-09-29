@@ -511,7 +511,8 @@ fn evidence_attached_requirement_ids(item: &Value) -> Vec<String> {
 /// Whether an evidence envelope's own result token is a definitive `pass`,
 /// a definitive `fail`, or carries no verdict at all (gate failures like
 /// `dataset_invalid`, or structural-only output like `compared`) — issue
-/// #508 / `docs/DESIGN-assurance-classes.md` `classify_source`. This is
+/// #508 / `docs/DESIGN-assurance-classes.md` "Verdict mapping —
+/// `ledger::evidence_verdict` (issue #508)". This is
 /// deliberately independent of [`assurance_token`]: class (method strength)
 /// and verdict (outcome) are orthogonal, so a failing source must never
 /// change the assurance label, only add a finding.

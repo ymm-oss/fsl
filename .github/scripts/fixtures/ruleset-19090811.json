@@ -33,6 +33,7 @@
         },
         "require_last_push_approval": false,
         "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
         "allowed_merge_methods": [
           "merge",
           "squash",
@@ -43,7 +44,7 @@
     {
       "type": "required_status_checks",
       "parameters": {
-        "strict_required_status_checks_policy": true,
+        "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
@@ -76,7 +77,7 @@
   ],
   "node_id": "RRS_lACqUmVwb3NpdG9yec5Lu2QuzgEjTXs",
   "created_at": "2026-07-17T16:28:37.565+09:00",
-  "updated_at": "2026-08-06T08:14:18.007+09:00",
+  "updated_at": "2026-09-17T11:53:56.771+09:00",
   "bypass_actors": [],
   "current_user_can_bypass": "never",
   "_links": {

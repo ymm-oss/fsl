@@ -335,3 +335,63 @@ fn invalid_parameters_do_not_consume_a_logical_step() {
         .expect("valid disabled attempt is observable");
     assert_eq!(failed.violation.expect("requires violation").step, 1);
 }
+
+/// #1119: a satisfied `exists` used to copy its whole local scope -- the
+/// witnessing binder included -- back into the caller's bindings, so a
+/// binder shadowing an action parameter overwrote it. `act(0)`'s only
+/// witness here is `r = 1`, so the effects wrote `w[1]`/`a[1]` and the
+/// explicit engine reported `proved` for a violated `NoW0`. The binder must
+/// stay inside the quantifier: `typecheck.rs` types the body in a cloned
+/// environment, so nothing outside can legitimately name it.
+#[test]
+fn exists_binder_does_not_overwrite_a_shadowed_action_parameter() {
+    let model = model(
+        "spec Shadow { type R = 0..1 state { a: Map<R, Bool>, w: Map<R, Bool> } \
+         init { forall r: R { a[r] = true  w[r] = false } } \
+         action act(r: R) { \
+           requires a[r] and (exists r: R { a[r] and not (r == 0) }) \
+           w[r] = true  a[r] = false } \
+         invariant NoW0 { not w[0] } }",
+    );
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize monitor");
+
+    // The quantifier leaves the caller's `r` alone even when it witnesses.
+    let mut bindings = BTreeMap::from([("r".to_owned(), FslValue::Int(0))]);
+    for guard in &model.actions[0].requires {
+        let value = fsl_runtime::eval(guard, &monitor.state, &mut bindings, &model, None)
+            .expect("evaluate the guard");
+        assert_eq!(value, FslValue::Bool(true), "the guard holds for act(0)");
+    }
+    assert_eq!(
+        bindings["r"],
+        FslValue::Int(0),
+        "the exists witness (r = 1) escaped into the caller's scope: {bindings:?}"
+    );
+
+    // ...and the effects therefore write the parameter's index.
+    let stepped = monitor
+        .attempt("act", &BTreeMap::from([("r".to_owned(), FslValue::Int(0))]))
+        .expect("act(0) is enabled");
+    let violation = stepped.violation.clone().expect("act(0) breaks NoW0");
+    assert_eq!(violation.name, "NoW0", "{stepped:?}");
+    let attempted = stepped
+        .attempted_state
+        .as_ref()
+        .expect("the violating successor state");
+    let map = |zero: bool, one: bool| {
+        FslValue::Map(BTreeMap::from([
+            (FslValue::Int(0), FslValue::Bool(zero)),
+            (FslValue::Int(1), FslValue::Bool(one)),
+        ]))
+    };
+    assert_eq!(
+        attempted["w"],
+        map(true, false),
+        "act(0) must raise w[0], not the witness's w[1]: {stepped:?}"
+    );
+    assert_eq!(
+        attempted["a"],
+        map(false, true),
+        "act(0) must clear a[0], not the witness's a[1]: {stepped:?}"
+    );
+}

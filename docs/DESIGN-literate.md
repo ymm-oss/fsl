@@ -79,6 +79,29 @@ fence — this is what lets a non-fsl four-backtick (or `~~~~`) fence safely
 contain a literal ` ```fsl ` example without corrupting extraction. An
 unterminated fence runs to end of file.
 
+### Marking complete specifications in `docs/` (#1137)
+
+Most `fsl` fences under `docs/` are fragments, so `fslc check` on the whole
+document exits 2 — correct for a fragment, but it leaves no way to tell a
+fragment from a complete specification that has since broken. Inferring
+completeness from "it checks" is rejected for that reason. An author instead
+marks a complete specification with a second info-string word:
+`fsl check` in place of `fsl`. GitHub renders it as an ordinary `fsl` code
+block (verified with `gh api --method POST /markdown -f mode=gfm`: the word
+survives only as an undisplayed `data-meta="check"` attribute), and the
+extractor above still sees it, because it keys on the *first* token.
+
+`tools/check-doc-fences.py` is the gate. Every marked fence must check; all
+fences of one document form one compilation unit, as for any literate
+document. Every unmarked `fsl` fence is skipped and counted, and the report
+prints both numbers so "the docs are verified" cannot be claimed beyond what
+was measured. `fslc` is given the `.md` itself so a failure carries the
+document's own line; when a document also holds unmarked fragments, a copy is
+given whose unmarked opening fences are renamed on the same line, which cannot
+move any line. Marking every remaining fence is deliberately not done here:
+each needs a judgement that it is a complete specification, and the gate's
+skipped count is the to-do list.
+
 ### `use`/compose path resolution
 
 Import paths resolve relative to the Markdown file's parent directory,

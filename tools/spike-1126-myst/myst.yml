@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
+#
+# Spike artifact for issue #1126 -- NOT live configuration.  mystmd was
+# evaluated and not adopted; see docs/DESIGN-myst-spike.md for the decision
+# and for every measurement made with this file.
+#
+# To reproduce:  cp tools/spike-1126-myst/myst.yml docs/myst.yml
+#                cd docs && myst build --site --strict --ci --check-links
+# Measured with mystmd v1.11.0.
+version: 1
+project:
+  id: fsl-docs-myst-spike
+  title: fsl docs — MyST reference gate spike
+  plugins:
+    # Re-identify every heading with GitHub's slug, and resolve `other.md#anchor`
+    # against the target file instead of mystmd's project-global label namespace.
+    - ../tools/spike-1126-myst/github-slugs.mjs
+    # A typed FSL reference, in both the `{fsl}` role and the GitHub-safe
+    # `[text](../specs/x.fsl#action:name)` link shape.
+    - ../tools/spike-1126-myst/fsl-refs.mjs
+  error_rules:
+    # Without these two, every broken reference is a warning and --strict exits 0.
+    - id: reference-target-resolves
+      severity: error
+    - id: reference-target-explicit
+      severity: error
+    # --check-links cannot resolve a link to a directory, and reaching external
+    # hosts must not decide a required gate.  Scoping by key keeps the rule an
+    # error for every other target.
+    - id: link-resolves
+      severity: ignore
+      keys:
+        - "../*/"
+        - "http*://**"
+site:
+  # book-theme is fetched from api.mystmd.org and GitHub on first use (99 MB
+  # under docs/_build/templates).  A local path here builds offline.
+  template: book-theme

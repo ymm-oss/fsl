@@ -315,8 +315,19 @@ impl TwoSnapshotFifo {
             }
 
             if writer.is_finished() {
-                let outcome = outcome.expect("finished FIFO writer must report an outcome");
                 writer.join().expect("join finished FIFO writer");
+                let outcome = match outcome {
+                    Some(received) => received,
+                    None => match self.writer_outcome.try_recv() {
+                        Ok(received) => received,
+                        Err(TryRecvError::Disconnected) => {
+                            panic!("FIFO writer exited without reporting an outcome");
+                        }
+                        Err(TryRecvError::Empty) => {
+                            panic!("finished FIFO writer must report an outcome");
+                        }
+                    },
+                };
                 return outcome;
             }
 

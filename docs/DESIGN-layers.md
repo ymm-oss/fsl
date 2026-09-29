@@ -292,21 +292,25 @@ process exit code follows the existing `cli.exit_code` convention.
 
 ```toml
 [business]
-file = "specs/business.fsl"
+file = "business.fsl"
 depth = 8
 
 [requirements]
-file = "specs/requirements.fsl"
+file = "requirements.fsl"
 
 [design]
-file = "specs/design.fsl"
+file = "design.fsl"
 depth = 12
 refine_against = "requirements"
-mapping = "specs/design_refines_requirements.fsl"
+mapping = "design_refines_requirements.fsl"
 
 [impl]
 command = "pytest -q"
 ```
+
+The layer filenames above are placeholders for whatever the project calls its
+layers; `tests/fixtures/chain/fsl-project.toml` is a runnable manifest of this
+shape, with its four layer files beside it.
 
 For `[business]`, `[requirements]`, and `[design]`, adding `depth = K` runs the
 existing `verify` path at that depth; omitting `depth` runs the existing `check`

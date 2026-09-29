@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+// #1116: a domain whose command inputs cover the three declared parameter
+// shapes replay must convert -- a declared range (`Score`), an enum
+// (`Tier`), and `Bool` -- plus the implicit identity type `AccountId`,
+// so a false-conformance fixture can be written against each one.
+
+domain ParamTypeProbe {
+  implementation_profile functional_ddd
+
+  type Score = 0..3;
+  enum Tier { Basic, Premium }
+
+  aggregate Account {
+    id AccountId
+
+    state {
+      tier: Tier = Basic;
+      score: Score = 0;
+      active: Bool = false;
+    }
+
+    command SetScore {
+      input value: Score
+    }
+    command SetTier {
+      input target: Tier
+    }
+    command SetActive {
+      input flag: Bool
+    }
+
+    event ScoreSet {
+      value: Score
+    }
+    event TierSet {
+      target: Tier
+    }
+    event ActiveSet {
+      flag: Bool
+    }
+
+    decide SetScore {
+      emits ScoreSet
+    }
+    decide SetTier {
+      emits TierSet
+    }
+    decide SetActive {
+      emits ActiveSet
+    }
+
+    evolve ScoreSet {
+      score = value
+    }
+    evolve TierSet {
+      tier = target
+    }
+    evolve ActiveSet {
+      active = flag
+    }
+  }
+}

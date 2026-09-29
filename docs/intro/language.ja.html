@@ -678,7 +678,10 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   を実行しますが、名前と型の検査は常に両方の分岐を訪れます。</li>
 <li>有限バインダー: <code>x: T</code>、<code>x in lo..hi</code>、または <code>x in set_or_seq</code>。それぞれ省略
   可能な <code>where predicate</code> を後置できます。述語は <code>Bool</code> で、<code>x</code> が束縛された後に
-  スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。</li>
+  スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。
+  <code>x</code> のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
+  なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
+  充足した <code>exists</code> が witness を外側の束縛へ出すことはありません。</li>
 <li>量化(有界): 正準形は <code>forall binder { expr }</code> と <code>exists binder { expr }</code>
   です。<code>forall i in lo..hi: expr</code> のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス
@@ -1599,8 +1602,13 @@ enum(または struct)は、マージされるのではなく <code>kind: "type"
 stutter)、bottom ⊒ top を検査します。成功時は合成された <code>action_map</code> とレイヤーの
 順序 <code>chain</code> を返します。失敗時は最初に壊れたリンク
 <code>failed_link: {from, to, kind}</code> を返します。有界の refinement は同じ深さで推移的
-なので、合成の検査はすべての隣接リンクが成立することと等価です
-(<code>docs/DESIGN-refinement.md</code> §7、例 <code>examples/refinement_chain</code>)。
+です。深さ K で隣接するすべてのリンクが成立すれば合成も成立しますが、逆は
+成り立ちません。直接の端点間チェックが成功しても、中間レイヤーの契約適合は示され
+ません。たとえば Low は1ステップで止まり、Mid は Top が許さない2ステップ目を許す
+ため、Low→Top は成功しても Mid→Top と chain は失敗します。chain は各隣接契約の
+成立を要求します (<code>docs/DESIGN-refinement.md</code> §7、例 <code>examples/refinement_chain</code>)。
+マニフェストによる <code>fslc chain</code> ではリンクごとに <code>refine_depth</code> を指定でき、端から
+端までの保守的な検査深度は各リンクの深度の最小値です。
 引数の式が中間レイヤーの状態を読むケースだけが未対応です。</p>
 <p>推奨ワークフロー: <strong>人間/LLM が abs をレビュー → LLM が impl を詳細化 →
 <code>refine</code> が忠実性を保証</strong>。abs の <code>ensures</code> / invariant は refine では再検査され
@@ -2201,6 +2209,11 @@ invariant / leadsTo へ、kpi はメタデータとして記録される宣言�
 展開されます。規程の矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ
 診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
 すべて機械的に検出できます。</p>
+<p>business の process は純粋なステージグラフなので、<code>transition</code> が取るのは名前、
+遷移元と遷移先のステージ、actor、<code>covers</code> 注釈だけです。<code>with</code> / <code>when</code> / <code>set</code>
+を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
+クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
+ためです。意味を与えるには <code>requirements</code> spec(§13.4)で process を宣言します。</p>
 <p>PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:</p>
 <pre><code class="language-fsl">business ReturnHandling {
@@ -2281,6 +2294,12 @@ or Rejected</code> — そして、同じ <code>(process, waypoint-set)</code> �
   satisfies CTRL-DECISION
   every Return in Requested must eventually be Approved or Rejected or Refunded
 </code></pre>
+<p>このカタログは検査されます。宣言されていないコントロールを <code>satisfies</code> が指した
+場合は位置付きのエラーとなり、その <code>satisfies</code> を書いた policy / goal の位置で
+報告されます。どの policy / goal からも satisfies されない <code>control</code> は、宣言の
+位置を持つ <code>unused_control</code> 警告として JSON の <code>warnings</code> に出ます。どちらも、
+以前は宣言も参照も構文解析されたあと捨てられ、書かれていないコントロールに対して
+<code>check</code> が <code>ok</code> と答えていたために設けられた検査です。</p>
 <p>business の spec をまたいで再利用されるコントロールには、<code>governance</code> カタログを
 使います:</p>
 <pre><code class="language-fsl">governance EnterpriseReturnControls {

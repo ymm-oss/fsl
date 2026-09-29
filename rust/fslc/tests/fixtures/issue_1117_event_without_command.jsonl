@@ -1,0 +1,1 @@
+{"event":"domain_event","aggregate":"Msg","name":"MsgSent","params":{"ref_id":"r1"}}

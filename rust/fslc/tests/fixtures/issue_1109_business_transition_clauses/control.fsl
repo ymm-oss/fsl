@@ -1,0 +1,14 @@
+// The same process without the three clauses stays accepted (#1109).
+business ClausesAbsent {
+  actor Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved
+    initial Requested
+    transition approve Requested -> Approved by Manager
+  }
+}
+verify {
+  instances Return = 1
+}

@@ -220,7 +220,11 @@ pub fn eval(
                 (Value::Some(_), fsl_core::Pattern::None)
                 | (Value::None, fsl_core::Pattern::Some(_)) => Ok(Value::Bool(false)),
                 (Value::Some(value), fsl_core::Pattern::Some(name)) => {
-                    bindings.insert(name.clone(), *value);
+                    // A pattern binding never overwrites a name already in scope
+                    // (action parameter, binder, let): the frozen reference guards
+                    // this in `_eval_requires` (`if k not in param_binds`), and #1153
+                    // is the port dropping it. A new name still reaches the body.
+                    bindings.entry(name.clone()).or_insert(*value);
                     Ok(Value::Bool(true))
                 }
                 _ => Err(runtime_error("is pattern requires an Option value")),
@@ -250,7 +254,18 @@ pub fn eval(
                         continue;
                     }
                     if as_bool(eval(body, state, &mut local, model, old_state)?)? {
-                        bindings.extend(local);
+                        // The witnessing binding stays in `local` and dies with
+                        // it. Copying the satisfied scope back into `bindings`
+                        // used to overwrite a caller name the binder shadows
+                        // (an action parameter with the binder's name), so a
+                        // later `w[r] = true` wrote the witness's index instead
+                        // of the parameter's -- explicit returned `proved` for a
+                        // violated invariant while the symbolic engines rejected
+                        // the replay (#1119). `typecheck.rs`'s `Quantified` arm
+                        // types the body in a cloned env, so no expression can
+                        // legitimately name the binder outside the quantifier;
+                        // `eval_quantified` in `fsl-verifier` and the frozen
+                        // Python reference scope it the same way.
                         return Ok(Value::Bool(true));
                     }
                 }

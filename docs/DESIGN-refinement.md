@@ -655,9 +655,13 @@ one layer. `mappings[i]` treats `specs[i]` as impl and `specs[i+1]` as abs.
 to an abs transition/stutter at the same step), so bounded refinement is
 transitive at the same depth K. If both low→mid and mid→top refine at depth K,
 then since stutter does not increment the step number, low→top also refines at
-depth K. Therefore the chain check is **equivalent** to "all adjacent links hold
-at depth K" (demonstrated by `examples/refinement_chain`; a spike confirmed
-3 layers mid/bot/top + indexed map + parameterized action).
+depth K. The converse does not hold: a direct low→top success does not establish
+that mid satisfies its own contract. For example, Low may stop after one step
+while Mid permits a second step forbidden by Top; low→top succeeds, but mid→top
+and the chain fail. The chain deliberately requires the stronger obligation
+that every adjacent link hold (`examples/refinement_chain`). A manifest-driven
+`fslc chain` may use a different `refine_depth` per link; the minimum of those
+depths is the conservative end-to-end bound.
 
 **Implementation** (`refine_chain`):
 

@@ -1,0 +1,2 @@
+{"event":"command","aggregate":"Msg","command":"CancelMsg","params":{}}
+{"event":"domain_event","aggregate":"Msg","name":"MsgCancelled","params":{}}

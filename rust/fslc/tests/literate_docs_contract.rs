@@ -345,3 +345,35 @@ fn command_names_strips_an_fslc_prefix() {
         ]
     );
 }
+
+/// Issue #1137: every `fsl` fence marked `fsl check` under `docs/` must check,
+/// and the unchecked surface is counted rather than assumed. The gate is
+/// `tools/check-doc-fences.py`, which hands `fslc` the Markdown file itself so a
+/// failure is reported at the document's own line. Its `selftest` calibrates the
+/// accepting and rejecting cases before the live audit runs.
+#[test]
+fn marked_doc_fences_check_and_the_unmarked_surface_is_reported() {
+    let root = workspace_root();
+    let script = root.join("tools/check-doc-fences.py");
+    for args in [&["selftest"][..], &["check"][..]] {
+        let output = std::process::Command::new("python3")
+            .arg(&script)
+            .args(args)
+            .args(["--fslc", env!("CARGO_BIN_EXE_fslc")])
+            .current_dir(&root)
+            .output()
+            .unwrap_or_else(|error| panic!("run {}: {error}", script.display()));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "check-doc-fences.py {args:?} failed\n{stdout}{stderr}"
+        );
+        if args == ["check"] {
+            assert!(
+                stdout.contains("fsl fences skipped"),
+                "the report must state the skipped count: {stdout}"
+            );
+        }
+    }
+}
