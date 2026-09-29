@@ -81,6 +81,20 @@ violated/warning payloads embed both line numbers and quoted source; serving a c
 with stale locations would misdirect the repair loop. Consequence: comment/whitespace edits to
 the entry file miss the cache. That is the accepted trade — hit-rate loss, never staleness.
 
+**Native Rust key (path-free by construction; issue #1148).** `fslc` hashes the entry spec's
+bytes (item 4), each dependency it actually read (the `from`/`use` and inline `implements`
+targets, recorded as *path relative to the entry spec's directory* plus bytes), the
+`--requirements` file's bytes, the verify options (item 5), and the implementation/solver
+fingerprint (item 2), under key prefix `fslc-rust-verify-cache-v4`. **No absolute path enters
+the key, and neither does the entry spec's own path**: no cacheable verdict carries a file path
+(results carry spec names), so the path is not an input to the result, and hashing it only made
+an unchanged spec miss after a move, rename, or second checkout (measured: 13.32 s miss against
+0.02 s hit). Two consequences are pinned by tests: the same bytes at two absolute paths share an
+entry, and entries written under the older key derivation (prefix `fslc-rust-verify-cache-v3`, which did hash the canonical path)
+cannot be found by the new one, so a stale `verified` from before the change is never replayed.
+Everything that can change a verdict still changes the key: a spec edit, a dependency's content
+or relative name, any option.
+
 Canonical encoding: a recursive encoder tagging container types (tuple vs list vs dict —
 dicts serialized with sorted keys), then `json.dumps(..., sort_keys=True)` → sha256. The
 encoder **raises on any unrecognized type** (fail closed: the run becomes uncacheable rather
@@ -89,8 +103,8 @@ than hashing an under-specified representation).
 ## 3. Storage
 
 - Location: `$FSLC_CACHE_DIR`, else `$XDG_CACHE_HOME/fslc`, else `~/.cache/fslc`. Layout:
-  Python uses `<root>/verify/v1/<key[:2]>/<key>.json`; native Rust schema v2 uses the same
-  layout under `<root>/verify/v2/`. Content-addressed keys make a machine-global cache
+  Python uses `<root>/verify/v1/<key[:2]>/<key>.json`; native Rust schema v2 entries use the same
+  layout under `<root>/verify/v3/`. Content-addressed keys make a machine-global cache
   safe across projects/worktrees; entries embed no absolute paths (results carry spec names,
   not file paths).
 - Entry: `{"schema": 1, "created": iso8601, "fslc": version, "key_inputs": {component

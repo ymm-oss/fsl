@@ -3884,34 +3884,38 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
         let (entry, failed) = if kind == "spec" {
             if let Some(file) = section.values.get("file") {
                 let file_path = base.join(file);
-                let (detail, status, check_kind, depth) =
-                    if let Some(raw_depth) = section.values.get("depth") {
-                        match parse_manifest_depth(layer, "depth", raw_depth) {
-                            Ok(depth) => {
-                                let (detail, status) = run_verify(
-                                    &file_path,
-                                    depth,
-                                    section
-                                        .values
-                                        .get("deadlock")
-                                        .map_or("warn", String::as_str),
-                                    "bmc",
-                                    DEFAULT_EXPLICIT_BUDGET,
-                                    1,
-                                );
-                                (detail, status, "verify", Some(depth))
-                            }
-                            Err(message) => (
-                                json!({"result": "error", "kind": "parse", "message": message}),
-                                2,
-                                "verify",
-                                None,
-                            ),
+                let (detail, status, check_kind, depth) = if let Some(raw_depth) =
+                    section.values.get("depth")
+                {
+                    match parse_manifest_depth(layer, "depth", raw_depth) {
+                        Ok(depth) => {
+                            // Issue #1147: go through the same options path
+                            // `verify` and `sweep` use, so an unchanged layer is a
+                            // verify-cache hit. Every field other than `depth` and
+                            // `deadlock` is the value `run_verify` hard-coded.
+                            let options = CliVerifyOptions {
+                                depth,
+                                deadlock: section
+                                    .values
+                                    .get("deadlock")
+                                    .map_or("warn", String::as_str)
+                                    .to_owned(),
+                                ..CliVerifyOptions::default()
+                            };
+                            let (detail, status) = run_verify_cli(&file_path, &file_path, &options);
+                            (detail, status, "verify", Some(depth))
                         }
-                    } else {
-                        let (detail, status) = run_check(&file_path, &file_path);
-                        (detail, status, "check", None)
-                    };
+                        Err(message) => (
+                            json!({"result": "error", "kind": "parse", "message": message}),
+                            2,
+                            "verify",
+                            None,
+                        ),
+                    }
+                } else {
+                    let (detail, status) = run_check(&file_path, &file_path);
+                    (detail, status, "check", None)
+                };
                 let passed = chain_layer_passes(&detail, status);
                 let layer_status = if passed { "passed" } else { "failed" };
                 let result = detail.get("result").cloned().unwrap_or(Value::Null);
