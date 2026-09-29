@@ -155,3 +155,52 @@ spec SomeEq {
     assert verify(_spec(src), 1)["result"] == "verified"
     monitor = Monitor(_spec(src))
     assert any(action["action"] == "clear" for action in monitor.enabled())
+
+
+# #1132: `x is some(v)` binds `v`; it never compares against an existing `v`.
+# When `v` is a fresh name the binding reaches the action body (the
+# docs/LANGUAGE.md section 9 idiom). When it collides with an action
+# parameter the shadowing is confined to the guard expression and the
+# parameter is restored for the body -- `_eval_requires` in `fslc/bmc.py`
+# copies the guard bindings back only for names absent from `param_binds`.
+# This is the same confinement rule docs/LANGUAGE.md already states for
+# quantifier binders. The Rust port currently disagrees; see
+# docs/DESIGN-pattern-binding-scope.md.
+IS_PATTERN_FRESH_BINDING_REACHES_BODY = """
+spec Idiom {
+  type R = 0..1
+  state { o: Option<R>, w: Map<R,Bool> }
+  init { o = some(1)  forall r: R { w[r] = false } }
+  action act() { requires o is some(i)  w[i] = true }
+  invariant NoW1 { not w[1] }
+}
+"""
+
+IS_PATTERN_SHADOW_IS_CONFINED_TO_THE_GUARD = """
+spec Escape {
+  type R = 0..1
+  state { o: Option<R>, w: Map<R,Bool> }
+  init { o = some(1)  forall r: R { w[r] = false } }
+  action act(r: R) { requires r == 0 and (o is some(r))  w[r] = true }
+  invariant NoW0 { not w[0] }
+  invariant NoW1 { not w[1] }
+}
+"""
+
+
+def test_is_pattern_fresh_binding_reaches_the_action_body():
+    """A pattern name that shadows nothing is usable in the body."""
+    spec = build_spec(parse(IS_PATTERN_FRESH_BINDING_REACHES_BODY))
+    out = verify(spec, 3)
+    assert out["result"] == "violated", out
+
+
+@pytest.mark.parametrize(
+    "prop,expected",
+    [("NoW0", "violated"), ("NoW1", "verified")],
+)
+def test_is_pattern_shadow_does_not_overwrite_the_action_parameter(prop, expected):
+    """act(r=0) writes w[0]: the guard's `some(r)` does not survive into the body."""
+    spec = build_spec(parse(IS_PATTERN_SHADOW_IS_CONFINED_TO_THE_GUARD))
+    out = verify(spec, 3, property_name=prop)
+    assert out["result"] == expected, out

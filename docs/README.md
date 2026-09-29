@@ -63,6 +63,7 @@
 | [`DESIGN-inline-range.md`](DESIGN-inline-range.md) | Inline anonymous range types (`x: lo..hi`) |
 | [`DESIGN-spec-domains.md`](DESIGN-spec-domains.md) | `entity` / `number` in the kernel `spec` (decoupling a domain from the verification bound) |
 | [`DESIGN-def.md`](DESIGN-def.md) | Non-recursive named predicate frontend sugar, expansion order, capture and diagnostic contract |
+| [`DESIGN-pattern-binding-scope.md`](DESIGN-pattern-binding-scope.md) | `x is some(v)` binding vs match and its shadowing confinement (#1132), and why the `def` capture check stays (#1139) |
 | [`DESIGN-precedence-policy.md`](DESIGN-precedence-policy.md) | The business-layer no-bypass precedence policy (#75) — why `business` keeps users from writing `state`/`invariant` directly |
 | [`DESIGN-ledger.md`](DESIGN-ledger.md) | `fslc ledger` (turning verifier evidence into a per-requirement-id Markdown audit ledger for PM/audit) |
 | [`DESIGN-assurance-classes.md`](DESIGN-assurance-classes.md) | Assurance-class vocabulary (`proved`/`bounded`/`replay-observed`/`statistical`/`not_run`) shared by `fslc ledger` and `fslc html`, and what each class does/does not guarantee |
