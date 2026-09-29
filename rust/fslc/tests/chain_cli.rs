@@ -334,3 +334,135 @@ fn chain_honors_declared_depth_beyond_the_silent_fallback_of_eight() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(json(&output)["result"], "error");
 }
+
+// ---- Issue #1147: `chain` goes through the verify cache -------------------
+//
+// `chain` used to call `run_verify` directly, so it never read or wrote the
+// verify cache: two runs of an unchanged project left the cache directory
+// empty. Every test below points `FSLC_CACHE_DIR` at a private directory
+// (and clears `FSLC_CACHE`), so none of them observes a developer's cache.
+
+fn run_cached(cwd: &Path, cache: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .current_dir(cwd)
+        .env("FSLC_CACHE_DIR", cache)
+        .env_remove("FSLC_CACHE")
+        .env_remove("FSLC_CACHE_VERIFY")
+        .output()
+        .expect("run native fslc")
+}
+
+fn cache_entry_count(cache: &Path) -> usize {
+    fn walk(dir: &Path) -> usize {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return 0;
+        };
+        entries
+            .map(|entry| {
+                let path = entry.expect("cache entry").path();
+                if path.is_dir() { walk(&path) } else { 1 }
+            })
+            .sum()
+    }
+    walk(cache)
+}
+
+fn layer_cache_hit(value: &Value, name: &str) -> bool {
+    layer(value, name)["detail"]["cache"]["hit"] == true
+}
+
+/// A chain result with the two things that legitimately differ between a cold
+/// and a warm run removed: the additive `cache` annotation of a hit, and
+/// wall-clock fields.
+fn without_cache_and_timing(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .filter(|(key, _)| key.as_str() != "cache" && !key.ends_with("elapsed_s"))
+                .map(|(key, value)| (key.clone(), without_cache_and_timing(value)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(without_cache_and_timing).collect()),
+        other => other.clone(),
+    }
+}
+
+#[test]
+fn chain_second_run_over_an_unchanged_project_hits_the_cache() {
+    let dir = scratch_dir("cache-hit");
+    let cache = scratch_dir("cache-hit-store");
+    copy_chain_fixture(&dir);
+
+    assert_eq!(cache_entry_count(&cache), 0);
+    let cold = run_cached(&dir, &cache, &["chain", "fsl-project.toml"]);
+    assert!(
+        cold.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cold.stderr)
+    );
+    let after_cold = cache_entry_count(&cache);
+    assert!(after_cold >= 2, "cold chain wrote {after_cold} entries");
+    let cold = json(&cold);
+    assert!(!layer_cache_hit(&cold, "business"));
+    assert!(!layer_cache_hit(&cold, "design"));
+
+    let warm = run_cached(&dir, &cache, &["chain", "fsl-project.toml"]);
+    assert!(
+        warm.status.success(),
+        "{}",
+        String::from_utf8_lossy(&warm.stderr)
+    );
+    assert_eq!(
+        cache_entry_count(&cache),
+        after_cold,
+        "a hit writes nothing"
+    );
+    let warm = json(&warm);
+    assert!(layer_cache_hit(&warm, "business"), "{warm}");
+    assert!(layer_cache_hit(&warm, "design"), "{warm}");
+    // Same verdict, layer by layer, apart from the additive `cache` field.
+    assert_eq!(
+        without_cache_and_timing(&cold),
+        without_cache_and_timing(&warm)
+    );
+}
+
+#[test]
+fn chain_editing_one_layer_reverifies_only_that_layer() {
+    let dir = scratch_dir("cache-edit");
+    let cache = scratch_dir("cache-edit-store");
+    copy_chain_fixture(&dir);
+    let first = run_cached(&dir, &cache, &["chain", "fsl-project.toml"]);
+    assert!(first.status.success());
+
+    let design = fs::read_to_string(dir.join("design.fsl")).expect("read design");
+    fs::write(dir.join("design.fsl"), format!("{design}\n// edited\n")).expect("edit design");
+
+    let second = json(&run_cached(&dir, &cache, &["chain", "fsl-project.toml"]));
+    assert!(layer_cache_hit(&second, "business"), "{second}");
+    assert!(
+        !layer_cache_hit(&second, "design"),
+        "an edited layer must be re-verified, not served from cache: {second}"
+    );
+}
+
+#[test]
+fn chain_with_an_empty_cache_directory_is_cold_again() {
+    let dir = scratch_dir("cache-empty");
+    let cache = scratch_dir("cache-empty-a");
+    let other = scratch_dir("cache-empty-b");
+    copy_chain_fixture(&dir);
+    assert!(
+        run_cached(&dir, &cache, &["chain", "fsl-project.toml"])
+            .status
+            .success()
+    );
+
+    // Control: the hit really comes from the store, not from something that
+    // makes every run look warm.
+    let cold = json(&run_cached(&dir, &other, &["chain", "fsl-project.toml"]));
+    assert!(!layer_cache_hit(&cold, "business"), "{cold}");
+    assert!(!layer_cache_hit(&cold, "design"), "{cold}");
+    assert!(cache_entry_count(&other) >= 2);
+}
