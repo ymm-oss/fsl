@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes 4–7).
+//! Solver-dependent vacuity lanes (`docs/design/DESIGN-vacuity.md` §2 lanes 4–7).
 //!
 //! The two reachability lanes (`vacuous_implication`, `vacuous_leadsto`) are
 //! solver-independent and live in `fsl-runtime`. The four lanes here need Z3,
@@ -134,7 +134,7 @@ pub async fn model_vacuity_findings<S: SmtSolver>(
 /// nor leaves any constraint on the caller's unrolling session.
 ///
 /// `always_true_requires` findings are returned unfiltered; the caller must
-/// drop the ones whose action never became enabled (`docs/DESIGN-vacuity.md` §2
+/// drop the ones whose action never became enabled (`docs/design/DESIGN-vacuity.md` §2
 /// excludes coverage-false actions, which are already reported by their own
 /// warning).
 ///
@@ -339,7 +339,7 @@ fn is_generated_action(model: &KernelModel, name: &str) -> bool {
 /// is a generated Bool that is true at init and assigned by nothing) and give
 /// the synthetic declarations a zero span instead of a `generated_only`
 /// origin. Source lines are 1-based, so line 0 means "no source text behind
-/// this". `docs/DESIGN-vacuity.md` §2 scopes these lanes to **user**
+/// this". `docs/design/DESIGN-vacuity.md` §2 scopes these lanes to **user**
 /// declarations; a warning that cannot point at anything the author wrote is
 /// noise, and it is the frozen scaffolding of every governance spec.
 fn is_source_backed(span: Span) -> bool {
@@ -686,7 +686,7 @@ fn strengthened_urgent<S: SmtSolver>(
 /// not clauses[j]` is unsatisfiable. The declared type space is a superset of
 /// the reachable states, so an unsatisfiable answer means the clause cannot be
 /// false in any reachable state at any depth — the property
-/// `docs/DESIGN-vacuity.md` §2 lane 4 actually asks for. The frozen Python
+/// `docs/design/DESIGN-vacuity.md` §2 lane 4 actually asks for. The frozen Python
 /// reference instead discharges the clause from states witnessed within
 /// `--depth`, which reports a guard as dead merely because the bound was too
 /// small (issue #465: `examples/causal/funnel.fsl`'s `requires visits < 100`
@@ -793,7 +793,7 @@ async fn proven_unsat<S: SmtSolver>(
 }
 
 /// Drop `always_true_requires` findings for actions that were never enabled
-/// within the explored bound. `docs/DESIGN-vacuity.md` §2 lane 4 puts
+/// within the explored bound. `docs/design/DESIGN-vacuity.md` §2 lane 4 puts
 /// coverage-false actions out of scope: they already carry their own
 /// never-enabled warning, and every clause of a dead action is trivially
 /// redundant given the preceding ones.

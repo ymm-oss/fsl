@@ -119,7 +119,7 @@ const unsupportedReasons = {
     "native `check` runs the lenient fsl-ai agent analysis (result \"ok\", dialect fsl-ai-agent.v0); "
     + "the Worker has no agent path at all and stops at the kernel lowering gate",
   causal:
-    "standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md); native answers with the "
+    "standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md); native answers with the "
     + "causal envelope (`causal_model_checked`, no `versions` block) which the shared parity normalizer "
     + "cannot validate, so there is no comparable pair to build",
 };
@@ -140,7 +140,7 @@ for (const path of candidates) {
     const ast = JSON.parse(classified.stdout);
     documentType = Array.isArray(ast) ? ast[0] : ast.$type?.toLowerCase();
   } else {
-    // Standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md);
+    // Standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md);
     // detect them by their first significant declaration keyword.
     const stripped = (await readFile(path, "utf8"))
       .split("\n")

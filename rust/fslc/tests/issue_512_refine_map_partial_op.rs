@@ -6,10 +6,10 @@
 //! where `c` is an impl state variable that can be zero) as a located
 //! `result:"refinement_failed"` / `kind:"map_partial_op"` finding, matching
 //! the documented closed set of refinement failure kinds
-//! (`docs/DESIGN-refinement.md`, `docs/LANGUAGE.md`). Before the fix this
+//! (`docs/design/DESIGN-refinement.md`, `docs/manual/LANGUAGE.md`). Before the fix this
 //! surfaced as an unclassified internal error: `result:"error"`,
 //! `kind:"type"`, `message:"division by zero"` -- neither of the two
-//! documented `/0` treatments (`docs/DESIGN-divmod.md` §2.1/§2.3
+//! documented `/0` treatments (`docs/design/DESIGN-divmod.md` §2.1/§2.3
 //! totalization or §2.2 `partial_op`), and not a member of the refinement
 //! contract's kind set at all.
 

@@ -6,7 +6,7 @@
 //! result therefore fell through to 0, so a spec whose baseline is already
 //! `violated` returned `result:"violated"` with exit 0 — a mutation score is
 //! meaningless over a spec that already fails, and a gate reading only the
-//! exit code saw a pass. `docs/LANGUAGE.md`'s exit-code table maps `violated`
+//! exit code saw a pass. `docs/manual/LANGUAGE.md`'s exit-code table maps `violated`
 //! to 1 with no per-command exemption, and `scenarios`/`testgen` re-emit the
 //! same envelope and already exit 1.
 //!

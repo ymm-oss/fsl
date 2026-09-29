@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Implementation fault operators (#537 C5). See
-# `docs/DESIGN-conformance-harness.md` "Implementation fault operators".
+# `docs/design/DESIGN-conformance-harness.md` "Implementation fault operators".
 #
 # `injection_detector_matrix.rs` asks "can this detector see a bad spec?".
 # This harness asks the other question: would the test suite notice if the

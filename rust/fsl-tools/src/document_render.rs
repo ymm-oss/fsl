@@ -4,7 +4,7 @@
 //! The controlled-language renderer (issue #326): converts RCIR v1 claims
 //! (issue #325) into deterministic Japanese/English Markdown. Normative text
 //! comes from fixed per-claim-kind templates, never from an LLM. See
-//! `docs/DESIGN-document-requirement-claim-ir.md` for the RCIR contract this
+//! `docs/design/DESIGN-document-requirement-claim-ir.md` for the RCIR contract this
 //! renders and the design rationale for reusing `fsl_core::source_expr_text`
 //! as the canonical-expression fallback.
 //!
@@ -272,7 +272,7 @@ fn semantics_section(locale: Locale) -> String {
 /// Fixed boilerplate the "principles" section of issue #332 requires
 /// appearing regardless of whether any `--evidence` was supplied: the
 /// shared assurance vocabulary (`fslc ledger`'s own, issue #171,
-/// `docs/DESIGN-assurance-classes.md`), the class/verdict orthogonality
+/// `docs/design/DESIGN-assurance-classes.md`), the class/verdict orthogonality
 /// rule, the liveness disclaimers, and the explicit-`not_run`-by-default
 /// rule. Kept as its own section (not folded into "Global semantic
 /// conventions", which defines *execution* semantics — `updates`/`reads`/
@@ -682,7 +682,7 @@ fn analysis_scope_section(claims: &RequirementClaimSet, locale: Locale) -> Strin
 /// A reference section listing every accepted glossary label (issue #330),
 /// sorted by target. This is the only place a `state:`/`enum:` label is
 /// ever shown — v1 does not substitute a label inside rendered expression
-/// text (see `docs/DESIGN-document-glossary.md`); an `action:` label is
+/// text (see `docs/design/DESIGN-document-glossary.md`); an `action:` label is
 /// additionally shown at the action's own claim heading
 /// (`render_operation`/`metadata_header`). Returns `None` when no glossary
 /// was applied, so a glossary-less document renders byte-identically to
@@ -793,7 +793,7 @@ fn evidence_sources_section(
 /// The fixed intent-fidelity disclaimer (issue #333, acceptance criterion
 /// 3): an approval record is an organizational fact about who reviewed what
 /// at which digest, never a proof that the document matches original
-/// intent. Repeated verbatim in `docs/DESIGN-approval.md` and
+/// intent. Repeated verbatim in `docs/design/DESIGN-approval.md` and
 /// `skills/fsl-requirements-document/SKILL.md`.
 fn approval_intent_fidelity_disclaimer(locale: Locale) -> &'static str {
     match locale {

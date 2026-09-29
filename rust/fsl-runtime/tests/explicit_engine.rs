@@ -435,7 +435,7 @@ fn forall_init_writing_conflicting_values_to_the_same_location_is_unsatisfiable(
     assert!(result.violation.is_none());
 }
 
-/// Issue #821: `docs/LANGUAGE.md`'s "assign exactly once" rule is per
+/// Issue #821: `docs/manual/LANGUAGE.md`'s "assign exactly once" rule is per
 /// concrete key, not per variable. A `forall i { m[i] = ... }` write and a
 /// later flat `m[K] = ...` write must collide when `K` is one of the keys
 /// the `forall` already covered, whether or not the values agree — before

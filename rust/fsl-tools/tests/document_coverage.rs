@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Coverage registry and no-silent-omission gate for the RCIR v1 projector
-//! (issue #328). See `docs/DESIGN-document-coverage-registry.md`.
+//! (issue #328). See `docs/design/DESIGN-document-coverage-registry.md`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -218,7 +218,7 @@ fn kernel_native_target_kinds_match_the_public_kernel_v1_schema_required_keys() 
 /// wholly new dialect keyword added to the language: `DIALECT_KEYWORDS`
 /// growing without a corresponding decision here fails too, forcing an
 /// explicit RCIR posture for the newcomer rather than an implicit one. See
-/// `docs/DESIGN-document-dialect-adapters.md`.
+/// `docs/design/DESIGN-document-dialect-adapters.md`.
 #[test]
 fn rcir_supported_dialects_are_exactly_spec_and_requirements() {
     let supported: BTreeSet<&str> = RCIR_SUPPORTED_DIALECTS.iter().copied().collect();

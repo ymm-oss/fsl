@@ -3,7 +3,7 @@
 
 //! Negative controls for #495: the native TSG projection must emit the
 //! documented `requirement`/`acceptance`/`forbidden`/`kpi` node kinds and
-//! `covers` edges (`docs/DESIGN-analysis.md` §2), and — the actual
+//! `covers` edges (`docs/design/DESIGN-analysis.md` §2), and — the actual
 //! deliverable — a requirement-family review finding must be *detected*,
 //! not merely representable. Before the fix, `build_tsg` never projected
 //! any of these kinds for a standalone `.fsl`/requirements spec (only the
@@ -184,7 +184,7 @@ fn acceptance_and_forbidden_nodes_appear_and_are_covered_by_requirements() {
 /// (`src/fslc/analysis/tsg.py` `_add_scenario_steps`): the edge runs
 /// scenario -> action, step 0 is `starts_with`, every later step is
 /// `precedes`. Before the fix no scenario node had *any* outgoing edge, so
-/// both documented edge kinds (`docs/DESIGN-analysis.md` §2) were never
+/// both documented edge kinds (`docs/design/DESIGN-analysis.md` §2) were never
 /// emitted by native at all.
 #[test]
 fn scenario_step_edges_use_the_frozen_reference_direction_and_split() {
@@ -269,7 +269,7 @@ fn repeated_actions_in_one_scenario_keep_one_edge_per_step() {
 }
 
 /// `control` catalog entries have no Kernel-lowered form
-/// (`docs/LANGUAGE.md`: "does not generate a property by itself; it is a
+/// (`docs/manual/LANGUAGE.md`: "does not generate a property by itself; it is a
 /// catalog entry"), so before the fix a governance catalog declaring two
 /// controls projected zero `control` nodes even though
 /// `requirement_property_graph` already selected that node kind.

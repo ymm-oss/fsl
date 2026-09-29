@@ -13,7 +13,7 @@ Scope, deliberately narrow:
 * a directory target resolves (``docs/README.md`` links ``../specs/``)
 * ``#anchor`` is resolved against **GitHub's** heading-slug algorithm, because
   ``docs/`` is read on GitHub.  mystmd slugifies differently -- see
-  ``docs/DESIGN-myst-spike.md``
+  ``docs/design/DESIGN-myst-spike.md``
 * a ``.fsl`` target may carry a ``#<kind>:<name>`` fragment naming an element
   declared in that specification (``#action:add_to_cart``); it resolves against
   the declarations in the file.  GitHub renders such a link normally and

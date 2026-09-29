@@ -15,22 +15,22 @@ is authoritative and this one is a drift to delete.
 - Native CLI and Worker output must preserve the JSON envelope, exit codes, locations, and replayable
   evidence contract. Do not allowlist verdict, location, assurance, or exit-code differences.
 - A language feature moves with its grammar/lowering, typed model, symbolic and concrete semantics,
-  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, a design
+  regression cases, `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md`, `skills/fsl/references/`, a design
   note, and a `changelog.d/` fragment (see `changelog.d/README.md`; `CHANGELOG.md`'s `[Unreleased]`
   body itself is aggregated from fragments at release time and must not be hand-edited). A new
   declaration, binder, or reference form additionally moves with
   `rust/fsl-lsp/src/index.rs` and a targeted role/scope test, or it silently loses
   definition/references/rename/documentSymbol with no parse failure to surface the gap;
   `rust/fsl-lsp/tests/corpus.rs` only asserts that every identifier is indexed as something.
-  `docs/LANGUAGE.ja.md` is a second canonical source kept section-aligned
-  1:1 with `docs/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
-  fails loudly on drift; see `docs/DESIGN-docs-site.md` D7 (this one *is* a required CI check:
+  `docs/manual/LANGUAGE.ja.md` is a second canonical source kept section-aligned
+  1:1 with `docs/manual/LANGUAGE.md` (same count/order of `## ` sections) — `tools/build_site_reference.py`
+  fails loudly on drift; see `docs/design/DESIGN-docs-site.md` D7 (this one *is* a required CI check:
   `.github/workflows/site-reference-freshness.yml`). A new dialect's top-level construct (and any new
   `examples/`/`specs/` directory) additionally moves with `tests/dialect_registry.py` (`DIALECTS`,
   `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS`). The frozen-Python conformance harness
-  (`docs/DESIGN-conformance-harness.md`, `tests/test_dialect_conformance.py`) is written to fail
+  (`docs/design/DESIGN-conformance-harness.md`, `tests/test_dialect_conformance.py`) is written to fail
   loudly on an unregistered construct instead of silently excluding the corpus, but — unlike the
-  `docs/LANGUAGE.ja.md` check above — **no CI workflow and no `./tools/check-native-integration.sh`
+  `docs/manual/LANGUAGE.ja.md` check above — **no CI workflow and no `./tools/check-native-integration.sh`
   lane currently invokes it**; it is a developer-run manual/reference check, not a machine-enforced
   gate (see the design doc's "Cost and CI wiring"). Scope that precisely: registering the construct
   in `tests/dialect_registry.py` and the harness's dual-evaluator (Monitor/BMC/oracle) agreement
@@ -78,7 +78,7 @@ is authoritative and this one is a drift to delete.
   these has produced a confidently reported defect that did not exist, or a passing verdict that the
   change had not earned.
 - A soundness-critical claim marked triangulated must follow
-  `docs/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
+  `docs/design/DESIGN-triangulated-assurance.md`: preserve the pre-classification raw observation, declare
   two reviewably independent semantic lineages, execute all three agreement edges, and calibrate
   accepting/rejecting controls. Consumer parity through one parser/classifier is not independence,
   and triangulation never promotes the public assurance class or process exit.
@@ -100,7 +100,7 @@ experiment record only when its method or raw data is itself a maintained produc
 pull-request history preserve chronology.
 
 For an explicitly requested local Referance semantic-drift audit, follow
-`docs/DESIGN-referance-local-audit.md`: begin with a verified task-local Store and provenance-bearing
+`docs/design/DESIGN-referance-local-audit.md`: begin with a verified task-local Store and provenance-bearing
 behavior/freshness evidence, then use the repo-owned bounded CodeReferance profile only as an auxiliary
 read-only detector. Confirm both Store path and audited root, keep every observation shadow/local, and
 complete authority-ordered triage before filing a finding. Referance is not a CI, merge, product,
@@ -108,7 +108,7 @@ promotion, or release gate, and its symbol/parity results never establish nested
 or authorize automatic ground/promote/issue.
 
 - A new `tests/test_*.py` module moves with `tools/check_ci_validator_inventory.py generate` and
-  `docs/DESIGN-ci-validator-inventory.md`, so required-gate reachability is recorded before merge.
+  `docs/design/DESIGN-ci-validator-inventory.md`, so required-gate reachability is recorded before merge.
   (Enforced surface: the inventory tool itself — run it rather than reasoning about reachability.)
 
 ## Coding and change conventions
@@ -132,7 +132,7 @@ New source files must carry the repository's Apache-2.0 SPDX header.
   not declare the task complete on its own.
 - Use `$task-start` before substantial Codex work and `$checkpoint` before compaction, clearing,
   handoff, independent review, or ending the task.
-- Keep durable decisions in accepted `docs/DESIGN-*.md`; task packets, conversations, plans, and Codex
+- Keep durable decisions in accepted `docs/design/DESIGN-*.md`; task packets, conversations, plans, and Codex
   memories are not architectural authority.
 - Delegate broad read-heavy exploration to `evidence_explorer` and independent final review to
   `independent_reviewer`. Keep iterative implementation in the main thread unless work can be isolated

@@ -1,1 +1,1 @@
-See docs/DESIGN-ci.md: "Merge readiness contract".
+See docs/design/DESIGN-ci.md: "Merge readiness contract".

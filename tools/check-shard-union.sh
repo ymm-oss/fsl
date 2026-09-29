@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Generic, line-set based shard-completeness guard (issue: CI wall-clock
-# reduction via job splitting; see docs/DESIGN-ci.md, "Sharded pre-merge Linux
+# reduction via job splitting; see docs/design/DESIGN-ci.md, "Sharded pre-merge Linux
 # evidence"). A scheduling change that splits one set of tests/operators/
 # mutants across N shards must prove, mechanically, that the shards are a
 # partition of the original set: every entry lands in exactly one shard, none
@@ -273,7 +273,7 @@ selftest() {
   fi
 
   # check-groups rejecting (c): a shard index above the shard total. This bound
-  # is stated as a guarantee in docs/DESIGN-ci.md, so it needs an executable
+  # is stated as a guarantee in docs/design/DESIGN-ci.md, so it needs an executable
   # control -- otherwise deleting the check passes every gate.
   printf '1 binA\n4 binB\n' >"$tmp/groups-range.txt"
   if (check_groups "$tmp/groups-range.txt" "$tmp/known.txt" 3) >/dev/null 2>&1; then

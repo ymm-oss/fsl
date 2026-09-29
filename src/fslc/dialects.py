@@ -1500,7 +1500,7 @@ def _precedence_dominated_stages(proc, waypoints):
 
     This is *not* "W and everything downstream of W": a downstream stage
     that is also reachable by a path that never touches W is not dominated
-    (see docs/DESIGN-precedence-policy.md for the counterexample), so a
+    (see docs/design/DESIGN-precedence-policy.md for the counterexample), so a
     single reachability pass with W nodes deleted is the correct -- and
     sufficient -- computation.
     """
@@ -1538,7 +1538,7 @@ def _collect_precedence_policies(policies, process_by_case):
     stage[c] in dominated(W) => visited[c] }`. It is true by construction
     (the dominated set comes from the graph, independent of policy
     compliance) and, paired with the policy invariant, is inductive at k=1
-    -- see docs/DESIGN-precedence-policy.md.
+    -- see docs/design/DESIGN-precedence-policy.md.
     Returns:
       - history_var_by_item: id(policy item) -> history var name
       - history_specs: [(proc, history_var, sorted_waypoints), ...], one per

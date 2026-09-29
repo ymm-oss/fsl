@@ -147,7 +147,7 @@ pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
 
 /// Render a model-construction error using the public semantic classification.
 ///
-/// `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
+/// `docs/design/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
 /// `semantics` and fixes `kind` as a closed set including `name`. This is the
 /// single dispatch point for that whole half of the set, so both the location
 /// (issue 555) and the classification (issue 565) travel with the diagnostic
@@ -257,7 +257,7 @@ pub fn render_governance_error(
 /// The classification for a typed diagnostic, preferring the class the frontend
 /// determined over matching on the message text.
 ///
-/// `docs/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
+/// `docs/design/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
 /// pattern can identify: `duplicate state variable 'x'`,
 /// `duplicate enum member 'B'` and `undefined predicate 'p'` share no prefix or
 /// suffix, and a classifier keyed on message text silently reclassifies a
@@ -2063,7 +2063,7 @@ fn shared_warnings(
     )
 }
 
-/// Render the solver-decided vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// Render the solver-decided vacuity lanes (`docs/design/DESIGN-vacuity.md` §2 lanes
 /// 4–7) that `fsl-verifier` proved for this model.
 ///
 /// None of the messages mention `--depth`: unlike the two reachability lanes,

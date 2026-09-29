@@ -4,7 +4,7 @@
 //! (`rust/fsl-runtime/src/lib.rs::verification_warnings`) must unwrap a
 //! `forall`-quantified implication before checking antecedent reachability,
 //! not only a bare top-level `Binary{op: "=>"}`. This is the shape
-//! `docs/DESIGN-vacuity.md:22` documents as the primary case. Before the
+//! `docs/design/DESIGN-vacuity.md:22` documents as the primary case. Before the
 //! fix, `issue_486_vacuous_forall_implication.fsl` verified clean (no
 //! `vacuous_implication` warning at all, so `--vacuity error` never fired)
 //! because the top-level expression of the invariant is a `forall`, not a

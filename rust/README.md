@@ -56,5 +56,5 @@ All phases are complete over their declared gates. Native `replay --trace`
 matches the focused conformant and first-rejection contracts, and the complete
 gate matrix is documented below and in the porting guide.
 
-See [`../docs/RUST-PORTING.md`](../docs/RUST-PORTING.md) for the rewrite method,
+See [`../docs/design/RUST-PORTING.md`](../docs/design/RUST-PORTING.md) for the rewrite method,
 evidence gates, and current decisions.

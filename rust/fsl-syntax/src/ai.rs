@@ -233,7 +233,7 @@ pub(crate) fn parse_ai_component_tokens(
 /// orchestration/`review_gate`/`failure_policy` child references, output
 /// visibility targets, and the graph-based finding kinds -- are a separate
 /// pass over the parsed tree (`fsl_tools`' agent analyzer), matching
-/// `docs/DESIGN-ai-hard.md`'s separation of parse/grammar from structural
+/// `docs/design/DESIGN-ai-hard.md`'s separation of parse/grammar from structural
 /// analysis.
 ///
 /// # Errors
@@ -526,7 +526,7 @@ impl AiParser<'_> {
     }
 
     /// Parse one `agent { ... }` body, recursing into nested `agent`
-    /// declarations for `children`. `docs/LANGUAGE.md` §13.6: nested agents
+    /// declarations for `children`. `docs/manual/LANGUAGE.md` §13.6: nested agents
     /// are ordinary agents scoped by their parent, not a distinct
     /// `sub_agent` type.
     #[allow(clippy::too_many_lines)]

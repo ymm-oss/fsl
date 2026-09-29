@@ -15,7 +15,7 @@ const OBSERVATION_SCHEMA_VERSION: &str = "fsl-db-observation.v0";
 const OBSERVATION_CAPABILITIES: &[&str] = &["reads", "writes", "calls", "requires", "provides"];
 
 /// The default `check compatibility` rule set applied when a `dbsystem` omits
-/// the block entirely (`docs/DESIGN-db.md` "Syntax"). `data_preserved` and
+/// the block entirely (`docs/design/DESIGN-db.md` "Syntax"). `data_preserved` and
 /// `rollback_equivalent` are deliberately excluded: they remain opt-in.
 const DEFAULT_RULES: &[&str] = &[
     "all_active_reads_exist",
@@ -152,7 +152,7 @@ pub fn validate_db(system: &DbSystem) -> Result<(), DbToolError> {
 
     // DB-04 (#490): an `environment schema lo..hi` must denote schema
     // versions actually reachable in the declared migration plan
-    // (`docs/DESIGN-db.md` "Compatibility Snapshot"). Migrations are a
+    // (`docs/design/DESIGN-db.md` "Compatibility Snapshot"). Migrations are a
     // single, strictly sequential rollout plan, so this also rejects a
     // migration whose `from` does not chain from the previous schema.
     let mut current_schema = system.database.initial_schema;
@@ -516,7 +516,7 @@ fn operation_annotations<'a>(
 
 /// Whether `operation` loses information in the bounded row model: an
 /// existing column dropped, or a split/merge not marked `lossless`
-/// (`docs/DESIGN-db.md` "Preservation and Rollback").
+/// (`docs/design/DESIGN-db.md` "Preservation and Rollback").
 fn breaks_preservation(
     operation: &DbMigrationOp,
     annotations: &BTreeSet<&str>,
@@ -692,7 +692,7 @@ fn migration_op_findings(
 
 /// The `accepts`/`responds`/`provides` capability set contributed by every
 /// `active` or `supported` artifact live at `(schema, flags)`. `may_exist`
-/// artifacts are never providers; see `docs/DESIGN-db.md` "Generic Artifact
+/// artifacts are never providers; see `docs/design/DESIGN-db.md` "Generic Artifact
 /// Capabilities and AI Components".
 fn provided_capability(
     environment: &DbEnvironment,
@@ -866,7 +866,7 @@ fn findings(system: &DbSystem, assumptions: &[Value]) -> Vec<Value> {
                             let element = reference(expected);
                             // DB-12 (#492): the documented rule for this
                             // finding is `api_responses_expected`
-                            // (`docs/LANGUAGE.md`), not an undocumented
+                            // (`docs/manual/LANGUAGE.md`), not an undocumented
                             // `api_response_fields_available`.
                             let mut finding = common_finding(
                                 "api_response_field_missing",

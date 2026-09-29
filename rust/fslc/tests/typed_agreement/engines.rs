@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Builds a model from generated FSL source and runs the three native
-//! engines named in `docs/DESIGN-conformance-harness.md`'s C6 section --
+//! engines named in `docs/design/DESIGN-conformance-harness.md`'s C6 section --
 //! `fsl_runtime::bfs` ("Monitor BFS"), `fsl_runtime::verify_explicit`
 //! ("explicit"), and `fsl_verifier::verify_bounded` ("BMC", native Z3) --
 //! comparing verdicts, replaying evidence through `replay_trace`, and
@@ -398,7 +398,7 @@ pub fn require_expected_violation(
 /// (`fsl_runtime::explicit_unsupported_reason` rejects any model that
 /// declares one) and are invisible to `fsl_runtime::bfs` (it never reads
 /// `model.leadstos`), so a model with a `leadsTo` property runs BMC only;
-/// see the module doc and `docs/DESIGN-conformance-harness.md` C6 for why
+/// see the module doc and `docs/design/DESIGN-conformance-harness.md` C6 for why
 /// asserting bfs/explicit "agreement" there would be vacuous rather than
 /// evidence.
 ///

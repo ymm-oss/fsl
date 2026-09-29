@@ -200,7 +200,7 @@ there), `initial` is trusted as the concrete starting point directly instead
 of failing `initial_state_mismatch` against an arbitrary default value for
 that variable. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
-replay input. See `docs/DESIGN-replay-trace.md`.
+replay input. See `docs/design/DESIGN-replay-trace.md`.
 
 Schema 1.2 opts into solver-free bounded-liveness replay. Every
 `leadsTo P ~> within K Q` is observed at tick 0 and after each action/stutter;
@@ -219,8 +219,8 @@ means every dialect is source-complete. Requirement relations remain separate
 from origin targets. Use `fslc conformance` with the same major and the matching
 `schemas/fslc/kernel/conformance.v{1,2}.schema.json` to test an independent runtime.
 The compatibility policy and field contract are in
-`docs/DESIGN-kernel-contract.md`; v2 provenance is in
-`docs/DESIGN-kernel-origin-v2.md`.
+`docs/design/DESIGN-kernel-contract.md`; v2 provenance is in
+`docs/design/DESIGN-kernel-origin-v2.md`.
 
 For an induction `unknown_cti`, first try `--engine explicit` — if exploration
 closes it returns `proved` with **no lemmas at all** (the invariant being
@@ -353,7 +353,7 @@ opts a run out entirely. Cache writes are atomic, so running `fslc verify` on
 many files as concurrent processes (e.g. `xargs -P`, a CI job matrix) is safe —
 concurrent runs at worst duplicate solving, never corrupt the cache. When
 verifying a whole project's specs, prefer process-level parallelism over a
-sequential per-file loop. See `docs/DESIGN-incremental-verify.md`.
+sequential per-file loop. See `docs/design/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
@@ -380,7 +380,7 @@ exact executable Kernel requirement targets to `@fsl.trace` implementation
 locations. Treat missing, orphan, and target-mismatch findings as review signals,
 not proof. `origin_assurance` describes Public Kernel provenance
 (`source_backed|generated_from_source|generated_only|unknown`), never formal
-verification strength. See `docs/DESIGN-code-audit.md`.
+verification strength. See `docs/design/DESIGN-code-audit.md`.
 `--profile ai-review` emits AI-readable review findings such as
 `disconnected_requirement`, `unanchored_property`, `progressless_cycle`,
 `unwritten_state`, `unread_state`, `unguarded_action`, and
@@ -435,7 +435,7 @@ a `requirement.id` nested inside a `findings`/`checks` array item — or a
 spec-level（仕様全体）finding when it fails with no attribution at all; it
 never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
-verdict). See `docs/DESIGN-ledger.md`.
+verdict). See `docs/design/DESIGN-ledger.md`.
 
 Digest-bound approvals (issue #190) are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
@@ -448,7 +448,7 @@ renderer changes. A drifted row carries the complete baseline digest and an
 `approval diff` command, which compares the approved commit to the current
 working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy. See
-`docs/DESIGN-approval.md`.
+`docs/design/DESIGN-approval.md`.
 
 Every requirement id in the ledger (and every property row in `fslc html`)
 carries an **assurance class** (issue #171): `proved(induction)` (k-induction,
@@ -464,7 +464,7 @@ is required for a requirement to ever show `proved`; `--evidence
 <result.json>` folds a saved fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"`
 producer's output (tagged via a top-level `requirements: [...]` list) into the
 per-requirement classification. Class is method coverage, not verdict — a
-`violated` BMC run is still `bounded`. See `docs/DESIGN-assurance-classes.md`.
+`violated` BMC run is still `bounded`. See `docs/design/DESIGN-assurance-classes.md`.
 
 `chain` reads `fsl-project.toml` by default. Each `[business]`,
 `[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`
@@ -632,7 +632,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   total `elapsed_s`, solver check statistics, and deterministic per-property
   check counts/times. Native/Worker keys and nullability match; Z3 counters are
   maximum observed snapshots. Explicit verification emits zero/null solver
-  statistics in the same shape. See `docs/DESIGN-verification-cost.md`.
+  statistics in the same shape. See `docs/design/DESIGN-verification-cost.md`.
   Bounded `verified` may include a saturation `hint` when the depth-K frontier
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),

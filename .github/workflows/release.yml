@@ -218,8 +218,8 @@ jobs:
           cp examples/nfr/bounded_response.fsl dist/fsl-kernel-contract-v1/fixtures/
           cp examples/nfr/bounded_response.within.v1.json dist/fsl-kernel-contract-v1/fixtures/
           cp examples/nfr/bounded_response.overdue.v1.json dist/fsl-kernel-contract-v1/fixtures/
-          cp docs/DESIGN-replay-trace.md dist/fsl-kernel-contract-v1/
-          cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v1/README.md
+          cp docs/design/DESIGN-replay-trace.md dist/fsl-kernel-contract-v1/
+          cp docs/design/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v1/README.md
           tar -czf dist/fsl-kernel-contract-v1.tar.gz -C dist fsl-kernel-contract-v1
           ( cd dist && shasum -a 256 fsl-kernel-contract-v1.tar.gz > fsl-kernel-contract-v1.tar.gz.sha256 )
 
@@ -246,9 +246,9 @@ jobs:
           cp examples/nfr/bounded_response.fsl dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp examples/nfr/bounded_response.within.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
           cp examples/nfr/bounded_response.overdue.v1.json dist/fsl-kernel-contract-v2/rust/fslc/tests/fixtures/
-          cp docs/DESIGN-replay-trace.md dist/fsl-kernel-contract-v2/docs/
-          cp docs/DESIGN-kernel-origin-v2.md dist/fsl-kernel-contract-v2/README.md
-          cp docs/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v2/docs/
+          cp docs/design/DESIGN-replay-trace.md dist/fsl-kernel-contract-v2/docs/
+          cp docs/design/DESIGN-kernel-origin-v2.md dist/fsl-kernel-contract-v2/README.md
+          cp docs/design/DESIGN-kernel-contract.md dist/fsl-kernel-contract-v2/docs/
           tar -czf dist/fsl-kernel-contract-v2.tar.gz -C dist fsl-kernel-contract-v2
           ( cd dist && shasum -a 256 fsl-kernel-contract-v2.tar.gz > fsl-kernel-contract-v2.tar.gz.sha256 )
 
@@ -348,9 +348,9 @@ jobs:
           path: release-assets
 
       - name: Check no changelog fragments remain unaggregated
-        # Control 4's release-time half (docs/DESIGN-changelog-fragments.md):
+        # Control 4's release-time half (docs/design/DESIGN-changelog-fragments.md):
         # a fragment still present under changelog.d/ at tag time means
-        # docs/RELEASE.md step 7's aggregation was skipped or ran against the
+        # docs/design/RELEASE.md step 7's aggregation was skipped or ran against the
         # wrong tree. Fails loudly, before "Extract release notes" builds a
         # notes file that would otherwise silently omit that entry.
         run: ./tools/aggregate_changelog.sh check-stale

@@ -142,8 +142,8 @@ written as legacy strings, `@...` syntax, or a mix of both on one declaration.
 Explicit `covers` and requirement-block annotations retain their own spans;
 `undecided` is reserved and cannot be an explicit requirement ID.
 Multiple-relation JSON outputs use `requirements` and preserve singular fields
-as lexical compatibility projections. See `docs/DESIGN-undecided.md`,
-`docs/DESIGN-annotations.md`, and `docs/DESIGN-dialect-dispatch.md`. This syntax and its
+as lexical compatibility projections. See `docs/design/DESIGN-undecided.md`,
+`docs/design/DESIGN-annotations.md`, and `docs/design/DESIGN-dialect-dispatch.md`. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
 

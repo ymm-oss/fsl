@@ -36,7 +36,7 @@ pub fn claims() -> Vec<TriangulatedClaim> {
     vec![TriangulatedClaim {
         id: "p3.token_dialect_dispatch",
         contract: Citation {
-            path: "docs/DESIGN-triangulated-assurance.md",
+            path: "docs/design/DESIGN-triangulated-assurance.md",
             anchor: "## P3 — token-based dialect dispatch",
         },
         common_observation: ObservationEvidence {
@@ -84,7 +84,7 @@ pub fn claims() -> Vec<TriangulatedClaim> {
         },
         scope: ScopeEvidence {
             declared_by: Citation {
-                path: "docs/DESIGN-triangulated-assurance.md",
+                path: "docs/design/DESIGN-triangulated-assurance.md",
                 anchor: "## P3 — token-based dialect dispatch",
             },
             commands: &[

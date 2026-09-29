@@ -12,8 +12,8 @@ together. Inspect staged and unstaged changes; do not modify them.
 ## Coupling map
 
 1. Syntax or surface grammar in `rust/fsl-syntax` requires the corresponding lowering/model work,
-   regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, an accepted
-   `docs/DESIGN-*.md`, and a new `changelog.d/<id>-<slug>.<category>.md` fragment (see
+   regression cases, `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md`, `skills/fsl/references/`, an accepted
+   `docs/design/DESIGN-*.md`, and a new `changelog.d/<id>-<slug>.<category>.md` fragment (see
    `changelog.d/README.md`) -- not a direct `CHANGELOG.md` edit, which is aggregated from fragments only
    at release time. A new declaration, binder, or reference form additionally requires
    `rust/fsl-lsp/src/index.rs` and a targeted role/scope test.
@@ -22,7 +22,7 @@ together. Inspect staged and unstaged changes; do not modify them.
 3. Solver changes require the relevant backend tests and preservation of runtime solver independence.
 4. CLI/Worker changes require native/Worker envelope, exit-code, raw-output, and replay contracts.
 5. Public Kernel changes require schemas, exporters/consumers, conformance vectors, agreement tests,
-   `docs/DESIGN-kernel-contract.md`, language/reference docs, and a `changelog.d/<id>-<slug>.<category>.md`
+   `docs/design/DESIGN-kernel-contract.md`, language/reference docs, and a `changelog.d/<id>-<slug>.<category>.md`
    fragment (see `changelog.d/README.md`) -- not a direct `CHANGELOG.md` edit.
 6. Changes under `specs/` or `examples/` require native check/verify and non-vacuity evidence. Generated
    compatibility artifacts may change only through their owning generator.

@@ -2,7 +2,7 @@
 
 name: site reference freshness
 
-# Not product verification (docs/DESIGN-ci.md's sense: rust workspace / WASM / native Z3 /
+# Not product verification (docs/design/DESIGN-ci.md's sense: rust workspace / WASM / native Z3 /
 # semantic mutation / FSL Logic Test). This gate protects a documentation artifact --
 # generated `docs/intro/language.{ja,en}.html` and `docs/intro/cli.{ja,en}.html`.
 # The same required context also invokes a static parser for the hand-authored
@@ -24,12 +24,12 @@ name: site reference freshness
 #     `main safety and CI` ruleset (.github/ruleset-contract.json), so a stale page does block the
 #     merge. That is safe specifically because this workflow runs on every pull request with no
 #     path filter (see the `on:` block below) -- unlike the deferred, FSL_OPTIMISTIC_CI-gated
-#     contexts in docs/DESIGN-ci.md's "Product gate contract", it can never fail to report on an
-#     ordinary pull request, so requiring it cannot deadlock one. docs/DESIGN-ci.md's "Ruleset
+#     contexts in docs/design/DESIGN-ci.md's "Product gate contract", it can never fail to report on an
+#     ordinary pull request, so requiring it cannot deadlock one. docs/design/DESIGN-ci.md's "Ruleset
 #     drift audit" audits this requirement against the live ruleset so it cannot silently regress.
 #
-# See docs/DESIGN-ci.md's “Site reference context scope” for the combined-context contract.
-# docs/DESIGN-docs-site.md D7 remains the generated-reference rationale for #630/#688.
+# See docs/design/DESIGN-ci.md's “Site reference context scope” for the combined-context contract.
+# docs/design/DESIGN-docs-site.md D7 remains the generated-reference rationale for #630/#688.
 
 on:
   pull_request:

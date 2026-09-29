@@ -23,7 +23,7 @@ def is_causal_source(source: str) -> bool:
     """Sniff the top-level ``causal`` keyword.
 
     Native intentionally excludes "causal" from its dialect-dispatch
-    ``frontends!`` list (``docs/DESIGN-causal.md`` §1: the causal graph never
+    ``frontends!`` list (``docs/design/DESIGN-causal.md`` §1: the causal graph never
     enters ``KernelModel``, ``fsl-runtime``, or ``fsl-solver``), and the frozen
     Python reference has no causal implementation at all, so
     ``src/fslc/dialect_registry.py``'s ``DIALECT_KEYWORDS`` deliberately
@@ -85,7 +85,7 @@ EVIDENCE_CONSTRUCTS: dict[str, str] = {
         "kernel spec"
     ),
     "causal": (
-        "causal profile file (is_causal_source, docs/DESIGN-causal.md §1): the "
+        "causal profile file (is_causal_source, docs/design/DESIGN-causal.md §1): the "
         "causal graph never enters KernelModel/fsl-runtime/fsl-solver, and "
         "check reports result=causal_model_checked / formal_result=not_run. "
         "Native coverage lives in rust/fslc/tests/causal_cli.rs; the frozen "
@@ -151,7 +151,7 @@ NATIVE_ONLY_REFINEMENT_SYNTAX: dict[str, NativeOnlyRefinementSyntax] = {
         construct="enum abstraction",
         line=11,
         column=3,
-        design_citation="docs/DESIGN-enum-member-identity.md:13-16, 38-52",
+        design_citation="docs/design/DESIGN-enum-member-identity.md:13-16, 38-52",
         reason=(
             "source-total many-to-one enum abstraction mapping syntax is "
             "Rust-native-only; the accepted decision explicitly retains the "

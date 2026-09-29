@@ -4,13 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FSL 言語リファレンス — LANGUAGE.ja.md から生成</title>
-<meta name="description" content="docs/LANGUAGE.ja.md から生成される、FSLの網羅的な言語リファレンス(日本語版)。" />
+<meta name="description" content="docs/manual/LANGUAGE.ja.md から生成される、FSLの網羅的な言語リファレンス(日本語版)。" />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="language">
 <!-- GENERATED — do not edit by hand. Regenerate with:
      python tools/build_site_reference.py
-     Source: docs/LANGUAGE.ja.md -->
+     Source: docs/manual/LANGUAGE.ja.md -->
 <div class="progress"></div>
 
 <header class="topbar" data-nav></header>
@@ -25,7 +25,7 @@
     <p class="kicker mono reveal">Generated Reference</p>
     <span class="badge ref reveal">Generated from LANGUAGE.ja.md</span>
     <h1 class="reveal" style="margin-top:14px">言語リファレンス</h1>
-    <p class="lead narrow reveal">これは <code>docs/LANGUAGE.ja.md</code> からの生成物です。<code>docs/LANGUAGE.md</code>(英語)と節単位で1対1対応する第二の正典として保守されています。FSLの予約語・コマンド名・診断コード・JSON出力などはそのまま英語で表記しています。</p>
+    <p class="lead narrow reveal">これは <code>docs/manual/LANGUAGE.ja.md</code> からの生成物です。<code>docs/manual/LANGUAGE.md</code>(英語)と節単位で1対1対応する第二の正典として保守されています。FSLの予約語・コマンド名・診断コード・JSON出力などはそのまま英語で表記しています。</p>
     <div class="tree-controls reveal">
       <button class="btn op-expand" type="button">すべて展開</button>
       <button class="btn op-collapse" type="button">すべて折りたたむ</button>
@@ -104,7 +104,7 @@
 <code>fslc html</code> が spec 名の横の分類バッジとして表示します(JSON:
 <code>skeleton.spec_kind = {id, text}</code>)。spec 全体がどんな種類のものかを記録するために
 使います(例: 振る舞いのスライスだけをモデル化した画面フロー spec なら <code>ui</code>)。
-カーネル意味論は持たず、何にも脱糖されません。<code>docs/DESIGN-ui.md</code> を参照。
+カーネル意味論は持たず、何にも脱糖されません。<code>docs/design/DESIGN-ui.md</code> を参照。
 内部的には、このレガシーなバッジは共有の型付き <code>Kind</code> アノテーションへ適合されます。
 ソース文法は変わりません。<code>DESIGN-annotations.md</code> を参照。</p>
 <p>任意のレイヤー — カーネル <code>spec</code> を含む — は、有限サイズをインラインの
@@ -133,7 +133,7 @@ verify {
 <p><code>entity</code>/<code>number</code> は検証の前に <code>type &lt;Name&gt; = lo..hi</code> へ脱糖されるので、有界型を
 直接書くのと完全に等価です — 違いは可読性だけです(設計 spec が、実際にはモデルの
 境界にすぎないドメインサイズを主張する代わりに、ドキュメントとして読めるように
-なります)。<code>docs/DESIGN-spec-domains.md</code> を参照。</p>
+なります)。<code>docs/design/DESIGN-spec-domains.md</code> を参照。</p>
 <p>データベース互換ダイアレクトも、同じカーネルの上の別のフロントエンドです:</p>
 <pre><code class="language-fsl">dbsystem &lt;Name&gt; {
   database &lt;db&gt; {
@@ -203,7 +203,7 @@ API/オフラインおよび有界の preservation/rollback 検査は、ダイ�
 ものではありません。汎用の <code>requires</code> / <code>provides</code> ケイパビリティは、AI モデル/
 プロンプト/リトリーバー、ツールスキーマ、出力スキーマ、モバイル/サーバー、その他の
 アーティファクトプロファイルを同じスナップショットモデルでカバーします。
-<code>docs/DESIGN-db.md</code> を参照。</p>
+<code>docs/design/DESIGN-db.md</code> を参照。</p>
 <p>関数型 DDD / 非同期エフェクトダイアレクト(v0。同じカーネルへ展開され、安定した
 fsl-domain findings を報告します):</p>
 <pre><code class="language-fsl">domain &lt;Name&gt; {
@@ -381,7 +381,7 @@ type/state/action の対応物の欠落は fail closed です。ソース式と 
 しないためです。5 つのターゲット出力はすべて移行前のゴールデンに固定されており、
 valid な domain コーパスはすべてのターゲットについて生成されます。
 実際のゲートウェイの挙動、実時間のタイムアウト、キューの配送、本番の exactly-once
-意味論は証明しません。<code>docs/DESIGN-domain.md</code> と <code>docs/DESIGN-effect.md</code> を参照。</p>
+意味論は証明しません。<code>docs/design/DESIGN-domain.md</code> と <code>docs/design/DESIGN-effect.md</code> を参照。</p>
 <p><code>fslc verify</code> は、spec を編集することなく、<code>verify</code> ブロックの <code>instances</code>/<code>values</code>
 境界をコマンドラインから上書きできます:</p>
 <pre><code class="language-bash">fslc verify spec.fsl --instances Case=1 --property EventuallyLeavesInProgress
@@ -606,7 +606,7 @@ induction、Public Kernel v1 は、等価な <code>init</code> ブロックと�
 使えますが、状態ルートや別の初期化子を読んではなりません。インデックス付き、
 フィールド、条件文、量化、関係、一括の初期化は <code>init</code> に残ります。同じルートを
 インラインと <code>init</code> の両方で代入するのは意味論エラーで、両方のソース位置を報告
-します。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a> を参照。</p>
+します。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a> を参照。</p>
 <p><strong>状態変数として合法な型</strong>(それ以外は <code>check</code> が型エラーとして拒否します):
 スカラー | 入れ子の <code>Option&lt;scalar&gt;</code> | struct(スカラー / 入れ子の <code>Option&lt;scalar&gt;</code> フィールド)
 | <code>Map&lt;bounded scalar, scalar | nested Option&lt;scalar&gt; | struct&gt;</code>
@@ -652,7 +652,7 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 なりません。定義は前後の定義を呼べますが、直接・相互の再帰はできません。定義は意味
 検査の前に展開され、検証器とランタイムは手で展開したのと同じカーネル式を見ます。
 展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-def.md"><code>DESIGN-def.md</code></a> を参照。</p>
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a> を参照。</p>
 <ul>
 <li>算術: <code>+ - * / %</code>、単項 <code>-</code>、<code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (<code>a//b</code> は <code>//</code> 以降がすべてコメントになってしまうので、除算は空白を入れて
@@ -941,7 +941,7 @@ fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runti
 量化子、曖昧さのないローカルなインライン action マッピング、暗黙のデフォルトを
 扱います。安全と証明できないソース/コメントの移動は拒否します。<code>&amp;&amp;</code> は引き続き
 不正なトークンであり、そのため <code>and</code> の提案つきで報告されますが、機械適用される
-ことはありません。原子性と一括更新の手順は <code>docs/DESIGN-migration.md</code> を参照。</p>
+ことはありません。原子性と一括更新の手順は <code>docs/design/DESIGN-migration.md</code> を参照。</p>
 <p><code>fslc lint</code> の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの <code>*.fsl</code> へ再帰的に展開され、その走査中はシンボリックリンクの
 エントリと他の拡張子が除外されます。統合されたファイル集合は重複排除され、決定的に
@@ -958,9 +958,9 @@ success/disabled/rollback-failure ベクターを出力します。
 に拒否します。現在の lowering がコンポーネントごとの正確なファイル名を保持しない
 ためです。direct とその他の lowering されたダイアレクトは引き続きサポートされます。
 互換性の規則、スキーマ、フィクスチャ、Rust API のエントリポイントは
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a> で規定されています。
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a> で規定されています。
 Public Kernel v2 はオプトインで、
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a> により規定されます。
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a> により規定されます。
 損失のある v1 の origin オブジェクトを、クエリ可能な provenance グラフへのターゲット
 参照で置き換えます。ソースカバレッジに依存する前に、その <code>completeness</code> フィールド
 を確認しなければなりません。</p>
@@ -1064,14 +1064,14 @@ spec を省略すると、変更されたすべての <code>.fsl</code> パス�
 <code>ledger --approval</code> は要件ごとに同じステータスを追加し、完全なベースラインの
 ダイジェストを含みます。<code>approval diff</code> は承認されたコミットを実体化し、現在の作業
 ファイルに対して通常の有界セマンティック diff を呼び出します。
-<code>docs/DESIGN-approval.md</code> を参照。</p>
+<code>docs/design/DESIGN-approval.md</code> を参照。</p>
 <p><code>--signing-key</code> がなければ、<code>approval create</code> は従来どおり無署名の
 <code>fslc.approval.v1</code> レコードを出力します。Ed25519 PKCS#8 PEM の署名鍵があれば
 <code>fslc.approval.v2</code> を出力します。そのレコードを使うすべての check、diff、ledger は
 対応する SPKI PEM の <code>--trust-key</code> を要求します。v2 の分離署名は完全な正準レコード
 をカバーし、暗号的な不一致は承認ではなく <code>signature-invalid</code> です。trust-key の
 所持は署名者を認証しますが、認可は依然として組織のポリシーの問題です。正確な正準化
-と鍵のフォーマットは <code>docs/DESIGN-approval.md</code> で規定されています。</p>
+と鍵のフォーマットは <code>docs/design/DESIGN-approval.md</code> で規定されています。</p>
 <p>Exit code: <code>0</code> = verified / proved / scenarios/testgen の生成 / conformant / refines /
 mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗しない限り) /
 typestate / sweep_passed / observed_conformant /
@@ -1087,16 +1087,16 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 <code>ledger</code> と <code>fslc html</code> は畳み込まれた検証封筒から同じ exit を引き継ぎ、<code>sweep</code> は
 真の失敗なら <code>sweep_failed</code>、全セルが深さ不足なら <code>sweep_inconclusive</code> を返します。同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
-セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/DESIGN-layers.md</code> §7)
+セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/design/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、
-空の台帳行として描画してはならない — <code>docs/DESIGN-ledger.md</code>)でもフェイルクローズド
+空の台帳行として描画してはならない — <code>docs/design/DESIGN-ledger.md</code>)でもフェイルクローズド
 に適用されます。</p>
 <p><code>approval_check</code> と <code>approval_diff</code> がこの表に無いのは、exit code が <code>result</code> の
 関数ではないからです。<code>fslc approval check</code> はどの結果でも同じ <code>approval_check</code> を
 返し、判定は <code>status</code> が担います: <code>approved</code> と <code>drifted</code> が <code>0</code>、
 <code>signature-invalid</code> が <code>1</code>。drift が 0 で終わるのは、<code>diff</code> の findings と同じく
 分析出力だからです(§12)。理由と、<code>fslc document check</code> の <code>document_drifted</code> が
-異なる扱いになる理由は <code>docs/DESIGN-approval.md</code> にあります。exit code ではなく
+異なる扱いになる理由は <code>docs/design/DESIGN-approval.md</code> にあります。exit code ではなく
 <code>status</code> でゲートしてください。</p>
 <h3 id="_1">結果の種類</h3>
 <table>
@@ -1170,7 +1170,7 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 を運ぶので、呼び出し側は再導出することなく、有界の bmc verdict と非有界の explicit
 verdict を区別できます。<code>auto</code> がデフォルトのエンジンを変えることはなく(依然
 <code>bmc</code>)、<code>explicit</code> 自体と同じく Rust 専用です。
-<code>docs/DESIGN-explicit-engine.md</code> §6a を参照。</p>
+<code>docs/design/DESIGN-explicit-engine.md</code> §6a を参照。</p>
 <p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>。</p>
 <p><code>violation_kind</code> が <code>invariant</code>/<code>type_bound</code> の <code>violated</code> 結果は、さらに
 <strong>ブレーム割り当て(blame assignment)</strong>(issue #170)を運び、反例をただ見せるの
@@ -1210,7 +1210,7 @@ blame は特定するだけで、修復(ガードの弱化、連言肢の削除)
 カウンターは、累積かもしれないスナップショットの合計ではなく、構成する検査を通じて
 観測された最大のスナップショットです。タイミングの値は非決定的です。explicit
 エンジンは、ソルバー検査ゼロ・Z3 統計 null で同じ形を使います。
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-verification-cost.md"><code>DESIGN-verification-cost.md</code></a> を参照。BMC の
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-verification-cost.md"><code>DESIGN-verification-cost.md</code></a> を参照。BMC の
 <code>verified</code> は明示的に有界です。最終深さが、通常の探索の中で
 reachable/vacuity/coverage の事実を最初に目撃したとき、<code>verified</code> には、その深さで
 状態空間が明らかには飽和していないことを示し、より大きな <code>--depth</code> または
@@ -1606,7 +1606,7 @@ stutter)、bottom ⊒ top を検査します。成功時は合成された <code
 成り立ちません。直接の端点間チェックが成功しても、中間レイヤーの契約適合は示され
 ません。たとえば Low は1ステップで止まり、Mid は Top が許さない2ステップ目を許す
 ため、Low→Top は成功しても Mid→Top と chain は失敗します。chain は各隣接契約の
-成立を要求します (<code>docs/DESIGN-refinement.md</code> §7、例 <code>examples/refinement_chain</code>)。
+成立を要求します (<code>docs/design/DESIGN-refinement.md</code> §7、例 <code>examples/refinement_chain</code>)。
 マニフェストによる <code>fslc chain</code> ではリンクごとに <code>refine_depth</code> を指定でき、端から
 端までの保守的な検査深度は各リンクの深度の最小値です。
 引数の式が中間レイヤーの状態を読むケースだけが未対応です。</p>
@@ -1752,7 +1752,7 @@ fslc scenarios specs/order_system.fsl
 <code>examples/refinement_chain/top.fsl</code> では初期 <code>TOpen</code> からすぐ <code>finish</code> できるが、
 <code>mid.fsl</code> では <code>MOpen → MReview</code> のあとでなければ <code>finish</code> できない。<code>ChainTop</code> の
 正例 <code>finish</code> トレースを <code>ChainMid</code> 実装のテストに使ってはならない。詳細は
-<code>docs/DESIGN-layers.md</code> を参照(refinement 連鎖の末端は design 層への testgen/replay;
+<code>docs/design/DESIGN-layers.md</code> を参照(refinement 連鎖の末端は design 層への testgen/replay;
 requirements の <code>acceptance</code> は<strong>その層</strong>の scenarios/testgen へ流れる)。</p>
 <p><code>testgen</code> は、言語非依存のシナリオ収集コア(<code>scenarios</code>)をターゲットごとの
 エミッタから分離しているので、同じシナリオが複数のハーネスへレンダリングされます。
@@ -1862,7 +1862,7 @@ action/パラメータ名と、その完全な事後状態を持ちます。ト�
 Monitor の後続に適用され、報告されない実装の中間には適用されません。裸の配列と
 <code>{events:[...]}</code> は引き続き明示の
 非バージョンの action-only アダプタです。testgen と検証器のトレース JSON は replay
-の入力ではありません。<code>docs/DESIGN-replay-trace.md</code> を参照。</p>
+の入力ではありません。<code>docs/design/DESIGN-replay-trace.md</code> を参照。</p>
 <p>トレーススキーマ 1.2 はさらに、初期状態と各 action/stutter の観測において、
 すべての <code>leadsTo P ~&gt; within K Q</code> を検査します。締め切り <code>p + K</code> は境界を含み
 ます: そこでの <code>Q</code> は成功し、<code>Q</code> の不在は有界 liveness のエビデンスを伴って失敗
@@ -1896,14 +1896,14 @@ spec 状態変数をカバーし、<code>action external(params) -&gt; spec_acti
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: <strong>business ⊒
 requirements ⊒ design ⊒ implementation (testgen/replay)</strong>。</p>
-<p><code>fslc document generate</code>/<code>claims</code>(<code>docs/DESIGN-document-requirement-claim-ir.md</code>
+<p><code>fslc document generate</code>/<code>claims</code>(<code>docs/design/DESIGN-document-requirement-claim-ir.md</code>
 参照)は、現時点では <code>spec</code> と <code>requirements</code> の2ダイアレクトのみを
 Requirement Claim IR へ投影する。本節で説明する他のダイアレクト(<code>business</code>、
 <code>dbsystem</code>、<code>ai_component</code> など)は、部分的な文書を生成するのではなく、コード化
 されたエラー(<code>FSL-DOC-DIALECT-UNSUPPORTED</code>)で fail-closed に拒否される。
 <code>--view business</code>/<code>--view design</code> は予約済みの未実装フラグ値である —
 将来のcross-layer viewが満たすべき有効化契約については
-<code>docs/DESIGN-document-dialect-adapters.md</code> を参照。</p>
+<code>docs/design/DESIGN-document-dialect-adapters.md</code> を参照。</p>
 <h3 id="131">13.1 宣言タグ(全レイヤー共通のトレーサビリティ)</h3>
 <p>正準な関係構文は、リンクされる宣言の直前に置く型付きアノテーションです。違反、
 CTI、カバレッジ診断、シナリオは <code>requirement: {id, text}</code> を運びます:</p>
@@ -2149,7 +2149,7 @@ verify {
   process は 1 で終了します。これは standalone の <code>fslc refine</code> が <code>refinement_failed</code> に対して
   既に使っているクラスと同じです。seam 固有の証拠は <code>implements.violation</code> に残ります（ただし <code>--vacuity error</code> は封筒全体を自身の <code>error</code> 結果へ置き換え、<code>implements</code> を引き継ぎません）。
   <code>fslc chain</code> は同じゲートをレイヤーへ適用して 1 で終了します
-  （<code>docs/DESIGN-design-family.md</code> がオーケストレーター向けに同じ規則を述べています）。
+  （<code>docs/design/DESIGN-design-family.md</code> がオーケストレーター向けに同じ規則を述べています）。
   呼び出し側が inline seam のために独自の第二のゲートを持つ必要はなくなりました。
   空のボディ（<code>implements X from "..." { }</code>）は、process / action / stage の名前が一致するとき
   恒等の refinement を自動生成します。<code>verify</code> が <code>--property</code>、<code>--exclude-property</code>、
@@ -2163,7 +2163,7 @@ verify {
   <code>map</code> エントリ、<code>maps auto</code>、<code>preserve progress</code>、そして — #73 以降 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code> を書きます。これは
   別の refinement ファイルの <code>refinement_action</code>
-  (<code>docs/DESIGN-refinement.md</code> §1)と同じ対応の構文で、impl と abs の action の
+  (<code>docs/design/DESIGN-refinement.md</code> §1)と同じ対応の構文で、impl と abs の action の
   間のアリティ変更を含みます。action↔action の対応は、requirement レベルの action
   の上の <code>maps &lt;abs_act&gt;(...)</code> 節としても引き続き書けます。<code>maps auto</code> は
   同名のカーネルラッパーの state/action をカバーし、明示の map はそれを上書き
@@ -2389,7 +2389,7 @@ requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
   それらのステップの抽象像を持たず、<code>abs_requires_failed</code> で <code>fslc refine</code> に失敗
   します — liveness と同じ非伝播です。時間付きのプロパティはクロックを所有する
   レイヤーで検証するか、上位のコントラクトを時間なしに保ってクロックを設計の
-  カーネルに置いてください(<code>tick → stutter</code>)。<code>docs/DESIGN-nfr.md</code> §6 と
+  カーネルに置いてください(<code>tick → stutter</code>)。<code>docs/design/DESIGN-nfr.md</code> §6 と
   <code>examples/nfr/sla_worker_design.fsl</code> を参照。</li>
 <li><strong>⚠ vacuous な SLA の罠</strong>: 常に enabled になりうる action を urgent にすると
   時間が凍結し、任意の K が deadline を空虚に満たします(<code>&lt;= 0</code> でも green です)。
@@ -2728,7 +2728,7 @@ exit 1 となり、唯一の成功ケースである <code>statistically_support
 はパースされ、agent ごとに列挙されますが — <code>ai_component</code> の <code>check hard { }</code> とは
 違い — そのルール名は既知の集合に対して検証されず、まだ何とも突合されません。
 前方宣言されたメタデータとして扱ってください。</p>
-<p>設計の詳細: <code>docs/DESIGN-ai-hard.md</code>。</p>
+<p>設計の詳細: <code>docs/design/DESIGN-ai-hard.md</code>。</p>
 <h3 id="137">13.7 扱わないもの(レイヤーの境界)</h3>
 <p>非機能要件の大半(権限、監査、容量、信頼性の振る舞い、離散時間の SLA)は扱えます
 (§13.4)。FSL の外に残るのは: <strong>確率、パーセンタイル(99.9% など)、実時間
@@ -2760,7 +2760,7 @@ DESIGN-*.md があります)。</p>
   (not-enabled または違反)ことが replay 検証されます。受理されてしまった場合は
   <code>kind:"forbidden"</code> です(制約不足 = ガードの欠落の検出。安全性の invariant は
   これについて沈黙します)。<code>acceptance</code>(must-allow)の双対です。
-  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
+  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity 検査(<code>--vacuity</code>)</strong> — verified/proved のパスの上で、
   <code>never_enabled_action</code>(検査した深さ内で action の enabled な instance がない。
   恒久的な死を証明するものではない有界の証拠)、<code>vacuous_implication</code>(含意の前件が到達不能)、
@@ -2772,7 +2772,7 @@ DESIGN-*.md があります)。</p>
   <code>vacuous_deadline</code>(生成 deadline の age が全遷移で 0 のままと証明される)、
   <code>vacuity_probe_truncated</code>†を警告します。
   <code>error</code> は exit 2 です。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 </ul>
 <p>† <code>vacuity_probe_truncated</code>: <code>vacuous_implication</code>/<code>vacuous_leadsto</code> の
   到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
@@ -2785,7 +2785,7 @@ DESIGN-*.md があります)。</p>
   しまいます。他の 7 kind と全く同様に <code>--vacuity</code> で選択されます。
 - <strong><code>--strict-tags</code></strong> — 成功の結果の上で、タグのない宣言(捏造の候補)と、参照
   されない要件(欠落の候補。空の requirement ブロックを含む)を警告します。存在
-  レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
+  レベルの突合です。→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
 - <strong><code>fslc mutate</code></strong> — spec を機械的に変異させ、各ミュータントが既存の検査の網に
   よって殺されるかを測定します。スコアは<strong>有界ミュータント集合への感度
   (bounded mutant-set sensitivity)</strong>です: 選択された有限のミュータント集合・
@@ -2815,14 +2815,14 @@ DESIGN-*.md があります)。</p>
   (opt-in) はミュータントごとの <code>killers</code> 配列と、oracle 表示名をキーにした
   <code>by_obligation</code> の sole/shared 集計を追加します。既定出力は変わらず、これらの
   カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
   それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
   論理式を読むことから、具体例を裁定することへ移します。<code>--readable</code> なしでは
   JSON モードが引き続き利用できます。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
   グラフの射影は、連結成分、SCC、代表的なサイクル、次数、そしてサイクルランクや
@@ -2861,7 +2861,7 @@ DESIGN-*.md があります)。</p>
   られた <code>unconstrained_effect</code> は、同じ状態の
   構造的な <code>unread_state</code> を抑制します。意味的な action の witness は、同様に重複
   する <code>unguarded_action</code> を抑制します。不在は、境界を超えた決定性の証明では
-  ありません。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a> を
+  ありません。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a> を
   参照。
   正確な識別子の検査はさらに、コード形のタグのトークンがもはや存在しないときに
   <code>tag_stale_reference</code> を、タグがその宣言の形式的な定義に存在しない現在の
@@ -2872,13 +2872,13 @@ DESIGN-*.md があります)。</p>
   これらの findings は <code>formal_status: "not_a_violation"</code> を運びます。構造的な
   サイクルや非連結の成分は、証明の失敗ではありません。TSG、グラフの射影、findings
   のバージョン付きスキーマは <code>schemas/fslc/analysis/</code> の下で公開されています。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
 - <strong><code>fslc html</code></strong> — 同じ explain/verify のエビデンスの上の、自己完結の HTML
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
   非専門家によるプロジェクトレビューに使うためのものです。→
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
 <code>skills/</code> の下の AI エージェントスキルにあり、共有の言語リファレンスは
 <code>skills/fsl/SKILL.md</code> にあります。保守される実例は
@@ -2904,7 +2904,7 @@ DESIGN-*.md があります)。</p>
 バージョン付きの公開 Kernel JSON v1 コントラクトから行い、未対応の Kernel
 スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
 バイト列は、凍結された参照実装の出力と互換のままです。
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
 <details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. causal プロファイル(レビュー専用の因果仮説グラフ)<span class="tree-blurb"> — レビュー専用の因果仮説グラフ — proved/verified は決して付かない。</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> は独立したサイドカードキュメント(それ自体が 1 つの
 <code>.fsl</code> ファイルで、kernel spec の一部にはなりません)で、長期の因果仮説 —
 介入、媒介、成果、文脈、時間 lag、持続、遅延 feedback、計測バインディング、
@@ -2991,7 +2991,7 @@ pulse ghost になります。<code>within</code> は名前付き clock の下�
 あり、ブラウザ Worker は causal コマンドを公開しません。動作するモデルは
 <a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>
 にあります。
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>
 </section>
 

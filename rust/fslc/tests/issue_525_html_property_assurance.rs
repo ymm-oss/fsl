@@ -8,11 +8,11 @@
 //! misstatement, which `AGENTS.md` names as never allowlistable. The same
 //! renderer also never called `requirement_caption` for property rows, so
 //! invariants/reachables/leadsTo lost the requirement text that actions and
-//! counterfactuals keep (`docs/DESIGN-html-report.md`).
+//! counterfactuals keep (`docs/design/DESIGN-html-report.md`).
 //!
 //! Property rows now classify per element through `ledger::formal_assurance`,
 //! the rule `fslc ledger` already applies
-//! (`docs/DESIGN-assurance-classes.md`).
+//! (`docs/design/DESIGN-assurance-classes.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -157,7 +157,7 @@ fn each_property_row_renders_its_own_requirement_caption() {
 
 #[test]
 fn an_untagged_property_row_renders_no_caption() {
-    // `docs/DESIGN-html-report.md`: the caption is "omitted entirely for a row
+    // `docs/design/DESIGN-html-report.md`: the caption is "omitted entirely for a row
     // that has none -- no `none` filler cells".
     let rows = property_rows("issue_525_property_assurance.fsl", "untagged");
     let untagged = row_named(&rows, "Drained");

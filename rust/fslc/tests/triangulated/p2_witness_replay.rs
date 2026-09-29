@@ -30,7 +30,7 @@ pub fn claims() -> Vec<TriangulatedClaim> {
     vec![TriangulatedClaim {
         id: "p2.symbolic_concrete_witness",
         contract: Citation {
-            path: "docs/DESIGN-triangulated-assurance.md",
+            path: "docs/design/DESIGN-triangulated-assurance.md",
             anchor: "## P2 — symbolic witness / concrete replay agreement",
         },
         common_observation: ObservationEvidence {
@@ -87,7 +87,7 @@ pub fn claims() -> Vec<TriangulatedClaim> {
         },
         scope: ScopeEvidence {
             declared_by: Citation {
-                path: "docs/DESIGN-triangulated-assurance.md",
+                path: "docs/design/DESIGN-triangulated-assurance.md",
                 anchor: "## P2 — symbolic witness / concrete replay agreement",
             },
             commands: &["verify", "replay"],

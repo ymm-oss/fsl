@@ -74,7 +74,7 @@ def test_normal_entrypoint_triggers_rust_architecture_rule_for_rust_only() -> No
     assert applies_to("rust/fsl-runtime/Cargo.toml")
     assert not applies_to("src/fslc/runtime.py")
     assert not applies_to("pyproject.toml")
-    assert not applies_to("docs/DESIGN-rust-components.md")
+    assert not applies_to("docs/design/DESIGN-rust-components.md")
 
 
 def test_rust_architecture_rule_carries_the_accepted_contract() -> None:

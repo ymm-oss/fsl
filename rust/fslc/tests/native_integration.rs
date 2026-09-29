@@ -465,7 +465,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
         "3.9.2"
     );
 
-    let runbook = std::fs::read_to_string(root.join("docs/RELEASE.md")).expect("release runbook");
+    let runbook = std::fs::read_to_string(root.join("docs/design/RELEASE.md")).expect("release runbook");
     let skill = std::fs::read_to_string(root.join(".claude/skills/release/SKILL.md"))
         .expect("release skill");
     for contract in [

@@ -57,7 +57,7 @@ fn reject(name: &str, position: &str, span: Option<Span>) -> ModelError {
         origin: None,
         span,
         // A reserved word used as a declaration name is a name-resolution
-        // failure: `docs/DESIGN-v1.md` §7.2 places it under `name`, and the
+        // failure: `docs/design/DESIGN-v1.md` §7.2 places it under `name`, and the
         // frozen reference emits `kind="name"` from `_check_reserved`. Issue
         // 570 landed this diagnostic as `semantics` only because the `name`
         // classification did not exist yet (issue 565), and recorded the move

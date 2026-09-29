@@ -4,7 +4,7 @@
 # Decides whether a product-gate job needs to execute real evidence for the
 # current change. This replaces the workflow-level `paths-ignore`
 # agent-configuration exemption that `ci.yml`'s `pull_request` trigger used
-# to carry (see docs/DESIGN-ci.md, "Agent-configuration exemption"). A
+# to carry (see docs/design/DESIGN-ci.md, "Agent-configuration exemption"). A
 # workflow-level path skip never emits its job's context at all; if that
 # context is ever made a required status check, or ever needs to satisfy
 # merge-queue entry, an exempted pull request is stuck `Expected` forever --
@@ -12,7 +12,7 @@
 # check out, diff, and exit fast, so its context always reports something.
 #
 # It also owns the (currently inert) `merge_group`/`FSL_MERGE_QUEUE_CI`
-# decision described in docs/DESIGN-ci.md, "The merge queue was tried,
+# decision described in docs/design/DESIGN-ci.md, "The merge queue was tried,
 # measured against this repository's workflow, and rejected". A merge queue
 # was configured on the `main` ruleset on 2026-08-05 and removed the same
 # day: an admin merge bypasses the queue entirely, and the ordinary
@@ -36,7 +36,7 @@
 set -euo pipefail
 
 # Exempt paths: the five entries from the retired `paths-ignore` list, plus
-# `changelog.d/` (docs/DESIGN-changelog-fragments.md, migration site 2).
+# `changelog.d/` (docs/design/DESIGN-changelog-fragments.md, migration site 2).
 # `.claude/**`, `.agents/**`, and `changelog.d/*` are directory prefixes;
 # `CLAUDE.md`, `AGENTS.md`, and `CHANGELOG.md` are exact repository-root
 # filenames, not prefixes -- "CLAUDE.md.d/x" must NOT match, and neither
@@ -76,7 +76,7 @@ emit() {
   echo "run=$run"
   echo "reason=$reason"
   if [ "$run" = "false" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    echo "early exit (\`$reason\`): evidence for this context is not required for this change; see docs/DESIGN-ci.md" >>"$GITHUB_STEP_SUMMARY"
+    echo "early exit (\`$reason\`): evidence for this context is not required for this change; see docs/design/DESIGN-ci.md" >>"$GITHUB_STEP_SUMMARY"
   fi
 }
 

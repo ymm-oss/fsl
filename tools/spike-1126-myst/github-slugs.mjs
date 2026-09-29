@@ -3,7 +3,7 @@
 
 // Spike experiment (#1126): can a MyST plugin make heading identifiers match
 // GitHub's slug algorithm, so the anchors that already work on github.com keep
-// resolving under mystmd?  See docs/DESIGN-myst-spike.md.
+// resolving under mystmd?  See docs/design/DESIGN-myst-spike.md.
 
 function text(node) {
   if (node.value) return node.value;

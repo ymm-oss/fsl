@@ -5,7 +5,7 @@
 // This is configuration-conformance automation, not product verification: it never touches
 // rust/, the Kernel, or fslc's JSON contract, so AGENTS.md's "one Rust-native entrypoint, no
 // Python" clause (which governs tools/check-native-integration.sh) does not apply here. It
-// exists because the `main` repository ruleset drifted silently once (docs/DESIGN-ci.md,
+// exists because the `main` repository ruleset drifted silently once (docs/design/DESIGN-ci.md,
 // "Required pre-merge contexts, and why the merge queue was rejected") and, without an audit,
 // can drift again the same way.
 //
@@ -185,7 +185,7 @@ function compareRequiredContexts(contractEntry, observedContexts) {
       if (deferredNames.has(rsc.context)) {
         findings.push({
           class: "required-context-unexpected",
-          detail: `"${rsc.context}" (integration_id ${rsc.integration_id}) is required in the live ruleset, but the contract records it as deliberately deferred (docs/DESIGN-ci.md, "Product gate contract"); requiring it pre-merge would deadlock every pull request`,
+          detail: `"${rsc.context}" (integration_id ${rsc.integration_id}) is required in the live ruleset, but the contract records it as deliberately deferred (docs/design/DESIGN-ci.md, "Product gate contract"); requiring it pre-merge would deadlock every pull request`,
         });
       } else {
         findings.push({
@@ -429,7 +429,7 @@ export function buildRulesetDriftIssueBody({ key, runId, runUrl, artifactUrl, fi
     `Raw observation: [workflow run](${runUrl})${artifactUrl ? ` — [artifact](${artifactUrl})` : ""}.`,
     "",
     "There are two legitimate exits: revert the live ruleset to match the contract, or amend the",
-    "contract, the fixture, and `docs/DESIGN-ci.md` together in one pull request if the live",
+    "contract, the fixture, and `docs/design/DESIGN-ci.md` together in one pull request if the live",
     "change was intentional. Editing the contract alone to match unexplained live state is the",
     "drift this audit catches, not a fix.",
   ];

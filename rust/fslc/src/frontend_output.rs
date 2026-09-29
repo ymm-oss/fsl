@@ -87,7 +87,7 @@ pub fn parse_checked_ai_project(
 }
 
 /// An fsl-ai project check failure, carrying the offending clause's position
-/// when the parser resolved one. `docs/DESIGN-v1.md` §7.2 guarantees every
+/// when the parser resolved one. `docs/design/DESIGN-v1.md` §7.2 guarantees every
 /// `parse` error carries a `loc` (#562).
 pub struct AiProjectParseError {
     pub message: String,
@@ -220,7 +220,7 @@ struct SelectedDefault {
     ///
     /// `check` still reports the renderer's implicit choice in both cases;
     /// `migrate --edition next` cannot yet demand an initializer it cannot
-    /// safely insert (see `docs/LANGUAGE.md`).
+    /// safely insert (see `docs/manual/LANGUAGE.md`).
     insertable: bool,
 }
 

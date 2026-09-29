@@ -10,7 +10,7 @@
 //!
 //! Native now reports the check stage from `fsl_syntax::parse_ai_project`,
 //! the same parser the evidence commands run, and rejects an unexecutable
-//! clause as a spec error (exit 2, `kind: "parse"`) per `docs/LANGUAGE.md`'s
+//! clause as a spec error (exit 2, `kind: "parse"`) per `docs/manual/LANGUAGE.md`'s
 //! exit-code table.
 
 use std::path::{Path, PathBuf};

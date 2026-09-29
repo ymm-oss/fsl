@@ -12,7 +12,7 @@
 //! kinds are induction-only, so exactly half of this 12x2 matrix is
 //! `NotApplicable` by construction -- each with a citation to where that
 //! structural fact is codified (see this module's `SLICE1_BOUNDARY` and
-//! `INDUCTION_ONLY_RANKING` bases, and `docs/DESIGN-assurance-matrix.md`'s
+//! `INDUCTION_ONLY_RANKING` bases, and `docs/design/DESIGN-assurance-matrix.md`'s
 //! "Slice 1 boundary" section, which records the reasoned scope decision
 //! this axis's N/A cells rest on).
 
@@ -32,7 +32,7 @@ use crate::claim::{Axis, Citation, Claim};
 /// literals, and the bounded `leadsTo` kind's absence from the induction
 /// engine).
 const SLICE1_BOUNDARY: Citation = Citation {
-    path: "docs/DESIGN-assurance-matrix.md",
+    path: "docs/design/DESIGN-assurance-matrix.md",
     anchor: "### Slice 1 boundary",
 };
 

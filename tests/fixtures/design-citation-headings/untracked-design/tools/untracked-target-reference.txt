@@ -1,1 +1,1 @@
-See docs/DESIGN-ambient.md: "Ambient-only heading".
+See docs/design/DESIGN-ambient.md: "Ambient-only heading".

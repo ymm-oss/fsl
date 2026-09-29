@@ -309,7 +309,7 @@ def audit_locale_nav_contract(js_text: str) -> list[str]:
     Both are runtime-only. The static hosts ship
     `<nav class="breadcrumb" data-nav>` with no aria-label, so if initNav() stops
     setting one, nothing in the static pages reveals it.
-    docs/DESIGN-docs-site.md requires `<nav aria-label="Breadcrumb">`.
+    docs/design/DESIGN-docs-site.md requires `<nav aria-label="Breadcrumb">`.
     """
     missing: list[str] = []
     js_text = strip_js_comments(js_text)

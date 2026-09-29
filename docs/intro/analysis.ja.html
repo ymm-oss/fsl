@@ -20,7 +20,7 @@
     <p class="kicker reveal">構造の観測</p>
     <h1 class="reveal"><code>fslc analyze</code> でレビューの入口を作る</h1>
     <p class="lead reveal"><code>fslc analyze</code> は、FSL 仕様を「どの要件・操作・状態・性質がつながっているか」というレビュー用の地図にします。検証の前後で、影響範囲、根拠の薄い宣言、トレーサビリティの穴を短時間で見つけるためのコマンドです。</p>
-    <p class="reveal dim" style="margin-top:18px">実装設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md">DESIGN-analysis.md</a> に、チーム向けの実務ガイド（もっと深掘りしたい場合）は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a> にあります。</p>
+    <p class="reveal dim" style="margin-top:18px">実装設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-analysis.md">DESIGN-analysis.md</a> に、チーム向けの実務ガイド（もっと深掘りしたい場合）は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a> にあります。</p>
   </div>
 </section>
 
@@ -170,7 +170,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">cycle 所見は名前の英単語を見ません。未決定領域の所見は有界レビュー証拠であり、決定性の証明ではありません。所見がないことは「深さ4以内では witness がない」という意味だけです。<code>undecided:</code> 宣言との完全一致は <code>acknowledged:true</code> と <code>acknowledged_by</code> を追加し、一致しない所見には acknowledgement フィールドを追加せず、未処理のまま残します。このタグは意図的な先送りを記録するメタデータで、検証条件ではありません。詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-undecided.md">DESIGN-undecided.md</a>。</p>
+      <p style="margin:0">cycle 所見は名前の英単語を見ません。未決定領域の所見は有界レビュー証拠であり、決定性の証明ではありません。所見がないことは「深さ4以内では witness がない」という意味だけです。<code>undecided:</code> 宣言との完全一致は <code>acknowledged:true</code> と <code>acknowledged_by</code> を追加し、一致しない所見には acknowledgement フィールドを追加せず、未処理のまま残します。このタグは意図的な先送りを記録するメタデータで、検証条件ではありません。詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-undecided.md">DESIGN-undecided.md</a>。</p>
     </div>
   </div>
 </section>

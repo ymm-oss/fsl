@@ -197,7 +197,7 @@ pub fn check_requirements_document(
     // meaningful reason under a flood of `claim_changed` noise. Evidence and
     // approval records never appear inside a claim block (both render as
     // residue, outside every `<!-- fsl:claim -->` marker — see
-    // `docs/DESIGN-document-evidence-overlay.md`/`docs/DESIGN-approval.md`),
+    // `docs/design/DESIGN-document-evidence-overlay.md`/`docs/design/DESIGN-approval.md`),
     // so neither skips claim-body comparison: a genuine hand-edit inside a
     // claim must still be caught even when the checker's own `--evidence`/
     // `--approval` set does not match what `generate` was given. Residue

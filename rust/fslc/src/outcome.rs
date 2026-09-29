@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! One definition of the success and failure classes over the CLI's `result`
-//! vocabulary (issue #537 C2, `docs/DESIGN-rust-component-internals.md`
+//! vocabulary (issue #537 C2, `docs/design/DESIGN-rust-component-internals.md`
 //! "Outcome classification").
 //!
 //! The Verdict Conservation Law is that a failure-class `result` must not exit
@@ -22,7 +22,7 @@
 //!   `finding_count`, and `diff`'s `gate.passed`, shared by its single-file
 //!   and batch forms). A `&str`
 //!   signature would force a second classifier beside this one, which is the
-//!   defect being removed. `docs/LANGUAGE.md`'s exit-code table says the same
+//!   defect being removed. `docs/manual/LANGUAGE.md`'s exit-code table says the same
 //!   thing from the outside: `approval_check`/`approval_diff` are absent from
 //!   it "because their exit code is not a function of `result`".
 //! - **It is flat, not per-family.** The class does not collide even where
@@ -596,7 +596,7 @@ pub fn project_kernel(kernel: Value) -> Value {
     Value::Object(projected)
 }
 
-/// `docs/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
+/// `docs/manual/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
 /// function over [`outcome_class`].
 ///
 /// Classification decides whether exit zero is *allowed*; it does not by

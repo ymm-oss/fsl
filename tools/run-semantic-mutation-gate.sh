@@ -141,7 +141,7 @@ mkdir -p "$scratch/rust/target"
 # save while it lived under `rust/target/semantic-mutation-build` -- it is not
 # known to have actually done so: the `semantic-mutation` cache entry's
 # measured size is fully accounted for by a cold `mutation operators` run that
-# never created this directory at all (docs/DESIGN-ci.md, "Actions cache
+# never created this directory at all (docs/design/DESIGN-ci.md, "Actions cache
 # budget").
 export CARGO_TARGET_DIR
 CARGO_TARGET_DIR="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fsl-semantic-mutation-build.XXXXXX")"

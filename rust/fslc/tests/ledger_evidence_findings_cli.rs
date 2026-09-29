@@ -7,7 +7,7 @@
 //! list, or a nested `findings[]`/`checks[]` item's `requirement.id`) still
 //! rendered green with no 🔴 row, and evidence with no requirement
 //! attribution at all was silently dropped rather than becoming a
-//! spec-level finding. `docs/DESIGN-assurance-classes.md` requires that "a
+//! spec-level finding. `docs/design/DESIGN-assurance-classes.md` requires that "a
 //! failing source never lowers the class of an independently proven
 //! requirement — it adds a 要確認 finding." Every
 //! `*_is_a_red_finding`/`*_finding` test here fails if the fix is reverted;

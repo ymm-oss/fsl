@@ -289,7 +289,7 @@ domain C5 {
 
 #[test]
 fn c6_compensation_only_owning_saga_without_outbox_fires() {
-    // `docs/DESIGN-domain.md`'s canonical saga example emits a request event
+    // `docs/design/DESIGN-domain.md`'s canonical saga example emits a request event
     // (`InventoryReleaseRequested`) from a `compensation` block, not a step.
     // `owning_sagas` must count that as owning, or a compensation-only
     // emitter silently escapes the finding even without an outbox.

@@ -595,7 +595,7 @@ fn assurance(verification: &Value) -> String {
 }
 
 /// The html property `kind` to the ledger's element group
-/// (`docs/DESIGN-assurance-classes.md` defines "Assurance column per property row
+/// (`docs/design/DESIGN-assurance-classes.md` defines "Assurance column per property row
 /// via `classify_element` (kind->group: invariant->invariants,
 /// leadsTo->leadstos, reachable->reachables, trans->transitions)").
 fn property_group(kind: &str) -> Option<&'static str> {
@@ -631,7 +631,7 @@ fn property_deadline(property: &Value) -> Option<&Value> {
 }
 
 fn properties_section(properties: &[Value], checks: &[Value], verification: &Value) -> String {
-    // Conditional column: `docs/DESIGN-html-report.md` puts the Deadline column
+    // Conditional column: `docs/design/DESIGN-html-report.md` puts the Deadline column
     // in the table only when at least one property declares a deadline, under
     // the same rule that forbids `none` filler cells for absent requirement
     // captions. Rendering it always with empty cells would violate the spec it

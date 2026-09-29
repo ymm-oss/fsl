@@ -3,7 +3,7 @@
 
 """Compare bounded leadsTo decisions and cross-replay liveness witnesses.
 
-Deletion remains deferred (docs/RUST-PORTING.md F4). ``rust/fslc/tests/
+Deletion remains deferred (docs/design/RUST-PORTING.md F4). ``rust/fslc/tests/
 liveness_witness_replay.rs`` (#903) owns a native-only 3x3 state/action/loop
 corruption matrix -- a Monitor-generated trace, corrupted, rejected by the
 native Monitor's own replay path; it also separately checks BMC's safety/

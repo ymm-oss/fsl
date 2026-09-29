@@ -14,18 +14,18 @@ on:
     # `paths-ignore` list. It now lives in `tools/check-product-gate-scope.sh`,
     # run as the first step of each heavy job below, so a skip is an
     # in-job early exit that still reports a context instead of a
-    # workflow-level skip that reports none at all. See docs/DESIGN-ci.md,
+    # workflow-level skip that reports none at all. See docs/design/DESIGN-ci.md,
     # "Agent-configuration exemption".
   merge_group:
     # Unfiltered: GitHub does not support `paths`/`paths-ignore` on
-    # `merge_group` (docs/DESIGN-ci.md), and only `main` could ever have a
+    # `merge_group` (docs/design/DESIGN-ci.md), and only `main` could ever have a
     # queue, so an unfiltered trigger is equivalent. Dormant -- no merge
     # queue exists on `main`. One was configured on the `main` ruleset on
     # 2026-08-05 and removed the same day: every merge would have taken the
     # admin-bypass path, so the queue would never have validated anything --
     # measured, not predicted. Reviving it needs a human-review-policy
     # change, not a CI change, so this trigger stays inert rather than
-    # removed. See docs/DESIGN-ci.md, "Required pre-merge contexts, and why
+    # removed. See docs/design/DESIGN-ci.md, "Required pre-merge contexts, and why
     # the merge queue was rejected" and its "The merge queue was tried,
     # measured against this repository's workflow, and rejected" subsection.
   schedule:
@@ -52,7 +52,7 @@ permissions:
 # that human review policy, not this workflow, so the trigger and
 # `tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch stay ready
 # rather than removed. `pull_request` events run the complete evidence in
-# full, exactly as before. See docs/DESIGN-ci.md, "Required pre-merge
+# full, exactly as before. See docs/design/DESIGN-ci.md, "Required pre-merge
 # contexts, and why the merge queue was rejected" and its "The merge queue
 # was tried, measured against this repository's workflow, and rejected"
 # subsection.
@@ -70,7 +70,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # `rust workspace` is split three ways (docs/DESIGN-ci.md, "Sharded
+  # `rust workspace` is split three ways (docs/design/DESIGN-ci.md, "Sharded
   # pre-merge Linux evidence"): `rust-checks` runs the non-test phases once
   # (formatting, Clippy, doctests -- which `cargo-nextest` cannot run, so
   # they stay here rather than being silently dropped -- and the full
@@ -114,7 +114,7 @@ jobs:
           # tie-breaker; a tied boundary can produce a duplicate ID, rejected immediately, or
           # different paired observations, which retry once and fail closed if still different;
           # an identical mixed state can repeat as an undetectable residual. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: rust-workspace
@@ -157,7 +157,7 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: rust-workspace
@@ -297,7 +297,7 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
@@ -389,7 +389,7 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: rust-native-z3
@@ -405,7 +405,7 @@ jobs:
           # job completed. That changeset also raised the timeout from 40 to 60
           # minutes, so the observed post-save does not isolate either change's
           # contribution. Commit 877fe8c (#752) likewise paired the semantic-mutation
-          # flag with timeout increases; see docs/DESIGN-ci.md, "Actions cache budget".
+          # flag with timeout increases; see docs/design/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates
@@ -457,7 +457,7 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: rust-native-z3
@@ -473,7 +473,7 @@ jobs:
           # job completed. That changeset also raised the timeout from 40 to 60
           # minutes, so the observed post-save does not isolate either change's
           # contribution. Commit 877fe8c (#752) likewise paired the semantic-mutation
-          # flag with timeout increases; see docs/DESIGN-ci.md, "Actions cache budget".
+          # flag with timeout increases; see docs/design/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
       - name: Test pinned native solver and BMC crates
@@ -509,7 +509,7 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
 
@@ -517,7 +517,7 @@ jobs:
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
 
-  # M13 semantic mutation gate (#672), split into two lanes (docs/DESIGN-ci.md,
+  # M13 semantic mutation gate (#672), split into two lanes (docs/design/DESIGN-ci.md,
   # "Sharded pre-merge Linux evidence"). Pull requests run the complete
   # curated control matrix plus generic mutants intersecting their diff.
   # Push, schedule, and manual runs execute the complete accepted P2 pilot
@@ -564,7 +564,7 @@ jobs:
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
           # non-`pull_request` events. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
           shared-key: semantic-mutation
@@ -573,7 +573,7 @@ jobs:
           # enables rust-cache's post-save path for a non-success outcome. Commit
           # 877fe8c simultaneously raised this timeout from 30 to 50 minutes, so
           # subsequent outcomes do not isolate either change's contribution. See
-          # docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           cache-on-failure: true
 
       - name: Calibrate curated fault-operator shard
@@ -648,7 +648,7 @@ jobs:
           # (`rust/target/semantic-mutation.*`, kept there solely because the
           # artifact-upload glob below requires it) must not enter a future cache
           # save. `cache-on-failure` is absent because `save-if: false` bypasses
-          # the save path. See docs/DESIGN-ci.md, "Actions cache budget", and
+          # the save path. See docs/design/DESIGN-ci.md, "Actions cache budget", and
           # issue #747.
           save-if: false
           workspaces: rust -> target

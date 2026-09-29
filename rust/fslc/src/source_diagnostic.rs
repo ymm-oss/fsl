@@ -38,7 +38,7 @@ pub fn diagnostics_with_model(
     if crate::frontend_output::is_ai_project(source) {
         return (migration_diagnostics(source), None);
     }
-    // Standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md):
+    // Standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md):
     // surface their own parse errors, never FSL-DIALECT-UNKNOWN, and no kernel.
     if fsl_syntax::is_causal_source(source) {
         return match fsl_syntax::parse_causal(source) {

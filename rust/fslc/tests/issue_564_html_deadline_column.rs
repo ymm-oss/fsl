@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Regression coverage for issue #564: `docs/DESIGN-html-report.md` specifies
+//! Regression coverage for issue #564: `docs/design/DESIGN-html-report.md` specifies
 //! that the property table's "Deadline" column appears when at least one
 //! property declares a `leadsTo ... within`, under the same rule that forbids
 //! `none` filler cells for an absent requirement caption. `html.rs` had no

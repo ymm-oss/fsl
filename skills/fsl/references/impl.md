@@ -27,7 +27,7 @@ with `finish` enabled immediately (`fair action finish` requires only
 fails a sound refinement — the implementation correctly requires the review step
 the abstract top layer omitted.
 
-This matches `docs/DESIGN-layers.md`: the refinement chain ends with
+This matches `docs/design/DESIGN-layers.md`: the refinement chain ends with
 implementation conforming to the **design** layer via testgen/replay (§1); the
 requirements layer's `acceptance` flows into scenarios/testgen for **that layer's**
 conformance anchor (§5), not as a substitute for design-layer positive tests.
@@ -264,7 +264,7 @@ from log content. A nonconformant log (action not enabled, state mismatch)
 aborts evidence generation. **Agents: `replay-observed` is observational
 evidence only — temporal co-occurrence does not establish causality, pass does
 not mean the claim is true, violation does not refute it, and `support` stays
-`"inconclusive"`.** See `docs/DESIGN-causal.md` §16.
+`"inconclusive"`.** See `docs/design/DESIGN-causal.md` §16.
 
 Portfolio ledger: `fslc causal ledger model.fsl [--plans plan.json ...]
 [--evidence ev.json ...] [--lifecycle lc.json ...] [--as-of YYYY-MM-DD]`
@@ -281,4 +281,4 @@ plans and evidence are contractually present — it does not mean the causal
 claim is true, the study design is sufficient, or the project is complete.
 `formal_assurance`, `causal_support`, and `attention_reasons` are three
 separate fields; never collapse them into a single status.** See
-`docs/DESIGN-causal.md` §17.
+`docs/design/DESIGN-causal.md` §17.

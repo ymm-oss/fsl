@@ -27,7 +27,7 @@ fn run(args: &[&str]) -> (serde_json::Value, i32) {
 
 #[test]
 fn relation_check_and_verify_are_exit_0_ok_and_verified() {
-    // docs/LANGUAGE.md:583-585 promises `relation A -> B` and all seven
+    // docs/manual/LANGUAGE.md:583-585 promises `relation A -> B` and all seven
     // operations unconditionally; both `check` and `verify` must accept it.
     let (check_output, check_status) = run(&[
         "check",

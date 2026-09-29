@@ -9,7 +9,7 @@ by composing the mappings by hand, but that is easy to get wrong).
 the adjacent mappings (α_AC = α_BC ∘ α_AB, action correspondence a→b→c / stutter)
 and checks bottom ⊒ top **directly**. Since bounded refinement is transitive at
 the same depth, this is equivalent to and as sound as "all adjacent links hold"
-(`docs/DESIGN-refinement.md` §7).
+(`docs/design/DESIGN-refinement.md` §7).
 
 ## Cast (3 layers: business ⊒ requirements ⊒ design)
 

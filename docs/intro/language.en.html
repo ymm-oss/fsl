@@ -4,13 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FSL Language Reference — generated from LANGUAGE.md</title>
-<meta name="description" content="The exhaustive FSL language reference, generated from docs/LANGUAGE.md." />
+<meta name="description" content="The exhaustive FSL language reference, generated from docs/manual/LANGUAGE.md." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="language">
 <!-- GENERATED — do not edit by hand. Regenerate with:
      python tools/build_site_reference.py
-     Source: docs/LANGUAGE.md -->
+     Source: docs/manual/LANGUAGE.md -->
 <div class="progress"></div>
 
 <header class="topbar" data-nav></header>
@@ -25,7 +25,7 @@
     <p class="kicker mono reveal">Generated Reference</p>
     <span class="badge ref reveal">Generated from LANGUAGE.md</span>
     <h1 class="reveal" style="margin-top:14px">Language Reference</h1>
-    <p class="lead narrow reveal">Generated from <code>docs/LANGUAGE.md</code>, reproduced verbatim — this is the canonical source, not a copy that can drift from it.</p>
+    <p class="lead narrow reveal">Generated from <code>docs/manual/LANGUAGE.md</code>, reproduced verbatim — this is the canonical source, not a copy that can drift from it.</p>
     <div class="tree-controls reveal">
       <button class="btn op-expand" type="button">Expand all</button>
       <button class="btn op-collapse" type="button">Collapse all</button>
@@ -104,7 +104,7 @@ per-declaration tags, it is <strong>metadata only</strong> — never verified �
 <code>fslc explain</code> / <code>fslc html</code> as a classification badge next to the spec name (JSON:
 <code>skeleton.spec_kind = {id, text}</code>). Use it to record what kind of thing the whole
 spec is (e.g. <code>ui</code> for a screen-flow spec that models only the behavioral slice);
-it carries no kernel semantics and desugars to nothing. See <code>docs/DESIGN-ui.md</code>.
+it carries no kernel semantics and desugars to nothing. See <code>docs/design/DESIGN-ui.md</code>.
 Internally this legacy badge is adapted to the shared typed <code>Kind</code> annotation;
 the source grammar remains unchanged. See <code>DESIGN-annotations.md</code>.</p>
 <p>Any layer — including a kernel <code>spec</code> — may declare identity/number sorts whose
@@ -133,7 +133,7 @@ verify {
 <p><code>entity</code>/<code>number</code> desugar to <code>type &lt;Name&gt; = lo..hi</code> before verification, so they
 are exactly equivalent to writing the bounded type directly — the difference is
 only readability (a design spec reads as documentation instead of asserting a
-domain size that is really a model bound). See <code>docs/DESIGN-spec-domains.md</code>.</p>
+domain size that is really a model bound). See <code>docs/design/DESIGN-spec-domains.md</code>.</p>
 <p>The database compatibility dialect is another frontend over the same kernel:</p>
 <pre><code class="language-fsl">dbsystem &lt;Name&gt; {
   database &lt;db&gt; {
@@ -201,7 +201,7 @@ checks are dialect-level compatibility checks. Feature flags are finite declared
 variants inside an environment and add <code>DB-ASSUME-FINITE-FLAG-STATE</code>; they do
 not prove rollout percentages. Generic <code>requires</code> / <code>provides</code> capabilities
 cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
-other artifact profiles in the same snapshot model. See <code>docs/DESIGN-db.md</code>.</p>
+other artifact profiles in the same snapshot model. See <code>docs/design/DESIGN-db.md</code>.</p>
 <p>Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):</p>
 <pre><code class="language-fsl">domain &lt;Name&gt; {
@@ -388,8 +388,8 @@ topology remain authoritative in the companion because Public Kernel v1 does
 not encode them. All five target outputs are locked to pre-migration goldens,
 and the valid domain corpus is generated for every target.
 It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
-production exactly-once semantics. See <code>docs/DESIGN-domain.md</code> and
-<code>docs/DESIGN-effect.md</code>.</p>
+production exactly-once semantics. See <code>docs/design/DESIGN-domain.md</code> and
+<code>docs/design/DESIGN-effect.md</code>.</p>
 <p><code>fslc verify</code> can override a <code>verify</code> block's <code>instances</code>/<code>values</code> bounds from
 the command line, without editing the spec:</p>
 <pre><code class="language-bash">fslc verify spec.fsl --instances Case=1 --property EventuallyLeavesInProgress
@@ -623,7 +623,7 @@ literals, but it must not read any state root or another initializer. Indexed,
 field, conditional-statement, quantified, relational, and bulk initialization
 remain in <code>init</code>. Assigning the same root both inline and in <code>init</code> is a semantic
 error that reports both source locations. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a>.</p>
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a>.</p>
 <p><strong>Types legal as state variables</strong> (anything else is rejected by <code>check</code> as a type error):
 scalar | nested <code>Option&lt;scalar&gt;</code> | struct (scalar / nested <code>Option&lt;scalar&gt;</code> fields)
 | <code>Map&lt;bounded scalar, scalar | nested Option&lt;scalar&gt; | struct&gt;</code>
@@ -672,7 +672,7 @@ may call earlier or later definitions but cannot be directly or mutually
 recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
 variable capture instead of inventing internal binder names. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
 <ul>
 <li>Arithmetic: <code>+ - * / %</code>, unary <code>-</code>, <code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (since <code>a//b</code> would turn everything after <code>//</code> into a comment, write division
@@ -967,7 +967,7 @@ handles legacy domain enums/operators, declaration string metadata, colon
 quantifiers, unambiguous local inline action mappings, and implicit defaults.
 It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;</code> remains an
 invalid token and is therefore reported with an <code>and</code> suggestion but is never
-machine-applied. See <code>docs/DESIGN-migration.md</code> for atomicity and bulk-update
+machine-applied. See <code>docs/design/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
 <p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
 to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
@@ -985,9 +985,9 @@ Public Kernel v1 explicitly rejects <code>compose</code> export because current 
 does not retain truthful per-component filenames; direct and other lowered
 dialects remain supported.
 Compatibility rules, schemas, fixtures, and Rust API entry points are specified
-in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>. Public Kernel v2 is
+in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>. Public Kernel v2 is
 opt-in and specified by
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a>; it replaces the lossy
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a>; it replaces the lossy
 v1 origin object with target references into a queryable provenance graph. Its
 <code>completeness</code> field must be checked before relying on source coverage.</p>
 <p><code>verify --from-state state.json</code> replaces the declared <code>init</code> for one bounded
@@ -1099,7 +1099,7 @@ all match; otherwise it returns <code>drifted</code> with <code>spec_changed</co
 <code>rendering_changed</code>, and/or <code>renderer_changed</code>. <code>ledger --approval</code> adds the
 same status per requirement and includes the full baseline digest. <code>approval
 diff</code> materializes the approved commit and invokes the ordinary bounded semantic
-diff against the current working file. See <code>docs/DESIGN-approval.md</code>.</p>
+diff against the current working file. See <code>docs/design/DESIGN-approval.md</code>.</p>
 <p>Without <code>--signing-key</code>, <code>approval create</code> emits the unchanged unsigned
 <code>fslc.approval.v1</code> record. With an Ed25519 PKCS#8 PEM signing key it emits
 <code>fslc.approval.v2</code>; every check, diff, or ledger use of that record requires the
@@ -1107,7 +1107,7 @@ matching SPKI PEM <code>--trust-key</code>. The v2 detached signature covers the
 canonical record, and a cryptographic mismatch is <code>signature-invalid</code> rather
 than an approval. Trust-key possession authenticates a signer but authorization
 remains an organizational policy. The exact canonicalization and key formats
-are specified in <code>docs/DESIGN-approval.md</code>.</p>
+are specified in <code>docs/design/DESIGN-approval.md</code>.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
@@ -1125,14 +1125,14 @@ same exit from the folded verification envelope, and <code>sweep</code> reports 
 failure or <code>sweep_inconclusive</code> when every cell is depth-limited. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
-<code>docs/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
+<code>docs/design/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
 replay error is not implementation-log evidence and must not be rendered as
-an empty ledger row — <code>docs/DESIGN-ledger.md</code>).</p>
+an empty ledger row — <code>docs/design/DESIGN-ledger.md</code>).</p>
 <p><code>approval_check</code> and <code>approval_diff</code> are absent from this table because their
 exit code is not a function of <code>result</code>. <code>fslc approval check</code> reports the same
 <code>approval_check</code> for every outcome and carries the verdict in <code>status</code>: <code>0</code> for
 <code>approved</code> and for <code>drifted</code>, <code>1</code> for <code>signature-invalid</code>. Drift exits 0 because
-it is analysis output, as <code>diff</code> findings are (§12); <code>docs/DESIGN-approval.md</code>
+it is analysis output, as <code>diff</code> findings are (§12); <code>docs/design/DESIGN-approval.md</code>
 records why, and why <code>fslc document check</code>'s <code>document_drifted</code> differs. Gate on
 <code>status</code>, not on the exit code.</p>
 <h3 id="kinds-of-result">Kinds of result</h3>
@@ -1207,7 +1207,7 @@ actually decided it; a fallback additionally carries
 so a caller can tell a bounded bmc verdict from an unbounded explicit one
 without re-deriving it. <code>auto</code> never changes the default engine (still
 <code>bmc</code>) and is Rust-only, like <code>explicit</code> itself. See
-<code>docs/DESIGN-explicit-engine.md</code> §6a.</p>
+<code>docs/design/DESIGN-explicit-engine.md</code> §6a.</p>
 <p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>.</p>
 <p>A <code>violated</code> result with <code>violation_kind</code> <code>invariant</code>/<code>type_bound</code> additionally
 carries <strong>blame assignment</strong> (issue #170), localizing the counterexample
@@ -1247,7 +1247,7 @@ Native and browser Workers use the same keys and nullability. Z3 counters are
 the maximum snapshot observed across constituent checks rather than a sum of
 possibly cumulative snapshots; timing values are nondeterministic. The explicit
 engine uses the same shape with zero solver checks and null Z3 statistics. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-verification-cost.md"><code>DESIGN-verification-cost.md</code></a>. BMC <code>verified</code> is
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-verification-cost.md"><code>DESIGN-verification-cost.md</code></a>. BMC <code>verified</code> is
 explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
 exploration, <code>verified</code> also includes a <code>hint</code> that the state space is not
@@ -1659,7 +1659,7 @@ because a direct endpoint success does not establish the middle layer's
 contract. For example, Low may stop after one step while Mid permits a second
 step that Top forbids, so direct Low→Top succeeds while Mid→Top and the chain
 fail. The chain requires every adjacent contract to hold
-(<code>docs/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>). For
+(<code>docs/design/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>). For
 manifest-driven <code>fslc chain</code>, links may use different <code>refine_depth</code> values;
 the minimum link depth is the conservative end-to-end bound.
 Only the case where an argument expression reads the state of an intermediate
@@ -1806,7 +1806,7 @@ implementation because refinement is forward simulation, not backward replay of
 every abstract positive trace. <strong>Example:</strong> <code>examples/refinement_chain/top.fsl</code>
 lets <code>finish</code> from initial <code>TOpen</code>; <code>mid.fsl</code> requires <code>MOpen → MReview</code> first —
 a <code>ChainTop</code> positive <code>finish</code> trace must not be used as a <code>ChainMid</code>
-implementation test. See <code>docs/DESIGN-layers.md</code> (refinement chain → design-layer
+implementation test. See <code>docs/design/DESIGN-layers.md</code> (refinement chain → design-layer
 testgen/replay; requirements <code>acceptance</code> → that layer's scenarios/testgen).</p>
 <p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
 from per-target emitters, so the same scenarios render to multiple harnesses. In
@@ -1917,7 +1917,7 @@ leaf mismatch evidence. Invariants apply to observation points and atomic
 Monitor successors, not to unreported implementation intermediates. Bare arrays
 and <code>{events:[...]}</code> remain the explicit
 unversioned action-only adapter. Testgen and verifier trace JSON are not replay
-input. See <code>docs/DESIGN-replay-trace.md</code>.</p>
+input. See <code>docs/design/DESIGN-replay-trace.md</code>.</p>
 <p>Trace schema 1.2 additionally checks every <code>leadsTo P ~&gt; within K Q</code> at the
 initial state and each action/stutter observation. The deadline <code>p + K</code> is
 inclusive: <code>Q</code> there succeeds, while absence of <code>Q</code> fails with bounded-liveness
@@ -1952,13 +1952,13 @@ spec in <code>DESIGN-dialects.md</code>. There is a single kernel (§1–12 of t
 and the per-layer dialects are a front-end that expands into the AST. The layers
 are connected by refinement: <strong>business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay)</strong>.</p>
-<p><code>fslc document generate</code>/<code>claims</code> (see <code>docs/DESIGN-document-requirement-claim-ir.md</code>)
+<p><code>fslc document generate</code>/<code>claims</code> (see <code>docs/design/DESIGN-document-requirement-claim-ir.md</code>)
 projects only the <code>spec</code> and <code>requirements</code> dialects into its Requirement Claim
 IR today. Every other dialect described in this section — <code>business</code>,
 <code>dbsystem</code>, <code>ai_component</code>, and the rest — is rejected fail-closed with a coded
 error (<code>FSL-DOC-DIALECT-UNSUPPORTED</code>) rather than producing a partial document.
 <code>--view business</code>/<code>--view design</code> are reserved, not yet implemented, flag
-values — see <code>docs/DESIGN-document-dialect-adapters.md</code> for the activation
+values — see <code>docs/design/DESIGN-document-dialect-adapters.md</code> for the activation
 contract a future cross-layer view must satisfy.</p>
 <h3 id="131-declaration-tags-traceability-common-to-all-layers">13.1 Declaration tags (traceability common to all layers)</h3>
 <p>The canonical relationship syntax is a typed annotation immediately before the
@@ -2220,7 +2220,7 @@ verify {
   <code>--vacuity error</code>, which replaces the whole envelope with its own <code>error</code> result and does not
   carry <code>implements</code> over.
   <code>fslc chain</code> applies the same gate to the layer and exits 1
-  (<code>docs/DESIGN-design-family.md</code> states the same rule for orchestrators); a caller no longer
+  (<code>docs/design/DESIGN-design-family.md</code> states the same rule for orchestrators); a caller no longer
   needs a second gate of its own for the inline seam. An empty body
   (<code>implements X from "..." { }</code>) auto-generates identity refinement when process/action/stage
   names match. Inline refinement is <strong>not</strong> evaluated when <code>verify</code> is scoped with
@@ -2233,7 +2233,7 @@ verify {
   state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code>, the same
   correspondence syntax as a separate refinement file's <code>refinement_action</code>
-  (<code>docs/DESIGN-refinement.md</code> §1), including an arity change between the impl
+  (<code>docs/design/DESIGN-refinement.md</code> §1), including an arity change between the impl
   and abs action. Action↔action correspondence can also still be written as the
   <code>maps &lt;abs_act&gt;(...)</code> clause on the requirement-level action; <code>maps auto</code>
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
@@ -2459,7 +2459,7 @@ requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
   abstract image for those steps and fails <code>fslc refine</code> with
   <code>abs_requires_failed</code> — the same non-propagation as liveness. Verify a timed
   property at the clock-owning layer, or keep the upper contract time-less and put
-  the clock in the design kernel (<code>tick → stutter</code>). See <code>docs/DESIGN-nfr.md</code> §6
+  the clock in the design kernel (<code>tick → stutter</code>). See <code>docs/design/DESIGN-nfr.md</code> §6
   and <code>examples/nfr/sla_worker_design.fsl</code>.</li>
 <li><strong>⚠ The vacuous-SLA trap</strong>: making an action that can always be enabled urgent
   freezes time, and any K satisfies the deadline vacuously (even <code>&lt;= 0</code> is
@@ -2797,7 +2797,7 @@ have no distinct check yet. <code>contract { hard { rule &lt;Name&gt;; } }</code
 and listed per agent, but — unlike <code>ai_component</code>'s <code>check hard { }</code> — its
 rule names are not validated against a known set and are not yet
 cross-checked against anything; treat it as forward-declared metadata.</p>
-<p>Design details: <code>docs/DESIGN-ai-hard.md</code>.</p>
+<p>Design details: <code>docs/design/DESIGN-ai-hard.md</code>.</p>
 <h3 id="137-what-is-not-handled-the-boundary-of-the-layers">13.7 What is not handled (the boundary of the layers)</h3>
 <p>The majority of non-functional requirements (permissions, audit, capacity,
 reliability behavior, discrete-time SLA) can be handled (§13.4). What remains
@@ -2830,7 +2830,7 @@ DESIGN-*.md).</p>
   time it is replay-verified that the last step is rejected (not-enabled or a
   violation). If it is accepted, <code>kind:"forbidden"</code> (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
-  about). The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
+  about). The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity check (<code>--vacuity</code>)</strong> — on the verified/proved path, warns about
   <code>never_enabled_action</code> (an action has no enabled instance through the checked
   depth; bounded evidence, not a permanent-dead proof), <code>vacuous_implication</code>
@@ -2842,7 +2842,7 @@ DESIGN-*.md).</p>
   because urgency freezes time), <code>vacuous_deadline</code> (a generated deadline
   whose age is proven to remain zero across every transition), and
   <code>vacuity_probe_truncated</code>†. <code>error</code> exits 2. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 </ul>
 <p>† <code>vacuity_probe_truncated</code>: the <code>vacuous_implication</code>/<code>vacuous_leadsto</code>
   reachability probe shares one budgeted concrete BFS across every
@@ -2855,7 +2855,7 @@ DESIGN-*.md).</p>
   decided. Selected by <code>--vacuity</code> exactly like the other seven kinds.
 - <strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
-  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
+  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
 - <strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
   mutant is killed by the existing net of checks. The score is <strong>bounded
   mutant-set sensitivity</strong>: <code>kill_rate = killed / (killed + survived)</code> over a
@@ -2886,14 +2886,14 @@ DESIGN-*.md).</p>
   <code>killers</code> arrays and <code>by_obligation</code> sole/shared counts keyed by oracle display
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
-  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
+  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
   counterfactuals ("without this rule, this procedure could break it") + witness
   narration. Moves human review from reading logical formulas to adjudicating
   concrete examples. JSON mode remains available without <code>--readable</code>. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
   returns the Typed Semantic Graph of requirements, actions, state, properties,
   and scenarios. Graph projections return connected components, SCCs,
@@ -2930,7 +2930,7 @@ DESIGN-*.md).</p>
   no acknowledgement fields. A bounded-witness-backed <code>unconstrained_effect</code> suppresses the same state's
   structural <code>unread_state</code>; semantic action witnesses similarly suppress a
   duplicate <code>unguarded_action</code>. Absence is not proof of determinism beyond the
-  bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
+  bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
   Exact identifier checks additionally emit <code>tag_stale_reference</code> when a
   code-shaped tag token no longer exists and <code>tag_formula_disjoint</code> when a tag
   names a current state/constant absent from that declaration's formal
@@ -2940,13 +2940,13 @@ DESIGN-*.md).</p>
   These findings carry <code>formal_status: "not_a_violation"</code>; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under <code>schemas/fslc/analysis/</code>. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
 - <strong><code>fslc html</code></strong> — a self-contained HTML report over the same explain/verify
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
   raw JSON. It is meant for PRs, design reviews, and non-specialist project
   review without requiring the reader to run the CLI. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under <code>skills/</code>, with
 the shared language reference in <code>skills/fsl/SKILL.md</code>. A maintained worked example
@@ -2970,7 +2970,7 @@ The native Rust command performs this judgment from the versioned public Kernel
 JSON v1 contract, not private parser/model structures, and fails closed on an
 unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
 compatible with the frozen reference output.
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
 <details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. The causal profile (review-only causal hypothesis graphs)<span class="tree-blurb"> — Review-only causal hypothesis graphs — never proved/verified.</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> is a standalone sidecar document (its own <code>.fsl</code> file,
 never part of a kernel spec) that structures long-horizon causal hypotheses:
 interventions, mediators, outcomes, contexts, time lags, persistence, delayed
@@ -3062,7 +3062,7 @@ The legacy field name <code>supports</code> is rejected. Versioned
 schemas live under <code>schemas/fslc/causal/</code>; the browser Worker does not expose
 causal commands. Working models live in
 <a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>.
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>
 </section>
 

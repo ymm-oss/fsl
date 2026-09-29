@@ -9,7 +9,7 @@
 //! and checked `current == target` before traversing any edge, so it
 //! reported `reachable(r, a, a)` as trivially true for *any* relation
 //! (including an empty one) -- a free zero-hop step the symbolic
-//! evaluator's non-reflexive convention never took. `docs/LANGUAGE.md`'s
+//! evaluator's non-reflexive convention never took. `docs/manual/LANGUAGE.md`'s
 //! relation section now states the contract explicitly: `reachable(r, a,
 //! a)` is true only via a real path of one or more edges.
 //!

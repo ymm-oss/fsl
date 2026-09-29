@@ -13,7 +13,7 @@ dialect wrappers' nested ``kernel``, runtime replay's ``guarantee_kind`` /
 of re-deriving it. Presentation/aggregation only: it reads existing result
 fields and asserts nothing new.
 
-See ``docs/DESIGN-assurance-classes.md`` for what each class does and does not
+See ``docs/design/DESIGN-assurance-classes.md`` for what each class does and does not
 guarantee.
 """
 from __future__ import annotations

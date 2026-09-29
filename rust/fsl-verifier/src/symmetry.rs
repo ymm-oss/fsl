@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Liveness symmetry reduction for `symmetric type` / `symmetric enum`
-//! (issue #461; `docs/LANGUAGE.md` §2 type notes, `docs/DESIGN-temporal.md`
+//! (issue #461; `docs/manual/LANGUAGE.md` §2 type notes, `docs/design/DESIGN-temporal.md`
 //! §2.5.1).
 //!
 //! During `leadsTo` lasso and deadlock-stall search, a designated

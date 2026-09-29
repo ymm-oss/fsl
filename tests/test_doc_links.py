@@ -9,7 +9,7 @@ into a throwaway document inside `docs/` (so the relative targets in the table
 resolve exactly as a real document's would), the real command-line entry point
 runs over that one file, and the exit code is asserted.
 
-Scope note, mirrored in `docs/DESIGN-ci.md` ("Link-target resolution"): the gate
+Scope note, mirrored in `docs/design/DESIGN-ci.md` ("Link-target resolution"): the gate
 checks that a **link target** resolves. A bare path written in prose is not a
 link and is not checked, and the backward direction -- every FSL element being
 discussed by some hand-written document -- is not claimed here (issue #1138).

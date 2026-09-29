@@ -11,7 +11,7 @@
 // read. All three engines agreed, so symbolic/concrete/BFS agreement did not
 // catch it.
 //
-// `expected-kind` is `name`, the class `docs/DESIGN-v1.md` §7.2 puts a
+// `expected-kind` is `name`, the class `docs/design/DESIGN-v1.md` §7.2 puts a
 // reserved-word diagnostic in and the one the frozen reference emits from
 // `_check_reserved`. Issue #570 landed this as `semantics` only because the
 // `name` classification did not exist yet; issue #565 added it.

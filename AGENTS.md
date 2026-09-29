@@ -9,7 +9,7 @@ there only when a compatibility change explicitly requires it.
 
 Resolve evidence in this order:
 
-1. `docs/LANGUAGE.md`, accepted `docs/DESIGN-*.md`, tests, and CI contracts.
+1. `docs/manual/LANGUAGE.md`, accepted `docs/design/DESIGN-*.md`, tests, and CI contracts.
 2. Native Rust implementation and public Kernel/JSON contracts.
 3. Observable frozen-Python behavior where parity applies.
 4. Proposals, task notes, conversations, and agent memory.
@@ -93,7 +93,7 @@ new hypothesis, code/config change, or narrower reproducer.
   references, design note, changelog fragment, and—when applicable—LSP indexing
   plus role/scope tests and dialect registry coverage.
 - Soundness-critical triangulation follows
-  `docs/DESIGN-triangulated-assurance.md`; shared parsing/classification is not
+  `docs/design/DESIGN-triangulated-assurance.md`; shared parsing/classification is not
   independent evidence and triangulation does not promote assurance or exit
   status.
 - ⚠️ **No gate enforces this one.** A change that rewrites a type-boundary gate
@@ -106,7 +106,7 @@ new hypothesis, code/config change, or narrower reproducer.
   fragment; state an empty transition set with the command, both SHAs, and the
   form count rather than assuming it. `corpus_check_sweep.rs` reports only a
   `specs/`/`examples/` form that stops checking
-  (`docs/DESIGN-nested-option-support.md`, "Amendment (#925)").
+  (`docs/design/DESIGN-nested-option-support.md`, "Amendment (#925)").
 - Never hand-edit generated compatibility snapshots. An accepted construct with
   missing/placeholder semantics is a soundness defect: fix it in scope or record
   an issue/follow-up with explicit authority.

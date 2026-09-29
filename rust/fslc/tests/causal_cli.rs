@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! CLI contract tests for the review-only `fslc causal` command family
-//! (issue #321, `docs/DESIGN-causal.md`). The load-bearing invariants:
+//! (issue #321, `docs/design/DESIGN-causal.md`). The load-bearing invariants:
 //! deterministic JSON, `formal_result: "not_run"` everywhere, a
 //! `do_not_assume` array on every success payload, and no output path that
 //! attaches `proved`/`verified` to a causal claim.

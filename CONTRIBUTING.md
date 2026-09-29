@@ -5,11 +5,11 @@ and code changes should preserve FSL's observable language and evidence contract
 
 ## Read these first
 
-- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) — complete language contract.
+- [`docs/manual/LANGUAGE.md`](docs/manual/LANGUAGE.md) — complete language contract.
 - [`docs/README.md`](docs/README.md) — documentation map.
-- [`docs/DESIGN-rust-port.md`](docs/DESIGN-rust-port.md) — authoritative implementation boundary.
-- [`docs/RUST-PORTING.md`](docs/RUST-PORTING.md) — differential and replay evidence gates.
-- Relevant `docs/DESIGN-*.md` for the surface being changed.
+- [`docs/design/DESIGN-rust-port.md`](docs/design/DESIGN-rust-port.md) — authoritative implementation boundary.
+- [`docs/design/RUST-PORTING.md`](docs/design/RUST-PORTING.md) — differential and replay evidence gates.
+- Relevant `docs/design/DESIGN-*.md` for the surface being changed.
 
 ## Implementation boundary
 
@@ -52,26 +52,26 @@ run the single required CI-equivalent gate:
 
 Native solver changes also require focused tests for `fsl-solver-z3`, `fsl-verifier`, and `fslc-rust`.
 Public Kernel or CLI changes require the relevant Rust envelope, schema, corpus, and bidirectional
-replay cases. See [`docs/DESIGN-rust-integration.md`](docs/DESIGN-rust-integration.md) for the contract
+replay cases. See [`docs/design/DESIGN-rust-integration.md`](docs/design/DESIGN-rust-integration.md) for the contract
 inventory and explicitly optional Python surfaces.
 
 ## Guidelines for changes
 
 - **Language or semantics:** update Rust syntax/lowering, typed model, symbolic and concrete evaluation,
-  regression cases, `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, an accepted
+  regression cases, `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md`, `skills/fsl/references/`, an accepted
   design note, and a new `changelog.d/` fragment (see `changelog.d/README.md`) together. A new dialect's
   top-level construct,
   and any new `examples/`/`specs/`
   directory it lands in, must also be registered in `tests/dialect_registry.py` (`DIALECTS`,
   `EVIDENCE_CONSTRUCTS`, or `MONITOR_EXCLUSIONS` with a reason) — the conformance harness
-  (`docs/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and is written
+  (`docs/design/DESIGN-conformance-harness.md`) scans every `.fsl` under `specs/`/`examples/` and is written
   to fail loudly on an unregistered construct instead of silently skipping it. That harness is a
   manual/reference check that no CI lane currently invokes (see the design doc's "Cost and CI
   wiring") — register the construct regardless of that gap.
 - **A new declaration, binder, or reference form:** also update `rust/fsl-lsp/src/index.rs` and a
   targeted role/scope test.
 - **Public Kernel contract:** update schemas, Rust exporter/consumer paths, conformance vectors,
-  agreement tests, `docs/DESIGN-kernel-contract.md`, language/reference docs, and a new
+  agreement tests, `docs/design/DESIGN-kernel-contract.md`, language/reference docs, and a new
   `changelog.d/` fragment (see `changelog.d/README.md`) rather than editing `CHANGELOG.md` directly.
 - **CLI/JSON contract:** preserve field meanings, ordering requirements, raw-output modes, exit codes,
   locations, and replayable evidence. Any parity allowlist entry needs a nondeterminism rationale.
@@ -90,7 +90,7 @@ inventory and explicitly optional Python surfaces.
 - Changes to runtime or verifier semantics should run
   `./tools/check-native-integration.sh fsl-logic pr`; use `scheduled` when
   changing the generator, comparator, inventory, or release evidence.
-- **Triangulated claims:** use `docs/DESIGN-triangulated-assurance.md` only for selected
+- **Triangulated claims:** use `docs/design/DESIGN-triangulated-assurance.md` only for selected
   soundness-critical seams. Register the semantic owner's claim with a raw common observation,
   distinct owner/decision lineages, three executable edges, accepting/rejecting controls, and scope.
   Multiple consumers of one parser/classifier provide parity, not independent observation, and the

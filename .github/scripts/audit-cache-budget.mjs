@@ -165,7 +165,7 @@ export function auditCacheBudget({
   //    Generation coexistence (issue #926, measured 2026-09-04) is still
   //    computed and reported below, but strictly as an *additional*
   //    diagnostic alongside a real `budget-exhausted` finding, never as a
-  //    reduction applied before judgment. See docs/DESIGN-ci.md, "Generation
+  //    reduction applied before judgment. See docs/design/DESIGN-ci.md, "Generation
   //    coexistence (issue #926, measured 2026-09-04)".
   const rawSummed = caches.reduce((total, entry) => total + (entry.size_in_bytes ?? 0), 0);
   const rawEffective = typeof usageBytes === "number" ? Math.max(usageBytes, rawSummed) : rawSummed;
@@ -259,7 +259,7 @@ export function auditCacheBudget({
         code: "generation-coexistence-partial-explanation",
         message: `up to ${formatGiB(staleGenerationBytes)} of this overage may be ${
           staleGenerationCount === 1 ? "a single generation" : `${staleGenerationCount} generations`
-        } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` -- self-healing via GitHub's own least-recently-used eviction, not something a save-if/shared-key/deletion change in this repository controls. This does not reduce the budget-exhausted finding above: the listing and the independently-observed usage total are separate, non-atomic observations, so these bytes are not proven to be what the usage total is counting. See docs/DESIGN-ci.md, "Generation coexistence (issue #926, measured 2026-09-04)".`,
+        } beyond the newest per {sharedKey, platform} pair on \`${defaultBranchRef}\` -- self-healing via GitHub's own least-recently-used eviction, not something a save-if/shared-key/deletion change in this repository controls. This does not reduce the budget-exhausted finding above: the listing and the independently-observed usage total are separate, non-atomic observations, so these bytes are not proven to be what the usage total is counting. See docs/design/DESIGN-ci.md, "Generation coexistence (issue #926, measured 2026-09-04)".`,
       });
     }
   }
@@ -319,7 +319,7 @@ export function auditCacheBudget({
       code: "pull-request-rust-cache-present",
       message: `\`${entry.ref}\` holds a rust cache \`${entry.key}\` (${formatGiB(
         entry.size_in_bytes ?? 0,
-      )}). No workflow may save a rust cache on a pull-request event; see docs/DESIGN-ci.md, "Actions cache budget".`,
+      )}). No workflow may save a rust cache on a pull-request event; see docs/design/DESIGN-ci.md, "Actions cache budget".`,
     });
   }
 

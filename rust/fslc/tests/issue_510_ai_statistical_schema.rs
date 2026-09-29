@@ -8,7 +8,7 @@
 //! assumptions`) and every non-`statistically_supported` terminal status
 //! (`dataset_invalid`, `evaluator_untrusted`, `insufficient_samples`,
 //! `inconclusive`) exited 0 instead of the documented non-success routing
-//! (`docs/LANGUAGE.md:898-906`).
+//! (`docs/manual/LANGUAGE.md:898-906`).
 //!
 //! Native now builds every eval result through
 //! `fsl_tools::evaluate_statistical_property`, which always emits the full

@@ -247,7 +247,7 @@ impl Expr {
     /// `fsl_tools::document_digest::spec_digest_from_kernel`), the requirements
     /// document's claim projection, and testgen's `expect` all project through
     /// it -- so the residual `serde_json` recursion described in
-    /// `docs/DESIGN-rust-component-internals.md` 4.4 (#622) is not an
+    /// `docs/design/DESIGN-rust-component-internals.md` 4.4 (#622) is not an
     /// `analyze`-only problem. The witness only reaches it via `analyze`
     /// because the deep expression lives in the mapping file, not in a spec.
     #[must_use]

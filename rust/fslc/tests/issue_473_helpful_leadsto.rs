@@ -2,8 +2,8 @@
 
 //! CLI-level coupled-change coverage for issue #473: `leadsTo ... helpful`
 //! ranking proofs, end to end through the native `fslc` binary's JSON
-//! envelope and exit-code contract (docs/LANGUAGE.md:383, :441-452,
-//! docs/DESIGN-induction.md).
+//! envelope and exit-code contract (docs/manual/LANGUAGE.md:383, :441-452,
+//! docs/design/DESIGN-induction.md).
 
 use std::process::Command;
 
@@ -29,7 +29,7 @@ fn run(args: &[&str]) -> (serde_json::Value, i32) {
 #[test]
 fn helpful_leadsto_ranking_proof_is_exit_0_proved_unbounded() {
     // Positive path: the documented per-entity `helpful` idiom
-    // (docs/LANGUAGE.md:441-452) must produce the same verdict shape as the
+    // (docs/manual/LANGUAGE.md:441-452) must produce the same verdict shape as the
     // frozen Python reference: exit 0, `proved`, `completeness:"unbounded"`,
     // and `leads_to.<name>.helpful` echoing the declared helpful action(s).
     let (output, status) = run(&[

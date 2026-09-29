@@ -2,7 +2,7 @@
 
 //! Native primary/blind negative-control detector matrix for
 //! `examples/gallery/injected/`. See issue #485 and
-//! `docs/DESIGN-conformance-harness.md`: the injected corpus is only a valid
+//! `docs/design/DESIGN-conformance-harness.md`: the injected corpus is only a valid
 //! detector calibration if it is measured against the authoritative native
 //! CLI, not only the frozen Python reference (`tests/test_injection_bench.py`,
 //! which now defaults to measuring this same native binary too).

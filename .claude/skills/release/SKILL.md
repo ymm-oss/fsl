@@ -20,7 +20,7 @@ Keep `main` as the default branch. Do not create `develop` or `pre-production`.
 Use a temporary `release/vX.Y` branch only when `main` must advance while an
 exact candidate is stabilized.
 
-Read `docs/RELEASE.md` completely before `promote` or `cut`; it is the
+Read `docs/design/RELEASE.md` completely before `promote` or `cut`; it is the
 authoritative command-level procedure. Keep it and this lifecycle contract
 aligned in the same pull request.
 
@@ -101,7 +101,7 @@ a feature-flag system solely to accommodate this flow.
 1. Verify `production` is an ancestor of, or can be merged cleanly with, `main`.
 2. Freeze the candidate by recording the exact `main` SHA. Follow the canonical
    pinned-head and pre-/post-merge tree-identity procedure in
-   `docs/RELEASE.md` §2, steps 3–4: create the candidate branch `release/vX.Y`
+   `docs/design/RELEASE.md` §2, steps 3–4: create the candidate branch `release/vX.Y`
    at that SHA — the name the required `production source policy` check accepts —
    use it as the promotion pull request head, and perform both identity checks.
    Do not open a moving `main -> production` pull request. If unrelated changes
@@ -127,7 +127,7 @@ a feature-flag system solely to accommodate this flow.
 5. Open the promotion pull request from the pinned candidate branch to
    `production`. State the candidate SHA, version, included changes, known
    residual risk, exact gates, and artifact evidence.
-6. Complete the canonical checks in `docs/RELEASE.md` §2, step 4 before and
+6. Complete the canonical checks in `docs/design/RELEASE.md` §2, step 4 before and
    after merge. Record the new production merge SHA; it is distinct from the
    gated candidate SHA unless promotion was a true fast-forward.
 
@@ -170,7 +170,7 @@ After the promotion is approved and merged:
 ## Classify a failed gate before retrying
 
 This is the sole classification rule for the release procedure. Apply it before
-calling a job failure transient or rerunning it; `docs/RELEASE.md` retains the
+calling a job failure transient or rerunning it; `docs/design/RELEASE.md` retains the
 command and publication contract.
 
 1. Record the exact commit, the binary that ran, and the run ID/status before

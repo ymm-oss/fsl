@@ -60,7 +60,7 @@ pub fn claims() -> Vec<TriangulatedClaim> {
     vec![TriangulatedClaim {
         id: "p1.compound_outcome_conservation",
         contract: Citation {
-            path: "docs/DESIGN-triangulated-assurance.md",
+            path: "docs/design/DESIGN-triangulated-assurance.md",
             anchor: "## P1 — compound outcome conservation",
         },
         common_observation: ObservationEvidence {
@@ -122,7 +122,7 @@ pub fn claims() -> Vec<TriangulatedClaim> {
         },
         scope: ScopeEvidence {
             declared_by: Citation {
-                path: "docs/DESIGN-triangulated-assurance.md",
+                path: "docs/design/DESIGN-triangulated-assurance.md",
                 anchor: "## P1 — compound outcome conservation",
             },
             commands: &["check", "verify", "induction", "sweep", "chain", "analyze"],

@@ -100,7 +100,7 @@ fn repairs_for_kernel_violation(violation: &str, tool_name: &str) -> Value {
 /// Structural (pre-kernel) hard-contract findings: `tool_authority` (a
 /// forbidden tool also declared executable), `human_approval_required` (an
 /// irreversible tool with no explicit `requires_human_approval`, mirroring
-/// `docs/DESIGN-ai-hard.md`'s rule text rather than the narrower "and it is
+/// `docs/design/DESIGN-ai-hard.md`'s rule text rather than the narrower "and it is
 /// in `may_execute`" precondition), and `tool_schema_declared` (an
 /// executable tool with no declared schema).
 fn static_ai_findings(component: &AiComponent, assumptions: &[Value]) -> Vec<Value> {

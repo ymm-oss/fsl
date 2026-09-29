@@ -5,7 +5,7 @@
 // / `@kind(id, text?)` / custom-namespace annotation syntax attached
 // directly to declarations, coexisting on the same file with the legacy
 // string-metadata and `covers` forms it desugars to the same typed
-// relation. See docs/DESIGN-annotations.md and docs/LANGUAGE.md.
+// relation. See docs/design/DESIGN-annotations.md and docs/manual/LANGUAGE.md.
 //
 // Native-only: the frozen Python reference does not parse `@...` before a
 // nested declaration, so this file is excluded from the Python Monitor

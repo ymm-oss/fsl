@@ -104,7 +104,7 @@ pub struct CoreError {
     /// Whether this is a name-resolution failure — a declaration that is
     /// duplicated, missing, or shadowed.
     ///
-    /// `docs/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
+    /// `docs/design/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
     /// member covers exactly these. Carrying the classification on the error
     /// keeps it out of message-string matching, which cannot survive a message
     /// edit (issue 565, the direction issue 484 established).

@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Golden and synchronization tests for the conformance corpus feature
-//! coverage matrix (issue #223). See `docs/DESIGN-kernel-contract.md`'s
+//! coverage matrix (issue #223). See `docs/design/DESIGN-kernel-contract.md`'s
 //! "Conformance coverage matrix" section for the coupled-change discipline
 //! these tests enforce.
 

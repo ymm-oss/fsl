@@ -120,7 +120,7 @@ fn eval_flags_a_declared_slice_gate_the_combined_estimate_would_hide() {
 
 #[test]
 fn eval_supports_the_documented_property_without_records_via_dataset_source() {
-    // `docs/LANGUAGE.md` documents this exact invocation with no
+    // `docs/manual/LANGUAGE.md` documents this exact invocation with no
     // `--records`, relying on the declared `dataset SupportEvalV3 { source
     // "..."; }` fallback -- the pre-fix implementation required `--records`
     // unconditionally and rejected this with exit 2.

@@ -3,7 +3,7 @@
 // Non-firing control for `always_true_requires`: the second clause is
 // trivially implied by the first, but `impossible` is never enabled and
 // already carries its own never-enabled warning
-// (`docs/DESIGN-vacuity.md` §2 puts coverage-false actions out of scope).
+// (`docs/design/DESIGN-vacuity.md` §2 puts coverage-false actions out of scope).
 spec CoverageFalseSuppressesRequires {
   state { x: Int }
   init { x = 0 }

@@ -1081,7 +1081,7 @@ fn logical_var(target: &LValue) -> Option<&str> {
 }
 
 /// Concrete per-key write identities a single init assignment touches, for
-/// duplicate-write detection at the granularity `docs/LANGUAGE.md` §12
+/// duplicate-write detection at the granularity `docs/manual/LANGUAGE.md` §12
 /// requires: "assign exactly once" is per concrete key, not per variable.
 ///
 /// This reuses `assignment_coverage`'s resolution rather than computing a

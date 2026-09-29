@@ -8,7 +8,7 @@
 //! * a value that is not of the declared type was accepted as `0`, so
 //!   `{"value":"garbage"}` on an integer input replayed as `value = 0` and
 //!   the run reported `conformance_checked`/exit 0 — false conformance, and
-//!   the evidence class `docs/DESIGN-assurance-classes.md` attaches to
+//!   the evidence class `docs/design/DESIGN-assurance-classes.md` attaches to
 //!   `domain replay` was therefore overstated;
 //! * an enum or `Bool` input could never be replayed at all, because the
 //!   forced `Int` never belongs to the parameter's declared domain, so every
@@ -322,7 +322,7 @@ fn an_opaque_token_still_replays_for_an_identity_input() {
 // hand-written mapped-action inputs. Routing `domain replay` through it
 // inherited that, so the first #1116 commit accepted `{"flag":1}` as
 // `active = true` -- a relaxation inside a tightening, on the evidence path
-// where the log is someone else's record and `docs/DESIGN-domain.md` spells
+// where the log is someone else's record and `docs/design/DESIGN-domain.md` spells
 // a Boolean `true`/`false`.
 // ---------------------------------------------------------------------------
 

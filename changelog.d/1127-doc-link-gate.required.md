@@ -7,7 +7,7 @@ including a `.fsl#kind:name` fragment naming an element the specification does
 not declare (the forward direction of #1124) and a `other.md#anchor` whose
 anchor exists only in a different document. What the gate does not check (a bare
 path in prose) and does not claim (that every FSL element is discussed by some
-document, #1138) is recorded in `docs/DESIGN-ci.md`. The one pre-existing
+document, #1138) is recorded in `docs/design/DESIGN-ci.md`. The one pre-existing
 finding, `CONTRIBUTING.md`'s link to a `CODE_OF_CONDUCT.md` that has never
 existed in this repository, was removed rather than answered by inventing a
 policy document.

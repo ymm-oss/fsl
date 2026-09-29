@@ -24,7 +24,7 @@
 //! **Scope boundary (Slice 1):** `bmc.rs`'s own `make_violation` call sites
 //! for `"invariant"`/`"trans"`/`"ensures"` (the plain, non-induction BMC
 //! engine's property violations) are deliberately *not* routed through this
-//! module. Issue #646 and `docs/DESIGN-assurance-matrix.md` scope this
+//! module. Issue #646 and `docs/design/DESIGN-assurance-matrix.md` scope this
 //! registry to the induction/liveness kinds plus the two hardcoded ones
 //! (`leadsTo`, `deadlock`); the plain-BMC values mirror
 //! `fsl_runtime::Monitor`'s own registered `outcome.kind` spelling
@@ -33,7 +33,7 @@
 //! (`refine`'s progress-check rendering, also `"leadsTo"`) and
 //! `verification.rs:537` (`"leadsTo_rank"`, a fixed envelope-shape tag with
 //! no corresponding `RankFailure.kind` value) are likewise out of Slice 1's
-//! file scope; see `docs/DESIGN-assurance-matrix.md`'s "Slice 1 boundary"
+//! file scope; see `docs/design/DESIGN-assurance-matrix.md`'s "Slice 1 boundary"
 //! section for the reasoned basis these axis N/A cells cite.
 
 /// A bounded BMC search found a state where the `leadsTo` trigger (`P` holds,

@@ -2,7 +2,7 @@
 # Copyright 2026 Ryoichi Izumita
 #
 # Spike artifact for issue #1126 -- NOT live configuration.  mystmd was
-# evaluated and not adopted; see docs/DESIGN-myst-spike.md for the decision
+# evaluated and not adopted; see docs/design/DESIGN-myst-spike.md for the decision
 # and for every measurement made with this file.
 #
 # To reproduce:  cp tools/spike-1126-myst/myst.yml docs/myst.yml
