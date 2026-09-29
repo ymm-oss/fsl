@@ -1633,7 +1633,9 @@ fn eval_pattern<S: SmtSolver>(
             Ok(bool_value(solver, solver.not(&present)?))
         }
         (SymbolicValue::Option { present, value, .. }, Pattern::Some(name)) => {
-            bindings.insert(name.clone(), *value);
+            // Never overwrite a name already in scope (#1153); see the concrete
+            // evaluator. A new name still reaches the action body.
+            bindings.entry(name.clone()).or_insert(*value);
             Ok(bool_value(solver, present))
         }
         _ => Err(VerifyError::new("is pattern requires an Option value")),

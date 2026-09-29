@@ -506,7 +506,15 @@ pub(crate) fn extend_pattern_binding(
             else {
                 return Err(error("some pattern requires an Option operand"));
             };
-            env.insert(binding.clone(), *inner);
+            // Mirror the evaluators (#1153): a pattern binding never rewrites the
+            // type of an action parameter, binder or let already in scope. State
+            // variables and constants are not bindings, so they stay shadowable.
+            let outer_binding = env.contains_key(binding)
+                && !model.state.iter().any(|(name, _)| name == binding)
+                && !model.consts.contains_key(binding);
+            if !outer_binding {
+                env.insert(binding.clone(), *inner);
+            }
         }
         Expr::Binary { left, right, .. } => {
             extend_pattern_binding(left, env, model)?;
