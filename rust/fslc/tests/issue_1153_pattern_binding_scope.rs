@@ -12,7 +12,7 @@
 //! restored here: a pattern binding never overwrites a name already in scope,
 //! and a *new* name still reaches the action body (LANGUAGE.md section 9).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
@@ -39,7 +39,7 @@ fn fixture(tag: &str, text: &str) -> PathBuf {
     path
 }
 
-fn verify(path: &PathBuf, engine: &str) -> (Value, i32) {
+fn verify(path: &Path, engine: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["verify", &path.display().to_string(), "--engine", engine])
         .output()
