@@ -211,11 +211,11 @@ payload_skill_names() {
   done | sort
 }
 
-# A link into an earlier installation, under any data directory: the
-# `current` link of a native payload, or a pre-native source tree (`~/.fsl` by
-# default). Such a link is migrated like any other of ours, even after
-# FSL_DATA_DIR or XDG_DATA_HOME changed, and it must not outlive the directory
-# it points into.
+# A link an earlier run of this installer made, under any data directory:
+# the `current` link of a native payload, or a pre-native repository clone
+# (`~/.fsl` by default). Such a link is migrated like any other of ours, even
+# after FSL_DATA_DIR or XDG_DATA_HOME changed, and it must not outlive the
+# directory it points into.
 installer_skill_link() {
   local target="$1"
   local skill_name="$2"
@@ -227,26 +227,10 @@ installer_skill_link() {
       ;;
     */skills/"$skill_name")
       root="${target%/skills/"$skill_name"}"
-      [ -f "$root/install.sh" ] \
-        && { [ -d "$root/.git" ] || pre_native_source_copy "$root"; }
+      [ -d "$root/.git" ] && [ -f "$root/install.sh" ]
       ;;
     *) return 1 ;;
   esac
-}
-
-# A pre-native installer run from a ZIP download copied the source into
-# `~/.fsl` without `.git`. It is recognized by the markers that installer
-# checked (`is_fsl_repo`) and by the environment it then made inside the
-# copy: `.venv` for the Python releases, `.native` for the later ones. A tag's
-# source tree that another tool unpacked, such as the one under
-# `.mise-packslip/repo`, has the markers but neither environment.
-pre_native_source_copy() {
-  local root="$1"
-  [ -f "$root/pyproject.toml" ] \
-    && [ -d "$root/src/fslc" ] \
-    && [ -f "$root/specs/cart_v1.fsl" ] \
-    && grep -q 'name = "fslc"' "$root/pyproject.toml" 2>/dev/null \
-    && { [ -d "$root/.venv" ] || [ -d "$root/.native" ]; }
 }
 
 # A symbolic link this installer did not create belongs to whatever put it

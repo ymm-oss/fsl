@@ -628,8 +628,8 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     );
 }
 
-/// Runs the installer's own guard against real links. A link into an earlier
-/// installation must still be migrated, under any data directory, while
+/// Runs the installer's own guard against real links. A link an earlier run of
+/// the installer made must still be migrated, under any data directory, while
 /// a link another tool placed, such as one `mise skills sync` made, is kept.
 #[cfg(not(windows))]
 #[test]
@@ -664,26 +664,11 @@ fn installer_migrates_its_own_skill_links_and_keeps_foreign_ones() {
     make("clone/.git");
     std::fs::write(make("clone").join("install.sh"), "").unwrap();
     make("clone/skills/fsl");
-    // A source tree a pre-native installer copied out of a ZIP download into
-    // `~/.fsl`. The copy left `.git` behind; the installer then made `.venv`
-    // or `.native` inside it.
-    let source_tree = |root: &str| {
-        std::fs::write(make(root).join("install.sh"), "").unwrap();
-        std::fs::write(make(root).join("pyproject.toml"), "name = \"fslc\"\n").unwrap();
-        make(&format!("{root}/src/fslc"));
-        std::fs::write(make(&format!("{root}/specs")).join("cart_v1.fsl"), "").unwrap();
-        make(&format!("{root}/skills/fsl"));
-    };
-    source_tree("zip-venv");
-    make("zip-venv/.venv");
-    source_tree("zip-native");
-    make("zip-native/.native/bin");
     // A native payload under a data directory this run no longer uses.
     make("old-data/releases/old/skills/fsl");
     std::os::unix::fs::symlink("releases/old", dir.join("old-data/current")).unwrap();
-    // What `mise skills sync` links to, even when mise keeps the whole source
-    // tree of the tag there.
-    source_tree("mise/installs/fslc/4.8.0/.mise-packslip/repo");
+    // What `mise skills sync` links to.
+    make("mise/installs/fslc/4.8.0/.mise-packslip/repo/skills/fsl");
     // Look-alikes that no run of this installer made.
     make("other/current/skills/fsl");
     make("plain/skills/fsl");
@@ -709,8 +694,6 @@ fn installer_migrates_its_own_skill_links_and_keeps_foreign_ones() {
     ];
     let ours = [
         link(&dir.join("clone/skills/fsl"), "clone"),
-        link(&dir.join("zip-venv/skills/fsl"), "zip-venv"),
-        link(&dir.join("zip-native/skills/fsl"), "zip-native"),
         link(&dir.join("old-data/current/skills/fsl"), "old-data"),
         link(&source, "current"),
         link(&dir.join("gone/skills/fsl"), "broken"),
