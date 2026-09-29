@@ -4,7 +4,7 @@
 // the forall-wrapped implication below is unreachable within any depth.
 // Before #486, native `vacuous_implication` only matched an invariant whose
 // *top-level* expression was `Binary{op: "=>"}`; a `forall`-quantified
-// implication (the shape `docs/design/DESIGN-vacuity.md:22` documents as the
+// implication (the shape `docs/DESIGN-vacuity.md:22` documents as the
 // primary case) was never unwrapped, so this hollow invariant verified
 // clean instead of being flagged.
 spec ForallVacuousImplication {
