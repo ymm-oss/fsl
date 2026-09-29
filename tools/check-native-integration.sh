@@ -319,6 +319,9 @@ check_wasm() {
   # The exit-code classifier below is only meaningful while 124/65/1 stay
   # distinct; pin it before the browser run can report through it.
   npm --prefix rust/fsl-wasm run test:outcome
+  # The browser run reads each spec's imports through this scanner; pin its
+  # comment and unterminated-string handling first (#1056).
+  npm --prefix rust/fsl-wasm run test:imports
   local status
   if npm --prefix rust/fsl-wasm run test:browser; then
     status=0

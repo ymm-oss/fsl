@@ -13,6 +13,7 @@ import "./build.mjs";
 import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
 import { classifyOutcome, ParityViolationError, ProbeTimeoutError } from "./browser-outcome.mjs";
+import { specImports } from "./spec-imports.mjs";
 
 async function main() {
   assertNormalizerContract();
@@ -193,8 +194,8 @@ for (const path of candidates) {
   }
   const source = await readFile(path, "utf8");
   const files = {};
-  for (const match of source.matchAll(/\b(?:from|refinement)\s+"([^"]+)"/g)) {
-    files[match[1]] = await readFile(resolve(dirname(path), match[1]), "utf8");
+  for (const imported of specImports(source, repositoryPath)) {
+    files[imported] = await readFile(resolve(dirname(path), imported), "utf8");
   }
   for (const cmd of ["check", "verify"]) {
     parityCases.push({
