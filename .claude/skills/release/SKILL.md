@@ -167,8 +167,10 @@ After the promotion is approved and merged:
     require `fslc --version` to equal the tag; the workflow performs the same
     tag/version assertion on every native runner. Then, in a throwaway
     directory, install the release with
-    `mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"` and require
-    `mise skills ls` to name every directory under `skills/`.
+    `mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"` and
+    `mise use "packslip:github.com/ymm-oss/fsl/fslc-lsp@X.Y.Z"`, require
+    `mise skills ls` to name every directory under `skills/`, and require
+    `mise which fslc-lsp` to resolve.
 11. If publication has begun and a defect is found, fix it upstream, promote it,
     and cut a new patch version. Never rewrite the published release.
 

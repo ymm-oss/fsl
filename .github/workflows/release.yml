@@ -389,8 +389,11 @@ jobs:
           diff -u expected-assets.txt remote-assets.txt
 
   # Only this job can mint an OIDC token. It signs and gates the packslips
-  # locally and writes nothing to the release, so a failure here leaves the
+  # locally and writes no asset to the release, so a failure here leaves the
   # draft exactly as `publish` verified it and this job can be re-run alone.
+  # It does write build-provenance attestations: the packslip action's
+  # `attest` input defaults to `true`, which attests every artifact it signs
+  # to the repository's attestations, not to the release.
   sign:
     name: sign the packslips
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

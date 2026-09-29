@@ -270,18 +270,22 @@ truth for the pinned-head and tree-identity requirements.
    checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
 4. Install the release through mise and confirm the skills arrive with it. The
    packslip is what mise reads, and nothing before this point consumes one.
+   Install both commands so each of the two bundles is read once.
 
    ```bash
    cd "$(mktemp -d)"
    mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"
+   mise use "packslip:github.com/ymm-oss/fsl/fslc-lsp@X.Y.Z"
    mise skills ls
+   mise which fslc-lsp
    ```
 
    Run it in a throwaway directory. `mise use` writes a `mise.toml` where it
    runs, and this step is a check rather than an install.
 
-   `skills ls` must name every directory under `skills/`. A packslip the
-   workflow signed but mise rejects is a release defect, not a local one.
+   `skills ls` must name every directory under `skills/`, and `mise which
+   fslc-lsp` must resolve to the language server mise installed. A packslip
+   the workflow signed but mise rejects is a release defect, not a local one.
 5. Report the promotion pull request, production SHA, tag SHA, release URL,
    workflow runs, non-empty notes, asset inventory, checksum, version smoke
    test, and the skills mise listed.
