@@ -1,1 +1,0 @@
-Fixed: the daily ruleset drift audit no longer reports the intended `strict_required_status_checks_policy: false` on `main safety and CI` as drift. The contract and fixture now record `false`, and the checker compares against the contract's value instead of a hardcoded `true`.
