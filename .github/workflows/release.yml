@@ -372,6 +372,10 @@ jobs:
           body_path: release-notes.md
           files: release-assets/*
 
+      # The two packslip bundles are left out of the remote list by their exact
+      # names. `release` uploads them to this same draft, so a run of every job
+      # again after `release` failed finds them here; `sign` replaces them and
+      # `release` checks them against their digests before anything is public.
       - name: Verify the remote draft release unit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -379,7 +383,9 @@ jobs:
           test "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = true
           test -n "$(gh release view "$GITHUB_REF_NAME" --json body --jq .body)"
           find release-assets -maxdepth 1 -type f -exec basename {} \; | sort > expected-assets.txt
-          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort > remote-assets.txt
+          gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' \
+            | { grep -vxF -e packslip.fslc.sigstore.json -e packslip.fslc-lsp.sigstore.json || true; } \
+            | sort > remote-assets.txt
           diff -u expected-assets.txt remote-assets.txt
 
   # Only this job can mint an OIDC token. It signs and gates the packslips

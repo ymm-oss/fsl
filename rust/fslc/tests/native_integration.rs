@@ -118,6 +118,11 @@ fn assert_packslip_release_contract(workflow: &str, root: &Path) {
     // The draft is checked against `release-assets/` exactly before anything
     // is signed.
     assert!(publish.contains("diff -u expected-assets.txt remote-assets.txt"));
+    // Only the two bundles, by exact name, are left out of that check, so
+    // every job can run again after `release` uploaded them.
+    assert!(publish.contains(
+        "{ grep -vxF -e packslip.fslc.sigstore.json -e packslip.fslc-lsp.sigstore.json || true; }"
+    ));
     let gated = sign
         .find("diff -u present-skills.txt declared-skills.txt")
         .expect("the gate");

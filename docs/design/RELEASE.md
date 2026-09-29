@@ -307,6 +307,8 @@ truth for the pinned-head and tree-identity requirements.
   uploads them with `--clobber`, checks the complete inventory and the bundle
   digests, and makes the Release public. Each job can be rerun on its own after
   a transient failure, and a bundle an earlier attempt left on the draft does
-  not block the rerun.
+  not block the rerun: `publish` leaves the two bundle names out of its
+  inventory check, `sign` signs them again, and `release` replaces them with
+  `--clobber` before it checks their digests.
 - Follow the internal release skill's `release/vX.Y` stabilization and hotfix
   procedures when `main` cannot be promoted as a whole.
