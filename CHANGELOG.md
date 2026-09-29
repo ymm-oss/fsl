@@ -5,6 +5,140 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.8.0] - 2026-09-29
+
+- `fsl check` fence marking and `tools/check-doc-fences.py` gate the FSL in complete-specification fences under `docs/`, and report how many `fsl` fences remain unchecked (#1137).
+- Changed (#1116), **breaking for runtime logs that were passing**: `fslc domain replay` accepts a narrower set of JSON values than 4.7.0 did. A parameter of a declared numeric type takes a JSON integer only — `"2"`, `2.0`, `true`, and `null` replayed as 2, 2, 1, and 0 and reported `conformance_checked`/exit 0, and are now `nonconformant`/exit 1 with `command_rejected_by_model`. A `Bool` parameter takes `true`/`false` only; the integer `1` is not read as `true` on this path, unlike `fslc replay`'s hand-written mapped-action inputs. Note the cliff this puts in front of specification work: while an identity type is only referenced and never declared, an opaque token such as `"p1"` maps onto its `external` placeholder and the log replays, but declaring it (`type PaymentRequestId = 0..999;`) makes every non-numeric token for it nonconformant. See `docs/DESIGN-domain.md`, "Runtime Replay".
+  Migration: replay your existing logs against 4.8.0 before upgrading. Where a row now reports
+  `nonconformant`/`command_rejected_by_model`, fix the log emitter to write each parameter at its
+  declared type — a JSON integer for a numeric type, `true`/`false` for `Bool`, an enum member for
+  an enum — rather than a string, a float, or `null`. Where the rejected parameter is an opaque
+  token for a type you have since declared numeric, either keep that type implicit or change the
+  runtime to emit the numeric identity.
+- Fixed (#828): VS Code installation instructions now use the published VSIX asset name and document checksum availability.
+- Fixed (#979): The e2e README command test now matches the documented invocations without `--deadlock ignore`.
+- Fixed (#991): Document that adjacent refinement links imply composed refinement, but direct endpoint success does not establish intermediate-layer contract compliance.
+- Fixed (#1037): `ledger::evidence_verdict`'s doc comment now cites the design section that documents it ("Verdict mapping — `ledger::evidence_verdict` (issue #508)") as a quoted heading, so the design-citation check verifies it; the old `classify_source` name no longer exists anywhere.
+- Fixed (#1040): FIFO cleanup joins a finished writer before reading its final outcome, avoiding a race between outcome delivery and the writer's finished state.
+- Fixed (#1069): issue_250 test fixture paths now remain unique when tests construct fixtures concurrently.
+- Fixed: the daily ruleset drift audit no longer reports the intended `strict_required_status_checks_policy: false` on `main safety and CI` as drift. The contract and fixture now record `false`, and the checker compares against the contract's value instead of a hardcoded `true`.
+- Fixed (#1090): the skill reference and the intro syntax pages now recommend the depth-only `fslc sweep file.fsl --depth 1..8 [--property Name]`, which works on every spec, and present `--instances <Entity>=…` / `--values <Number>=…` as an extension for specs that declare them. The old `--instances Case=1..3` form exited 2 on any spec without entity/number declarations.
+- Fixed (#1109): the business dialect now rejects `with`, `when` and `set` on a
+  transition instead of silently dropping them. `lower_business` never read a
+  transition's inputs, guard or assignments, so `check` answered `ok` for a
+  guard that was never applied and an assignment to a field that was never
+  declared, and `verify` then answered for that other model. The error is
+  positioned at the transition and names the `requirements` dialect, whose
+  `process` gives the three clauses meaning; a control confirms the same
+  process without them, and every existing business example, still passes. `covers` is unaffected: `lower_business` does consume it into a requirement
+  annotation, so it keeps working.
+- Fixed (#1116): `fslc domain replay` now reads a runtime log's `params` at the target action's declared types instead of forcing every value to `Int` and reading an unparseable one as `0`. `{"value":"garbage"}` on an integer input no longer reports `conformance_checked`/exit 0 (false conformance), and enum and `Bool` inputs — which the forced `Int` made permanently `command_rejected_by_model` — now replay, an enum member from its domain, qualified, or Kernel spelling. An *implicit identity type* (`PaymentRequestId`, only referenced and never declared) keeps its documented `external` placeholder mapping for an opaque token such as `"p1"`, but a JSON object, array, or `null` there is rejected rather than folded onto the placeholder, so the exception does not re-open the same false conformance for the parameter shape most logs carry. A correlation id filled in from `effect_completion.correlation_id` is converted from the JSON the log wrote rather than from a re-parse of the stringified pairing key, so `"1"` and `1` get the same verdict there as in `params`. `examples/domain/order_async_effect_replay.jsonl` and the `issue_518` replay corpus are byte-identical to 4.7.0.
+- Fixed (#1117): `fslc domain replay` now checks each `domain_event` log row
+  against the event the model actually raised at that point — the one-hot
+  `event_<Event>` flag left by the last accepted `command`/`effect_completion`
+  transition — instead of only checking that the name is declared somewhere in
+  the domain. An event the preceding command's `decide` does not emit, a
+  `domain_event` with no preceding transition, and a stale event re-logged
+  after a later accepted transition are all reported as
+  `unknown_domain_event`/`runtime_event_emitted_by_preceding_transition`
+  (`nonconformant`, exit 1) rather than returning `conformance_checked`.
+  Conformant logs, including outcome events raised by an `effect_completion`,
+  are unchanged. A mismatch names its cause rather than guessing: an event only
+  a saga step, step timeout, or compensation emits gets
+  `failed_rule:"runtime_event_reachable_by_replayed_transition"` and repair
+  text saying no log can match it and the FSL model must not be changed; a
+  mismatch after a transition the model **rejected** names that rejection; and
+  only a genuine ordering or model gap proposes adding the event to the
+  transition the log ran. The finding `kind` enum in
+  `schemas/fslc/domain/finding.v0.schema.json` is unchanged. What the check
+  does **not** cover, and what therefore keeps #1117 open: **payloads are not
+  compared** — `command SetN {v:1}` followed by `domain_event NSet {v:0}` still
+  conforms, because only the event name is matched; the **`aggregate` field of
+  a `domain_event` row is not read**, so a row naming the wrong aggregate
+  conforms as long as the event name matches (the flag is keyed by event name
+  across the whole domain, and a domain where two aggregates declare the same
+  event name is already rejected at lowering with `duplicate state variable`);
+  and a **rejected** `command`/`effect_completion` rewrites nothing, so a stale
+  event row after one still conforms — the rejection itself is the reported
+  finding. `events_observed` changes meaning accordingly: a `domain_event` row
+  enters it only once its occurrence flag matched, so it lists the events the
+  model raised rather than every declared name the log mentioned.
+- Fixed (#1119): The explicit runtime no longer copies an `exists` witness scope into the caller's bindings, so a quantifier binder that shadows an action parameter can no longer overwrite it -- `explicit`/`auto` returned `proved` for a violated invariant, `bmc`/`induction` failed witness replay, and the conformance vectors recorded the witness index.
+- Fixed (#1124): `docs/DESIGN-approval.md`'s worked example now names `examples/e2e/2_requirements.fsl` -- a specification that exists and carries requirement IDs -- instead of the nonexistent `specs/order.fsl`, so the `fslc ledger` / `fslc approval create` / `fslc document generate` sequences it shows run as written. The same section's prose claim that a specification without requirement IDs is rejected is now demonstrable against the specification it names.
+- Fixed (#1133): `fslc domain replay` no longer reports a **type-mismatched log
+  parameter** as a guard rejection that blames the FSL model. Since #1116 a
+  value that is not of its declared type fails closed, but the conversion
+  failure was folded into the same verdict the model's own refusal produces, so
+  `{"value":"garbage"}` on an integer input came out as
+  `command_rejected_by_model`/`runtime_command_must_be_enabled_by_domain_model`
+  with the repair *"change the implementation command path or update the FSL
+  decide/evolve model"* — advice to edit a `decide`/`evolve` that was never
+  consulted, since the row was refused before any guard ran. The conversion's
+  own message was computed and discarded. A conversion failure now takes its
+  own `failed_rule` on the same `kind` —
+  `runtime_command_parameters_match_declared_types` for a `command` row,
+  `effect_completion_parameters_match_declared_types` for an
+  `effect_completion` row, including the correlation value filled in from
+  `correlation_id` — and the discarded message is carried in the witness as
+  `parameter_error` (`parameter 'value' must be an integer`). The repair names
+  the row and the two things that can actually disagree: the value the
+  implementation logged, and the parameter's declared type. A parameter the
+  command does not declare takes the same rule, for the same reason. Genuine
+  guard rejections and genuine `effect_completion` lifecycle mismatches keep
+  their existing rules and repair text, and every conformant log is unchanged:
+  `examples/domain/order_async_effect_replay.jsonl` and the `issue_518_*`
+  fixtures produce byte-identical output to v4.7.0. The finding `kind` enum in
+  `schemas/fslc/domain/finding.v0.schema.json` is unchanged; a consumer that
+  branches on `kind` alone still cannot tell the two causes apart, which is the
+  new-`kind` option deliberately left to #1133's own follow-up.
+- Fixed (#1134): the business dialect now checks its control catalog instead of
+  discarding it. `BusinessItem::Control` fell into the catch-all arm of
+  `lower_business`'s item loop, so a `control` declaration --- and every
+  `satisfies` naming one --- was parsed, accepted and dropped, and `check`
+  answered `ok` for a policy pointing at a control the document never declared.
+  An unknown reference is now a located error at the policy or goal that wrote
+  it, and a control no policy or goal satisfies raises the `unused_control`
+  warning `docs/DESIGN-dialects.md` already promised, located at the
+  declaration. Both were already implemented in the Python front end
+  (`src/fslc/dialects.py`), so this closes a port gap rather than narrowing the
+  language; a control confirms a declared-and-satisfied catalog still checks
+  clean, and `check` exit codes are unchanged for all 537 tracked `.fsl` files.
+- Fixed (#1135): `tools/check-merge-readiness.sh` now runs every step of a lane and fails afterwards, instead of aborting at the first failure and hiding the other thirty steps of `check_automation`. A step whose tool is absent is reported as a skip, listed separately from failures, and still exits the lane non-zero -- a skip is not a pass -- and in CI (`GITHUB_ACTIONS`, `CI`, or `FSL_READINESS_CI`) a missing tool is a hard failure with no way to re-enable skipping, so a CI image that loses a tool cannot go green. `--fail-fast` restores the previous stop-at-the-first-failure behaviour. See `docs/DESIGN-ci.md`, "Run every step, then fail".
+- Fixed (#1136): `docs/DESIGN-approval.md`'s walkthrough now runs end to end. Its opening `approval create` no longer signs the record the later `approval check`, `ledger --approval`, and `approval diff` examples consume without a trust anchor, which made those three blocks exit 2 with `no trusted Ed25519 public key matches`. The signed flow keeps its own block, which now creates the v2 record it verifies with `--trust-key`, and the "Record contract" examples report the current `generator_version` (`4.7.0`, not `2.7.0`).
+- Fixed (#1147): `fslc chain` now verifies each layer through the same options path as `verify` and `sweep`, so it reads and writes the verify cache; before, it bypassed the cache entirely and re-solved every layer on every run (0 entries after two runs). An unchanged layer is a cache hit, an edited layer alone is re-verified, and a hit adds only the documented `cache` field to that layer's `detail`. Regression controls in `rust/fslc/tests/chain_cli.rs` fail on the old code.
+- Fixed (#1148): the verify cache key no longer embeds the checked spec's canonicalised absolute path, as `docs/DESIGN-incremental-verify.md` already promised. The same spec bytes at another path, in another worktree or under another file name now hit the cache (13.32 s miss against a 0.02 s hit before), while a changed spec, a changed dependency or a changed option still misses. The key prefix moves from `v3` to `v4`, so entries written before this change are never matched and a stale `verified` cannot be replayed; they age out through normal eviction. The design document now states the native key and its storage layout as implemented.
+- Fixed (#1153): An `x is some(v)` pattern binding no longer overwrites an action parameter, binder or let of the same name in the native runtime, verifier and type checker, restoring the guard the frozen reference has in `_eval_requires`. Before, the native `fslc` and the Python reference returned opposite `verified`/`violated` verdicts for the same spec (`act(r=0)` wrote `w[1]` natively), `and` was not commutative over such a binding, an `Option<Bool>` matched into `r: R` retyped `r` and was rejected, and a failed shadowing match ended `bmc`/`induction` in `trace state mismatch at step 1`. A pattern binding with a new name still reaches the action body.
+- Required (#1127): Markdown link targets now resolve or the merge-readiness lane
+  fails. `tools/check-doc-links.py` runs repository-wide (214 documents, 396
+  in-repository link targets, about 0.1s, no network and no build) alongside its
+  slug selftest and the new accepting/rejecting controls in
+  `tests/test_doc_links.py`, which reproduce issue #1127's measured table in CI --
+  including a `.fsl#kind:name` fragment naming an element the specification does
+  not declare (the forward direction of #1124) and a `other.md#anchor` whose
+  anchor exists only in a different document. What the gate does not check (a bare
+  path in prose) and does not claim (that every FSL element is discussed by some
+  document, #1138) is recorded in `docs/DESIGN-ci.md`. The one pre-existing
+  finding, `CONTRIBUTING.md`'s link to a `CODE_OF_CONDUCT.md` that has never
+  existed in this repository, was removed rather than answered by inventing a
+  policy document.
+- Documented (#1124): `docs/README.md` now states the convention that separates a broken FSL reference from a deliberate example -- a `specs/`- or `examples/`-prefixed path in `docs/**.md` names a file that exists, while an illustrative path is written bare (`spec.fsl`, `<spec.fsl>`) -- together with the one-liner that checks it, a note that no CI gate enforces it yet, and an explicit statement that the backward direction (every FSL element being discussed by some document) is not claimed. `DESIGN-layers.md`'s `fsl-project.toml` example and `DESIGN-changelog-fragments.md`'s rename experiment were brought into line.
+- Documented (#1128): `docs/DESIGN-claim-binding-spike.md` records the spike that binds one hand-written claim to one named FSL element and measures whether the claim is raised for re-verification when the bound element changes (it is) and when another part of the same specification changes (it is not). It decides that a prose-only rewrite must raise the claim under its own reason, compares how GitHub renders the three annotation syntaxes, and names where the mechanism overlaps the existing document checks. `tools/spike-1128-claim-binding/` holds the projector; nothing is wired into a gate.
+- Decided (#1126): mystmd is not adopted for `docs/`. The spike record `docs/DESIGN-myst-spike.md` measures both stages. Stage 1: every one of five reference breaks exits 0 under `myst build --site --strict` until `error_rules` and `--check-links` are configured, and no single switch closes the table. Stage 2: all four stage-1 objections are configurable — `error_rules` entries take a `keys` glob list, a document-stage plugin re-identifies headings with GitHub's slug algorithm, a local `site.template` path builds the whole gate offline, and the one prose failure is a nested-code-span bug GitHub renders wrong too (fixed here). Configured that way all 105 documents build clean and a typed FSL reference plugin closes the forward check, with the measured caveat that a plugin's report only reaches the exit code from a transform, never from a role's `run()`. Adoption is still declined: the transforms that close the reference rows reimplement GitHub slug and per-file anchor resolution in JavaScript against files on disk, stock mystmd resolves a wrong-file `other.md#anchor` silently, and the notation that makes the typed reference work in both renderers is an ordinary Markdown link that needs no AST. `tools/spike-1126-myst/` holds the configuration and both plugins for reproduction; `tools/check-doc-links.py` is the counter-proposal, extended here to resolve `.fsl#kind:name` fragments, and is deliberately not wired into a gate.
+- Decided (#1132): `x is some(v)` is a binding, never a match against an
+  already-bound `v`, and the binding is lexically confined — a collision with
+  an action parameter does not survive into the action body. The Python
+  implementation already does this; the Rust port does not, and the two return
+  opposite verdicts on the same specification. `docs/DESIGN-pattern-binding-scope.md`
+  records the decision, the measurements, and the port fixes it implies
+  (including a Rust-only `trace state mismatch` internal error on a failed
+  shadowing match).
+- Decided (#1138): the backward documentation direction -- every FSL element being discussed by at least one hand-written document -- is now measured and reported, and deliberately **not** gated. `tools/report-doc-backward-coverage.py` is the report and `docs/DESIGN-backward-doc-coverage.md` is the spike record. The denominator is every FSL element declared under `examples/` except `examples/gallery/` -- 516 elements in 120 files -- with `tests/`-style fixtures (323 files, 702 elements), the `specs/` conformance corpus (23 / 134), the deliberately-invalid `examples/gallery/` (71 / 213) and the generated site's `docs/intro/specs/` (3 / 19) excluded, each with its reason; `examples/self/` and the feature examples are kept in scope even though keeping them worsens every ratio. Measured against 178 hand-written Markdown documents, 0 of 516 elements are discussed at element granularity (`<path>.fsl#kind:name`, a notation used three times in the whole repository), 267 at non-index file granularity, and 444 at file granularity, with 35 of 120 in-scope files named by no hand-written document at all. That 0/516 is why the outcome is a periodic report: a gate would stop all work on day one, and an element-level ratchet over a zero baseline is a gate in disguise. A file-level ratchet is deferred until the 35 unnamed files are named. What is still not claimed: a reference is a reference, not an assurance that the prose is correct or current (that is #1128).
+- Decided (#1139): the `def` capture check stays as a semantics error with its
+  current message. It guards capture-avoiding substitution at expansion time,
+  not the runtime binder leak #1119 removed, so #1119 could not have made it
+  redundant. `tests/test_named_predicates.py` now pins the two expansions of a
+  rejected call to opposite verdicts; see `docs/DESIGN-pattern-binding-scope.md`.
+
 ## [4.7.0] - 2026-09-24
 
 - Added (#1055): examples now require an adjacent rationale whenever a teaching command uses `--deadlock ignore`, preventing unexplained flag regressions.
@@ -6208,7 +6342,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.7.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.8.0...HEAD
+[4.8.0]: https://github.com/ymm-oss/fsl/compare/v4.7.0...v4.8.0
 [4.7.0]: https://github.com/ymm-oss/fsl/compare/v4.6.0...v4.7.0
 [4.6.0]: https://github.com/ymm-oss/fsl/compare/v4.5.0...v4.6.0
 [4.5.0]: https://github.com/ymm-oss/fsl/compare/v4.4.1...v4.5.0

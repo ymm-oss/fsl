@@ -451,7 +451,7 @@ findings は機械可読で `candidate_repairs` / `do_not_assume` を持つた�
 
 ### 付録: 本ガイドで使ったデモ仕様
 
-```fsl
+```fsl check
 // findings を意図的に残したデモ仕様
 spec OrderReview {
   enum Status { Draft, Submitted, Approved }
