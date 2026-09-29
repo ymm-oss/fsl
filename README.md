@@ -110,8 +110,8 @@ Put this in your `mise.toml`, then run `mise install`:
 ```
 
 > [!IMPORTANT]
-> v4.7.0 and earlier releases carry no packslip. It is published from the first release
-> after v4.7.0, so pin a version only once the release you want carries one.
+> Releases made before packslip support carry no packslip, so pin a version only once
+> the release you want carries one.
 > mise says so rather than guessing:
 >
 > ```console
