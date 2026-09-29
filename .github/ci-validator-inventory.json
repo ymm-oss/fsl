@@ -196,6 +196,13 @@
       "tier": "exempt"
     },
     {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_doc_links.py",
+      "tier": "required"
+    },
+    {
       "exempt_reason": "frozen-python-compatibility",
       "path": "tests/test_domain_dialect.py",
       "tier": "exempt"
