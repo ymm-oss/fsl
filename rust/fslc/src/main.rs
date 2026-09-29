@@ -5595,30 +5595,6 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
         .join(", ")
 }
 
-/// `check` on an agent document is deliberately lenient: the top-level
-/// `result` stays "ok" even when the structural analysis finds a violation
-/// (matching the frozen reference); `fslc ai check` is the actual gate (exit 1
-/// on `agent_analysis_result: "violated"`). A grant-boundary or other
-/// tree-validation failure is still a hard error here.
-fn agent_check_output(agent: &fsl_syntax::SurfaceAgent) -> (Value, i32) {
-    let analysis = match fsl_tools::analyze_ai_agent(agent) {
-        Ok(analysis) => analysis,
-        Err(error) => return (agent_error_output(&error), 2),
-    };
-    let analysis_result = analysis
-        .get("result")
-        .cloned()
-        .unwrap_or_else(|| json!("agent_analyzed"));
-    let mut output = envelope();
-    output.insert("result".to_owned(), json!("ok"));
-    output.insert("spec".to_owned(), json!(agent.name));
-    output.insert("dialect".to_owned(), json!("fsl-ai-agent.v0"));
-    output.insert("warnings".to_owned(), json!([]));
-    output.insert("ai_analysis_result".to_owned(), analysis_result.clone());
-    output.insert("agent_analysis_result".to_owned(), analysis_result);
-    (Value::Object(output), 0)
-}
-
 /// `path` is read for source content (for a literate `.md` input, this is the
 /// materialized, blanked `.literate.fsl` sibling — its line positions match
 /// the original document). `display_path` is stamped into every user-visible
@@ -5638,71 +5614,17 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
 /// The displayed path intentionally remains independent of the path used to
 /// resolve imports, including for materialized literate sources.
 fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Value, i32) {
-    // The fsl-ai project gate carries its own exit code: an unexecutable
-    // `require` clause is a spec error (issue #542), so this may not be
-    // flattened back to a fixed exit 0.
-    if let Some(result) = fslc_rust::frontend_output::ai_project_check_output(
-        source,
-        &display_path.to_string_lossy(),
-        envelope(),
-    ) {
-        return result;
-    }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
-        Ok(fsl_syntax::ParsedDocument {
-            surface: fsl_syntax::SurfaceDocument::Agent(agent),
-            ..
-        }) => return agent_check_output(&agent),
-        Ok(_) => {}
-        Err(error) => return (surface_parse_error_output(&error), 2),
-    }
-    // The source-diagnostic preflight lowers every regular dialect document.
-    // Validate specialized documents first, so an invalid AI authority name
-    // cannot reach `lower_ai_component`'s generated-member lookup. Surface
-    // parsing stays ahead of this validation to retain parse-error envelopes.
-    if let Err(error) = validate_specialized_document_from_source(path, source) {
-        return (semantic_error_output(&error), 2);
-    }
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    if let Some(diagnostic) = fslc_rust::source_diagnostic::diagnostics(
+    // The validity stages are shared with the Worker (issue #1163); only the
+    // success envelope is composed here.
+    match fslc_rust::check_stages::run_check_stages(
         source,
+        &path.to_string_lossy(),
         &display_path.to_string_lossy(),
         &resolver,
-    )
-    .into_iter()
-    .find(|diagnostic| diagnostic.kind != "migration")
-    {
-        // `check` returns here before it reaches `load_kernel_model`, so the
-        // location and classification have to travel through this branch too,
-        // or `check` alone reports `loc: null` and `semantics` for a diagnostic
-        // every other command locates and classifies (issues 555, 565).
-        return (
-            fslc_rust::verification_output::render_semantic_error(
-                envelope(),
-                &diagnostic.message,
-                diagnostic.located.then(|| diagnostic.span.python_loc()),
-                diagnostic.kind == "name",
-                Some(diagnostic.code.as_str()).filter(|code| {
-                    *code != "FSL-SEMANTIC" && *code != "FSL-TYPE" && *code != "FSL-NAME"
-                }),
-                diagnostic.hint.as_deref(),
-            ),
-            2,
-        );
-    }
-    match load_kernel_model_from_source(path, source) {
-        Ok((kernel, model)) => {
-            if let Err(error) = fsl_runtime::check_init_write_ownership(&model) {
-                return (
-                    fslc_rust::verification_output::render_runtime_error(envelope(), &error),
-                    2,
-                );
-            }
-            match validate_requirement_traces_from_source(path, source, &model) {
-                Ok((Some(failure), _)) => return (failure, 2),
-                Ok((None, _)) => {}
-                Err(error) => return (semantic_error_output(&error), 2),
-            }
+        &envelope,
+    ) {
+        Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
             output.insert("spec".to_owned(), json!(model.name));
@@ -5740,7 +5662,7 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
             }
             (Value::Object(output), status)
         }
-        Err(error) => (spec_load_error_output(&error), 2),
+        Err(result) => result,
     }
 }
 
@@ -6271,15 +6193,7 @@ fn load_surface_document_from_source(
 }
 
 fn validate_specialized_document_from_source(path: &Path, source: &str) -> Result<(), String> {
-    match parse_surface_document_from_source(path, source)? {
-        fsl_syntax::SurfaceDocument::Db(system) => {
-            fsl_tools::validate_db(&system).map_err(|error| error.to_string())
-        }
-        fsl_syntax::SurfaceDocument::AiComponent(component) => {
-            fsl_core::validate_ai_component(&component).map_err(|error| error.to_string())
-        }
-        _ => Ok(()),
-    }
+    fslc_rust::check_stages::validate_specialized_document(source, &path.display().to_string())
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
@@ -6548,20 +6462,7 @@ fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Val
 }
 
 fn agent_error_output(error: &fsl_tools::AgentError) -> Value {
-    let mut output = envelope();
-    output.insert("result".to_owned(), json!("error"));
-    output.insert("kind".to_owned(), json!("semantics"));
-    output.insert("message".to_owned(), json!(error.message));
-    if let Some(loc) = error.loc {
-        output.insert(
-            "loc".to_owned(),
-            json!({"line": loc.line, "column": loc.column}),
-        );
-    }
-    if let Some(hint) = &error.hint {
-        output.insert("hint".to_owned(), json!(hint));
-    }
-    Value::Object(output)
+    fslc_rust::check_stages::agent_error_output(envelope(), error)
 }
 
 fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
@@ -17184,15 +17085,7 @@ fn load_kernel_model_from_source_with_resolver(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    let kernel =
-        match fsl_core::parse_kernel_source_with_file(source, resolver, path.to_string_lossy()) {
-            Ok(kernel) => kernel,
-            Err(error) => return Err(kernel_load_error(source, &error)),
-        };
-    let model = fsl_core::build_model(kernel.clone()).map_err(|error| {
-        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
-    })?;
-    Ok((kernel, model))
+    fslc_rust::check_stages::load_kernel_model(source, &path.to_string_lossy(), resolver)
 }
 
 /// Read a spec file, classifying a read failure as `io` rather than letting the

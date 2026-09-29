@@ -168,32 +168,23 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
 }
 
 async fn check(request: &Request, solver_version: &str) -> Value {
-    if let Some((output, _)) = fslc_rust::frontend_output::ai_project_check_output(
+    let resolver = MemoryResolver {
+        files: request.files.clone(),
+    };
+    // The same validity stages, in the same order, that native `check` runs
+    // (issue #1163): this surface only composes the success envelope.
+    let checked = match fslc_rust::check_stages::run_check_stages(
         &request.source,
         &request.source_file,
-        envelope(solver_version),
+        &request.source_file,
+        &resolver,
+        &|| envelope(solver_version),
     ) {
-        return output;
-    }
-    if let Err(failure) = fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&request.source)) {
-        return fslc_rust::frontend_output::render_surface_parse_error(
-            envelope(solver_version),
-            &failure,
-        );
-    }
-    let (model, compose_warnings) = match build(request, solver_version) {
-        Ok(built) => built,
-        Err(error) => return error,
+        Ok(checked) => checked,
+        Err((output, _)) => return output,
     };
-    match fslc_rust::verification_output::validate_requirement_trace_source(
-        &envelope(solver_version),
-        &request.source,
-        &model,
-    ) {
-        Ok((Some(failure), _)) => return failure,
-        Ok((None, _)) => {}
-        Err(failure) => return error(solver_version, "semantics", failure),
-    }
+    let compose_warnings = checked.kernel.diagnostics().to_vec();
+    let model = checked.model;
     let warning_ctx = match ModelWarningContext::from_source(&model, &request.source) {
         Ok(ctx) => ctx,
         Err(core_error) => return error(solver_version, "semantics", core_error.to_string()),
@@ -390,6 +381,14 @@ async fn verify(request: &Request, solver_version: &str) -> Value {
             Ok(deadlock) => deadlock,
             Err(message) => return error(solver_version, "usage", message),
         };
+    // Native `verify` rejects an init that writes one variable twice before it
+    // reaches the solver (`prepare_bmc`); `build_model` does not (issue #1163).
+    if let Err(failure) = fsl_runtime::check_init_write_ownership(&model) {
+        return fslc_rust::verification_output::render_runtime_error(
+            envelope(solver_version),
+            &failure,
+        );
+    }
     // Preserve exact concrete evidence for boundary outcomes the bounded
     // symbolic value cannot represent. `partial_op` is intentionally left to
     // the public symbolic verifier boundary itself (#651).
@@ -579,6 +578,15 @@ mod tests {
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
 
+    // Messages native `fslc check` reports for the specialized-validation
+    // fixtures below (issue #1163), and the Agent analysis verdict it reports
+    // for `issue_468_unsafe_graph.fsl`.
+    const DB_UNKNOWN_COLUMN_MESSAGE: &str = "unknown column 'users.missing_column'";
+    const AI_UNKNOWN_TOOL_MESSAGE: &str = "unknown tool 'MissingTool' in authority block";
+    const AI_INVALID_RULE_MESSAGE: &str =
+        "unknown ai hard-contract rule 'unregistered_hard_rule' at 17:3";
+    const AGENT_UNSAFE_GRAPH_RESULT: &str = "violated";
+
     /// Every Worker `check`/`verify` error-return route has exactly one row.
     ///
     /// This is a test-local inventory, not a reflection of `check`/`verify`.
@@ -602,6 +610,9 @@ mod tests {
         CheckRequirementTrace,
         CheckGovernance,
         CheckImplements,
+        CheckSpecializedDocument,
+        CheckInitWriteOwnership,
+        VerifyInitWriteOwnership,
         VerifySurfaceParse,
         VerifyBuild,
         VerifyRequirementTrace,
@@ -614,7 +625,7 @@ mod tests {
     }
 
     impl ErrorRoute {
-        const COUNT: usize = 15;
+        const COUNT: usize = 18;
 
         const ALL: [Self; Self::COUNT] = [
             Self::CheckAiProject,
@@ -623,6 +634,9 @@ mod tests {
             Self::CheckRequirementTrace,
             Self::CheckGovernance,
             Self::CheckImplements,
+            Self::CheckSpecializedDocument,
+            Self::CheckInitWriteOwnership,
+            Self::VerifyInitWriteOwnership,
             Self::VerifySurfaceParse,
             Self::VerifyBuild,
             Self::VerifyRequirementTrace,
@@ -672,6 +686,9 @@ mod tests {
                 Self::VerifyReplay => 12,
                 Self::VerifyReachableDiagnostics => 13,
                 Self::VerifyImplements => 14,
+                Self::CheckSpecializedDocument => 15,
+                Self::CheckInitWriteOwnership => 16,
+                Self::VerifyInitWriteOwnership => 17,
             }
         }
     }
@@ -733,7 +750,7 @@ mod tests {
         RouteRegistration {
             route: ErrorRoute::CheckBuild,
             coverage: RouteCoverage::Compared {
-                cell: "build_rejects_duplicate_action_writes",
+                cell: "check_error_envelopes_match_native_across_parse_guard_and_name",
             },
         },
         RouteRegistration {
@@ -806,6 +823,24 @@ mod tests {
             route: ErrorRoute::VerifyImplements,
             coverage: RouteCoverage::Compared {
                 cell: "verify_implements_error_envelope_matches_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckSpecializedDocument,
+            coverage: RouteCoverage::Compared {
+                cell: "check_rejects_invalid_specialized_documents_like_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckInitWriteOwnership,
+            coverage: RouteCoverage::Compared {
+                cell: "check_rejects_init_write_collision_like_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyInitWriteOwnership,
+            coverage: RouteCoverage::Compared {
+                cell: "verify_rejects_init_write_collision_like_native",
             },
         },
     ];
@@ -1230,6 +1265,11 @@ mod tests {
                 ),
                 "invalid_unknown_name.fsl",
             ),
+            (
+                "duplicate action write",
+                "spec Duplicate { state { x: Bool } init { x = false } action write_twice() { x = true x = false } }",
+                "duplicate.fsl",
+            ),
         ] {
             let request = Request {
                 cmd: "check".to_owned(),
@@ -1384,6 +1424,121 @@ mod tests {
         };
 
         assert_worker_governance_error_matches_native(&request, "missing governance dependency");
+    }
+
+    /// The native `check`/`verify` rejection of an init that writes `m` from
+    /// two `forall`s, rendered from the runtime owner of that rule. The model
+    /// itself builds: `build_model` does not check init ownership (#1163).
+    fn native_init_write_ownership_error(request: &Request) -> Value {
+        let failure = fsl_runtime::check_init_write_ownership(&model_from(&request.source))
+            .expect_err("fixture must fail native init write ownership");
+        fslc_rust::verification_output::render_runtime_error(
+            envelope(TEST_SOLVER_VERSION),
+            &failure,
+        )
+    }
+
+    fn init_write_collision_request(cmd: &str) -> Request {
+        Request {
+            cmd: cmd.to_owned(),
+            source: include_str!("../../fslc/tests/fixtures/issue_826_root_root.fsl").to_owned(),
+            source_file: "issue_826_root_root.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        }
+    }
+
+    fn assert_init_write_collision(worker: &Value, request: &Request, command: &str) {
+        assert_eq!(
+            worker,
+            &native_init_write_ownership_error(request),
+            "Worker/native {command} init-ownership envelope diverged"
+        );
+        // Pinned to what native `fslc check` prints for this fixture.
+        assert_eq!(worker["result"], "error");
+        assert_eq!(worker["kind"], "semantics");
+        assert_eq!(
+            worker["message"],
+            "state variable 'm' assigned more than once in init forall"
+        );
+        assert_eq!(worker["loc"], json!({"line": 8, "column": 21}));
+    }
+
+    #[test]
+    fn check_rejects_init_write_collision_like_native() {
+        let request = init_write_collision_request("check");
+        let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+        assert_init_write_collision(&worker, &request, "check");
+    }
+
+    #[test]
+    fn verify_rejects_init_write_collision_like_native() {
+        let request = init_write_collision_request("verify");
+        let worker = block_on(verify(&request, TEST_SOLVER_VERSION));
+        assert_init_write_collision(&worker, &request, "verify");
+    }
+
+    #[test]
+    fn check_rejects_invalid_specialized_documents_like_native() {
+        for (fixture, source, source_file, message) in [
+            (
+                "dbsystem unknown column",
+                include_str!("../../fslc/tests/fixtures/error_envelope_db_unknown_column.fsl"),
+                "error_envelope_db_unknown_column.fsl",
+                DB_UNKNOWN_COLUMN_MESSAGE,
+            ),
+            (
+                "ai_component unknown tool",
+                include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl"),
+                "error_envelope_ai_unknown_tool.fsl",
+                AI_UNKNOWN_TOOL_MESSAGE,
+            ),
+            (
+                "ai_component unknown rule",
+                include_str!("../../fslc/tests/fixtures/error_envelope_ai_invalid_rule.fsl"),
+                "error_envelope_ai_invalid_rule.fsl",
+                AI_INVALID_RULE_MESSAGE,
+            ),
+        ] {
+            let request = Request {
+                cmd: "check".to_owned(),
+                source: source.to_owned(),
+                source_file: source_file.to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+            };
+            let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+            // Native `check` renders a specialized-validation failure as an
+            // unlocated `semantics` error carrying the validator's message;
+            // the messages are pinned to native `fslc check` output.
+            let native = fslc_rust::verification_output::render_semantic_error(
+                envelope(TEST_SOLVER_VERSION),
+                message,
+                None,
+                false,
+                None,
+                None,
+            );
+            assert_eq!(
+                worker, native,
+                "Worker/native specialized envelope diverged for {fixture}"
+            );
+        }
+    }
+
+    #[test]
+    fn check_reports_agent_analysis_like_native() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: include_str!("../../fslc/tests/fixtures/issue_468_unsafe_graph.fsl").to_owned(),
+            source_file: "issue_468_unsafe_graph.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+        assert_eq!(worker["result"], "ok", "{worker}");
+        assert_eq!(worker["dialect"], "fsl-ai-agent.v0");
+        assert_eq!(worker["agent_analysis_result"], AGENT_UNSAFE_GRAPH_RESULT);
     }
 
     #[test]
