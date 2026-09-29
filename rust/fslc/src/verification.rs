@@ -2724,7 +2724,6 @@ mod tests {
     /// absent.
     #[test]
     fn verify_cache_base_options_includes_the_implements_search_budget() {
-        let path = repository_path("examples/gallery/valid/tiny_turnstile.fsl");
         let options = CliVerifyOptions::default();
 
         let base_options = verify_cache_base_options("bmc", &options);
