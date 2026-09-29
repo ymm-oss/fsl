@@ -59,23 +59,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Deliberately not pinned: test_site_reference_snapshot.py's own
-      # test_argparse_help_normalization_is_python_version_independent, and a direct
+      # Only the two third-party packages these steps import: `markdown` (the generator,
+      # tools/build_site_reference.py) and pytest. None of the steps below imports the
+      # frozen Python `fslc` package, lark, or z3-solver: the CLI pages are generated from
+      # rust/fslc/cli-contract.json (#1007), and the generator's last `fslc` import, an
+      # unused `fslc.cli_help` helper, was removed in #1176. The specifiers mirror
+      # pyproject.toml's dev extra. They are deliberately not pinned: a direct
       # cross-version measurement (CPython 3.9.6/markdown 3.9 vs. CPython 3.14.6/markdown
-      # 3.10.2) that produced byte-identical generated pages, showed the generator's output is
-      # independent of the markdown version. pyproject.toml's own dev extra is unpinned
-      # ("markdown>=3") for the same reason -- this step now installs that extra directly
-      # rather than paraphrasing it as a hand-typed package list.
-      #
-      # Installing the whole package, not just pytest/markdown, is required: the generator
-      # (tools/build_site_reference.py) imports fslc.cli_help, and importing any fslc
-      # submodule runs src/fslc/__init__.py, which imports parser/model/bmc/runtime/analysis
-      # -- so the generator also needs lark and z3-solver, both declared in pyproject.toml's
-      # core `dependencies`. A hand-maintained transitive list goes stale the next time
-      # src/fslc/__init__.py grows an import (#689); deferring to pyproject.toml's own
-      # declaration cannot go stale, because it is that declaration.
+      # 3.10.2) produced byte-identical generated pages. If a step here starts importing
+      # `fslc`, it fails with ModuleNotFoundError rather than passing on a partial install.
       - name: Install the generator's test dependencies
-        run: pip install ".[dev]"
+        run: pip install "pytest>=7" "markdown>=3"
 
       - name: Check examples explain deadlock-ignore commands
         run: python3 tools/check-example-deadlock-ignore.py
