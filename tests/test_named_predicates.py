@@ -152,3 +152,63 @@ def test_capture_risk_is_rejected_without_synthetic_name_leak(tmp_path):
     assert out["result"] == "error"
     assert "would capture variable 'x'" in out["message"]
     assert "__def" not in out["message"]
+
+
+# The capture check is not redundant with #1119's scoping fix: `def` expansion
+# substitutes argument expressions into the definition body with
+# `substitute()` / `_subst_expr()`, neither of which alpha-renames. The two
+# specs below are the two possible expansions of the rejected call in
+# `test_capture_risk_changes_the_verdict_not_only_the_names`'s `Cap` spec.
+# They disagree, so the check defends a change of meaning, not a naming
+# preference (#1139).
+CAPTURE_ALPHA_RENAMED = """
+spec Cap {
+  type R = 0..2
+  state { a: Map<R,Bool>, done: Bool }
+  init { forall r: R { a[r] = (r != 0) }  done = false }
+  def allBelow(x: R) = forall k: R where k < x { a[k] }
+  action act(r: R) { requires r > 0 and allBelow(r)  done = true }
+  invariant NeverDone { not done }
+}
+"""
+
+CAPTURE_NAIVE_SUBSTITUTION = """
+spec Cap {
+  type R = 0..2
+  state { a: Map<R,Bool>, done: Bool }
+  init { forall r: R { a[r] = (r != 0) }  done = false }
+  action act(r: R) { requires r > 0 and (forall r: R where r < r { a[r] })  done = true }
+  invariant NeverDone { not done }
+}
+"""
+
+
+def test_capture_risk_changes_the_verdict_not_only_the_names(tmp_path):
+    """#1139: the rejected call's two expansions give opposite verdicts."""
+    path = tmp_path / "cap.fsl"
+    path.write_text(textwrap.dedent("""
+        spec Cap {
+          type R = 0..2
+          state { a: Map<R,Bool>, done: Bool }
+          init { forall r: R { a[r] = (r != 0) }  done = false }
+          def allBelow(x: R) = forall r: R where r < x { a[r] }
+          action act(r: R) { requires r > 0 and allBelow(r)  done = true }
+          invariant NeverDone { not done }
+        }
+    """), encoding="utf-8")
+
+    rejected = run_check(str(path))
+    assert rejected["result"] == "error"
+    assert "would capture variable 'r'" in rejected["message"]
+
+    # Capture-avoiding expansion: the guard is never satisfiable, because
+    # a[0] is false and every r > 0 ranges over it.
+    renamed = verify(_spec(CAPTURE_ALPHA_RENAMED), 3)
+    assert renamed["result"] == "verified", renamed
+
+    # Naive (capturing) expansion: `forall r where r < r` is vacuously true,
+    # so act(1) fires and the invariant falls. This is the meaning the check
+    # refuses to produce silently.
+    captured = verify(_spec(CAPTURE_NAIVE_SUBSTITUTION), 3)
+    assert captured["result"] == "violated", captured
+    assert captured["last_action"]["params"] == {"r": 1}, captured
