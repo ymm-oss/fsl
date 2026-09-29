@@ -10,12 +10,12 @@
 //!
 //! - [`domain_sweep`]: domain kind x domain size x structural shape
 //!   (state-variable count, action count, guard, fairness, property kind).
-//!   Fifteen `(kind, size)` pairs from `docs/LANGUAGE.md` S2's four scalar
+//!   Fifteen `(kind, size)` pairs from `docs/manual/LANGUAGE.md` S2's four scalar
 //!   domain kinds, each crossed with a structural variant selected by index
 //!   so every one of the five checkable property kinds
 //!   (invariant/reachable/leadsTo/trans/terminal) is exercised at least
 //!   once (`PROPERTY_KINDS.len() == 5` divides the 15-entry axis evenly).
-//! - [`operation_sweep`]: the six partial operations `docs/LANGUAGE.md` S6
+//! - [`operation_sweep`]: the six partial operations `docs/manual/LANGUAGE.md` S6
 //!   names (`head`/`pop`/`at`/index/`divide`/`remainder`), each placed at
 //!   its documented boundary. See the module doc on `relations.rs` R6 for
 //!   why `head`/`pop`/`at`/index are generated only in action context.

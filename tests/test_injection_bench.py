@@ -16,7 +16,7 @@ PY = sys.executable
 RUST_CLI = ROOT / "rust" / "target" / "debug" / "fslc"
 
 # The measured CLI is the authoritative native binary by default
-# (docs/DESIGN-conformance-harness.md: detector calibration is measured on
+# (docs/design/DESIGN-conformance-harness.md: detector calibration is measured on
 # the authoritative native surface, not only the frozen Python reference).
 # Set FSLC_BENCH_CLI=python to measure the frozen reference instead.
 CLI = [str(RUST_CLI)] if os.environ.get("FSLC_BENCH_CLI", "native") != "python" else [PY, "-m", "fslc"]
@@ -56,7 +56,7 @@ PRIMARY_DETECTOR = {
 # Native-only, filed gap: `vacuous_implication` (rust/fsl-runtime/src/lib.rs)
 # only matches an invariant whose top-level expression is a direct `=>`; it
 # does not unwrap a `forall`-quantified implication, the shape
-# docs/DESIGN-vacuity.md:22-24 documents as the primary case. See issue #486
+# docs/design/DESIGN-vacuity.md:22-24 documents as the primary case. See issue #486
 # (distinct from #465, which covers the four vacuity kinds with no native
 # implementation at all). Only applies when CLI == native; against the
 # frozen Python reference these two files' primary detector already catches.

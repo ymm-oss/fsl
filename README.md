@@ -14,7 +14,7 @@ Specs can be written in **three layered dialects — consulting (business) / req
 chained via refinement so that requirement IDs propagate transparently across all diagnostics.
 Non-functional requirements are also supported, down to SLAs (discrete time).
 
-For the language specification, semantics, and output JSON see [`docs/LANGUAGE.md`](docs/LANGUAGE.md);
+For the language specification, semantics, and output JSON see [`docs/manual/LANGUAGE.md`](docs/manual/LANGUAGE.md);
 for a map of all the documentation see [`docs/README.md`](docs/README.md).
 
 > **A note on this repository's two implementations.** The native Rust workspace under
@@ -80,7 +80,7 @@ is not published to PyPI. The Rust workspace crates are not published to crates.
 Publishing either surface requires an explicit manifest, workflow, and documentation
 change.
 
-Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
+Maintainers cut releases using the documented [`docs/design/RELEASE.md`](docs/design/RELEASE.md)
 procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
 
 ### With mise
@@ -206,12 +206,12 @@ fslc testgen   specs/cart_v1.fsl -o test_cart_v1.py       # pytest conformance-t
 fslc testgen   specs/cart_v1.fsl --target vitest -o cart_v1.test.js
 fslc replay    specs/cart_v1.fsl --trace events.json      # conformance check of a captured full-state
                                                             # trace; events.json is a trace you capture or
-                                                            # build yourself (schema: docs/DESIGN-replay-trace.md)
+                                                            # build yourself (schema: docs/design/DESIGN-replay-trace.md)
 fslc replay    specs/cart_v1.fsl --from-log events.jsonl --mapping log_mapping.fsl
                                                             # conformance check of a production event log,
                                                             # mapped into the spec's actions/state by a
                                                             # refinement-syntax mapping file you author
-                                                            # (see docs/DESIGN-log-replay.md)
+                                                            # (see docs/design/DESIGN-log-replay.md)
 ```
 
 `testgen --target` also accepts `swift`, `kotlin`, `dart`, and `phpunit`.
@@ -229,7 +229,7 @@ fslc verify specs/order_system.fsl --depth 8     # compose: synchronized composi
 project manifest (a small TOML file naming each layer's spec, its refinement mapping, and
 an optional implementation-conformance command) that you write for your own project —
 there is no shared example manifest at the repository root, since a manifest is inherently
-project-specific. `docs/DESIGN-*.md` and the `fsl-delivery` skill describe the manifest
+project-specific. `docs/design/DESIGN-*.md` and the `fsl-delivery` skill describe the manifest
 shape; running it looks like:
 
 ```bash
@@ -281,7 +281,7 @@ fslc kernel specs/cart_v1.fsl              # normalized public Kernel JSON (sche
 
 Since the Rust crates are not published, **the supported programmatic surface is the
 CLI's JSON envelope and this Public Kernel contract**, not a library import. See
-[`docs/DESIGN-kernel-contract.md`](docs/DESIGN-kernel-contract.md).
+[`docs/design/DESIGN-kernel-contract.md`](docs/design/DESIGN-kernel-contract.md).
 
 ### Editor integration
 

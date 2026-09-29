@@ -12,7 +12,7 @@ serves a stale verdict is a soundness regression, strictly worse than no
 cache. Every function here is fail-closed -- ``cli.run_verify`` wraps every
 call into this module in a broad ``try/except`` so any bug, corrupt file, or
 unexpected input degrades to an ordinary uncached run rather than raising or
-(worse) serving a wrong result. See ``docs/DESIGN-incremental-verify.md`` for
+(worse) serving a wrong result. See ``docs/design/DESIGN-incremental-verify.md`` for
 the full design and its soundness argument.
 
 Scope (v1 / stage 1 of that design): a whole-verdict cache keyed on every

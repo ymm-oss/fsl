@@ -10,7 +10,7 @@
 //! whole-identifier display points — never inside the safe-pattern
 //! recognizer's connective/template logic. v1 adds no new FSL grammar: every
 //! target is validated against the already-checked `KernelModel`. See
-//! `docs/DESIGN-document-glossary.md`.
+//! `docs/design/DESIGN-document-glossary.md`.
 
 use std::collections::BTreeMap;
 use std::fmt;

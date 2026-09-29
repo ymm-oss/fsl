@@ -3,11 +3,11 @@
 # This profile is local audit tooling; its output is shadow evidence, never authority.
 
 doc_patterns = [
-  "docs/DESIGN-domain.md",
-  "docs/DESIGN-conformance-harness.md",
-  "docs/DESIGN-kernel-contract.md",
-  "docs/DESIGN-rust-integration.md",
-  "docs/RUST-PORTING.md",
+  "docs/design/DESIGN-domain.md",
+  "docs/design/DESIGN-conformance-harness.md",
+  "docs/design/DESIGN-kernel-contract.md",
+  "docs/design/DESIGN-rust-integration.md",
+  "docs/design/RUST-PORTING.md",
 ]
 
 source_patterns = [

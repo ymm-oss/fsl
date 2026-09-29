@@ -32,7 +32,7 @@ fn request_event(effect: &DomainEffect) -> Option<&str> {
 }
 
 /// Sagas that own `effect`: a step or a compensation `emits` the effect's
-/// request event (`docs/DESIGN-domain.md`'s canonical saga example emits a
+/// request event (`docs/design/DESIGN-domain.md`'s canonical saga example emits a
 /// request event from a `compensation` block, e.g.
 /// `InventoryReleaseRequested`, so a compensation-only emitter must count as
 /// owning too). `DESIGN-effect.md` allows a `reliable` effect's outbox

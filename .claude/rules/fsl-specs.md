@@ -1,7 +1,7 @@
 ---
 paths:
   - "**/*.fsl"
-  - "docs/LANGUAGE.md"
+  - "docs/manual/LANGUAGE.md"
   - "skills/fsl/**"
 ---
 

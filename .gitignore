@@ -44,7 +44,7 @@ docs/index.bleve/
 *.literate.fsl
 
 # Relational Design plugin local trace/session state — working scratch for the
-# design process, not a repo deliverable (the decisions land in docs/DESIGN-*.md)
+# design process, not a repo deliverable (the decisions land in docs/design/DESIGN-*.md)
 .relational-design/
 
 # Codex transient full command logs

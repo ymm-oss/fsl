@@ -76,5 +76,5 @@ the system requirements and the business policy" is shown in a single output.
 - The world you verify can be small (3 contracts). Bugs reproduce even in a small
   world.
 - To go further: you can also write an SLA ("present within K steps of the
-  request") → `docs/DESIGN-nfr.md`; the full picture of the 3-layer structure →
+  request") → `docs/design/DESIGN-nfr.md`; the full picture of the 3-layer structure →
   `examples/layers/`.

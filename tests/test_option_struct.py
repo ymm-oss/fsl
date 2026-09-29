@@ -159,13 +159,13 @@ spec SomeEq {
 
 # #1132: `x is some(v)` binds `v`; it never compares against an existing `v`.
 # When `v` is a fresh name the binding reaches the action body (the
-# docs/LANGUAGE.md section 9 idiom). When it collides with an action
+# docs/manual/LANGUAGE.md section 9 idiom). When it collides with an action
 # parameter the shadowing is confined to the guard expression and the
 # parameter is restored for the body -- `_eval_requires` in `fslc/bmc.py`
 # copies the guard bindings back only for names absent from `param_binds`.
-# This is the same confinement rule docs/LANGUAGE.md already states for
+# This is the same confinement rule docs/manual/LANGUAGE.md already states for
 # quantifier binders. The Rust port currently disagrees; see
-# docs/DESIGN-pattern-binding-scope.md.
+# docs/design/DESIGN-pattern-binding-scope.md.
 IS_PATTERN_FRESH_BINDING_REACHES_BODY = """
 spec Idiom {
   type R = 0..1

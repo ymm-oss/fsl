@@ -15,7 +15,7 @@ MANIFESTS = (
     ROOT / "tools/referance/domain-generate-mismatch-control.json",
 )
 REQUIRED_SOURCE_ARTIFACTS = {
-    "docs/DESIGN-domain.md",
+    "docs/design/DESIGN-domain.md",
     "examples/domain/order_functional_ddd.fsl",
     "src/fslc/cli.py",
     "src/fslc/domain_check.py",
@@ -27,8 +27,8 @@ REQUIRED_SOURCE_ARTIFACTS = {
     "tools/referance/domain-probe-adapter.py",
 }
 REQUIRED_CANDIDATE_ARTIFACTS = {
-    "docs/DESIGN-domain.md",
-    "docs/DESIGN-kernel-contract.md",
+    "docs/design/DESIGN-domain.md",
+    "docs/design/DESIGN-kernel-contract.md",
     "rust/Cargo.lock",
     "rust/Cargo.toml",
     "rust/fsl-core/Cargo.toml",

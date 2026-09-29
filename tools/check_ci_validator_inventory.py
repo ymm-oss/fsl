@@ -5,7 +5,7 @@
 
 Scope, since issue #761 stage 2: `tests/test_*.py` pytest modules and
 `tools/check_rust_*.py` frozen-Python/Rust parity harnesses (the family
-`docs/DESIGN-ci-validator-inventory.md`'s "Scope boundaries" originally
+`docs/design/DESIGN-ci-validator-inventory.md`'s "Scope boundaries" originally
 reserved as out of scope for slice 1).
 
 Guarantee boundary, load-bearing for why `--exempt path:reason` is an
@@ -18,7 +18,7 @@ accumulate silently, unclassified" (issue #761's own root problem: 17
 `tools/check_rust_*.py` harnesses existed with nobody having recorded why).
 Whether a recorded reason accurately describes the module -- the F1-F8
 precondition analysis, native-owner cross-referencing, and retirement
-readiness -- is `docs/RUST-PORTING.md`'s job, a human-maintained document
+readiness -- is `docs/design/RUST-PORTING.md`'s job, a human-maintained document
 this tool does not read and cannot verify.
 
 Wiring-detection scope, deliberate, shared by PYTEST_PATH and
@@ -161,7 +161,7 @@ def default_exempt_reason(path: str) -> str:
     # frozen-python-compatibility for a tools/check_rust_*.py path: getting
     # that distinction right needs the classification behind issue #761's
     # table, which a caller is expected to supply via explicit --exempt
-    # pairs (see docs/DESIGN-ci-validator-inventory.md) rather than rely on
+    # pairs (see docs/design/DESIGN-ci-validator-inventory.md) rather than rely on
     # this guess.
     if path in HOOK_LOCAL_TESTS:
         return "hook-local"

@@ -3,7 +3,7 @@
 
 //! The TSG vocabulary must not depend on which input form named the spec.
 //!
-//! `docs/DESIGN-analysis.md` §2 lists the stable node and edge kinds without
+//! `docs/design/DESIGN-analysis.md` §2 lists the stable node and edge kinds without
 //! conditioning them on input form, but the project-manifest path built each
 //! layer with `fsl_tools::build_tsg` alone. `build_tsg` sees only the lowered
 //! `KernelModel`, and `acceptance`/`forbidden` cases have no lowered form, so

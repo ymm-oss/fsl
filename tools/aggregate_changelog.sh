@@ -4,7 +4,7 @@
 #
 # Aggregates checked-in changelog fragments under `changelog.d/` into
 # `CHANGELOG.md`'s `[Unreleased]` section at release time, and enforces the
-# six fail-closed controls docs/DESIGN-changelog-fragments.md requires of
+# six fail-closed controls docs/design/DESIGN-changelog-fragments.md requires of
 # this mechanism (issue #737). Stdlib-only (bash + coreutils), matching the
 # `merge readiness / automation contracts` lane's dependency contract
 # (tools/check-merge-readiness.sh's own comment) and this repository's
@@ -64,9 +64,9 @@
 # way one still in current-era use is, and nothing in this mechanism's
 # post-Rust history has needed `removed`. It can be added the same way, from
 # real recent usage, if that changes. Growing the set further is still a
-# contract change to docs/DESIGN-changelog-fragments.md, the same way growing
+# contract change to docs/design/DESIGN-changelog-fragments.md, the same way growing
 # tools/check-product-gate-scope.sh's exempt-path list is (see
-# docs/DESIGN-ci.md, "Agent-configuration exemption"): name the new word,
+# docs/design/DESIGN-ci.md, "Agent-configuration exemption"): name the new word,
 # show it is measured from real, recent usage, and update
 # changelog.d/README.md in the same change.
 #
@@ -100,7 +100,7 @@
 #       Aggregates every fragment into a new `## [X.Y.Z] - YYYY-MM-DD`
 #       section (preceded by whatever the existing `[Unreleased]` body still
 #       holds, moved verbatim -- the migration pull request deliberately
-#       left it there, see docs/DESIGN-changelog-fragments.md), verifies
+#       left it there, see docs/design/DESIGN-changelog-fragments.md), verifies
 #       conservation (control 5), rewrites CHANGELOG.md, and deletes the
 #       consumed fragments -- all before returning, so the authority
 #       handover from fragment to version section is a single atomic step
@@ -543,7 +543,7 @@ strip_first_section() {
 }
 
 # Drops a trailing contiguous block of Markdown link-reference lines
-# ("[X]: url"), which docs/RELEASE.md step 7 updates on every release.
+# ("[X]: url"), which docs/design/RELEASE.md step 7 updates on every release.
 strip_link_ref_tail() {
   awk '
     { lines[NR] = $0 }
@@ -559,7 +559,7 @@ strip_link_ref_tail() {
 
 is_product_surface_path() {
   case "$1" in
-    rust/*|src/fslc/*|specs/*|examples/*|docs/LANGUAGE*|skills/fsl/references/*) return 0 ;;
+    rust/*|src/fslc/*|specs/*|examples/*|docs/manual/LANGUAGE*|skills/fsl/references/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -581,7 +581,7 @@ is_product_surface_path() {
 # alongside an unrelated change to a new `rust/` file with no fragment,
 # passed `check-pr`. Two non-adversarial diffs reached the same gap: a
 # genuine release commit carrying an unrelated product change in the same
-# commit (`docs/RELEASE.md` bundles steps 4-10 into one), and a branch whose
+# commit (`docs/design/RELEASE.md` bundles steps 4-10 into one), and a branch whose
 # `BASE_SHA` predates a release that has since landed on `main`.
 #
 # This set is deliberately not part of is_product_surface_path -- that
@@ -601,7 +601,7 @@ is_product_surface_path() {
 # `is_product_surface_path` branch -- leaves exactly the three paths below.
 # `CHANGELOG.md` is excluded because it is governed separately, by
 # classify_direct_edit/control 4, not by this control. `7b8607a`
-# additionally touched `docs/RELEASE.md`, and every release touches
+# additionally touched `docs/design/RELEASE.md`, and every release touches
 # `editors/vscode/package.json` and `editors/vscode/package-lock.json`; none
 # of those three is a product surface under is_product_surface_path, so none
 # of them ever reaches this predicate. Listing them here anyway would be
@@ -611,7 +611,7 @@ is_product_surface_path() {
 # comment 2026-08-08, fourth round).
 #
 # A maintainer must add an exact path here whenever either side of that
-# filter moves: a docs/RELEASE.md release-commit step that starts touching a
+# filter moves: a docs/design/RELEASE.md release-commit step that starts touching a
 # new product-surface path, or an is_product_surface_path that widens to
 # cover a path releases already touch (`editors/vscode/*` is the live
 # candidate). Otherwise every future release commit starts failing its own
@@ -650,9 +650,9 @@ is_top_level_fragment_path() {
 # $1 is the direct-edit classification control 4 (classify_direct_edit,
 # below) already computed for this same diff: "release-move" or "unchanged".
 #
-# Release exclusion (docs/DESIGN-changelog-fragments.md, control 1;
+# Release exclusion (docs/design/DESIGN-changelog-fragments.md, control 1;
 # corrected, review finding S2-1, #737, comment 2026-08-07, second round):
-# the release commit itself (docs/RELEASE.md steps 4-7, committed together
+# the release commit itself (docs/design/RELEASE.md steps 4-7, committed together
 # in step 10) bumps product-surface files (`rust/Cargo.toml`,
 # `rust/Cargo.lock`, the domain characterization baseline) and *deletes* the
 # fragments it aggregates -- it never *adds* one, so the rule as stated
@@ -709,7 +709,7 @@ is_top_level_fragment_path() {
 # exclusion then waived every product-surface path riding along in that same
 # diff -- a genuinely unrelated `rust/` change with no fragment included.
 # Two non-adversarial diffs reached the identical gap without any forgery: a
-# real release commit that also carries an unrelated product change (docs/
+# real release commit that also carries an unrelated product change (docs/design/
 # RELEASE.md bundles steps 4-10 into one commit), and a branch whose
 # `BASE_SHA` predates a release that has since landed on `main`. Each
 # product-surface path is now checked against is_release_bump_path
@@ -786,7 +786,7 @@ classify_product_diff() {
 # ---- control 4b: direct-edit-forbidden, with the single release exclusion -
 
 # Pure classifier over two whole-file CHANGELOG.md snapshots. See
-# docs/DESIGN-changelog-fragments.md, control 4, and the migration
+# docs/design/DESIGN-changelog-fragments.md, control 4, and the migration
 # correction: the only excluded diff shape left is the release move (the
 # migration pull request does not touch the body at all). Prints
 # "unchanged" on stdout if the `[Unreleased]` body's raw text and the
@@ -1043,7 +1043,7 @@ release() {
   # with no product-facing content since the previous release is a real
   # release shape, and this command must agree with check-pr's release
   # exclusion (classify_product_diff, tools/aggregate_changelog.sh), which
-  # no longer requires a deleted fragment either -- see docs/RELEASE.md,
+  # no longer requires a deleted fragment either -- see docs/design/RELEASE.md,
   # step 7. `no-fragments-to-aggregate` previously hard-failed here, which
   # made step 7 impossible to run for that release shape at all. Guarded
   # with `-gt 0` before the loop below (rather than only inside it) because
@@ -1432,7 +1432,7 @@ selftest_control1() {
 
   # Release exclusion (review finding S2-1, #737, comment 2026-08-07, second
   # round): the release commit bumps product-surface files and only
-  # *deletes* fragments (docs/RELEASE.md steps 4-7, one commit per step 10);
+  # *deletes* fragments (docs/design/RELEASE.md steps 4-7, one commit per step 10);
   # it never adds one. classify_product_diff no longer decides this for
   # itself from the diff's file statuses -- it takes control 4's own
   # classification (classify_direct_edit, via compute_direct_edit_classification)
@@ -1685,7 +1685,7 @@ selftest_control4() {
   # End-to-end (review finding S2-1, #737, comment 2026-08-07): a full
   # release pull request -- product-surface changes (rust/Cargo.toml,
   # rust/Cargo.lock) and fragment deletions in the same diff, produced by
-  # the real `release` subcommand, exactly as docs/RELEASE.md steps 4-10
+  # the real `release` subcommand, exactly as docs/design/RELEASE.md steps 4-10
   # commit it. Before this fix, this failed
   # `changelog-fragment-missing: rust/Cargo.lock rust/Cargo.toml`, and the
   # documented workaround of adding a dummy fragment only moved the failure
@@ -1993,7 +1993,7 @@ selftest_release_exclusion() {
   # full release move (body moved verbatim into the new section, exactly the
   # shape classify_direct_edit's own validation requires) that also carries
   # an unrelated product-surface change with no fragment in the same commit,
-  # the way docs/RELEASE.md steps 4-10 bundle a release into one commit.
+  # the way docs/design/RELEASE.md steps 4-10 bundle a release into one commit.
   local repo_h1c="$tmp/h1-handforged-release-plus-unrelated"
   mkdir -p "$repo_h1c/rust" "$repo_h1c/changelog.d"
   (

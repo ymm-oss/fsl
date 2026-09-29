@@ -9,8 +9,8 @@ paths:
 # Native Rust architecture rules
 
 - The Rust workspace is authoritative. Before changing it, read
-  [`DESIGN-rust-components.md`](../../docs/DESIGN-rust-components.md) and
-  [`DESIGN-rust-component-internals.md`](../../docs/DESIGN-rust-component-internals.md). They own
+  [`DESIGN-rust-components.md`](../../docs/design/DESIGN-rust-components.md) and
+  [`DESIGN-rust-component-internals.md`](../../docs/design/DESIGN-rust-component-internals.md). They own
   the accepted crate and in-crate responsibility boundaries; do not copy Python structure.
 - Preserve the owner map: `fsl-syntax` owns source fidelity; `fsl-core` owns checked models and
   Public Kernel; `fsl-runtime` owns concrete Monitor/replay/BFS semantics; `fsl-solver` owns the

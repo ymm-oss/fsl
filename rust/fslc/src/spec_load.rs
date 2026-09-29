@@ -22,7 +22,7 @@ use serde_json::{Map, Value, json};
 /// A spec-loading failure that keeps the diagnostic class the frontend
 /// determined instead of flattening it to a message string.
 ///
-/// `docs/DESIGN-v1.md` §7.2 fixes the error classification as a closed set and
+/// `docs/design/DESIGN-v1.md` §7.2 fixes the error classification as a closed set and
 /// guarantees `loc` for `parse`. Flattening a surface-parse failure into a
 /// `String` erased that class, so every command loading a spec through
 /// `load_kernel_model` re-classified a syntax error as `semantics` with no
@@ -51,7 +51,7 @@ pub enum SpecLoadError {
 pub struct SemanticDiagnostic {
     pub message: String,
     pub loc: Option<Value>,
-    /// Whether the failure was resolving a name, which `docs/DESIGN-v1.md`
+    /// Whether the failure was resolving a name, which `docs/design/DESIGN-v1.md`
     /// §7.2 classifies `kind:"name"` (issue 565).
     pub name_resolution: bool,
     pub diagnostic_code: Option<&'static str>,

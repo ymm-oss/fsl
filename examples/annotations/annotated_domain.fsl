@@ -8,8 +8,8 @@
 // by rust/fsl-syntax/tests/dialect_declaration_annotations.rs and
 // rust/fsl-core/tests/typed_annotations.rs instead of this file, to
 // keep this example's saga-free reachability easy to verify by
-// inspection. See docs/DESIGN-annotations.md's "domain/db/ai nested
-// declaration syntax" section and docs/LANGUAGE.md §13.1.
+// inspection. See docs/design/DESIGN-annotations.md's "domain/db/ai nested
+// declaration syntax" section and docs/manual/LANGUAGE.md §13.1.
 //
 // Native-only: the frozen Python reference does not parse `@...` before
 // a domain nested declaration, so this file is excluded from the

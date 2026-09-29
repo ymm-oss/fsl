@@ -6,7 +6,7 @@
 // `migration` and to a `rule` line inside `check compatibility { ... }`.
 // Direct DB lowering clones the typed annotation onto the generated action or
 // invariant without a generated-source/render/reparse round trip — see
-// docs/DESIGN-annotations.md's "domain/db/ai nested declaration syntax"
+// docs/design/DESIGN-annotations.md's "domain/db/ai nested declaration syntax"
 // section.
 //
 // Native-only: the frozen Python reference does not parse `@...` before

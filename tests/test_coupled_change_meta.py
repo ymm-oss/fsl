@@ -20,13 +20,14 @@ from fslc.grammar import GRAMMAR
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+DESIGN_DOCS = DOCS / "design"
 LANGUAGE_FEATURE_CHECKLISTS = (
     "CONTRIBUTING.md",
     ".claude/skills/add-language-feature/SKILL.md",
     ".claude/agents/fsl-coupled-change-reviewer.md",
 )
 LANGUAGE_FEATURE_CHECKLIST_MEMBERS = (
-    "docs/LANGUAGE.ja.md",
+    "docs/manual/LANGUAGE.ja.md",
     "rust/fsl-lsp/src/index.rs",
     "targeted role/scope test",
 )
@@ -116,7 +117,7 @@ COMMAND_DESIGN_DOCS = {
 def test_design_docs_readme_map_bidirectional():
     readme = (DOCS / "README.md").read_text(encoding="utf-8")
     linked = set(re.findall(r"DESIGN-[A-Za-z0-9-]+\.md", readme))
-    on_disk = {p.name for p in DOCS.glob("DESIGN-*.md")}
+    on_disk = {p.name for p in DESIGN_DOCS.glob("DESIGN-*.md")}
     missing_on_disk = linked - on_disk
     unlinked = on_disk - linked
     assert not missing_on_disk, f"docs/README.md links a DESIGN doc that doesn't exist: {missing_on_disk}"
@@ -133,7 +134,7 @@ def test_top_level_dialects_map_to_design_docs():
     )
     for alt, docs in TOP_DEF_DESIGN_DOCS.items():
         for doc in docs:
-            assert (DOCS / doc).exists(), f"{alt} -> {doc}, but {doc} does not exist"
+            assert (DESIGN_DOCS / doc).exists(), f"{alt} -> {doc}, but {doc} does not exist"
 
 
 def test_cli_commands_map_to_design_docs():
@@ -148,4 +149,4 @@ def test_cli_commands_map_to_design_docs():
         if isinstance(docs, str):
             continue
         for doc in docs:
-            assert (DOCS / doc).exists(), f"{command} -> {doc}, but {doc} does not exist"
+            assert (DESIGN_DOCS / doc).exists(), f"{command} -> {doc}, but {doc} does not exist"

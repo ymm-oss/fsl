@@ -1,5 +1,5 @@
 # Duration-aware pinning for `rust-tests` shards (issue #720 Finding 1;
-# docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning", which also
+# docs/design/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning", which also
 # records the cost model, the reachable floor, and when this file must be
 # edited). Each non-comment, non-blank line is "<shard> <binary-id>", 1-based
 # shard index <= the shard total cargo-nextest is invoked with (3 in

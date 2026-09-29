@@ -30,7 +30,7 @@ thin spec) and **inventing** a rule the source never stated. Hold both ends:
   `@requirement("REQ-CHECKOUT-001", "...")` on a declaration that links to an ID
   a `requirement` block owns, with a `MODEL-`/`ASSUME-`prefixed id for an
   explicit modeling choice. Those two are the canonical forms
-  (`docs/DESIGN-id-policy.md`); the `"REQ-1: text"` string slot is non-canonical
+  (`docs/design/DESIGN-id-policy.md`); the `"REQ-1: text"` string slot is non-canonical
   migration input, so never write it. An untagged declaration is an ungrounded
   guess, not a style nit.
 - **Do not invent to reach green.** If `check`/`verify` needs a guard, bound,

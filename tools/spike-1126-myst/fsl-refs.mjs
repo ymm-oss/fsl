@@ -9,7 +9,7 @@
 //   role       -- report from inside the role's run(), with fatal = true
 //   transform  -- report from a document-stage transform, with fatal = true
 // The pair measures the claim that `fatal` is honoured in a transform but not
-// in a role.  See docs/DESIGN-myst-spike.md.
+// in a role.  See docs/design/DESIGN-myst-spike.md.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -73,7 +73,7 @@ function walk(node, out) {
 
 // The link-shaped notation: [text](../specs/cart_v1.fsl#action:add_to_cart).
 // Unlike the role, GitHub renders this as an ordinary link, so the same source
-// is correct in both renderers.  Measured: docs/DESIGN-myst-spike.md.
+// is correct in both renderers.  Measured: docs/design/DESIGN-myst-spike.md.
 function linkNodes(node, out) {
   if (!node || typeof node !== 'object') return out;
   if (node.type === 'link') out.push(node);

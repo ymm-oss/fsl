@@ -8,7 +8,7 @@
 //! and every `satisfies` naming one --- was parsed, accepted and dropped.
 //! `check` therefore answered `ok` for a policy pointing at a control the
 //! document never declared, the same defect class #1109 closed for `with` /
-//! `when` / `set`. `docs/DESIGN-dialects.md` §3.2 already promised both
+//! `when` / `set`. `docs/design/DESIGN-dialects.md` §3.2 already promised both
 //! checks, and `src/fslc/dialects.py` already implemented them, so this is a
 //! port gap rather than a narrowing of the language.
 //!
@@ -91,7 +91,7 @@ fn unknown_control_references_are_positioned_errors() {
 }
 
 /// A declared control nothing satisfies is an `unused_control` warning, the
-/// one `docs/DESIGN-dialects.md` §3.2 promises and `src/fslc/dialects.py`
+/// one `docs/design/DESIGN-dialects.md` §3.2 promises and `src/fslc/dialects.py`
 /// already emits. The spec still checks, so the warning is the whole signal:
 /// asserting its `name` and `loc` is what keeps it actionable.
 #[test]

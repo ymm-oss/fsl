@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Negative controls for the #465 residual: the three solver-dependent
-//! `docs/DESIGN-vacuity.md` §2 lanes — `always_true_requires`,
+//! `docs/design/DESIGN-vacuity.md` §2 lanes — `always_true_requires`,
 //! `tautology_over_frozen`, `urgency_freeze` — were entirely unimplemented in
 //! native `fslc`, so a hollow spec whose only emptiness was one of them came
 //! back `result:"verified"`/exit 0 even under `--vacuity error`. Each lane is
@@ -184,7 +184,7 @@ fn state_changing_urgency_cannot_hide_a_deadline_that_never_advances() {
 }
 
 /// Non-firing control: the documented deadline-urgency pattern must stay
-/// clean, otherwise the lane punishes the shape `docs/LANGUAGE.md` recommends.
+/// clean, otherwise the lane punishes the shape `docs/manual/LANGUAGE.md` recommends.
 #[test]
 fn the_deadline_urgency_pattern_is_not_reported_as_a_freeze() {
     let (output, status) = verify(DEADLINE_PATTERN, "4", "error");
@@ -339,7 +339,7 @@ fn a_coverage_false_action_does_not_produce_always_true_requires() {
 /// Non-firing control: a compose-synchronized action inherits `a > 0` from
 /// both `bank.submit_deposit` and `audit.deposit`. That duplication is the
 /// intended "each component defends its own contract" design, not removable
-/// redundancy (`docs/DESIGN-vacuity.md` §2), and every clause is checked in
+/// redundancy (`docs/design/DESIGN-vacuity.md` §2), and every clause is checked in
 /// the right context when the component spec is verified on its own.
 #[test]
 fn a_synchronized_compose_action_is_not_flagged_for_duplicate_guards() {
@@ -362,7 +362,7 @@ fn a_synchronized_compose_action_is_not_flagged_for_duplicate_guards() {
 /// The lanes describe the model, not the exploration, so `--engine explicit`
 /// (solver-free BFS) and `--engine induction` must report the same kind as
 /// bounded model checking. An engine-dependent vacuity verdict would be
-/// exactly the exit-code divergence `docs/DESIGN-rust-port.md` forbids.
+/// exactly the exit-code divergence `docs/design/DESIGN-rust-port.md` forbids.
 #[test]
 fn every_engine_reports_the_same_vacuity_kind() {
     for (fixture, depth, kind) in [

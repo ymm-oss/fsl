@@ -666,7 +666,7 @@ fn requirements_dialect_claims_are_source_backed() {
 #[test]
 fn unknown_provenance_is_reported_not_guessed() {
     // The internal origin registry is currently sparse outside the domain
-    // dialect (docs/DESIGN-kernel-origin-v2.md), so most claims fall back to
+    // dialect (docs/design/DESIGN-kernel-origin-v2.md), so most claims fall back to
     // their checked declaration's own span (a real, non-guessed signal — see
     // `provenance_for`). `terminal` is the one claim kind with no span of its
     // own (`KernelModel::terminal` is a bare `Expr`), so stripping the origin

@@ -146,7 +146,7 @@ impl ComponentNames {
 /// Re-anchor a failure that happened *inside* a component onto the parent's
 /// `use ... from` declaration (issue #567).
 ///
-/// `loc` is `{line, column}` with no `file` (`docs/DESIGN-v1.md`), so it can
+/// `loc` is `{line, column}` with no `file` (`docs/design/DESIGN-v1.md`), so it can
 /// only ever mean "a position in the file the envelope names". A component's
 /// line and column reported against the parent's path therefore points at
 /// whatever happens to sit there — for the compose error gallery fixture, a
@@ -173,7 +173,7 @@ fn component_error(
         // Not propagated from `error`. What this value reports is a compose-level
         // failure to load a component, anchored at the parent's `use`
         // declaration — it is not itself a name-resolution failure, and
-        // `docs/DESIGN-v1.md` §8's repair branch for `name` ("add a declaration
+        // `docs/design/DESIGN-v1.md` §8's repair branch for `name` ("add a declaration
         // or change a type") would be wrong advice at that location. The
         // component's own classification survives inside the message, together
         // with its path and position (issue 565's flag, issue 567's anchoring).
@@ -1044,7 +1044,7 @@ fn sync_action(
                     action.span,
                 )
             })?;
-        // Fairness is not inherited through synchronization (docs/LANGUAGE.md
+        // Fairness is not inherited through synchronization (docs/manual/LANGUAGE.md
         // "Compose"): capture the constituent's own `fair` marker here, before
         // `rewrite_component_item` and the composite's single `fair: action.fair`
         // below discard it, so a non-fair composite that references a fair

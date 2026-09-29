@@ -5,9 +5,9 @@
 //! #332): overlays saved external verification evidence onto a generated
 //! requirements document, at requirement granularity, using the exact
 //! assurance vocabulary and classifier `fslc ledger` already established
-//! (issue #171, `docs/DESIGN-assurance-classes.md`,
+//! (issue #171, `docs/design/DESIGN-assurance-classes.md`,
 //! `rust/fsl-tools/src/ledger.rs`) — this module adds no new classification
-//! logic of its own. See `docs/DESIGN-document-evidence-overlay.md`.
+//! logic of its own. See `docs/design/DESIGN-document-evidence-overlay.md`.
 //!
 //! v1 is evidence-only: there is no live verify pass here (that stays
 //! `fslc ledger`'s job; the document's own determinism contract — the same

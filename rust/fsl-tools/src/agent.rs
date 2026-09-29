@@ -9,7 +9,7 @@
 //! parent's declared boundary via explicit `grant`, and runtime collaboration
 //! is declared separately via `orchestration` edges. A `grant` that exceeds
 //! the parent boundary is a check-time `AgentError` (semantics error,
-//! `docs/LANGUAGE.md` §13.6), distinct from the six `agent_structural_violation`
+//! `docs/manual/LANGUAGE.md` §13.6), distinct from the six `agent_structural_violation`
 //! finding kinds below, which are reported findings, not parse/validation
 //! failures.
 
@@ -476,7 +476,7 @@ fn reachability(
 }
 
 /// Compute the six documented `agent_structural_violation` finding kinds from
-/// `docs/DESIGN-ai-hard.md` "Recursive Agent Composition" over an
+/// `docs/design/DESIGN-ai-hard.md` "Recursive Agent Composition" over an
 /// already-validated agent tree.
 #[allow(clippy::too_many_lines)]
 fn agent_findings(

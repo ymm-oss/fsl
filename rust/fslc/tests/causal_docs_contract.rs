@@ -44,7 +44,7 @@ fn skill_reference_states_the_review_only_hard_rule() {
 
 #[test]
 fn language_references_document_the_profile_in_both_languages() {
-    for relative in ["docs/LANGUAGE.md", "docs/LANGUAGE.ja.md"] {
+    for relative in ["docs/manual/LANGUAGE.md", "docs/manual/LANGUAGE.ja.md"] {
         let text = normalized(relative);
         assert!(
             text.contains("fslc causal check"),
@@ -55,8 +55,8 @@ fn language_references_document_the_profile_in_both_languages() {
             "{relative} must document the do_not_assume contract"
         );
     }
-    let english = normalized("docs/LANGUAGE.md");
+    let english = normalized("docs/manual/LANGUAGE.md");
     assert!(english.contains("FSL never proves real-world causality"));
-    let japanese = normalized("docs/LANGUAGE.ja.md");
+    let japanese = normalized("docs/manual/LANGUAGE.ja.md");
     assert!(japanese.contains("FSL は現実世界の因果関係を証明しません"));
 }

@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Negative controls for #465: native `--vacuity` must select over the full
-//! documented 8-kind lane set (`docs/LANGUAGE.md` §15,
+//! documented 8-kind lane set (`docs/manual/LANGUAGE.md` §15,
 //! `fsl_core::VACUITY_KINDS` -- `vacuity_probe_truncated` joined the other
 //! seven in issue #729), not just the two kinds spelled `vacuous_*`.
 //! This file exercises the `vacuous_leadsto` lane end to end through the CLI

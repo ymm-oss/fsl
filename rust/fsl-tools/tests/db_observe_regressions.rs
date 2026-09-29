@@ -82,7 +82,7 @@ fn observe_rejects_unknown_capability() {
 }
 
 // #505 control: a well-formed envelope/event must still validate and
-// evaluate normally (this is the shape `docs/DESIGN-db.md` documents).
+// evaluate normally (this is the shape `docs/design/DESIGN-db.md` documents).
 #[test]
 fn observe_accepts_well_formed_envelope() {
     let result = observe(

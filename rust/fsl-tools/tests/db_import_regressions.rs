@@ -12,7 +12,7 @@ fn warning_kinds(warnings: &[serde_json::Value]) -> Vec<&str> {
         .collect()
 }
 
-// `docs/DESIGN-db.md` "Importer Boundary" documents DROP COLUMN as
+// `docs/design/DESIGN-db.md` "Importer Boundary" documents DROP COLUMN as
 // supported, but no branch ever produced a `drop` migration op for it.
 #[test]
 fn import_sql_supports_drop_column() {

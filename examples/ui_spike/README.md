@@ -2,7 +2,7 @@
 
 A spike for issue #9 (write screen flows in plain fsl, and confirm verification and
 refinement to the requirements layer). Findings, an expansion-rule proposal, and
-go/no-go are in [`../../docs/DESIGN-ui.md`](../../docs/DESIGN-ui.md).
+go/no-go are in [`../../docs/design/DESIGN-ui.md`](../../docs/design/DESIGN-ui.md).
 
 | File | Contents |
 |---|---|

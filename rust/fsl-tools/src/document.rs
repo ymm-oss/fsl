@@ -8,7 +8,7 @@
 //! (`schemas/fslc/document/requirement-claims.v1.schema.json`). RCIR is not a
 //! second semantics: it embeds the validated Public Kernel v2 contract and
 //! attaches document roles and traceability to stable semantic targets.
-//! See `docs/DESIGN-document-requirement-claim-ir.md`.
+//! See `docs/design/DESIGN-document-requirement-claim-ir.md`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

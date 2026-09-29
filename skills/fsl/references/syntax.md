@@ -625,7 +625,7 @@ time (`inconclusive`, exit 1), not warned past. Eval statuses are
 `dataset_invalid`, `evaluator_untrusted`, `insufficient_samples`,
 `inconclusive`, `statistically_unsupported`, `statistically_supported`; the
 priority order and the eval-record JSONL schema live in
-`docs/DESIGN-stochastic.md`.
+`docs/design/DESIGN-stochastic.md`.
 
 Composite spec (a separate top-level form):
 

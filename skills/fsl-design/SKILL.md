@@ -51,7 +51,7 @@ for a contract decision.
    requirements spec owns the ID (`requirement REQ-CHECKOUT-001`); the design
    spec only links to it. Use a `MODEL-`/`ASSUME-`prefixed id for a design
    choice the requirements do not state. **Never use the `"REQ-1: text"` string
-   slot** — `docs/DESIGN-id-policy.md` classifies it as non-canonical migration
+   slot** — `docs/design/DESIGN-id-policy.md` classifies it as non-canonical migration
    input and `fslc lint` reports it as `legacy_string_metadata`.
 4. Verify the design itself with `fslc check`, `fslc verify`, and usually
    `fslc verify --engine induction`. Run `fslc lint <file>` as the tagging

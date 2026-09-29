@@ -6,7 +6,7 @@
 //! the user chose -- must not be able to abort the process. An abort returns
 //! neither the JSON envelope nor an exit code, so it leaves the outcome
 //! projection contract entirely: it is the one failure mode the delivery layer
-//! cannot even report. See `docs/DESIGN-rust-component-internals.md` 4.4.
+//! cannot even report. See `docs/design/DESIGN-rust-component-internals.md` 4.4.
 //!
 //! The accepted mechanism is segmented stack growth, not a depth limit. A limit
 //! would put an arbitrary constant into the language contract and reject

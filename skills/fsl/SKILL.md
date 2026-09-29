@@ -7,7 +7,7 @@ description: Shared FSL language and verifier reference for writing, checking, v
 
 FSL is a language not present in training data. **Do not write from memory;
 follow this guide.** Use the reference index below to read only the topical
-material needed for the task. Within the repository, `docs/LANGUAGE.md` is the
+material needed for the task. Within the repository, `docs/manual/LANGUAGE.md` is the
 complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
 form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
 
@@ -57,7 +57,7 @@ through `python -m fslc`.
 External compilers and generators must use `fslc kernel <spec>` rather than the
 Python AST or source re-parsing. Validate independent implementations with
 `fslc conformance <spec> --depth N`; versioning and rollback semantics are in
-`docs/DESIGN-kernel-contract.md`.
+`docs/design/DESIGN-kernel-contract.md`.
 
 Most commands print a single JSON document on stdout; `fslc ledger` and
 `fslc document generate` print Markdown instead, so gate on the exit code, not
@@ -80,7 +80,7 @@ failure to 1 instead. So branch on the exit code being non-zero, and read
 `refinement_failed`, `impl_violated`, `sweep_failed`, `sweep_inconclusive` and `observed_mismatch`,
 and the dialect commands add their own (`document check`'s
 `document_drifted`, `ai replay`'s `replay_nonconformant`, `ai eval`'s gate
-statuses). `docs/LANGUAGE.md` lists the verify-family values with each one's
+statuses). `docs/manual/LANGUAGE.md` lists the verify-family values with each one's
 producing command.
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
@@ -190,7 +190,7 @@ not use it to hide an agent's uncertainty, a missing source requirement, or a
 failed formalization guess. The declaration has one tag slot, so an
 `undecided:` declaration cannot simultaneously carry an `ID: text` tag; reports
 derive affected IDs from state dependencies. Full syntax and limits are in
-the [syntax reference](references/syntax.md) and `docs/DESIGN-undecided.md`. This feature belongs to the
+the [syntax reference](references/syntax.md) and `docs/design/DESIGN-undecided.md`. This feature belongs to the
 native Rust CLI and is intentionally not added to the frozen Python reference.
 
 ## Standard workflow (single spec; treat proved as the standard)
@@ -207,7 +207,7 @@ native Rust CLI and is intentionally not added to the frozen Python reference.
    `covers REQ-SCOPE-001 "..."` as the equivalent dialect sugar, and a
    `MODEL-`/`ASSUME-`prefixed id for modeling intent rather than a source
    requirement. The `invariant X "REQ-1: text" { ... }` string slot is
-   non-canonical migration input (`docs/DESIGN-id-policy.md`); `--strict-tags`
+   non-canonical migration input (`docs/design/DESIGN-id-policy.md`); `--strict-tags`
    still counts it as tagged, so add `fslc lint file.fsl`, which exits 1 with
    `legacy_string_metadata` plus a machine-applicable replacement.
 2. `fslc verify file.fsl --depth 8` → see the [repair protocol](references/errors.md)

@@ -3,9 +3,9 @@
 //! Every spec-reading command must classify a syntax error the way `check`
 //! does.
 //!
-//! `docs/DESIGN-v1.md` §7.2 fixes the error classification as a closed set and
-//! guarantees `loc` for `parse`; `docs/DESIGN-rust-port.md` requires the JSON
-//! envelope to be preserved; `docs/DESIGN-rust-lsp.md` promises that "CLI and
+//! `docs/design/DESIGN-v1.md` §7.2 fixes the error classification as a closed set and
+//! guarantees `loc` for `parse`; `docs/design/DESIGN-rust-port.md` requires the JSON
+//! envelope to be preserved; `docs/design/DESIGN-rust-lsp.md` promises that "CLI and
 //! LSP tests compare diagnostic kind and message for parse, type, and semantic
 //! failures". Before this matrix only `check` was exercised, so the CLI could
 //! (and did) report the same unparseable file as `kind:"semantics"` with no
@@ -16,7 +16,7 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
-/// The corpus parse-error golden. `docs/RUST-PORTING.md` names it as the
+/// The corpus parse-error golden. `docs/design/RUST-PORTING.md` names it as the
 /// shared parse-location parity case.
 const PARSE_FIXTURE: &str = "examples/gallery/errors/parse_missing_expression.fsl";
 /// A spec that parses but declares no state: a genuine `semantics` diagnostic
@@ -116,7 +116,7 @@ fn every_spec_reading_command_reports_a_syntax_error_as_parse_with_a_location() 
         assert_eq!(output["result"], "error", "{name}: {output}");
         assert_eq!(output["kind"], "parse", "{name}: {output}");
         // `lint` adds a `file` key to its own `loc`; the guaranteed fields are
-        // `line`/`column` (`docs/DESIGN-v1.md` §7.2).
+        // `line`/`column` (`docs/design/DESIGN-v1.md` §7.2).
         assert_eq!(output["loc"]["line"], json!(6), "{name}: {output}");
         assert_eq!(output["loc"]["column"], json!(14), "{name}: {output}");
         assert_eq!(output["diagnostic_code"], "FSL-PARSE", "{name}: {output}");
@@ -309,7 +309,7 @@ const LOCATED_SEMANTIC_FIXTURES: &[(&str, &str, u64, u64)] = &[
     ),
 ];
 
-/// Issue 555: `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `type` and
+/// Issue 555: `docs/design/DESIGN-v1.md` §7.2 guarantees `loc` for `type` and
 /// `semantics`, not only for `parse`. Issue 484 delivered the `parse` half; the
 /// other half returned `loc: null` from every command, including `check`.
 ///
@@ -338,7 +338,7 @@ fn every_spec_reading_command_locates_a_type_or_semantic_error() {
             assert_eq!(output["kind"], *expected_kind, "{fixture}/{name}: {output}");
             assert_eq!(status, 2, "{fixture}/{name}: {output}");
             // `lint` adds a `file` key to its own `loc`; the guaranteed fields
-            // are `line`/`column` (`docs/DESIGN-v1.md` §7.2).
+            // are `line`/`column` (`docs/design/DESIGN-v1.md` §7.2).
             assert_eq!(
                 output["loc"]["line"].as_u64(),
                 Some(*line),
@@ -357,7 +357,7 @@ fn every_spec_reading_command_locates_a_type_or_semantic_error() {
 
 /// The corpus `name` golden, with the construct its diagnostic must point at.
 ///
-/// `docs/DESIGN-v1.md` §7.2 fixes `kind` as a closed set including `name`.
+/// `docs/design/DESIGN-v1.md` §7.2 fixes `kind` as a closed set including `name`.
 /// Native reached every member except that one: name-resolution failures were
 /// collapsed into `semantics`, because the only classifier was
 /// `semantic_error_kind`, which matches message text and has no `name` pattern
@@ -482,7 +482,7 @@ const DUPLICATE_DECLARATION_POSITIONS: &[(&str, &str, u64, u64)] = &[
 ];
 
 /// A `loc` that exists but names the wrong construct is worse than no `loc`:
-/// `docs/DESIGN-v1.md` G2 assumes the position is *correct*, and for a
+/// `docs/design/DESIGN-v1.md` G2 assumes the position is *correct*, and for a
 /// duplicate the wrong one accuses the declaration that is not the problem.
 ///
 /// The classification is deliberately not asserted here — it is issue 565's

@@ -3,7 +3,7 @@
 
 """Compare stable Python/Rust CLI verdicts across the complete FSL corpus.
 
-Deletion deferred (docs/RUST-PORTING.md F1). ``rust/fslc/tests/
+Deletion deferred (docs/design/RUST-PORTING.md F1). ``rust/fslc/tests/
 corpus_check_sweep.rs``'s ``verify_result_and_exit_status_never_contradict``
 now binds every corpus ``verify`` result class to its process exit, with
 rejecting mutations calibrated in ``fault_operators/{unknown-result-to-

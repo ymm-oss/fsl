@@ -4,7 +4,7 @@
 //! Negative controls for #464: `sweep` must never fold a spec error into the
 //! `sweep_passed`/exit-0 verdict. A one-character typo in `--instances`, a
 //! parse error, or a missing file are not "no counterexample in this grid" —
-//! they are documented exit-2 spec errors (`docs/LANGUAGE.md` exit-code
+//! they are documented exit-2 spec errors (`docs/manual/LANGUAGE.md` exit-code
 //! table) that a caller gating on exit code or `result` must be able to
 //! distinguish from a genuinely clean sweep.
 
@@ -43,7 +43,7 @@ fn fixture(name: &str) -> String {
 /// `sweep_passed`/exit 0 (a one-character typo silently turned a red gate
 /// green); the spec declares no entity/number bounds at all, so any
 /// `--instances` name is a documented exit-2 error
-/// (`docs/LANGUAGE.md` §"NAME with no matching entity/number declaration").
+/// (`docs/manual/LANGUAGE.md` §"NAME with no matching entity/number declaration").
 #[test]
 fn sweep_does_not_mask_a_typo_d_instances_name_as_sweep_passed() {
     let path = fixture("sweep_violating.fsl");

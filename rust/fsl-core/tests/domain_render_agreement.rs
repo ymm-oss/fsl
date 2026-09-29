@@ -849,7 +849,7 @@ fn unlowered_domain_constructs_fail_closed_on_both_paths() {
     }
 }
 
-/// #723 (1/4): `docs/DESIGN-effect.md` lists `Compensated` as a reachable
+/// #723 (1/4): `docs/design/DESIGN-effect.md` lists `Compensated` as a reachable
 /// member of the effect status lifecycle, but neither lowering path ever
 /// assigns it. `effect_outcome_member` (`domain_lowering.rs`) is a total
 /// function whose value set is exactly `{Succeeded, Failed, TimedOut,
@@ -859,7 +859,7 @@ fn unlowered_domain_constructs_fail_closed_on_both_paths() {
 /// (`fsl-tools/src/domain.rs`) and is never consumed as a status write. This
 /// pins that as a negative control over the two production lowering paths:
 /// it fails the day either path gains a writer for `Compensated`, which
-/// forces that change to update this test and `docs/DESIGN-effect.md`
+/// forces that change to update this test and `docs/design/DESIGN-effect.md`
 /// together rather than silently reviving a status the sticky-success
 /// invariant does not account for.
 #[test]
@@ -907,7 +907,7 @@ fn effect_compensated_status_is_never_assigned_by_either_lowering_path() {
                 offending.is_empty(),
                 "{relative} ({path_name}): expected no action to assign an \
                  *EffectStatus_Compensated member -- effect compensation is \
-                 presence-only design-review metadata (docs/DESIGN-effect.md), \
+                 presence-only design-review metadata (docs/design/DESIGN-effect.md), \
                  not a status writer; found assignment(s) to {offending:?}"
             );
         }

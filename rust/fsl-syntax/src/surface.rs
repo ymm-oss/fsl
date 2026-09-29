@@ -668,7 +668,7 @@ pub struct SurfaceCompose {
 
 /// Recursive `agent` dialect body (issue #468). Nested agents are ordinary
 /// `SurfaceAgent` values held in `children` -- lexical nesting only, not a
-/// distinct sub-agent type (`docs/LANGUAGE.md` §13.6).
+/// distinct sub-agent type (`docs/manual/LANGUAGE.md` §13.6).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SurfaceAgent {
     pub name: String,
@@ -677,7 +677,7 @@ pub struct SurfaceAgent {
     pub prompt: Option<String>,
     pub context: Vec<String>,
     /// Bare names from a `tools [X, Y];` list, kept separate from `tools`
-    /// (full `tool X { ... }` blocks) -- `docs/LANGUAGE.md` §13.6.
+    /// (full `tool X { ... }` blocks) -- `docs/manual/LANGUAGE.md` §13.6.
     pub tool_names: Vec<String>,
     pub tools: Vec<AiTool>,
     pub authority: AiAuthority,

@@ -3,7 +3,7 @@
 
 """Compare native and Python business/requirements/governance envelopes.
 
-Deletion deferred (docs/RUST-PORTING.md F2). ``rust/fslc/tests/
+Deletion deferred (docs/design/RUST-PORTING.md F2). ``rust/fslc/tests/
 dialect_induction_contract.rs``'s
 ``business_requirements_and_governance_pin_native_induction_contracts`` (#900)
 now owns focused native induction output contracts for the business,

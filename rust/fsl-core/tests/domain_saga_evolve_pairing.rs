@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #779 structural control: the "evolve pairing invariant"
-//! (`docs/DESIGN-domain.md`'s saga step section) says an `evolve` is 1:1
+//! (`docs/design/DESIGN-domain.md`'s saga step section) says an `evolve` is 1:1
 //! with the *occurrence* of its event: any generated action whose
 //! `updates` sets `event_<E> := true` must, in the SAME action, apply E's
 //! declared `evolve` assignments if the domain declares one for E.

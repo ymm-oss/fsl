@@ -615,7 +615,7 @@ fn relation_reachable(
     };
     // Non-reflexive: `reachable(r, a, a)` is true only via a real path of
     // one or more edges back to `a`, never a free zero-hop `a == a` step
-    // (`docs/LANGUAGE.md`'s relation section; matches the frozen Python
+    // (`docs/manual/LANGUAGE.md`'s relation section; matches the frozen Python
     // reference's `_relation_reachable` in `src/fslc/runtime.py`, and this
     // crate's own symbolic evaluator). The frontier starts at `source`'s
     // *direct successors*, not `source` itself, so an empty or acyclic
@@ -888,7 +888,7 @@ impl Monitor {
     ///
     /// Returns [`RuntimeError`] when init does not deterministically assign
     /// every state variable (component-wise; see
-    /// `docs/DESIGN-bridge.md` "Determinism of init") or sequential init
+    /// `docs/design/DESIGN-bridge.md` "Determinism of init") or sequential init
     /// execution fails. A model whose init leaves some state free is
     /// admissible to `verify`/BMC, which explores every admissible value —
     /// concrete execution has no such freedom to explore, so construction
@@ -1955,7 +1955,7 @@ pub fn check_refinement_with_budget(
                         // is already excluded above) hit an undefined
                         // operation for this reachable impl instance, e.g. a
                         // `/`/`%` divisor that is zero only through the
-                        // mapping's argument expression. `docs/DESIGN-divmod.md`
+                        // mapping's argument expression. `docs/design/DESIGN-divmod.md`
                         // §2.2's action-context partial_op check applies here
                         // by the same G5 rationale (constructing an abstract
                         // action call is action context, not the read-only
@@ -2217,7 +2217,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
 /// budget (e.g. 100,000) was measured and rejected: it left materially less
 /// headroom before an unoptimized debug build's peak RSS reached the same
 /// order of magnitude as the original failure. See
-/// `docs/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
+/// `docs/design/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
 /// the full measurement.
 ///
 /// The value is bracketed from both sides by measurement, not chosen by feel:
@@ -2594,7 +2594,7 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
 }
 
 /// The existentially-closed antecedent of each user invariant shaped
-/// `forall* P => Q` (`docs/DESIGN-vacuity.md` lane 2), paired with the
+/// `forall* P => Q` (`docs/design/DESIGN-vacuity.md` lane 2), paired with the
 /// index of the source invariant in `model.invariants`. An invariant
 /// without that shape (after peeling leading `forall`s) contributes no
 /// candidate, so the index travels with the expression rather than being
@@ -2635,7 +2635,7 @@ pub fn vacuous_implication_candidates(model: &KernelModel) -> Vec<(usize, Expr)>
 }
 
 /// The existentially-closed trigger of each `leadsTo` property
-/// (`docs/DESIGN-vacuity.md` lane 3), one per `model.leadstos` entry in
+/// (`docs/design/DESIGN-vacuity.md` lane 3), one per `model.leadstos` entry in
 /// declaration order.
 #[must_use]
 pub fn vacuous_leadsto_candidates(model: &KernelModel) -> Vec<Expr> {
@@ -2680,7 +2680,7 @@ fn vacuity_reachability_warning(
 /// budgeted BFS (issue #729) over every antecedent/trigger candidate
 /// (`CONCRETE_PROBE_BUDGET`, the same constant/calibration
 /// `find_boundary_violation` uses), and stay solver-independent.
-/// `solver_vacuity` carries the already-rendered `docs/DESIGN-vacuity.md`
+/// `solver_vacuity` carries the already-rendered `docs/design/DESIGN-vacuity.md`
 /// §2 lanes 4–7 that only `fsl-verifier` can decide; passing them in keeps
 /// the documented warning order (model → vacuity → deadlock → action
 /// coverage) owned by one function without giving `fsl-runtime` a solver
@@ -2736,7 +2736,7 @@ pub fn verification_warnings(
         // same condition that already fails the surrounding BMC/explicit
         // run before vacuity warnings are ever rendered, so this path is
         // not reachable on any spec that reaches `verification_warnings` in
-        // the first place. See `docs/DESIGN-vacuity.md`.
+        // the first place. See `docs/design/DESIGN-vacuity.md`.
         let probe_results =
             expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
                 .unwrap_or_default();

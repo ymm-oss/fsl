@@ -1484,7 +1484,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
 /// item loop, so a `control` declaration was parsed, accepted and discarded
 /// along with every `satisfies` that named it. `check` then answered `ok` for
 /// a policy pointing at a control that did not exist --- the same shape as the
-/// transition clauses issue #1109 closed --- while `docs/DESIGN-dialects.md`
+/// transition clauses issue #1109 closed --- while `docs/design/DESIGN-dialects.md`
 /// §3.2 already promised both checks and `src/fslc/dialects.py` already
 /// implemented them. This closes that port gap: an unknown reference is a
 /// located error, and a declared-but-unsatisfied control is an
@@ -2691,8 +2691,8 @@ pub fn lower_domain(domain: &fsl_syntax::DomainSpec) -> Result<KernelSpec, CoreE
 }
 
 /// The five documented `ai_component` `check hard { rule <Name>; }` rules
-/// (`docs/DESIGN-ai-hard.md` "Static Rules"). Naming any other rule is a
-/// check-time error (`docs/LANGUAGE.md` §13.6).
+/// (`docs/design/DESIGN-ai-hard.md` "Static Rules"). Naming any other rule is a
+/// check-time error (`docs/manual/LANGUAGE.md` §13.6).
 const AI_HARD_RULES: [&str; 5] = [
     "tool_authority",
     "human_approval_required",
@@ -2795,7 +2795,7 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
 }
 
 /// Validate and resolve `check hard { rule ...; }`, defaulting to all five
-/// rules when the block is omitted (`docs/LANGUAGE.md` §13.6).
+/// rules when the block is omitted (`docs/manual/LANGUAGE.md` §13.6).
 ///
 /// # Errors
 ///
@@ -3293,7 +3293,7 @@ pub fn requirements_trace_contract(
 
 /// Every requirement-block ID a requirements-layer source declares (`requirement
 /// REQ-ID "text" { ... }`), whether or not the block has any children to formalize
-/// it. `docs/DESIGN-strict-tags.md` section 2 requires this collection for
+/// it. `docs/design/DESIGN-strict-tags.md` section 2 requires this collection for
 /// `Declared` independently of `Referenced`, because an empty block reaches no
 /// annotation and would otherwise never surface as "declared but forgotten to
 /// formalize."

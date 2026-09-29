@@ -6,7 +6,7 @@
 //! at that point, not merely against the set of declared event names. Before
 //! this fix, `command SetN` followed by `domain_event KindSet` — an event the
 //! command's `decide` does not emit — returned `conformance_checked`/exit 0,
-//! so the promise in `docs/DESIGN-domain.md` that the finite log matches the
+//! so the promise in `docs/design/DESIGN-domain.md` that the finite log matches the
 //! model was unbacked for every `domain_event` row. (Unquoted on purpose:
 //! `tools/check-design-citation-headings.py` reads a quoted phrase next to a
 //! DESIGN path as a section citation, and this one names a promise in the

@@ -7,7 +7,7 @@ inclusion of observable behavior) propagates to lower layers, but **liveness**
 (`leadsTo`/`responds`) does not — because refinement allows stuttering (internal
 steps in which the lower layer does not change the upper-layer state).
 
-For details, see the note in `docs/DESIGN-layers.md` §6 and `docs/LANGUAGE.md` §10.
+For details, see the note in `docs/design/DESIGN-layers.md` §6 and `docs/manual/LANGUAGE.md` §10.
 
 ## Cast
 

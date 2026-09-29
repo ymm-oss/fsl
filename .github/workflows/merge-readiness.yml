@@ -62,7 +62,7 @@ jobs:
           # boundary can produce a duplicate ID, rejected immediately, or different paired
           # observations, which retry once and fail closed if still different; an identical
           # mixed state can repeat as an undetectable residual.
-          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # See docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
@@ -114,7 +114,7 @@ jobs:
           # `rust-workspace` entry exists; without one, it remains cold. `main` has never
           # held a cache under this workflow's own former key (no `push` trigger ever
           # existed for it), so that former-key path could not make the first run warm.
-          # See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+          # See docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
@@ -131,7 +131,7 @@ jobs:
         with:
           # Full history, not the default single commit: the changelog
           # fragment checks below diff BASE_SHA...HEAD_SHA and read
-          # CHANGELOG.md at both revisions (docs/DESIGN-changelog-fragments.md,
+          # CHANGELOG.md at both revisions (docs/design/DESIGN-changelog-fragments.md,
           # migration site 6).
           fetch-depth: 0
 

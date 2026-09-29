@@ -5,8 +5,8 @@
 //! (via `fslc ai regress`), and `observed_property` (via `fslc ai drift`).
 //! Every result is schema-conformant with
 //! `schemas/fslc/ai/statistical-result.v0.schema.json` and
-//! `docs/DESIGN-stochastic.md`'s status priority; `formal_result` is always
-//! `"not_run"` (`docs/DESIGN-stochastic.md`: this layer is external
+//! `docs/design/DESIGN-stochastic.md`'s status priority; `formal_result` is always
+//! `"not_run"` (`docs/design/DESIGN-stochastic.md`: this layer is external
 //! evidence, never a kernel proof).
 
 use fsl_syntax::{
@@ -28,7 +28,7 @@ const STATUS_PRIORITY: [&str; 7] = [
 
 /// Evaluate a selected `statistical_property` against precomputed eval JSONL
 /// records, applying every declared slice's `min_samples`/`ci_lower`/
-/// `ci_upper` gate (`docs/DESIGN-stochastic.md`'s status priority).
+/// `ci_upper` gate (`docs/design/DESIGN-stochastic.md`'s status priority).
 ///
 /// # Errors
 ///
@@ -202,7 +202,7 @@ fn record_outcome(record: &Value) -> bool {
 
 /// The first `(case_id, slice, metric)` collision, or a record missing one
 /// of those required fields; `None` if the dataset is well-formed
-/// (`docs/DESIGN-stochastic.md` states that "A missing required slice field is
+/// (`docs/design/DESIGN-stochastic.md` states that "A missing required slice field is
 /// `dataset_invalid`. Duplicate `(case_id, slice, metric)` records are
 /// `dataset_invalid`.").
 fn duplicate_eval_key(records: &[Value]) -> Option<Value> {

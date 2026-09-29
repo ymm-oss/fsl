@@ -6,7 +6,7 @@
 //! the most load-bearing sentence FSL emits about ID form. It used to propose
 //! `add a declaration tag such as "REQ-1: original requirement"; use
 //! "MODEL: ..." or "ASSUME-1: ..."` — the `"ID: text"` string slot that
-//! `docs/DESIGN-id-policy.md` classifies as non-canonical migration input and
+//! `docs/design/DESIGN-id-policy.md` classifies as non-canonical migration input and
 //! that `fslc lint` rejects as `legacy_string_metadata`. Following the
 //! diagnostic produced a spec the next gate refuses.
 //!

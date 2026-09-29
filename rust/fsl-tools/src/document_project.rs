@@ -43,7 +43,7 @@ pub enum DocumentDialect {
 /// The dialects RCIR v1 projects. Single source of truth for the CLI
 /// envelope's `supported_dialects` field and for the coverage-gate tripwire
 /// test that pins the activation contract (issue #334,
-/// `docs/DESIGN-document-dialect-adapters.md`).
+/// `docs/design/DESIGN-document-dialect-adapters.md`).
 pub const RCIR_SUPPORTED_DIALECTS: &[&str] = &["requirements", "spec"];
 
 /// Why RCIR projection refused or failed (issue #334). Distinguishes a scope
@@ -325,7 +325,7 @@ fn chain_assurance(chain: &OriginChain) -> ProvenanceAssurance {
 /// The origin registry (`OriginChain`/`OriginSite`) is the richer of the two
 /// signals where it is populated (it can distinguish `generated_from_source`
 /// from `generated_only`), but it is currently sparse outside the domain
-/// dialect (docs/DESIGN-kernel-origin-v2.md): `requirements`/`spec` targets
+/// dialect (docs/design/DESIGN-kernel-origin-v2.md): `requirements`/`spec` targets
 /// routinely have zero bound origins today. `declared_span` is not a guess —
 /// it is the same `Span` the parser attached to the authored declaration
 /// (`ActionDef::span`, `PropertyDef::span`, ...) — so when the registry is

@@ -3,7 +3,7 @@
 
 //! Issue #562, first half: the fsl-ai project parser tracked no positions, so
 //! the spec error #542 introduced for an unexecutable `require` clause carried
-//! no `loc` at all. `docs/DESIGN-v1.md` §7.2 guarantees every `parse` error
+//! no `loc` at all. `docs/design/DESIGN-v1.md` §7.2 guarantees every `parse` error
 //! carries one.
 //!
 //! These assert the **exact** line and column of the offending clause, never

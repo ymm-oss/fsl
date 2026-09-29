@@ -37,7 +37,7 @@ const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
 
 /// `mutate`'s built-in mutant cap when `--max-mutants` is omitted. Must equal
 /// the `max_mutants` default the published CLI contract advertises
-/// (`rust/fslc/cli-contract.json`), which `docs/DESIGN-mutate.md`,
+/// (`rust/fslc/cli-contract.json`), which `docs/design/DESIGN-mutate.md`,
 /// `skills/fsl/references/commands.md`, and the frozen `src/fslc/mutate.py`
 /// (`DEFAULT_MAX_MUTANTS`) all fix at 200: a smaller runtime default silently
 /// evaluates a different mutant set and reports a different kill rate
@@ -2048,7 +2048,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         if value != "requirements" {
                             return Err(
                                 "--view must be requirements ('business'/'design' are reserved \
-                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 until docs/design/DESIGN-document-dialect-adapters.md's activation \
                                  contract is met, issue #334)"
                                     .to_owned(),
                             );
@@ -2131,7 +2131,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         if value != "requirements" {
                             return Err(
                                 "--view must be requirements ('business'/'design' are reserved \
-                                 until docs/DESIGN-document-dialect-adapters.md's activation \
+                                 until docs/design/DESIGN-document-dialect-adapters.md's activation \
                                  contract is met, issue #334)"
                                     .to_owned(),
                             );
@@ -2198,7 +2198,7 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
 }
 
 /// An unsupported source dialect is a scope boundary (issue #334,
-/// `docs/DESIGN-document-dialect-adapters.md`), not a defect in the spec: it
+/// `docs/design/DESIGN-document-dialect-adapters.md`), not a defect in the spec: it
 /// gets its own coded `document` envelope so a caller can programmatically
 /// distinguish "RCIR has no adapter for this dialect yet" from a genuine
 /// parse/semantic error in a supported dialect.
@@ -5968,7 +5968,7 @@ fn strict_tag_warnings_from_source(
     requirements: Option<&Path>,
 ) -> Result<Vec<Value>, String> {
     let mut warnings = Vec::new();
-    // The hint names the canonical link form from `docs/DESIGN-id-policy.md`.
+    // The hint names the canonical link form from `docs/design/DESIGN-id-policy.md`.
     // It used to propose the `"REQ-1: original requirement"` string slot, which
     // that policy classifies as non-canonical migration input and `fslc lint`
     // reports as `legacy_string_metadata` — so the repair this diagnostic asked
@@ -6020,7 +6020,7 @@ fn strict_tag_warnings_from_source(
 
     let referenced = referenced_requirement_ids(model, source);
     // `Declared` = requirement-block IDs auto-collected from the requirements dialect
-    // (docs/DESIGN-strict-tags.md section 2 calls this "essential" for catching an
+    // (docs/design/DESIGN-strict-tags.md section 2 calls this "essential" for catching an
     // empty block) union `--requirements` file IDs. Both halves run regardless of
     // whether `--requirements` was passed; only the file half is optional. The file
     // half keeps reporting in its original file-line order, so an established
@@ -6936,7 +6936,7 @@ fn run_ai_regress(
 /// unconditionally and `--property`/the spec path were never read). The
 /// success result is `observed_supported` (not `observed_conformant`,
 /// which stays `fslc db observe`'s vocabulary --
-/// `docs/DESIGN-assurance-classes.md`/`docs/LANGUAGE.md` document
+/// `docs/design/DESIGN-assurance-classes.md`/`docs/manual/LANGUAGE.md` document
 /// `observed_supported`/`observed_mismatch` for `ai drift` specifically;
 /// only `ai drift`'s result string was wrong, not `db observe`'s).
 fn run_ai_drift(
@@ -7350,7 +7350,7 @@ fn run_domain_generate(
 /// An identity type is one the domain document only ever references and never
 /// declares (`id OrderId`, `input payment_request_id: PaymentRequestId`).
 /// `lower_domain` synthesizes it as an `external` type whose bounds are the
-/// documented placeholder (`docs/DESIGN-domain.md`: "Runtime Replay"), so a
+/// documented placeholder (`docs/design/DESIGN-domain.md`: "Runtime Replay"), so a
 /// runtime identifier such as `"p1"` has no declared numeric meaning and the
 /// placeholder is the only mapping available. Declared
 /// `range`/`enum`/`Bool` parameters do have one and go through
@@ -7444,7 +7444,7 @@ fn domain_replay_enum_token(type_name: &str, members: &[String], token: &str) ->
 /// for `fslc replay`'s hand-written mapped-action inputs, but `domain
 /// replay` produces `replay-observed` evidence about a log it did not write,
 /// and reading `1` as `true` there would invent a Boolean observation the
-/// log never recorded. `docs/DESIGN-domain.md` documents `true`/`false` as
+/// log never recorded. `docs/design/DESIGN-domain.md` documents `true`/`false` as
 /// the Boolean spelling; anything else fails closed (#1116 review).
 fn domain_replay_param_value(
     model: &KernelModel,
@@ -8871,7 +8871,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
             // Present only for a `leadsTo ... within`, never as a null filler:
             // `fslc html`'s Deadline column exists exactly when some property
-            // carries one (`docs/DESIGN-html-report.md`), and the frozen
+            // carries one (`docs/design/DESIGN-html-report.md`), and the frozen
             // reference's `_property_skeleton` omits the key the same way.
             if let Some(within) = property.within {
                 value.insert("within".to_owned(), json!(within));
@@ -9947,7 +9947,7 @@ fn invariant_counterfactuals_from_source(path: &Path, source: &str, depth: usize
 }
 
 /// Readable-mode summary of a requirements-layer `implements X from "Y"`
-/// declaration — the "synthesized refinement mapping" `docs/DESIGN-explain.md`
+/// declaration — the "synthesized refinement mapping" `docs/design/DESIGN-explain.md`
 /// documents for the skeleton (issue #528). `None` when the source declares
 /// no `implements`, or when computing it fails: that failure already
 /// surfaces through `verify`/`check`, and a presentation view must not
@@ -11487,7 +11487,7 @@ fn run_mutate(
     );
     if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
         // The baseline envelope is re-emitted verbatim, so its own `result`
-        // decides the exit code through `docs/LANGUAGE.md`'s table: `violated`
+        // decides the exit code through `docs/manual/LANGUAGE.md`'s table: `violated`
         // and the other row-1 verdicts exit 1, and a *spec error* keeps the
         // code the baseline already classified.
         let baseline_status = mutate_exit_status(&baseline, status);
@@ -13031,7 +13031,7 @@ fn run_ledger_report_from_source(
         // verification verdict.
         return (result, status);
     }
-    // `docs/LANGUAGE.md`'s exit-code table applied to the same `verify`
+    // `docs/manual/LANGUAGE.md`'s exit-code table applied to the same `verify`
     // baseline `mutate` already shares through `mutate_exit_status`:
     // `prepared.verification` carries the identical `result` vocabulary
     // (`verified`/`proved`/`violated`/`unknown_cti`/`unknown_budget`/`error`)
@@ -14211,7 +14211,7 @@ fn add_scenario_items(
 
 /// Project governance/business `control` catalog entries.
 ///
-/// `docs/LANGUAGE.md` §"control" states a control "does not generate a property
+/// `docs/manual/LANGUAGE.md` §"control" states a control "does not generate a property
 /// by itself; it is a catalog entry", so lowering leaves nothing behind for
 /// `build_tsg` to find.
 fn add_control_items(
@@ -17849,7 +17849,7 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
     )
 }
 
-/// `docs/LANGUAGE.md`'s exit-code table applied to an envelope `mutate`
+/// `docs/manual/LANGUAGE.md`'s exit-code table applied to an envelope `mutate`
 /// returns.
 ///
 /// The success/failure classification this used to restate now lives once, in
@@ -18014,7 +18014,7 @@ mod exit_status_tests {
     /// Negative control for #465: before the fix, `apply_vacuity_mode`
     /// selected findings with `kind.starts_with("vacuous_")`, which matches
     /// only 2 of the documented vacuity kinds
-    /// (`docs/LANGUAGE.md` §15, `fsl_core::VACUITY_KINDS`).
+    /// (`docs/manual/LANGUAGE.md` §15, `fsl_core::VACUITY_KINDS`).
     /// `always_true_requires`, `tautology_over_frozen`, `urgency_freeze`, and
     /// `vacuous_deadline` do not share that prefix, so `--vacuity error`
     /// silently let a hollow

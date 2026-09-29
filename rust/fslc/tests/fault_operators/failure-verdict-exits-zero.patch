@@ -1,4 +1,4 @@
-Sends row 1 of `docs/LANGUAGE.md`'s exit-code table to zero: a `mutate` whose
+Sends row 1 of `docs/manual/LANGUAGE.md`'s exit-code table to zero: a `mutate` whose
 baseline `verify` came back `violated`/`reachable_failed`/`unknown_cti`/
 `unknown_budget` exits 0 while its envelope still reports the failure. A gate
 reading only the exit code sees a pass. This is #554 itself. Since #1002 the

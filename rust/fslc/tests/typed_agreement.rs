@@ -12,7 +12,7 @@
 //! adds an expression-variant family that is also the exercising evidence for
 //! the C3 `expr` and `types` axes.
 //!
-//! See `docs/DESIGN-conformance-harness.md`'s "Typed generative /
+//! See `docs/design/DESIGN-conformance-harness.md`'s "Typed generative /
 //! metamorphic agreement (#537 C6)" section for the accepted design this
 //! implements, including why Z3js/Worker parity is out of scope here.
 

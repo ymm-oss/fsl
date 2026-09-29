@@ -1,0 +1,785 @@
+# FSL v2.0 — Refinement Checking Implementation Design
+
+The refinement side of DESIGN-v1.md §10 v2.0 "Composition of multiple specs and
+refinement." It verifies that "a detailed spec (impl) does not deviate from the
+behavior of an abstract spec (abs)" via **bounded simulation checking using a
+refinement mapping**.
+
+Use case: first get the abstract spec to proved, then mechanically verify that
+the detailed spec close to the implementation (including caches, intermediate
+states, optimizations) is **faithful** to the abstract spec. In the LLM
+workflow this becomes a division of labor: "a human/LLM reviews abs → the LLM
+freely refines impl → the refine check guarantees faithfulness."
+
+## 1. The Mapping File
+
+A third file (it pollutes neither the impl nor the abs spec):
+
+```fsl
+refinement CartImplRefinesCart {
+  impl CartImpl                       // spec name of the detailed spec (file passed on the CLI)
+  abs  ShoppingCart                   // spec name of the abstract spec
+
+  maps auto                           // optional identity defaults for same-named state/actions
+
+  // For each abstract state variable, give the mapping expression from the impl state (all variables required)
+  map stock[i: ItemId] = impl_stock[i] - reserved[i]
+  map cart[u: UserId]  = impl_cart[u]
+  map revenue          = ledger
+
+  // Correspondence of impl action → abs action (all impl actions required)
+  action impl_checkout(u: UserId) -> checkout(u)     // params may include matching impl types
+  action rebalance(i: ItemId)     -> stutter          // internal action (nothing happens in abs)
+
+  // Optional: pull selected abs leadsTo declarations through the state mapping
+  // and check them on impl executions too.
+  preserve progress {
+    respond CheckoutEventuallyCompletes by impl_checkout
+  }
+}
+```
+
+- `map <abs_var> = <expr>` — a scalar abstract variable. The expression
+  references the impl's state variables and consts.
+- `map <abs_var>[<binder>] = <expr>` — per-element mapping of a Map/Seq etc.
+  The binder ranges over the abs-side key type (Seq is limited to the
+  whole-mapping form `map q = <impl Seq expr>` only — in v2.0, Seq is limited to
+  an isomorphic mapping (there is a Seq on the impl side too, passed as an
+  expression)).
+- `maps auto` — optional shorthand for representation-only refinements. It
+  synthesizes `map x = x` for same-named compatible state variables and
+  `action f(params...) -> f(params...)` for same-named compatible actions that
+  do not already have explicit entries. Explicit `map` and `action ... ->`
+  entries always win. An action pair's parameters are matched **by name**,
+  never by position: each abstract parameter is bound to the impl parameter
+  sharing its exact name, in the abstract action's own parameter order, so a
+  purely reordered same-named pair still auto-maps. When a same-name
+  candidate exists but its state type is incompatible, its action arity
+  differs, or an abstract parameter has no same-named impl parameter (a
+  renamed parameter, an impl parameter left over/"surplus" with nothing on
+  the abs side to bind it, or two same-typed parameters that a
+  position-based fallback would otherwise have to guess between —
+  issue #494), `build_refinement` raises a located `kind: "type"` error
+  instead of guessing. A parameter *type* mismatch between two identically
+  named parameters is caught by the same `validate_expression_type` check
+  every other authoring route already goes through, not duplicated here.
+- `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
+  The formal parameters are the parameter names of the impl action (matching
+  order). They may be written bare (`u`) or with a type annotation matching the
+  impl action declaration (`u: UserId`). The abs-side arguments are expressions
+  using them and the impl state.
+- Every surface route lowers to one typed `ActionCorrespondence`:
+  `impl_action: ActionRef`, resolved `impl_params: Vec<ParamDef>`, a typed
+  action/stutter target, `CorrespondenceOrigin`, and a source span. Standalone
+  files, inline `implements`, requirement-action `maps`, and auto synthesis use
+  the same resolver for impl/target existence, parameter annotations, arity,
+  argument expression types, actor compatibility, and duplicate detection.
+  Progress declarations and the concrete Monitor consume the same action
+  identity. Success JSON remains the existing name-to-target projection.
+- `preserve progress { respond <AbsLeadsTo> by <impl_action>, ... }` is an
+  optional liveness-preserving refinement check. It does not change ordinary
+  safety refinement. When present, fslc pulls the named abstract `leadsTo` P/Q
+  through the state mapping and runs the same bounded lasso/stall search on impl
+  executions. The `by` actions are validated impl action names and are returned
+  in JSON as review context; they do not create fairness or implementation
+  conformance by themselves. Fairness still comes from the impl actions marked
+  `fair`. Failures report `kind:"progress_lost"` plus
+  `progress_failure:"lasso_blocks_progress"` or
+  `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
+  `progress:{leadsTo, actions}` so repair can target the lower-layer action.
+- The grammar does not coexist with existing `.fsl` files (an **independent
+  file** with `refinement` at the top level. Parsing adds `refinement_def` to
+  the same Lark grammar).
+
+### 1.1 Requirements-layer action-level `maps stutter`
+
+The requirements dialect can embed the action correspondence that would
+otherwise be written in the separate refinement mapping file. For an unbranched
+requirements action, `maps` may appear directly on the action declaration:
+
+```fsl
+spec AbsTick {
+  type K = 0..1
+  state { x: K }
+  init { x = 0 }
+  action tick() { x = 1 }
+}
+
+requirements ImplTick {
+  implements AbsTick from "refine_abs.fsl" {
+    map x = y
+  }
+  type K = 0..1
+  state { y: K }
+  init { y = 0 }
+  requirement REQ-TICK "tick is internal" {
+    fair action tick() maps stutter {
+      y = y
+    }
+  }
+}
+```
+
+This expands to a kernel action plus an inline action correspondence equivalent
+to `action tick() -> stutter` in a refinement file. The `stutter` rule is the
+same as §2: the abstract state after mapping must be unchanged by the impl
+step.
+
+Observed result: `fslc check refine_impl.fsl` returned `result:"ok"` with
+`implements:{abs:"AbsTick", result:"refines"}`, and
+`fslc verify refine_impl.fsl --depth 1` returned `result:"verified"` with the
+same implements result.
+
+### 1.2 Inline `implements { }` action items (v2.x — #73)
+
+The requirements-dialect inline `implements Abs from "file" { }` block
+originally only accepted `map`/`maps auto`/`preserve progress` — an
+arity-changing action correspondence had to go through `maps` on the
+requirement action (§1.1, same arity/argument shape as the impl action's own
+params) or a separate refinement file's `action <impl>(...) -> <abs>(...)`
+item (§1).
+
+`implements_item` now also accepts `refinement_action` (grammar.py), i.e. the
+block can contain:
+
+```fsl
+requirements Impl {
+  implements Abs from "abs.fsl" {
+    map done[c: CaseId] = paid[c]
+    action pay(c: CaseId, m: Method) -> refund(c)   // arity change: drops m
+  }
+  ...
+}
+```
+
+The Rust frontend preserves the route as `CorrespondenceOrigin`, then lowers
+the shared surface item into the typed IR described in §1. Requirement-action
+`maps` clauses and branch maps are adapted to the same item before validation;
+implicit identity/stutter correspondences call the same resolver directly.
+
+Two consequences fall out of reusing the same merge, not from new logic:
+
+- **Duplicate correspondence.** A second correspondence for the same impl
+  action is rejected before semantic resolution. The diagnostic reports both
+  origin kinds and both line/column sites, whether the conflict is within a
+  standalone file or between `implements` and an action-level `maps` clause.
+- **Branch-split action names.** `branches` splits an action into aliased
+  kernel actions (`name__b1`, `name__b2`, ...; dialects.py
+  `_split_branch_action`), so the impl spec `build_refinement` type-checks
+  against never has an action under the pre-split name. An inline
+  `action <pre_split_name>(...) -> ...` item is therefore `"unknown impl
+  action '<pre_split_name>'"` — reference the generated alias instead, same as
+  a separate-file mapping would need to.
+
+## 2. Checking Semantics (Bounded Forward Simulation)
+
+α(s) := the mapping that defines the impl state → abs state mapping.
+
+0. **impl self-consistency (precondition, issue #466)**: before any of the
+   following steps run, the impl spec's own reachable states up to depth K —
+   including its initial state — are checked concretely for a type-bound,
+   invariant, `trans`, or `ensures` violation, independent of the mapping and
+   the abstraction entirely. This is a property of the refinement *input*
+   (the impl spec is broken on its own), not a refinement fidelity verdict:
+   `result:"violated"` with the impl's own `violation_kind`/trace and an
+   explanatory `note`, never `result:"refines"` and never folded into
+   `refinement_failed` (whose `kind`s below describe a mismatch *between*
+   impl and abs, not a defect in the impl alone). If this precondition finds
+   a violation, steps 1-4 do not run. This precondition and step 1 below both
+   reason over the impl's full set of concrete initial valuations (§2.8), not
+   one materialized default, so a self-violation reachable only from a
+   non-default nondeterministic initial branch is not missed either.
+1. **init correspondence**: for *every* concrete initial valuation s₀ the
+   impl's `init` permits, α(s₀) satisfies the abs init constraints — i.e.
+   α(s₀) is a member of the set of concrete initial valuations the abs's own
+   `init` permits, not equal to one arbitrarily materialized default on
+   either side (§2.8, issue #493). Counterexample: `refinement_failed` /
+   `at: "init"`.
+2. **transition correspondence**: for a reachable impl transition
+   s →[a, params] s':
+   - `a -> stutter` case: **α(s') == α(s)** (logical equality reuses leadsTo's
+     `_logical_eq`).
+   - `a(p…) -> b(e…)` case: the instance of abs action b (arguments = the
+     evaluated values of e) is **enabled** in α(s) (its requires hold), and the
+     result of applying b's update to α(s) is **logically equal to α(s')**.
+3. The check is done over the impl's BMC expansion (depth K): at each step t,
+   for each impl instance, if "the choice is that instance ∧ the negation of the
+   correspondence condition" is sat, it is a violation. The impl trace + the abs
+   states before and after α are returned as the counterexample.
+4. If `preserve progress` is present and the safety checks above pass, each named
+   abstract `leadsTo P ~> Q` is checked on impl executions as
+   `P(α(s)) ~> Q(α(s))`. A lasso or deadlock/stall counterexample is reported as
+   `refinement_failed / kind:"progress_lost" / violation_kind:"leadsTo"`.
+
+The abs-side invariants are not checked (verifying/proving abs separately is the
+premise. However, if α(s₀..s_K) breaks an abs invariant, that usually manifests
+as a transition-correspondence violation itself). The abs-side automatic bounds
+(_bounds_*) are likewise out of scope — however, it is not necessarily the case
+that α's value escaping the abs type range is detected naturally as a
+transition-correspondence violation (because it cannot match b's update result),
+so **the type-bounds check of α(s_t) alone is performed additionally**
+(`map_out_of_bounds` violation; this can directly point out the typical mapping
+expression bug).
+
+**Check order**:
+- **Between steps (t>0)**: the transition-correspondence check (s_{t-1}→s_t) is
+  done **before** the type-bounds check of α(s_t). When transition
+  correspondence and a bounds violation occur simultaneously, e.g. due to guard
+  weakening, prioritize reporting the root cause `abs_requires_failed`. The
+  bounds check is applied only to α(s_t) after the previous step's transition
+  correspondence has held.
+- **Initial state (t=0)**: the type-bounds check (`map_out_of_bounds`) is done
+  **before** the init-correspondence check. Because init correspondence nearly
+  implies that α(s₀) is within the abs type range (if out of range, init
+  correspondence usually also fails), reporting a range escape as
+  `map_out_of_bounds` rather than as a general "init mismatch" can directly
+  point out the mapping-expression bug (the typical one that produces an
+  out-of-range initial value), which is more useful. A mismatch that is in
+  range but with a different value is reported as before as an
+  init-correspondence violation (`abs_state_mismatch`).
+
+## 2.5 Shared Conditional Expressions (v2.7 — issue #245)
+
+Refinement mappings use the same conditional expression as every other FSL
+expression context:
+
+```fsl
+refinement SeatImplRefinesBooking {
+  impl SeatBookingImpl
+  abs  SeatBooking
+
+  // A mapping of an Option value that depends on a state tag can be written
+  map seats[s: SeatId] =
+    if slots[s].st == Sold then slots[s].holder else none
+
+  action sell(s, u)    -> book(s, u)
+  action hold(s, u)    -> stutter
+  action expire(s)     -> stutter
+  action confirm(s)    -> book(... )   // etc.
+}
+```
+
+- Syntax: `if <expr> then <expr> else <expr>` (else required; nesting is
+  right-associative). The shared parser accepts it in ordinary specs,
+  refinements, requirements, and lowered domain expressions.
+- Typing rule: both arms of then/else are the same logical type. Option vs
+  Option (including none), enum vs enum, Int/domain vs Int/domain, Bool vs Bool,
+  struct vs struct are allowed. A type mismatch is `kind: "type"` at check time.
+- Semantics (lowering): Z3's `If`. When the arms are Option, present/value are
+  each composed with ite (`If(c, p1, p2)` / `If(c, v1, v2)`); a struct is ite
+  per field (the same convention as the existing merge of an if statement). The
+  value of a none arm is don't care (a free variable is fine — if present is
+  false it is not read).
+- The surface and Kernel AST use one `Conditional` node. Refinement no longer
+  has a separate expression parser.
+- Concrete evaluation executes only the selected branch. Static name/type
+  checking visits both branches. Symbolic evaluation uses one typed `ite`.
+- A partial operation in a branch is guarded by that branch's path condition,
+  so an unselected division, remainder, or sequence operation cannot fail.
+- Public Kernel JSON continues to use the existing `kind: "ite"` node. Because
+  the node and its semantics already existed in both v1 and v2 schemas, this
+  change does not alter either schema version.
+
+## 2.6 Exhaustive nominal-enum conversion (issue #450)
+
+The checked-boundary ownership and flat-index compatibility decision is recorded in
+[DESIGN-enum-member-identity.md](DESIGN-enum-member-identity.md). In particular, a bare
+member shared by the implementation and abstraction inventories is rejected rather than
+resolved by merge order.
+
+Refinement preserves nominal enum identity. Distinct impl/abs enums are never
+assignment-compatible and are never converted by ordinal. A refinement that needs a
+member-wise representation change declares a named conversion and calls it from a state
+map or action argument:
+
+```fsl
+refinement ApplicationUnitOfWorkRefinesUseCase {
+  impl ApplicationUnitOfWorkDesign
+  abs ApplicationUseCaseRequirements
+
+  enum conversion use_case_stage UnitOfWorkStage -> CommandStage {
+    Received  -> Received
+    Loaded    -> Loaded
+    Decided   -> Decided
+    Committed -> Committed
+    Rejected  -> Rejected
+    Conflict  -> Conflict
+  }
+
+  map command_stage[c: Command] = convert(use_case_stage, stage[c])
+  action load(c) -> load(c)
+}
+```
+
+The declaration is a refinement item, so the same syntax is accepted in a standalone
+`refinement` file and an inline requirements `implements { }` block. Its name is local to
+that refinement block. Invocation uses the dedicated
+`convert(<conversion-name>, <expression>)` form and is valid in both state-map expressions
+and abstract action arguments. The first argument is a syntactic conversion name, not a
+value expression; this keeps conversion names out of the namespace of special expression
+calls such as `stage`, `old`, and `abs`.
+
+The source and target names must resolve to enums in the merged impl/abs checked-Kernel
+type inventory. This includes requirements `process` stage enums, DB/domain generated
+enums, and compose-renamed enum types. Conversion rows use the checked-Kernel member
+spellings. Requirements stages retain their source spelling; domain lowering intentionally
+namespaces members (for example `OrderStatus_Pending`), so a mapping at the Kernel
+refinement boundary uses the names published by `fslc kernel`, not the shorter domain-source
+alias. Diagnostics point to the conversion row and list the checked members; they do not
+fabricate a source-level domain span after lowering. The declaration is a checked bijection:
+
+- every declared source member appears exactly once on the left;
+- every declared target member appears exactly once on the right;
+- unknown source/target types or members, duplicate source/target members, a missing
+  member on either side, and a non-enum endpoint are `kind:"type"` errors at the
+  declaration/member location;
+- the call argument must have the declared source nominal type and the call result has
+  the declared target nominal type; and
+- duplicate conversion names, unknown conversion calls, and wrong call arity fail
+  statically.
+
+Requiring both source-totality and target-totality deliberately makes this construct a
+one-to-one representation conversion. A genuine abstraction that collapses several impl
+states into one abs state uses the separate source-total contract in section 2.7 rather
+than weakening this fail-closed bijection.
+
+### Checked representation and evaluation
+
+The private checked expression IR gains an enum-member literal carrying both
+`type_name` and `member`; it is not surface `Type.Member` syntax and never consults the
+flat bare-member namespace. Before storing the checked `Refinement`, the frontend
+elaborates each conversion call to the existing nested conditional (`ite`) shape whose
+conditions and results use these typed literals. Repeating the pure argument expression in
+that tree has no observable evaluation-order effect. The last branch is safe as the
+fallback only because source coverage was proved complete.
+
+Concrete Monitor/refinement evaluation maps the selected source member to the declared
+target member. Symbolic evaluation uses the same conditional tree and the enums' own
+member encodings; reversing declaration order therefore cannot change the result.
+Preserved-progress substitution, semantic diff, and inline `implements` consume the
+already-elaborated expression through the shared refinement builder. Production-log and
+causal replay are different: their `impl` is an untyped external JSON schema, so no source
+enum can be resolved. Those raw-surface mapping paths must reject an `enum conversion`
+declaration or `convert(...)` call with a located `kind:"type"` error explaining that a
+typed impl model is required; they must never ignore or partially evaluate it.
+
+Public Kernel model contracts do not contain refinement mappings, and this change does not
+invent a standalone mapping schema. For sidecars that publish an already-checked mapping
+expression, `public_kernel_expression` projects the elaborated form using the existing
+typed `ite` and `var` shape: an internal enum-member literal becomes
+`{"kind":"var","name":<member>,"type":{"kind":"named","name":<type>},...}`.
+The `(type, name)` pair round-trips nominal identity even when impl and abs use identical
+member spelling; projection does not reconstruct it through `base_env`. Public Kernel v1
+and v2 therefore need no new expression kind or schema version. An unelaborated
+`convert(...)` call fails export instead of being omitted or emitted as an untyped call.
+
+### Migration
+
+A pre-3.1 conditional mapping with distinct, unambiguous member spellings remains valid.
+For a bijection, replace a colliding or exhaustively intended conditional with
+`enum conversion` plus `convert(<name>, <expr>)`. For a source-total many-to-one
+mapping, use the abstraction contract in section 2.7.
+Do not rename both layers to one enum type and do not map by declaration order; those
+workarounds erase layer identity or recreate the ordinal false-green that nominal typing
+prevents.
+
+## 2.7 Source-total nominal-enum abstraction (issue #455)
+
+A many-to-one representation boundary declares a distinct `enum abstraction` and invokes
+it with `abstract(<name>, <expr>)`:
+
+```fsl
+enum abstraction lifecycle ImplStage -> AbsStage {
+  Received  -> Pending
+  Validated -> Pending
+  Completed -> Done
+  Rejected  -> Failed
+}
+map status = abstract(lifecycle, stage)
+```
+
+This declaration is a source-total function, not a bijection. Both endpoint enums must be
+non-empty so the total mapping has a representable result and the checked conditional has
+a fallback. Every source member must appear exactly once. Unknown endpoint types or members, non-enum endpoints, duplicate
+source rows, missing source rows, wrong call arity, unknown names, and a call argument of
+the wrong nominal source type are located type errors. Multiple source rows may select the
+same target. Target members absent from all rows are intentionally unused by this
+abstraction and require no separate declaration. An injective table is accepted, but
+authors should use `enum conversion` when target-totality and target uniqueness are part of
+the intended assurance.
+
+Conversion and abstraction names share one refinement-local namespace, while their call
+forms are not interchangeable. Keeping both declaration and invocation distinct prevents
+a call site from silently claiming bijective assurance for a source-total mapping. Both
+forms lower through the same typed enum-member conditional representation, so concrete
+refinement, symbolic expression agreement, preserved progress, inline `implements`, CLI,
+Worker, and Public Kernel expression projection retain one evaluation path. Reversing
+either enum's declaration order cannot change the result.
+
+Raw production and causal replay lack a typed implementation model and therefore reject
+either an abstraction declaration or `abstract(...)` call with a located type error. They
+must not infer endpoint types from JSON values. Migrate an ambiguous conditional that
+collapses nominal members to `enum abstraction` plus `abstract`; migrate a one-to-one table
+to `enum conversion` plus `convert` so its stronger target guarantees remain executable.
+
+## 2.8 Nondeterministic init (v2.x — issue #493)
+
+`init` need not assign every state variable: a state variable an `init if` (or a `forall`
+branch) never assigns on any path is a genuinely free/unconstrained initial value across
+its declared type's domain, the same way `fsl-verifier`'s symbolic BMC init lowering leaves
+an omitted assignment unconstrained (DESIGN-init-if.md). Before this fix, the concrete
+refinement checker instead ran the impl and abs each through one solver-free `Monitor`,
+which fills an unassigned variable with its type's *default* value before executing `init`
+— a single, arbitrarily chosen representative of what may be several valid initial states,
+not the full set §2 step 1 requires. That single-state approximation produced two opposite
+symptoms depending on which side was nondeterministic:
+
+- an impl `init` reading an unassigned variable let the checker silently pick only the
+  default-valued initial state, missing both that state's own initial-correspondence
+  violation on another valuation and the reachable set below it (`refines` reported for a
+  refinement that actually fails);
+- an abs `init` reading an unassigned variable made the checker compare α(s₀) for equality
+  against the single default abs initial state, rejecting a correct refinement whose impl
+  deterministically starts in a different — but still abs-valid — initial valuation
+  (`refinement_failed / abs_state_mismatch@init` reported for a refinement that actually
+  holds).
+
+**Fix**: `check_refinement` enumerates every concrete initial valuation a model's `init`
+permits (`concrete_initial_states` in `rust/fsl-runtime/src/lib.rs`) instead of
+materializing one. A state variable init never assigns on *any* path is domain-enumerated
+(`explicit::unassigned_init_state_vars`); a model with no such variable still produces
+exactly the single state a plain `Monitor` would build, so an ordinary deterministic-init
+spec is unaffected. Step 0's self-consistency precondition and step 1's init correspondence
+both consume this set:
+
+- step 0 checks every impl initial valuation for a self-violation, not just the default;
+- step 1 checks that *every* impl initial valuation's α is a member of the abs's own
+  initial-valuation set, and seeds one BFS root per surviving impl valuation, so the walk
+  covers the full nondeterministic-init reachable set rather than one branch.
+
+**Scope**: only a state variable with *zero* assignment coverage — never an assignment
+target on any init path — is treated as free. A variable assigned on some but not all
+paths (e.g. only inside an `if` with no `else`) is left out of the enumeration and keeps
+the prior default-filled behavior for the branch that skips it; the static analysis cannot
+always prove such a remaining value is genuinely unconstrained rather than an approximation
+artifact (a `where`-filtered `forall`, for instance), so this checker does not guess there
+either. Fully characterizing that partial-coverage case is `Monitor` construction's own
+concern generally, not this refinement-local enumeration (issue #519, a different surface).
+
+**Breaking change**: `fslc refine` verdicts change for a mapping between two specs where
+either side's `init` leaves a state variable fully unassigned on every path. A refinement
+that used to report `refines` because only the impl's default initial branch was checked
+may now report `refinement_failed / abs_state_mismatch@init` (or `map_out_of_bounds`) if
+another impl initial branch is not abs-valid. A refinement that used to report
+`refinement_failed / abs_state_mismatch@init` solely because the abs's default initial
+branch did not equal α(s₀) may now report `refines` if α(s₀) matches a different, still
+valid, abs initial branch.
+
+## 3. CLI / JSON
+
+```
+fslc refine <impl.fsl> <abs.fsl> <mapping.fsl> [--depth K]
+```
+
+Success:
+
+```json
+{ "fsl": "1.0", "result": "refines", "impl": "CartImpl", "abs": "ShoppingCart",
+  "checked_to_depth": 8,
+  "action_map": { "impl_checkout": "checkout", "rebalance": "stutter" } }
+```
+
+Violation:
+
+```json
+{ "fsl": "1.0", "result": "refinement_failed",
+  "impl": "CartImpl", "abs": "ShoppingCart",
+  "at": "init" | "step",
+  "violated_at_step": 3,
+  "impl_action": { "name": "rebalance", "params": {...}, "loc": ... },
+  "kind": "abs_requires_failed" | "abs_state_mismatch" | "stutter_changed_abs"
+        | "map_out_of_bounds" | "map_partial_op",
+  "impl_trace": [ ...existing trace format... ],
+  "abs_before": { ...logical state of α(s)... },
+  "abs_after_expected": { ...after applying b... } | null,
+  "abs_after_actual": { ...α(s') ... },
+  "mismatch": ["stock[1]", ...],            // logical paths where equality broke (as far as known)
+  "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action" }
+```
+
+exit: refines = 0, refinement_failed = 1, error = 2/3.
+
+### Inline `implements` bounds propagation (`fslc verify`)
+
+When `fslc verify` carries `--instances` / `--values` scope overrides, the native
+CLI still evaluates inline `implements` and keeps the nested `implements` field in
+the envelope. Overrides propagate into the abstract spec **only for entity/number
+names the abstraction itself declares**; impl-only names are filtered out before
+direct-spec validation so they cannot trigger undeclared-name errors on a business
+or spec abstract that does not model them.
+
+This matches the language contract in `docs/manual/LANGUAGE.md` (inline `implements`
+bounds propagation). Before #1003 the native Rust CLI violated that documented
+contract; the frozen Python reference exercised the intended behavior in
+`tests/test_implements_bounds_override.py` (#94). Refinement remains a
+same-size forward simulation: a shrunken implementation and an unfiltered
+full-size abstract would otherwise disagree with `map_out_of_bounds`.
+
+**Independent suppressors (not treated as safe):** inline `implements` is still
+omitted silently when any of these hold:
+
+- `--property`
+- `--exclude-property`
+- `--from-state`
+
+No omission reason is recorded in the envelope today. This design does **not**
+declare those suppressions safe; they remain an explicit follow-up contract
+decision ([#1008](https://github.com/ymm-oss/fsl/issues/1008)).
+
+Static checks (`kind: "type"` error, exit 2):
+- An abs state variable that is not mapped / a nonexistent variable or action
+  name
+- An impl action with no correspondence
+- A type mismatch of a mapping expression or argument expression (matched
+  against the expected type on the abs side)
+- When abs has ensures: since the correspondence check is done with "requires +
+  body update," ensures is **assumed to be separately verified on the abs side**
+  (stated in the note)
+
+## 4. Implementation Notes
+
+- The two specs are handled in the same Z3 context. The abs-side state does not
+  create concrete variables; **α(s_t) is built as an expression** (a dict
+  associating the map expressions, evaluated over the impl state variables, to
+  the abs logical variables). The abs action's requires/update work as is if you
+  pass "state dict = α's expression dict" to the existing
+  `eval_expr` / `compute_updates` (build α at the **physical level** so that
+  physical variable names match: Option is present/value, struct is field-split,
+  Seq is data/len).
+- The per-element map mapping `map stock[i] = expr` is **substituted on the read
+  side** rather than as a Lambda/Store construction over the abs's physical Map
+  variable: hold α as "physical variable name → (Z3 expression or keyed
+  expression template)" so that `Select(stock, k)` during abs expression
+  evaluation can be replaced by `expr[i := k]`, and add a hook to eval_expr's var
+  resolution… that is invasive, so instead **enumerate the keys boundedly and
+  build a concrete Array expression with a chain of Z3 K(ArraySort) + Store** (the
+  keys are bounded, so a sequence of Stores can write it exactly). This one
+  avoids touching existing code.
+- The stutter / correspondence check expressions are push/pop per step t and per
+  instance. They run on top of PERF1's shared expansion and expression cache.
+- The counterexample's `abs_before/after` display applies `logical_state_values`
+  to the values obtained by evaluating α's expression dict in the model.
+
+## 5. Test Plan (tests/test_refine.py) + Sample
+
+Sample: `specs/cart_impl.fsl` (a refinement of ShoppingCart. Example: it has
+reserved stock `reserved`, and `reserve` (an internal state change equivalent to
+a stutter, but the map absorbs it with `impl_stock - reserved` so as not to
+change abs's stock) → `impl_checkout` consumes the reserved stock) +
+`specs/cart_refines.fsl` (the mapping).
+
+1. **Positive case**: cart_impl refines ShoppingCart (refines / exit 0).
+2. **stutter violation**: a modification where an internal action changes the
+   post-map abs state → stutter_changed_abs, with the variable path in mismatch.
+3. **requires violation**: a modification where impl weakens a guard (impl allows
+   a situation corresponding to abs's checkout `stock[i] > 0`) →
+   abs_requires_failed.
+4. **update mismatch**: a bug in the map expression (sign error etc.) →
+   abs_state_mismatch.
+5. **init mismatch** → at: "init".
+6. **static checks**: missing map / unknown action / missing correspondence →
+   kind: type, exit 2.
+7. **bounds**: the mapping value is out of the abs type range → map_out_of_bounds.
+8. **conflicting same-named type**: impl and abs both declare a type with the
+   same name but a different shape (an enum with different members, or a
+   struct with different fields) → kind: type, exit 2. Type metadata is
+   merged by name for refinement checking (`_merge_types_meta`); a same name
+   with a different member list would otherwise let an impl-only member get
+   silently reinterpreted as whichever abs member sits at the same ordinal
+   index, turning a real refinement violation into a false "refines". Domain
+   types with different bounds are still allowed to share a name — an
+   out-of-range impl value there is already caught downstream as
+   `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
+   layers distinct type names.
+9. **impl self-violation (precondition, issue #466)**: an impl whose own
+   guard/type-bound weakening lets it violate itself within depth K (e.g. a
+   dropped `requires` that lets a state variable step outside its declared
+   type bound) → `result:"violated"` with the impl's own `violation_kind`,
+   never `refines`. `docs/design/DESIGN-refinement.md` §2 step 0. Rust coverage:
+   `rust/fsl-runtime/tests/refinement.rs` (the `check_refinement` contract
+   directly, plus a regression control distinguishing this from a pure
+   guard-weakening `abs_requires_failed`) and
+   `rust/fslc/tests/issue_466_refine_impl_self_violation.rs` (the `fslc
+   refine` and `fslc diff` CLI contract).
+10. No regression of existing features (refine is a completely independent CLI
+   path).
+11. **action-correspondence argument partial_op (issue #512)**: an
+   action-correspondence argument expression (`impl_action(a) -> abs_action(a / c)`)
+   that divides by an impl state variable which can be zero — distinct from
+   `map_out_of_bounds` (a range problem) and from the impl's own body dividing by
+   zero (`abs_requires_failed`'s precondition, issue #466's `impl_violation`, since
+   here the impl's own body has no division at all) → `map_partial_op`, not an
+   unclassified `kind:"type"` error. `docs/design/DESIGN-divmod.md` §2.2/§2.3: this is
+   action context, not the read-only "mapping expression" §2.3 exempts, so it gets
+   the same partial_op treatment a division inside the abstract action's own body
+   would. A guarded correspondence (the divisor is never zero on any reachable impl
+   step) still `refines`. Rust coverage: `rust/fsl-runtime/tests/refinement.rs` (the
+   `check_refinement` contract directly) and
+   `rust/fslc/tests/issue_512_refine_map_partial_op.rs` (the `fslc refine` CLI
+   contract).
+
+## 6. Documentation Reflection
+
+- A "refinement" section in LANGUAGE.md (mapping syntax, check content,
+  workflow).
+- A note in DESIGN-v1.md §10. Add the command to the README.
+
+## 7. Chain Checking (Mapping Composition / v2.x)
+
+For a layer chain business ⊒ requirements ⊒ design …, check end-to-end
+faithfulness by composing adjacent mappings to **directly check lowest ⊒
+highest**. Previously you could only `refine` adjacent pairs individually, and
+ensuring the bottom preserves the top's contract meant either implicitly trusting
+transitivity or hand-writing the composed mapping.
+
+CLI:
+
+```
+fslc refine <low> <mid> <map_lm> <top> <map_mt> [<next> <map> ...] [--depth K]
+```
+
+After the first `(impl abs map)`, each appended `(abs map)` extends the chain by
+one layer. `mappings[i]` treats `specs[i]` as impl and `specs[i+1]` as abs.
+
+**Soundness**: fslc's refine is a step-local check (it maps each impl transition
+to an abs transition/stutter at the same step), so bounded refinement is
+transitive at the same depth K. If both low→mid and mid→top refine at depth K,
+then since stutter does not increment the step number, low→top also refines at
+depth K. The converse does not hold: a direct low→top success does not establish
+that mid satisfies its own contract. For example, Low may stop after one step
+while Mid permits a second step forbidden by Top; low→top succeeds, but mid→top
+and the chain fail. The chain deliberately requires the stronger obligation
+that every adjacent link hold (`examples/refinement_chain`). A manifest-driven
+`fslc chain` may use a different `refine_depth` per link; the minimum of those
+depths is the conservative end-to-end bound.
+
+**Implementation** (`refine_chain`):
+
+- The state mapping is **composed at the Z3 level**: α_AC(s) =
+  `build_alpha(build_alpha(s, map_AB, A, B), map_BC, B, C)`. The output of
+  `build_alpha` (a dict expressing B's physical state in Z3 expressions over A)
+  is passed as is to the input state of the next `build_alpha`. Since AST
+  substitution is avoided, indexed map, Option, struct, and Seq are also composed
+  with the existing `eval_expr` unchanged.
+- The action correspondence is composed by folding: `a -> stutter` is stutter,
+  `a -> b -> c` binds b's formal parameters to a's mapping argument expressions
+  and composes. It is unsupported only when the argument expression reads the
+  **intermediate-layer state** (`kind: type` error; in practice, arguments are
+  mostly parameter references).
+- The check body runs the existing `refine()` with the composed α (`alpha_fn`)
+  and the composed action correspondence (the check loop is unmodified).
+- On failure, the adjacent links are re-checked in order, and the first broken
+  link is returned as `failed_link: {from, to, kind}` (the cause is easier to
+  pinpoint than from a composed end-to-end trace).
+
+**Propagation premise (liveness is separate)**: even if the chain is `refines`,
+only safety propagates. The top-level liveness (`leadsTo`/`responds`) is re-
+verified at each layer (see the note in `DESIGN-layers.md` §6,
+`examples/refinement_liveness`). The diagnostic routing table reserves
+`faithfulness_class: "liveness_not_refined"` for leadsTo-refinement failures.
+When a refinement declares `preserve progress`, `fslc refine` additionally pulls
+the named abstract `leadsTo` through the state mapping and runs bounded progress
+search on the implementation model (`check_refinement_progress` in
+`fsl-verifier`), surfacing `kind: "progress_lost"` directly in refine output
+(see §1 above). Without `preserve progress`, liveness failures still appear only
+as separate lower-layer `violated` / `leadsTo` verification results.
+
+## Frozen Python reference divergence
+
+Native Rust and the frozen Python compatibility reference disagree on whether
+a failed inline `implements` seam folds into the top-level `check` / `verify`
+verdict. Before `feedaefa`, both implementations kept the primary command result
+(`ok` / `verified`) and recorded the seam only under nested `implements`. PR
+#1026 (`246f0987`, building on #1002) made native `fslc check` and `fslc
+verify` fail closed: a broken seam on an otherwise-successful envelope is
+promoted to top-level `refinement_failed` or `impl_violated` with exit 1. The
+frozen Python reference was not updated and still leaves the primary result
+unchanged.
+
+Issue #1018 CLI measurements were **not re-run in this worktree** (no `cargo`
+build). The table below is backed by source reading at `44922cfa` only.
+
+| Command / envelope field | Native Rust (#1002, #1026) | Frozen Python |
+|---|---|---|
+| `check` top-level `result` / exit | `refinement_failed` / 1 | `ok` / 0 |
+| `verify` top-level `result` / exit | `refinement_failed` / 1 | `verified` / 0 |
+| `chain` layer `detail.result` | `refinement_failed` | `ok` |
+
+`fslc chain` itself still agrees on the outcome that matters for the pipeline:
+exit 1, top-level `violated`, the failing layer `status=failed`, and nested
+`detail.implements.result=refinement_failed`. Native folds the seam into
+`detail.result` before `chain` assembles the layer; frozen Python keeps
+`detail.result` at `ok` / `verified` and detects the failure through
+`detail.implements.violation` instead (`src/fslc/chain.py:42-50`).
+
+Concrete example: `tests/fixtures/chain/requirements_broken_implements.fsl`
+declares a deliberately broken inline `implements` mapping. Native `fslc check`
+on that file exits 1 with top-level `refinement_failed`; frozen Python `fslc
+check` exits 0 with top-level `ok` and
+`implements.result=refinement_failed`. The same fixture drives
+`tests/test_chain.py::test_chain_treats_nested_implements_failure_as_layer_failure`,
+which runs the frozen Python `chain` path in-process.
+
+### Why this is allowed
+
+`CLAUDE.md` names the native Rust workspace as authoritative and `src/fslc/` as
+a **frozen** compatibility/LSP surface: new product behavior lands in Rust
+first; the frozen Python reference moves only when an explicit compatibility
+decision requires both implementations to move. The nearest precedent is
+`docs/design/DESIGN-no-user-invariants-warning.md` `## Frozen Python reference
+divergence` (#967).
+
+`tests/agreement.py` exercises symbolic/concrete expression agreement
+(`bmc.eval_expr` vs the Monitor). It does not compare CLI `check` / `verify`
+top-level `result` values or process exit codes between native and frozen
+Python. No existing parity gate therefore fails closed on this verdict
+difference.
+
+`tests/snapshots/corpus_snapshot.json` is likewise pinned to frozen Python
+(`tests/test_corpus_snapshot.py` imports `run_check` / `run_verify` from
+`fslc.cli`). For `check`, the snapshot projection records nested
+`implements.result` when present but keeps the frozen Python top-level
+`result`; a native-only fold into `refinement_failed` therefore does not move
+that snapshot. That absence of movement is expected, not a missed
+regeneration.
+
+### Permanence
+
+This divergence is **intentional for #1002 / #1026**: fail-closed folding is a
+native product correction; the frozen reference retains the pre-#1026 envelope
+shape until a separate compatibility decision says otherwise.
+
+Aligning Python with Rust is a **follow-up compatibility task**, not part of
+#1018. Whether to open that follow-up is a maintainer decision; this design
+note does not authorize or schedule it.
+
+### Issue #1041 divergence: inline `implements` has a search budget only in native Rust
+
+Native `check_refinement`'s correspondence walk (`rust/fsl-runtime/src/lib.rs`)
+is now bounded by `IMPLEMENTS_SEARCH_BUDGET` (50,000 states; no CLI flag).
+Exceeding it folds to top-level `unknown_budget` / exit 1 on both `check` and
+`verify`, the same fail-closed shape #1026 established for
+`refinement_failed`/`impl_violated` above.
+
+The frozen Python reference's inline-`implements` refinement check has no
+budget and no `unknown_budget` verdict for this seam: a domain large enough to
+exceed the native budget still runs to completion (or exhaustion of process
+memory) under frozen Python, unbounded, exactly the behavior #1041 fixed in
+Rust. This is the same class of divergence as the fold-to-top-level one above
+(a native-only product correction on a frozen surface), not re-measured with a
+fresh CLI run in this worktree — confirmed by reading
+`src/fslc/analysis/refinement.py`, which has no `budget`/`visited`-cap match
+at all (`grep -n "budget\|visited"` finds nothing there), per `CLAUDE.md`'s
+frozen-Python-moves-only-for-an-explicit-compatibility-decision rule.
+Aligning Python is the same kind of follow-up compatibility task as above,
+not decided here.

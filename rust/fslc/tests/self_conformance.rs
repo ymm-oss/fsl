@@ -759,7 +759,7 @@ enum FoldClass {
 
 /// Independent fold registry. Registered result literals are transcribed
 /// from `rust/fslc/src/outcome.rs:128-282` (66 result literals); sibling-field
-/// semantics are documented at `docs/LANGUAGE.md:1043-1070`. This function
+/// semantics are documented at `docs/manual/LANGUAGE.md:1043-1070`. This function
 /// deliberately does not call the production classifier.
 #[allow(clippy::too_many_lines)]
 fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
@@ -894,7 +894,7 @@ fn fold_action(output: &Value) -> Result<Value, String> {
     })
 }
 
-/// Exact compound result/exit pairs follow `docs/LANGUAGE.md:1043-1070` and
+/// Exact compound result/exit pairs follow `docs/manual/LANGUAGE.md:1043-1070` and
 /// the command contracts at `main.rs:3491-3698` (`run_sweep`), `:4127-4159`
 /// (`run_project_chain`'s result/exit decision), and `:14444-14557`
 /// (`run_analyze_batch`).

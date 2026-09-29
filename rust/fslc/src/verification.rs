@@ -825,13 +825,13 @@ fn insert_helpful_rank_failure_json(
     }
 }
 
-/// Prove the solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// Prove the solver-dependent vacuity lanes (`docs/design/DESIGN-vacuity.md` §2 lanes
 /// 3–6) for a run decided by the solver-free explicit-state engine.
 ///
 /// The lanes describe the model, not the exploration, so `--engine explicit`
 /// must surface the same vacuity kinds `--engine bmc` does; letting the engine
 /// choice change which kinds `--vacuity error` can see would be exactly the
-/// exit-code divergence `docs/DESIGN-rust-port.md` forbids. A solver or
+/// exit-code divergence `docs/design/DESIGN-rust-port.md` forbids. A solver or
 /// semantics failure is surfaced, never swallowed.
 type ExplicitSolverFindings = (
     Vec<fsl_verifier::VacuityFinding>,
@@ -1600,7 +1600,7 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
 /// walked) and too broad (an unrelated sibling `.fsl` file was).
 ///
 /// The key embeds no absolute path (issue #1148, and
-/// `docs/DESIGN-incremental-verify.md` §3): the entry spec is identified by
+/// `docs/design/DESIGN-incremental-verify.md` §3): the entry spec is identified by
 /// its bytes, each dependency by its path relative to the entry spec's
 /// directory plus its bytes, and the `--requirements` file by its bytes. The
 /// entry spec's own path is deliberately not an input: no verdict-class
@@ -1831,7 +1831,7 @@ pub(super) fn run_verify_cli(
 /// Whether this run selects a subset of the model, and therefore does not
 /// evaluate the inline `implements` seam.
 ///
-/// This is the whole population of seam suppressors: `docs/LANGUAGE.md` names
+/// This is the whole population of seam suppressors: `docs/manual/LANGUAGE.md` names
 /// these three options and nothing else, and both call sites read it from here
 /// so the list cannot drift in one of them. #1008 is open against the semantics
 /// of these three, so a change there has to land in one place.
@@ -1939,7 +1939,7 @@ pub(super) fn run_verify_cli_from_source(
         // inline `implements` seam has to be evaluated and folded here as well.
         // Without this, `verify --engine induction --lemma ...` is another way
         // to pass a broken seam with exit 0 (#1002), and the suppressor list in
-        // `docs/LANGUAGE.md` would be missing an entry.
+        // `docs/manual/LANGUAGE.md` would be missing an entry.
         if !seam_is_suppressed(options, &prepared)
             && let Ok(model) = &prepared.model
         {

@@ -142,7 +142,7 @@ fn check_rejects_a_syntactically_invalid_agent_body() {
 }
 
 // --- grant-boundary exceedance: a check-time semantics error, not a
-// finding (docs/LANGUAGE.md §13.6) ---------------------------------------
+// finding (docs/manual/LANGUAGE.md §13.6) ---------------------------------------
 
 #[test]
 fn ai_check_rejects_a_grant_that_exceeds_the_parent_boundary() {
@@ -256,7 +256,7 @@ fn ai_check_finds_nothing_when_every_rule_is_satisfied() {
 
 #[test]
 fn verify_still_rejects_agent_documents_as_kernel_specs() {
-    // `agent` never lowers to the kernel (docs/LANGUAGE.md §13.6); this
+    // `agent` never lowers to the kernel (docs/manual/LANGUAGE.md §13.6); this
     // boundary must be unchanged by the new grammar/analyzer.
     let (value, status) = run(&[
         "verify",

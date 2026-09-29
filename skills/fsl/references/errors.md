@@ -37,7 +37,7 @@ existing result/kind fields:
 | `error` / `acceptance` | Replay of an acceptance criterion failed | The ID and step of the failed AC are returned. Decide whether the procedure's precondition (state) or the expect is correct, and fix accordingly |
 | `error` / `forbidden` | An operation sequence that should be rejected was accepted (under-constraint; the kind that a safety invariant stays silent about) | `accepted_trace` is the accepting path. The requires enabling the last operation is too loose → add a guard or review the spec |
 | `error` / `forbidden_setup` | A precondition (non-final) step of the forbidden is not enabled (invalid trace) | Review the setup procedure. The non-final steps are there to reach that point and are not treated as success |
-| `statistically_unsupported` / `dataset_invalid` / `evaluator_untrusted` / `insufficient_samples` (fsl-ai evidence commands) | External statistical/migration/drift evidence failed a gate — there is no kernel counterexample to read | Route by the status priority list in `docs/DESIGN-stochastic.md`: fix the evidence (records, calibration, sample size) or the component/rollout — not the spec, and do not expect a trace |
+| `statistically_unsupported` / `dataset_invalid` / `evaluator_untrusted` / `insufficient_samples` (fsl-ai evidence commands) | External statistical/migration/drift evidence failed a gate — there is no kernel counterexample to read | Route by the status priority list in `docs/design/DESIGN-stochastic.md`: fix the evidence (records, calibration, sample size) or the component/rollout — not the spec, and do not expect a trace |
 
 For an action whose coverage is `false`, `blocking_requires` pinpoints "which
 requires is blocking it" on a per-clause basis, and `hint` summarizes the

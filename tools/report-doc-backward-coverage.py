@@ -79,7 +79,7 @@ LAYERS: list[tuple[str, bool, str]] = [
     (
         "specs/",
         False,
-        "conformance corpus (docs/DESIGN-conformance-harness.md): written to be "
+        "conformance corpus (docs/design/DESIGN-conformance-harness.md): written to be "
         "verified, not to be documented -- stated in #1138 itself",
     ),
     (

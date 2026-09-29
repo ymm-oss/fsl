@@ -6,7 +6,7 @@
 The cache is only as good as its ability to never lie, so most of this file
 is negative tests -- proving specific input changes are *not* served from a
 stale cache entry, per the soundness argument in
-`docs/DESIGN-incremental-verify.md` §7.
+`docs/design/DESIGN-incremental-verify.md` §7.
 """
 from __future__ import annotations
 

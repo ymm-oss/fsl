@@ -511,7 +511,7 @@ fn evidence_attached_requirement_ids(item: &Value) -> Vec<String> {
 /// Whether an evidence envelope's own result token is a definitive `pass`,
 /// a definitive `fail`, or carries no verdict at all (gate failures like
 /// `dataset_invalid`, or structural-only output like `compared`) — issue
-/// #508 / `docs/DESIGN-assurance-classes.md` "Verdict mapping —
+/// #508 / `docs/design/DESIGN-assurance-classes.md` "Verdict mapping —
 /// `ledger::evidence_verdict` (issue #508)". This is
 /// deliberately independent of [`assurance_token`]: class (method strength)
 /// and verdict (outcome) are orthogonal, so a failing source must never
@@ -590,7 +590,7 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
 
 /// Classify one JSON envelope (an evidence file's parsed contents, or a
 /// `fslc verify` result) into the shared assurance vocabulary (issue #171,
-/// `docs/DESIGN-assurance-classes.md`): `proved` / `bounded` /
+/// `docs/design/DESIGN-assurance-classes.md`): `proved` / `bounded` /
 /// `replay-observed` / `statistical` / `not_run`. `pub(crate)` so
 /// `document_evidence.rs` (issue #332) reuses this exact classification
 /// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
@@ -889,7 +889,7 @@ pub fn render_ledger_with_approvals(
     }
 
     let mut output = format!(
-        "# 意図ずれ監査台帳: {}\n\n- 対象: `{file}`\n- 保証限界: {}\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n",
+        "# 意図ずれ監査台帳: {}\n\n- 対象: `{file}`\n- 保証限界: {}\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/design/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n",
         model.name,
         guarantee_line(verification)
     );

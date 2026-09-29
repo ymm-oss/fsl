@@ -20,7 +20,7 @@
     <p class="kicker reveal">AI hard-contracts / statistical evidence</p>
     <h1 class="reveal">fsl-ai でAIのtool境界・agent構造・統計品質を1つの規律で扱う</h1>
     <p class="lead reveal">fsl-ai は3つの層でAIシステムを扱います。<code>ai_component</code> はtool authority・human approval・forbidden toolをkernel展開で検査するhard contract層、<code>agent</code> はrecursive agentのgrant・visibility・orchestrationを解析する構造層、そして <code>dataset</code> / <code>evaluator</code> / <code>statistical_property</code> / <code>ai_migration</code> / <code>observed_property</code> は統計品質・migration regression・運用driftを <code>formal_result: "not_run"</code> の外部証拠として扱うevidence層です。</p>
-    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a> にあります。</p>
+    <p class="reveal dim" style="margin-top:18px">設計の詳細は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-stochastic.md">DESIGN-stochastic.md</a> にあります。</p>
   </div>
 </section>
 
@@ -454,7 +454,7 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod</code><
       <div class="syntax-card">
         <h3>設計判断</h3>
         <p>guarantee boundary、lowering、event schema、findingはhard-contract設計文書に、Wilson区間・status優先順位・eval record schemaはstochastic設計文書にあります。</p>
-        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> <a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-stochastic.md">DESIGN-stochastic.md</a></p>
+        <p><a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-ai-hard.md">DESIGN-ai-hard.md</a> <a class="btn" href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-stochastic.md">DESIGN-stochastic.md</a></p>
       </div>
       <div class="syntax-card">
         <h3>動く例</h3>

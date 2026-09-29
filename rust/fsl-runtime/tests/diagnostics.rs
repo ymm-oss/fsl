@@ -160,7 +160,7 @@ fn digit_growth_vacuity_model() -> fsl_core::KernelModel {
 }
 
 /// Positive and negative control for issue #729's tri-state contract, in one
-/// shared BFS call (`docs/DESIGN-vacuity.md`, `expression_reachability`):
+/// shared BFS call (`docs/design/DESIGN-vacuity.md`, `expression_reachability`):
 /// - Negative control: a genuinely unreachable antecedent
 ///   (`NeverNegative`'s `count < 0`) must resolve `Exhausted`, not
 ///   `Unreachable`, once the shared budget is hit -- folding it into

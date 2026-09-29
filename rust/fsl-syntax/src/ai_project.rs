@@ -9,7 +9,7 @@
 //! graph check. The `dataset` / `statistical_property` / `ai_migration` /
 //! `observed_property` declarations parsed here are external evidence jobs:
 //! their `require` clauses are threshold labels, not kernel formulas
-//! (`docs/DESIGN-stochastic.md`). This mirrors the frozen reference's
+//! (`docs/design/DESIGN-stochastic.md`). This mirrors the frozen reference's
 //! `src/fslc/ai_project.py`: a small typed metadata model built with a
 //! brace-matching block scanner, not a strict grammar.
 
@@ -217,7 +217,7 @@ impl AiProject {
 
     /// Resolve the source JSONL path declared by `dataset <name> { source
     /// "..."; }`, matching `_records_path`'s dataset-source fallback used
-    /// when `fslc ai eval` is invoked without `--records` (`docs/LANGUAGE.md`
+    /// when `fslc ai eval` is invoked without `--records` (`docs/manual/LANGUAGE.md`
     /// documents this exact usage).
     #[must_use]
     pub fn dataset_source(&self, name: &str) -> Option<&str> {
@@ -703,7 +703,7 @@ struct SourceLine {
 }
 
 /// Resolve a char offset in `source` to the 1-based `loc` line and column
-/// `docs/DESIGN-v1.md` §7.2 guarantees every `parse` error carries (#562).
+/// `docs/design/DESIGN-v1.md` §7.2 guarantees every `parse` error carries (#562).
 #[allow(clippy::cast_possible_truncation)]
 fn line_column(source: &str, offset: usize) -> (u32, u32) {
     let mut line = 1u32;

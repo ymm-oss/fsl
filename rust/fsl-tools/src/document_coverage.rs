@@ -13,7 +13,7 @@
 //! cannot ship with silently unmeasured document coverage. See
 //! `rust/fsl-tools/tests/document_coverage.rs` for the tests that keep this
 //! registry in sync with the Public Kernel v1 schema and the fixture
-//! corpus, and `docs/DESIGN-document-coverage-registry.md` for the design.
+//! corpus, and `docs/design/DESIGN-document-coverage-registry.md` for the design.
 
 /// Whether RCIR v1 renders a semantic target kind as a claim, or reports it
 /// as an unsupported target (never both, and never silently dropped).

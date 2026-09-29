@@ -9,7 +9,7 @@ load -> BMC/Monitor expression agreement -> verify-vs-oracle verdict
 agreement``) or excluded **loudly**, with a documented reason
 (``tests/dialect_registry.py``) that this file re-asserts on every run. A new
 dialect that nobody registers here is a failure of this file, not a silent
-skip — see ``docs/DESIGN-conformance-harness.md`` for the full design and the
+skip — see ``docs/design/DESIGN-conformance-harness.md`` for the full design and the
 gap this closes (the 2026-07-08 fsl-db audit: 15/18 ``examples/db/*.fsl``
 silently sat outside this net while ``pytest -q`` stayed green).
 

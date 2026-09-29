@@ -6,7 +6,7 @@
 //! #537 C4 residual).
 //!
 //! These documents are not `check`-shaped: `causal` bypasses dialect
-//! dispatch entirely (`docs/DESIGN-causal.md`), and `agent`/`ai_component`
+//! dispatch entirely (`docs/design/DESIGN-causal.md`), and `agent`/`ai_component`
 //! evaluate under `fslc ai check`, not `fslc check`, for their declared
 //! result. Before this manifest, nothing walked the corpus and failed on an
 //! unregistered evidence-only document -- only fixed-path issue tests
@@ -118,11 +118,11 @@ const ROWS: &[Row] = &[
         construct: Construct::Causal,
         command: &["causal", "check"],
         expected_result: "causal_model_checked",
-        declared_by: "docs/LANGUAGE.md:2974-2984 (`causal <Name> { ... }` is evaluated by \
-                      `fslc causal check model.fsl`) and docs/DESIGN-causal.md:475 (the \
+        declared_by: "docs/manual/LANGUAGE.md:2974-2984 (`causal <Name> { ... }` is evaluated by \
+                      `fslc causal check model.fsl`) and docs/design/DESIGN-causal.md:475 (the \
                       command's success envelope: `\"result\": \"causal_model_checked\"`)",
         declaration: Declaration {
-            path: "docs/DESIGN-causal.md",
+            path: "docs/design/DESIGN-causal.md",
             anchor: "\"result\": \"causal_model_checked\"",
         },
     },
@@ -131,10 +131,10 @@ const ROWS: &[Row] = &[
         construct: Construct::Causal,
         command: &["causal", "check"],
         expected_result: "causal_model_checked",
-        declared_by: "docs/LANGUAGE.md:2974-2984 and docs/DESIGN-causal.md:475, as for \
+        declared_by: "docs/manual/LANGUAGE.md:2974-2984 and docs/design/DESIGN-causal.md:475, as for \
                       incident_response.fsl above -- one command contract, three fixtures",
         declaration: Declaration {
-            path: "docs/DESIGN-causal.md",
+            path: "docs/design/DESIGN-causal.md",
             anchor: "\"result\": \"causal_model_checked\"",
         },
     },
@@ -143,9 +143,9 @@ const ROWS: &[Row] = &[
         construct: Construct::Causal,
         command: &["causal", "check"],
         expected_result: "causal_model_checked",
-        declared_by: "docs/LANGUAGE.md:2974-2984 and docs/DESIGN-causal.md:475, as above",
+        declared_by: "docs/manual/LANGUAGE.md:2974-2984 and docs/design/DESIGN-causal.md:475, as above",
         declaration: Declaration {
-            path: "docs/DESIGN-causal.md",
+            path: "docs/design/DESIGN-causal.md",
             anchor: "\"result\": \"causal_model_checked\"",
         },
     },
@@ -182,7 +182,7 @@ const ROWS: &[Row] = &[
         construct: Construct::AiProject,
         command: &["ai", "check"],
         expected_result: "ai_project_analyzed",
-        declared_by: "docs/LANGUAGE.md:2689-2692 (`fslc ai check` parses a project-level \
+        declared_by: "docs/manual/LANGUAGE.md:2689-2692 (`fslc ai check` parses a project-level \
                       fsl-ai evidence declaration -- combining `ai_component`, `dataset`, \
                       `evaluator`, `failure_mode`, `statistical_property`, `ai_migration`, \
                       `observed_property` -- with the same parser the evidence commands run, \
@@ -190,7 +190,7 @@ const ROWS: &[Row] = &[
                       (`support_answer_quality.fsl` declares `dataset`, `evaluator`, ... \
                       blocks, i.e. is that shape)",
         declaration: Declaration {
-            path: "docs/LANGUAGE.md",
+            path: "docs/manual/LANGUAGE.md",
             anchor: "ai_project_analyzed",
         },
     },
