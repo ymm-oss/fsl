@@ -1114,27 +1114,73 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     })
 }
 
+/// Run the #1149 ranking pre-pass for a BMC run, on its own thread.
+///
+/// The ranking must not share a Z3 context with the BMC session: the native
+/// backend's `Solver::new()` uses the thread's default context, and terms
+/// created there -- even in a separate `Solver` -- measurably change which
+/// model Z3 returns for the BMC session's later witness queries (observed on
+/// `helpful` specs whose ranking fails and whose lasso witness then differed).
+/// A fresh thread gets a fresh default context, so the BMC session sees
+/// exactly the query history it has without the pre-pass.
+fn ranked_lasso_discharges(
+    model: &KernelModel,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+) -> (
+    std::collections::BTreeSet<String>,
+    Option<fsl_solver::VerificationStatistics>,
+) {
+    if !model
+        .leadstos
+        .iter()
+        .any(|property| property.decreases.is_some())
+    {
+        return (std::collections::BTreeSet::new(), None);
+    }
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .stack_size(super::STACK_SIZE)
+            .name("fslc-ranking".to_owned())
+            .spawn_scoped(scope, || {
+                let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+                    return (std::collections::BTreeSet::new(), None);
+                };
+                let discharged = block_on_native(fsl_verifier::ranked_leadsto_lasso_discharges(
+                    model,
+                    &mut solver,
+                    checked_bounds,
+                ));
+                (discharged, Some(fsl_solver::SmtSolver::statistics(&solver)))
+            });
+        match worker {
+            Ok(worker) => worker
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            // No thread, no pre-pass: the full search runs as before.
+            Err(_) => (std::collections::BTreeSet::new(), None),
+        }
+    })
+}
+
 fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedBmc, CommandResult> {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
     };
-    let verification = if let Some(initial_state) = request.initial_state {
-        block_on_native(fsl_verifier::verify_bounded_from_state(
-            &prepared.model,
-            &mut solver,
-            request.depth,
-            prepared.checked_bounds.as_ref(),
-            initial_state,
-        ))
-    } else {
-        block_on_native(fsl_verifier::verify_bounded_selected(
-            &prepared.model,
-            &mut solver,
-            request.depth,
-            prepared.checked_bounds.as_ref(),
-        ))
-    };
+    // A ranked `leadsTo` whose ranking obligations hold needs no bounded
+    // fair-lasso search: the ranking already shows that search is `unsat`
+    // (#1149). It only withdraws probes; the verdict, completeness, and every
+    // witness stay those of the full search.
+    let (lasso_discharged, ranking_statistics) =
+        ranked_lasso_discharges(&prepared.model, prepared.checked_bounds.as_ref());
+    let verification = block_on_native(fsl_verifier::verify_bounded_discharging(
+        &prepared.model,
+        &mut solver,
+        request.depth,
+        prepared.checked_bounds.as_ref(),
+        request.initial_state,
+        &lasso_discharged,
+    ));
     let mut result = match verification {
         Ok(result) => result,
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
@@ -1151,6 +1197,9 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     // underdetermined witness projections, which are byte-compared across the
     // native and browser backends.
     let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
+    if let Some(ranking_statistics) = &ranking_statistics {
+        statistics.merge(ranking_statistics);
+    }
     let needs_reachable_diagnosis =
         result.violation.is_none() && result.reachables.values().any(Option::is_none);
     if needs_reachable_diagnosis {

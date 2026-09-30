@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::recursion;
 use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
@@ -448,10 +448,49 @@ fn helpful_witnesses<S: SmtSolver>(
 ///
 /// Returns [`VerifyError`] for unsupported measures, symbolic expressions, or
 /// solver failures.
-#[allow(clippy::too_many_lines)]
 pub async fn prove_ranked_leadstos<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
+) -> Result<RankedLeadstoResult, VerifyError> {
+    prove_ranked_leadstos_assuming(model, solver, None).await
+}
+
+/// The ranked `leadsTo` names whose bounded fair-lasso search a BMC run may
+/// skip (#1149), because the ranking obligations of
+/// [`prove_ranked_leadstos`] hold for them over every state that satisfies
+/// exactly the properties that same BMC run checks at every unrolled step.
+///
+/// `checked_bounds` must be the implicit type-bound selection the BMC run
+/// uses (`None` = every `_bounds_*`); a bound the run does not check is not
+/// assumed here, because an unrolled state may violate it. The ranking stops
+/// at its first failing property, so only the properties proved before it
+/// are returned. Any ranking error (unsupported measure, solver `unknown`,
+/// fail-closed filters) returns the empty set: the fast path never reports
+/// anything itself, it only withdraws probes whose answer it has already
+/// shown to be `unsat`. See `docs/design/DESIGN-induction.md` §2.5.
+pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> BTreeSet<String> {
+    if !model
+        .leadstos
+        .iter()
+        .any(|property| property.decreases.is_some())
+    {
+        return BTreeSet::new();
+    }
+    match prove_ranked_leadstos_assuming(model, solver, checked_bounds).await {
+        Ok(result) => result.proofs.into_iter().map(|proof| proof.name).collect(),
+        Err(_) => BTreeSet::new(),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<RankedLeadstoResult, VerifyError> {
     let instances = action_instances(solver, model)?;
     let state0 = symbolic_state_with_suffix(solver, model, "rank0")?;
@@ -462,6 +501,11 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
     // pending states in which nothing is enabled (#1189).
     let deadlock_state = symbolic_state_with_suffix(solver, model, "rank_deadlock")?;
     for property in properties(model) {
+        if let (Property::Bound(_), Some(selected)) = (property, checked_bounds)
+            && !selected.contains(&property.name(model))
+        {
+            continue;
+        }
         solver.assert(&property_condition(solver, model, property, &state0, None)?)?;
         solver.assert(&property_condition(
             solver,

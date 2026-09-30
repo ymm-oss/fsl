@@ -200,6 +200,10 @@ so its `fair` declaration is never actually obligated to fire. See
   base case (BMC) side** and remains bounded. A ranked `leadsTo` whose
   obligations in §2.6 are unsat is reported as an unbounded ranking proof in its
   `leads_to` entry.
+- With either engine, a ranked `leadsTo` whose ranking obligations hold skips
+  the bounded lasso search of §2.1–2.2, whose every probe the ranking shows to
+  be `unsat`; the deadlock-stall (§2.4) and `within` probes still run, and the
+  bounded result is unchanged (`DESIGN-induction.md` §2.5, #1149).
 
 ## 4. JSON
 
