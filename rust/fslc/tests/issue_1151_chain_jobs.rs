@@ -325,6 +325,18 @@ fn jobs_rejects_a_missing_zero_or_non_integer_value() {
         );
         assert!(text.contains(message), "{args:?}: {text}");
     }
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["chain", "fsl-project.toml", "other.toml"])
+        .current_dir(&dir)
+        .env("FSLC_CACHE_DIR", &cache)
+        .output()
+        .expect("run native fslc");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("unexpected chain argument 'other.toml'"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     // The path may follow the options, as the published contract says.
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["chain", "--jobs", "2", "--keep-going", "fsl-project.toml"])
@@ -388,4 +400,66 @@ fn every_layer_reports_what_a_standalone_verify_reports() {
             "--jobs {jobs}: the design layer differs from `fslc verify`"
         );
     }
+}
+
+/// The published cache entries under `cache` (temporary files excluded).
+fn cache_entries(cache: &Path) -> Vec<String> {
+    fn walk(dir: &Path, found: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries {
+            let path = entry.expect("cache entry").path();
+            let name = path
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned();
+            if path.is_dir() {
+                walk(&path, found);
+            } else if !name.starts_with('.') {
+                found.push(name);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(cache, &mut found);
+    found.sort();
+    found
+}
+
+#[test]
+fn an_early_failure_does_not_wait_for_a_slow_later_layer() {
+    // `[business]` fails at step 0; `[design]` is the slow layer at a depth
+    // that takes seconds. Serially the design layer never starts. At
+    // `--jobs 4` it starts at once, and the run must still end as soon as the
+    // business failure decides the report -- not after the discarded design
+    // layer finishes. A run that waited would have stored the design
+    // layer's cache entry before exiting; one that did not leaves exactly the
+    // serial run's entries.
+    let dir = project();
+    let manifest = format!(
+        "[business]\nfile = \"business_broken.fsl\"\ndepth = 1\n\n\
+         [design]\nfile = \"slow.fsl\"\ndepth = 9\n\n[impl]\n{}\n",
+        impl_command()
+    );
+    let serial_cache = scratch_dir("early-serial");
+    let parallel_cache = scratch_dir("early-parallel");
+    let serial = chain(&dir, &serial_cache, &manifest, &["--jobs", "1"]);
+    let started = std::time::Instant::now();
+    let parallel = chain(&dir, &parallel_cache, &manifest, &["--jobs", "4"]);
+    let parallel_wall = started.elapsed();
+    assert_eq!(serial.code, Some(1), "{}", serial.stderr);
+    assert_eq!(serial.code, parallel.code);
+    assert_eq!(serial.stderr, parallel.stderr);
+    assert_eq!(comparable(&serial.stdout), comparable(&parallel.stdout));
+    assert_eq!(
+        layer_names(&serial.stdout),
+        ["business:failed", "design:skipped", "impl:skipped"]
+    );
+    assert_eq!(
+        cache_entries(&parallel_cache),
+        cache_entries(&serial_cache),
+        "--jobs 4 waited for the discarded design layer (wall {parallel_wall:?})"
+    );
 }

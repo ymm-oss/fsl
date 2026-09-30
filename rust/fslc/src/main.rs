@@ -1571,7 +1571,7 @@ fn command() -> Result<(Value, i32), String> {
                         return Err(format!("unknown chain option '{option}'"));
                     }
                     _ if path.is_none() => path = Some(PathBuf::from(option)),
-                    _ => return Err(format!("unknown chain option '{option}'")),
+                    _ => return Err(format!("unexpected chain argument '{option}'")),
                 }
             }
             let path = path.unwrap_or_else(|| PathBuf::from("fsl-project.toml"));
@@ -4032,6 +4032,16 @@ fn run_chain_step_isolated(
     })
 }
 
+/// How many chain workers `--jobs` starts: never more than there are groups
+/// to claim, so `--jobs 64` on a three-layer manifest starts three.
+fn chain_worker_count(jobs: usize, groups: usize) -> usize {
+    jobs.min(groups)
+}
+
+/// What a chain worker reports for one step: its result, or the payload of a
+/// panic inside it.
+type ChainStepMessage = (usize, std::thread::Result<(Value, bool)>);
+
 /// Runs the planned chain steps on up to `jobs` workers (issue #1151) and
 /// returns each step's result in manifest order.
 ///
@@ -4046,16 +4056,25 @@ fn run_chain_step_isolated(
 ///
 /// - a step's result never depends on another step's result
 ///   ([`run_chain_step`]), and layers sharing a cache key stay serial;
-/// - results land in per-step slots and are aggregated by manifest index,
-///   never by completion order;
-/// - without `keep_going`, a failing step lowers `cutoff` and no worker starts
-///   a step past it. Every step before the serial run's first failure `F` still
-///   runs: skipping one would take an earlier failing step, and `F` is the
-///   earliest. Steps past `F` that were already running finish, and the
-///   aggregation discards them; a running solver is not interrupted;
+/// - results are sent to this thread with their manifest index and are
+///   aggregated by that index, never by completion order;
+/// - a step that stops the serial loop -- a failure without `keep_going`, or
+///   a panic -- lowers `cutoff`, and no worker starts a step past it. Every
+///   step before the serial run's stopping step `F` still runs: skipping one
+///   would take an earlier stopping step, and `F` is the earliest;
+/// - this thread returns as soon as every step up to the cutoff has reported.
+///   Workers still running a later step are not joined: they are detached,
+///   and the process exits under them once the report is printed, so a
+///   discarded layer does not hold up the run (a solver cannot be interrupted
+///   from outside its thread). A step prints nothing itself, so a straggler
+///   cannot write after the table; one killed while storing a cache entry
+///   leaves at most its temporary file, because entries are renamed into
+///   place;
+/// - a panic is re-raised with its original payload only when the walk in
+///   manifest order reaches it, where the serial loop would have panicked;
 /// - the `[impl]` command is a side effect whose running at all depends on the
-///   earlier layers, so it runs alone, after every other step, and only when
-///   the serial loop would have reached it.
+///   earlier layers, so it runs alone, after every other step has reported,
+///   and only when the serial loop would have reached it.
 fn run_chain_steps(
     steps: &[(String, String)],
     sections: &std::collections::BTreeMap<String, ManifestSection>,
@@ -4063,6 +4082,9 @@ fn run_chain_steps(
     keep_going: bool,
     jobs: usize,
 ) -> ChainStepResults {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     let mut results: ChainStepResults = vec![None; steps.len()];
     if jobs <= 1 {
         for (index, (kind, layer)) in steps.iter().enumerate() {
@@ -4075,43 +4097,87 @@ fn run_chain_steps(
         }
         return results;
     }
-    let groups = chain_step_groups(steps, sections, base);
-    let slots = steps
-        .iter()
-        .map(|_| std::sync::Mutex::new(None))
-        .collect::<Vec<_>>();
-    let next_group = std::sync::atomic::AtomicUsize::new(0);
-    let cutoff = std::sync::atomic::AtomicUsize::new(usize::MAX);
-    std::thread::scope(|scope| {
-        for worker in 0..jobs.min(groups.len()) {
-            std::thread::Builder::new()
-                .stack_size(STACK_SIZE)
-                .name(format!("fslc-chain-{worker}"))
-                .spawn_scoped(scope, || {
-                    while let Some(group) =
-                        groups.get(next_group.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
-                    {
-                        for &index in group {
-                            if index > cutoff.load(std::sync::atomic::Ordering::SeqCst) {
-                                break;
-                            }
-                            let (kind, layer) = &steps[index];
-                            let result = run_chain_step_isolated(kind, layer, sections, base);
-                            if result.1 && !keep_going {
-                                cutoff.fetch_min(index, std::sync::atomic::Ordering::SeqCst);
-                            }
-                            *slots[index].lock().expect("chain result slot") = Some(result);
+    let groups = Arc::new(chain_step_groups(steps, sections, base));
+    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf()));
+    let next_group = Arc::new(AtomicUsize::new(0));
+    let cutoff = Arc::new(AtomicUsize::new(usize::MAX));
+    let (sender, receiver) = std::sync::mpsc::channel::<ChainStepMessage>();
+    for worker in 0..chain_worker_count(jobs, groups.len()) {
+        let (groups, shared, next_group, cutoff, sender) = (
+            Arc::clone(&groups),
+            Arc::clone(&shared),
+            Arc::clone(&next_group),
+            Arc::clone(&cutoff),
+            sender.clone(),
+        );
+        std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .name(format!("fslc-chain-{worker}"))
+            .spawn(move || {
+                let (steps, sections, base) = &*shared;
+                while let Some(group) = groups.get(next_group.fetch_add(1, Ordering::SeqCst)) {
+                    for &index in group {
+                        if index > cutoff.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let (kind, layer) = &steps[index];
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            run_chain_step_isolated(kind, layer, sections, base)
+                        }));
+                        let ends_serial_loop = result
+                            .as_ref()
+                            .map_or(true, |(_, failed)| *failed && !keep_going);
+                        if ends_serial_loop {
+                            cutoff.fetch_min(index, Ordering::SeqCst);
+                        }
+                        let panicked = result.is_err();
+                        // The receiver is gone once the report is decided;
+                        // a straggler's result is simply dropped.
+                        if sender.send((index, result)).is_err() || panicked {
+                            return;
                         }
                     }
-                })
-                .expect("spawn a chain worker thread");
-        }
-    });
-    for (slot, result) in slots.into_iter().zip(results.iter_mut()) {
-        *result = slot.into_inner().expect("chain result slot");
+                }
+            })
+            .expect("spawn a chain worker thread");
     }
-    let reached_impl = keep_going || cutoff.into_inner() == usize::MAX;
-    if reached_impl && let Some(index) = steps.iter().position(|(kind, _)| kind == "impl") {
+    drop(sender);
+
+    let pending = |slots: &[Option<std::thread::Result<(Value, bool)>>], stop: usize| {
+        steps
+            .iter()
+            .enumerate()
+            .take_while(|(index, _)| *index <= stop)
+            .any(|(index, (kind, _))| kind != "impl" && slots[index].is_none())
+    };
+    let mut slots = steps.iter().map(|_| None).collect::<Vec<_>>();
+    let mut stop = usize::MAX;
+    while pending(&slots, stop) {
+        // Every worker holding a sender has exited: nothing more can arrive.
+        let Ok((index, result)) = receiver.recv() else {
+            break;
+        };
+        if result
+            .as_ref()
+            .map_or(true, |(_, failed)| *failed && !keep_going)
+        {
+            stop = stop.min(index);
+        }
+        slots[index] = Some(result);
+    }
+    for (index, slot) in slots.into_iter().enumerate() {
+        if index > stop {
+            break;
+        }
+        match slot {
+            Some(Ok(result)) => results[index] = Some(result),
+            Some(Err(payload)) => std::panic::resume_unwind(payload),
+            None => {}
+        }
+    }
+    if stop == usize::MAX
+        && let Some(index) = steps.iter().position(|(kind, _)| kind == "impl")
+    {
         let (kind, layer) = &steps[index];
         results[index] = Some(run_chain_step(kind, layer, sections, base));
     }
@@ -17717,6 +17783,36 @@ fn block_on_native<F: Future>(future: F) -> F::Output {
     match future.as_mut().poll(&mut context) {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("native Z3 backend unexpectedly yielded Pending"),
+    }
+}
+
+#[cfg(test)]
+mod chain_jobs_tests {
+    use super::*;
+
+    #[test]
+    fn chain_starts_no_more_workers_than_there_are_groups() {
+        // A business/requirements/design manifest with distinct files, and
+        // `[impl]`, which is never a group: three groups.
+        let mut sections = std::collections::BTreeMap::new();
+        let base = std::env::temp_dir().join(format!("fslc-1151-groups-{}", std::process::id()));
+        std::fs::create_dir_all(&base).expect("create scratch dir");
+        let mut steps = Vec::new();
+        for layer in ["business", "requirements", "design"] {
+            let file = format!("{layer}.fsl");
+            std::fs::write(base.join(&file), format!("// {layer}\n")).expect("write layer");
+            let mut section = ManifestSection::default();
+            section.values.insert("file".to_owned(), file);
+            sections.insert(layer.to_owned(), section);
+            steps.push(("spec".to_owned(), layer.to_owned()));
+        }
+        sections.insert("impl".to_owned(), ManifestSection::default());
+        steps.push(("impl".to_owned(), "impl".to_owned()));
+        let groups = chain_step_groups(&steps, &sections, &base);
+        std::fs::remove_dir_all(&base).expect("remove scratch dir");
+        assert_eq!(groups, vec![vec![0], vec![1], vec![2]]);
+        assert_eq!(chain_worker_count(64, groups.len()), 3);
+        assert_eq!(chain_worker_count(2, groups.len()), 2);
     }
 }
 

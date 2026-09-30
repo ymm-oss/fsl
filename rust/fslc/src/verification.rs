@@ -1751,6 +1751,19 @@ fn cache_temporary_name(stem: &str) -> String {
     format!(".{stem}.{}.{sequence}.tmp", std::process::id())
 }
 
+/// Writes `bytes` to `temporary` and renames it onto `destination`. The cache
+/// is best-effort, so a failure is not reported, but the temporary file is
+/// removed: its name is unique per writer, so a leftover would never be
+/// overwritten by a later store.
+fn publish_cache_file(temporary: &Path, destination: &Path, bytes: Option<Vec<u8>>) {
+    let published = bytes.is_some_and(|bytes| {
+        std::fs::write(temporary, bytes).is_ok() && std::fs::rename(temporary, destination).is_ok()
+    });
+    if !published {
+        let _ = std::fs::remove_file(temporary);
+    }
+}
+
 fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if !valid_cache_key(key) || !valid_cache_key(xdepth) {
         return;
@@ -1786,13 +1799,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         },
         "output": output,
     });
-    if serde_json::to_vec(&entry)
-        .ok()
-        .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-        .is_some()
-    {
-        let _ = std::fs::rename(&temporary, path);
-    }
+    publish_cache_file(&temporary, &path, serde_json::to_vec(&entry).ok());
     if output.get("result").and_then(Value::as_str) == Some("violated")
         && let Some(step) = output.get("violated_at_step").and_then(Value::as_u64)
         && let Some(root) = cache_root()
@@ -1801,18 +1808,14 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
             let temporary = directory.join(cache_temporary_name(xdepth));
-            if serde_json::to_vec(&json!({
+            let bytes = serde_json::to_vec(&json!({
                 "schema": "fslc-rust-cache-pointer.v2",
                 "xdepth": xdepth,
                 "entry_key": key,
                 "violated_at_step": step,
             }))
-            .ok()
-            .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-            .is_some()
-            {
-                let _ = std::fs::rename(temporary, pointer);
-            }
+            .ok();
+            publish_cache_file(&temporary, &pointer, bytes);
         }
     }
 }

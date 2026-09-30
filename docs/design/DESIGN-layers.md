@@ -360,18 +360,35 @@ memory. The contract is the one #1108 set for `sweep`/`mutate`:
 - **Order.** Each step's result goes into the slot for its manifest position.
   The existing aggregation reads the slots in manifest order, so the order in
   which steps complete never reaches the output.
-- **First failure.** Workers claim steps in manifest order. Without
-  `--keep-going`, a failing step stops workers from starting any later step.
-  Every step before the serial run's first failure still runs, because
-  skipping one would require an earlier failure. A later step that is already
-  running is not interrupted. It finishes and the aggregation discards its
-  result. Its verify-cache entry is still written. That entry is a correct
+- **First failure and early exit.** Workers claim steps in manifest order.
+  Without `--keep-going`, a failing step stops workers from starting any later
+  step. A panicking step does the same with or without `--keep-going`. Every
+  step before the serial run's first stopping step still runs, because
+  skipping one would require an earlier stopping step. The report is decided
+  once every step up to that point has reported, and the chain then prints it
+  and exits without waiting. A solver cannot be interrupted from outside its
+  thread, so a later step that is already running is detached, and the
+  process exits under it. Measured on a release build, with a `[business]`
+  layer that fails at step 0 and the slow `[design]` test layer at depth 11
+  (0.91 s on its own): without the early exit `--jobs 4` took 0.89–1.02 s
+  against 0.04–0.09 s at `--jobs 1`, because the discarded design layer ran
+  to the end. With it, `--jobs 4` takes 0.03–0.05 s. The output was the same
+  in all runs, and 100 repeated `--jobs 4` runs all exited 1 with identical
+  output. Steps print nothing, so a detached step cannot write
+  after the table. A detached step killed while storing a cache entry leaves
+  at most its temporary file (see below). One that finishes in the moment
+  before the process exits still stores its entry. That entry is a correct
   verdict, but a following run can hit it where a run after a serial chain
-  would miss.
+  would miss. A panic is re-raised with its original payload only when the
+  manifest-order walk reaches it, which is where the serial loop panics.
+  The one stderr difference left is a panic in a later step that a serial run
+  would never have started: its panic message can still be printed before
+  the process exits.
 - **Cache writes.** An entry is written to a temporary file and then renamed
   into place. The temporary name carries a per-process sequence number as
   well as the process id, so two workers in one process never write through
-  the same temporary file. The cache key does not include the job count.
+  the same temporary file. A failed write or rename removes the temporary
+  file. The cache key does not include the job count.
 
 The manifest bounds the speed-up. A chain has at most three `spec` layers
 and three refine links, so the longest layer sets the floor. Verifying many
