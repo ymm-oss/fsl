@@ -84,7 +84,8 @@ contract above: before this fix, a baseline `verified` result from one file revi
 reported alongside a mutant set enumerated and scored against a different revision, silently mixing
 one document's health with another document's mutation coverage. `run_mutate_legacy`, dead code
 behind `#[allow(dead_code)]` that carried the same pre-#808 multi-read shape and was unreachable
-from any command dispatch, was removed with its three helpers in #1168. The standalone `refine` command is unaffected: it takes three independently-owned
+from any command dispatch, was removed with its three helpers in #1168.
+The standalone `refine` command is unaffected: it takes three independently-owned
 paths (implementation, abstraction, mapping) and already reads each exactly once, so it has no
 same-path multi-read hazard to fix.
 
