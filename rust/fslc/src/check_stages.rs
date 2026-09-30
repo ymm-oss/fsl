@@ -3,8 +3,8 @@
 //! The one ordered list of stages that decides whether `check` accepts a spec.
 //!
 //! The native CLI and the browser Worker both answer `check`, and
-//! `docs/DESIGN-rust-components.md` hard gate 6 forbids either of them from
-//! deciding semantic validity on its own. They used to hand-write the stage
+//! `docs/design/DESIGN-rust-components.md` hard gate 6 forbids either of them
+//! from deciding semantic validity on its own. They used to hand-write the stage
 //! list separately, and the Worker's copy lacked the specialized-document
 //! validation, the source-diagnostic preflight, the Agent dispatch, and the
 //! init write-ownership check, so it answered `ok` for specs native `check`
