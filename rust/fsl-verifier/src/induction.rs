@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use fsl_core::recursion;
 use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
@@ -319,12 +320,24 @@ const HELPFUL_PROGRESS_HINT: &str = "helpful marks which action instance is resp
 /// over those values), matching the frozen Python reference's
 /// `_helpful_arg_value`.
 ///
+/// Recurses on itself through `Neg` and both `Binary` operands, so it is its own
+/// cycle entry for `recursion::guard` (#1164). Crash-witnessed by `verify
+/// --engine induction` on a `helpful step(c + 0 + ... + 0)` argument: 4000
+/// terms on a debug aarch64 build, 20000 on release.
+///
 /// # Errors
 ///
 /// Returns [`VerifyError`] when the expression references anything other than
 /// a bound leadsTo binder or a constant, or does not fold to an integer,
 /// Boolean, or enum-member value.
 fn eval_state_independent(
+    expr: &KernelExpr,
+    binder_env: &BTreeMap<String, FslValue>,
+) -> Result<FslValue, VerifyError> {
+    recursion::guard(|| eval_state_independent_inner(expr, binder_env))
+}
+
+fn eval_state_independent_inner(
     expr: &KernelExpr,
     binder_env: &BTreeMap<String, FslValue>,
 ) -> Result<FslValue, VerifyError> {
@@ -887,4 +900,37 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
         proofs,
         failure: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #1164: `eval_state_independent` recursed without the stack guard.
+    ///
+    /// Tested here rather than through `fslc` because the CLI cannot open this
+    /// window reliably: on a debug aarch64 build the unguarded walk aborts a
+    /// `helpful step(c + 0 + ... + 0)` argument between 3800 and 3900 terms,
+    /// while the derived `Clone` of the parsed tree (#1186) aborts at 4500, so a
+    /// CLI witness would sit within a few hundred terms of both. Built directly,
+    /// the tree can be far deeper than either. It is leaked rather than dropped
+    /// because the derived `Drop` recurses as deeply as the derived `Clone`.
+    #[test]
+    fn a_deep_helpful_argument_folds_instead_of_overflowing_the_stack() {
+        const TERMS: i64 = 100_000;
+        let mut expr = KernelExpr::Var("c".to_owned());
+        for _ in 0..TERMS {
+            expr = KernelExpr::Binary {
+                op: "+".to_owned(),
+                left: Box::new(expr),
+                right: Box::new(KernelExpr::Num(1)),
+            };
+        }
+        let expr = Box::leak(Box::new(expr));
+        let binder_env = BTreeMap::from([("c".to_owned(), FslValue::Int(0))]);
+
+        let value = eval_state_independent(expr, &binder_env).expect("folds");
+
+        assert_eq!(value, FslValue::Int(TERMS));
+    }
 }

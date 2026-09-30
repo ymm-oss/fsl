@@ -31,6 +31,7 @@
 use fsl_syntax::{Binder, Expr, Param, Span, SpecItem, SurfaceSpec};
 
 use crate::model::ModelError;
+use crate::recursion;
 
 /// Words the expression parser resolves to a literal, so they can never be read
 /// back as a name.
@@ -114,7 +115,15 @@ fn check_binder(binder: &Binder, span: Option<Span>) -> Result<(), ModelError> {
 
 /// Walk an expression for the name-introducing positions it can contain:
 /// quantifier and aggregate binders, and an `is some(x)` pattern binding.
+///
+/// Also the cycle entry for this walk's stack guard (#1164): every arm and
+/// `check_binder` re-enter here. Crash-witnessed by `check` on a 2500-term
+/// `x + ... + x` invariant and a 2500-deep `not` chain (debug aarch64).
 fn check_expr(expr: &Expr, span: Option<Span>) -> Result<(), ModelError> {
+    recursion::guard(|| check_expr_inner(expr, span))
+}
+
+fn check_expr_inner(expr: &Expr, span: Option<Span>) -> Result<(), ModelError> {
     match expr {
         Expr::Quantified { binder, body, .. } => {
             check_binder(binder, span)?;

@@ -588,8 +588,35 @@ pub(crate) fn property_evaluation_status<S: SmtSolver>(
     )
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// Definedness analysis of one kernel expression, and a second cycle entry
+/// for this module's stack guard (#1164): every arm below, and the
+/// `ordered_evaluation_status_refs` / binder helpers, re-enter here for their
+/// operands. It walks the same user-controlled tree as [`eval`] but is not
+/// dominated by it -- `eval`'s guard runs inside the calls this function makes,
+/// not around its own recursion -- so it needs its own guard.
+///
+/// Crash-witnessed by `verify` (bmc and induction) on a right-nested `if`
+/// chain inside an `invariant`: unguarded, a debug aarch64 build survives
+/// N=300 and aborts at N=320, and at N=500 all ~320 frames on the stack are
+/// this function (~25 KiB per level), reached through
+/// `property_evaluation_status` from `bmc::check_state_properties`.
+#[allow(clippy::too_many_arguments)]
 fn evaluation_status_with_policy<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    recursion::guard(|| {
+        evaluation_status_with_policy_inner(solver, model, expr, state, bindings, old_state, policy)
+    })
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn evaluation_status_with_policy_inner<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,
