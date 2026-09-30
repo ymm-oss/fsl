@@ -156,11 +156,15 @@ ranking obligations as a pre-pass for every `leadsTo` that declares
 `decreases`, and skips the bounded fair-lasso search
 (`DESIGN-temporal.md` §2.1–2.2; `check_leadstos` in
 `rust/fsl-verifier/src/bmc.rs`) for each property the ranking discharges.
-That search is `B·D(D+1)(2D+1)/6` probes for `B` bindings at depth `D` — the
+A discharge is a position in `model.leadstos`, which the ranking and the
+lasso search both walk in order — never a property name, because `check`
+accepts two `leadsTo` blocks with the same name, and a name key would let one
+block's ranking withdraw the other block's search. That search is `B·D(D+1)(2D+1)/6` probes for `B` bindings at depth `D` — the
 cubic term — and the ranking is a constant number of checks per binding.
 
-**What is still claimed.** Exactly what the full search claims: no fair
-lasso counterexample with a loop inside the first `D` steps. `result`,
+**What is still claimed.** For each `leadsTo` block, exactly what the full
+search claims for that block: no fair lasso counterexample with a loop inside
+the first `D` steps. `result`,
 `completeness:"bounded"`, `leads_to.<name>.checked_to_depth`, and every
 witness are unchanged; the property is *not* reported `proved`. The ranking
 could only support an unbounded claim if the invariants it assumes were
@@ -212,7 +216,17 @@ only the properties proved before it are discharged, and every other
 `leadsTo` keeps the full search. A ranking error (unsupported measure,
 solver `unknown`, fail-closed `where` filters) discharges nothing and is not
 reported — the BMC run then produces whatever it produced before, including
-its own error. The pre-pass never reports a verdict or a witness of its own.
+its own error. The same holds when the pre-pass cannot run at all (no
+thread, no solver) and when it panics: the run proceeds without it (the
+panic message still reaches stderr). The pre-pass never reports a verdict or
+a witness of its own.
+
+**Budget.** Every pre-pass check has a 5 s wall-clock limit
+(`RANKING_PREPASS_CHECK_TIMEOUT_MS`); a check that runs out answers
+`unknown` and so discharges nothing. The number of checks is linear in
+bindings × action instances. Because the limit depends on machine load, it
+can only decide whether the shortcut is taken — and therefore `cost` — never
+the verdict or a witness.
 
 **Solver isolation.** The pre-pass runs on its own thread with its own Z3
 solver. The native backend's `Solver::new()` uses the thread's default

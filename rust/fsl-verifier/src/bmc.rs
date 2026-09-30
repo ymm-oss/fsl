@@ -260,8 +260,8 @@ pub async fn verify_bounded_from_state<S: SmtSolver>(
 }
 
 /// [`verify_bounded_selected`] / [`verify_bounded_from_state`], except that the
-/// bounded fair-lasso search is skipped for every `leadsTo` named in
-/// `lasso_discharged` (#1149).
+/// bounded fair-lasso search is skipped for every `leadsTo` whose position in
+/// `model.leadstos` is in `lasso_discharged` (#1149).
 ///
 /// `lasso_discharged` must come from
 /// [`crate::ranked_leadsto_lasso_discharges`] for the same `model` and
@@ -281,7 +281,7 @@ pub async fn verify_bounded_discharging<S: SmtSolver>(
     depth: usize,
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
-    lasso_discharged: &BTreeSet<String>,
+    lasso_discharged: &BTreeSet<usize>,
 ) -> Result<BmcResult, VerifyError> {
     verify_bounded_config(
         model,
@@ -301,7 +301,7 @@ async fn verify_bounded_config<S: SmtSolver>(
     depth: usize,
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
-    lasso_discharged: &BTreeSet<String>,
+    lasso_discharged: &BTreeSet<usize>,
 ) -> Result<BmcResult, VerifyError> {
     if model.actions.is_empty() {
         return Err(VerifyError::new("spec has no actions"));
@@ -1411,18 +1411,19 @@ async fn check_leadstos<S: SmtSolver>(
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
     depth: usize,
-    lasso_discharged: &BTreeSet<String>,
+    lasso_discharged: &BTreeSet<usize>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     let canonical = states
         .iter()
         .take(depth + 1)
         .map(|state| canonical_constraint(solver, model, state))
         .collect::<Result<Vec<_>, _>>()?;
-    for property in &model.leadstos {
+    for (index, property) in model.leadstos.iter().enumerate() {
         // A ranking proof already showed every fair lasso below is `unsat`
         // for this property (#1149); asking the solver again changes nothing
         // but the cost. Every property not in the set keeps its full search.
-        if lasso_discharged.contains(&property.name) {
+        // Keyed by position: two `leadsTo` blocks may share a name.
+        if lasso_discharged.contains(&index) {
             continue;
         }
         solver.set_query_context("leadsTo", &property.name);

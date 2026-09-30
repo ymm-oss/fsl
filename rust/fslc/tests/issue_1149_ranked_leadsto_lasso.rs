@@ -282,3 +282,70 @@ fn a_failed_ranking_leaves_the_fallback_witness_unchanged() {
     assert_eq!(plain_status, ranked_status);
     assert_eq!(without_cost(&plain), without_cost(&ranked));
 }
+
+/// `check` accepts two `leadsTo` blocks with the same name. The rankable `L`
+/// must not withdraw the lasso search of the other, false `L` (`flip`
+/// alternates `x` forever once `y == 5`): every variant stays `violated`
+/// under both engines, as it was before #1149.
+///
+/// Calibration: keying the discharge by name instead of position turns all
+/// three BMC runs into `verified` and the first two induction runs into
+/// `proved` (`completeness:"unbounded"`).
+const DUPLICATE_NAMES: &str = r"
+spec IssueDuplicateNames {
+  state { x: 0..1, y: 0..5 }
+  init { x = 0  y = 0 }
+  action flip() {
+    requires y == 5
+    x = 1 - x
+  }
+  action inc() {
+    requires y < 5
+    y = y + 1
+  }
+  leadsTo L { y < 5 ~> y == 5 decreases 5 - y }
+  leadsTo L { x == 0 ~> x == 2 }
+}
+";
+
+#[test]
+fn a_duplicated_leadsto_name_cannot_withdraw_the_other_blocks_search() {
+    let ranked = "  leadsTo L { y < 5 ~> y == 5 decreases 5 - y }\n";
+    let false_block = "  leadsTo L { x == 0 ~> x == 2 }\n";
+    let reversed = DUPLICATE_NAMES.replace(
+        &format!("{ranked}{false_block}"),
+        &format!("{false_block}{ranked}"),
+    );
+    assert_ne!(reversed, DUPLICATE_NAMES, "fixture edit must apply");
+    // The false block also ranked, with a measure that fails.
+    let failing_rank =
+        DUPLICATE_NAMES.replace("{ x == 0 ~> x == 2 }", "{ x == 0 ~> x == 2 decreases 1 }");
+    assert_ne!(failing_rank, DUPLICATE_NAMES, "fixture edit must apply");
+
+    // `(result, violation_kind)` per engine, identical to the pre-#1149
+    // binary: with the false block ranked too, the induction engine prefers
+    // that block's rank failure over the raw BMC lasso (as it always has).
+    let violated = ("violated", "leadsTo");
+    for (tag, source, induction) in [
+        ("dup_ranked_first", DUPLICATE_NAMES.to_owned(), violated),
+        ("dup_ranked_second", reversed, violated),
+        (
+            "dup_failing_rank",
+            failing_rank,
+            ("unknown_cti", "leadsTo_rank"),
+        ),
+    ] {
+        for (engine, (result, kind)) in [("bmc", violated), ("induction", induction)] {
+            let (output, status) =
+                verify_source(tag, &source, &["--depth", "8", "--engine", engine]);
+            assert_eq!(status, 1, "{tag} {engine}: {output}");
+            assert_eq!(output["result"], result, "{tag} {engine}");
+            assert_eq!(output["violation_kind"], kind, "{tag} {engine}");
+            assert_eq!(output["completeness"], "bounded", "{tag} {engine}");
+            if kind == "leadsTo" {
+                assert_eq!(output["invariant"], "L", "{tag} {engine}");
+                assert!(output["loop_start"].is_u64(), "{tag} {engine}: {output}");
+            }
+        }
+    }
+}

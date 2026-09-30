@@ -68,6 +68,25 @@ impl Z3Solver {
     ///
     /// Returns an error when the loaded Z3 library is not version 4.16.0.
     pub fn new() -> SolverResult<Self> {
+        Self::configured(None)
+    }
+
+    /// [`Self::new`], except that every `check` gives up after `milliseconds`
+    /// of wall-clock time and answers [`SatResult::Unknown`].
+    ///
+    /// For optional evidence only (the #1149 ranking pre-pass), whose caller
+    /// treats `Unknown` as "no shortcut" and falls back to a complete search:
+    /// a wall-clock limit makes the answer depend on machine load, so a
+    /// verdict must never rest on it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the loaded Z3 library is not version 4.16.0.
+    pub fn with_timeout_ms(milliseconds: u32) -> SolverResult<Self> {
+        Self::configured(Some(milliseconds))
+    }
+
+    fn configured(timeout_ms: Option<u32>) -> SolverResult<Self> {
         let version = version().to_owned();
         let required_prefix = format!("Z3 {REQUIRED_Z3_VERSION}.");
         if !version.starts_with(&required_prefix) {
@@ -79,6 +98,9 @@ impl Z3Solver {
         let mut params = Params::new();
         params.set_u32("random_seed", RANDOM_SEED);
         params.set_u32("smt.random_seed", RANDOM_SEED);
+        if let Some(timeout_ms) = timeout_ms {
+            params.set_u32("timeout", timeout_ms);
+        }
         solver.set_params(&params);
         Ok(Self {
             solver,

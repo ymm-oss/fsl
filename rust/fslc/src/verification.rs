@@ -1114,6 +1114,12 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     })
 }
 
+/// Per-check wall-clock limit for the #1149 ranking pre-pass. A check that
+/// runs out answers `unknown`, which discharges nothing: the BMC run then does
+/// the full search it always did, so the limit bounds the pre-pass's cost
+/// without ever deciding a verdict.
+const RANKING_PREPASS_CHECK_TIMEOUT_MS: u32 = 5_000;
+
 /// Run the #1149 ranking pre-pass for a BMC run, on its own thread.
 ///
 /// The ranking must not share a Z3 context with the BMC session: the native
@@ -1123,26 +1129,26 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
 /// `helpful` specs whose ranking fails and whose lasso witness then differed).
 /// A fresh thread gets a fresh default context, so the BMC session sees
 /// exactly the query history it has without the pre-pass.
+///
+/// The pre-pass is optional evidence: a thread that cannot be spawned, a
+/// solver that cannot be created, a timeout, or a panic inside the ranking
+/// all discharge nothing, and the run proceeds exactly as without it. (A
+/// panic's message is still printed to stderr by the default hook.)
 fn ranked_lasso_discharges(
     model: &KernelModel,
     checked_bounds: Option<&std::collections::BTreeSet<String>>,
 ) -> (
-    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<usize>,
     Option<fsl_solver::VerificationStatistics>,
 ) {
-    if !model
-        .leadstos
-        .iter()
-        .any(|property| property.decreases.is_some())
-    {
-        return (std::collections::BTreeSet::new(), None);
-    }
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .stack_size(super::STACK_SIZE)
             .name("fslc-ranking".to_owned())
             .spawn_scoped(scope, || {
-                let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+                let Ok(mut solver) =
+                    fsl_solver_z3::Z3Solver::with_timeout_ms(RANKING_PREPASS_CHECK_TIMEOUT_MS)
+                else {
                     return (std::collections::BTreeSet::new(), None);
                 };
                 let discharged = block_on_native(fsl_verifier::ranked_leadsto_lasso_discharges(
@@ -1152,13 +1158,10 @@ fn ranked_lasso_discharges(
                 ));
                 (discharged, Some(fsl_solver::SmtSolver::statistics(&solver)))
             });
-        match worker {
-            Ok(worker) => worker
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
-            // No thread, no pre-pass: the full search runs as before.
-            Err(_) => (std::collections::BTreeSet::new(), None),
-        }
+        worker
+            .ok()
+            .and_then(|worker| worker.join().ok())
+            .unwrap_or_else(|| (std::collections::BTreeSet::new(), None))
     })
 }
 
@@ -1197,7 +1200,11 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     // underdetermined witness projections, which are byte-compared across the
     // native and browser backends.
     let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
-    if let Some(ranking_statistics) = &ranking_statistics {
+    // A pre-pass that asked nothing (no ranked `leadsTo`) leaves `cost` as it
+    // was without it.
+    if let Some(ranking_statistics) = &ranking_statistics
+        && ranking_statistics.solver.checks > 0
+    {
         statistics.merge(ranking_statistics);
     }
     let needs_reachable_diagnosis =
