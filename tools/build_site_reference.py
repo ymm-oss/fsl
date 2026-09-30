@@ -31,7 +31,6 @@ from __future__ import annotations
 import html
 import posixpath
 import re
-import sys
 from pathlib import Path
 
 import markdown
@@ -41,10 +40,6 @@ LANGUAGE_MD = REPO_ROOT / "docs" / "manual" / "LANGUAGE.md"
 LANGUAGE_MD_JA = REPO_ROOT / "docs" / "manual" / "LANGUAGE.ja.md"
 CLI_CONTRACT_JSON = REPO_ROOT / "rust" / "fslc" / "cli-contract.json"
 OUT_DIR = REPO_ROOT / "docs" / "intro"
-
-sys.path.insert(0, str(REPO_ROOT / "src"))
-
-from fslc.cli_help import normalize_argparse_help as _normalize_argparse_help  # noqa: E402
 
 GENERATED_BANNER = (
     "<!-- GENERATED — do not edit by hand. Regenerate with:\n"
