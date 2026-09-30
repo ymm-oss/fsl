@@ -450,20 +450,22 @@ CLI, Worker, and corpus ownership are adjudicated.
 
 Declared columns are `CLI check`, `Worker`, and `corpus` (10 × 3 = 30 cells):
 
-- 27 cells are `Exercised`. Ordinary dialect checks cite the native bare-check
+- 28 cells are `Exercised`. Ordinary dialect checks cite the native bare-check
   sweep; Worker cells cite the all-corpus normalized-envelope parity harness;
   corpus ownership cites the C4 bare-check/gallery, refinement, or evidence
-  manifest appropriate to the dialect.
-- Three cells are `UnsupportedFailClosed`. Two are `refinement`: a mapping has
+  manifest appropriate to the dialect. `agent` × Worker cites the harness's
+  `agentParityCase` anchor: since issue #1163 the Worker's `check` runs the
+  shared `check_stages` (including the lenient agent analysis) and its
+  `verify` rejects an Agent document as native `verify` does, so
+  `examples/ai/recursive_support_agent.fsl` is a compared parity case rather
+  than a Worker-only exclusion probe.
+- Two cells are `UnsupportedFailClosed`, both `refinement`: a mapping has
   no standalone Kernel `state`, so native bare `check` refuses it and the
   Worker parity corpus confirms the same refusal. Its actual semantics remain
   owned and exercised by `refine_corpus_parity.rs` under `fslc refine`. The
-  third is `agent` × Worker: native runs its lenient agent analysis while the
-  Worker has no agent path and stops at the Kernel lowering gate.
-  `test-browser.mjs::assertAgentWorkerProbeFailsClosed` is the agent-specific,
-  self-retiring error assertion. The harness's other three unsupported probes
-  are causal documents, but causal intentionally bypasses `frontends!` and is
-  therefore not a dialect-axis row.
+  harness's three remaining unsupported probes are causal documents, but
+  causal intentionally bypasses `frontends!` and is therefore not a
+  dialect-axis row.
 
 ### Deferred corpus/induction expansion
 

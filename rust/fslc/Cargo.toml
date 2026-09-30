@@ -18,7 +18,6 @@ native-cli = [
     "dep:base64",
     "dep:ed25519-dalek",
     "dep:fsl-solver-z3",
-    "dep:fsl-tools",
     "dep:sha2",
 ]
 
@@ -30,7 +29,9 @@ fsl-runtime = { path = "../fsl-runtime" }
 fsl-solver = { path = "../fsl-solver" }
 fsl-solver-z3 = { path = "../fsl-solver-z3", optional = true }
 fsl-syntax = { path = "../fsl-syntax" }
-fsl-tools = { path = "../fsl-tools", optional = true }
+# Unconditional: `check_stages` (shared with the Worker) validates `dbsystem`
+# and Agent documents through it (issue #1163).
+fsl-tools = { path = "../fsl-tools" }
 fsl-verifier = { path = "../fsl-verifier" }
 serde.workspace = true
 serde_json.workspace = true

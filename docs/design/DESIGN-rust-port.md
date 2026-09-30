@@ -216,8 +216,9 @@ non-deterministic traces. The migration harness therefore has three layers:
 
 1. exact existing snapshot projection;
 2. full-envelope structural diff across every surface-parseable `specs/` and
-   `examples/` check/verify document supported by the Worker (Agent and
-   standalone Refinement documents are different commands); and
+   `examples/` check/verify document supported by the Worker (standalone
+   Refinement documents joined in #577 and Agent documents in #1163; causal
+   models remain excluded); and
 3. bidirectional trace replay to validate non-unique Z3 witnesses semantically.
 
 The structural diff first validates the public `versions` and `cost` schemas,

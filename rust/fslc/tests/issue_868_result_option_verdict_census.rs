@@ -481,6 +481,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "governance_output",
         ResultOption
     ),
+    entry!(
+        Verdict,
+        "rust/fsl-wasm/src/lib.rs",
+        314,
+        "implements_output",
+        ResultOption
+    ),
     // `Ok(None)` means "this guard is not a parameter-vs-literal comparison",
     // a structural non-match rather than a verdict, and every caller consumes
     // it with `let ... else { continue }`.

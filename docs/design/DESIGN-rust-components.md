@@ -134,10 +134,12 @@ flowchart TD
 ```
 
 `fslc-rust` exposes a library without the `native-cli` feature so the LSP and Worker can reuse
-diagnostic and result projections without pulling in native Z3, signing, or report-generation
-dependencies. The executable enables those optional dependencies and is the native composition
-root. `fsl-verifier` depends only on `fsl-core` and `fsl-solver` in production; runtime and native
-Z3 appear only in its tests.
+diagnostic and result projections without pulling in native Z3 or signing dependencies.
+`fsl-tools` is linked unconditionally: `check_stages`, the one ordered list of `check`'s validity
+stages that the CLI and the Worker both call (issue #1163), validates `dbsystem` and Agent
+documents through it. The executable enables those optional dependencies and is the native
+composition root. `fsl-verifier` depends only on `fsl-core` and `fsl-solver` in production;
+runtime and native Z3 appear only in its tests.
 
 The shared execution path is:
 
@@ -286,6 +288,8 @@ authorization to move source; section 8 remains the selection gate.
   transport failure, and cancellation recovery in the browser harness.
 - Browser-only behavior belongs here or in its JavaScript Worker wrapper; shared meaning belongs in
   solver-independent crates.
+- Its `check` takes its validity stages from `fslc_rust::check_stages::run_check_stages`, the same
+  function native `check` calls; it composes only the success envelope (issue #1163).
 
 ### `fsl-lsp` — editor state and protocol owner
 
