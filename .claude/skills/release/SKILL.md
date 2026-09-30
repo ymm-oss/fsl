@@ -151,19 +151,26 @@ After the promotion is approved and merged:
    notes derived from the pre-promotion candidate.
 5. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
 6. Before pushing, state the tag, commit SHA, exact notes, and that the push
-   uploads a draft, verifies its remote inventory, then makes the notes, native
-   binaries, VS Code extension, and Kernel contract bundles public.
+   uploads a draft, verifies its remote inventory, signs and uploads the
+   packslip bundles, verifies the inventory again, then makes the notes, native
+   binaries, VS Code extension, Kernel contract bundles, and packslip bundles
+   public.
 7. Push the tag only after one explicit confirmation for that complete
    publication and version.
 8. Observe every release job. If a job fails transiently, inspect it and rerun
    only the failed jobs; do not retag.
 9. Verify the Release body is non-empty and matches the changelog section.
 10. Verify exactly the four supported native `fslc`/`fslc-lsp` asset pairs and
-    checksums, the Agent Skill bundle and checksum, the VS Code extension, and
-    both Kernel bundles. Reject any
+    checksums, the Agent Skill bundle and checksum, the VS Code extension,
+    both Kernel bundles, and both packslip bundles. Reject any
     `macos-x64` asset. Download one supported binary, verify its checksum, and
     require `fslc --version` to equal the tag; the workflow performs the same
-    tag/version assertion on every native runner.
+    tag/version assertion on every native runner. Then, in a throwaway
+    directory, install the release with
+    `mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"` and
+    `mise use "packslip:github.com/ymm-oss/fsl/fslc-lsp@X.Y.Z"`, require
+    `mise skills ls` to name every directory under `skills/`, and require
+    `mise which fslc-lsp` to resolve.
 11. If publication has begun and a defect is found, fix it upstream, promote it,
     and cut a new patch version. Never rewrite the published release.
 

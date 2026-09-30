@@ -242,9 +242,11 @@ truth for the pinned-head and tree-identity requirements.
    it, show it to the user, and stop if it is empty; do not reuse a file derived
    from the pre-promotion candidate.
 4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
-   and that pushing the tag uploads a draft, verifies its remote inventory, then
-   makes the GitHub Release and notes public. Obtain one explicit confirmation
-   for that complete publication immediately before running:
+   and that pushing the tag uploads a draft, verifies its remote inventory, signs
+   the two packslip bundles, uploads them, verifies the inventory again, then
+   makes the GitHub Release, notes, and packslips public. Obtain one
+   explicit confirmation for that complete publication immediately before
+   running:
 
    ```bash
    git tag -a vX.Y.Z PRODUCTION_SHA -m "vX.Y.Z"
@@ -260,13 +262,33 @@ truth for the pinned-head and tree-identity requirements.
    section.
 2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
    four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
-   the Agent Skill bundle/checksum pair, VS Code extension, and both Kernel
-   bundle/checksum pairs are present.
+   the Agent Skill bundle/checksum pair, VS Code extension, both Kernel
+   bundle/checksum pairs, and both packslip bundles
+   (`packslip.fslc.sigstore.json` and `packslip.fslc-lsp.sigstore.json`) are
+   present.
 3. Download the current machine's supported binary and checksum, verify the
    checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
-4. Report the promotion pull request, production SHA, tag SHA, release URL,
-   workflow runs, non-empty notes, asset inventory, checksum, and version smoke
-   test.
+4. Install the release through mise and confirm the skills arrive with it. The
+   packslip is what mise reads, and nothing before this point consumes one.
+   Install both commands so each of the two bundles is read once.
+
+   ```bash
+   cd "$(mktemp -d)"
+   mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"
+   mise use "packslip:github.com/ymm-oss/fsl/fslc-lsp@X.Y.Z"
+   mise skills ls
+   mise which fslc-lsp
+   ```
+
+   Run it in a throwaway directory. `mise use` writes a `mise.toml` where it
+   runs, and this step is a check rather than an install.
+
+   `skills ls` must name every directory under `skills/`, and `mise which
+   fslc-lsp` must resolve to the language server mise installed. A packslip
+   the workflow signed but mise rejects is a release defect, not a local one.
+5. Report the promotion pull request, production SHA, tag SHA, release URL,
+   workflow runs, non-empty notes, asset inventory, checksum, version smoke
+   test, and the skills mise listed.
 
 ## Failure handling
 
@@ -284,5 +306,13 @@ truth for the pinned-head and tree-identity requirements.
   the remote inventory, and only then makes the Release public. If any publish
   step fails, leave the draft non-public until the defect is fixed upstream.
   Do not report completion.
+- The tag workflow publishes in three jobs. `publish` uploads the draft, `sign`
+  signs and checks the packslips without touching the release, and `release`
+  uploads them with `--clobber`, checks the complete inventory and the bundle
+  digests, and makes the Release public. Each job can be rerun on its own after
+  a transient failure, and a bundle an earlier attempt left on the draft does
+  not block the rerun: `publish` leaves the two bundle names out of its
+  inventory check, `sign` signs them again, and `release` replaces them with
+  `--clobber` before it checks their digests.
 - Follow the internal release skill's `release/vX.Y` stabilization and hotfix
   procedures when `main` cannot be promoted as a whole.
