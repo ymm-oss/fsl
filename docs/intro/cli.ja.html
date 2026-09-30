@@ -248,7 +248,7 @@ options:
   -h, --help     show this help message and exit
   --depth DEPTH
 </pre></div></details></div></div></details>
-<details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [path]
+<details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [--jobs JOBS] [path]
 
 positional arguments:
   path
@@ -256,6 +256,8 @@ positional arguments:
 options:
   -h, --help    show this help message and exit
   --keep-going
+  --jobs JOBS   run up to JOBS independent layers concurrently (default 1);
+                the report and exit code do not depend on JOBS
 </pre></div></details>
 <details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file
 

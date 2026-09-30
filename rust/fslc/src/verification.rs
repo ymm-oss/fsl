@@ -1738,6 +1738,19 @@ fn verified_cross_depth_output(
     .then_some(output)
 }
 
+/// A temporary-file name no other writer uses. The entry is written there and
+/// then renamed into place, so a reader sees either no entry or a whole one.
+/// The process id alone is not enough since `chain --jobs` (issue #1151):
+/// two worker threads of one process storing the same key or the same
+/// cross-depth pointer would write through one temporary file, and a rename
+/// could publish their interleaved bytes. The per-process sequence number
+/// keeps every writer's temporary file its own.
+fn cache_temporary_name(stem: &str) -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(".{stem}.{}.{sequence}.tmp", std::process::id())
+}
+
 fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if !valid_cache_key(key) || !valid_cache_key(xdepth) {
         return;
@@ -1759,7 +1772,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if std::fs::create_dir_all(parent).is_err() {
         return;
     }
-    let temporary = parent.join(format!(".{}.{}.tmp", key, std::process::id()));
+    let temporary = parent.join(cache_temporary_name(key));
     let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
     let entry = json!({
         "schema": "fslc-rust-cache.v2",
@@ -1787,7 +1800,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         let directory = root.join("verify/v3/xdepth");
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
-            let temporary = directory.join(format!(".{xdepth}.{}.tmp", std::process::id()));
+            let temporary = directory.join(cache_temporary_name(xdepth));
             if serde_json::to_vec(&json!({
                 "schema": "fslc-rust-cache-pointer.v2",
                 "xdepth": xdepth,

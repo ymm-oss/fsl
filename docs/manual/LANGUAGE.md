@@ -843,7 +843,8 @@ fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
                                                  # bounded semantic change analysis
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
-fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
+fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
+                                                 # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)

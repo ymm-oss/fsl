@@ -323,6 +323,61 @@ short-circuits on the first failed layer and marks the remaining planned
 layers as `skipped`; `--keep-going` records the failure and continues through
 the rest of the manifest.
 
+### Parallel layers (`--jobs N`, issue #1151)
+
+`--jobs N` runs up to `N` layers at once. The default is 1, the serial loop
+above. The core count is not the default because memory multiplies with
+workers, and single verifications in this repository have measured 11 GB
+(#697) and 28 GB (#1041). The job count does not change the result: stdout,
+the stderr table, and the exit code are those of `--jobs 1`. Two figures are
+exempt. Elapsed times differ between any two runs. The solver's `memory_mb`
+is Z3's per-process peak, so while other workers run it includes their
+memory. The contract is the one #1108 set for `sweep`/`mutate`:
+
+- **Which steps may overlap.** A layer's result depends only on its own
+  manifest table, the target table of its refine link, and the files those
+  name. It never depends on another layer's result. The chain's order decides
+  only which layers run at all. So all `spec` and refine steps may run
+  concurrently, with one exception. Two `spec` layers whose files have
+  identical bytes can share a verify-cache entry (the keys are
+  content-addressed, #1148). Run serially, the later layer would hit the entry
+  the earlier one wrote. Such layers therefore run in one worker, in manifest
+  order, and get the same `cache` annotation as in a serial run. `[impl]` is
+  a side effect, and whether it runs at all depends on the earlier layers. It
+  runs alone after every other step, and only when the serial loop would
+  reach it.
+- **One Z3 context per step, at every job count.** z3 0.20 keeps one
+  `Context` per thread, and it is not `Send`. A context that has already built
+  an earlier layer's terms can lead the solver to a different witness for the
+  next layer. Measured on `examples/agentic_rag` at depth 8, the design
+  layer's `reachable_failed` witness and solver counts from a serial chain
+  differed from `fslc verify agentic_rag_design.fsl --depth 8` for the same
+  file and depth. So each `spec` and refine step runs on a thread of its own,
+  including at `--jobs 1`. That thread has the same 8 MiB stack as the main
+  worker. As a result a layer reports what `fslc verify` reports for it, which
+  is also what the verify cache holds. This changes the serial chain's output
+  for such manifests, from the order-dependent witness to the standalone one.
+- **Order.** Each step's result goes into the slot for its manifest position.
+  The existing aggregation reads the slots in manifest order, so the order in
+  which steps complete never reaches the output.
+- **First failure.** Workers claim steps in manifest order. Without
+  `--keep-going`, a failing step stops workers from starting any later step.
+  Every step before the serial run's first failure still runs, because
+  skipping one would require an earlier failure. A later step that is already
+  running is not interrupted. It finishes and the aggregation discards its
+  result. Its verify-cache entry is still written. That entry is a correct
+  verdict, but a following run can hit it where a run after a serial chain
+  would miss.
+- **Cache writes.** An entry is written to a temporary file and then renamed
+  into place. The temporary name carries a per-process sequence number as
+  well as the process id, so two workers in one process never write through
+  the same temporary file. The cache key does not include the job count.
+
+The manifest bounds the speed-up. A chain has at most three `spec` layers
+and three refine links, so the longest layer sets the floor. Verifying many
+independent specs of a project in one pass is a different axis, and so is
+the `sweep`/`mutate` grid of #1108.
+
 The manifest reader is fail-closed (issue #489): a top-level section name
 other than `[business]`, `[requirements]`, `[design]`, or `[impl]` — including
 a plain typo — is a `kind: "parse"` error at exit 2 rather than a silently

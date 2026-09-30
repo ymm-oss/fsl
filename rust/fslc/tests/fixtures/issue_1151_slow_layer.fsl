@@ -1,0 +1,30 @@
+// Issue #1151: a chain layer that is deliberately slower than every other
+// layer in `issue_1151_chain_jobs.rs`, so that at `--jobs 4` the later
+// layers finish first. The width of `Item` is what makes it slow; it
+// verifies at the manifest's depth.
+spec ChainSlowLayer {
+  type Item = 0..5
+
+  state {
+    level: Map<Item, Int>
+  }
+  init {
+    forall i: Item { level[i] = 0 }
+  }
+
+  action raise(i: Item) {
+    requires level[i] < 3
+    level[i] = level[i] + 1
+  }
+
+  action lower(i: Item) {
+    requires level[i] > 0
+    level[i] = level[i] - 1
+  }
+
+  invariant Bounded {
+    forall i: Item { level[i] >= 0 and level[i] <= 3 }
+  }
+
+  reachable SomeRaised { exists i: Item { level[i] == 1 } }
+}

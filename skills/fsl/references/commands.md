@@ -127,7 +127,8 @@ fslc diff <old> <new> [--depth K] [--mapping <mapping>]
                                                   # bounded semantic change report
 fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
                                                   # materialize both full revision trees; omit spec for changed .fsl batch
-fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
+fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
+                                                # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
@@ -472,7 +473,11 @@ runs `verify`, while omitting `depth` runs `check`. A layer with
 `refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
 runs its shell `command` from the manifest directory. JSON is stdout; the
 consolidated table is stderr. Without `--keep-going`, execution stops after the
-first failed layer and later layers are marked `skipped`. The manifest reader
+first failed layer and later layers are marked `skipped`. `--jobs N` (default 1)
+runs up to N `spec`/refine layers at once, each with its own solver; `[impl]`
+still runs last. The output, table, and exit code do not depend on N (only
+elapsed times and the per-process `memory_mb` can differ), so raise it for
+cold or CI runs, but memory multiplies with workers. The manifest reader
 is fail-closed: an unrecognized top-level section name, zero recognized
 sections (including an empty file), or a present-but-unparseable `depth` /
 `refine_depth` value (e.g. one followed by an inline comment) is a `kind:
