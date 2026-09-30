@@ -78,6 +78,10 @@ impl fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
+/// A `ModelError` is never a partial-operation failure. Its "division by
+/// zero"/"remainder by zero" come from constant folding while the model is built
+/// (`check` rejects them), not from evaluating an action, so the conversion
+/// deliberately sets `partial_operation: None` even though the messages match.
 impl From<ModelError> for RuntimeError {
     fn from(error: ModelError) -> Self {
         Self {
@@ -3719,6 +3723,10 @@ fn assign(
                     }
                     values.insert(index, value);
                 }
+                // Unreachable on a checked model: `check` rejects a `Seq`
+                // indexed target. Kept with its pre-#1166 classification (a
+                // negative index was `partial_op` by message, a too-large one
+                // was not) so this change does not alter it.
                 Value::Seq(values) => {
                     let index = partial_index(index, PartialOperation::Index)?;
                     let slot = values

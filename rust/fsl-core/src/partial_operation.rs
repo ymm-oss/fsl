@@ -272,6 +272,10 @@ fn collect_statement<'a, S: Scope>(
 trait Scope {
     type Saved;
     fn is_seq(&self, collection: &Expr) -> bool;
+    /// Whether an indexed assignment target names a `Seq`. Unreachable on a
+    /// checked model today -- `check` accepts indexed targets on `Map` and
+    /// `Relation` only -- so the typed walk never counts one; it stays so a
+    /// future `Seq` indexed update is classified like a `Seq` index read.
     fn is_seq_target(&self, name: &str) -> bool;
     /// Bring `binder`'s variable into scope, returning what it shadowed.
     fn enter(&mut self, binder: &Binder) -> Self::Saved;

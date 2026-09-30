@@ -949,34 +949,89 @@ pub struct PartialInventoryModel {
     pub id: String,
     pub source: String,
     pub operation: fsl_core::PartialOperation,
-    pub placement: &'static str,
+    pub placement: &'static PartialInventoryPlacement,
 }
 
-/// Where each [`partial_inventory_sweep`] model puts its one partial operation.
-/// `OP` is replaced by the operation. Every placement is in action context and
-/// outside `requires`/`let`, so the failure is a `partial_op` verdict.
-pub const PARTIAL_INVENTORY_PLACEMENTS: [(&str, &str); 9] = [
-    ("plain", "y = OP"),
-    (
+/// Where a [`partial_inventory_sweep`] model puts its one partial operation,
+/// and what the Public Kernel is expected to list for it.
+///
+/// `explain` lists one site per authored occurrence. The Public Kernel instead
+/// expands a quantifier or aggregate into one term per finite candidate
+/// (`finite_binder_candidates`), so one authored site becomes
+/// `kernel_authored` entries. A collection binder over a `Seq` also
+/// synthesizes one `collection.at(i)` read per candidate; the Kernel lists
+/// those `at`s too (`kernel_binder_reads`), each with a failure condition
+/// guarded by the candidate's own `i < collection.size()` membership, so they
+/// can never fire. The test proves that guard structurally for every entry it
+/// counts as a binder read.
+#[derive(Debug)]
+pub struct PartialInventoryPlacement {
+    pub name: &'static str,
+    /// `OP` is replaced by the operation.
+    pub template: &'static str,
+    pub kernel_authored: usize,
+    pub kernel_binder_reads: usize,
+    /// Why the Public Kernel omits this placement's site, if it does. Live: the
+    /// test requires the Kernel to list nothing here, so a fix must delete it.
+    pub kernel_exclusion: Option<&'static str>,
+}
+
+const fn placement(
+    name: &'static str,
+    template: &'static str,
+    kernel_authored: usize,
+    kernel_binder_reads: usize,
+) -> PartialInventoryPlacement {
+    PartialInventoryPlacement {
+        name,
+        template,
+        kernel_authored,
+        kernel_binder_reads,
+        kernel_exclusion: None,
+    }
+}
+
+/// Every placement is in action context and outside `requires`/`let`, so the
+/// failure is a `partial_op` verdict. `K` has three values and `s` capacity 2.
+pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 9] = [
+    placement("plain", "y = OP", 1, 0),
+    placement(
         "quantifier_body",
         "y = if (exists k: K: OP == k) then 1 else 0",
+        3,
+        0,
     ),
-    (
+    placement(
         "quantifier_where",
         "y = if (exists k: K where OP == k: true) then 1 else 0",
+        3,
+        0,
     ),
-    (
+    // Two candidates, each reading the collection in its membership and in its
+    // selected element: four authored entries and two synthesized reads.
+    placement(
         "quantifier_collection",
         "y = if (exists v in (if OP == 0 then s else s): v == 0) then 1 else 0",
+        4,
+        2,
     ),
-    ("aggregate_where", "y = count(k: K where OP == k)"),
-    ("aggregate_value", "y = sum(k in 0..0 of OP)"),
-    ("ensures", "y = 1\n    ensures OP == 0"),
-    ("assignment_target", "m[OP] = 1"),
-    (
-        "forall_statement_where",
-        "forall k: K where OP == k { m[k] = 1 }",
-    ),
+    placement("aggregate_where", "y = count(k: K where OP == k)", 3, 0),
+    placement("aggregate_value", "y = sum(k in 0..0 of OP)", 1, 0),
+    placement("ensures", "y = 1\n    ensures OP == 0", 1, 0),
+    placement("assignment_target", "m[OP] = 1", 1, 0),
+    PartialInventoryPlacement {
+        kernel_exclusion: Some(
+            "the Public Kernel does not walk a statement-level forall binder, and walking \
+             its body already fails closed ('cannot type identifier') because the binder is \
+             not in scope; follow-up to #1166",
+        ),
+        ..placement(
+            "forall_statement_where",
+            "forall k: K where OP == k { m[k] = 1 }",
+            0,
+            0,
+        )
+    },
 ];
 
 /// The expression that fails for each partial operation in the initial state
@@ -1000,11 +1055,13 @@ pub fn failing_partial_operation(operation: fsl_core::PartialOperation) -> &'sta
 pub fn partial_inventory_sweep() -> Vec<PartialInventoryModel> {
     let mut models = Vec::new();
     for operation in fsl_core::PartialOperation::ALL {
-        for (placement, template) in PARTIAL_INVENTORY_PLACEMENTS {
+        for placement in &PARTIAL_INVENTORY_PLACEMENTS {
             models.push(PartialInventoryModel {
-                id: format!("partial_inventory_{}_{placement}", operation.name()),
+                id: format!("partial_inventory_{}_{}", operation.name(), placement.name),
                 source: partial_inventory_source(
-                    &template.replace("OP", failing_partial_operation(operation)),
+                    &placement
+                        .template
+                        .replace("OP", failing_partial_operation(operation)),
                 ),
                 operation,
                 placement,

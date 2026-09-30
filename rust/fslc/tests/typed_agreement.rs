@@ -365,15 +365,73 @@ fn domain_sweep_agrees_across_all_three_engines() {
     eprintln!("domain sweep summary: {summary}");
 }
 
-/// Placements whose Public Kernel `partial_operations` is known to omit the
-/// site, with the reason. Live: the test fails if the Kernel starts listing it,
-/// so a fix must delete the row.
-const KERNEL_INVENTORY_EXCLUSIONS: [(&str, &str); 1] = [(
-    "forall_statement_where",
-    "the Public Kernel does not walk a statement-level forall binder, and walking its body \
-     already fails closed ('cannot type identifier') because the binder is not in scope; \
-     follow-up to #1166",
-)];
+/// A Public Kernel JSON expression with its `span`s removed, for structural
+/// comparison.
+fn without_spans(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(fields) => fields
+            .iter()
+            .filter(|(key, _)| key.as_str() != "span")
+            .map(|(key, item)| (key.clone(), without_spans(item)))
+            .collect(),
+        serde_json::Value::Array(items) => items.iter().map(without_spans).collect(),
+        other => other.clone(),
+    }
+}
+
+fn binary<'v>(
+    value: &'v serde_json::Value,
+    operator: &str,
+) -> Option<(&'v serde_json::Value, &'v serde_json::Value)> {
+    (value["kind"] == "binary" && value["operator"] == operator)
+        .then(|| (&value["left"], &value["right"]))
+}
+
+fn conjuncts<'v>(value: &'v serde_json::Value, out: &mut Vec<&'v serde_json::Value>) {
+    if let Some((left, right)) = binary(value, "and") {
+        conjuncts(left, out);
+        conjuncts(right, out);
+    } else {
+        out.push(value);
+    }
+}
+
+/// Whether an `at` entry's failure condition is `P and (i < 0 or i >= n)` for a
+/// literal `i >= 0` where `P` has the conjunct `i < n` -- the membership guard
+/// of a `Seq` collection binder's synthesized `collection.at(i)` read. That
+/// condition is unsatisfiable, so such an entry is not an authored site.
+fn is_guarded_binder_read(failure: &serde_json::Value) -> bool {
+    let failure = without_spans(failure);
+    let Some((path, out_of_prefix)) = binary(&failure, "and") else {
+        return false;
+    };
+    let Some((negative, beyond)) = binary(out_of_prefix, "or") else {
+        return false;
+    };
+    let (Some((index, zero)), Some((index_again, size))) =
+        (binary(negative, "<"), binary(beyond, ">="))
+    else {
+        return false;
+    };
+    let literal = |value: &serde_json::Value| {
+        if value["kind"] == "num" {
+            value["value"].as_i64()
+        } else {
+            None
+        }
+    };
+    let (Some(position), Some(0)) = (literal(index), literal(zero)) else {
+        return false;
+    };
+    if position < 0 || index_again != index {
+        return false;
+    }
+    let mut guards = Vec::new();
+    conjuncts(path, &mut guards);
+    guards
+        .iter()
+        .any(|guard| binary(guard, "<").is_some_and(|(left, right)| left == index && right == size))
+}
 
 fn cli_json(args: &[&str]) -> serde_json::Value {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
@@ -393,7 +451,9 @@ fn cli_json(args: &[&str]) -> serde_json::Value {
 /// names, both CLI verify engines, and the Monitor's own step.
 struct InventoryObservation {
     explain_sites: usize,
-    kernel_operations: Vec<String>,
+    /// Every Kernel `partial_operations` entry of action `a`: its operation
+    /// name, and whether it is a provably guarded binder read.
+    kernel_operations: Vec<(String, bool)>,
     bmc: (String, String),
     explicit: (String, String),
     monitor: Option<String>,
@@ -425,11 +485,10 @@ fn observe_inventory(id: &str, source: &str) -> InventoryObservation {
                 .cloned()
                 .unwrap_or_default()
         })
-        .map(|operation| {
-            operation["operation"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned()
+        .map(|entry| {
+            let name = entry["operation"].as_str().unwrap_or_default().to_owned();
+            let binder_read = name == "at" && is_guarded_binder_read(&entry["failure_condition"]);
+            (name, binder_read)
         })
         .collect();
     let verdict = |engine: &str| {
@@ -484,21 +543,37 @@ fn partial_inventory_sweep_agrees_across_explain_kernel_verifier_and_runtime() {
     for model in &models {
         let observed = observe_inventory(&model.id, &model.source);
         let violated = ("violated".to_owned(), "partial_op/_partial_a".to_owned());
-        let kernel_excluded = KERNEL_INVENTORY_EXCLUSIONS
-            .iter()
-            .any(|(placement, _)| *placement == model.placement);
-        let kernel_lists = observed
+        let placement = model.placement;
+        let (expected_authored, expected_reads) = if placement.kernel_exclusion.is_some() {
+            (0, 0)
+        } else {
+            (placement.kernel_authored, placement.kernel_binder_reads)
+        };
+        let authored = observed
             .kernel_operations
             .iter()
-            .any(|name| name == model.operation.name());
+            .filter(|(_, binder_read)| !binder_read)
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        let binder_reads = observed
+            .kernel_operations
+            .iter()
+            .filter(|(_, binder_read)| *binder_read)
+            .count();
         let mut problems = Vec::new();
         if observed.explain_sites != 1 {
             problems.push(format!("explain lists {} sites", observed.explain_sites));
         }
-        if kernel_lists == kernel_excluded {
+        // Exact multiset: every authored Kernel entry is this model's one
+        // operation, expanded `kernel_authored` times, and nothing else.
+        if authored != vec![model.operation.name(); expected_authored]
+            || binder_reads != expected_reads
+        {
             problems.push(format!(
-                "kernel partial_operations {:?} (excluded: {kernel_excluded})",
-                observed.kernel_operations
+                "kernel partial_operations {:?}, expected {expected_authored} x '{}' and \
+                 {expected_reads} guarded binder reads",
+                observed.kernel_operations,
+                model.operation.name()
             ));
         }
         if observed.bmc != violated {
@@ -534,6 +609,26 @@ fn partial_inventory_map_index_is_not_partial_for_any_consumer() {
         observed.kernel_operations.is_empty(),
         "{:?}",
         observed.kernel_operations
+    );
+    assert_eq!(observed.bmc.0, "verified");
+    assert_eq!(observed.explicit.0, "proved");
+    assert_eq!(observed.monitor, None);
+}
+
+/// A `Seq` collection binder with no authored partial operation (the case an
+/// independent review raised): explain lists nothing, and the Public Kernel's
+/// only entries are the binder's own synthesized reads, one per candidate
+/// (capacity 2), each provably guarded by its membership.
+#[test]
+fn partial_inventory_seq_binder_reads_are_guarded_and_not_listed_by_explain() {
+    let observed = observe_inventory(
+        "partial_inventory_seq_binder_reads",
+        &partial_inventory_source("y = if (exists v in s: m[v] == 0) then m[1] else 0"),
+    );
+    assert_eq!(observed.explain_sites, 0);
+    assert_eq!(
+        observed.kernel_operations,
+        vec![("at".to_owned(), true), ("at".to_owned(), true)]
     );
     assert_eq!(observed.bmc.0, "verified");
     assert_eq!(observed.explicit.0, "proved");

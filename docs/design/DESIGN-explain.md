@@ -111,12 +111,20 @@ declaration with no registered `OriginChain`:
   its collection is a `Seq` (a `Map` index is total). The verifier's candidate
   check, the Public Kernel's `partial_operations` classification and the
   runtime's `RuntimeError::partial_operation` (which replaced matching the
-  error message) use the same enum. A statement-level `forall` binder's site is
+  error message) use the same enum. A `ModelError` converted into a
+  `RuntimeError` is never tagged: its `division by zero`/`remainder by zero`
+  come from constant folding at model build, which `check` rejects. A statement-level `forall` binder's site is
   reported with the binder's text as `text`. `typed_agreement`'s
   `partial_inventory_sweep_agrees_across_explain_kernel_verifier_and_runtime`
-  checks every kind in every placement against all four consumers; the Public
-  Kernel still omits a statement-level `forall` binder's site, a live
-  exclusion recorded in that test.
+  checks every kind in every placement against all four consumers, comparing
+  the Kernel's entries as an exact multiset. The Kernel expands a quantifier or
+  aggregate into one term per finite candidate, so one authored site becomes
+  several entries, and a `Seq` collection binder adds one synthesized
+  `collection.at(i)` read per candidate whose failure condition is guarded by
+  that candidate's own `i < collection.size()` membership and so cannot fire;
+  the test counts both explicitly and proves the guard structurally. The Public
+  Kernel still omits a statement-level `forall` binder's site, a live exclusion
+  recorded in that test.
 - **Branch lowering and generated declarations carried no provenance.**
   `branches { when P { … } maps Q }` in a `requirements` action lowers to one
   physical Kernel action per branch, named `name__bN` (issue #528); the SLA

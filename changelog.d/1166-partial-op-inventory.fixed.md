@@ -6,5 +6,7 @@ violations for all of them. The six partial operations are now defined once in
 `fsl-core` and shared by `explain`, the verifier, the runtime and the Public
 Kernel; the Public Kernel's `partial_operations` now also includes an indexed
 assignment target's index expression (`m[s.head()] = …`). The runtime classifies
-a partial-operation failure by a typed field rather than by its error message.
+a partial-operation failure by a typed field rather than by its error message;
+a model-build `division by zero`/`remainder by zero` (constant folding, rejected
+by `check`) is deliberately not tagged as one.
 Verification verdicts are unchanged.
