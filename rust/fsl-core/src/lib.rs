@@ -687,17 +687,30 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             symmetric: false,
         });
     }
-    if let Some((name, (_, span))) = instances.into_iter().next() {
-        return Err(core_error(
-            format!("verify instances for undeclared entity '{name}'"),
-            span,
-        ));
-    }
-    if let Some((name, (_, _, span))) = values.into_iter().next() {
-        return Err(core_error(
-            format!("verify values for undeclared number '{name}'"),
-            span,
-        ));
+    // Whatever is left names no declaration. Report the first such bound in
+    // source order, not in `HashMap` order, so the message and location are
+    // deterministic and point at the first offending line (#1165).
+    for item in &spec.items {
+        let SpecItem::VerifyBounds { items, .. } = item else {
+            continue;
+        };
+        for bound in items {
+            match bound {
+                VerifyItem::Instances(name, _, span) if instances.contains_key(name) => {
+                    return Err(core_error(
+                        format!("verify instances for undeclared entity '{name}'"),
+                        *span,
+                    ));
+                }
+                VerifyItem::Values(name, _, _, span) if values.contains_key(name) => {
+                    return Err(core_error(
+                        format!("verify values for undeclared number '{name}'"),
+                        *span,
+                    ));
+                }
+                _ => {}
+            }
+        }
     }
     types.extend(spec.items.into_iter().filter(|item| {
         !matches!(
