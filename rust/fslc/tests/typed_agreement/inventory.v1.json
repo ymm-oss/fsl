@@ -29,7 +29,8 @@
     "partial_operations": {
       "values": ["head", "pop", "at", "index", "divide", "remainder"],
       "evidence_test": "operation_sweep_agrees_across_all_three_engines",
-      "boundary_evidence_test": "r6_action_context_partial_operations_agree_across_all_engines"
+      "boundary_evidence_test": "r6_action_context_partial_operations_agree_across_all_engines",
+      "inventory_evidence_test": "partial_inventory_sweep_agrees_across_explain_kernel_verifier_and_runtime"
     },
     "dialect_lowering": {
       "registry_coupling": "dialects",

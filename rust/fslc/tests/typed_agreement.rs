@@ -43,7 +43,10 @@ use enum_rows::{
 };
 use fsl_core::{KernelModel, TypeDef, TypeRef};
 use fsl_syntax::{Binder, Expr};
-use generator::{PropertyKind, domain_sweep, expression_sweep, operation_sweep};
+use generator::{
+    PARTIAL_INVENTORY_PLACEMENTS, PropertyKind, domain_sweep, expression_sweep, operation_sweep,
+    partial_inventory_source, partial_inventory_sweep,
+};
 use sweep_summary::SweepSummary;
 
 include!("typed_agreement/nested_options.rs");
@@ -360,6 +363,181 @@ fn domain_sweep_agrees_across_all_three_engines() {
         );
     }
     eprintln!("domain sweep summary: {summary}");
+}
+
+/// Placements whose Public Kernel `partial_operations` is known to omit the
+/// site, with the reason. Live: the test fails if the Kernel starts listing it,
+/// so a fix must delete the row.
+const KERNEL_INVENTORY_EXCLUSIONS: [(&str, &str); 1] = [(
+    "forall_statement_where",
+    "the Public Kernel does not walk a statement-level forall binder, and walking its body \
+     already fails closed ('cannot type identifier') because the binder is not in scope; \
+     follow-up to #1166",
+)];
+
+fn cli_json(args: &[&str]) -> serde_json::Value {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .output()
+        .expect("run native CLI");
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "{args:?}: invalid JSON: {error}; stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+/// What each consumer of the partial-operation inventory says about action
+/// `a`: explain's `_partial_a` entry count, the Public Kernel's operation
+/// names, both CLI verify engines, and the Monitor's own step.
+struct InventoryObservation {
+    explain_sites: usize,
+    kernel_operations: Vec<String>,
+    bmc: (String, String),
+    explicit: (String, String),
+    monitor: Option<String>,
+}
+
+fn observe_inventory(id: &str, source: &str) -> InventoryObservation {
+    let dir =
+        std::env::temp_dir().join(format!("fslc-typed-agreement-1166-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create scratch directory");
+    let path = dir.join(format!("{id}.fsl"));
+    std::fs::write(&path, source).expect("write generated model");
+    let file = path.to_str().expect("utf-8 path");
+
+    let explain = cli_json(&["explain", file]);
+    let explain_sites = explain["skeleton"]["auto_checks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("'{id}': explain has no auto_checks: {explain}"))
+        .iter()
+        .filter(|check| check["kind"] == "partial_op" && check["name"] == "_partial_a")
+        .count();
+    let kernel = cli_json(&["kernel", file]);
+    let kernel_operations = kernel["actions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("'{id}': kernel has no actions: {kernel}"))
+        .iter()
+        .flat_map(|action| {
+            action["partial_operations"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .map(|operation| {
+            operation["operation"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect();
+    let verdict = |engine: &str| {
+        let result = cli_json(&["verify", file, "--depth", "2", "--engine", engine]);
+        (
+            result["result"].as_str().unwrap_or_default().to_owned(),
+            format!(
+                "{}/{}",
+                result["violation_kind"].as_str().unwrap_or_default(),
+                result["invariant"].as_str().unwrap_or_default()
+            ),
+        )
+    };
+    let bmc = verdict("bmc");
+    let explicit = verdict("explicit");
+
+    let model = engines::build(id, source);
+    let mut monitor = fsl_runtime::Monitor::new(model)
+        .unwrap_or_else(|error| panic!("'{id}': Monitor rejected the model: {error}"));
+    let enabled = monitor
+        .enabled()
+        .unwrap_or_else(|error| panic!("'{id}': enabledness failed: {error}"));
+    let [instance] = enabled.as_slice() else {
+        panic!("'{id}': expected exactly one enabled instance, got {enabled:?}");
+    };
+    let step = monitor.step(instance).unwrap_or_else(|error| {
+        panic!("'{id}': Monitor step raised instead of classifying: {error}")
+    });
+    let monitor = step.violation.map(|violation| violation.kind);
+    let _ = std::fs::remove_file(&path);
+    InventoryObservation {
+        explain_sites,
+        kernel_operations,
+        bmc,
+        explicit,
+        monitor,
+    }
+}
+
+/// Issue #1166: explain, the Public Kernel, the verifier's candidate check (BMC)
+/// and the runtime (explicit engine and Monitor) agree on every kind in
+/// `fsl_core::PartialOperation::ALL`, wherever it sits -- index reads,
+/// quantifier and aggregate binders, assignment targets included.
+#[test]
+fn partial_inventory_sweep_agrees_across_explain_kernel_verifier_and_runtime() {
+    let models = partial_inventory_sweep();
+    assert_eq!(
+        models.len(),
+        fsl_core::PartialOperation::ALL.len() * PARTIAL_INVENTORY_PLACEMENTS.len()
+    );
+    let mut failures = Vec::new();
+    for model in &models {
+        let observed = observe_inventory(&model.id, &model.source);
+        let violated = ("violated".to_owned(), "partial_op/_partial_a".to_owned());
+        let kernel_excluded = KERNEL_INVENTORY_EXCLUSIONS
+            .iter()
+            .any(|(placement, _)| *placement == model.placement);
+        let kernel_lists = observed
+            .kernel_operations
+            .iter()
+            .any(|name| name == model.operation.name());
+        let mut problems = Vec::new();
+        if observed.explain_sites != 1 {
+            problems.push(format!("explain lists {} sites", observed.explain_sites));
+        }
+        if kernel_lists == kernel_excluded {
+            problems.push(format!(
+                "kernel partial_operations {:?} (excluded: {kernel_excluded})",
+                observed.kernel_operations
+            ));
+        }
+        if observed.bmc != violated {
+            problems.push(format!("bmc {:?}", observed.bmc));
+        }
+        if observed.explicit != violated {
+            problems.push(format!("explicit {:?}", observed.explicit));
+        }
+        if observed.monitor.as_deref() != Some("partial_op") {
+            problems.push(format!("monitor {:?}", observed.monitor));
+        }
+        if !problems.is_empty() {
+            failures.push(format!("{}: {}", model.id, problems.join("; ")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "partial-operation inventory disagreement:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// Negative control: a `Map` index read is total, so no consumer may treat it
+/// as a partial operation.
+#[test]
+fn partial_inventory_map_index_is_not_partial_for_any_consumer() {
+    let observed = observe_inventory(
+        "partial_inventory_map_index",
+        &partial_inventory_source("y = m[x]"),
+    );
+    assert_eq!(observed.explain_sites, 0);
+    assert!(
+        observed.kernel_operations.is_empty(),
+        "{:?}",
+        observed.kernel_operations
+    );
+    assert_eq!(observed.bmc.0, "verified");
+    assert_eq!(observed.explicit.0, "proved");
+    assert_eq!(observed.monitor, None);
 }
 
 #[test]

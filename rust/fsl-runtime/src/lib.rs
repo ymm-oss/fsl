@@ -11,9 +11,9 @@ use fsl_core::{
     ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value,
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
-    Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
-    insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
-    state_summary, static_leadsto_bindings,
+    PartialOperation, Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
+    display_name, insert_requirement_metadata, internal_origin_json, model_warnings,
+    origin_display_name, state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
@@ -64,6 +64,10 @@ pub struct RuntimeError {
     pub message: String,
     /// Authored construct responsible for this runtime diagnostic, when one exists.
     pub span: Option<Span>,
+    /// Set exactly when evaluation failed inside a partial operation, which the
+    /// engines report as `partial_op` rather than as a raw runtime error
+    /// (issue #1166: this used to be recovered by matching `message`).
+    pub partial_operation: Option<PartialOperation>,
 }
 
 impl fmt::Display for RuntimeError {
@@ -79,6 +83,7 @@ impl From<ModelError> for RuntimeError {
         Self {
             message: error.message,
             span: error.span,
+            partial_operation: None,
         }
     }
 }
@@ -185,9 +190,9 @@ fn eval_inner(
                     .cloned()
                     .ok_or_else(|| runtime_error("map index outside finite key domain")),
                 Value::Seq(values) => values
-                    .get(as_usize(index, "sequence index out of range")?)
+                    .get(partial_index(index, PartialOperation::Index)?)
                     .cloned()
-                    .ok_or_else(|| runtime_error("sequence index out of range")),
+                    .ok_or_else(|| partial_operation_error(PartialOperation::Index)),
                 _ => Err(runtime_error("indexing requires a map or sequence")),
             }
         }
@@ -459,7 +464,7 @@ fn eval_method(
             }
             ("pop", []) => {
                 if sequence.is_empty() {
-                    Err(runtime_error("pop() on empty sequence"))
+                    Err(partial_operation_error(PartialOperation::Pop))
                 } else {
                     sequence.remove(0);
                     Ok(Value::Seq(sequence))
@@ -468,11 +473,11 @@ fn eval_method(
             ("head", []) => sequence
                 .first()
                 .cloned()
-                .ok_or_else(|| runtime_error("head() on empty sequence")),
+                .ok_or_else(|| partial_operation_error(PartialOperation::Head)),
             ("at", [index]) => sequence
-                .get(as_usize(index.clone(), "at() index out of range")?)
+                .get(partial_index(index.clone(), PartialOperation::At)?)
                 .cloned()
-                .ok_or_else(|| runtime_error("at() index out of range")),
+                .ok_or_else(|| partial_operation_error(PartialOperation::At)),
             ("size", []) => Ok(Value::Int(i64_len(sequence.len())?)),
             _ => Err(runtime_error(format!("invalid Seq method '{name}'"))),
         },
@@ -541,7 +546,7 @@ fn eval_binary(
                 if TOTAL_DIVISION.with(std::cell::Cell::get) {
                     Ok(Value::Int(0))
                 } else {
-                    Err(runtime_error("division by zero"))
+                    Err(partial_operation_error(PartialOperation::Divide))
                 }
             } else {
                 Ok(Value::Int(left.div_euclid(right)))
@@ -554,7 +559,7 @@ fn eval_binary(
                 if TOTAL_DIVISION.with(std::cell::Cell::get) {
                     Ok(Value::Int(0))
                 } else {
-                    Err(runtime_error("remainder by zero"))
+                    Err(partial_operation_error(PartialOperation::Remainder))
                 }
             } else {
                 Ok(Value::Int(left.rem_euclid(right)))
@@ -759,8 +764,10 @@ fn as_int(value: Value) -> Result<i64, RuntimeError> {
     }
 }
 
-fn as_usize(value: Value, message: &str) -> Result<usize, RuntimeError> {
-    usize::try_from(as_int(value)?).map_err(|_| runtime_error(message))
+/// A `Seq` position for `operation`; a negative index is that operation's own
+/// out-of-range failure.
+fn partial_index(value: Value, operation: PartialOperation) -> Result<usize, RuntimeError> {
+    usize::try_from(as_int(value)?).map_err(|_| partial_operation_error(operation))
 }
 
 fn i64_len(value: usize) -> Result<i64, RuntimeError> {
@@ -771,6 +778,24 @@ fn runtime_error(message: impl Into<String>) -> RuntimeError {
     RuntimeError {
         message: message.into(),
         span: None,
+        partial_operation: None,
+    }
+}
+
+/// The failure of one partial operation. The messages are the ones these
+/// failures have always carried; classification reads `partial_operation`.
+fn partial_operation_error(operation: PartialOperation) -> RuntimeError {
+    let message = match operation {
+        PartialOperation::Head => "head() on empty sequence",
+        PartialOperation::Pop => "pop() on empty sequence",
+        PartialOperation::At => "at() index out of range",
+        PartialOperation::Index => "sequence index out of range",
+        PartialOperation::Divide => "division by zero",
+        PartialOperation::Remainder => "remainder by zero",
+    };
+    RuntimeError {
+        partial_operation: Some(operation),
+        ..runtime_error(message)
     }
 }
 
@@ -778,6 +803,7 @@ fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
     RuntimeError {
         message: message.into(),
         span: Some(span),
+        partial_operation: None,
     }
 }
 
@@ -981,7 +1007,7 @@ impl Monitor {
             Ok(None) => {
                 return Ok(self.failed_step(action_name, params, "requires_failed", None));
             }
-            Err(error) if is_partial_operation_error(&error.message) => {
+            Err(error) if is_partial_operation_error(&error) => {
                 return Ok(self.failed_step(action_name, params, "partial_op", None));
             }
             Err(error) => return Err(error),
@@ -1065,7 +1091,7 @@ impl Monitor {
                 &mut bindings,
                 &self.model,
             ) {
-                if is_partial_operation_error(&error.message) {
+                if is_partial_operation_error(&error) {
                     self.step += 1;
                     return Ok(StepResult {
                         action: enabled.action.clone(),
@@ -1093,7 +1119,7 @@ impl Monitor {
             checked_bounds,
         ) {
             Ok(violation) => violation,
-            Err(error) if is_partial_operation_error(&error.message) => {
+            Err(error) if is_partial_operation_error(&error) => {
                 return Ok(StepResult {
                     action: enabled.action.clone(),
                     params: enabled.params.clone(),
@@ -1121,7 +1147,7 @@ impl Monitor {
             let evaluated = eval(ensure, &next, &mut bindings, &self.model, Some(&old_state));
             let value = match evaluated {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
@@ -1332,16 +1358,8 @@ impl BoundedLivenessMonitor {
     }
 }
 
-fn is_partial_operation_error(message: &str) -> bool {
-    matches!(
-        message,
-        "pop() on empty sequence"
-            | "head() on empty sequence"
-            | "at() index out of range"
-            | "sequence index out of range"
-            | "division by zero"
-            | "remainder by zero"
-    )
+fn is_partial_operation_error(error: &RuntimeError) -> bool {
+    error.partial_operation.is_some()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1982,7 +2000,7 @@ pub fn check_refinement_with_budget(
                         // "mapping expression" §2.3 exempts): this must be a
                         // located refinement finding, not an unclassified
                         // internal error that the CLI defaults to `kind:"type"`.
-                        Err(error) if is_partial_operation_error(&error.message) => {
+                        Err(error) if is_partial_operation_error(&error) => {
                             let child_trace = refinement_child_trace(
                                 state,
                                 &parents,
@@ -2156,7 +2174,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         if enabled.is_empty() {
             let terminal = match terminal_holds(&scratch) {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     let violation = Violation {
                         kind: "partial_op".to_owned(),
                         name: "_partial_property_terminal".to_owned(),
@@ -2976,8 +2994,7 @@ fn replay_trace_with_initial(
                 monitor.step(instance)?
             }
             Err(error)
-                if expected_step + 1 == trace.len()
-                    && is_partial_operation_error(&error.message) =>
+                if expected_step + 1 == trace.len() && is_partial_operation_error(&error) =>
             {
                 let attempted = monitor.attempt(&action.name, &action.params)?;
                 if attempted
@@ -3362,7 +3379,7 @@ fn record_reachables(
                 None,
             ) {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
                         name: format!("_partial_property_{}", property.name),
@@ -3432,7 +3449,7 @@ fn check_state_selected_inner(
         let mut bindings = Bindings::new();
         let value = match eval(&property.expr, state, &mut bindings, model, old_state) {
             Ok(value) => value,
-            Err(error) if is_partial_operation_error(&error.message) => {
+            Err(error) if is_partial_operation_error(&error) => {
                 return Ok(Some(Violation {
                     kind: "partial_op".to_owned(),
                     name: format!("_partial_property_{}", property.name),
@@ -3454,7 +3471,7 @@ fn check_state_selected_inner(
             let mut bindings = Bindings::new();
             let value = match eval(&property.expr, state, &mut bindings, model, Some(old_state)) {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
                         name: format!("_partial_property_{}", property.name),
@@ -3703,7 +3720,7 @@ fn assign(
                     values.insert(index, value);
                 }
                 Value::Seq(values) => {
-                    let index = as_usize(index, "sequence index out of range")?;
+                    let index = partial_index(index, PartialOperation::Index)?;
                     let slot = values
                         .get_mut(index)
                         .ok_or_else(|| runtime_error("sequence assignment index out of range"))?;

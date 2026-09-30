@@ -943,4 +943,93 @@ spec OperationRemainderProperty {
     ]
 }
 
+/// One partial operation placed where it fails on the first step (issue #1166).
+#[derive(Clone, Debug)]
+pub struct PartialInventoryModel {
+    pub id: String,
+    pub source: String,
+    pub operation: fsl_core::PartialOperation,
+    pub placement: &'static str,
+}
+
+/// Where each [`partial_inventory_sweep`] model puts its one partial operation.
+/// `OP` is replaced by the operation. Every placement is in action context and
+/// outside `requires`/`let`, so the failure is a `partial_op` verdict.
+pub const PARTIAL_INVENTORY_PLACEMENTS: [(&str, &str); 9] = [
+    ("plain", "y = OP"),
+    (
+        "quantifier_body",
+        "y = if (exists k: K: OP == k) then 1 else 0",
+    ),
+    (
+        "quantifier_where",
+        "y = if (exists k: K where OP == k: true) then 1 else 0",
+    ),
+    (
+        "quantifier_collection",
+        "y = if (exists v in (if OP == 0 then s else s): v == 0) then 1 else 0",
+    ),
+    ("aggregate_where", "y = count(k: K where OP == k)"),
+    ("aggregate_value", "y = sum(k in 0..0 of OP)"),
+    ("ensures", "y = 1\n    ensures OP == 0"),
+    ("assignment_target", "m[OP] = 1"),
+    (
+        "forall_statement_where",
+        "forall k: K where OP == k { m[k] = 1 }",
+    ),
+];
+
+/// The expression that fails for each partial operation in the initial state
+/// (`s` empty, `x == 0`). The match is exhaustive, so a new inventory kind
+/// cannot join `fsl_core::PartialOperation::ALL` without a generated model.
+#[must_use]
+pub fn failing_partial_operation(operation: fsl_core::PartialOperation) -> &'static str {
+    use fsl_core::PartialOperation;
+    match operation {
+        PartialOperation::Head => "s.head()",
+        PartialOperation::Pop => "s.pop().size()",
+        PartialOperation::At => "s.at(0)",
+        PartialOperation::Index => "s[0]",
+        PartialOperation::Divide => "2 / x",
+        PartialOperation::Remainder => "2 % x",
+    }
+}
+
+/// Every inventory kind crossed with every placement.
+#[must_use]
+pub fn partial_inventory_sweep() -> Vec<PartialInventoryModel> {
+    let mut models = Vec::new();
+    for operation in fsl_core::PartialOperation::ALL {
+        for (placement, template) in PARTIAL_INVENTORY_PLACEMENTS {
+            models.push(PartialInventoryModel {
+                id: format!("partial_inventory_{}_{placement}", operation.name()),
+                source: partial_inventory_source(
+                    &template.replace("OP", failing_partial_operation(operation)),
+                ),
+                operation,
+                placement,
+            });
+        }
+    }
+    models
+}
+
+/// The shared state for [`partial_inventory_sweep`] with `body` as the only
+/// action. Also the negative control's shape: a `Map` index is total.
+#[must_use]
+pub fn partial_inventory_source(body: &str) -> String {
+    format!(
+        "spec PartialInventory {{
+  type K = 0..2
+  type V = 0..3
+  state {{ s: Seq<K, 2>, m: Map<K, V>, x: K, y: V }}
+  init {{ s = Seq {{}} forall k: K {{ m[k] = 0 }} x = 0 y = 0 }}
+  action a() {{
+    {body}
+  }}
+}}
+"
+    )
+}
+
 use std::fmt::Write as _;

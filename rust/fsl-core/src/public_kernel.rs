@@ -21,8 +21,8 @@ use crate::typecheck::{
 
 use crate::recursion;
 use crate::{
-    ActionGuard, KernelModel, KernelSpec, OriginChain, OriginSite, ParamDef, TypeDef, TypeRef,
-    action_target, property_target, state_target, type_target,
+    ActionGuard, KernelModel, KernelSpec, OriginChain, OriginSite, ParamDef, PartialOperation,
+    TypeDef, TypeRef, action_target, property_target, state_target, type_target,
 };
 
 pub const KERNEL_V1_SCHEMA_VERSION: &str = "1.0.0";
@@ -725,90 +725,56 @@ fn walk_partial(
     path_condition: Option<&Expr>,
     output: &mut Vec<Value>,
 ) -> Result<(), PublicKernelError> {
-    if let Expr::Method {
-        receiver,
-        name,
-        args,
-    } = expr
-        && matches!(name.as_str(), "head" | "pop" | "at")
-    {
-        let size = Expr::Method {
-            receiver: receiver.clone(),
-            name: "size".to_owned(),
-            args: Vec::new(),
-        };
-        let failure = if name == "at" {
-            Expr::Binary {
-                op: "or".to_owned(),
-                left: Box::new(Expr::Binary {
-                    op: "<".to_owned(),
-                    left: Box::new(args[0].clone()),
-                    right: Box::new(Expr::Num(0)),
-                }),
-                right: Box::new(Expr::Binary {
-                    op: ">=".to_owned(),
-                    left: Box::new(args[0].clone()),
-                    right: Box::new(size),
-                }),
-            }
-        } else {
+    // The kind comes from the shared inventory (#1166); this walk owns only the
+    // per-kind failure condition. The match is exhaustive on purpose.
+    let failure = match (PartialOperation::candidate(expr), expr) {
+        (
+            Some(operation @ (PartialOperation::Head | PartialOperation::Pop)),
+            Expr::Method { receiver, .. },
+        ) => Some((operation, empty_failure(receiver))),
+        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => Some((
+            PartialOperation::At,
+            out_of_prefix_failure(receiver, &args[0]),
+        )),
+        (Some(PartialOperation::Index), Expr::Index(collection, index))
+            if matches!(
+                resolve(model, &infer_type(collection, env, model, None)?)?,
+                TypeRef::Seq(_, _)
+            ) =>
+        {
+            Some((
+                PartialOperation::Index,
+                out_of_prefix_failure(collection, index),
+            ))
+        }
+        (
+            Some(operation @ (PartialOperation::Divide | PartialOperation::Remainder)),
+            Expr::Binary { right, .. },
+        ) => Some((
+            operation,
             Expr::Binary {
                 op: "==".to_owned(),
-                left: Box::new(size),
+                left: right.clone(),
                 right: Box::new(Expr::Num(0)),
-            }
-        };
+            },
+        )),
+        (
+            Some(
+                PartialOperation::Head
+                | PartialOperation::Pop
+                | PartialOperation::At
+                | PartialOperation::Index
+                | PartialOperation::Divide
+                | PartialOperation::Remainder,
+            )
+            | None,
+            _,
+        ) => None,
+    };
+    if let Some((operation, failure)) = failure {
         let failure = guard_failure(failure, path_condition);
         output.push(json!({
-            "operation":name,
-            "failure_condition":expr_json(&failure,env,model,path,span,Some(&TypeRef::Bool))?,
-            "state_effect_on_failure":"rollback",
-            "span":span_json(path,span),
-        }));
-    }
-    if let Expr::Index(collection, index) = expr
-        && matches!(
-            resolve(model, &infer_type(collection, env, model, None)?)?,
-            TypeRef::Seq(_, _)
-        )
-    {
-        let size = Expr::Method {
-            receiver: collection.clone(),
-            name: "size".to_owned(),
-            args: Vec::new(),
-        };
-        let failure = Expr::Binary {
-            op: "or".to_owned(),
-            left: Box::new(Expr::Binary {
-                op: "<".to_owned(),
-                left: index.clone(),
-                right: Box::new(Expr::Num(0)),
-            }),
-            right: Box::new(Expr::Binary {
-                op: ">=".to_owned(),
-                left: index.clone(),
-                right: Box::new(size),
-            }),
-        };
-        let failure = guard_failure(failure, path_condition);
-        output.push(json!({
-            "operation":"index",
-            "failure_condition":expr_json(&failure,env,model,path,span,Some(&TypeRef::Bool))?,
-            "state_effect_on_failure":"rollback",
-            "span":span_json(path,span),
-        }));
-    }
-    if let Expr::Binary { op, right, .. } = expr
-        && matches!(op.as_str(), "/" | "%")
-    {
-        let failure = Expr::Binary {
-            op: "==".to_owned(),
-            left: right.clone(),
-            right: Box::new(Expr::Num(0)),
-        };
-        let failure = guard_failure(failure, path_condition);
-        output.push(json!({
-            "operation":if op == "/" {"divide"} else {"remainder"},
+            "operation":operation.name(),
             "failure_condition":expr_json(&failure,env,model,path,span,Some(&TypeRef::Bool))?,
             "state_effect_on_failure":"rollback",
             "span":span_json(path,span),
@@ -962,6 +928,40 @@ fn walk_quantified_partial(
     Ok(())
 }
 
+fn seq_size(sequence: &Expr) -> Expr {
+    Expr::Method {
+        receiver: Box::new(sequence.clone()),
+        name: "size".to_owned(),
+        args: Vec::new(),
+    }
+}
+
+/// `head`/`pop` fail on an empty sequence.
+fn empty_failure(sequence: &Expr) -> Expr {
+    Expr::Binary {
+        op: "==".to_owned(),
+        left: Box::new(seq_size(sequence)),
+        right: Box::new(Expr::Num(0)),
+    }
+}
+
+/// `at(i)` and a `Seq` index read fail outside the live prefix.
+fn out_of_prefix_failure(sequence: &Expr, index: &Expr) -> Expr {
+    Expr::Binary {
+        op: "or".to_owned(),
+        left: Box::new(Expr::Binary {
+            op: "<".to_owned(),
+            left: Box::new(index.clone()),
+            right: Box::new(Expr::Num(0)),
+        }),
+        right: Box::new(Expr::Binary {
+            op: ">=".to_owned(),
+            left: Box::new(index.clone()),
+            right: Box::new(seq_size(sequence)),
+        }),
+    }
+}
+
 fn guard_failure(failure: Expr, path_condition: Option<&Expr>) -> Expr {
     match path_condition {
         Some(condition) => Expr::Binary {
@@ -994,7 +994,23 @@ fn statement_partial(
     output: &mut Vec<Value>,
 ) -> Result<(), PublicKernelError> {
     match statement {
-        Statement::Assign { value, span, .. } => {
+        Statement::Assign {
+            target,
+            value,
+            span,
+        } => {
+            // An indexed target evaluates its index before the update (#1166).
+            let mut target = target;
+            loop {
+                match target {
+                    LValue::Var(_) => break,
+                    LValue::Index(_, index) => {
+                        walk_partial(index, env, model, path, *span, None, output)?;
+                        break;
+                    }
+                    LValue::Field(base, _) => target = base,
+                }
+            }
             walk_partial(value, env, model, path, *span, None, output)?;
         }
         Statement::If {

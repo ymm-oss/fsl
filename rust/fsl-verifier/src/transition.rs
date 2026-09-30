@@ -4,15 +4,15 @@ use std::collections::BTreeMap;
 
 use fsl_core::{
     ActionDef, ActionGuard, FslValue, KernelLValue as LValue, KernelModel,
-    KernelStatement as Statement, ParamDef, TypeRef,
+    KernelStatement as Statement, ParamDef, TypeRef, binder_has_partial_operation_candidate,
+    expression_has_partial_operation_candidate, lvalue_has_partial_operation_candidate,
 };
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{
-    EvaluationStatus, binder_has_partial_operation_candidate, binder_values, binder_where, eval,
-    eval_expected, evaluation_status, expression_has_partial_operation_candidate, index_accessible,
-    partial_operation_index_accessible, sequence_statuses,
+    EvaluationStatus, binder_values, binder_where, eval, eval_expected, evaluation_status,
+    index_accessible, partial_operation_index_accessible, sequence_statuses,
 };
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
@@ -81,14 +81,6 @@ fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
                     .iter()
                     .any(statement_has_partial_operation_candidate)
         }
-    }
-}
-
-fn lvalue_has_partial_operation_candidate(target: &LValue) -> bool {
-    match target {
-        LValue::Var(_) => false,
-        LValue::Index(_, _) => true,
-        LValue::Field(base, _) => lvalue_has_partial_operation_candidate(base),
     }
 }
 
