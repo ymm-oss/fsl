@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 
 use fsl_syntax::{AggregateKind, Binder, Expr, Pattern};
 
+use crate::recursion;
 use crate::{KernelModel, display_name};
 
 #[must_use]
@@ -105,8 +106,16 @@ fn binder_filter(binder: &Binder) -> Option<&Expr> {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+/// Cycle entry for expression rendering, and where `recursion::guard` belongs
+/// (#1164): `operand`, `binder_text_with_origins`, and every arm below
+/// re-enter here. Crash-witnessed by `verify --engine induction` rendering a
+/// 2500-term `helpful step(c + 0 + ... + 0)` argument (debug aarch64).
 fn expr_text_with_origins(model: Option<&KernelModel>, expr: &Expr) -> String {
+    recursion::guard(|| expr_text_with_origins_inner(model, expr))
+}
+
+#[allow(clippy::too_many_lines)]
+fn expr_text_with_origins_inner(model: Option<&KernelModel>, expr: &Expr) -> String {
     match expr {
         Expr::Num(value) => value.to_string(),
         Expr::Bool(value) => value.to_string(),

@@ -169,7 +169,7 @@ happened to exhaust the stack first, so guarding it does not fix the file, it re
 Implementing the fix took six rounds of guard-rebuild-recrash before the witness completed. Neither
 earlier count was a bad measurement; both were single measurements read as a census.
 
-Eleven cycles are guarded, in three crates. **Nine are crash-witnessed; two are not**, and the table
+Sixteen cycles are guarded, in four crates. **Fourteen are crash-witnessed; two are not**, and the table
 says which, because a reader who cannot tell them apart cannot tell this apart from the preventive
 spraying the design forbids:
 
@@ -186,6 +186,11 @@ spraying the design forbids:
 | `fsl-core` | `public_kernel.rs` `expr_json` | `document claims` on the same spec (#622) | Kernel v2, document claims, digests |
 | `fsl-verifier` | `eval.rs` `eval` | #620 sample, `agentic_rag` at 1 MiB | `verify`, `refine` |
 | `fsl-verifier` | `eval.rs` `evaluation_status_with_policy` | `verify` bmc/induction on a 320-deep *invariant* (#1164) | `verify` (bmc, induction), vacuity, trace replay |
+| `fsl-core` | `typecheck.rs` `extend_pattern_binding` | `check` on a 1000-term `x + … + x` invariant (#1164) | every checked command |
+| `fsl-core` | `reserved.rs` `check_expr` | `check` on a 2500-term `+` chain and a 2500-deep `not` chain (#1164) | every checked command |
+| `fsl-core` | `expr_text.rs` `expr_text_with_origins` | `verify --engine induction` on a 2500-term `helpful` argument (#1164) | envelopes and diagnostics that render an expression |
+| `fsl-verifier` | `induction.rs` `eval_state_independent` | `verify --engine induction` on a 3900-term `helpful` argument (#1164) | induction's ranked `leadsTo` |
+| `fsl-runtime` | `lib.rs` `eval` | `verify`, all four engines, on a 300-term `+` / `and` chain (#1164) | every `verify` engine (the bmc/induction boundary monitor, explicit), trace replay |
 
 The two #622 rows were found by changing the *witness*, not the code, and they are the clearest evidence
 for this section's thesis. #620's witness put its depth in a refinement mapping, so no amount of
@@ -234,6 +239,24 @@ Three boundaries hold the mechanism in place:
   re-serialized the whole subtree — O(depth) stack and O(n²) time *per level*, spent inside our
   guard rather than around it, which is why the guard could not see it. #622 removed the recursion
   by building `Value::Array` directly rather than widening the red zone.
+
+#1164 is the same lesson a fourth time, and it cost a review round to learn. Its first fix guarded
+`evaluation_status_with_policy` against a right-nested `if` chain and stopped there — but that
+witness is deep only *symbolically*. The concrete evaluator in `fsl-runtime`, which every engine
+runs (bmc and induction through `find_boundary_violation`'s monitor, explicit through
+`current_violation_selected`), stops an `if` chain at its first true arm, so the witness never made
+it descend. Shapes that force full evaluation — a left-nested `+` chain, an all-true `and` chain, an
+even `not` chain — aborted `fsl_runtime::eval` at N≈300 on a debug build and then, once that was
+guarded, exposed `extend_pattern_binding`, `reserved::check_expr`, `expr_text_with_origins`, and
+`eval_state_independent` in turn. A chain is deep only for the walkers that do not short-circuit
+on it, so "the witness is N deep" says nothing about a walker until the witness is shown to make
+that walker descend.
+
+Two unguarded walkers on the same paths were probed and left alone, per the no-spraying rule:
+`expression_has_partial_operation_candidate` (reached by a 20000-term `+` chain inside an action's
+`requires`) and `vacuity::collect_vars` (the same chain over a never-written state variable) survive
+N=2500 on debug and N=20000 on release, under `check` and all four `verify` engines. The remaining
+ceiling is the derived `Clone`/`Drop` of the parse tree (#1186), which no guard can wrap.
 
 **The invariant holds across the measured surface, and the measurement is stated so it can be
 falsified.** Two witness shapes — depth in a refinement mapping, depth in an `invariant` — were run

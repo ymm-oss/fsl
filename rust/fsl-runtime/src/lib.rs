@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
+use fsl_core::recursion;
 use fsl_core::{
     ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value,
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
@@ -92,8 +93,27 @@ impl From<ModelError> for RuntimeError {
 ///
 /// Returns [`RuntimeError`] for unknown names, type mismatches, invalid
 /// indexing/method calls, partial operations, or checked integer overflow.
-#[allow(clippy::too_many_lines)]
+///
+/// This is also the cycle entry for this crate's stack guard
+/// (`recursion::guard`, #1164): `eval_binary`, `eval_method`,
+/// `eval_relation_unary`, and the binder helpers all re-enter `eval` for their
+/// operands. Depth follows the spec's structure, and every engine reaches it:
+/// bmc and induction through `find_boundary_violation`'s concrete monitor,
+/// explicit through `current_violation_selected`. Crash-witnessed by a
+/// left-nested `x + x + ... + x` invariant, which (unlike an `if` chain that
+/// stops at its first true arm) forces evaluation of every level.
 pub fn eval(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Value, RuntimeError> {
+    recursion::guard(|| eval_inner(expr, state, bindings, model, old_state))
+}
+
+#[allow(clippy::too_many_lines)]
+fn eval_inner(
     expr: &Expr,
     state: &State,
     bindings: &mut Bindings,

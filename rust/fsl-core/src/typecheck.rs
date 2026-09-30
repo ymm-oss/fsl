@@ -492,7 +492,24 @@ pub(crate) fn ensure_assignable(
     }
 }
 
+/// Cycle entry for pattern-binding extension, and where `recursion::guard`
+/// belongs (#1164): it recurses on itself down both operands of every
+/// `Binary`, so a left-nested chain (`x + x + ... + x`, `a and a and ...`)
+/// makes its depth the chain's length. `validate_expression`'s guard does not
+/// cover it: validation calls this once per level, and the walk then descends
+/// the whole left spine without passing back through validation.
+///
+/// Crash-witnessed by `check` on a 1000-term `x + ... + x` invariant (debug
+/// aarch64): ~3000 frames of this function above `validate_expression`.
 pub(crate) fn extend_pattern_binding(
+    expression: &Expr,
+    env: &mut TypeEnv,
+    model: &KernelModel,
+) -> Result<(), TypecheckError> {
+    recursion::guard(|| extend_pattern_binding_inner(expression, env, model))
+}
+
+fn extend_pattern_binding_inner(
     expression: &Expr,
     env: &mut TypeEnv,
     model: &KernelModel,
