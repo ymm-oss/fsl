@@ -1,7 +1,7 @@
 Changed (#1089): `fslc sweep` settles depth-limited (`insufficient_depth`)
 reachability cells per `--instances`/`--values` scope instead of over the
-whole grid. A determinate success at a larger depth still settles the same
-scope, but a success in another scope no longer does: with no true failure,
+whole grid. A determinate success at any depth of the same scope still
+settles it, but a success in another scope no longer does: with no true failure,
 the grid is `sweep_passed`/exit 0 only when every scope has a determinate
 success at some depth, and otherwise `sweep_inconclusive`/exit 1 with a null
 `minimal_counterexample`. The new `sweep.inconclusive_scopes` array lists each

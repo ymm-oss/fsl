@@ -370,3 +370,97 @@ fn sweep_violation_dominates_inconclusive_values_scopes() {
         "{swept:#}"
     );
 }
+
+/// #1089 on the `--instances` axis alone: the 3-instance success does not
+/// settle the 1- and 2-instance scopes. Before the fix this grid returned
+/// `sweep_passed`/exit 0.
+#[test]
+fn sweep_success_in_one_instances_scope_does_not_settle_another() {
+    let path = fixture("sweep_instances_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&[
+        "sweep",
+        &path,
+        "--instances",
+        "Case=1..3",
+        "--depth",
+        "2..2",
+    ]);
+    let results = swept["sweep"]["results"]
+        .as_array()
+        .expect("sweep.results")
+        .iter()
+        .map(|entry| {
+            (
+                entry["scope"]["instances"].clone(),
+                entry["summary"]["result"].clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        [
+            (
+                serde_json::json!({"Case": 1}),
+                serde_json::json!("reachable_failed")
+            ),
+            (
+                serde_json::json!({"Case": 2}),
+                serde_json::json!("reachable_failed")
+            ),
+            (
+                serde_json::json!({"Case": 3}),
+                serde_json::json!("verified")
+            ),
+        ],
+        "grid shape: {swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_inconclusive", "{swept:#}");
+    assert_eq!(status, 1, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(
+        swept["sweep"]["inconclusive_scopes"],
+        serde_json::json!([
+            {"instances": {"Case": 1}, "values": {}},
+            {"instances": {"Case": 2}, "values": {}},
+        ]),
+        "{swept:#}"
+    );
+}
+
+/// `--instances` and `--values` together: every combined scope has a
+/// determinate success, so the grid passes with no inconclusive scope.
+#[test]
+fn sweep_all_instances_and_values_scopes_successful_passes() {
+    let path = fixture("sweep_instances_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&[
+        "sweep",
+        &path,
+        "--instances",
+        "Case=2..3",
+        "--values",
+        "Amount=1..2",
+        "--depth",
+        "2..2",
+    ]);
+    let scopes = swept["sweep"]["results"]
+        .as_array()
+        .expect("sweep.results")
+        .iter()
+        .map(|entry| {
+            assert_eq!(entry["summary"]["result"], "verified", "{swept:#}");
+            (
+                entry["scope"]["instances"].clone(),
+                entry["scope"]["values"].clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        scopes.len(),
+        4,
+        "2 instance counts x 2 value ranges: {swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_passed", "{swept:#}");
+    assert_eq!(status, 0, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(swept["sweep"]["inconclusive_scopes"], serde_json::json!([]));
+}

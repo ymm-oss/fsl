@@ -560,8 +560,8 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   cell is inconclusive only when its nonempty `unreached` array contains only
   `classification:"insufficient_depth"`: it remains in the results but is not
   a counterexample. Such cells are settled per `--instances`/`--values` scope
-  (one combination across the whole depth range): a determinate success at a
-  larger depth settles the same scope, but a success in another scope never
+  (one combination across the whole depth range): a determinate success at
+  any depth of the same scope settles it, but a success in another scope never
   does. With no true failure, a grid whose every scope is settled yields
   `sweep_passed`/exit 0; otherwise it yields `sweep_inconclusive`/exit 1 with
   a null minimal counterexample and retained per-cell results, and

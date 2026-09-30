@@ -990,7 +990,21 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
         vacuity.output
     );
 
-    let mutation = run_cli(&strings(&["mutate", FOLD_SPEC, "--depth", "8"]));
+    assert_fold_mutation_evidence();
+}
+
+/// Mutation evidence for the fold self-spec's finalize guards.
+fn assert_fold_mutation_evidence() {
+    // The external mutants drop one disjunct each from finalize_fail's guard
+    // (#1089); the built-in catalog only removes or negates whole guards.
+    let mutation = run_cli(&strings(&[
+        "mutate",
+        FOLD_SPEC,
+        "--depth",
+        "8",
+        "--from",
+        "rust/fslc/tests/fixtures/fslc_fold_finalize_fail_disjuncts.jsonl",
+    ]));
     assert_eq!(
         (mutation.output["result"].as_str(), mutation.exit_code),
         (Some("mutated"), 0)
@@ -1033,6 +1047,30 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
     let mutants = mutation.output["mutants"]
         .as_array()
         .expect("mutation rows");
+    // Dropping either new finalize_fail disjunct only disables failing, so no
+    // safety property can see it; each is pinned by a reachable fail witness
+    // that no other disjunct can enable.
+    for (id, killed_by) in [
+        (
+            "finalize_fail_drop_unsettled_seen",
+            "ReachFailOnClosedUnsettledScope",
+        ),
+        (
+            "finalize_fail_drop_open_unsettled_scope",
+            "ReachFailOnOpenUnsettledScope",
+        ),
+    ] {
+        assert!(
+            mutants.iter().any(|mutant| {
+                mutant["id"] == id
+                    && mutant["source"] == "external"
+                    && mutant["status"] == "killed"
+                    && mutant["killed_by"] == killed_by
+            }),
+            "external mutant {id} was not killed by {killed_by}: {}",
+            mutation.output
+        );
+    }
     for operator in ["requires_remove", "requires_negate"] {
         for (target, killed_by, guard) in guards {
             assert!(

@@ -32,6 +32,11 @@
 //        scope_inconclusive` yields violated/FinalizeAgreesWithFolded after
 //        fold_sub_inconclusive; finalize_pass (an all-inconclusive fold
 //        wrongly finalizing pass).
+// probe: dropping finalize_fail's `or unsettled_seen` disjunct yields
+//        reachable_failed/ReachFailOnClosedUnsettledScope; dropping its
+//        `or (scope_inconclusive and not scope_success)` disjunct yields
+//        reachable_failed/ReachFailOnOpenUnsettledScope (both pinned as
+//        external mutants in self_conformance.rs).
 // probe: dropping finalize_pass's `requires not unsettled_seen` yields
 //        violated/FinalizeAgreesWithFolded after fold_sub_inconclusive;
 //        fold_scope_boundary; fold_sub_success; finalize_pass (#1089: a
@@ -178,8 +183,20 @@ spec FslcFold {
     status == Folding and scope_epoch and not any_failure_seen
   }
 
-  reachable ReachUnsettledScopeDespiteSuccessPath {
-    status == FinalizedFail and success_seen and unsettled_seen and not any_failure_seen
+  // #1089: finalizing fail must stay enabled for an unsettled scope even
+  // after a success and with no failure. Each witness below is reachable only
+  // through one disjunct of finalize_fail's guard, so dropping that disjunct
+  // makes the witness unreachable instead of merely deadlocking the fold.
+  // Closed scope: the open scope is settled, only `unsettled_seen` enables it.
+  reachable ReachFailOnClosedUnsettledScope {
+    status == FinalizedFail and not any_failure_seen and success_seen
+      and unsettled_seen and scope_success
+  }
+
+  // Open scope: nothing closed is unsettled, only the open scope enables it.
+  reachable ReachFailOnOpenUnsettledScope {
+    status == FinalizedFail and not any_failure_seen and success_seen
+      and not unsettled_seen and scope_inconclusive and not scope_success
   }
 
   terminal { status == FinalizedPass or status == FinalizedFail }
