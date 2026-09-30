@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Built for #1089 (`sweep_contract.rs`). `Big` needs `x >= 10`, and each
+// `bump` adds at most the upper bound of `Amount`. Swept at `--depth 3..3`
+// over `--values Amount=1..5`, the scopes `Amount` 1..1, 1..2 and 1..3 cannot
+// witness `Big` in three steps (at most 9) and are `reachable_failed` with only
+// `classification:"insufficient_depth"`; the scopes 1..4 and 1..5 witness it
+// and are `verified`. A success in one values scope must not settle the
+// depth-limited cells of another.
+spec SweepValuesScopeInconclusive {
+  number Amount
+  type X = 0..20
+  state { x: X }
+  init { x = 0 }
+  action bump(a: Amount) { x = x + a }
+  reachable Big { x >= 10 }
+}
+verify { values Amount = 1..1 }

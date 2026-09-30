@@ -3564,13 +3564,19 @@ fn run_sweep(
     let mut results = Vec::new();
     let mut minimal = None;
     let mut spec_name = None;
-    let mut has_success = false;
+    // #1089: a depth-limited cell is settled only by a determinate success in
+    // the *same* instances/values scope. A larger depth answers the question a
+    // smaller depth left open; a different instance count or value range does
+    // not, so a scope whose every cell is inconclusive keeps the grid from
+    // passing and is reported here.
+    let mut inconclusive_scopes = Vec::new();
     for instances in instance_combinations {
         for upper_values in &value_upper_combinations {
             let values = upper_values
                 .iter()
                 .map(|(name, hi)| (name.clone(), (value_ranges[name].0, *hi)))
                 .collect::<std::collections::BTreeMap<_, _>>();
+            let mut scope_all_inconclusive = true;
             for depth in depth_lo..=depth_hi {
                 let scope = ScopeBounds {
                     instances: instances.clone(),
@@ -3654,21 +3660,32 @@ fn run_sweep(
                     "verification": verification,
                 });
                 match sweep_cell_class(&entry["verification"]) {
-                    SweepCellClass::Success => has_success = true,
+                    SweepCellClass::Inconclusive => {}
                     // The helper delegates every non-exempt result to the
                     // shared classifier, preserving #594's fail-closed rule.
                     SweepCellClass::Failure if minimal.is_none() => {
+                        scope_all_inconclusive = false;
                         minimal = Some(entry.clone());
                     }
-                    SweepCellClass::Inconclusive | SweepCellClass::Failure => {}
+                    SweepCellClass::Success | SweepCellClass::Failure => {
+                        scope_all_inconclusive = false;
+                    }
                 }
                 results.push(entry);
+            }
+            if scope_all_inconclusive {
+                inconclusive_scopes.push(json!({
+                    "instances": instances,
+                    "values": values.iter().map(|(name, (lo, hi))| (
+                        name.clone(), json!([lo, hi])
+                    )).collect::<Map<_, _>>(),
+                }));
             }
         }
     }
     let result = if minimal.is_some() {
         "sweep_failed"
-    } else if has_success {
+    } else if inconclusive_scopes.is_empty() && !results.is_empty() {
         "sweep_passed"
     } else {
         "sweep_inconclusive"
@@ -3691,6 +3708,7 @@ fn run_sweep(
             },
             "results": results,
             "minimal_counterexample": minimal,
+            "inconclusive_scopes": inconclusive_scopes,
         }),
     );
     (Value::Object(output), i32::from(result != "sweep_passed"))

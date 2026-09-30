@@ -74,10 +74,12 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    true failing scope under `sweep.minimal_counterexample`. For specs that
    declare an entity or number, optionally extend the sweep with
    `--instances <Entity>=1..3` and/or `--values <Number>=…` (replace the
-   placeholders with declared names). A grid
-   with only `insufficient_depth` reachability observations is
-   `sweep_inconclusive`/exit 1 (and has a null minimal counterexample); a grid
-   with a determinate success and no true failure is `sweep_passed`/exit 0.
+   placeholders with declared names). Depth-limited
+   (`insufficient_depth`) reachability cells are settled per
+   `--instances`/`--values` scope: with no true failure, the grid is
+   `sweep_passed`/exit 0 only when every such scope has a determinate success
+   at some depth; otherwise it is `sweep_inconclusive`/exit 1 (null minimal
+   counterexample) and `sweep.inconclusive_scopes` names the unsettled scopes.
 
 ## 7. CLI and JSON essentials
 
@@ -557,9 +559,14 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   its first scope under `sweep.minimal_counterexample`. A `reachable_failed`
   cell is inconclusive only when its nonempty `unreached` array contains only
   `classification:"insufficient_depth"`: it remains in the results but is not
-  a counterexample. With no true failure, a determinate success yields
-  `sweep_passed`/exit 0; all-inconclusive yields `sweep_inconclusive`/exit 1
-  with a null minimal counterexample and retained per-cell results. Missing,
+  a counterexample. Such cells are settled per `--instances`/`--values` scope
+  (one combination across the whole depth range): a determinate success at a
+  larger depth settles the same scope, but a success in another scope never
+  does. With no true failure, a grid whose every scope is settled yields
+  `sweep_passed`/exit 0; otherwise it yields `sweep_inconclusive`/exit 1 with
+  a null minimal counterexample and retained per-cell results, and
+  `sweep.inconclusive_scopes` lists each all-inconclusive `{instances,
+  values}` scope (`[]` when there is none). Missing,
   unknown, or mixed classifications, including `over_constrained`, fail closed as
   `sweep_failed`. For `--values NAME=LO..HI`, it fixes `LO` and expands
   `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope

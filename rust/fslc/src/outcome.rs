@@ -71,8 +71,8 @@ impl OutcomeClass {
 ///
 /// The shared [`OutcomeClass`] remains binary: an inconclusive reachability
 /// observation is still a failing `verify` verdict. Only a sweep grid needs to
-/// distinguish it from a counterexample so later, determinate cells can settle
-/// the aggregate result.
+/// distinguish it from a counterexample so a determinate cell of the same
+/// `--instances`/`--values` scope can settle it (#1089).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub enum SweepCellClass {

@@ -954,9 +954,16 @@ semantics / io / vacuous / …)を返した場合、それは反例ではあり�
 
 `reachable_failed` のセルが不確定なのは、空でない `unreached` 配列の全要素が
 `classification:"insufficient_depth"` のときだけです。このセルは
-`sweep.results` に残りますが反例ではありません。真の失敗がなく、決定済みの成功が
-1件以上あるグリッドは `sweep_passed` / exit 0 になります。全セルが不確定なら
-`sweep_inconclusive` / exit 1 となり、`minimal_counterexample:null` です。
+`sweep.results` に残りますが反例ではありません。不確定なセルはスコープごとに
+決着します。スコープとは `--instances`/`--values` の1つの組み合わせを `--depth`
+の全範囲にわたって見たもので、そのセルのどれかが決定済みの成功なら決着します。
+大きい深さは小さい深さが残した問いに答えますが、別のインスタンス数や値域は
+答えません。したがって、あるスコープの成功が別のスコープを決着させることは
+ありません。真の失敗がなく、すべてのスコープが決着したグリッドは
+`sweep_passed` / exit 0 になります。そうでなければ `sweep_inconclusive` / exit 1
+となり、`minimal_counterexample:null` です。`sweep.inconclusive_scopes` は、
+全セルが不確定なスコープ(`{instances, values}`)を sweep の result によらず
+すべて列挙し、該当がなければ `[]` です。
 classification の欠落・未知・混在（`over_constrained` を含む）は真の失敗として
 `sweep_failed` / exit 1 になります。
 
@@ -1020,7 +1027,7 @@ inline `implements` が top-level `result` へ伝播するため列挙してい�
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
-真の失敗なら `sweep_failed`、全セルが深さ不足なら `sweep_inconclusive` を返します。同じ `2` の
+真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1043,8 +1050,8 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `proved` | **invariant がすべての実行で成立する**(深さ非有界)。`completeness:"unbounded"`。`--engine induction` から、または探索が閉じたとき(`closure:true`)の `--engine explicit` から | 完了 |
 | `violated` | 反例が存在する。`violation_kind` と最短トレースつき | トレースを読んで spec を直す |
 | `reachable_failed` | reachable が深さ K 以内に到達されなかった | 各 `unreached[].classification` を読む: `insufficient_depth` なら `--depth` を上げ、`over_constrained` ならブロックしている制約を直す |
-| `sweep_passed` | sweep グリッドに真の失敗がなく、決定済みの成功が1件以上ある。深さ不足の観測は `sweep.results` に残る | 記録されたグリッドを確認する。これは非有界の証明ではない |
-| `sweep_inconclusive` | すべての sweep セルが `insufficient_depth` だけを持つ `reachable_failed` で、`minimal_counterexample` は null | `--depth` を上げるか sweep 境界を調整して再実行する |
+| `sweep_passed` | sweep グリッドに真の失敗がなく、すべての `--instances`/`--values` スコープがいずれかの深さで決定済みの成功を持つ。深さ不足の観測は `sweep.results` に残る | 記録されたグリッドを確認する。これは非有界の証明ではない |
+| `sweep_inconclusive` | 真の失敗はないが、`insufficient_depth` だけを持つ `reachable_failed` のセルしかない `--instances`/`--values` スコープが1つ以上ある。そのスコープは `sweep.inconclusive_scopes` に列挙され、`minimal_counterexample` は null | 列挙されたスコープの `--depth` を上げるか sweep 境界を調整して再実行する |
 | `sweep_failed` | sweep セルに反例、またはフェイルクローズドな reachable classification がある | `sweep.minimal_counterexample` を調べて報告された問題を直す |
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または inline `implements Abs from "file" { }` seam の対応探索が固定の内部状態予算を超えた(`check`/`verify`、CLI フラグ無し) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。inline `implements` seam の場合: domain を縮めるか、結合検査ではなく `fslc refine`/`fslc verify` で層を分けて検証する |

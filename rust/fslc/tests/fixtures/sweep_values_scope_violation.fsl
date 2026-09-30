@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Built for #1089 (`sweep_contract.rs`). Swept at `--depth 3..3` over
+// `--values Amount=1..3`, the scopes `Amount` 1..1 and 1..2 reach at most 6
+// in three steps, so `Big` is `reachable_failed` with only
+// `classification:"insufficient_depth"` (`NeverNine` does not block `x >= 10`,
+// so the classification is not `over_constrained`); the scope 1..3 reaches 9
+// and violates `NeverNine`. The true failure must dominate the inconclusive
+// scopes.
+spec SweepValuesScopeViolation {
+  number Amount
+  type X = 0..20
+  state { x: X }
+  init { x = 0 }
+  action bump(a: Amount) { x = x + a }
+  invariant NeverNine { x != 9 }
+  reachable Big { x >= 10 }
+}
+verify { values Amount = 1..1 }
