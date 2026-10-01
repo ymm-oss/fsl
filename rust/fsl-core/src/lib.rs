@@ -37,6 +37,7 @@ mod domain_lowering;
 mod expr_text;
 mod model;
 mod origin;
+mod partial_operation;
 mod public_kernel;
 mod refinement;
 mod reserved;
@@ -74,6 +75,11 @@ pub use origin::{
     TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,
     action_statement_target, action_target, init_statement_target, property_target, state_target,
     type_target,
+};
+pub use partial_operation::{
+    ActionPartialOperation, PartialOperation, PartialOperationClause, action_partial_operations,
+    binder_has_partial_operation_candidate, expression_has_partial_operation_candidate,
+    lvalue_has_partial_operation_candidate,
 };
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,

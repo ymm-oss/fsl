@@ -94,7 +94,10 @@ or `ensures`. Guard/body failures have no attempted state. Failures after the
 body retain the exact uncommitted successor as `attempted_state`.
 
 Partial operations (`head`, `pop`, `at`, sequence indexing, division, and
-remainder) are listed with a typed failure condition. Every classified failure
+remainder) are listed with a typed failure condition. The set is defined once as
+`fsl_core::PartialOperation` and shared by the Public Kernel, the verifier, the
+runtime (`RuntimeError::partial_operation`) and `fslc explain` (#1166); an
+indexed assignment target's index expression is listed like any other operand. Every classified failure
 above rolls back the whole step: the Monitor returns the input state and leaves
 its internal state unchanged. For diagnostics, `attempted_state` is absent for
 guard/body failures and is the exact uncommitted candidate for any later

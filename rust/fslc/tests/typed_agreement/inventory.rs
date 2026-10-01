@@ -55,7 +55,11 @@ fn generation_inventory_is_coupled_to_registries_and_test_anchors() {
         let entry = companion_axes[axis]
             .as_object()
             .expect("companion axis row");
-        for key in ["evidence_test", "boundary_evidence_test"] {
+        for key in [
+            "evidence_test",
+            "boundary_evidence_test",
+            "inventory_evidence_test",
+        ] {
             let Some(anchor) = entry.get(key).and_then(Value::as_str) else {
                 continue;
             };
@@ -74,8 +78,11 @@ fn generation_inventory_is_coupled_to_registries_and_test_anchors() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         partial_operations,
-        BTreeSet::from(["head", "pop", "at", "index", "divide", "remainder"]),
-        "head/pop/at/index/divide/remainder inventory must stay complete"
+        fsl_core::PartialOperation::ALL
+            .iter()
+            .map(|operation| operation.name())
+            .collect::<BTreeSet<_>>(),
+        "the partial-operation axis must be fsl_core's inventory (#1166)"
     );
 
     let excluded = inventory["excluded_observation_fields"]

@@ -571,7 +571,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   counterfactual trace that breaks it under requires/assignment/fair removal.
   `skeleton.spec_kind` names the source dialect (`kernel`/`requirements`/…);
   `skeleton.auto_checks` lists both `type_bound` and one `partial_op` entry
-  per syntactic `pop`/`head`/`at`/`/`/`%` site. A `branches { when P { … }
+  per `pop`/`head`/`at`/`Seq` index/`/`/`%` site in an action, including
+  quantifier and aggregate binders and assignment targets — the same set the
+  verifier checks as `_partial_<action>`. A `branches { when P { … }
   maps Q }` action and a generated SLA `tick`/`_deadline_*` declaration each
   carry an `origin` (`generated:true`, plus a `branch` lowering step naming
   the guard/correspondence for the former) so `name` still resolves to the

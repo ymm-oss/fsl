@@ -244,7 +244,7 @@ pub fn verify_explicit_selected(
             if enabled.is_empty() && result.deadlock_step.is_none() {
                 let terminal = match terminal_holds(&scratch) {
                     Ok(value) => value,
-                    Err(error) if super::is_partial_operation_error(&error.message) => {
+                    Err(error) if super::is_partial_operation_error(&error) => {
                         result.violation = Some(ExplicitViolation {
                             trace: reconstruct_trace(state, &parents),
                             violation: Violation {
@@ -351,7 +351,7 @@ fn record_reachables(
                 None,
             ) {
                 Ok(value) => value,
-                Err(error) if super::is_partial_operation_error(&error.message) => {
+                Err(error) if super::is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
                         name: format!("_partial_property_{}", property.name),

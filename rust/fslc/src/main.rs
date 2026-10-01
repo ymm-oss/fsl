@@ -8545,155 +8545,33 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
     flows
 }
 
-/// Every syntactic partial-operation site (`pop`/`head`/`at`, `/`, `%`)
-/// inside one action's `requires`/`lets`/`statements`/`ensures`, one
-/// `(loc, text)` entry per occurrence — the same structural coverage the
-/// verifier's implicit `partial_op` check applies (issue #530: `explain`'s
-/// skeleton previously enumerated `type_bound` auto-checks only). `text` is
-/// the rendered text of the containing requires/statement/ensures (the same
-/// convention `requires_text`/`ensures_text` already use), so every site
-/// found within one clause shares that clause's rendering. Deliberately
-/// simpler than `fsl_core::public_kernel`'s `walk_partial`/`statement_partial`,
-/// which additionally compute a per-branch failure condition this listing
-/// does not need — a static enumeration has no branches to attribute to.
-#[allow(clippy::too_many_lines)]
+/// Every partial-operation site inside one action's `requires`/`lets`/
+/// `statements`/`ensures`, one `(loc, text)` entry per occurrence, from the
+/// shared inventory `fsl_core::action_partial_operations` (issue #530 added the
+/// listing; #1166 made it the verifier's, runtime's and Public Kernel's own set,
+/// so `Seq` index reads and binder parts are no longer missed). `text` is the
+/// rendered text of the containing requires/statement/ensures (the same
+/// convention `requires_text`/`ensures_text` already use), or of a statement
+/// `forall`'s binder, so every site found within one clause shares that
+/// clause's rendering.
 fn action_partial_op_sites(
     model: &KernelModel,
     action: &fsl_core::ActionDef,
 ) -> Vec<(fsl_syntax::Span, String)> {
-    fn walk_expr(
-        expr: &KernelExpr,
-        site: &(fsl_syntax::Span, String),
-        sites: &mut Vec<(fsl_syntax::Span, String)>,
-    ) {
-        match expr {
-            KernelExpr::Method {
-                receiver,
-                name,
-                args,
-            } => {
-                if matches!(name.as_str(), "head" | "pop" | "at") {
-                    sites.push(site.clone());
+    fsl_core::action_partial_operations(model, action)
+        .into_iter()
+        .map(|site| {
+            let text = match site.clause {
+                fsl_core::PartialOperationClause::Expr(expr) => {
+                    fslc_rust::source_expr_text(model, expr)
                 }
-                walk_expr(receiver, site, sites);
-                for arg in args {
-                    walk_expr(arg, site, sites);
+                fsl_core::PartialOperationClause::Binder(binder) => {
+                    fsl_core::source_binder_text(model, binder)
                 }
-            }
-            KernelExpr::Binary { op, left, right } => {
-                if matches!(op.as_str(), "/" | "%") {
-                    sites.push(site.clone());
-                }
-                walk_expr(left, site, sites);
-                walk_expr(right, site, sites);
-            }
-            KernelExpr::Index(left, right) | KernelExpr::BinaryNamed { left, right, .. } => {
-                walk_expr(left, site, sites);
-                walk_expr(right, site, sites);
-            }
-            KernelExpr::Some(item) | KernelExpr::Neg(item) | KernelExpr::Not(item) => {
-                walk_expr(item, site, sites);
-            }
-            KernelExpr::Set(items) | KernelExpr::Seq(items) => {
-                for item in items {
-                    walk_expr(item, site, sites);
-                }
-            }
-            KernelExpr::Struct { fields, .. } => {
-                for (_, item) in fields {
-                    walk_expr(item, site, sites);
-                }
-            }
-            KernelExpr::Field(value, _)
-            | KernelExpr::Stage { entity: value, .. }
-            | KernelExpr::UnaryNamed { expr: value, .. } => walk_expr(value, site, sites),
-            KernelExpr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                walk_expr(condition, site, sites);
-                walk_expr(then_expr, site, sites);
-                walk_expr(else_expr, site, sites);
-            }
-            KernelExpr::Is { expr, .. } => walk_expr(expr, site, sites),
-            KernelExpr::Quantified { body, .. } => walk_expr(body, site, sites),
-            KernelExpr::Aggregate { value, .. } => {
-                if let Some(value) = value {
-                    walk_expr(value, site, sites);
-                }
-            }
-            KernelExpr::TernaryNamed {
-                first,
-                second,
-                third,
-                ..
-            } => {
-                walk_expr(first, site, sites);
-                walk_expr(second, site, sites);
-                walk_expr(third, site, sites);
-            }
-            // A `def` call's own body is a separate declaration, checked on
-            // its own terms; its argument expressions are not partial-op
-            // sites of *this* action (matches `walk_partial`'s own choice).
-            KernelExpr::Num(_)
-            | KernelExpr::Bool(_)
-            | KernelExpr::None
-            | KernelExpr::Var(_)
-            | KernelExpr::EnumMember { .. }
-            | KernelExpr::Call { .. } => {}
-        }
-    }
-    fn walk_statement(
-        model: &KernelModel,
-        statement: &KernelStatement,
-        sites: &mut Vec<(fsl_syntax::Span, String)>,
-    ) {
-        match statement {
-            KernelStatement::Assign { value, span, .. } => {
-                let site = (*span, fslc_rust::source_expr_text(model, value));
-                walk_expr(value, &site, sites);
-            }
-            KernelStatement::If {
-                condition,
-                then_statements,
-                else_statements,
-                span,
-            } => {
-                let site = (*span, fslc_rust::source_expr_text(model, condition));
-                walk_expr(condition, &site, sites);
-                for item in then_statements.iter().chain(else_statements) {
-                    walk_statement(model, item, sites);
-                }
-            }
-            KernelStatement::ForAll { statements, .. } => {
-                for item in statements {
-                    walk_statement(model, item, sites);
-                }
-            }
-        }
-    }
-    let mut sites = Vec::new();
-    for (expr, span) in action.requires.iter().zip(&action.require_spans) {
-        let site = (*span, fslc_rust::source_expr_text(model, expr));
-        walk_expr(expr, &site, &mut sites);
-    }
-    // `lets` carries no per-binding span in the checked model; the action's
-    // own declaration span is the closest honest location rather than
-    // fabricating a precise one.
-    for (_, expr) in &action.lets {
-        let site = (action.span, fslc_rust::source_expr_text(model, expr));
-        walk_expr(expr, &site, &mut sites);
-    }
-    for statement in &action.statements {
-        walk_statement(model, statement, &mut sites);
-    }
-    for (expr, span) in action.ensures.iter().zip(&action.ensure_spans) {
-        let site = (*span, fslc_rust::source_expr_text(model, expr));
-        walk_expr(expr, &site, &mut sites);
-    }
-    sites
+            };
+            (site.span, text)
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_lines)]
