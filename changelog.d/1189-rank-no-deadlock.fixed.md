@@ -12,3 +12,8 @@ over an unconstrained invariant state and fails as `unknown_cti` /
 proof obligation over invariant states, so `--deadlock` does not disable it,
 and an unreachable deadlocked pending state blocks the proof until an
 invariant excludes it.
+Visible change: at a depth large enough for the base-case BMC to find the
+stall, such a spec now reports `unknown_cti` / `rank_failure: "deadlock"`
+instead of `violated` / `leadsTo` (the existing rule prefers the rank failure
+when the base case shows a leadsTo violation, as Python does); the exit code
+stays 1.
