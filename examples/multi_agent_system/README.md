@@ -87,10 +87,10 @@ fslc refine examples/multi_agent_system/multi_agent_design.fsl \
   --depth 8
 
 fslc testgen examples/multi_agent_system/multi_agent_design.fsl \
-  --depth 6 \
+  --depth 6 --allow-unwired \
   -o examples/multi_agent_system/test_multi_agent_design_conformance.py
 
-# Adapter未実装の間はskipされる。
+# --allow-unwired で生成したので、Adapter未実装の間はskipされる（既定では失敗する。#1200）。
 ./.venv/bin/python -m pytest \
   examples/multi_agent_system/test_multi_agent_design_conformance.py -q
 ```
@@ -103,7 +103,7 @@ fslc testgen examples/multi_agent_system/multi_agent_design.fsl \
 - design層の浅い安全性検証: `verified` at depth 12。深い後段actionには到達深さ不足のwarningが出る
 - requirements→businessの`refine`: `refines` at depth 8、`progress.BP1..BP6`が確認される
 - design→requirementsの`refine`: `refines` at depth 8、`progress.WorkEventuallyHandled`と`progress.WorkOpenUntilHandled`が確認される
-- conformance pytest: Adapter未実装ならskip。Adapter接続後はscenario replayとrandom walkが実装・prompt harnessを検査する
+- conformance pytest: `--allow-unwired`で生成した雛形はAdapter未実装ならskip（全件skipは実装の証拠ではない）。Adapter接続後はscenario replayとrandom walkが実装・prompt harnessを検査する
 - `WorkEventuallyHandled`全体の深さ18 liveness verifyは重い。継続運用では、RAG例と同様にliveness専用sliceへ分ける
 
 ## Open Decisions

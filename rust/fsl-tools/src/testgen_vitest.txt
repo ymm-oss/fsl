@@ -3,8 +3,7 @@
  * Auto-generated FSL conformance tests (Vitest).
  * Source: __SOURCE__
  *
- * Wire `makeAdapter()` to your implementation. Until it is wired, every test is
- * skipped (mirroring the pytest scaffold's skip-when-unwired behaviour).
+__UNWIRED_HEADER__
  *
  * The random-walk trace below was baked at generation time by the FSL Monitor
  * (the spec's concrete interpreter) under a fixed seed, so these tests need no
@@ -31,7 +30,7 @@ export interface Adapter {
   observe(): Record<string, unknown>;
 }
 
-// Wire your implementation here. Throwing leaves the suite skipped (not failed).
+__MAKE_ADAPTER_NOTE__
 function makeAdapter(): Adapter {
   throw new Error("wire your implementation: implement makeAdapter()");
 }
@@ -61,14 +60,4 @@ function assertRejected(result: StepResult | void, expectedKind: string | null):
   }
 }
 
-let adapter: Adapter;
-let wired = false;
-try {
-  adapter = makeAdapter();
-  adapter.reset();
-  adapter.observe();
-  wired = true;
-} catch {
-  // Adapter not wired yet — every test below is skipped.
-}
-const scenario = wired ? test : test.skip;
+__UNWIRED_GUARD__

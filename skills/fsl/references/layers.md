@@ -25,7 +25,9 @@ route authoring through the role skills.
 3. **Gate the whole chain at once** with `fslc chain fsl-project.toml`: it runs
    business → requirements → design → impl from a manifest and returns a per-layer
    table (a failed layer stops the chain unless `--keep-going`). This is the connected
-   analogue of single-spec `verify`.
+   analogue of single-spec `verify`. Give `[impl]` a JUnit `report` when its
+   command runs a test suite: then an all-skipped or empty run is `indeterminate`,
+   not `passed` (without `report` only the exit code is seen — `commands.md`).
 4. **Read counterexamples by seam.** A `refinement_failed` / `implements.violation`
    names the seam that broke; repair in line with the contract — never weaken the
    upper layer just to make the lower one pass (that hollows out the very traceability

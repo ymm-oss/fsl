@@ -175,7 +175,7 @@ skipping only the ones a free component shares a root with.
 ## 3. `fslc testgen` — generation of a conformance-test skeleton
 
 ```
-fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
+fslc testgen <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o <out>]   # default target pytest; default file test_<spec name lowercased>.py to stdout
 ```
 
 The native generator has one normalized input adapter for every target. For an
@@ -286,8 +286,16 @@ the Rust workspace is the authoritative implementation and the Python package
 is a frozen compatibility reference (`AGENTS.md`). No parity gate compares
 walk-violation behavior across the two implementations today, so nothing
 enforces either side; this table is the record.
-4. While the Adapter is unimplemented (NotImplementedError), make all tests
-   `pytest.skip`, so that pytest does not error even right after generation.
+4. While the Adapter is unimplemented (NotImplementedError), every test
+   **fails** with `pytest.fail(ADAPTER_NOT_WIRED, pytrace=False)`, whose message
+   starts `adapter not wired`. `--allow-unwired` restores the earlier
+   `pytest.skip` (see §3.6, issue #1200).
+
+   **Superseded by issue #1200.** This item used to make every test
+   `pytest.skip` "so that pytest does not error even right after generation".
+   That made a suite whose adapter was never wired exit 0, and `fslc chain`
+   reported that green as a passing `[impl]` layer, so a spec-to-implementation
+   claim held without the implementation being called once.
 
 ### 3.1 `--target vitest` (TypeScript / Vitest)
 
@@ -295,7 +303,9 @@ The Vitest emitter renders the **same scenarios** to a self-contained TypeScript
 file with the same `reset`/`step`/`observe` `Adapter` contract. Parts 1, 2, and 4
 above port directly: an `Adapter` interface + `makeAdapter()` stub, deterministic
 scenario tests (`assertPartial`), forbidden-rejection tests (`assertRejected`), and
-skip-when-unwired (a top-level guard flips `test` to `test.skip`).
+the unwired behaviour of §3.6 (by default a `scenario()` wrapper throws
+`adapter not wired` from every test; with `--allow-unwired` a top-level guard
+flips `test` to `test.skip`).
 
 Part 3 — the random walk — is the one real design point, because TypeScript has no
 `Monitor`. The chosen approach **bakes the trace at generation time**: the Python
@@ -327,9 +337,11 @@ language-independent baked walk. The Swift-specific points:
   by the expected keys and asserts only the fields the spec mentions.
 - **Null.** An Option `None` bakes as `FSLNull.instance`, a one-line sentinel struct,
   so the generated file depends only on `Testing` (no Foundation/`NSNull`).
-- **Skip-when-unwired.** `makeAdapter()` throws until wired; each `@Test` carries
-  `.enabled(if: isAdapterWired())`, so the suite is *disabled* (not failed) until an
-  adapter is connected — the Swift analog of the pytest skip / Vitest `test.skip`.
+- **Fail-when-unwired (§3.6).** `makeAdapter()` throws `FSLNotWired.notWired`
+  until wired, and its `description` is the `adapter not wired` message, so every
+  `@Test` fails. With `--allow-unwired` each `@Test` instead carries
+  `.enabled(if: isAdapterWired())`, so the suite is *disabled* until an adapter is
+  connected (the pre-#1200 behaviour).
 - **Literals.** `_swift_literal` renders int as `Int`, float as `Double` (always with
   a decimal point), bool/null per above, and strings with Swift escape rules
   (`\u{XX}`, which differ from JSON). The baked walk is an inline labelled-tuple
@@ -354,11 +366,12 @@ again reusing the baked walk. The choices:
   and Kotlin's structural `==` is already deep on `List`/`Map` and discriminates a
   boxed `Int` from a `Double`, so `assertPartial` is a plain recursion that asserts
   only the expected keys and leans on `assertEquals` for leaves.
-- **Skip-when-unwired.** kotlin.test has no portable runtime skip (no
-  `assumeTrue`), so `makeAdapter(): Adapter?` returns `null` until wired and each
-  `@Test` starts `val a = makeAdapter() ?: return` — an unwired suite no-ops rather
-  than fails. This is the one deliberate divergence from the pytest/Vitest/Swift
-  "reported as skipped" behaviour, forced by the framework.
+- **Fail-when-unwired (§3.6).** `makeAdapter(): Adapter?` returns `null` until
+  wired and each `@Test` starts `val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)`.
+  kotlin.test has no portable runtime skip (no `assumeTrue`), so the only way to
+  "skip" would be the early `?: return` the target used before #1200, under which
+  an unwired suite passed. `--allow-unwired` is therefore rejected for Kotlin
+  (exit 2) instead of generating that silent green.
 - **Literals.** `_kotlin_literal` renders int as `Int`, float as `Double`, `null`,
   `listOf`/`mapOf` (empty ones carry explicit type args), and strings with Kotlin
   escapes — notably `$` must be escaped (string templates). The baked walk is a
@@ -383,9 +396,11 @@ The Dart emitter renders the same scenarios to a self-contained `package:test` f
 - **int/float.** Unlike PHP, Dart treats `1 == 1.0` as true, so `_dart_literal`
   renders the right syntax (`1` vs `1.0`) but the values compare equal — this is Dart
   semantics, not a fidelity gap.
-- **Skip-when-unwired.** `package:test`'s `skip:` argument is static, so a top-level
-  `_adapterWired()` probe runs once in `main()` and every `test(..., skip: wired ?
-  null : 'Adapter not wired')` is conditionally skipped until an adapter is connected.
+- **Fail-when-unwired (§3.6).** `makeAdapter()` throws an `UnimplementedError`
+  carrying the `adapter not wired` message, so every test fails until wired. With
+  `--allow-unwired`, `package:test`'s static `skip:` argument is used instead: a
+  top-level `_adapterWired()` probe runs once in `main()` and every
+  `test(..., skip: wired ? null : 'Adapter not wired')` is conditionally skipped.
 - **Literals.** Strings are single-quoted with `$` escaped (interpolation); empty
   collections carry explicit type args (`<String, dynamic>{}`); the baked walk is a
   `List<Map<String, dynamic>>` of `{action, params, expected}`. Output defaults to
@@ -410,9 +425,9 @@ reusing the baked walk. The choices:
   fields are asserted) and, for a genuinely list-shaped expected (`array_is_list`),
   also pins the length so sequences stay exact. Both sides see the same key coercion,
   so it cancels out.
-- **Skip-when-unwired.** `makeAdapter()` throws until wired; `setUp()` probes it and
-  calls `markTestSkipped`, so the whole class is skipped (not failed) until an
-  adapter is connected — the PHPUnit analog of the pytest skip.
+- **Fail-when-unwired (§3.6).** `makeAdapter()` throws until wired; `setUp()`
+  probes it and calls `$this->fail(...)` with the `adapter not wired` message, so
+  every test fails. With `--allow-unwired` it calls `markTestSkipped` instead.
 - **Literals.** Strings are single-quoted (PHP single-quotes interpolate nothing;
   only `\\`/`\'` are escaped); JSON arrays render to PHP lists, JSON objects to
   associative arrays; the baked walk is a `private const WALK`. Output defaults to
@@ -422,6 +437,53 @@ reusing the baked walk. The choices:
 (Syntax gate in tests: `php -l` lints syntax without loading PHPUnit — a clean
 dependency-free check like swiftc -parse, so the PHP tests run it when php is present
 and skip it otherwise.)
+
+### 3.6 Unwired adapters fail by default (issue #1200)
+
+A generated test whose adapter is not wired never calls the implementation, so
+its result says nothing about whether the implementation conforms. Before
+#1200 every target skipped such tests (Kotlin returned early and passed), so a
+forgotten wiring exited 0, and `fslc chain` lifted that exit 0 to a passing
+`[impl]` layer. The default is now that **every generated test of every target
+fails** while unwired, with a message that starts `adapter not wired: implement
+makeAdapter() ...` (pytest: `implement Adapter.reset/step/observe ...`). This is
+a breaking change of the generated text, shipped in a minor release (the
+changelog fragment carries the migration note).
+
+**Opt-in skip: `--allow-unwired`.** Skipping is an explicit choice at
+generation time, for `fslc testgen` and `fslc domain testgen`. The opt-in
+output is byte-identical to the pre-#1200 scaffold for pytest, Vitest, Swift,
+Dart, and PHPUnit (`rust/fslc/tests/testgen_contract.rs` pins those digests),
+so a project that wants the old file regenerates with the flag and gets exactly
+it. A generation flag was chosen over a run-time environment variable for three
+reasons:
+
+- **One mechanism on every target.** Reading an environment variable needs a
+  platform API the scaffolds deliberately avoid: Kotlin's common stdlib has
+  none (`System.getenv` is JVM-only), Swift would need Foundation or libc
+  imports the file does not carry, and Dart's `Platform.environment` is
+  unavailable on the web. A flag changes only the generated text.
+- **Visible in the artifact.** The choice is in the reviewed file, not in a CI
+  setting that a reviewer of the test file cannot see.
+- **No silent run-time downgrade.** A run-time switch can be set in one
+  environment and forgotten; it would turn a failing unwired suite back into a
+  green one without any file changing.
+
+**Kotlin rejects `--allow-unwired`** (`result:"error"`, exit 2): kotlin.test has
+no portable runtime skip, so the only opt-in available would be the early
+return, which is the silent pass this section removes.
+
+**What a skipping suite still means for `chain`.** `--allow-unwired` makes a
+runner green while nothing ran. `fslc chain` therefore does not trust the exit
+code alone when the `[impl]` layer names a JUnit `report`: zero executed tests
+is `indeterminate`, not `passed` (`DESIGN-layers.md` §7).
+
+**Frozen Python reference.** `src/fslc/testgen.py` is unchanged and still
+skips. The parked developer comparison `tools/check_rust_phase3_commands.py`
+compares testgen bytes between the two implementations and now reports the
+default scaffolds as different; the native default is the authoritative one
+(`AGENTS.md`), and `--allow-unwired` is the native form equal to the Python
+output. This is a deliberate divergence like §3.0, not a parity defect.
 
 ## 4. CLI / public API
 
@@ -451,8 +513,8 @@ and skip it otherwise.)
 4. Non-deterministic init (a missing assignment) is a semantics error at Monitor construction.
 5. replay: a conformant log / a nonconformant log (confirm failed_at_event and
    violation.kind) / array-form input.
-6. testgen: the generated file is importable, skips if the Adapter is
-   unimplemented, and with the Monitor wired in place of the Adapter, the
+6. testgen: the generated file is importable, fails if the Adapter is
+   unimplemented (skips only under `--allow-unwired`), and with the Monitor wired in place of the Adapter, the
    "self-conformance" makes all tests pass (= verification that the generated
    skeleton works as-is).
 7. enabled(): matches the expected instance enumeration in a known state.

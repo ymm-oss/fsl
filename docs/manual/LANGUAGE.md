@@ -842,7 +842,7 @@ fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test sc
 fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
-fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testgen   <file.fsl> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o out]  # implementation-conformance test scaffold (§12)
 fslc testplan  <file.fsl> [--depth K]             # closed test-plan.v1 vector selection (§12)
 fslc refine    <impl> <abs> <mapping> [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      <old> <new> [--depth K] [--mapping map.fsl]
@@ -882,7 +882,7 @@ fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional D
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
 fslc domain expand <file.fsl> [-o out.fsl]                      # generated kernel FSL
 fslc domain generate <file.fsl> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
-fslc domain testgen <file.fsl> [--target vitest] [-o out]       # domain adapter/conformance scaffold
+fslc domain testgen <file.fsl> [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay <file.fsl> --logs events.jsonl              # domain runtime replay evidence
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
 fslc db observe <file.fsl> --trace events.json                  # runtime observation evidence
@@ -1063,7 +1063,8 @@ mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) 
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
+indeterminate (`chain` when the `[impl]` report records no executed test),
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
@@ -1824,31 +1825,50 @@ v1 rejects `leadsTo`, refinement documents, induction/CTI, nondeterministic
   `@Test`, `#expect`; **not XCTest**). Same baked-walk design as Vitest. Dynamic
   state is `[String: Any]` with a bundled deep-equality/partial-match helper; an
   Option `None` bakes as the self-contained `FSLNull.instance` sentinel (no
-  Foundation). Until `makeAdapter()` is wired every test is disabled via
-  `@Test(.enabled(if:))`. Output defaults to `<SpecName>ConformanceTests.swift`.
+  Foundation). Until `makeAdapter()` is wired every test fails (its
+  `FSLNotWired` error says "adapter not wired"); with `--allow-unwired` every test
+  is disabled via `@Test(.enabled(if:))` instead. Output defaults to
+  `<SpecName>ConformanceTests.swift`.
 - `--target kotlin`: emits a self-contained kotlin.test file (multiplatform; the
   JVM delegates to JUnit). Same baked-walk design. Dynamic state is
   `Map<String, Any?>`, where Kotlin's structural `==` is deep on `List`/`Map` and
   distinguishes `Int` from `Double`, so the partial-match helper is a plain
-  recursion. kotlin.test has no portable runtime skip, so until `makeAdapter()`
-  is wired (it returns `null`) each test returns early. Output defaults to
+  recursion. Until `makeAdapter()` is wired (it returns `null`) each test fails
+  with `fail(ADAPTER_NOT_WIRED)`. kotlin.test has no portable runtime skip, so
+  `--allow-unwired` is rejected for this target (exit 2) rather than generating
+  tests that return early and pass. Output defaults to
   `<SpecName>ConformanceTest.kt`.
 - `--target dart`: emits a self-contained `package:test` file (also runs under
   `flutter test`). Same baked-walk design. Dynamic state is `Map<String, dynamic>`;
   Dart's `==` is reference-based on collections, so the bundled `assertPartial`
   recurses by the expected keys and compares leaves/sequences with the `equals`
   matcher (re-exported by `package:test`, so the only dependency is `package:test`).
-  A top-level probe sets `skip:` on each `test()` until `makeAdapter()` is wired.
-  Output defaults to `<spec_name>_conformance_test.dart` (snake_case, the
+  Until `makeAdapter()` is wired every test fails with its "adapter not wired"
+  `UnimplementedError`; with `--allow-unwired` a top-level probe sets `skip:` on
+  each `test()` instead. Output defaults to `<spec_name>_conformance_test.dart` (snake_case, the
   `_test.dart` suffix the runner expects).
 - `--target phpunit`: emits a self-contained PHPUnit file (PHP 8.1+ / PHPUnit 10+,
   `declare(strict_types=1)`). Same baked-walk design. Dynamic state is an
   associative `array`; leaves are compared with `assertSame` (`===`), which keeps
   `int`/`float`, `bool` and `null` from coercing (PHP's loose `==` would conflate
   `0 == "0"` etc.). `assertPartial` recurses by the expected keys (maps match
-  order-independently; list-shaped values also pin length). `setUp()` skips every
-  test until `makeAdapter()` is wired. Output defaults to
+  order-independently; list-shaped values also pin length). Until `makeAdapter()`
+  is wired `setUp()` fails every test ("adapter not wired"); with
+  `--allow-unwired` it marks them skipped instead. Output defaults to
   `<SpecName>ConformanceTest.php` (PSR-4 class = file name).
+
+**Unwired adapters fail (issue #1200, breaking).** Until the generated adapter
+is wired, every generated test of every target **fails** with a message that
+starts `adapter not wired`: a suite that never calls the implementation is not
+evidence that it conforms, so it must not turn a runner green. To get the
+earlier skip-until-wired scaffold, generate with `--allow-unwired`; the output
+is then byte-identical to the pre-#1200 scaffold (pytest `pytest.skip`, Vitest
+`test.skip`, Swift `.enabled(if:)`, Dart `skip:`, PHPUnit `markTestSkipped`).
+The choice is made at generation time so it is visible in the generated file.
+Kotlin rejects `--allow-unwired`. A green run of an `--allow-unwired` suite
+whose tests were all skipped still proves nothing: `fslc chain` reports such an
+`[impl]` layer as `indeterminate` when the manifest names the runner's JUnit
+`report` (`docs/design/DESIGN-layers.md` §7).
 
 ```python
 from fslc import Monitor
@@ -1861,7 +1881,8 @@ r = mon.step("add_to_cart", {"u": 0, "i": 0})   # ok / kind / state / changes
 ```bash
 fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
 fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
-fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict; unwired tests fail
+fslc testgen specs/cart_v1.fsl --allow-unwired -o test_cart_v1.py  # opt-in: unwired tests skip instead (not for kotlin)
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold

@@ -112,6 +112,10 @@ fn assert_generation_succeeds(spec: &str, target: &str) {
 }
 
 fn domain_testgen_digest() -> String {
+    domain_testgen_digest_with(&[])
+}
+
+fn domain_testgen_digest_with(extra: &[&str]) -> String {
     let root = root();
     let output_path = root.join("rust/target/domain-codegen-contract/domain.test.ts");
     if let Some(parent) = output_path.parent() {
@@ -124,8 +128,9 @@ fn domain_testgen_digest() -> String {
             "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
             "--target",
             "vitest",
-            "-o",
         ])
+        .args(extra)
+        .arg("-o")
         .arg(&output_path)
         .current_dir(root)
         .output()
@@ -184,8 +189,16 @@ fn domain_testgen_adapter_and_effects_match_the_typestate_contract_golden() {
     // state space as a result (reviewed diff: pre-fix scenarios show
     // `Order.status: "Status_Approved"` surviving `event.PaymentTimedOut:
     // true`; post-fix scenarios correctly show `"Status_Failed"`).
+    //
+    // #1200 regenerated it again: an unwired adapter now fails every test
+    // instead of skipping it. `--allow-unwired` must still reproduce the
+    // pre-#1200 skipping scaffold byte for byte.
     assert_eq!(
         domain_testgen_digest(),
+        "2d874fbc9bbebc44469a0f2fbe42ba97a3c3c96c6546687081241a9e9436c100"
+    );
+    assert_eq!(
+        domain_testgen_digest_with(&["--allow-unwired"]),
         "162a3acd293591147d84dff8a57c4b27038557ebcfdd02c9b938c91a58b6dbf3"
     );
 }

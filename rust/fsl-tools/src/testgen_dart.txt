@@ -3,9 +3,7 @@
 // Auto-generated FSL conformance tests (package:test).
 // Source: __SOURCE__
 //
-// Wire `makeAdapter()` to your implementation. Until it is wired every test is
-// skipped (a top-level probe sets `skip:` on each test), mirroring the other
-// targets' skip-when-unwired behaviour.
+__UNWIRED_HEADER__
 //
 // The random-walk trace below was baked at generation time by the FSL Monitor
 // (the spec's concrete interpreter) under a fixed seed, so these tests need no
@@ -31,20 +29,7 @@ abstract class Adapter {
   Map<String, dynamic> observe();
 }
 
-// Wire your implementation here. Return your adapter instead of throwing.
-Adapter makeAdapter() =>
-    throw UnimplementedError('wire your implementation: implement makeAdapter()');
-
-bool _adapterWired() {
-  try {
-    final a = makeAdapter();
-    a.reset();
-    a.observe();
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
+__MAKE_ADAPTER__
 
 // Assert only the fields the spec mentions; recurse into nested (Map/struct)
 // shapes. `equals` (from package:test's matcher) is deep on List/Map, so leaves

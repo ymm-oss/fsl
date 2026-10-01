@@ -1314,6 +1314,7 @@ fn command() -> Result<(Value, i32), String> {
             let mut depth = 8_usize;
             let mut output = None;
             let mut target = "pytest".to_owned();
+            let mut unwired = fsl_tools::UnwiredAdapter::Fail;
             let mut engine = "bmc".to_owned();
             let mut impl_log = None;
             let mut evidence = Vec::new();
@@ -1377,13 +1378,24 @@ fn command() -> Result<(Value, i32), String> {
                         required_option_value(&mut args, "--trust-key")?,
                     )),
                     "--strict" => strict = true,
+                    "--allow-unwired" if command == "testgen" => {
+                        unwired = fsl_tools::UnwiredAdapter::Skip;
+                    }
                     _ => return Err(format!("unknown {command} option '{option}'")),
                 }
             }
             let result = match command.as_str() {
-                "testgen" => {
-                    run_testgen(&path, depth, &target, &deadlock, strict, output.as_deref())
-                }
+                "testgen" => run_testgen(
+                    &path,
+                    depth,
+                    TestgenTarget {
+                        name: &target,
+                        unwired,
+                    },
+                    &deadlock,
+                    strict,
+                    output.as_deref(),
+                ),
                 "html" => run_html_report(&path, depth, &deadlock, &engine, output.as_deref()),
                 "ledger" => run_ledger_report(
                     &LedgerReportRequest {
@@ -3400,6 +3412,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             }
             let mut depth = 8_usize;
             let mut target = "vitest".to_owned();
+            let mut unwired = fsl_tools::UnwiredAdapter::Fail;
             let mut deadlock = "warn".to_owned();
             let mut strict = false;
             let mut output = None;
@@ -3426,6 +3439,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                         }
                     }
                     "--strict" => strict = true,
+                    "--allow-unwired" => unwired = fsl_tools::UnwiredAdapter::Skip,
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(
                             args.next()
@@ -3435,8 +3449,17 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                     _ => return Err(format!("unknown domain testgen option '{option}'")),
                 }
             }
-            let result =
-                run_domain_testgen(&path, depth, &target, &deadlock, strict, output.as_deref());
+            let result = run_domain_testgen(
+                &path,
+                depth,
+                TestgenTarget {
+                    name: &target,
+                    unwired,
+                },
+                &deadlock,
+                strict,
+                output.as_deref(),
+            );
             if output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
@@ -3942,10 +3965,19 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
             .and_then(Value::as_i64)
             .is_some_and(|code| matches!(code, 2 | 3))
     });
+    // A run whose only failures are `indeterminate` layers (an `[impl]`
+    // report that records no executed test, issue #1200) did not find a
+    // violation either, so it is reported as `indeterminate`, not `violated`.
+    let all_indeterminate = layers
+        .iter()
+        .filter(|layer| layer.get("status").and_then(Value::as_str) == Some("failed"))
+        .all(|layer| layer.get("result").and_then(Value::as_str) == Some("indeterminate"));
     let result = if failed_layers.is_empty() {
         "verified"
     } else if has_error {
         "error"
+    } else if all_indeterminate {
+        "indeterminate"
     } else {
         "violated"
     };
@@ -4376,7 +4408,23 @@ fn run_chain_step(
         }
     } else {
         let command = section.values.get("command").cloned().unwrap_or_default();
-        if command.is_empty() {
+        let report = section.values.get("report").cloned();
+        if report
+            .as_deref()
+            .is_some_and(|report| report.trim().is_empty())
+        {
+            let detail = json!({
+                "result": "error", "kind": "parse",
+                "message": "[impl] report must name a JUnit XML file or directory",
+            });
+            (
+                json!({
+                    "layer": "impl", "kind": "command", "status": "failed",
+                    "result": "error", "exit_code": 2, "detail": detail,
+                }),
+                true,
+            )
+        } else if command.is_empty() {
             let detail =
                 json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
             (
@@ -4387,6 +4435,7 @@ fn run_chain_step(
                 true,
             )
         } else {
+            let started = whole_second_floor(std::time::SystemTime::now());
             #[cfg(target_family = "windows")]
             let completed = std::process::Command::new("cmd")
                 .args(["/C", &command])
@@ -4399,20 +4448,41 @@ fn run_chain_step(
                 .output();
             match completed {
                 Ok(completed) => {
-                    let passed = completed.status.success();
                     let code = completed.status.code().unwrap_or(1);
-                    let detail = json!({
-                        "result": if passed { "passed" } else { "failed" },
+                    let verdict = impl_verdict(
+                        completed.status.success(),
+                        report
+                            .as_deref()
+                            .map(|report| (report, read_impl_report(base, report, started))),
+                    );
+                    let passed = verdict.result == "passed";
+                    let mut detail = json!({
+                        "result": verdict.result,
                         "command": command,
                         "returncode": code,
                         "stdout": String::from_utf8_lossy(&completed.stdout),
                         "stderr": String::from_utf8_lossy(&completed.stderr),
                     });
+                    if let Some(report) = &report {
+                        detail["report"] = json!(report);
+                    }
+                    if let Some(counts) = verdict.counts {
+                        detail["tests"] = json!({
+                            "total": counts.tests,
+                            "executed": counts.executed(),
+                            "skipped": counts.skipped,
+                            "failures": counts.failures,
+                            "errors": counts.errors,
+                        });
+                    }
+                    if let Some(reason) = verdict.reason {
+                        detail["reason"] = json!(reason);
+                    }
                     (
                         json!({
                             "layer": "impl", "kind": "command", "command": command,
                             "status": if passed { "passed" } else { "failed" },
-                            "result": if passed { "passed" } else { "failed" },
+                            "result": verdict.result,
                             "exit_code": if passed { 0 } else { 1 }, "detail": detail,
                         }),
                         !passed,
@@ -4433,6 +4503,139 @@ fn run_chain_step(
             }
         }
     }
+}
+
+/// The `[impl]` layer's verdict and the evidence behind it (issue #1200).
+struct ImplVerdict {
+    /// `passed`, `failed`, or `indeterminate`.
+    result: &'static str,
+    counts: Option<fslc_rust::junit_report::JunitCounts>,
+    reason: Option<String>,
+}
+
+/// Decides the `[impl]` layer from the command's exit status and, when the
+/// manifest names a `report`, the `JUnit` counts read from it.
+///
+/// Without a `report` the exit status alone decides, as before #1200. With
+/// one, an exit status of 0 is `passed` only when the report records at least
+/// one executed test and no failing or erroring one. Zero executed tests (none
+/// collected, or every one skipped) and a missing, stale, or unreadable report
+/// are `indeterminate`: not running the implementation is not evidence that it
+/// conforms. A nonzero exit status stays `failed` whatever the report says.
+fn impl_verdict(
+    exit_success: bool,
+    report: Option<(&str, Result<fslc_rust::junit_report::JunitCounts, String>)>,
+) -> ImplVerdict {
+    let Some((report, counts)) = report else {
+        return ImplVerdict {
+            result: if exit_success { "passed" } else { "failed" },
+            counts: None,
+            reason: None,
+        };
+    };
+    match counts {
+        Err(message) if exit_success => ImplVerdict {
+            result: "indeterminate",
+            counts: None,
+            reason: Some(format!(
+                "the command exited 0 but its test counts could not be read from report '{report}': {message}"
+            )),
+        },
+        Err(_) => ImplVerdict {
+            result: "failed",
+            counts: None,
+            reason: None,
+        },
+        Ok(counts) if !exit_success => ImplVerdict {
+            result: "failed",
+            counts: Some(counts),
+            reason: None,
+        },
+        Ok(counts) if counts.failures + counts.errors > 0 => ImplVerdict {
+            result: "failed",
+            counts: Some(counts),
+            reason: Some(format!(
+                "the command exited 0 but report '{report}' records {} failing and {} erroring test case(s)",
+                counts.failures, counts.errors
+            )),
+        },
+        Ok(counts) if counts.executed() == 0 => ImplVerdict {
+            result: "indeterminate",
+            counts: Some(counts),
+            reason: Some(format!(
+                "no test executed: report '{report}' records {} test case(s), {} skipped; a suite that never calls the implementation is not evidence that it conforms",
+                counts.tests, counts.skipped
+            )),
+        },
+        Ok(counts) => ImplVerdict {
+            result: "passed",
+            counts: Some(counts),
+            reason: None,
+        },
+    }
+}
+
+/// `time` rounded down to a whole second, so a report written by the command
+/// is never judged stale on a file system with coarse modification times.
+fn whole_second_floor(time: std::time::SystemTime) -> std::time::SystemTime {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .map_or(time, |since| {
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(since.as_secs())
+        })
+}
+
+/// Reads the `JUnit` counts the `[impl]` command wrote to `report` (a file, or
+/// a directory whose `*.xml` files are summed), relative to the manifest
+/// directory. Only files modified since the command started count, so a
+/// report left over from an earlier run is never read as this run's evidence.
+fn read_impl_report(
+    base: &Path,
+    report: &str,
+    started: std::time::SystemTime,
+) -> Result<fslc_rust::junit_report::JunitCounts, String> {
+    let path = base.join(report);
+    let metadata = std::fs::metadata(&path).map_err(|error| format!("not found: {error}"))?;
+    let files = if metadata.is_dir() {
+        let mut files = std::fs::read_dir(&path)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|file| {
+                file.is_file()
+                    && file
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("xml"))
+            })
+            .collect::<Vec<_>>();
+        files.sort();
+        files
+    } else {
+        vec![path]
+    };
+    let mut counts = fslc_rust::junit_report::JunitCounts::default();
+    let mut fresh = 0_usize;
+    for file in &files {
+        let modified = std::fs::metadata(file)
+            .and_then(|metadata| metadata.modified())
+            .map_err(|error| format!("{}: {error}", file.display()))?;
+        if modified < started {
+            continue;
+        }
+        let text = std::fs::read_to_string(file)
+            .map_err(|error| format!("{}: {error}", file.display()))?;
+        let file_counts = fslc_rust::junit_report::junit_counts(&text)
+            .map_err(|error| format!("{}: {error}", file.display()))?;
+        counts = counts.plus(file_counts);
+        fresh += 1;
+    }
+    if fresh == 0 {
+        return Err(if metadata.is_dir() {
+            "the directory holds no *.xml file written by this run".to_owned()
+        } else {
+            "the file was not written by this run (it predates the command)".to_owned()
+        });
+    }
+    Ok(counts)
 }
 
 fn format_chain_table(result: &Value) -> String {
@@ -8485,7 +8688,7 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
 fn run_domain_testgen(
     path: &Path,
     depth: usize,
-    target: &str,
+    target: TestgenTarget<'_>,
     deadlock_mode: &str,
     strict: bool,
     output_path: Option<&Path>,
@@ -8560,7 +8763,7 @@ fn run_domain_testgen(
     for (internal, public) in display_names {
         content = content.replace(&internal, &public);
     }
-    if target == "vitest" {
+    if target.name == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
         let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
             Ok(input) => input,
@@ -8601,7 +8804,7 @@ fn run_domain_testgen(
     if let Value::Object(result) = &mut result {
         result.insert("dialect".to_owned(), json!("fsl-domain-effect.v0"));
         result.insert("domain".to_owned(), json!(domain.name));
-        result.insert("target".to_owned(), json!(target));
+        result.insert("target".to_owned(), json!(target.name));
         result.insert("depth".to_owned(), json!(depth));
         result.insert("warnings".to_owned(), json!([]));
     }
@@ -11992,10 +12195,17 @@ fn run_counterexample_export(
     (verify_output, status)
 }
 
+/// A testgen target and what its generated tests do while unwired (#1200).
+#[derive(Clone, Copy)]
+struct TestgenTarget<'a> {
+    name: &'a str,
+    unwired: fsl_tools::UnwiredAdapter,
+}
+
 fn run_testgen(
     path: &Path,
     depth: usize,
-    target: &str,
+    target: TestgenTarget<'_>,
     deadlock_mode: &str,
     strict: bool,
     output_path: Option<&Path>,
@@ -12020,7 +12230,7 @@ fn run_testgen_from_source(
     path: &Path,
     source: &str,
     depth: usize,
-    target: &str,
+    target: TestgenTarget<'_>,
     deadlock_mode: &str,
     strict: bool,
     output_path: Option<&Path>,
@@ -12092,11 +12302,11 @@ fn run_testgen_from_source(
         Ok(input) => input,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let content = match fsl_tools::generate_testgen(&input, target) {
+    let content = match fsl_tools::generate_testgen_with(&input, target.name, target.unwired) {
         Ok(content) => content,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let extension = match target {
+    let extension = match target.name {
         "vitest" => "test.ts",
         "swift" => "swift",
         "kotlin" => "kt",
@@ -12120,7 +12330,7 @@ fn run_testgen_from_source(
     );
     if let Value::Object(result) = &mut result {
         result.remove("kind");
-        result.insert("target".to_owned(), json!(target));
+        result.insert("target".to_owned(), json!(target.name));
         if let Some(warnings) = scenarios.get("warnings")
             && warnings.as_array().is_some_and(|items| !items.is_empty())
         {
@@ -17710,6 +17920,50 @@ mod chain_jobs_tests {
         assert_eq!(chain_worker_count(64, groups.len()), 3);
         assert_eq!(chain_worker_count(2, groups.len()), 2);
     }
+
+    /// Issue #1200: with a `report`, an exit status of 0 passes the `[impl]`
+    /// layer only when at least one test executed and none failed.
+    #[test]
+    fn impl_verdict_requires_an_executed_test_when_a_report_is_named() {
+        use fslc_rust::junit_report::JunitCounts;
+        let counts = |tests, skipped, failures| JunitCounts {
+            tests,
+            skipped,
+            failures,
+            errors: 0,
+        };
+        let verdict = |exit, report| impl_verdict(exit, report).result;
+        assert_eq!(verdict(true, None), "passed");
+        assert_eq!(verdict(false, None), "failed");
+        assert_eq!(
+            verdict(true, Some(("r.xml", Ok(counts(3, 1, 0))))),
+            "passed"
+        );
+        assert_eq!(
+            verdict(true, Some(("r.xml", Ok(counts(3, 3, 0))))),
+            "indeterminate"
+        );
+        assert_eq!(
+            verdict(true, Some(("r.xml", Ok(counts(0, 0, 0))))),
+            "indeterminate"
+        );
+        assert_eq!(
+            verdict(true, Some(("r.xml", Ok(counts(2, 0, 1))))),
+            "failed"
+        );
+        assert_eq!(
+            verdict(false, Some(("r.xml", Ok(counts(2, 0, 0))))),
+            "failed"
+        );
+        assert_eq!(
+            verdict(true, Some(("r.xml", Err("missing".to_owned())))),
+            "indeterminate"
+        );
+        assert_eq!(
+            verdict(false, Some(("r.xml", Err("missing".to_owned())))),
+            "failed"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -18282,8 +18536,18 @@ spec InitTraceability {
         let captured = read_domain_command_source(&fixture.path).expect("capture source A");
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
-        let (generic, status) =
-            run_testgen_from_source(&fixture.path, &captured, 4, "vitest", "warn", false, None);
+        let (generic, status) = run_testgen_from_source(
+            &fixture.path,
+            &captured,
+            4,
+            TestgenTarget {
+                name: "vitest",
+                unwired: fsl_tools::UnwiredAdapter::Fail,
+            },
+            "warn",
+            false,
+            None,
+        );
         assert_eq!(status, 0, "{generic:#}");
         assert_eq!(generic["spec"], "CleanDiagnosticDomain", "{generic:#}");
         assert!(

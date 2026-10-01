@@ -118,7 +118,7 @@ fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <repr
                                                 # reproducer.v1 artifact from a safety-invariant violation
 fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                 # production JSONL -> mapped action/state -> Monitor
-fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit); unwired tests FAIL unless --allow-unwired (skip; rejected for kotlin)
 fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection of conformance vectors
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
@@ -161,7 +161,7 @@ fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / e
 fslc domain analyze <f>                                      # aggregate/effect ownership summary
 fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
 fslc domain generate <f> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
-fslc domain testgen <f> [--target vitest] [-o out]           # adapter/conformance scaffold
+fslc domain testgen <f> [--target vitest] [--allow-unwired] [-o out]  # adapter/conformance scaffold
 fslc domain replay <f> --logs events.jsonl                  # runtime command/event/effect evidence
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
 fslc db observe <f> --trace events.json                 # runtime observation evidence
@@ -473,7 +473,16 @@ per-requirement classification. Class is method coverage, not verdict — a
 `[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`
 runs `verify`, while omitting `depth` runs `check`. A layer with
 `refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
-runs its shell `command` from the manifest directory. JSON is stdout; the
+runs its shell `command` from the manifest directory. With only `command`, the
+exit status alone decides `passed`/`failed`, so an all-skipped or empty suite
+passes. Add `report = "<JUnit XML file or directory>"` (written by the command,
+e.g. `pytest --junitxml=r.xml`, `vitest run --reporter=junit --outputFile=r.xml`,
+`phpunit --log-junit r.xml`) and exit 0 is `passed` only with ≥ 1 executed test
+and no `<failure>`/`<error>`; 0 executed (none collected, or all skipped) or a
+missing/stale/non-JUnit report is `result:"indeterminate"` (layer exit_code 1,
+top-level `indeterminate`, exit 1), with counts in `detail.tests`. Do not
+report a chain whose `[impl]` has no `report` as implementation evidence for a
+generated suite. JSON is stdout; the
 consolidated table is stderr. Without `--keep-going`, execution stops after the
 first failed layer and later layers are marked `skipped`. `--jobs N` (default 1)
 runs up to N `spec`/refine layers at once, each with its own solver; `[impl]`

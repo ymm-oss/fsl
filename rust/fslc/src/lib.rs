@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 pub mod check_stages;
 pub mod coverage;
 pub mod frontend_output;
+pub mod junit_report;
 // The single owner of "does this command accept literate Markdown input"
 // (issue #665). Declared on the library side for the same reason `outcome`
 // is: integration tests under `tests/` link the library, not the binary, and

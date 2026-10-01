@@ -287,8 +287,10 @@ returns one consolidated report. The human status table is written to stderr;
 the machine-readable JSON envelope is written to stdout and contains one
 `layers[]` entry per executed or skipped layer. The top-level result is
 `verified` when every layer passes, `violated` when a behavioral/refinement/impl
-layer fails, and `error` when any layer returns a spec/IO/internal error. The
-process exit code follows the existing `cli.exit_code` convention.
+layer fails, `indeterminate` when the only failing layer is an `[impl]` layer
+whose report records no executed test (see "`[impl]` evidence" below), and
+`error` when any layer returns a spec/IO/internal error. The process exit code
+follows the existing `cli.exit_code` convention (`indeterminate` exits 1).
 
 ```toml
 [business]
@@ -305,7 +307,8 @@ refine_against = "requirements"
 mapping = "design_refines_requirements.fsl"
 
 [impl]
-command = "pytest -q"
+command = "pytest -q --junitxml=impl-report.xml"
+report = "impl-report.xml"
 ```
 
 The layer filenames above are placeholders for whatever the project calls its
@@ -322,6 +325,52 @@ resolves to `.`, not to an empty `current_dir`). By default the chain
 short-circuits on the first failed layer and marks the remaining planned
 layers as `skipped`; `--keep-going` records the failure and continues through
 the rest of the manifest.
+
+### `[impl]` evidence (issue #1200)
+
+An exit status of 0 does not say that any test ran. A suite whose tests are all
+skipped (for example a `fslc testgen --allow-unwired` scaffold whose adapter is
+not wired), or that collected none, exits 0 too, and before #1200 the chain
+reported that as a passing implementation layer. `[impl]` now takes an optional
+`report` key:
+
+| `[impl]` keys | Command exit | Report | Layer `result` | Layer `exit_code` |
+|---|---|---|---|---|
+| `command` only | 0 | — | `passed` | 0 |
+| `command` only | ≠ 0 | — | `failed` | 1 |
+| `command` + `report` | ≠ 0 | any | `failed` | 1 |
+| `command` + `report` | 0 | ≥ 1 executed, 0 failure/error | `passed` | 0 |
+| `command` + `report` | 0 | a `<failure>`/`<error>` test case | `failed` | 1 |
+| `command` + `report` | 0 | 0 executed (none, or all skipped) | `indeterminate` | 1 |
+| `command` + `report` | 0 | missing, predates the command, or not JUnit XML | `indeterminate` | 1 |
+| `report = ""` | — (not run) | — | `error` (`kind:"parse"`) | 2 |
+
+- **What `report` is.** A path, relative to the manifest directory, of a JUnit
+  XML file the command writes, or of a directory whose `*.xml` files are
+  summed (Gradle's `build/test-results/test`). JUnit XML is the one
+  machine-readable format every testgen target's runner writes:
+  `pytest --junitxml=FILE`, `vitest run --reporter=junit --outputFile=FILE`,
+  `swift test --xunit-output FILE`, Gradle/`kotlin.test` on the JVM,
+  `dart test --reporter json | tojunit`, `phpunit --log-junit FILE`.
+- **How it is counted.** One test per `<testcase>` element; one with a
+  `<skipped>`, `<failure>`, or `<error>` child is skipped, failed, or erroring.
+  The `tests`/`skipped` attributes of `<testsuite>` are not read, because
+  runners differ in which ones they write. CDATA sections and comments are
+  removed first, so captured test output cannot fake a marker
+  (`rust/fslc/src/junit_report.rs`).
+- **Freshness.** Only a file modified at or after the command's start (rounded
+  down to a whole second) counts, so a report left over from an earlier run is
+  never read as this run's evidence. The chain never deletes or writes it.
+- **Partial skips pass.** A report with at least one executed test and some
+  skipped ones is `passed`; the counts are in the layer's `detail.tests`
+  (`total`, `executed`, `skipped`, `failures`, `errors`) for a reviewer to read.
+  Only "nothing executed" is decided as `indeterminate` here.
+- **Without `report` the old contract holds.** The exit status alone decides,
+  and the layer entry carries no `tests`/`report` fields, so manifests whose
+  command is not a test suite (`make check`, a smoke script) keep working. Such
+  a layer cannot tell an all-skipped suite from a passing one; that is why the
+  testgen default is to fail while unwired (`DESIGN-bridge.md` §3.6), and why a
+  manifest that runs a test suite should name its `report`.
 
 ### Parallel layers (`--jobs N`, issue #1151)
 

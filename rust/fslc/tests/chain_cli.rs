@@ -7,6 +7,8 @@
 //! documented bare-filename invocation is a confidently-green false negative
 //! (AGENTS.md). Every test here fails if the corresponding fix is reverted.
 
+#[cfg(unix)]
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -465,4 +467,219 @@ fn chain_with_an_empty_cache_directory_is_cold_again() {
     assert!(!layer_cache_hit(&cold, "business"), "{cold}");
     assert!(!layer_cache_hit(&cold, "design"), "{cold}");
     assert!(cache_entry_count(&other) >= 2);
+}
+
+/// Issue #1200: `JUnit` reports the `[impl]` layer's `report` key points at.
+#[cfg(unix)]
+const JUNIT_ALL_SKIPPED: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="0" skipped="2" tests="2">
+<testcase classname="test_cart" name="test_scenario_cover_checkout"><skipped type="pytest.skip" message="Adapter not implemented">skipped</skipped></testcase>
+<testcase classname="test_cart" name="test_random_walk_conformance"><skipped type="pytest.skip" message="Adapter not implemented">skipped</skipped></testcase>
+</testsuite></testsuites>
+"#;
+
+#[cfg(unix)]
+const JUNIT_PASSED: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="2">
+<testcase classname="test_cart" name="test_scenario_cover_checkout" time="0.001"/>
+<testcase classname="test_cart" name="test_random_walk_conformance" time="0.002"/>
+</testsuite></testsuites>
+"#;
+
+#[cfg(unix)]
+const JUNIT_EMPTY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0"></testsuite></testsuites>
+"#;
+
+#[cfg(unix)]
+const JUNIT_FAILED: &str =
+    r#"<testsuite tests="1"><testcase name="a"><failure message="boom"/></testcase></testsuite>"#;
+
+/// A manifest with only an `[impl]` layer whose command copies the named
+/// `JUnit` fixture to `report.xml` (so the report is written by this run) and
+/// then exits with `exit_code`.
+#[cfg(unix)]
+fn impl_report_project(name: &str, junit: &str, exit_code: i32, report: Option<&str>) -> PathBuf {
+    let dir = scratch_dir(name);
+    fs::create_dir_all(dir.join("fixtures")).expect("create fixtures dir");
+    fs::write(dir.join("fixtures/junit.xml"), junit).expect("write junit fixture");
+    let command = format!("cp fixtures/junit.xml report.xml && exit {exit_code}");
+    let mut manifest = format!(
+        "[impl]\ncommand = {}\n",
+        serde_json::to_string(&command).expect("encode command")
+    );
+    if let Some(report) = report {
+        let _ = writeln!(
+            manifest,
+            "report = {}",
+            serde_json::to_string(report).expect("encode report")
+        );
+    }
+    fs::write(dir.join("fsl-project.toml"), manifest).expect("write manifest");
+    dir
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_all_skipped_report_is_indeterminate_not_passed() {
+    let dir = impl_report_project("impl-all-skipped", JUNIT_ALL_SKIPPED, 0, Some("report.xml"));
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(1), "{value:#}");
+    assert_eq!(value["result"], "indeterminate", "{value:#}");
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "indeterminate", "{value:#}");
+    assert_eq!(impl_layer["status"], "failed", "{value:#}");
+    assert_eq!(impl_layer["exit_code"], 1, "{value:#}");
+    assert_eq!(
+        impl_layer["detail"]["tests"],
+        serde_json::json!({"total": 2, "executed": 0, "skipped": 2, "failures": 0, "errors": 0}),
+        "{value:#}"
+    );
+    assert!(
+        impl_layer["detail"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("no test executed")),
+        "{value:#}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_report_with_zero_test_cases_is_indeterminate() {
+    let dir = impl_report_project("impl-zero-tests", JUNIT_EMPTY, 0, Some("report.xml"));
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(1), "{value:#}");
+    assert_eq!(
+        layer(&value, "impl")["result"],
+        "indeterminate",
+        "{value:#}"
+    );
+    assert_eq!(layer(&value, "impl")["detail"]["tests"]["total"], 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_report_with_executed_tests_passes() {
+    let dir = impl_report_project("impl-passed", JUNIT_PASSED, 0, Some("report.xml"));
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{value:#}");
+    assert_eq!(value["result"], "verified", "{value:#}");
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "passed", "{value:#}");
+    assert_eq!(impl_layer["detail"]["tests"]["executed"], 2, "{value:#}");
+    assert_eq!(impl_layer["detail"]["report"], "report.xml", "{value:#}");
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_report_directory_sums_its_xml_files() {
+    let dir = impl_report_project("impl-report-dir", JUNIT_PASSED, 0, Some("results"));
+    fs::create_dir_all(dir.join("results")).expect("create results dir");
+    fs::write(dir.join("fixtures/skipped.xml"), JUNIT_ALL_SKIPPED).expect("write skipped");
+    let command = "cp fixtures/junit.xml results/a.xml && cp fixtures/skipped.xml results/b.xml";
+    fs::write(
+        dir.join("fsl-project.toml"),
+        format!(
+            "[impl]\ncommand = {}\nreport = \"results\"\n",
+            serde_json::to_string(command).expect("encode command")
+        ),
+    )
+    .expect("write manifest");
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "passed", "{value:#}");
+    assert_eq!(
+        impl_layer["detail"]["tests"],
+        serde_json::json!({"total": 4, "executed": 2, "skipped": 2, "failures": 0, "errors": 0}),
+        "{value:#}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_stale_or_missing_report_is_indeterminate() {
+    // The report predates the command: a leftover from an earlier run is not
+    // this run's evidence. Its mtime is set two seconds into the past so the
+    // whole-second floor of the start time cannot absorb it.
+    let dir = impl_report_project("impl-stale", JUNIT_PASSED, 0, Some("report.xml"));
+    fs::write(
+        dir.join("fsl-project.toml"),
+        "[impl]\ncommand = \"true\"\nreport = \"report.xml\"\n",
+    )
+    .expect("write manifest");
+    let report = dir.join("report.xml");
+    fs::write(&report, JUNIT_PASSED).expect("write stale report");
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
+    fs::File::options()
+        .write(true)
+        .open(&report)
+        .and_then(|file| file.set_modified(past))
+        .expect("age the report");
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "indeterminate", "{value:#}");
+    assert!(
+        impl_layer["detail"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("predates the command")),
+        "{value:#}"
+    );
+
+    fs::remove_file(&report).expect("remove report");
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    assert_eq!(
+        layer(&value, "impl")["result"],
+        "indeterminate",
+        "{value:#}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_report_failures_and_nonzero_exit_stay_failed() {
+    let dir = impl_report_project("impl-report-failure", JUNIT_FAILED, 0, Some("report.xml"));
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    assert_eq!(value["result"], "violated", "{value:#}");
+    assert_eq!(layer(&value, "impl")["result"], "failed", "{value:#}");
+
+    let dir = impl_report_project("impl-exit-1", JUNIT_PASSED, 1, Some("report.xml"));
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    assert_eq!(value["result"], "violated", "{value:#}");
+    assert_eq!(layer(&value, "impl")["result"], "failed", "{value:#}");
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_without_report_keeps_the_exit_code_contract() {
+    let dir = impl_report_project("impl-no-report", JUNIT_ALL_SKIPPED, 0, None);
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{value:#}");
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "passed", "{value:#}");
+    assert!(impl_layer["detail"].get("tests").is_none(), "{value:#}");
+    assert!(impl_layer["detail"].get("report").is_none(), "{value:#}");
+}
+
+#[test]
+fn chain_impl_empty_report_key_is_a_parse_error() {
+    let dir = scratch_dir("impl-empty-report");
+    fs::write(
+        dir.join("fsl-project.toml"),
+        // The command never runs: an empty `report` is rejected first.
+        "[impl]\ncommand = \"unused\"\nreport = \"\"\n",
+    )
+    .expect("write manifest");
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(2), "{value:#}");
+    assert_eq!(value["result"], "error", "{value:#}");
+    assert_eq!(
+        layer(&value, "impl")["detail"]["kind"],
+        "parse",
+        "{value:#}"
+    );
 }
