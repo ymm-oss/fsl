@@ -1064,7 +1064,7 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate (`chain` when the `[impl]` report records no executed test),
+indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
@@ -1866,9 +1866,15 @@ is then byte-identical to the pre-#1200 scaffold (pytest `pytest.skip`, Vitest
 `test.skip`, Swift `.enabled(if:)`, Dart `skip:`, PHPUnit `markTestSkipped`).
 The choice is made at generation time so it is visible in the generated file.
 Kotlin rejects `--allow-unwired`. A green run of an `--allow-unwired` suite
-whose tests were all skipped still proves nothing: `fslc chain` reports such an
-`[impl]` layer as `indeterminate` when the manifest names the runner's JUnit
-`report` (`docs/design/DESIGN-layers.md` §7).
+whose tests were all skipped still proves nothing. `fslc chain`'s `[impl]`
+table therefore names its evidence: `report = "<JUnit XML file or directory>"`
+written by the command (exit 0 passes only with at least one executed test and
+no failing one), or `evidence = "exit_code"` for a command that is not a test
+suite (decided by the exit status, flagged `detail.evidence: "exit_code_only"`
+and in top-level `warnings[]`). With neither, an exit-0 run is `indeterminate`
+(exit 1); an unknown `[impl]` key is a parse error (exit 2). Breaking for
+manifests written before #1200: add `report` or `evidence = "exit_code"`
+(`docs/design/DESIGN-layers.md` §7).
 
 ```python
 from fslc import Monitor

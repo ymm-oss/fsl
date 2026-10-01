@@ -1091,7 +1091,7 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate(<code>chain</code> で <code>[impl]</code> の report が実行されたテストを 1 件も記録しないとき)、
+indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが実行された証拠が無いとき)、
 <code>2</code> = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
 <code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
@@ -1846,8 +1846,14 @@ enabled な action が無くなればそこで止まります。<code>--depth</c
 <p><code>test.skip</code>、Swift <code>.enabled(if:)</code>、Dart <code>skip:</code>、PHPUnit <code>markTestSkipped</code>)。
 選択は生成時に行うので、生成されたファイルを見れば分かります。Kotlin は
 <code>--allow-unwired</code> を拒否します。<code>--allow-unwired</code> のスイートが全件 skip で緑に
-なっても何も証明しません。マニフェストがランナーの JUnit <code>report</code> を指定していれば、
-<code>fslc chain</code> はその <code>[impl]</code> 層を <code>indeterminate</code> と報告します
+なっても何も証明しません。そのため <code>fslc chain</code> の <code>[impl]</code> テーブルは証拠を
+名指しします。コマンドが書く <code>report = "&lt;JUnit XML ファイルかディレクトリ&gt;"</code>
+(exit 0 が合格になるのは、実行されたテストが 1 件以上あり失敗が無いときだけ)か、
+テストスイートではないコマンド向けの <code>evidence = "exit_code"</code>(exit code で判定し、
+<code>detail.evidence: "exit_code_only"</code> とトップレベルの <code>warnings[]</code> で示す)です。
+どちらも無ければ exit 0 の実行は <code>indeterminate</code>(exit 1)、<code>[impl]</code> の未知のキーは
+parse エラー(exit 2)です。#1200 より前に書いたマニフェストには破壊的変更なので、
+<code>report</code> か <code>evidence = "exit_code"</code> を足してください
 (<code>docs/design/DESIGN-layers.md</code> §7)。</p>
 <pre><code class="language-python">from fslc import Monitor
 

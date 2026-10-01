@@ -76,6 +76,21 @@ fn element_at(text: &str, name: &str) -> bool {
     })
 }
 
+/// The byte index of the `>` that closes the start tag `text` begins in,
+/// skipping any `>` inside a quoted attribute value (`name="a/>b"`).
+fn start_tag_end(text: &str) -> Option<usize> {
+    let mut quote = None;
+    for (index, character) in text.char_indices() {
+        match (quote, character) {
+            (None, '"' | '\'') => quote = Some(character),
+            (Some(open), _) if character == open => quote = None,
+            (None, '>') => return Some(index),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn contains_element(body: &str, name: &str) -> bool {
     body.match_indices('<')
         .any(|(index, _)| element_at(&body[index + 1..], name))
@@ -107,9 +122,8 @@ pub fn junit_counts(text: &str) -> Result<JunitCounts, String> {
             rest = &rest[start + "<testcase".len()..];
             continue;
         }
-        let tag_end = after
-            .find('>')
-            .ok_or_else(|| "unterminated <testcase> start tag".to_owned())?;
+        let tag_end =
+            start_tag_end(after).ok_or_else(|| "unterminated <testcase> start tag".to_owned())?;
         counts.tests += 1;
         if after[..tag_end].ends_with('/') {
             rest = &after[tag_end + 1..];
@@ -181,6 +195,19 @@ mod tests {
         assert!(junit_counts("{\"tests\": 3}").is_err());
         assert!(junit_counts("<testsuites><testcase name=\"a\"><skipped/>").is_err());
         assert!(junit_counts("<testsuite><testcase name=\"a\"").is_err());
+    }
+
+    #[test]
+    fn a_quoted_attribute_value_cannot_close_the_start_tag() {
+        let report = r#"<testsuite><testcase name="t[a/>b]" classname='c>d'><failure message="boom"/></testcase></testsuite>"#;
+        assert_eq!(
+            junit_counts(report),
+            Ok(JunitCounts {
+                tests: 1,
+                failures: 1,
+                ..JunitCounts::default()
+            })
+        );
     }
 
     #[test]

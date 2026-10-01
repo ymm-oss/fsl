@@ -1127,7 +1127,7 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate (<code>chain</code> when the <code>[impl]</code> report records no executed test),
+indeterminate (<code>chain</code> when its <code>[impl]</code> layer has no evidence that a test executed),
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
@@ -1901,9 +1901,15 @@ is then byte-identical to the pre-#1200 scaffold (pytest <code>pytest.skip</code
 <code>test.skip</code>, Swift <code>.enabled(if:)</code>, Dart <code>skip:</code>, PHPUnit <code>markTestSkipped</code>).
 The choice is made at generation time so it is visible in the generated file.
 Kotlin rejects <code>--allow-unwired</code>. A green run of an <code>--allow-unwired</code> suite
-whose tests were all skipped still proves nothing: <code>fslc chain</code> reports such an
-<code>[impl]</code> layer as <code>indeterminate</code> when the manifest names the runner's JUnit
-<code>report</code> (<code>docs/design/DESIGN-layers.md</code> §7).</p>
+whose tests were all skipped still proves nothing. <code>fslc chain</code>'s <code>[impl]</code>
+table therefore names its evidence: <code>report = "&lt;JUnit XML file or directory&gt;"</code>
+written by the command (exit 0 passes only with at least one executed test and
+no failing one), or <code>evidence = "exit_code"</code> for a command that is not a test
+suite (decided by the exit status, flagged <code>detail.evidence: "exit_code_only"</code>
+and in top-level <code>warnings[]</code>). With neither, an exit-0 run is <code>indeterminate</code>
+(exit 1); an unknown <code>[impl]</code> key is a parse error (exit 2). Breaking for
+manifests written before #1200: add <code>report</code> or <code>evidence = "exit_code"</code>
+(<code>docs/design/DESIGN-layers.md</code> §7).</p>
 <pre><code class="language-python">from fslc import Monitor
 
 mon = Monitor(&quot;specs/cart_v1.fsl&quot;)

@@ -1027,7 +1027,7 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate(`chain` で `[impl]` の report が実行されたテストを 1 件も記録しないとき)、
+indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
 `2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
@@ -1810,8 +1810,14 @@ enabled な action が無くなればそこで止まります。`--depth` には
 `test.skip`、Swift `.enabled(if:)`、Dart `skip:`、PHPUnit `markTestSkipped`)。
 選択は生成時に行うので、生成されたファイルを見れば分かります。Kotlin は
 `--allow-unwired` を拒否します。`--allow-unwired` のスイートが全件 skip で緑に
-なっても何も証明しません。マニフェストがランナーの JUnit `report` を指定していれば、
-`fslc chain` はその `[impl]` 層を `indeterminate` と報告します
+なっても何も証明しません。そのため `fslc chain` の `[impl]` テーブルは証拠を
+名指しします。コマンドが書く `report = "<JUnit XML ファイルかディレクトリ>"`
+(exit 0 が合格になるのは、実行されたテストが 1 件以上あり失敗が無いときだけ)か、
+テストスイートではないコマンド向けの `evidence = "exit_code"`(exit code で判定し、
+`detail.evidence: "exit_code_only"` とトップレベルの `warnings[]` で示す)です。
+どちらも無ければ exit 0 の実行は `indeterminate`(exit 1)、`[impl]` の未知のキーは
+parse エラー(exit 2)です。#1200 より前に書いたマニフェストには破壊的変更なので、
+`report` か `evidence = "exit_code"` を足してください
 (`docs/design/DESIGN-layers.md` §7)。
 
 ```python

@@ -4,15 +4,29 @@ starts `adapter not wired`. Before, pytest/Vitest/Swift/Dart/PHPUnit skipped
 such tests and Kotlin returned early, so a forgotten wiring exited 0. The new
 `--allow-unwired` flag restores the skip and produces the pre-#1200 file byte
 for byte; Kotlin rejects it (exit 2), since kotlin.test has no runtime skip.
-`fslc chain`'s `[impl]` layer accepts an optional `report` key naming the JUnit
-XML file (or directory of files) its command writes; with it, exit 0 is
-`passed` only when at least one test executed and none failed, and zero
-executed tests (none collected, or all skipped) or a missing/stale/unreadable
-report is the new layer and top-level result `indeterminate` (exit 1). Without
-`report`, `[impl]` is decided by the exit code as before. This is a breaking
-change of the generated test files. Migration: wire `makeAdapter()` (pytest:
-the `Adapter` class) before running a regenerated suite, or regenerate with
-`--allow-unwired` to keep the skipping scaffold (not available for Kotlin);
-for a chain whose `[impl]` runs a test suite, make the command write JUnit XML
-(`pytest --junitxml=r.xml`, `vitest run --reporter=junit --outputFile=r.xml`,
-`phpunit --log-junit r.xml`) and add `report = "r.xml"`.
+`fslc chain`'s `[impl]` layer must now name its evidence and accepts only the
+keys `command`, `report`, and `evidence`; any other key (a typo such as
+`reprot`) is a `kind:"parse"` error at exit 2 naming it. `report` names the
+JUnit XML file (or directory of files) the command writes: exit 0 is `passed`
+only when at least one test executed and none failed, and zero executed tests
+(none collected, or all skipped) or a missing, unchanged, or unreadable report
+is the new layer and top-level result `indeterminate` (exit 1). A report counts
+only if the run created or changed it (length, full-precision modification
+time, and on Unix inode and change time are compared before and after).
+`evidence = "exit_code"` keeps the old exit-status decision for a command that
+is not a test suite, marked `detail.evidence: "exit_code_only"`, shown in the
+table, and reported in a top-level `warnings[]` entry `impl_exit_code_only`. An
+`[impl]` with neither key is `indeterminate` when its command exits 0. This is
+a breaking change of the generated test files and of every existing chain
+manifest with an `[impl]` table. Migration: wire `makeAdapter()` (pytest: the
+`Adapter` class) before running a regenerated suite, or regenerate with
+`--allow-unwired` to keep the skipping scaffold (not available for Kotlin). In
+every `[impl]` table add either `report = "r.xml"` with a command that writes
+JUnit XML (`pytest --junitxml=r.xml`, `vitest run --reporter=junit
+--outputFile=r.xml`, `phpunit --log-junit r.xml`, Gradle with `--rerun-tasks`
+so an `UP-TO-DATE` task does not leave the report unchanged, and for SwiftPM 6
+the `r-swift-testing.xml` file Swift Testing writes beside `--xunit-output
+r.xml` when XCTest also runs), or `evidence = "exit_code"` for a smoke command
+that is not a test suite. A pipe into a JUnit converter reports the
+converter's exit status, so a failing run can exit 0; the report check still
+sees the failing test case.

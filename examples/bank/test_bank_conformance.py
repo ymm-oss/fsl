@@ -65,7 +65,7 @@ def _assert_partial_expected(observed, expected):
 def test_scenario_reach_bank_Settled(adapter):
     'Scenario: reach_bank.Settled'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 3})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 3, 'audit.balance': 3, 'audit.log': [3], 'withdrawn': 0})
@@ -75,7 +75,7 @@ def test_scenario_reach_bank_Settled(adapter):
 def test_scenario_reach_audit_LogFull(adapter):
     'Scenario: reach_audit.LogFull'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 3})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 3, 'audit.balance': 3, 'audit.log': [3], 'withdrawn': 0})
@@ -89,7 +89,7 @@ def test_scenario_reach_audit_LogFull(adapter):
 def test_scenario_reach_FullCycle(adapter):
     'Scenario: reach_FullCycle'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 3})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 3, 'audit.balance': 3, 'audit.log': [3], 'withdrawn': 0})
@@ -103,7 +103,7 @@ def test_scenario_reach_FullCycle(adapter):
 def test_scenario_cover_bank_settle(adapter):
     'Scenario: cover_bank.settle'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 3})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 3, 'audit.balance': 3, 'audit.log': [3], 'withdrawn': 0})
@@ -113,7 +113,7 @@ def test_scenario_cover_bank_settle(adapter):
 def test_scenario_cover_deposit_audited(adapter):
     'Scenario: cover_deposit_audited'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 1})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 1, 'audit.balance': 1, 'audit.log': [1], 'withdrawn': 0})
@@ -121,7 +121,7 @@ def test_scenario_cover_deposit_audited(adapter):
 def test_scenario_cover_withdraw_audited(adapter):
     'Scenario: cover_withdraw_audited'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 3})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 3, 'audit.balance': 3, 'audit.log': [3], 'withdrawn': 0})
@@ -133,7 +133,7 @@ def test_scenario_cover_withdraw_audited(adapter):
 def test_scenario_deadlock_terminal(adapter):
     'Scenario: deadlock_terminal'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('deposit_audited', {'a': 1})
     _assert_partial_expected(adapter.observe(), {'bank.cleared': 0, 'bank.pending': 1, 'audit.balance': 1, 'audit.log': [1], 'withdrawn': 0})
@@ -152,7 +152,7 @@ def test_scenario_deadlock_terminal(adapter):
 
 def test_random_walk_conformance(adapter):
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     mon = Monitor(SPEC_PATH)
     mon.reset()
     adapter.reset()

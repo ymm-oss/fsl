@@ -3985,7 +3985,23 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
     output.insert("result".to_owned(), json!(result));
     output.insert("manifest".to_owned(), json!(path.display().to_string()));
     output.insert("keep_going".to_owned(), json!(keep_going));
+    // An `[impl]` layer that opted into exit-code evidence passed or failed on
+    // its exit status alone; say so where a reader of the verdict looks.
+    let warnings = layers
+        .iter()
+        .filter(|layer| layer["detail"]["evidence"] == "exit_code_only")
+        .map(|layer| {
+            json!({
+                "kind": "impl_exit_code_only",
+                "layer": layer["layer"],
+                "message": "[impl] opts into exit-code evidence (evidence = exit_code): its result rests on the command's exit status alone, which cannot tell a passing run from one that executed no test",
+            })
+        })
+        .collect::<Vec<_>>();
     output.insert("layers".to_owned(), Value::Array(layers));
+    if !warnings.is_empty() {
+        output.insert("warnings".to_owned(), Value::Array(warnings));
+    }
     if !failed_layers.is_empty() {
         output.insert(
             "failed".to_owned(),
@@ -4408,101 +4424,149 @@ fn run_chain_step(
         }
     } else {
         let command = section.values.get("command").cloned().unwrap_or_default();
-        let report = section.values.get("report").cloned();
-        if report
-            .as_deref()
-            .is_some_and(|report| report.trim().is_empty())
-        {
-            let detail = json!({
-                "result": "error", "kind": "parse",
-                "message": "[impl] report must name a JUnit XML file or directory",
-            });
-            (
-                json!({
-                    "layer": "impl", "kind": "command", "status": "failed",
-                    "result": "error", "exit_code": 2, "detail": detail,
-                }),
-                true,
-            )
-        } else if command.is_empty() {
-            let detail =
-                json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
-            (
-                json!({
-                    "layer": "impl", "kind": "command", "status": "failed",
-                    "result": "error", "exit_code": 2, "detail": detail,
-                }),
-                true,
-            )
-        } else {
-            let started = whole_second_floor(std::time::SystemTime::now());
-            #[cfg(target_family = "windows")]
-            let completed = std::process::Command::new("cmd")
-                .args(["/C", &command])
-                .current_dir(base)
-                .output();
-            #[cfg(not(target_family = "windows"))]
-            let completed = std::process::Command::new("sh")
-                .args(["-c", &command])
-                .current_dir(base)
-                .output();
-            match completed {
-                Ok(completed) => {
-                    let code = completed.status.code().unwrap_or(1);
-                    let verdict = impl_verdict(
-                        completed.status.success(),
-                        report
-                            .as_deref()
-                            .map(|report| (report, read_impl_report(base, report, started))),
-                    );
-                    let passed = verdict.result == "passed";
-                    let mut detail = json!({
-                        "result": verdict.result,
-                        "command": command,
-                        "returncode": code,
-                        "stdout": String::from_utf8_lossy(&completed.stdout),
-                        "stderr": String::from_utf8_lossy(&completed.stderr),
-                    });
-                    if let Some(report) = &report {
-                        detail["report"] = json!(report);
-                    }
-                    if let Some(counts) = verdict.counts {
-                        detail["tests"] = json!({
-                            "total": counts.tests,
-                            "executed": counts.executed(),
-                            "skipped": counts.skipped,
-                            "failures": counts.failures,
-                            "errors": counts.errors,
-                        });
-                    }
-                    if let Some(reason) = verdict.reason {
-                        detail["reason"] = json!(reason);
-                    }
-                    (
-                        json!({
-                            "layer": "impl", "kind": "command", "command": command,
-                            "status": if passed { "passed" } else { "failed" },
-                            "result": verdict.result,
-                            "exit_code": if passed { 0 } else { 1 }, "detail": detail,
-                        }),
-                        !passed,
-                    )
-                }
-                Err(error) => {
-                    let detail =
-                        json!({"result": "error", "kind": "io", "message": error.to_string()});
-                    (
-                        json!({
-                            "layer": "impl", "kind": "command", "command": command,
-                            "status": "failed", "result": "error", "exit_code": 2,
-                            "detail": detail,
-                        }),
-                        true,
-                    )
-                }
+        match impl_evidence(section) {
+            Err(message) => {
+                let detail = json!({"result": "error", "kind": "parse", "message": message});
+                (
+                    json!({
+                        "layer": "impl", "kind": "command", "status": "failed",
+                        "result": "error", "exit_code": 2, "detail": detail,
+                    }),
+                    true,
+                )
             }
+            Ok(_) if command.is_empty() => {
+                let detail = json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
+                (
+                    json!({
+                        "layer": "impl", "kind": "command", "status": "failed",
+                        "result": "error", "exit_code": 2, "detail": detail,
+                    }),
+                    true,
+                )
+            }
+            Ok(evidence) => run_impl_command(&command, &evidence, base),
         }
     }
+}
+
+/// What the `[impl]` layer takes as evidence that the command's run means
+/// anything (issue #1200).
+enum ImplEvidence {
+    /// `report = "..."`: the `JUnit` XML the command writes.
+    Report(String),
+    /// `evidence = "exit_code"`: the explicit opt-in to the exit code alone.
+    ExitCode,
+    /// Neither: an exit status of 0 cannot be told apart from a run that
+    /// executed nothing, so it is `indeterminate`.
+    Missing,
+}
+
+/// The keys an `[impl]` table may carry. Any other key is a parse error, so
+/// a typo such as `reprot` cannot silently drop the evidence requirement.
+const IMPL_KEYS: [&str; 3] = ["command", "report", "evidence"];
+
+fn impl_evidence(section: &ManifestSection) -> Result<ImplEvidence, String> {
+    let unknown = section
+        .values
+        .keys()
+        .filter(|key| !IMPL_KEYS.contains(&key.as_str()))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "unknown [impl] key(s): [{}] (expected command, report, and/or evidence)",
+            unknown.join(", ")
+        ));
+    }
+    let report = section.values.get("report");
+    let evidence = section.values.get("evidence");
+    match (report, evidence) {
+        (Some(_), Some(_)) => Err(
+            "[impl] sets both report and evidence; name a report, or opt into exit-code evidence with evidence = \"exit_code\", not both"
+                .to_owned(),
+        ),
+        (Some(report), None) if report.trim().is_empty() => {
+            Err("[impl] report must name a JUnit XML file or directory".to_owned())
+        }
+        (Some(report), None) => Ok(ImplEvidence::Report(report.clone())),
+        (None, Some(evidence)) if evidence == "exit_code" => Ok(ImplEvidence::ExitCode),
+        (None, Some(evidence)) => Err(format!(
+            "[impl] evidence must be \"exit_code\" (got {evidence:?})"
+        )),
+        (None, None) => Ok(ImplEvidence::Missing),
+    }
+}
+
+fn run_impl_command(command: &str, evidence: &ImplEvidence, base: &Path) -> (Value, bool) {
+    let before = match evidence {
+        ImplEvidence::Report(report) => report_snapshot(&base.join(report)),
+        ImplEvidence::ExitCode | ImplEvidence::Missing => std::collections::BTreeMap::new(),
+    };
+    #[cfg(target_family = "windows")]
+    let completed = std::process::Command::new("cmd")
+        .args(["/C", command])
+        .current_dir(base)
+        .output();
+    #[cfg(not(target_family = "windows"))]
+    let completed = std::process::Command::new("sh")
+        .args(["-c", command])
+        .current_dir(base)
+        .output();
+    let completed = match completed {
+        Ok(completed) => completed,
+        Err(error) => {
+            let detail = json!({"result": "error", "kind": "io", "message": error.to_string()});
+            return (
+                json!({
+                    "layer": "impl", "kind": "command", "command": command,
+                    "status": "failed", "result": "error", "exit_code": 2,
+                    "detail": detail,
+                }),
+                true,
+            );
+        }
+    };
+    let code = completed.status.code().unwrap_or(1);
+    let counts = match evidence {
+        ImplEvidence::Report(report) => Some(read_impl_report(&base.join(report), &before)),
+        ImplEvidence::ExitCode | ImplEvidence::Missing => None,
+    };
+    let verdict = impl_verdict(completed.status.success(), evidence, counts);
+    let passed = verdict.result == "passed";
+    let mut detail = json!({
+        "result": verdict.result,
+        "command": command,
+        "returncode": code,
+        "stdout": String::from_utf8_lossy(&completed.stdout),
+        "stderr": String::from_utf8_lossy(&completed.stderr),
+    });
+    match evidence {
+        ImplEvidence::Report(report) => detail["report"] = json!(report),
+        ImplEvidence::ExitCode => detail["evidence"] = json!("exit_code_only"),
+        ImplEvidence::Missing => {}
+    }
+    if let Some(counts) = verdict.counts {
+        detail["tests"] = json!({
+            "total": counts.tests,
+            "executed": counts.executed(),
+            "skipped": counts.skipped,
+            "failures": counts.failures,
+            "errors": counts.errors,
+        });
+    }
+    if let Some(reason) = verdict.reason {
+        detail["reason"] = json!(reason);
+    }
+    (
+        json!({
+            "layer": "impl", "kind": "command", "command": command,
+            "status": if passed { "passed" } else { "failed" },
+            "result": verdict.result,
+            "exit_code": i32::from(!passed), "detail": detail,
+        }),
+        !passed,
+    )
 }
 
 /// The `[impl]` layer's verdict and the evidence behind it (issue #1200).
@@ -4513,91 +4577,111 @@ struct ImplVerdict {
     reason: Option<String>,
 }
 
-/// Decides the `[impl]` layer from the command's exit status and, when the
-/// manifest names a `report`, the `JUnit` counts read from it.
+/// Decides the `[impl]` layer from the command's exit status and its
+/// evidence.
 ///
-/// Without a `report` the exit status alone decides, as before #1200. With
-/// one, an exit status of 0 is `passed` only when the report records at least
-/// one executed test and no failing or erroring one. Zero executed tests (none
-/// collected, or every one skipped) and a missing, stale, or unreadable report
-/// are `indeterminate`: not running the implementation is not evidence that it
-/// conforms. A nonzero exit status stays `failed` whatever the report says.
+/// A nonzero exit status is `failed` whatever the evidence says. With a
+/// `report`, an exit status of 0 is `passed` only when the report records at
+/// least one executed test and no failing or erroring one; zero executed
+/// tests (none collected, or every one skipped) and a missing, unchanged, or
+/// unreadable report are `indeterminate`: not running the implementation is
+/// not evidence that it conforms. With `evidence = "exit_code"` the exit
+/// status alone decides. With neither, exit 0 is `indeterminate`.
 fn impl_verdict(
     exit_success: bool,
-    report: Option<(&str, Result<fslc_rust::junit_report::JunitCounts, String>)>,
+    evidence: &ImplEvidence,
+    counts: Option<Result<fslc_rust::junit_report::JunitCounts, String>>,
 ) -> ImplVerdict {
-    let Some((report, counts)) = report else {
-        return ImplVerdict {
-            result: if exit_success { "passed" } else { "failed" },
-            counts: None,
-            reason: None,
-        };
+    let verdict = |result, counts, reason| ImplVerdict {
+        result,
+        counts,
+        reason,
+    };
+    let report = match evidence {
+        ImplEvidence::ExitCode => {
+            return verdict(if exit_success { "passed" } else { "failed" }, None, None);
+        }
+        ImplEvidence::Missing if exit_success => {
+            return verdict(
+                "indeterminate",
+                None,
+                Some(
+                    "the command exited 0, but [impl] names no report, so the chain cannot tell a passing run from one that executed no test; add report = \"<JUnit XML>\" or opt into exit-code evidence with evidence = \"exit_code\""
+                        .to_owned(),
+                ),
+            );
+        }
+        ImplEvidence::Missing => return verdict("failed", None, None),
+        ImplEvidence::Report(report) => report,
     };
     match counts {
-        Err(message) if exit_success => ImplVerdict {
-            result: "indeterminate",
-            counts: None,
-            reason: Some(format!(
+        None | Some(Err(_)) if !exit_success => verdict("failed", None, None),
+        None => verdict(
+            "indeterminate",
+            None,
+            Some(format!("no test counts were read from report '{report}'")),
+        ),
+        Some(Err(message)) => verdict(
+            "indeterminate",
+            None,
+            Some(format!(
                 "the command exited 0 but its test counts could not be read from report '{report}': {message}"
             )),
-        },
-        Err(_) => ImplVerdict {
-            result: "failed",
-            counts: None,
-            reason: None,
-        },
-        Ok(counts) if !exit_success => ImplVerdict {
-            result: "failed",
-            counts: Some(counts),
-            reason: None,
-        },
-        Ok(counts) if counts.failures + counts.errors > 0 => ImplVerdict {
-            result: "failed",
-            counts: Some(counts),
-            reason: Some(format!(
+        ),
+        Some(Ok(counts)) if !exit_success => verdict("failed", Some(counts), None),
+        Some(Ok(counts)) if counts.failures + counts.errors > 0 => verdict(
+            "failed",
+            Some(counts),
+            Some(format!(
                 "the command exited 0 but report '{report}' records {} failing and {} erroring test case(s)",
                 counts.failures, counts.errors
             )),
-        },
-        Ok(counts) if counts.executed() == 0 => ImplVerdict {
-            result: "indeterminate",
-            counts: Some(counts),
-            reason: Some(format!(
+        ),
+        Some(Ok(counts)) if counts.executed() == 0 => verdict(
+            "indeterminate",
+            Some(counts),
+            Some(format!(
                 "no test executed: report '{report}' records {} test case(s), {} skipped; a suite that never calls the implementation is not evidence that it conforms",
                 counts.tests, counts.skipped
             )),
-        },
-        Ok(counts) => ImplVerdict {
-            result: "passed",
-            counts: Some(counts),
-            reason: None,
-        },
+        ),
+        Some(Ok(counts)) => verdict("passed", Some(counts), None),
     }
 }
 
-/// `time` rounded down to a whole second, so a report written by the command
-/// is never judged stale on a file system with coarse modification times.
-fn whole_second_floor(time: std::time::SystemTime) -> std::time::SystemTime {
-    time.duration_since(std::time::UNIX_EPOCH)
-        .map_or(time, |since| {
-            std::time::UNIX_EPOCH + std::time::Duration::from_secs(since.as_secs())
-        })
+/// What identifies one version of a report file: its length, modification
+/// time at full precision, and (on Unix) its inode and change time. A file
+/// counts as written by the command only when this changed across the run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReportStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    changed: (i64, i64),
 }
 
-/// Reads the `JUnit` counts the `[impl]` command wrote to `report` (a file, or
-/// a directory whose `*.xml` files are summed), relative to the manifest
-/// directory. Only files modified since the command started count, so a
-/// report left over from an earlier run is never read as this run's evidence.
-fn read_impl_report(
-    base: &Path,
-    report: &str,
-    started: std::time::SystemTime,
-) -> Result<fslc_rust::junit_report::JunitCounts, String> {
-    let path = base.join(report);
-    let metadata = std::fs::metadata(&path).map_err(|error| format!("not found: {error}"))?;
-    let files = if metadata.is_dir() {
-        let mut files = std::fs::read_dir(&path)
-            .map_err(|error| error.to_string())?
+fn report_stamp(metadata: &std::fs::Metadata) -> ReportStamp {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt as _;
+    ReportStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+        #[cfg(unix)]
+        changed: (metadata.ctime(), metadata.ctime_nsec()),
+    }
+}
+
+/// The report files a `report` path names right now: the file itself, or a
+/// directory's `*.xml` files.
+fn report_files(path: &Path) -> Vec<PathBuf> {
+    if path.is_dir() {
+        let mut files = std::fs::read_dir(path)
+            .into_iter()
+            .flatten()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|file| {
@@ -4609,19 +4693,44 @@ fn read_impl_report(
             .collect::<Vec<_>>();
         files.sort();
         files
+    } else if path.is_file() {
+        vec![path.to_path_buf()]
     } else {
-        vec![path]
-    };
+        Vec::new()
+    }
+}
+
+/// Every report file that exists before the command runs, with its stamp.
+fn report_snapshot(path: &Path) -> std::collections::BTreeMap<PathBuf, ReportStamp> {
+    report_files(path)
+        .into_iter()
+        .filter_map(|file| {
+            std::fs::metadata(&file)
+                .ok()
+                .map(|metadata| (file, report_stamp(&metadata)))
+        })
+        .collect()
+}
+
+/// Reads the `JUnit` counts the `[impl]` command wrote to `report` (a file, or
+/// a directory whose `*.xml` files are summed). Only files that are new or
+/// whose stamp changed since `before` count, so a report left over from an
+/// earlier run is never read as this run's evidence, however recent it is.
+fn read_impl_report(
+    path: &Path,
+    before: &std::collections::BTreeMap<PathBuf, ReportStamp>,
+) -> Result<fslc_rust::junit_report::JunitCounts, String> {
+    let metadata = std::fs::metadata(path).map_err(|error| format!("not found: {error}"))?;
     let mut counts = fslc_rust::junit_report::JunitCounts::default();
     let mut fresh = 0_usize;
-    for file in &files {
-        let modified = std::fs::metadata(file)
-            .and_then(|metadata| metadata.modified())
+    for file in report_files(path) {
+        let stamp = std::fs::metadata(&file)
+            .map(|metadata| report_stamp(&metadata))
             .map_err(|error| format!("{}: {error}", file.display()))?;
-        if modified < started {
+        if before.get(&file) == Some(&stamp) {
             continue;
         }
-        let text = std::fs::read_to_string(file)
+        let text = std::fs::read_to_string(&file)
             .map_err(|error| format!("{}: {error}", file.display()))?;
         let file_counts = fslc_rust::junit_report::junit_counts(&text)
             .map_err(|error| format!("{}: {error}", file.display()))?;
@@ -4632,7 +4741,7 @@ fn read_impl_report(
         return Err(if metadata.is_dir() {
             "the directory holds no *.xml file written by this run".to_owned()
         } else {
-            "the file was not written by this run (it predates the command)".to_owned()
+            "the file was not written by this run (unchanged since before the command)".to_owned()
         });
     }
     Ok(counts)
@@ -4649,9 +4758,19 @@ fn format_chain_table(result: &Value) -> String {
         .into_iter()
         .flatten()
     {
-        let detail = layer
-            .get("depth")
-            .map_or_else(|| "-".to_owned(), |depth| format!("depth={depth}"));
+        let impl_detail = layer.get("detail");
+        let detail = if let Some(depth) = layer.get("depth") {
+            format!("depth={depth}")
+        } else if let Some(evidence) = impl_detail
+            .and_then(|detail| detail.get("evidence"))
+            .and_then(Value::as_str)
+        {
+            format!("evidence={evidence}")
+        } else if let Some(tests) = impl_detail.and_then(|detail| detail.get("tests")) {
+            format!("executed={}/{}", tests["executed"], tests["total"])
+        } else {
+            "-".to_owned()
+        };
         lines.push(format!(
             "{}  {}  {}  {}  {}",
             layer.get("layer").and_then(Value::as_str).unwrap_or(""),
@@ -8763,6 +8882,12 @@ fn run_domain_testgen(
     for (internal, public) in display_names {
         content = content.replace(&internal, &public);
     }
+    // The shared emitters name the generic command in their unwired-adapter
+    // guidance; a domain scaffold is regenerated with `fslc domain testgen`.
+    content = content.replace(
+        "`fslc testgen --allow-unwired`",
+        "`fslc domain testgen --allow-unwired`",
+    );
     if target.name == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
         let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
@@ -17932,37 +18057,57 @@ mod chain_jobs_tests {
             failures,
             errors: 0,
         };
-        let verdict = |exit, report| impl_verdict(exit, report).result;
-        assert_eq!(verdict(true, None), "passed");
-        assert_eq!(verdict(false, None), "failed");
+        let report = ImplEvidence::Report("r.xml".to_owned());
+        let verdict =
+            |exit, evidence: &ImplEvidence, counts| impl_verdict(exit, evidence, counts).result;
+        assert_eq!(verdict(true, &ImplEvidence::ExitCode, None), "passed");
+        assert_eq!(verdict(false, &ImplEvidence::ExitCode, None), "failed");
+        assert_eq!(verdict(true, &ImplEvidence::Missing, None), "indeterminate");
+        assert_eq!(verdict(false, &ImplEvidence::Missing, None), "failed");
+        assert_eq!(verdict(true, &report, Some(Ok(counts(3, 1, 0)))), "passed");
         assert_eq!(
-            verdict(true, Some(("r.xml", Ok(counts(3, 1, 0))))),
-            "passed"
-        );
-        assert_eq!(
-            verdict(true, Some(("r.xml", Ok(counts(3, 3, 0))))),
+            verdict(true, &report, Some(Ok(counts(3, 3, 0)))),
             "indeterminate"
         );
         assert_eq!(
-            verdict(true, Some(("r.xml", Ok(counts(0, 0, 0))))),
+            verdict(true, &report, Some(Ok(counts(0, 0, 0)))),
+            "indeterminate"
+        );
+        assert_eq!(verdict(true, &report, Some(Ok(counts(2, 0, 1)))), "failed");
+        assert_eq!(verdict(false, &report, Some(Ok(counts(2, 0, 0)))), "failed");
+        assert_eq!(
+            verdict(true, &report, Some(Err("missing".to_owned()))),
             "indeterminate"
         );
         assert_eq!(
-            verdict(true, Some(("r.xml", Ok(counts(2, 0, 1))))),
+            verdict(false, &report, Some(Err("missing".to_owned()))),
             "failed"
         );
-        assert_eq!(
-            verdict(false, Some(("r.xml", Ok(counts(2, 0, 0))))),
-            "failed"
-        );
-        assert_eq!(
-            verdict(true, Some(("r.xml", Err("missing".to_owned())))),
-            "indeterminate"
-        );
-        assert_eq!(
-            verdict(false, Some(("r.xml", Err("missing".to_owned())))),
-            "failed"
-        );
+    }
+
+    #[test]
+    fn impl_tables_reject_unknown_keys_and_conflicting_evidence() {
+        let section = |pairs: &[(&str, &str)]| ManifestSection {
+            values: pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        };
+        let error = impl_evidence(&section(&[("command", "x"), ("reprot", "s.xml")]))
+            .err()
+            .expect("typo key rejected");
+        assert!(error.contains("unknown [impl] key(s): [reprot]"), "{error}");
+        assert!(impl_evidence(&section(&[("report", "a"), ("evidence", "exit_code")])).is_err());
+        assert!(impl_evidence(&section(&[("evidence", "exitcode")])).is_err());
+        assert!(impl_evidence(&section(&[("report", " ")])).is_err());
+        assert!(matches!(
+            impl_evidence(&section(&[("command", "x")])),
+            Ok(ImplEvidence::Missing)
+        ));
+        assert!(matches!(
+            impl_evidence(&section(&[("evidence", "exit_code")])),
+            Ok(ImplEvidence::ExitCode)
+        ));
     }
 }
 

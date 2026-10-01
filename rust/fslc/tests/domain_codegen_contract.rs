@@ -191,11 +191,12 @@ fn domain_testgen_adapter_and_effects_match_the_typestate_contract_golden() {
     // true`; post-fix scenarios correctly show `"Status_Failed"`).
     //
     // #1200 regenerated it again: an unwired adapter now fails every test
-    // instead of skipping it. `--allow-unwired` must still reproduce the
+    // instead of skipping it, and the guidance names `fslc domain testgen
+    // --allow-unwired` (the command that regenerates this file). `--allow-unwired` must still reproduce the
     // pre-#1200 skipping scaffold byte for byte.
     assert_eq!(
         domain_testgen_digest(),
-        "2d874fbc9bbebc44469a0f2fbe42ba97a3c3c96c6546687081241a9e9436c100"
+        "25864d9a1ed4de9ff2d3191181f6ef1897580f51e9ebf432326ba609850e5683"
     );
     assert_eq!(
         domain_testgen_digest_with(&["--allow-unwired"]),
@@ -218,4 +219,31 @@ fn every_valid_domain_corpus_entry_generates_all_five_targets() {
             assert_generation_succeeds(spec, target);
         }
     }
+}
+
+/// Issue #1200: the shared emitters' unwired guidance names the generic
+/// command; a domain scaffold must name the one that regenerates it.
+#[test]
+fn domain_testgen_unwired_guidance_names_domain_testgen() {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "domain",
+            "testgen",
+            "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
+            "--target",
+            "vitest",
+        ])
+        .current_dir(root())
+        .output()
+        .expect("run domain testgen");
+    assert!(output.status.success());
+    let content = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        content.contains("`fslc domain testgen --allow-unwired`"),
+        "{content}"
+    );
+    assert!(
+        !content.contains("`fslc testgen --allow-unwired`"),
+        "{content}"
+    );
 }

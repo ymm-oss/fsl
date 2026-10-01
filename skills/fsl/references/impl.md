@@ -112,7 +112,10 @@ never calls the implementation proves nothing. `fslc testgen --allow-unwired`
 skip-until-wired; its output is byte-identical to the pre-#1200 scaffold, and
 Kotlin rejects it. An `--allow-unwired` suite exits 0 with every test skipped,
 so in `fslc chain` give `[impl]` a JUnit `report` (see `commands.md`, `chain`):
-then zero executed tests is `indeterminate`, never `passed`.
+then zero executed tests is `indeterminate`, never `passed`. An `[impl]` with
+neither `report` nor `evidence = "exit_code"` is `indeterminate` on exit 0, and
+`evidence = "exit_code"` is flagged `exit_code_only` with a warning — it is not
+conformance evidence for a generated suite.
 
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a

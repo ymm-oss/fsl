@@ -601,9 +601,8 @@ fn chain_impl_report_directory_sums_its_xml_files() {
 #[cfg(unix)]
 #[test]
 fn chain_impl_stale_or_missing_report_is_indeterminate() {
-    // The report predates the command: a leftover from an earlier run is not
-    // this run's evidence. Its mtime is set two seconds into the past so the
-    // whole-second floor of the start time cannot absorb it.
+    // The report predates the command (two seconds old): a leftover from an
+    // earlier run is not this run's evidence.
     let dir = impl_report_project("impl-stale", JUNIT_PASSED, 0, Some("report.xml"));
     fs::write(
         dir.join("fsl-project.toml"),
@@ -624,7 +623,7 @@ fn chain_impl_stale_or_missing_report_is_indeterminate() {
     assert!(
         impl_layer["detail"]["reason"]
             .as_str()
-            .is_some_and(|reason| reason.contains("predates the command")),
+            .is_some_and(|reason| reason.contains("unchanged since before the command")),
         "{value:#}"
     );
 
@@ -653,15 +652,109 @@ fn chain_impl_report_failures_and_nonzero_exit_stay_failed() {
 
 #[cfg(unix)]
 #[test]
-fn chain_impl_without_report_keeps_the_exit_code_contract() {
+fn chain_impl_without_report_or_evidence_is_indeterminate() {
+    // Issue #1200 (F1): exit 0 alone cannot tell a passing suite from one
+    // that executed nothing, so a manifest naming neither a report nor
+    // `evidence = "exit_code"` does not pass.
     let dir = impl_report_project("impl-no-report", JUNIT_ALL_SKIPPED, 0, None);
     let output = run(&dir, &["chain", "fsl-project.toml"]);
     let value = json(&output);
+    assert_eq!(output.status.code(), Some(1), "{value:#}");
+    assert_eq!(value["result"], "indeterminate", "{value:#}");
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "indeterminate", "{value:#}");
+    assert_eq!(impl_layer["detail"]["returncode"], 0, "{value:#}");
+    assert!(
+        impl_layer["detail"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("names no report")),
+        "{value:#}"
+    );
+
+    // A failing command is still `failed`, not `indeterminate`.
+    let dir = impl_report_project("impl-no-report-exit-1", JUNIT_ALL_SKIPPED, 1, None);
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    assert_eq!(value["result"], "violated", "{value:#}");
+    assert_eq!(layer(&value, "impl")["result"], "failed", "{value:#}");
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_exit_code_evidence_is_explicit_and_warned() {
+    let dir = scratch_dir("impl-exit-code-evidence");
+    fs::write(
+        dir.join("fsl-project.toml"),
+        "[impl]\ncommand = \"true\"\nevidence = \"exit_code\"\n",
+    )
+    .expect("write manifest");
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
     assert_eq!(output.status.code(), Some(0), "{value:#}");
+    assert_eq!(value["result"], "verified", "{value:#}");
     let impl_layer = layer(&value, "impl");
     assert_eq!(impl_layer["result"], "passed", "{value:#}");
+    assert_eq!(
+        impl_layer["detail"]["evidence"], "exit_code_only",
+        "{value:#}"
+    );
     assert!(impl_layer["detail"].get("tests").is_none(), "{value:#}");
-    assert!(impl_layer["detail"].get("report").is_none(), "{value:#}");
+    assert_eq!(
+        value["warnings"][0]["kind"], "impl_exit_code_only",
+        "{value:#}"
+    );
+    assert_eq!(value["warnings"][0]["layer"], "impl", "{value:#}");
+    let table = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        table.contains("impl  command  passed  passed  evidence=exit_code_only"),
+        "{table}"
+    );
+}
+
+#[test]
+fn chain_impl_unknown_key_is_a_parse_error_naming_it() {
+    let dir = scratch_dir("impl-unknown-key");
+    // The command never runs: the typo is rejected first.
+    fs::write(
+        dir.join("fsl-project.toml"),
+        "[impl]\ncommand = \"unused\"\nreprot = \"s.xml\"\n",
+    )
+    .expect("write manifest");
+    let output = run(&dir, &["chain", "fsl-project.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(2), "{value:#}");
+    assert_eq!(value["result"], "error", "{value:#}");
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["detail"]["kind"], "parse", "{value:#}");
+    assert!(
+        impl_layer["detail"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown [impl] key(s): [reprot]")),
+        "{value:#}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_impl_report_written_before_the_command_in_the_same_second_is_not_fresh() {
+    // Issue #1200 (F2): a passing report that exists before the command runs
+    // is not this run's evidence, even when it was written within the same
+    // second (no whole-second truncation).
+    let dir = scratch_dir("impl-same-second");
+    fs::write(
+        dir.join("fsl-project.toml"),
+        "[impl]\ncommand = \"true\"\nreport = \"report.xml\"\n",
+    )
+    .expect("write manifest");
+    fs::write(dir.join("report.xml"), JUNIT_PASSED).expect("write report");
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    let impl_layer = layer(&value, "impl");
+    assert_eq!(impl_layer["result"], "indeterminate", "{value:#}");
+    assert!(
+        impl_layer["detail"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("unchanged since before the command")),
+        "{value:#}"
+    );
 }
 
 #[test]

@@ -83,7 +83,8 @@ rules in this skill.
      conformance evidence by itself — check the executed count
    - gate the whole chain at once with `fslc chain` when a manifest exists; give
      `[impl]` a JUnit `report` so an all-skipped or empty run is `indeterminate`,
-     not `passed`
+     not `passed`. `evidence = "exit_code"` (flagged `exit_code_only`) is for
+     non-test commands and is never the implementation-conformance anchor
    - **testgen layer selection:** run `fslc testgen` on the spec at the **same
      layer granularity as the implementation** (design `spec` for design-aligned
      code). From upper layers, reuse **`forbidden` negatives only** — they stay

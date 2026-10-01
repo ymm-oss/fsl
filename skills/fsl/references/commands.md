@@ -473,16 +473,22 @@ per-requirement classification. Class is method coverage, not verdict — a
 `[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`
 runs `verify`, while omitting `depth` runs `check`. A layer with
 `refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
-runs its shell `command` from the manifest directory. With only `command`, the
-exit status alone decides `passed`/`failed`, so an all-skipped or empty suite
-passes. Add `report = "<JUnit XML file or directory>"` (written by the command,
-e.g. `pytest --junitxml=r.xml`, `vitest run --reporter=junit --outputFile=r.xml`,
-`phpunit --log-junit r.xml`) and exit 0 is `passed` only with ≥ 1 executed test
-and no `<failure>`/`<error>`; 0 executed (none collected, or all skipped) or a
-missing/stale/non-JUnit report is `result:"indeterminate"` (layer exit_code 1,
-top-level `indeterminate`, exit 1), with counts in `detail.tests`. Do not
-report a chain whose `[impl]` has no `report` as implementation evidence for a
-generated suite. JSON is stdout; the
+runs its shell `command` from the manifest directory and must name its
+evidence; its only keys are `command`, `report`, `evidence` (any other key,
+e.g. a typo `reprot`, is a `kind:"parse"` error at exit 2 naming the key).
+`report = "<JUnit XML file or directory>"` (written by the command, e.g.
+`pytest --junitxml=r.xml`, `vitest run --reporter=junit --outputFile=r.xml`,
+`phpunit --log-junit r.xml`, Gradle `--rerun-tasks` + `build/test-results/test`;
+SwiftPM 6 writes Swift Testing results to `r-swift-testing.xml` when XCTest also
+runs): exit 0 is `passed` only with ≥ 1 executed test and no
+`<failure>`/`<error>`; 0 executed (none collected, or all skipped) or a
+missing/unchanged/non-JUnit report is `result:"indeterminate"` (layer
+exit_code 1, top-level `indeterminate`, exit 1), counts in `detail.tests`.
+`evidence = "exit_code"` (for a non-test command) decides by exit status but
+marks `detail.evidence: "exit_code_only"` and adds a top-level `warnings[]`
+entry `impl_exit_code_only` — never report that as implementation evidence for
+a generated suite. With neither key an exit-0 run is `indeterminate`. JSON is
+stdout; the
 consolidated table is stderr. Without `--keep-going`, execution stops after the
 first failed layer and later layers are marked `skipped`. `--jobs N` (default 1)
 runs up to N `spec`/refine layers at once, each with its own solver; `[impl]`

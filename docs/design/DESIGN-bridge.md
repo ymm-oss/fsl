@@ -475,8 +475,14 @@ return, which is the silent pass this section removes.
 
 **What a skipping suite still means for `chain`.** `--allow-unwired` makes a
 runner green while nothing ran. `fslc chain` therefore does not trust the exit
-code alone when the `[impl]` layer names a JUnit `report`: zero executed tests
-is `indeterminate`, not `passed` (`DESIGN-layers.md` §7).
+code alone: an `[impl]` layer names a JUnit `report`, and zero executed tests
+is `indeterminate`, not `passed`; one without a report must opt into exit-code
+evidence explicitly, and is `indeterminate` on exit 0 otherwise
+(`DESIGN-layers.md` §7).
+
+`fslc domain testgen` rewrites the guidance in its scaffold to
+`fslc domain testgen --allow-unwired`, so the message names the command that
+regenerates that file.
 
 **Frozen Python reference.** `src/fslc/testgen.py` is unchanged and still
 skips. The parked developer comparison `tools/check_rust_phase3_commands.py`

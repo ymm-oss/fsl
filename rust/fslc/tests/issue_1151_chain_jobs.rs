@@ -71,7 +71,8 @@ fn project() -> PathBuf {
 /// `[impl]` runs this test binary's own `fslc`: no interpreter dependency.
 fn impl_command() -> String {
     let fslc = env!("CARGO_BIN_EXE_fslc").replace('\\', "\\\\");
-    format!("command = \"{fslc} check business.fsl\"")
+    // A smoke check, not a test suite: it opts into exit-code evidence (#1200).
+    format!("command = \"{fslc} check business.fsl\"\nevidence = \"exit_code\"")
 }
 
 /// Four independent verification steps -- business, requirements, design,
