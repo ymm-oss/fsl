@@ -1223,6 +1223,11 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 <td>短絡する <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code> で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す</td>
 </tr>
 <tr>
+<td><code>unknown_cti</code> / <code>ensures</code></td>
+<td>証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の <code>ensures</code> が偽になる</td>
+<td>本体か <code>ensures</code> を直す。始状態が到達不能なら、それを除外する補助 invariant を足す</td>
+</tr>
+<tr>
 <td><code>unknown_budget</code></td>
 <td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または inline <code>implements Abs from "file" { }</code> seam の対応探索が固定の内部状態予算を超えた(<code>check</code>/<code>verify</code>、CLI フラグ無し)</td>
 <td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。inline <code>implements</code> seam の場合: domain を縮めるか、結合検査ではなく <code>fslc refine</code>/<code>fslc verify</code> で層を分けて検証する</td>

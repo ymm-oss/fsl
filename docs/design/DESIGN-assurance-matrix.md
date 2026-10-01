@@ -157,7 +157,8 @@ unchanged before/after):
 | `LEADS_TO` | `leadsTo` | `bmc.rs::leadsto_violation`; `fslc`'s `verification_output.rs::render_leadsto_failure` (duplicate literal, now routed through the same constant) |
 | `INVARIANT` | `invariant` | `induction.rs`'s `InductionCti` construction in the k-induction base/step loop |
 | `TRANS` | `trans` | `induction.rs`'s `InductionCti` construction in the `k == 1` transition-property special case |
-| `PARTIAL_OP` | `partial_op` | `induction.rs::definedness_cti`, the step-case definedness obligation run after every invariant and transition property is proved (#1196) |
+| `ENSURES` | `ensures` | `induction.rs::step_obligation_cti`, the one-step `ensures` obligation under the proved invariants (#1217) |
+| `PARTIAL_OP` | `partial_op` | `induction.rs::step_obligation_cti`, the step-case definedness obligation run after every invariant and transition property is proved (#1196) |
 | `UNBOUNDED_BELOW` | `unbounded_below` | `induction.rs::prove_ranked_leadstos`, the unconditional pre-check |
 | `PROGRESS_ACTION_NOT_FAIR` | `progress_action_not_fair` | `induction.rs::prove_ranked_leadstos`, the `helpful_fairness` check |
 | `HELPFUL_ACTION_ENABLEDNESS_NOT_STICKY` | `helpful_action_enabledness_not_sticky` | `induction.rs::prove_ranked_leadstos`, the `helpful_sticky` check |
@@ -177,6 +178,7 @@ of populating one of these fields.
 | `invariant` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
 | `trans` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
 | `partial_op` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
+| `ensures` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
 | `unbounded_below` | `NotApplicable` (induction-only ranking) | `Exercised` |
 | `progress_action_not_fair` | `NotApplicable` (induction-only ranking) | `Exercised` |
 | `helpful_action_enabledness_not_sticky` | `NotApplicable` (induction-only ranking) | `Exercised` |
@@ -199,7 +201,11 @@ making the registry 13 values) cites
 which asserts `result: "unknown_cti"` with `violation_kind: "partial_op"` —
 a field `render_induction_cti` only inserts for that `cti.kind`. Its `BMC`
 cell is the Slice 1 boundary: BMC's same-spelled `partial_op` violations come
-from `bmc.rs`'s plain `make_violation` sites; the four ranked-liveness
+from `bmc.rs`'s plain `make_violation` sites; `ensures` (added by #1217,
+14 values) cites
+`issue_1217_induction_ensures.rs::a_false_ensures_is_never_proved_at_any_depth_or_k`,
+which asserts `violation_kind: "ensures"` on an induction `unknown_cti`, with
+the same Slice 1 `BMC` boundary; the four ranked-liveness
 kinds already exercised elsewhere cite `leadsto_helpful_ranking.rs`
 (`progress_action_not_fair`, `helpful_action_enabledness_not_sticky`,
 `helpful_action_not_enabled`, `non_helpful_action_increases_measure`); the

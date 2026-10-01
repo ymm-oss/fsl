@@ -1106,6 +1106,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `sweep_failed` | sweep セルに反例、またはフェイルクローズドな reachable classification がある | `sweep.minimal_counterexample` を調べて報告された問題を直す |
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
+| `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または inline `implements Abs from "file" { }` seam の対応探索が固定の内部状態予算を超えた(`check`/`verify`、CLI フラグ無し) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。inline `implements` seam の場合: domain を縮めるか、結合検査ではなく `fslc refine`/`fslc verify` で層を分けて検証する |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
 

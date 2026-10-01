@@ -191,7 +191,7 @@ pub async fn prove_induction<S: SmtSolver>(
         return Ok(result);
     }
     let instances = action_instances(solver, model)?;
-    let cti = definedness_cti(solver, model, &instances).await?;
+    let cti = step_obligation_cti(solver, model, &instances).await?;
     Ok(InductionResult {
         k_used: result.k_used,
         cti,
@@ -408,7 +408,12 @@ fn with_attempted_action<T>(
 /// - `Inv(s) ∧ first_partial(guards_a, s)` for every action instance;
 /// - `Inv(s) ∧ enabled_a(s) ∧ first_partial(body_a, s)`;
 /// - `Inv(s) ∧ T(s, s') ∧ Inv(s') ∧ Trans(s, s') ∧ first_partial(Q, s, s')`
-///   for every `transition` property and every reached `ensures`.
+///   for every `transition` property and every reached `ensures`;
+/// - `Inv(s) ∧ T(s, s') ∧ Inv(s') ∧ Trans(s, s') ∧ reached(E) ∧ defined(E) ∧
+///   ¬E` for every `ensures` E (#1217), returned as an `unknown_cti` of kind
+///   [`violation_kind::ENSURES`]. `reached` is BMC's: the instance is the
+///   selected one, its guards are enabled, its body is defined, and every
+///   earlier `ensures` of the action is defined and true.
 ///
 /// Every reachable state satisfies the proved invariants, and every real
 /// step is a step of the totalized `T` (a defined path evaluates
@@ -420,7 +425,7 @@ fn with_attempted_action<T>(
 /// and guard-order reachability as BMC (`evaluation_status`), so a guard such
 /// as `d != 0 and x / d < 100` stays defined.
 #[allow(clippy::too_many_lines)]
-async fn definedness_cti<S: SmtSolver>(
+async fn step_obligation_cti<S: SmtSolver>(
     solver: &mut S,
     model: &KernelModel,
     instances: &[ActionInstance<S::Term>],
@@ -438,9 +443,14 @@ async fn definedness_cti<S: SmtSolver>(
             fsl_core::expression_has_partial_operation_candidate(&property.before)
                 || fsl_core::expression_has_partial_operation_candidate(&property.after)
         });
-    if !has_action_candidates && !has_property_candidates {
-        // Nothing can be undefined: declare no terms and issue no queries,
-        // so the solver session later engines share is untouched.
+    let has_ensures = model
+        .actions
+        .iter()
+        .any(|action| !action.ensures.is_empty());
+    if !has_action_candidates && !has_property_candidates && !has_ensures {
+        // Nothing can be undefined and no ensures is declared: declare no
+        // terms and issue no queries, so the solver session later engines
+        // share is untouched.
         return Ok(None);
     }
     let properties = properties(model);
@@ -571,13 +581,8 @@ async fn definedness_cti<S: SmtSolver>(
             }
         }
 
-        // Two-state definedness: transition properties and reached ensures.
-        let has_ensures_candidates = model.actions.iter().any(|action| {
-            action
-                .ensures
-                .iter()
-                .any(fsl_core::expression_has_partial_operation_candidate)
-        });
+        // Two-state obligations: transition-property definedness, and
+        // reached-ensures definedness and truth (#1217).
         let mut transition_statuses = Vec::new();
         for property in &model.transitions {
             let status = property_evaluation_status(
@@ -592,7 +597,7 @@ async fn definedness_cti<S: SmtSolver>(
                 transition_statuses.push((property.name.clone(), status.first_partial));
             }
         }
-        if transition_statuses.is_empty() && !has_ensures_candidates {
+        if transition_statuses.is_empty() && !has_ensures {
             return Ok(None);
         }
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
@@ -640,7 +645,7 @@ async fn definedness_cti<S: SmtSolver>(
                 )));
             }
         }
-        if !has_ensures_candidates {
+        if !has_ensures {
             return Ok(None);
         }
         for (instance_index, instance) in instances.iter().enumerate() {
@@ -698,6 +703,25 @@ async fn definedness_cti<S: SmtSolver>(
                     &mut bindings,
                     Some(&def_states[0]),
                 )?;
+                // #1217: a reached, defined ensures must hold, exactly as
+                // `bmc::check_state_properties` asks per step.
+                solver.set_query_context("ensures", &action.name);
+                let failure = solver.and(&[
+                    reached.clone(),
+                    status.fully_defined.clone(),
+                    solver.not(bool_term(&value)?)?,
+                ])?;
+                if let Some(trace) =
+                    partial_witness(solver, model, &failure, &def_states, &choices, instances, 1)
+                        .await?
+                {
+                    return Ok(Some(InductionCti {
+                        kind: violation_kind::ENSURES.to_owned(),
+                        name: action.name.clone(),
+                        k: 1,
+                        trace,
+                    }));
+                }
                 reached =
                     solver.and(&[reached, status.fully_defined, bool_term(&value)?.clone()])?;
             }

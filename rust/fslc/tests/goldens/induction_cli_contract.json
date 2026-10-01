@@ -34,7 +34,7 @@
             "name": "deadlock"
           },
           {
-            "checks": 12,
+            "checks": 13,
             "elapsed_s": "<elapsed>",
             "kind": "ensures",
             "name": "push"

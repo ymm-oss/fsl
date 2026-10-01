@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! `violation_kind` axis: the 13-value `fsl_verifier::violation_kind::ALL`
+//! `violation_kind` axis: the 14-value `fsl_verifier::violation_kind::ALL`
 //! vocabulary (issue #646, #537 C3 slice 1). Rows are *referenced* from
 //! `fsl_verifier::violation_kind::ALL`, not re-owned.
 //!
@@ -10,8 +10,8 @@
 //! for `deadlock`, the BMC-only deadlock probe). Every cell is filled:
 //! `leadsTo`/`deadlock` are BMC-only, `invariant`/`trans`/the 8 ranked-leadsTo
 //! kinds are induction-only, so exactly half of this 12x2 matrix is
-//! `NotApplicable` by construction (`partial_op` is induction-only in this
-//! registry: BMC's same-spelled kind is a plain `make_violation` site) -- each with a citation to where that
+//! `NotApplicable` by construction (`partial_op` and `ensures` are induction-only in
+//! this registry: BMC's same-spelled kinds are plain `make_violation` sites) -- each with a citation to where that
 //! structural fact is codified (see this module's `SLICE1_BOUNDARY` and
 //! `INDUCTION_ONLY_RANKING` bases, and `docs/design/DESIGN-assurance-matrix.md`'s
 //! "Slice 1 boundary" section, which records the reasoned scope decision
@@ -125,6 +125,23 @@ pub fn axis() -> Axis {
         (vk::PARTIAL_OP, "BMC"),
         Claim::NotApplicable {
             reason: "same boundary as `invariant`: the plain BMC engine's partial_op violations are emitted by bmc.rs's out-of-Slice-1-scope make_violation sites, which mirror fsl_runtime::Monitor's own registered outcome.kind spelling",
+            basis: SLICE1_BOUNDARY,
+        },
+    );
+
+    cells.insert(
+        (vk::ENSURES, "induction"),
+        Claim::Exercised {
+            by: Citation {
+                path: "rust/fslc/tests/issue_1217_induction_ensures.rs",
+                anchor: "fn a_false_ensures_is_never_proved_at_any_depth_or_k()",
+            },
+        },
+    );
+    cells.insert(
+        (vk::ENSURES, "BMC"),
+        Claim::NotApplicable {
+            reason: "same boundary as `invariant`: the plain BMC engine's ensures violations are emitted by bmc.rs's out-of-Slice-1-scope make_violation sites, which mirror fsl_runtime::Monitor's own registered outcome.kind spelling",
             basis: SLICE1_BOUNDARY,
         },
     );
@@ -304,6 +321,15 @@ spec AssuranceProbePartialOpCti {
     d = 0
   }
   invariant NonNeg { x >= 0 }
+}
+";
+
+const ENSURES_CTI_SRC: &str = r"
+spec AssuranceProbeEnsuresCti {
+  state { x: 0..10 }
+  init { x = 0 }
+  action inc() { requires x < 10  x = x + 1  ensures x != 6 }
+  invariant Range { 0 <= x and x <= 10 }
 }
 ";
 
@@ -552,6 +578,15 @@ fn every_violation_kind_the_probe_corpus_emits_is_exactly_the_registered_set() {
     ))
     .expect("induction partial_op probe");
     observed.insert(partial.cti.expect("expected a partial_op CTI").kind);
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let ensures = block_on(fsl_verifier::prove_induction(
+        &model(ENSURES_CTI_SRC),
+        &mut solver,
+        1,
+    ))
+    .expect("induction ensures probe");
+    observed.insert(ensures.cti.expect("expected an ensures CTI").kind);
 
     for source in [
         UNBOUNDED_BELOW_SRC,
