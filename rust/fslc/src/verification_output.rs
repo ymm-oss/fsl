@@ -480,6 +480,86 @@ pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -
     }
 }
 
+/// `result` of an envelope section a run did not evaluate (issue #1008).
+///
+/// Not executing a check is never evidence that it holds, so a run that skips
+/// a declared check keeps the section's key and says why instead of dropping
+/// it. The value deliberately lives under the same `result` key every
+/// evaluated `implements` verdict uses (`refines`, `refinement_failed`, ...):
+/// a consumer that accepts only `refines` therefore rejects it without knowing
+/// this value exists.
+pub const NOT_EVALUATED: &str = "not_evaluated";
+
+/// `reason` for `verify --property`.
+pub const NOT_EVALUATED_PROPERTY_SELECTION: &str = "property_selection";
+/// `reason` for `verify --exclude-property`.
+pub const NOT_EVALUATED_PROPERTY_EXCLUSION: &str = "property_exclusion";
+/// `reason` for `verify --from-state`.
+pub const NOT_EVALUATED_FROM_STATE: &str = "from_state";
+/// `reason` for `verify --instances` / `--values`.
+pub const NOT_EVALUATED_BOUNDS_OVERRIDE: &str = "bounds_override";
+
+/// The abstraction name of a requirements document's inline `implements`, or
+/// `None` when it declares none. Reads only the root source: it is the same
+/// predicate `fsl_core::requirements_implements_with_bounds` starts from, but
+/// never reads the abstraction's file, so a run that does not evaluate the
+/// seam does not add that file to its cache-key dependency domain (#1023).
+#[must_use]
+pub fn requirements_implements_name(source: &str) -> Option<String> {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document(source)
+    else {
+        return None;
+    };
+    requirements.items.iter().find_map(|item| match item {
+        fsl_syntax::RequirementsItem::Implements { name, .. } => Some(name.clone()),
+        _ => None,
+    })
+}
+
+/// Build a `not_evaluated` section (issue #1008). `reasons` is every cause, in
+/// the caller's fixed order; `reason` repeats the first one so a consumer that
+/// reads a single value still gets one. `fields` carries section-specific
+/// identification (for example the abstraction name).
+///
+/// # Panics
+///
+/// Panics when `reasons` is empty: a section without a cause is a caller bug.
+#[must_use]
+pub fn not_evaluated_section(reasons: &[&str], fields: Map<String, Value>) -> Value {
+    assert!(
+        !reasons.is_empty(),
+        "a not_evaluated section needs a reason"
+    );
+    let mut section = fields;
+    section.insert("result".to_owned(), json!(NOT_EVALUATED));
+    section.insert("reason".to_owned(), json!(reasons[0]));
+    section.insert("reasons".to_owned(), json!(reasons));
+    Value::Object(section)
+}
+
+/// Attach a `not_evaluated` section under `key` (issue #1008).
+///
+/// Unlike [`attach_requirements_implements`] this never touches the top-level
+/// `result` or the exit status: the section records what this run did *not*
+/// check, and the verdict keeps speaking only for what it did. An `error`
+/// envelope carries no section, matching every other nested verdict. The
+/// later steps that turn a success envelope into an `error` one
+/// (`--vacuity error`, `--strict-tags`, the cache-divergence check) each build
+/// a fresh envelope rather than rewriting `result` in place, so a section
+/// attached here never survives onto an `error` envelope either; the
+/// `--vacuity error` case is pinned by
+/// `issue_1008_not_evaluated::vacuity_error_envelope_drops_the_section`.
+pub fn attach_not_evaluated(envelope: &mut Value, key: &str, section: Value) {
+    let Value::Object(map) = envelope else {
+        return;
+    };
+    if map.get("result").and_then(Value::as_str) == Some("error") {
+        return;
+    }
+    map.insert(key.to_owned(), section);
+}
+
 /// Render governance relationships while delegating preservation verification
 /// to the delivery surface that owns the refinement backend.
 ///

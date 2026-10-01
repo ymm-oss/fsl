@@ -334,7 +334,12 @@ verify {
   (`refinement_failed`/`impl_violated`/`unknown_budget`). Read
   `implements.violation` for seam-specific evidence. Gate on
   `implements.result == "refines"`, or use `fslc chain`, which applies exactly
-  that gate to the layer and exits 1.
+  that gate to the layer and exits 1. `verify --property` / `--exclude-property`
+  / `--from-state` do not evaluate the seam: the envelope then reports
+  `implements: {abs, result: "not_evaluated", reason, reasons}` (`reason` one of
+  `property_selection` / `property_exclusion` / `from_state`) with the top-level
+  result and exit unchanged, so such a run never gates the seam —
+  `not_evaluated` is not `refines`. A spec without `implements` has no key.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to

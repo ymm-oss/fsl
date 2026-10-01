@@ -107,6 +107,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--lemma "<expr>"]...                 # induction only; independently adjudicated
                # Inline `implements`: `refines` keeps the ordinary top-level result/exit;
                # `refinement_failed` or `impl_violated` becomes the top-level result with exit 1.
+               # --property/--exclude-property/--from-state skip it: implements.result
+               # "not_evaluated" + reason, result/exit unchanged (never a pass).
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
@@ -536,7 +538,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same
-  property, exclusion wins.
+  property, exclusion wins. A check these options skip is not dropped from the
+  envelope: an inline `implements` is reported as
+  `implements: {abs, result: "not_evaluated", reason, reasons}` with `reason`
+  `property_selection` (`--property`), `property_exclusion`
+  (`--exclude-property`), or `from_state` (`--from-state`); `reasons` lists all
+  that apply. The top-level result and exit stay those of the selected
+  properties, so `not_evaluated` is never a pass — gate the seam on an
+  unfiltered `check`/`verify` or `fslc chain`. A spec without `implements` has
+  no key.
 - `verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
   override the matching `entity`/`number` bound from a `verify { ... }` block
   without editing the spec — the CLI equivalent of hand-shrinking the model
@@ -546,13 +556,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `N=5..1`) is a spec error, and it does not apply to a kernel `spec` whose
   domain is a raw `type X = lo..hi` literal. The effective override is echoed
   back as `bounds_overrides` in the JSON envelope. When an override is active,
-  an `acceptance`/`forbidden` scenario that no longer fits the shrunken world
-  (a hardcoded id/number outside the overridden bounds, in a step argument or
-  inside its `expect`) is skipped per-scenario instead of hard-erroring the
-  whole `verify`, with a `warnings` entry (`kind: "acceptance_skipped"` /
-  `"forbidden_skipped"`) naming it; other scenarios still replay normally.
-  Without an override, or for a failure unrelated to bounds, the scenario
-  still hard-errors as before. When the spec has an inline `implements`, the
+  the native CLI does **not** replay the `acceptance`/`forbidden` scenarios at
+  all and reports `requirement_traces: {result: "not_evaluated", reason:
+  "bounds_override", acceptance: N, forbidden: M}` — replay them on an
+  unscoped `check`/`verify`. (The per-scenario `acceptance_skipped` /
+  `forbidden_skipped` downgrade of `docs/manual/LANGUAGE.md` is the frozen
+  Python reference's behavior and is not ported yet.) When the spec has an inline `implements`, the
   override also propagates into the abstract spec (restricted to the
   entity/number names the abstract declares) so refinement is checked at the
   same world size on both sides — otherwise a shrunken impl vs a full-size
@@ -577,6 +586,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
   a missing file) is returned verbatim — exit code and `kind` unchanged.
+  Cells always carry `--instances`/`--values`, so a check a cell skips
+  (`requirement_traces` for acceptance/forbidden scenarios, `implements` under
+  `--property`) is surfaced, not hidden behind the grid verdict: the cell's
+  `summary` row gets `"<section>": "not_evaluated"` and
+  `sweep.not_evaluated: {sections, reasons}` is the union over cells (absent
+  when nothing was skipped). `sweep_passed` says nothing about those sections —
+  check them on an unscoped run.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -756,9 +772,10 @@ Practical strategy:
   spec (see §7) — the file keeps its normal verify-block size for everything
   else. If the spec has `acceptance`/`forbidden` scenarios hardcoding ids from
   the original (larger) world, they are not a blocker: under an active
-  override, a scenario that no longer fits is skipped with a `warnings` entry
-  rather than hard-erroring the run (see §7), so `--instances Case=1
-  --property <Liveness>` stays usable without editing those scenarios too.
+  override the native `verify` does not replay them (the envelope says
+  `requirement_traces.result: "not_evaluated"`), so `--instances Case=1
+  --property <Liveness>` stays usable without editing those scenarios — replay
+  them on the unscoped run.
 - Verify **safety separately on the full-size model** at the depth you need.
 - Use `--property <leadsToName>` to run a single liveness property in isolation
   while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.

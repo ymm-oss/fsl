@@ -3576,6 +3576,12 @@ fn run_sweep(
     // not, so a scope whose every cell is inconclusive keeps the grid from
     // passing and is reported here.
     let mut inconclusive_scopes = Vec::new();
+    // #1008: every sweep cell carries `--instances`/`--values`, so a cell may
+    // skip a declared check (`requirement_traces`, or `implements` under
+    // `--property`). The grid verdict is not changed by that, but it must not
+    // hide it: the union over cells is surfaced as `sweep.not_evaluated`.
+    let mut not_evaluated_sections = std::collections::BTreeSet::new();
+    let mut not_evaluated_reasons = Vec::<String>::new();
     for instances in instance_combinations {
         for upper_values in &value_upper_combinations {
             let values = upper_values
@@ -3654,6 +3660,32 @@ fn run_sweep(
                         summary.insert(key.to_owned(), value.clone());
                     }
                 }
+                for section in SWEEP_NOT_EVALUATED_SECTIONS {
+                    let Some(nested) = verification.get(section) else {
+                        continue;
+                    };
+                    if nested.get("result").and_then(Value::as_str)
+                        != Some(fslc_rust::verification_output::NOT_EVALUATED)
+                    {
+                        continue;
+                    }
+                    summary.insert(
+                        section.to_owned(),
+                        json!(fslc_rust::verification_output::NOT_EVALUATED),
+                    );
+                    not_evaluated_sections.insert(section);
+                    for reason in nested
+                        .get("reasons")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                    {
+                        if !not_evaluated_reasons.iter().any(|seen| seen == reason) {
+                            not_evaluated_reasons.push(reason.to_owned());
+                        }
+                    }
+                }
                 let entry = json!({
                     "scope": {
                         "instances": instances,
@@ -3717,8 +3749,23 @@ fn run_sweep(
             "inconclusive_scopes": inconclusive_scopes,
         }),
     );
+    if !not_evaluated_sections.is_empty()
+        && let Some(sweep) = output.get_mut("sweep").and_then(Value::as_object_mut)
+    {
+        sweep.insert(
+            "not_evaluated".to_owned(),
+            json!({
+                "sections": not_evaluated_sections,
+                "reasons": not_evaluated_reasons,
+            }),
+        );
+    }
     (Value::Object(output), i32::from(result != "sweep_passed"))
 }
+
+/// Envelope sections a `verify` cell may report as `not_evaluated` (#1008);
+/// `sweep` copies each one into its cell summary and the grid's union.
+const SWEEP_NOT_EVALUATED_SECTIONS: [&str; 2] = ["implements", "requirement_traces"];
 
 #[derive(Clone, Debug, Default)]
 struct ManifestSection {

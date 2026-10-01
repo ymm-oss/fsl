@@ -525,16 +525,56 @@ contract; the frozen Python reference exercised the intended behavior in
 same-size forward simulation: a shrunken implementation and an unfiltered
 full-size abstract would otherwise disagree with `map_out_of_bounds`.
 
-**Independent suppressors (not treated as safe):** inline `implements` is still
-omitted silently when any of these hold:
+### Inline `implements` under a selected run (`fslc verify`, #1008)
 
-- `--property`
-- `--exclude-property`
-- `--from-state`
+Status: accepted. Three options make `verify` check a subset of what the spec
+declares. For each one the inline seam is **suppressed with a reason**, never
+silently omitted:
 
-No omission reason is recorded in the envelope today. This design does **not**
-declare those suppressions safe; they remain an explicit follow-up contract
-decision ([#1008](https://github.com/ymm-oss/fsl/issues/1008)).
+| Option | Decision | `implements.reason` | Why not run or project |
+|---|---|---|---|
+| `--property NAME` | suppress with reason | `property_selection` | The seam is a whole-model obligation, not one of the named properties a selection chooses between. Running it would make a one-property run fail on an obligation it did not select (a verdict change); projecting it onto one property has no defined meaning for a forward simulation. |
+| `--exclude-property NAME` | suppress with reason | `property_exclusion` | Same: excluding a property subtracts from the named set; it says nothing about the seam. |
+| `--from-state FILE` | suppress with reason | `from_state` | Refinement is a forward simulation from the declared initial states (`docs/design/DESIGN-from-state.md` keeps the seam a spec-level check). A caller-supplied snapshot need not be reachable, so "refines from this state" is a different question that no contract defines. |
+
+The envelope keeps the key:
+
+```json
+"implements": {
+  "abs": "CountedFlow",
+  "result": "not_evaluated",
+  "reason": "property_selection",
+  "reasons": ["property_selection"]
+}
+```
+
+- `reasons` lists every suppressor that applies, in the table's order; `reason`
+  repeats the first.
+- The value sits under the same `result` key as every evaluated seam verdict, so
+  a consumer that accepts only `refines` (`fslc chain`'s layer gate,
+  `html`'s badge classifier) rejects it without knowing the value. It is never
+  folded into the top-level `result`, and the exit code is unchanged: the verdict
+  still speaks only for the selected properties.
+- A spec that declares no inline `implements` keeps the key absent, so "nothing
+  declared" and "declared but not evaluated" stay distinguishable.
+- The suppressor list lives in one function (`seam_suppression_reasons` in
+  `rust/fslc/src/verification.rs`) read by both the default path and the
+  `--lemma` path. `--instances` / `--values` are not suppressors: they
+  propagate (above).
+- The Worker request has no selection options, so every Worker `verify` is a
+  full run and never emits `not_evaluated` (`rust/fsl-wasm/src/lib.rs`).
+
+The same rule covers the one other check a native `verify` option skips: under
+`--instances` / `--values` the requirements `acceptance` / `forbidden` replay
+does not run, and the envelope reports
+`requirement_traces: {"result":"not_evaluated","reason":"bounds_override",...}`
+(`docs/manual/LANGUAGE.md` §7). Porting the frozen Python reference's
+per-scenario downgrade is a separate follow-up; until then the verdict is not
+changed.
+
+Pinned by `rust/fslc/tests/issue_1008_not_evaluated.rs` (one detector per
+suppressor, whose cited mutation is restoring the silent skip, plus
+unfiltered-path preservation controls).
 
 Static checks (`kind: "type"` error, exit 2):
 - An abs state variable that is not mapped / a nonexistent variable or action

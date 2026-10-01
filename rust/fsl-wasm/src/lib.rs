@@ -41,6 +41,12 @@ fn default_source_file() -> String {
     "spec.fsl".to_owned()
 }
 
+/// Worker request options. There is deliberately no selection surface here
+/// (`property`, `exclude_properties`, `from_state`, `instances`, `values`):
+/// every Worker `verify` is a full run, so it always evaluates inline
+/// `implements` and the requirements trace replay and never emits the
+/// native CLI's `not_evaluated` sections (#1008). Unknown keys are ignored,
+/// which can only make a Worker run check *more* than such a key asked for.
 #[derive(Debug, Deserialize)]
 struct Options {
     #[serde(default = "default_depth")]
@@ -1421,6 +1427,35 @@ mod tests {
         assert_worker_requirement_trace_error_matches_native(
             &request,
             "requirements acceptance walk",
+            "verify",
+        );
+    }
+
+    /// Parity control for #1008 (mutation: the Worker gains a selection
+    /// option that skips the trace replay the way native `--instances` does).
+    /// A request carrying the native selection keys is still a full run: it
+    /// reports the same acceptance failure as an unscoped native `verify`,
+    /// not a `verified` envelope with a `not_evaluated` section.
+    #[test]
+    fn verify_ignores_selection_keys_and_still_replays_requirement_traces() {
+        let source =
+            include_str!("../../fslc/tests/fixtures/requirements_acceptance_walk_violation.fsl");
+        let request: Request = serde_json::from_value(json!({
+            "cmd": "verify",
+            "source": source,
+            "source_file": "requirements_acceptance_walk_violation.fsl",
+            "options": {
+                "property": "Anything",
+                "exclude_properties": ["Other"],
+                "from_state": "state.json",
+                "instances": {"E": 1},
+                "values": {"N": [0, 1]},
+            },
+        }))
+        .expect("unknown option keys are accepted");
+        assert_worker_requirement_trace_error_matches_native(
+            &request,
+            "requirements acceptance walk with selection keys",
             "verify",
         );
     }

@@ -407,8 +407,9 @@ impl 側だけの carried number(例: business の抽象には存在しない <c
 のみに適用されます。</p>
 <p><code>fslc verify</code> は <code>--instances</code> / <code>--values</code> の scope override だけが付いている場合でも
 インライン <code>implements</code> を評価します。<code>--property</code>、<code>--exclude-property</code>、
-<code>--from-state</code> は引き続き理由を記録せず <code>implements</code> フィールドを省略します。
-この挙動は安全とみなされておらず、契約上の未決定事項として残ります。</p>
+<code>--from-state</code> はこれを評価しません。そのときエンベロープはキーを省略せず、
+<code>implements: {"abs": ..., "result": "not_evaluated", "reason": ..., "reasons": [...]}</code>
+として残します(§7 の「選択した run が評価しない検査」を参照)。</p>
 <p><code>acceptance</code>/<code>forbidden</code> シナリオは、spec の元の世界の id や数値をハードコード
 しがちで(<code>accept(2)</code>)、それが縮小された上書き(<code>--instances Case=1</code>)の外に出る
 ことがあります。上書きが有効なとき、replay の失敗が<em>純粋に</em>上書き後の境界の外の値を
@@ -420,6 +421,13 @@ impl 側だけの carried number(例: business の抽象には存在しない <c
 の場合 — 挙動は変わらずハードエラーです。これにより、spec の acceptance シナリオが
 元の <code>verify { instances Case = N }</code> 境界向けに書かれていても、<code>--instances Case=1
 --property &lt;Liveness&gt;</code> が使えます。</p>
+<p><strong>native CLI の現状(#1008)。</strong> native の <code>fslc verify</code> は上のシナリオ単位の降格を
+まだ実装していません: <code>--instances</code> / <code>--values</code> のとき <code>acceptance</code>/<code>forbidden</code>
+シナリオを一切 replay しません。エンベロープはそれを
+<code>requirement_traces: {"result": "not_evaluated", "reason": "bounds_override",
+"acceptance": N, "forbidden": M, ...}</code> で示し、スコープ付きの run をシナリオを
+replay したものとして読んではいけません。上の段落は frozen Python 参照実装の挙動
+(<code>tests/test_acceptance_override_skip.py</code>)であり、移植は未着手の後続課題です。</p>
 <p><code>fair</code> は弱い公平性(weak fairness)のアノテーションです: その action インスタンス
 が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。
 公平性は action インスタンス全体に適用されます。条件付きでのみ公平にしたい場合は、
@@ -1005,6 +1013,43 @@ Public Kernel v2 はオプトインで、
 プロパティの出力(<code>invariants_checked</code>、<code>transitions_checked</code>、<code>leads_to</code>、
 <code>reachables</code>)から取り除きます。<code>--property</code> と <code>--exclude-property</code> が同じ
 プロパティを指名した場合は、除外が勝ちます。</p>
+<p><strong>選択した run が評価しない検査(#1008)。</strong> 検査を実行しなかったことは、それが成り立つ
+証拠にはなりません。<code>verify</code> のオプションによって宣言済みの検査が飛ばされるとき、
+エンベロープはその検査のキーを省略せず、<code>result: "not_evaluated"</code> と原因を入れて
+残します。トップレベルの <code>result</code> と exit code は変わらず、検査したものについてだけ
+述べます。完全な一覧:</p>
+<table>
+<thead>
+<tr>
+<th>セクション</th>
+<th>spec が宣言しているとき</th>
+<th><code>reason</code>(オプション)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>implements</code></td>
+<td>インライン <code>implements</code></td>
+<td><code>property_selection</code>(<code>--property</code>)、<code>property_exclusion</code>(<code>--exclude-property</code>)、<code>from_state</code>(<code>--from-state</code>)</td>
+</tr>
+<tr>
+<td><code>requirement_traces</code></td>
+<td><code>acceptance</code> / <code>forbidden</code> シナリオ</td>
+<td><code>bounds_override</code>(<code>--instances</code> / <code>--values</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>reasons</code> は当てはまる原因をすべて表の順に並べ、<code>reason</code> はその先頭を繰り返します。
+<code>implements</code> には <code>abs</code> も入り、<code>requirement_traces</code> には <code>acceptance</code> と <code>forbidden</code>
+のシナリオ数が入ります(シナリオ宣言そのものが取り出せない場合、たとえばスコープ無しの
+run が拒否する重複 id の場合は省略されます)。そうした検査を宣言していない spec ではキーは無いままなので、
+利用側は「何も宣言されていない」と「宣言されているが評価されていない」を区別できます。
+<code>not_evaluated</code> は決して合格ではありません: <code>implements.result == "refines"</code> だけを
+受け入れる利用側はこれを拒否し、seam のゲートはフィルタ無しの <code>check</code> / <code>verify</code>
+または <code>fslc chain</code> で行います。これ以外のオプションはどちらの検査も抑止しません。
+抑止するようになるオプションはこの表に加える必要があります。warning は選択の対象となる
+検査ではありません: 選択した run も、フル run と同じ compose lowering の warning
+(<code>fair_not_inherited</code>)と同じ <code>no_user_invariants</code> の抑止を報告します。</p>
 <p><code>verify --engine induction --lemma "EXPR"</code> は、<code>unknown_cti</code> の修復ループのための
 補助 invariant 候補を繰り返し指定で受け付けます。各式はまず、元の init/actions と
 暗黙の型境界に対して、元のユーザー invariant を仮定せずに独立に証明されます。偽の
@@ -1043,6 +1088,16 @@ semantics / io / vacuous / …)を返した場合、それは反例ではあり�
 すべて列挙し、該当がなければ <code>[]</code> です。
 classification の欠落・未知・混在（<code>over_constrained</code> を含む）は真の失敗として
 <code>sweep_failed</code> / exit 1 になります。</p>
+<p>sweep の各セルは <code>--instances</code>/<code>--values</code> 付きで走るので、セルが宣言済みの検査を
+<code>not_evaluated</code> として報告することがあります(§7「選択した run が評価しない検査」):
+spec に <code>acceptance</code>/<code>forbidden</code> シナリオがあれば <code>requirement_traces</code>、<code>--property</code>
+付きなら <code>implements</code> です。グリッドの verdict は変わりませんが、その裏に省略を
+隠しません: そうしたセルの <code>summary</code> 行にはセクション名が値 <code>"not_evaluated"</code> で
+入り、<code>sweep.not_evaluated: {"sections": [...], "reasons": [...]}</code> が全セルの和集合
+(sections は整列、reasons は初出順)になります。どのセルも何も省略していなければ
+このキーはありません。したがって <code>sweep.not_evaluated</code> 付きの <code>sweep_passed</code> は
+それらのセクションについて何も述べていません。スコープ無しの <code>check</code> / <code>verify</code>
+で確かめてください。</p>
 <p><code>diff</code> は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は <code>behavior_added</code>、OLD→NEW の失敗は
 <code>behavior_removed</code> です。ユーザー invariant の連言の間の含意を別途検査し
@@ -2167,12 +2222,13 @@ verify {
   空のボディ（<code>implements X from "..." { }</code>）は、process / action / stage の名前が一致するとき
   恒等の refinement を自動生成します。<code>verify</code> が <code>--property</code>、<code>--exclude-property</code>、
   または <code>--from-state</code> でスコープされている run では inline refinement は評価されず、
-  封筒から <code>implements</code> は省略されます。<strong>したがってスコープされた run で seam を
-  ゲートすることはできません</strong>——<code>implements</code> が無いので、<code>result</code> と exit code は
-  選択されたプロパティについてしか述べておらず、壊れた seam はその run を通過します。
-  スコープ無しの <code>check</code> / <code>verify</code>、または <code>fslc chain</code> でゲートしてください。
-  この3つのオプションが refinement を射影すべきか、省略した理由を記録すべきかは未決です
-  （<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>）。<code>implements { }</code> ブロックの内側には、状態の
+  封筒はキーを省略せずに <code>implements: {"result": "not_evaluated", "reason": ...}</code> を
+  報告します（§7「選択した run が評価しない検査」）。<strong>したがって選択した run で seam を
+  ゲートすることはできません</strong>——<code>result</code> と exit code は選択されたプロパティについて
+  しか述べておらず、壊れた seam はその run を通過しますが、封筒は seam を検査して
+  いないことを示します。スコープ無しの <code>check</code> / <code>verify</code>、または <code>fslc chain</code> で
+  ゲートしてください。この3つのオプションについての決定は「理由付きで抑止」です
+  （<code>docs/design/DESIGN-refinement.md</code>、<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>）。<code>implements { }</code> ブロックの内側には、状態の
   <code>map</code> エントリ、<code>maps auto</code>、<code>preserve progress</code>、そして — #73 以降 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code> を書きます。これは
   別の refinement ファイルの <code>refinement_action</code>

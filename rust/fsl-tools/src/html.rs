@@ -1277,7 +1277,29 @@ pub fn render_html_report(
 
 #[cfg(test)]
 mod tests {
-    use super::status_class;
+    use super::{status_class, status_section};
+    use serde_json::json;
+
+    /// #1008: a selected `verify` reports `implements.result:"not_evaluated"`.
+    /// The report must show that value verbatim and must never classify it as
+    /// a pass (mutation: add `not_evaluated` to the `"ok"` arm, or render the
+    /// nested seam from the top-level `result`).
+    #[test]
+    fn a_not_evaluated_seam_never_renders_as_satisfied() {
+        assert_ne!(status_class("not_evaluated"), "ok");
+        let html = status_section(&json!({
+            "result": "verified",
+            "implements": {
+                "abs": "Abs",
+                "result": "not_evaluated",
+                "reason": "property_selection",
+                "reasons": ["property_selection"],
+            },
+        }));
+        assert!(html.contains("not_evaluated"), "{html}");
+        assert!(html.contains("property_selection"), "{html}");
+        assert!(!html.contains("refines"), "{html}");
+    }
 
     /// Both inline-`implements` failure verdicts reach the top-level `result`
     /// since #1002, and `html` renders that value through `status_class`

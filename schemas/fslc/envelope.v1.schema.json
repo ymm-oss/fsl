@@ -12,6 +12,32 @@
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/actionProfile" }
     },
+    "implements": {
+      "type": "object",
+      "required": ["abs", "result"],
+      "properties": {
+        "abs": { "type": "string", "minLength": 1 },
+        "result": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "result": { "const": "not_evaluated" } } },
+      "then": {
+        "allOf": [{ "$ref": "#/$defs/notEvaluated" }],
+        "properties": {
+          "reason": { "enum": ["property_selection", "property_exclusion", "from_state"] },
+          "reasons": {
+            "items": { "enum": ["property_selection", "property_exclusion", "from_state"] }
+          }
+        }
+      }
+    },
+    "requirement_traces": {
+      "allOf": [{ "$ref": "#/$defs/notEvaluated" }],
+      "properties": {
+        "reason": { "const": "bounds_override" },
+        "acceptance": { "type": "integer", "minimum": 0 },
+        "forbidden": { "type": "integer", "minimum": 0 }
+      }
+    },
     "versions": {
       "type": "object",
       "additionalProperties": false,
@@ -25,6 +51,21 @@
   },
   "additionalProperties": true,
   "$defs": {
+    "notEvaluated": {
+      "description": "A declared check this run did not evaluate (#1008). Never a pass; the top-level result and exit code are unchanged.",
+      "type": "object",
+      "required": ["result", "reason", "reasons"],
+      "properties": {
+        "result": { "const": "not_evaluated" },
+        "reason": { "type": "string", "minLength": 1 },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "component": {
       "type": "object",
       "required": ["name", "version"],

@@ -381,8 +381,9 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 
 `fslc verify` は `--instances` / `--values` の scope override だけが付いている場合でも
 インライン `implements` を評価します。`--property`、`--exclude-property`、
-`--from-state` は引き続き理由を記録せず `implements` フィールドを省略します。
-この挙動は安全とみなされておらず、契約上の未決定事項として残ります。
+`--from-state` はこれを評価しません。そのときエンベロープはキーを省略せず、
+`implements: {"abs": ..., "result": "not_evaluated", "reason": ..., "reasons": [...]}`
+として残します(§7 の「選択した run が評価しない検査」を参照)。
 
 `acceptance`/`forbidden` シナリオは、spec の元の世界の id や数値をハードコード
 しがちで(`accept(2)`)、それが縮小された上書き(`--instances Case=1`)の外に出る
@@ -395,6 +396,14 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 の場合 — 挙動は変わらずハードエラーです。これにより、spec の acceptance シナリオが
 元の `verify { instances Case = N }` 境界向けに書かれていても、`--instances Case=1
 --property <Liveness>` が使えます。
+
+**native CLI の現状(#1008)。** native の `fslc verify` は上のシナリオ単位の降格を
+まだ実装していません: `--instances` / `--values` のとき `acceptance`/`forbidden`
+シナリオを一切 replay しません。エンベロープはそれを
+`requirement_traces: {"result": "not_evaluated", "reason": "bounds_override",
+"acceptance": N, "forbidden": M, ...}` で示し、スコープ付きの run をシナリオを
+replay したものとして読んではいけません。上の段落は frozen Python 参照実装の挙動
+(`tests/test_acceptance_override_skip.py`)であり、移植は未着手の後続課題です。
 
 `fair` は弱い公平性(weak fairness)のアノテーションです: その action インスタンス
 が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。
@@ -933,6 +942,29 @@ Public Kernel v2 はオプトインで、
 `reachables`)から取り除きます。`--property` と `--exclude-property` が同じ
 プロパティを指名した場合は、除外が勝ちます。
 
+**選択した run が評価しない検査(#1008)。** 検査を実行しなかったことは、それが成り立つ
+証拠にはなりません。`verify` のオプションによって宣言済みの検査が飛ばされるとき、
+エンベロープはその検査のキーを省略せず、`result: "not_evaluated"` と原因を入れて
+残します。トップレベルの `result` と exit code は変わらず、検査したものについてだけ
+述べます。完全な一覧:
+
+| セクション | spec が宣言しているとき | `reason`(オプション) |
+|---|---|---|
+| `implements` | インライン `implements` | `property_selection`(`--property`)、`property_exclusion`(`--exclude-property`)、`from_state`(`--from-state`) |
+| `requirement_traces` | `acceptance` / `forbidden` シナリオ | `bounds_override`(`--instances` / `--values`) |
+
+`reasons` は当てはまる原因をすべて表の順に並べ、`reason` はその先頭を繰り返します。
+`implements` には `abs` も入り、`requirement_traces` には `acceptance` と `forbidden`
+のシナリオ数が入ります(シナリオ宣言そのものが取り出せない場合、たとえばスコープ無しの
+run が拒否する重複 id の場合は省略されます)。そうした検査を宣言していない spec ではキーは無いままなので、
+利用側は「何も宣言されていない」と「宣言されているが評価されていない」を区別できます。
+`not_evaluated` は決して合格ではありません: `implements.result == "refines"` だけを
+受け入れる利用側はこれを拒否し、seam のゲートはフィルタ無しの `check` / `verify`
+または `fslc chain` で行います。これ以外のオプションはどちらの検査も抑止しません。
+抑止するようになるオプションはこの表に加える必要があります。warning は選択の対象となる
+検査ではありません: 選択した run も、フル run と同じ compose lowering の warning
+(`fair_not_inherited`)と同じ `no_user_invariants` の抑止を報告します。
+
 `verify --engine induction --lemma "EXPR"` は、`unknown_cti` の修復ループのための
 補助 invariant 候補を繰り返し指定で受け付けます。各式はまず、元の init/actions と
 暗黙の型境界に対して、元のユーザー invariant を仮定せずに独立に証明されます。偽の
@@ -973,6 +1005,17 @@ semantics / io / vacuous / …)を返した場合、それは反例ではあり�
 すべて列挙し、該当がなければ `[]` です。
 classification の欠落・未知・混在（`over_constrained` を含む）は真の失敗として
 `sweep_failed` / exit 1 になります。
+
+sweep の各セルは `--instances`/`--values` 付きで走るので、セルが宣言済みの検査を
+`not_evaluated` として報告することがあります(§7「選択した run が評価しない検査」):
+spec に `acceptance`/`forbidden` シナリオがあれば `requirement_traces`、`--property`
+付きなら `implements` です。グリッドの verdict は変わりませんが、その裏に省略を
+隠しません: そうしたセルの `summary` 行にはセクション名が値 `"not_evaluated"` で
+入り、`sweep.not_evaluated: {"sections": [...], "reasons": [...]}` が全セルの和集合
+(sections は整列、reasons は初出順)になります。どのセルも何も省略していなければ
+このキーはありません。したがって `sweep.not_evaluated` 付きの `sweep_passed` は
+それらのセクションについて何も述べていません。スコープ無しの `check` / `verify`
+で確かめてください。
 
 `diff` は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
@@ -2141,12 +2184,13 @@ verify {
   空のボディ（`implements X from "..." { }`）は、process / action / stage の名前が一致するとき
   恒等の refinement を自動生成します。`verify` が `--property`、`--exclude-property`、
   または `--from-state` でスコープされている run では inline refinement は評価されず、
-  封筒から `implements` は省略されます。**したがってスコープされた run で seam を
-  ゲートすることはできません**——`implements` が無いので、`result` と exit code は
-  選択されたプロパティについてしか述べておらず、壊れた seam はその run を通過します。
-  スコープ無しの `check` / `verify`、または `fslc chain` でゲートしてください。
-  この3つのオプションが refinement を射影すべきか、省略した理由を記録すべきかは未決です
-  （[#1008](https://github.com/ymm-oss/fsl/issues/1008)）。`implements { }` ブロックの内側には、状態の
+  封筒はキーを省略せずに `implements: {"result": "not_evaluated", "reason": ...}` を
+  報告します（§7「選択した run が評価しない検査」）。**したがって選択した run で seam を
+  ゲートすることはできません**——`result` と exit code は選択されたプロパティについて
+  しか述べておらず、壊れた seam はその run を通過しますが、封筒は seam を検査して
+  いないことを示します。スコープ無しの `check` / `verify`、または `fslc chain` で
+  ゲートしてください。この3つのオプションについての決定は「理由付きで抑止」です
+  （`docs/design/DESIGN-refinement.md`、[#1008](https://github.com/ymm-oss/fsl/issues/1008)）。`implements { }` ブロックの内側には、状態の
   `map` エントリ、`maps auto`、`preserve progress`、そして — #73 以降 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter` を書きます。これは
   別の refinement ファイルの `refinement_action`

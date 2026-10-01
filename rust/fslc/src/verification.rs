@@ -1886,6 +1886,10 @@ struct PreparedCliVerification {
     /// component information (like constituent `fair` markers) that produced
     /// them. `model`/`fsl_runtime::verification_warnings` cannot recover them.
     compose_warnings: Vec<Value>,
+    /// The `requirement_traces` section of a run that did not replay the
+    /// spec's `acceptance`/`forbidden` scenarios (#1008); `None` when they
+    /// were replayed or there are none.
+    requirement_traces_not_evaluated: Option<Value>,
 }
 
 pub(super) fn run_verify_cli(
@@ -1900,17 +1904,50 @@ pub(super) fn run_verify_cli(
     run_verify_cli_from_source(path, cache_identity_path, &source, options)
 }
 
-/// Whether this run selects a subset of the model, and therefore does not
-/// evaluate the inline `implements` seam.
+/// Why this run does not evaluate the inline `implements` seam, in a fixed
+/// order; empty when it does.
 ///
-/// This is the whole population of seam suppressors: `docs/manual/LANGUAGE.md` names
-/// these three options and nothing else, and both call sites read it from here
-/// so the list cannot drift in one of them. #1008 is open against the semantics
-/// of these three, so a change there has to land in one place.
-fn seam_is_suppressed(options: &CliVerifyOptions, prepared: &PreparedCliVerification) -> bool {
-    options.property.is_some()
-        || !options.exclude_properties.is_empty()
-        || prepared.initial_state.is_some()
+/// This is the whole population of seam suppressors: `docs/manual/LANGUAGE.md`
+/// names these three options and nothing else, and every call site reads it
+/// from here so the list cannot drift in one of them. The decision for each
+/// (`docs/design/DESIGN-refinement.md`, #1008) is *suppress with a reason*: the
+/// envelope keeps `implements` as `{"result":"not_evaluated","reason":...}`
+/// rather than dropping the key, and the verdict is not changed.
+fn seam_suppression_reasons(
+    options: &CliVerifyOptions,
+    prepared: &PreparedCliVerification,
+) -> Vec<&'static str> {
+    use fslc_rust::verification_output::{
+        NOT_EVALUATED_FROM_STATE, NOT_EVALUATED_PROPERTY_EXCLUSION,
+        NOT_EVALUATED_PROPERTY_SELECTION,
+    };
+    let mut reasons = Vec::new();
+    if options.property.is_some() {
+        reasons.push(NOT_EVALUATED_PROPERTY_SELECTION);
+    }
+    if !options.exclude_properties.is_empty() {
+        reasons.push(NOT_EVALUATED_PROPERTY_EXCLUSION);
+    }
+    if prepared.initial_state.is_some() {
+        reasons.push(NOT_EVALUATED_FROM_STATE);
+    }
+    reasons
+}
+
+/// The `implements` section a suppressed run reports in place of a verdict
+/// (#1008), or `None` when the spec declares no inline `implements` — so a
+/// consumer can tell "nothing declared" (key absent) from "declared but not
+/// evaluated" (this section).
+fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Option<Value> {
+    if reasons.is_empty() {
+        return None;
+    }
+    let abs = fslc_rust::verification_output::requirements_implements_name(source)?;
+    let mut fields = Map::new();
+    fields.insert("abs".to_owned(), json!(abs));
+    Some(fslc_rust::verification_output::not_evaluated_section(
+        reasons, fields,
+    ))
 }
 
 /// A `FileResolver` decorator that records every dependency it actually
@@ -2012,7 +2049,14 @@ pub(super) fn run_verify_cli_from_source(
         // Without this, `verify --engine induction --lemma ...` is another way
         // to pass a broken seam with exit 0 (#1002), and the suppressor list in
         // `docs/manual/LANGUAGE.md` would be missing an entry.
-        if !seam_is_suppressed(options, &prepared)
+        let suppression = seam_suppression_reasons(options, &prepared);
+        if let Some(section) = suppressed_implements_section(source, &suppression) {
+            fslc_rust::verification_output::attach_not_evaluated(
+                &mut output,
+                "implements",
+                section,
+            );
+        } else if suppression.is_empty()
             && let Ok(model) = &prepared.model
         {
             match implements_result_from_source_with_bounds(
@@ -2046,7 +2090,8 @@ pub(super) fn run_verify_cli_from_source(
     // `execute_cli_verification` instead of being recomputed there, so
     // "is the seam active" stays a single fact rather than two copies of the
     // same check that could drift.
-    let selection_filtered = seam_is_suppressed(options, &prepared);
+    let suppression = seam_suppression_reasons(options, &prepared);
+    let selection_filtered = !suppression.is_empty();
     let implements_contract = if selection_filtered {
         None
     } else {
@@ -2093,6 +2138,7 @@ pub(super) fn run_verify_cli_from_source(
         &prepared,
         selection_filtered,
         implements_contract,
+        suppressed_implements_section(source, &suppression),
     );
     let (output, status) = finalize_cli_verification(
         path,
@@ -2150,6 +2196,15 @@ fn prepare_cli_verification_from_source(
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
+    // Under `--instances`/`--values` the native CLI does not replay the
+    // requirements `acceptance`/`forbidden` scenarios at all (the frozen
+    // Python reference's per-scenario skip was never ported). Until it is,
+    // the run says so instead of reading as if they had passed (#1008).
+    let requirement_traces_not_evaluated = if has_scope {
+        requirement_traces_not_evaluated_section(source)
+    } else {
+        None
+    };
     // `--instances`/`--values` scope overrides go through
     // `parse_kernel_source_with_bounds` (`load_model_scoped`), a separate
     // lowering entrypoint that does not apply to compose documents, so
@@ -2174,6 +2229,7 @@ fn prepare_cli_verification_from_source(
         model: snapshot_model,
         initial_state,
         compose_warnings,
+        requirement_traces_not_evaluated,
     })
 }
 
@@ -2421,6 +2477,7 @@ fn execute_cli_verification(
     prepared: &PreparedCliVerification,
     selection_filtered: bool,
     implements_contract: Option<fsl_core::ImplementsContract>,
+    suppressed_implements: Option<Value>,
 ) -> CommandResult {
     if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
         return (
@@ -2501,15 +2558,21 @@ fn execute_cli_verification(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
-    if !selection_filtered
-        && let Some(code) = decorate_default_cli_verification(
-            &mut output,
-            source,
-            model,
-            implements,
-            &prepared.compose_warnings,
-        )
-    {
+    // A selected run (#1008) keeps the `implements` key with the reason it
+    // was not evaluated instead of dropping it, and still gets the same
+    // warning finalization and compose-lowering warnings as a full run: those
+    // were computed regardless of the selection, and dropping them hid a
+    // `fair_not_inherited` warning behind `--property`.
+    if let Some(section) = suppressed_implements {
+        fslc_rust::verification_output::attach_not_evaluated(&mut output, "implements", section);
+    }
+    if let Some(code) = decorate_default_cli_verification(
+        &mut output,
+        source,
+        model,
+        implements,
+        &prepared.compose_warnings,
+    ) {
         return (output, code);
     }
     (output, status)
@@ -2566,6 +2629,13 @@ fn finalize_cli_verification(
             }),
         );
     }
+    if let Some(section) = &prepared.requirement_traces_not_evaluated {
+        fslc_rust::verification_output::attach_not_evaluated(
+            &mut output,
+            "requirement_traces",
+            section.clone(),
+        );
+    }
     add_snapshot_metadata(&mut output, options);
     if let Some(vacuity_status) = apply_vacuity_mode(&mut output, &options.vacuity) {
         status = vacuity_status;
@@ -2604,6 +2674,32 @@ fn finalize_cli_verification(
         verify_cache_store(key, xdepth, &output);
     }
     (output, status)
+}
+
+/// The `requirement_traces` section for a run that skips the requirements
+/// `acceptance`/`forbidden` replay, or `None` when the spec declares none.
+///
+/// A trace contract that does not even extract (a duplicate scenario id, for
+/// instance — an unscoped run rejects it with exit 2) still yields the
+/// section, without counts: the scoped run has not looked at it, and that
+/// must not read as "no scenarios declared".
+fn requirement_traces_not_evaluated_section(source: &str) -> Option<Value> {
+    let mut fields = Map::new();
+    match fsl_core::requirements_trace_contract(source) {
+        Ok(None) => return None,
+        Ok(Some(contract)) => {
+            if contract.acceptance.is_empty() && contract.forbidden.is_empty() {
+                return None;
+            }
+            fields.insert("acceptance".to_owned(), json!(contract.acceptance.len()));
+            fields.insert("forbidden".to_owned(), json!(contract.forbidden.len()));
+        }
+        Err(_) => {}
+    }
+    Some(fslc_rust::verification_output::not_evaluated_section(
+        &[fslc_rust::verification_output::NOT_EVALUATED_BOUNDS_OVERRIDE],
+        fields,
+    ))
 }
 
 fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {
