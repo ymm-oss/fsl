@@ -1,0 +1,22 @@
+// #1008: a sound seam, but an acceptance scenario whose `expect` is false.
+// An unscoped `verify` rejects it (exit 2); `--instances`/`--values` does not
+// replay it, and must say so in `requirement_traces`.
+requirements CountedReq {
+  implements CountedFlow from "abs.fsl" { maps auto }
+
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() maps bump() {
+    n = 0
+  }
+  invariant Small { n <= 3 }
+
+  acceptance AC-1 "bump sets two" {
+    bump()
+    expect n == 2
+  }
+}
+verify {
+  values Limit = 0..3
+}

@@ -1,0 +1,26 @@
+// #1008: two acceptance scenarios share an id, so the trace contract does not
+// extract at all. An unscoped `verify` rejects it (exit 2); a scoped run never
+// looks at it, and must still say the scenarios were not evaluated rather than
+// read as "no scenarios declared".
+requirements CountedReq {
+  implements CountedFlow from "abs.fsl" { maps auto }
+
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() maps bump() {
+    n = 0
+  }
+
+  acceptance AC-1 "bump keeps zero" {
+    bump()
+    expect n == 0
+  }
+  acceptance AC-1 "bump keeps zero again" {
+    bump()
+    expect n == 0
+  }
+}
+verify {
+  values Limit = 0..3
+}

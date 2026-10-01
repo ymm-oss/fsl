@@ -418,8 +418,9 @@ carried number (e.g. <code>Amount</code>, absent from a business abstract) appli
 impl only.</p>
 <p><code>fslc verify</code> still evaluates inline <code>implements</code> when only <code>--instances</code> /
 <code>--values</code> scope overrides are present. <code>--property</code>, <code>--exclude-property</code>, and
-<code>--from-state</code> continue to omit the <code>implements</code> field without recording a reason;
-that behavior is not treated as safe and remains an open contract decision.</p>
+<code>--from-state</code> do not evaluate it; the envelope then keeps the key as
+<code>implements: {"abs": ..., "result": "not_evaluated", "reason": ..., "reasons": [...]}</code>
+instead of omitting it (see "Checks a selected run does not evaluate" in §7).</p>
 <p><code>acceptance</code>/<code>forbidden</code> scenarios often hardcode ids/numbers from the spec's
 original world (<code>accept(2)</code>), which can fall outside a shrunken override
 (<code>--instances Case=1</code>). When overrides are active, a scenario whose replay
@@ -432,6 +433,14 @@ overrides — or for any other failure (a false <code>expect</code>, an unmet <c
 — behavior is unchanged: hard error. This is what makes <code>--instances Case=1
 --property &lt;Liveness&gt;</code> usable even when the spec's acceptance scenarios were
 written against the original <code>verify { instances Case = N }</code> bound.</p>
+<p><strong>Native CLI status (#1008).</strong> The native <code>fslc verify</code> does not implement the
+per-scenario downgrade above yet: with <code>--instances</code> / <code>--values</code> it does not
+replay the <code>acceptance</code>/<code>forbidden</code> scenarios at all. The envelope says so with
+<code>requirement_traces: {"result": "not_evaluated", "reason": "bounds_override",
+"acceptance": N, "forbidden": M, ...}</code>, and a scoped run must not be read as
+having replayed them. The paragraph above is the frozen Python reference's
+behavior (<code>tests/test_acceptance_override_skip.py</code>); porting it is an open
+follow-up.</p>
 <p><code>fair</code> is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 Fairness applies to a whole action instance. To model fairness only under a
@@ -1036,6 +1045,45 @@ it removes named invariants, <code>trans</code>, <code>leadsTo</code>, and <code
 from the run and from checked-property outputs (<code>invariants_checked</code>,
 <code>transitions_checked</code>, <code>leads_to</code>, and <code>reachables</code>). When <code>--property</code> and
 <code>--exclude-property</code> name the same property, exclusion wins.</p>
+<p><strong>Checks a selected run does not evaluate (#1008).</strong> Not executing a check is
+never evidence that it holds. When a <code>verify</code> option makes the run skip a
+declared check, the envelope keeps that check's key with
+<code>result: "not_evaluated"</code> and the cause instead of omitting it. The top-level
+<code>result</code> and the exit code are unchanged and speak only for what was checked.
+The complete list:</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Present when the spec declares</th>
+<th><code>reason</code> (option)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>implements</code></td>
+<td>an inline <code>implements</code></td>
+<td><code>property_selection</code> (<code>--property</code>), <code>property_exclusion</code> (<code>--exclude-property</code>), <code>from_state</code> (<code>--from-state</code>)</td>
+</tr>
+<tr>
+<td><code>requirement_traces</code></td>
+<td><code>acceptance</code> / <code>forbidden</code> scenarios</td>
+<td><code>bounds_override</code> (<code>--instances</code> / <code>--values</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>reasons</code> lists every cause that applies, in the table's order, and <code>reason</code>
+repeats the first. <code>implements</code> also carries <code>abs</code>; <code>requirement_traces</code> carries
+the <code>acceptance</code> and <code>forbidden</code> scenario counts (omitted when the scenario
+declarations do not even extract, e.g. a duplicate id an unscoped run rejects). A spec that declares no such
+check keeps the key absent, so a consumer can tell "nothing declared" from
+"declared but not evaluated". <code>not_evaluated</code> is never a pass: a consumer that
+accepts only <code>implements.result == "refines"</code> rejects it, and the seam is gated
+on an unfiltered <code>check</code>/<code>verify</code> or on <code>fslc chain</code>. No other option suppresses
+either check; an option that starts to must be added to this table. Warnings are
+not a selected check: a selected run reports the same compose-lowering warnings
+(<code>fair_not_inherited</code>) and the same <code>no_user_invariants</code> suppression as a full
+run.</p>
 <p><code>verify --engine induction --lemma "EXPR"</code> accepts repeatable auxiliary
 invariant candidates for an <code>unknown_cti</code> repair loop. Each expression is first
 proved independently against the original init/actions and implicit type
@@ -2237,12 +2285,14 @@ verify {
   needs a second gate of its own for the inline seam. An empty body
   (<code>implements X from "..." { }</code>) auto-generates identity refinement when process/action/stage
   names match. Inline refinement is <strong>not</strong> evaluated when <code>verify</code> is scoped with
-  <code>--property</code>, <code>--exclude-property</code>, or <code>--from-state</code>; the envelope omits <code>implements</code>
-  on those runs. <strong>A scoped run therefore cannot gate the seam</strong>: with <code>implements</code> absent,
-  <code>result</code> and the exit code speak only for the selected properties, so a broken seam passes
-  such a run. Gate on an unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code>. Whether those three
-  options should project the refinement or record why they skipped it is undecided
-  (<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Inside the <code>implements { }</code> block you write
+  <code>--property</code>, <code>--exclude-property</code>, or <code>--from-state</code>; the envelope then reports
+  <code>implements: {"result": "not_evaluated", "reason": ...}</code> instead of omitting the key
+  (§7, "Checks a selected run does not evaluate"). <strong>A selected run therefore cannot gate
+  the seam</strong>: <code>result</code> and the exit code speak only for the selected properties, so a broken
+  seam still passes such a run, but the envelope says the seam was not checked. Gate on an
+  unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code>. The decision for these three options is
+  suppress-with-reason (<code>docs/design/DESIGN-refinement.md</code>,
+  <a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Inside the <code>implements { }</code> block you write
   state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code>, the same
   correspondence syntax as a separate refinement file's <code>refinement_action</code>

@@ -55,7 +55,10 @@ All ordinary bounded checks still run: invariants, transition invariants,
 reachables, action coverage, deadlocks, and bounded liveness. Property filters,
 scope overrides, deadlock mode, and vacuity mode keep their existing meanings.
 Acceptance/forbidden self-checks and an `implements` seam remain spec-level
-checks; they are not rewritten as production-snapshot procedures.
+checks; they are not rewritten as production-snapshot procedures. The seam is
+therefore not evaluated on a snapshot run, and the envelope says so with
+`implements: {"result":"not_evaluated","reason":"from_state",...}` instead of
+omitting the key (#1008, `docs/design/DESIGN-refinement.md`).
 
 ## 4. Faithfulness and cache contract
 
