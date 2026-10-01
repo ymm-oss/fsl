@@ -405,20 +405,25 @@ fails *purely* because it references a value outside the overridden bounds
 (an out-of-range action argument, or an out-of-range index inside its
 `expect`) is downgraded per-scenario from a hard error to a skip, reported in
 the envelope's `warnings` (`{"kind": "acceptance_skipped"/"forbidden_skipped",
-"id": ..., "message": ...}`); the rest of the scenarios still run. Without
+"id": ..., "reference": ..., "message": ...}`, where `reference` names the
+out-of-range argument or index); the rest of the scenarios still run. Without
 overrides — or for any other failure (a false `expect`, an unmet `requires`)
-— behavior is unchanged: hard error. This is what makes `--instances Case=1
+— behavior is unchanged: hard error (exit 2, `trace_type: "acceptance"` /
+`"forbidden"`), including when the override equals the declared range. Every
+`fslc sweep` cell runs with overrides, so the same rule applies per cell: a
+failing in-range scenario makes the sweep return that error rather than
+`sweep_passed`. A forbidden scenario's *final* step is not excused this way:
+an out-of-range final call is a rejection, exactly as without overrides. This is what makes `--instances Case=1
 --property <Liveness>` usable even when the spec's acceptance scenarios were
 written against the original `verify { instances Case = N }` bound.
 
-**Native CLI status (#1008).** The native `fslc verify` does not implement the
-per-scenario downgrade above yet: with `--instances` / `--values` it does not
-replay the `acceptance`/`forbidden` scenarios at all. The envelope says so with
-`requirement_traces: {"result": "not_evaluated", "reason": "bounds_override",
-"acceptance": N, "forbidden": M, ...}`, and a scoped run must not be read as
-having replayed them. The paragraph above is the frozen Python reference's
-behavior (`tests/test_acceptance_override_skip.py`); porting it is an open
-follow-up.
+**Envelope (#1008, #1218).** When a scoped run skips any scenario this way,
+the envelope also keeps `requirement_traces: {"result": "not_evaluated",
+"reason": "bounds_override", "reasons": [...], "skipped": [{"kind", "id",
+"reference"}, ...]}` (§7, "Checks a selected run does not evaluate"); the key
+is absent when every scenario was replayed. The native CLI implements the rule
+above as stated, and the frozen Python reference
+(`tests/test_acceptance_override_skip.py`) agrees on its six cases.
 
 `fair` is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
@@ -985,12 +990,12 @@ The complete list:
 | Section | Present when the spec declares | `reason` (option) |
 |---|---|---|
 | `implements` | an inline `implements` | `property_selection` (`--property`), `property_exclusion` (`--exclude-property`), `from_state` (`--from-state`) |
-| `requirement_traces` | `acceptance` / `forbidden` scenarios | `bounds_override` (`--instances` / `--values`) |
+| `requirement_traces` | `acceptance` / `forbidden` scenarios, one of which `--instances` / `--values` put out of scope | `bounds_override` (`--instances` / `--values`) |
 
 `reasons` lists every cause that applies, in the table's order, and `reason`
 repeats the first. `implements` also carries `abs`; `requirement_traces` carries
-the `acceptance` and `forbidden` scenario counts (omitted when the scenario
-declarations do not even extract, e.g. a duplicate id an unscoped run rejects). A spec that declares no such
+`skipped`, one `{kind, id, reference}` entry per skipped scenario (the scenarios it
+does not list were replayed and passed). A spec that declares no such
 check keeps the key absent, so a consumer can tell "nothing declared" from
 "declared but not evaluated". `not_evaluated` is never a pass: a consumer that
 accepts only `implements.result == "refines"` rejects it, and the seam is gated
@@ -1045,8 +1050,9 @@ classifications, including `over_constrained`, are true failures and return
 
 Every sweep cell runs with `--instances`/`--values`, so a cell can report a
 declared check as `not_evaluated` (§7, "Checks a selected run does not
-evaluate"): `requirement_traces` whenever the spec has `acceptance`/`forbidden`
-scenarios, and `implements` under `--property`. The grid verdict does not
+evaluate"): `requirement_traces` when the cell's scope puts an
+`acceptance`/`forbidden` scenario out of range (§4; an in-range failing scenario
+is an error the sweep returns), and `implements` under `--property`. The grid verdict does not
 change, but the skip is not hidden behind it: each such cell's `summary` row
 carries the section name with the value `"not_evaluated"`, and
 `sweep.not_evaluated: {"sections": [...], "reasons": [...]}` is the union over

@@ -1936,14 +1936,18 @@ struct PreparedCliVerification {
     is_agent_document: bool,
     model: Result<KernelModel, SpecLoadError>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
+    /// Requirements scenarios a bounds-overridden run skipped because they
+    /// reference a value outside the overridden scope (#1218); every other
+    /// scenario was replayed. Always empty without `--instances`/`--values`.
+    requirement_trace_skips: Vec<fslc_rust::verification_output::SkippedRequirementTrace>,
     /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
     /// lowering the surface document, before `build_model` drops the per-
     /// component information (like constituent `fair` markers) that produced
     /// them. `model`/`fsl_runtime::verification_warnings` cannot recover them.
     compose_warnings: Vec<Value>,
-    /// The `requirement_traces` section of a run that did not replay the
-    /// spec's `acceptance`/`forbidden` scenarios (#1008); `None` when they
-    /// were replayed or there are none.
+    /// The `requirement_traces` section of a run that skipped some of the
+    /// spec's `acceptance`/`forbidden` scenarios as out of the overridden
+    /// scope (#1008, #1218); `None` when every scenario was replayed.
     requirement_traces_not_evaluated: Option<Value>,
 }
 
@@ -2244,6 +2248,24 @@ fn prepare_cli_verification_from_source(
     } else {
         None
     };
+    // #1218: `--instances`/`--values` replays the scenarios against the
+    // overridden model too. Only a scenario that references a value outside
+    // the overridden scope is skipped (with a warning); any other failure is
+    // the same hard error an unscoped run reports.
+    let requirement_trace_skips = match &snapshot_model {
+        Ok(model) if has_scope => {
+            match fslc_rust::verification_output::validate_requirement_trace_source_scoped(
+                &envelope(),
+                source,
+                model,
+            ) {
+                Ok((Some(failure), _)) => return Err((failure, 2)),
+                Ok((None, skipped)) => skipped,
+                Err(error) => return Err((semantic_error_output(&error), 2)),
+            }
+        }
+        _ => Vec::new(),
+    };
     if !has_scope && let Ok(model) = &snapshot_model {
         match validate_requirement_traces_from_source(path, source, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
@@ -2251,15 +2273,11 @@ fn prepare_cli_verification_from_source(
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
-    // Under `--instances`/`--values` the native CLI does not replay the
-    // requirements `acceptance`/`forbidden` scenarios at all (the frozen
-    // Python reference's per-scenario skip was never ported). Until it is,
-    // the run says so instead of reading as if they had passed (#1008).
-    let requirement_traces_not_evaluated = if has_scope {
-        requirement_traces_not_evaluated_section(source)
-    } else {
-        None
-    };
+    // A scenario skipped as out of the overridden scope was not evaluated,
+    // and the envelope says so instead of reading as if it had passed
+    // (#1008); the replayed ones already passed above (#1218).
+    let requirement_traces_not_evaluated =
+        requirement_traces_not_evaluated_section(&requirement_trace_skips);
     // `--instances`/`--values` scope overrides go through
     // `parse_kernel_source_with_bounds` (`load_model_scoped`), a separate
     // lowering entrypoint that does not apply to compose documents, so
@@ -2283,6 +2301,7 @@ fn prepare_cli_verification_from_source(
         is_agent_document,
         model: snapshot_model,
         initial_state,
+        requirement_trace_skips,
         compose_warnings,
         requirement_traces_not_evaluated,
     })
@@ -2662,6 +2681,22 @@ fn decorate_default_cli_verification(
     implements_exit
 }
 
+/// `Case=1, Amount=0..1`: the overrides a skip warning names (#1218).
+fn describe_scope_overrides(scope: &ScopeBounds) -> String {
+    scope
+        .instances
+        .iter()
+        .map(|(name, count)| format!("{name}={count}"))
+        .chain(
+            scope
+                .values
+                .iter()
+                .map(|(name, (lo, hi))| format!("{name}={lo}..{hi}")),
+        )
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn finalize_cli_verification(
     path: &Path,
     options: &CliVerifyOptions,
@@ -2670,6 +2705,23 @@ fn finalize_cli_verification(
     mut output: Value,
     mut status: i32,
 ) -> CommandResult {
+    if !prepared.requirement_trace_skips.is_empty()
+        && output.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(envelope) = output.as_object_mut()
+    {
+        let scope = describe_scope_overrides(&options.scope);
+        if let Value::Array(warnings) = envelope
+            .entry("warnings")
+            .or_insert_with(|| Value::Array(Vec::new()))
+        {
+            warnings.extend(
+                prepared
+                    .requirement_trace_skips
+                    .iter()
+                    .map(|skip| skip.warning(&scope)),
+            );
+        }
+    }
     if prepared.has_scope
         && output.get("result").and_then(Value::as_str) != Some("error")
         && let Some(envelope) = output.as_object_mut()
@@ -2731,26 +2783,30 @@ fn finalize_cli_verification(
     (output, status)
 }
 
-/// The `requirement_traces` section for a run that skips the requirements
-/// `acceptance`/`forbidden` replay, or `None` when the spec declares none.
+/// The `requirement_traces` section for a bounds-overridden run that skipped
+/// scenarios referencing a value outside the overridden scope (#1218), or
+/// `None` when it skipped none — every declared scenario was then replayed
+/// and passed, since an in-scope failure is a hard error before this point.
 ///
-/// A trace contract that does not even extract (a duplicate scenario id, for
-/// instance — an unscoped run rejects it with exit 2) still yields the
-/// section, without counts: the scoped run has not looked at it, and that
-/// must not read as "no scenarios declared".
-fn requirement_traces_not_evaluated_section(source: &str) -> Option<Value> {
-    let mut fields = Map::new();
-    match fsl_core::requirements_trace_contract(source) {
-        Ok(None) => return None,
-        Ok(Some(contract)) => {
-            if contract.acceptance.is_empty() && contract.forbidden.is_empty() {
-                return None;
-            }
-            fields.insert("acceptance".to_owned(), json!(contract.acceptance.len()));
-            fields.insert("forbidden".to_owned(), json!(contract.forbidden.len()));
-        }
-        Err(_) => {}
+/// The reason stays `bounds_override`: the override is what put the skipped
+/// scenarios out of scope. `skipped` lists each one with its out-of-scope
+/// reference, the same entries the `*_skipped` warnings carry.
+fn requirement_traces_not_evaluated_section(
+    skips: &[fslc_rust::verification_output::SkippedRequirementTrace],
+) -> Option<Value> {
+    if skips.is_empty() {
+        return None;
     }
+    let mut fields = Map::new();
+    fields.insert(
+        "skipped".to_owned(),
+        Value::Array(
+            skips
+                .iter()
+                .map(fslc_rust::verification_output::SkippedRequirementTrace::entry)
+                .collect(),
+        ),
+    );
     Some(fslc_rust::verification_output::not_evaluated_section(
         &[fslc_rust::verification_output::NOT_EVALUATED_BOUNDS_OVERRIDE],
         fields,

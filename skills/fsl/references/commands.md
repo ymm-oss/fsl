@@ -571,12 +571,19 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `N=5..1`) is a spec error, and it does not apply to a kernel `spec` whose
   domain is a raw `type X = lo..hi` literal. The effective override is echoed
   back as `bounds_overrides` in the JSON envelope. When an override is active,
-  the native CLI does **not** replay the `acceptance`/`forbidden` scenarios at
-  all and reports `requirement_traces: {result: "not_evaluated", reason:
-  "bounds_override", acceptance: N, forbidden: M}` — replay them on an
-  unscoped `check`/`verify`. (The per-scenario `acceptance_skipped` /
-  `forbidden_skipped` downgrade of `docs/manual/LANGUAGE.md` is the frozen
-  Python reference's behavior and is not ported yet.) When the spec has an inline `implements`, the
+  an `acceptance`/`forbidden` scenario that no longer fits the shrunken world
+  (a hardcoded id/number outside the overridden bounds, in a step argument or
+  inside its `expect`) is skipped per-scenario instead of hard-erroring the
+  whole `verify`, with a `warnings` entry (`kind: "acceptance_skipped"` /
+  `"forbidden_skipped"`, plus `reference` naming the out-of-range argument or
+  index) naming it; other scenarios still replay normally.
+  Without an override, or for a failure unrelated to bounds, the scenario
+  still hard-errors as before (exit 2) — also when the override equals the
+  declared range, and in every `sweep` cell, so a failing in-range scenario
+  never yields `verified` / `sweep_passed`. When any scenario was skipped,
+  the envelope also carries `requirement_traces: {result: "not_evaluated",
+  reason: "bounds_override", skipped: [{kind, id, reference}, ...]}`; the key
+  is absent when every scenario was replayed. When the spec has an inline `implements`, the
   override also propagates into the abstract spec (restricted to the
   entity/number names the abstract declares) so refinement is checked at the
   same world size on both sides — otherwise a shrunken impl vs a full-size
@@ -602,7 +609,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
   a missing file) is returned verbatim — exit code and `kind` unchanged.
   Cells always carry `--instances`/`--values`, so a check a cell skips
-  (`requirement_traces` for acceptance/forbidden scenarios, `implements` under
+  (`requirement_traces` for an out-of-scope acceptance/forbidden scenario, `implements` under
   `--property`) is surfaced, not hidden behind the grid verdict: the cell's
   `summary` row gets `"<section>": "not_evaluated"` and
   `sweep.not_evaluated: {sections, reasons}` is the union over cells (absent
@@ -793,10 +800,12 @@ Practical strategy:
   spec (see §7) — the file keeps its normal verify-block size for everything
   else. If the spec has `acceptance`/`forbidden` scenarios hardcoding ids from
   the original (larger) world, they are not a blocker: under an active
-  override the native `verify` does not replay them (the envelope says
-  `requirement_traces.result: "not_evaluated"`), so `--instances Case=1
-  --property <Liveness>` stays usable without editing those scenarios — replay
-  them on the unscoped run.
+  override a scenario whose id/number falls outside the shrunken scope is
+  skipped with an `acceptance_skipped` / `forbidden_skipped` warning (and
+  listed under `requirement_traces.skipped`), while in-range scenarios still
+  replay and still fail hard, so `--instances Case=1 --property <Liveness>`
+  stays usable without editing those scenarios — the skipped ones are checked
+  on the unscoped run.
 - Verify **safety separately on the full-size model** at the depth you need.
 - Use `--property <leadsToName>` to run a single liveness property in isolation
   while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.

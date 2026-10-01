@@ -564,13 +564,15 @@ The envelope keeps the key:
 - The Worker request has no selection options, so every Worker `verify` is a
   full run and never emits `not_evaluated` (`rust/fsl-wasm/src/lib.rs`).
 
-The same rule covers the one other check a native `verify` option skips: under
-`--instances` / `--values` the requirements `acceptance` / `forbidden` replay
-does not run, and the envelope reports
-`requirement_traces: {"result":"not_evaluated","reason":"bounds_override",...}`
-(`docs/manual/LANGUAGE.md` §7). Porting the frozen Python reference's
-per-scenario downgrade is a separate follow-up; until then the verdict is not
-changed.
+The same rule covers the one other check a native `verify` option can skip:
+under `--instances` / `--values` the requirements `acceptance` / `forbidden`
+scenarios are replayed against the overridden model, and only a scenario that
+references a value outside the overridden scope is skipped (#1218, the frozen
+Python reference's per-scenario downgrade). Such a skip is reported as
+`requirement_traces: {"result":"not_evaluated","reason":"bounds_override",
+"skipped":[{"kind","id","reference"}],...}` (`docs/manual/LANGUAGE.md` §7); an
+in-scope failure is the same exit-2 error an unscoped run reports, pinned by
+`rust/fslc/tests/issue_1218_acceptance_replay.rs`.
 
 Pinned by `rust/fslc/tests/issue_1008_not_evaluated.rs` (one detector per
 suppressor, whose cited mutation is restoring the silent skip, plus

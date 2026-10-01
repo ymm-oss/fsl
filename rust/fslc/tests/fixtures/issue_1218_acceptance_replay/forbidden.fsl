@@ -1,0 +1,20 @@
+// Port of FORBIDDEN_SRC: a forbidden scenario whose setup hardcodes id 1.
+requirements ForbiddenRepro {
+  entity Case
+  enum St { Waiting, Accepted, Responded }
+  state { cases: Map<Case, St> }
+  init { forall c: Case { cases[c] = Waiting } }
+  requirement REQ-1 "accept" {
+    action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  requirement REQ-2 "respond" {
+    action respond(c: Case) { requires cases[c] == Accepted  cases[c] = Responded }
+  }
+  forbidden FB-1 "cannot respond twice" {
+    accept(1)
+    respond(1)
+    respond(1)
+    expect rejected
+  }
+}
+verify { instances Case = 3 }

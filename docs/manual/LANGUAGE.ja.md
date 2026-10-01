@@ -391,19 +391,25 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 参照したことによる場合(範囲外の action 引数、または `expect` 内の範囲外インデックス)、
 そのシナリオはシナリオ単位でハードエラーからスキップへ降格され、エンベロープの
 `warnings`(`{"kind": "acceptance_skipped"/"forbidden_skipped",
-"id": ..., "message": ...}`)で報告されます。残りのシナリオは引き続き実行されます。
+"id": ..., "reference": ..., "message": ...}`。`reference` は範囲外の引数または
+インデックスを名指しします)で報告されます。残りのシナリオは引き続き実行されます。
 上書きなしの場合 — あるいはそれ以外の失敗(偽の `expect`、満たされない `requires`)
-の場合 — 挙動は変わらずハードエラーです。これにより、spec の acceptance シナリオが
+の場合 — 挙動は変わらずハードエラー(exit 2、`trace_type: "acceptance"` /
+`"forbidden"`)です。上書きが宣言と同じ範囲でも同じです。`fslc sweep` の各セルは
+上書き付きで走るので、同じ規則がセルごとに適用されます: 範囲内で失敗するシナリオが
+あれば、sweep は `sweep_passed` ではなくそのエラーを返します。forbidden シナリオの
+*最後の* step はこの方法では免除されません: 範囲外の最後の呼び出しは、上書きなしと
+同じく拒否として扱われます。これにより、spec の acceptance シナリオが
 元の `verify { instances Case = N }` 境界向けに書かれていても、`--instances Case=1
 --property <Liveness>` が使えます。
 
-**native CLI の現状(#1008)。** native の `fslc verify` は上のシナリオ単位の降格を
-まだ実装していません: `--instances` / `--values` のとき `acceptance`/`forbidden`
-シナリオを一切 replay しません。エンベロープはそれを
-`requirement_traces: {"result": "not_evaluated", "reason": "bounds_override",
-"acceptance": N, "forbidden": M, ...}` で示し、スコープ付きの run をシナリオを
-replay したものとして読んではいけません。上の段落は frozen Python 参照実装の挙動
-(`tests/test_acceptance_override_skip.py`)であり、移植は未着手の後続課題です。
+**エンベロープ(#1008、#1218)。** スコープ付きの run がこの方法でシナリオを1つでも
+スキップしたときは、エンベロープに `requirement_traces: {"result": "not_evaluated",
+"reason": "bounds_override", "reasons": [...], "skipped": [{"kind", "id",
+"reference"}, ...]}` も残ります(§7「選択した run が評価しない検査」)。すべての
+シナリオを replay したときはこのキーはありません。native CLI は上の規則をそのまま
+実装しており、frozen Python 参照実装(`tests/test_acceptance_override_skip.py`)とも
+その6ケースで一致します。
 
 `fair` は弱い公平性(weak fairness)のアノテーションです: その action インスタンス
 が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。
@@ -951,12 +957,12 @@ Public Kernel v2 はオプトインで、
 | セクション | spec が宣言しているとき | `reason`(オプション) |
 |---|---|---|
 | `implements` | インライン `implements` | `property_selection`(`--property`)、`property_exclusion`(`--exclude-property`)、`from_state`(`--from-state`) |
-| `requirement_traces` | `acceptance` / `forbidden` シナリオ | `bounds_override`(`--instances` / `--values`) |
+| `requirement_traces` | `acceptance` / `forbidden` シナリオのうち `--instances` / `--values` が範囲外にしたもの | `bounds_override`(`--instances` / `--values`) |
 
 `reasons` は当てはまる原因をすべて表の順に並べ、`reason` はその先頭を繰り返します。
-`implements` には `abs` も入り、`requirement_traces` には `acceptance` と `forbidden`
-のシナリオ数が入ります(シナリオ宣言そのものが取り出せない場合、たとえばスコープ無しの
-run が拒否する重複 id の場合は省略されます)。そうした検査を宣言していない spec ではキーは無いままなので、
+`implements` には `abs` も入り、`requirement_traces` には `skipped`(スキップした
+シナリオごとに `{kind, id, reference}` を1つ。載っていないシナリオは replay されて
+合格しています)が入ります。そうした検査を宣言していない spec ではキーは無いままなので、
 利用側は「何も宣言されていない」と「宣言されているが評価されていない」を区別できます。
 `not_evaluated` は決して合格ではありません: `implements.result == "refines"` だけを
 受け入れる利用側はこれを拒否し、seam のゲートはフィルタ無しの `check` / `verify`
@@ -1008,8 +1014,9 @@ classification の欠落・未知・混在（`over_constrained` を含む）は�
 
 sweep の各セルは `--instances`/`--values` 付きで走るので、セルが宣言済みの検査を
 `not_evaluated` として報告することがあります(§7「選択した run が評価しない検査」):
-spec に `acceptance`/`forbidden` シナリオがあれば `requirement_traces`、`--property`
-付きなら `implements` です。グリッドの verdict は変わりませんが、その裏に省略を
+セルのスコープが `acceptance`/`forbidden` シナリオを範囲外にすれば `requirement_traces`
+(§4。範囲内で失敗するシナリオは sweep が返すエラーです)、`--property` 付きなら
+`implements` です。グリッドの verdict は変わりませんが、その裏に省略を
 隠しません: そうしたセルの `summary` 行にはセクション名が値 `"not_evaluated"` で
 入り、`sweep.not_evaluated: {"sections": [...], "reasons": [...]}` が全セルの和集合
 (sections は整列、reasons は初出順)になります。どのセルも何も省略していなければ

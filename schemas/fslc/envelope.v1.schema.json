@@ -32,10 +32,22 @@
     },
     "requirement_traces": {
       "allOf": [{ "$ref": "#/$defs/notEvaluated" }],
+      "required": ["skipped"],
       "properties": {
         "reason": { "const": "bounds_override" },
-        "acceptance": { "type": "integer", "minimum": 0 },
-        "forbidden": { "type": "integer", "minimum": 0 }
+        "skipped": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["kind", "id", "reference"],
+            "properties": {
+              "kind": { "enum": ["acceptance", "forbidden"] },
+              "id": { "type": "string", "minLength": 1 },
+              "reference": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
       }
     },
     "versions": {

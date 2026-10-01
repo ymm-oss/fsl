@@ -496,7 +496,8 @@ pub const NOT_EVALUATED_PROPERTY_SELECTION: &str = "property_selection";
 pub const NOT_EVALUATED_PROPERTY_EXCLUSION: &str = "property_exclusion";
 /// `reason` for `verify --from-state`.
 pub const NOT_EVALUATED_FROM_STATE: &str = "from_state";
-/// `reason` for `verify --instances` / `--values`.
+/// `reason` for `verify --instances` / `--values`: a requirements scenario
+/// that references a value outside the overridden scope was skipped (#1218).
 pub const NOT_EVALUATED_BOUNDS_OVERRIDE: &str = "bounds_override";
 
 /// The abstraction name of a requirements document's inline `implements`, or
@@ -844,7 +845,6 @@ fn requirement_failure_base(
 ///
 /// Panics only if a requirements contract bypasses parser validation and carries
 /// an acceptance case without its required expectation.
-#[allow(clippy::too_many_lines)]
 pub fn validate_requirement_trace_source(
     envelope: &Map<String, Value>,
     source: &str,
@@ -855,6 +855,15 @@ pub fn validate_requirement_trace_source(
     else {
         return Ok((None, false));
     };
+    validate_requirement_trace_contract(envelope, &contract, model)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_requirement_trace_contract(
+    envelope: &Map<String, Value>,
+    contract: &fsl_core::RequirementsTraceContract,
+    model: &KernelModel,
+) -> Result<(Option<Value>, bool), String> {
     let has_contract = !contract.acceptance.is_empty() || !contract.forbidden.is_empty();
     for case in &contract.acceptance {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
@@ -890,21 +899,7 @@ pub fn validate_requirement_trace_source(
             .expectation
             .as_ref()
             .expect("acceptance contract always has an expectation");
-        let expression = match expectation {
-            fsl_core::RequirementsTraceExpectation::Expr(expression) => expression.clone(),
-            fsl_core::RequirementsTraceExpectation::Stage {
-                entity,
-                instance,
-                stage,
-            } => KernelExpr::Binary {
-                op: "==".to_owned(),
-                left: Box::new(KernelExpr::Index(
-                    Box::new(KernelExpr::Var(format!("{}_stage", entity.to_lowercase()))),
-                    Box::new(KernelExpr::Num(*instance)),
-                )),
-                right: Box::new(KernelExpr::Var(stage.clone())),
-            },
-        };
+        let expression = requirement_expectation_expr(expectation);
         let value = fsl_runtime::eval(
             &expression,
             &monitor.state,
@@ -1004,6 +999,301 @@ pub fn validate_requirement_trace_source(
         }
     }
     Ok((None, has_contract))
+}
+
+fn requirement_expectation_expr(
+    expectation: &fsl_core::RequirementsTraceExpectation,
+) -> KernelExpr {
+    match expectation {
+        fsl_core::RequirementsTraceExpectation::Expr(expression) => expression.clone(),
+        fsl_core::RequirementsTraceExpectation::Stage {
+            entity,
+            instance,
+            stage,
+        } => KernelExpr::Binary {
+            op: "==".to_owned(),
+            left: Box::new(KernelExpr::Index(
+                Box::new(KernelExpr::Var(format!("{}_stage", entity.to_lowercase()))),
+                Box::new(KernelExpr::Num(*instance)),
+            )),
+            right: Box::new(KernelExpr::Var(stage.clone())),
+        },
+    }
+}
+
+/// A requirements scenario that a bounds-overridden run did not replay
+/// because it references a value outside the overridden scope (#1218).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkippedRequirementTrace {
+    /// `"acceptance"` or `"forbidden"`.
+    pub kind: &'static str,
+    pub id: String,
+    /// The out-of-scope reference, in source terms (for example
+    /// `accept(2): argument 2 for 'c' is outside its domain`).
+    pub reference: String,
+}
+
+impl SkippedRequirementTrace {
+    /// `{kind, id, reference}`: this skip as a `requirement_traces.skipped`
+    /// entry (#1008, #1218).
+    #[must_use]
+    pub fn entry(&self) -> Value {
+        json!({
+            "kind": self.kind,
+            "id": self.id,
+            "reference": self.reference,
+        })
+    }
+
+    /// The `warnings` entry for this skip. `scope` describes the overrides
+    /// (`Case=1, Amount=0..1`); the message keeps the frozen Python
+    /// reference's wording and appends the reference that is out of scope.
+    #[must_use]
+    pub fn warning(&self, scope: &str) -> Value {
+        json!({
+            "kind": format!("{}_skipped", self.kind),
+            "id": self.id,
+            "reference": self.reference,
+            "message": format!(
+                "{} '{}' skipped: references values outside overridden bounds ({scope}): {}",
+                self.kind, self.id, self.reference
+            ),
+        })
+    }
+}
+
+/// Replay the requirements `acceptance`/`forbidden` scenarios under
+/// `--instances`/`--values` overrides (#1218, the frozen Python reference's
+/// per-scenario skip from #89).
+///
+/// Every scenario is replayed against the overridden `model`. One whose replay
+/// fails *purely* because it references a value outside the overridden scope
+/// — an action argument outside its parameter domain in an acceptance step or
+/// a forbidden setup step, or a map index outside its key domain in an
+/// acceptance `expect` — is skipped and returned; any other failure (a false
+/// `expect`, an unmet `requires`, an accepted forbidden step) is the same hard
+/// failure an unscoped run reports, in the same scenario order. A forbidden
+/// scenario's final step is not a reference that can be out of scope: an
+/// out-of-domain final call is rejected, exactly as without overrides.
+///
+/// # Errors
+///
+/// Returns a diagnostic when the trace contract cannot be parsed or a
+/// scenario cannot be executed for a reason other than an out-of-scope
+/// reference.
+pub fn validate_requirement_trace_source_scoped(
+    envelope: &Map<String, Value>,
+    source: &str,
+    model: &KernelModel,
+) -> Result<(Option<Value>, Vec<SkippedRequirementTrace>), String> {
+    let Some(contract) =
+        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    else {
+        return Ok((None, Vec::new()));
+    };
+    let mut skipped = Vec::new();
+    let cases = contract
+        .acceptance
+        .iter()
+        .map(|case| ("acceptance", case))
+        .chain(contract.forbidden.iter().map(|case| ("forbidden", case)));
+    for (kind, case) in cases {
+        let single = fsl_core::RequirementsTraceContract {
+            acceptance: if kind == "acceptance" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            forbidden: if kind == "forbidden" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+        };
+        let outcome = validate_requirement_trace_contract(envelope, &single, model);
+        if matches!(outcome, Ok((None, _))) {
+            continue;
+        }
+        if let Some(reference) = out_of_scope_reference(model, kind, case) {
+            skipped.push(SkippedRequirementTrace {
+                kind,
+                id: case.id.clone(),
+                reference,
+            });
+            continue;
+        }
+        let (failure, _) = outcome?;
+        return Ok((failure, skipped));
+    }
+    Ok((None, skipped))
+}
+
+/// The first reference of a failing scenario that lies outside `model`'s
+/// (overridden) scope, replaying it up to the first step that is not
+/// enabled; `None` when the failure has another cause.
+fn out_of_scope_reference(
+    model: &KernelModel,
+    kind: &str,
+    case: &fsl_core::RequirementsTraceCase,
+) -> Option<String> {
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).ok()?;
+    let setup = if kind == "forbidden" {
+        case.steps.len().saturating_sub(1)
+    } else {
+        case.steps.len()
+    };
+    for step in &case.steps[..setup] {
+        let (arguments, instance) = requirement_step_match(&monitor, step).ok()?;
+        if let Some(reference) = out_of_domain_argument(model, step, &arguments) {
+            return Some(reference);
+        }
+        let result = monitor.step(&instance?).ok()?;
+        if result.violation.is_some() {
+            return None;
+        }
+    }
+    if kind != "acceptance" {
+        return None;
+    }
+    // Only an `expect` that fails to *evaluate* can be excused: one that
+    // evaluates to `false` is a genuine failure even if a branch it never
+    // reached indexes out of scope.
+    let expression = requirement_expectation_expr(case.expectation.as_ref()?);
+    fsl_runtime::eval(
+        &expression,
+        &monitor.state,
+        &mut std::collections::BTreeMap::new(),
+        &monitor.model,
+        None,
+    )
+    .err()?;
+    out_of_domain_index(model, &monitor.state, &expression)
+        .map(|reference| format!("expect indexes {reference} outside its key domain"))
+}
+
+/// Describe the argument of `step` that no same-named action of `model`
+/// admits, or `None` when some action's parameter domains admit them all.
+fn out_of_domain_argument(
+    model: &KernelModel,
+    step: &fsl_core::RequirementsTraceStep,
+    arguments: &[FslValue],
+) -> Option<String> {
+    let monitor = fsl_runtime::Monitor::new(model.clone()).ok()?;
+    let actions = requirement_actions_by_name(&monitor, step)
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+        .collect::<Vec<_>>();
+    let mut first_outside = None;
+    for action in actions {
+        let outside = action
+            .params
+            .iter()
+            .zip(arguments)
+            .find(|(parameter, value)| !parameter_admits(model, parameter, value));
+        match outside {
+            None => return None,
+            Some((parameter, value)) => {
+                first_outside.get_or_insert((parameter.name().to_owned(), value.clone()));
+            }
+        }
+    }
+    let (name, value) = first_outside?;
+    let rendered = arguments
+        .iter()
+        .map(|argument| fsl_value_json(argument).to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "{}({rendered}): argument {} for '{name}' is outside its domain",
+        step.name,
+        fsl_value_json(&value)
+    ))
+}
+
+fn parameter_admits(model: &KernelModel, parameter: &ParamDef, value: &FslValue) -> bool {
+    match parameter {
+        // A domain that cannot be enumerated is not evidence of an
+        // out-of-scope reference; treat it as admitting the value so the
+        // failure stays a hard one.
+        ParamDef::Typed { ty, .. } => model
+            .domain_values(ty)
+            .map_or(true, |values| values.contains(value)),
+        ParamDef::Range { lo, hi, .. } => {
+            matches!(value, FslValue::Int(value) if lo <= value && value <= hi)
+        }
+    }
+}
+
+/// The first `map[key]` in `expression` whose key, evaluated in `state`, is
+/// not in the map's finite key domain. Sub-expressions under a binder are not
+/// inspected: their indices depend on the bound variable.
+fn out_of_domain_index(
+    model: &KernelModel,
+    state: &fsl_runtime::State,
+    expression: &KernelExpr,
+) -> Option<String> {
+    fsl_core::recursion::guard(|| {
+        let children: Vec<&KernelExpr> = match expression {
+            KernelExpr::Index(base, index) => {
+                let evaluate = |expression: &KernelExpr| {
+                    fsl_runtime::eval(
+                        expression,
+                        state,
+                        &mut std::collections::BTreeMap::new(),
+                        model,
+                        None,
+                    )
+                    .ok()
+                };
+                if let (Some(FslValue::Map(entries)), Some(key)) = (evaluate(base), evaluate(index))
+                    && !entries.contains_key(&key)
+                {
+                    return Some(fsl_core::source_expr_text(model, expression));
+                }
+                vec![base, index]
+            }
+            KernelExpr::Some(inner)
+            | KernelExpr::Field(inner, _)
+            | KernelExpr::Neg(inner)
+            | KernelExpr::Not(inner)
+            | KernelExpr::Is { expr: inner, .. }
+            | KernelExpr::UnaryNamed { expr: inner, .. } => vec![inner],
+            KernelExpr::Set(items)
+            | KernelExpr::Seq(items)
+            | KernelExpr::Call { args: items, .. } => items.iter().collect(),
+            KernelExpr::Struct { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
+            KernelExpr::Method { receiver, args, .. } => {
+                std::iter::once(&**receiver).chain(args.iter()).collect()
+            }
+            KernelExpr::Binary { left, right, .. }
+            | KernelExpr::BinaryNamed { left, right, .. } => {
+                vec![left, right]
+            }
+            KernelExpr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => vec![condition, then_expr, else_expr],
+            KernelExpr::TernaryNamed {
+                first,
+                second,
+                third,
+                ..
+            } => vec![first, second, third],
+            KernelExpr::Stage { entity, .. } => vec![entity],
+            KernelExpr::Num(_)
+            | KernelExpr::Bool(_)
+            | KernelExpr::None
+            | KernelExpr::Var(_)
+            | KernelExpr::EnumMember { .. }
+            | KernelExpr::Quantified { .. }
+            | KernelExpr::Aggregate { .. } => Vec::new(),
+        };
+        children
+            .into_iter()
+            .find_map(|child| out_of_domain_index(model, state, child))
+    })
 }
 
 /// Replay every symbolic witness through the solver-independent Monitor.
