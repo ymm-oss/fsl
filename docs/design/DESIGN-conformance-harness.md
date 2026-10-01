@@ -805,7 +805,7 @@ Three self-specs separate the contracts:
 |---|---|
 | `examples/self/fslc_session.fsl` | Real check/verify/induction and extended subcommand observations map to session actions, then replay conformantly. |
 | `examples/self/fslc_monitor.fsl` | Real cart replay observations map to `step_ok` / `step_reject` / `finish`, then replay conformantly. |
-| `examples/self/fslc_fold.fsl` | Real sweep, full five-layer chain (including nested implements and implementation-command results), and analyze-batch item verdicts map to success/failure/skipped/inconclusive folds; depth-limited sweep cells are neutral, while true failures remain sticky. The real top-level result and exact process exit select the final action. `fold_spec_has_native_proof_vacuity_and_mutation_evidence` product-gates bounded verification, induction, vacuity, and the failure-sticky finalize-guard mutants. |
+| `examples/self/fslc_fold.fsl` | Real sweep, full five-layer chain (including nested implements and implementation-command results), and analyze-batch item verdicts map to success/failure/skipped/inconclusive folds; depth-limited sweep cells are neutral, while true failures remain sticky. Sweep also emits `fold_scope_boundary` between `--instances`/`--values` scopes, and a closed scope with an inconclusive cell but no success cannot finalize pass (#1089); chain and analyze batch never emit it, so each folds as one scope. The real top-level result and exact process exit select the final action. `fold_spec_has_native_proof_vacuity_and_mutation_evidence` product-gates bounded verification, induction, vacuity, and the failure-sticky finalize-guard mutants. |
 
 The C7 properties have both an accepting observation and a rejecting control:
 

@@ -1064,12 +1064,18 @@ instead of folding it into <code>sweep_passed</code>, <code>sweep_inconclusive</
 <code>sweep_failed</code>.</p>
 <p>A <code>reachable_failed</code> cell is inconclusive only when its nonempty <code>unreached</code>
 array contains only <code>classification:"insufficient_depth"</code>. Such a cell remains
-in <code>sweep.results</code> but is not a counterexample: a grid with at least one
-determinate success and no true failure returns <code>sweep_passed</code>/exit 0; a grid
-containing only inconclusive cells returns <code>sweep_inconclusive</code>/exit 1 with
-<code>minimal_counterexample:null</code>. Missing, unknown, or mixed classifications,
-including <code>over_constrained</code>, are true failures and return <code>sweep_failed</code>/exit
-1.</p>
+in <code>sweep.results</code> but is not a counterexample. Inconclusive cells are settled
+per scope: a scope is one <code>--instances</code>/<code>--values</code> combination across the whole
+<code>--depth</code> range, and it is settled when any of its cells is a determinate
+success. A larger depth answers what a smaller depth left open; a different
+instance count or value range does not, so a success in one scope never settles
+another. With no true failure, a grid whose every scope is settled returns
+<code>sweep_passed</code>/exit 0; otherwise it returns <code>sweep_inconclusive</code>/exit 1 with
+<code>minimal_counterexample:null</code>. <code>sweep.inconclusive_scopes</code> lists every scope
+(<code>{instances, values}</code>) whose cells are all inconclusive, under any sweep
+result, and is <code>[]</code> when there is none. Missing, unknown, or mixed
+classifications, including <code>over_constrained</code>, are true failures and return
+<code>sweep_failed</code>/exit 1.</p>
 <p><code>diff</code> compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is <code>behavior_added</code>, while
 OLD→NEW failure is <code>behavior_removed</code>. It separately checks implication between
@@ -1129,7 +1135,7 @@ happens where the verification envelope is produced, so it is not confined to <c
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
 same exit from the folded verification envelope, and <code>sweep</code> reports <code>sweep_failed</code> for a true
-failure or <code>sweep_inconclusive</code> when every cell is depth-limited. The same
+failure or <code>sweep_inconclusive</code> when some scope has only depth-limited cells. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
 <code>docs/design/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
@@ -1174,13 +1180,13 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 </tr>
 <tr>
 <td><code>sweep_passed</code></td>
-<td>A sweep grid has no true failure and at least one determinate success; depth-limited observations remain in <code>sweep.results</code></td>
+<td>A sweep grid has no true failure and every <code>--instances</code>/<code>--values</code> scope has a determinate success at some depth; depth-limited observations remain in <code>sweep.results</code></td>
 <td>Inspect the recorded grid; this is not an unbounded proof</td>
 </tr>
 <tr>
 <td><code>sweep_inconclusive</code></td>
-<td>Every sweep cell is <code>reachable_failed</code> with only <code>insufficient_depth</code> classifications; <code>minimal_counterexample</code> is null</td>
-<td>Raise <code>--depth</code> or adjust the sweep bounds, then rerun</td>
+<td>No true failure, but at least one <code>--instances</code>/<code>--values</code> scope has only <code>reachable_failed</code> cells with only <code>insufficient_depth</code> classifications; those scopes are listed in <code>sweep.inconclusive_scopes</code> and <code>minimal_counterexample</code> is null</td>
+<td>Raise <code>--depth</code> for the listed scopes or adjust the sweep bounds, then rerun</td>
 </tr>
 <tr>
 <td><code>sweep_failed</code></td>

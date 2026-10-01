@@ -990,7 +990,21 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
         vacuity.output
     );
 
-    let mutation = run_cli(&strings(&["mutate", FOLD_SPEC, "--depth", "8"]));
+    assert_fold_mutation_evidence();
+}
+
+/// Mutation evidence for the fold self-spec's finalize guards.
+fn assert_fold_mutation_evidence() {
+    // The external mutants drop one disjunct each from finalize_fail's guard
+    // (#1089); the built-in catalog only removes or negates whole guards.
+    let mutation = run_cli(&strings(&[
+        "mutate",
+        FOLD_SPEC,
+        "--depth",
+        "8",
+        "--from",
+        "rust/fslc/tests/fixtures/fslc_fold_finalize_fail_disjuncts.jsonl",
+    ]));
     assert_eq!(
         (mutation.output["result"].as_str(), mutation.exit_code),
         (Some("mutated"), 0)
@@ -1007,40 +1021,69 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
         "fold mutation kill rate is too weak: {}",
         mutation.output
     );
+    // (target, killing property, what a surviving mutant would let through).
+    // The third guard (`requires scope_success or not scope_inconclusive`) is
+    // the all-inconclusive-cannot-pass fix, the same reward-test hole #1080's
+    // review flagged for the all-failure case; the fourth (`requires not
+    // unsettled_seen`) is #1089's per-scope rule, without which a success in
+    // one sweep scope could absorb another scope's inconclusive cells.
+    let guards = [
+        (
+            "finalize_pass requires #2",
+            "FailureIsSticky",
+            "failure-sticky",
+        ),
+        (
+            "finalize_pass requires #3",
+            "FinalizeAgreesWithFolded",
+            "inconclusive-cannot-pass",
+        ),
+        (
+            "finalize_pass requires #4",
+            "FinalizeAgreesWithFolded",
+            "unsettled-scope-cannot-pass",
+        ),
+    ];
+    let mutants = mutation.output["mutants"]
+        .as_array()
+        .expect("mutation rows");
+    // Dropping either new finalize_fail disjunct only disables failing, so no
+    // safety property can see it; each is pinned by a reachable fail witness
+    // that no other disjunct can enable.
+    for (id, killed_by) in [
+        (
+            "finalize_fail_drop_unsettled_seen",
+            "ReachFailOnClosedUnsettledScope",
+        ),
+        (
+            "finalize_fail_drop_open_unsettled_scope",
+            "ReachFailOnOpenUnsettledScope",
+        ),
+    ] {
+        assert!(
+            mutants.iter().any(|mutant| {
+                mutant["id"] == id
+                    && mutant["source"] == "external"
+                    && mutant["status"] == "killed"
+                    && mutant["killed_by"] == killed_by
+            }),
+            "external mutant {id} was not killed by {killed_by}: {}",
+            mutation.output
+        );
+    }
     for operator in ["requires_remove", "requires_negate"] {
-        assert!(
-            mutation.output["mutants"]
-                .as_array()
-                .expect("mutation rows")
-                .iter()
-                .any(|mutant| {
+        for (target, killed_by, guard) in guards {
+            assert!(
+                mutants.iter().any(|mutant| {
                     mutant["op"] == operator
-                        && mutant["target"] == "finalize_pass requires #2"
+                        && mutant["target"] == target
                         && mutant["status"] == "killed"
-                        && mutant["killed_by"] == "FailureIsSticky"
+                        && mutant["killed_by"] == killed_by
                 }),
-            "{operator} of the failure-sticky finalize guard survived: {}",
-            mutation.output
-        );
-        // finalize_pass's third guard (`requires success_seen or not
-        // inconclusive_seen`) is the all-inconclusive-cannot-pass fix; a
-        // surviving mutant here means an all-inconclusive fold could
-        // wrongly finalize pass, the same reward-test hole #1080's review
-        // flagged for the all-failure case.
-        assert!(
-            mutation.output["mutants"]
-                .as_array()
-                .expect("mutation rows")
-                .iter()
-                .any(|mutant| {
-                    mutant["op"] == operator
-                        && mutant["target"] == "finalize_pass requires #3"
-                        && mutant["status"] == "killed"
-                        && mutant["killed_by"] == "FinalizeAgreesWithFolded"
-                }),
-            "{operator} of the inconclusive-cannot-pass finalize guard survived: {}",
-            mutation.output
-        );
+                "{operator} of the {guard} finalize guard survived: {}",
+                mutation.output
+            );
+        }
     }
 }
 
@@ -1080,6 +1123,40 @@ fn fold_classifier_is_fail_closed() {
     }
 }
 
+/// Sweep's fold trace: every cell's verdict, with `fold_scope_boundary`
+/// between consecutive cells whose `--instances`/`--values` scope differs.
+/// Depth cells of one scope share a scope (#1089); `run_sweep` emits a scope's
+/// depth cells contiguously, which this adapter checks rather than assumes.
+fn sweep_fold_trace(top: &RawCliOutput) -> Result<Vec<Value>, String> {
+    let results = top.output["sweep"]["results"]
+        .as_array()
+        .ok_or_else(|| format!("sweep results missing: {}", top.output))?;
+    let mut trace = Vec::new();
+    let mut closed_scopes = Vec::new();
+    let mut open_scope: Option<Value> = None;
+    for entry in results {
+        let scope = json!({
+            "instances": entry["scope"]["instances"],
+            "values": entry["scope"]["values"],
+        });
+        if open_scope.as_ref() != Some(&scope) {
+            if closed_scopes.contains(&scope) {
+                return Err(format!(
+                    "sweep scope {scope} is not contiguous: {}",
+                    top.output
+                ));
+            }
+            if let Some(previous) = open_scope.replace(scope) {
+                closed_scopes.push(previous);
+                trace.push(json!({"action":"fold_scope_boundary"}));
+            }
+        }
+        trace.push(fold_action(&entry["verification"])?);
+    }
+    trace.push(finalize_action(CompoundCommand::Sweep, top)?);
+    Ok(trace)
+}
+
 #[test]
 fn sweep_subverdicts_conform_to_the_fold_model() {
     let cart_v1 = run_cli(&strings(&["sweep", "specs/cart_v1.fsl"]));
@@ -1088,14 +1165,7 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "{}",
         cart_v1.output
     );
-    let cart_v1_items = cart_v1.output["sweep"]["results"]
-        .as_array()
-        .expect("cart_v1 sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
-    let cart_v1_trace =
-        fold_trace(CompoundCommand::Sweep, &cart_v1_items, &cart_v1).expect("map cart_v1 sweep");
+    let cart_v1_trace = sweep_fold_trace(&cart_v1).expect("map cart_v1 sweep");
     assert_conformant(FOLD_SPEC, &cart_v1_trace, "cart_v1 sweep fold");
 
     let passed = run_cli(&strings(&[
@@ -1104,14 +1174,7 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "--depth",
         "0..3",
     ]));
-    let passed_items = passed.output["sweep"]["results"]
-        .as_array()
-        .expect("clean sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
-    let passed_trace =
-        fold_trace(CompoundCommand::Sweep, &passed_items, &passed).expect("map clean sweep");
+    let passed_trace = sweep_fold_trace(&passed).expect("map clean sweep");
     assert_conformant(FOLD_SPEC, &passed_trace, "clean sweep fold");
 
     let failed = run_cli(&strings(&[
@@ -1121,21 +1184,16 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "0..3",
     ]));
     assert_eq!(failed.output["result"], "sweep_failed", "{}", failed.output);
-    let failed_items = failed.output["sweep"]["results"]
-        .as_array()
-        .expect("failed sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
     assert!(
-        failed_items
+        failed.output["sweep"]["results"]
+            .as_array()
+            .expect("failed sweep results")
             .iter()
-            .any(|item| fold_result_class(item) == Ok(FoldClass::Failure)),
+            .any(|entry| fold_result_class(&entry["verification"]) == Ok(FoldClass::Failure)),
         "failed sweep must expose a failure item: {}",
         failed.output
     );
-    let failed_trace =
-        fold_trace(CompoundCommand::Sweep, &failed_items, &failed).expect("map failed sweep");
+    let failed_trace = sweep_fold_trace(&failed).expect("map failed sweep");
     assert_conformant(FOLD_SPEC, &failed_trace, "failed sweep fold");
     assert_nonconformant(
         FOLD_SPEC,
@@ -1149,19 +1207,54 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "{}",
         inconclusive.output
     );
-    let inconclusive_items = inconclusive.output["sweep"]["results"]
-        .as_array()
-        .expect("inconclusive sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
-    let inconclusive_trace = fold_trace(CompoundCommand::Sweep, &inconclusive_items, &inconclusive)
-        .expect("map inconclusive sweep");
+    let inconclusive_trace = sweep_fold_trace(&inconclusive).expect("map inconclusive sweep");
     assert_conformant(FOLD_SPEC, &inconclusive_trace, "inconclusive sweep fold");
     assert_nonconformant(
         FOLD_SPEC,
         &rejected_finalize_pass(&inconclusive_trace),
         "all-inconclusive sweep cannot finalize pass",
+    );
+
+    // #1089: depth-limited values scopes followed by successful ones. The
+    // real `sweep_inconclusive` replays conformantly only because the scope
+    // boundaries keep the later successes from settling the earlier scopes.
+    let unsettled = run_cli(&strings(&[
+        "sweep",
+        "rust/fslc/tests/fixtures/sweep_values_scope_inconclusive.fsl",
+        "--values",
+        "Amount=1..5",
+        "--depth",
+        "3..3",
+    ]));
+    assert_eq!(
+        (unsettled.output["result"].as_str(), unsettled.exit_code),
+        (Some("sweep_inconclusive"), 1),
+        "{}",
+        unsettled.output
+    );
+    let unsettled_trace = sweep_fold_trace(&unsettled).expect("map unsettled-scope sweep");
+    assert!(
+        unsettled_trace.contains(&json!({"action":"fold_sub_success"}))
+            && unsettled_trace.contains(&json!({"action":"fold_scope_boundary"})),
+        "unsettled-scope sweep must fold a success and a scope boundary: {unsettled_trace:?}"
+    );
+    assert_conformant(FOLD_SPEC, &unsettled_trace, "unsettled-scope sweep fold");
+    assert_nonconformant(
+        FOLD_SPEC,
+        &rejected_finalize_pass(&unsettled_trace),
+        "a success in another scope cannot settle an inconclusive scope",
+    );
+    // Control: without the boundaries the same cells form one settled scope,
+    // so the model rejects the real `sweep_inconclusive` verdict.
+    let flat_trace = unsettled_trace
+        .iter()
+        .filter(|action| **action != json!({"action":"fold_scope_boundary"}))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_nonconformant(
+        FOLD_SPEC,
+        &flat_trace,
+        "scope boundaries are what make the unsettled verdict conformant",
     );
 }
 

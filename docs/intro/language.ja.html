@@ -1031,9 +1031,16 @@ semantics / io / vacuous / …)を返した場合、それは反例ではあり�
 <code>sweep_failed</code> のいずれにも畳み込みません。</p>
 <p><code>reachable_failed</code> のセルが不確定なのは、空でない <code>unreached</code> 配列の全要素が
 <code>classification:"insufficient_depth"</code> のときだけです。このセルは
-<code>sweep.results</code> に残りますが反例ではありません。真の失敗がなく、決定済みの成功が
-1件以上あるグリッドは <code>sweep_passed</code> / exit 0 になります。全セルが不確定なら
-<code>sweep_inconclusive</code> / exit 1 となり、<code>minimal_counterexample:null</code> です。
+<code>sweep.results</code> に残りますが反例ではありません。不確定なセルはスコープごとに
+決着します。スコープとは <code>--instances</code>/<code>--values</code> の1つの組み合わせを <code>--depth</code>
+の全範囲にわたって見たもので、そのセルのどれかが決定済みの成功なら決着します。
+大きい深さは小さい深さが残した問いに答えますが、別のインスタンス数や値域は
+答えません。したがって、あるスコープの成功が別のスコープを決着させることは
+ありません。真の失敗がなく、すべてのスコープが決着したグリッドは
+<code>sweep_passed</code> / exit 0 になります。そうでなければ <code>sweep_inconclusive</code> / exit 1
+となり、<code>minimal_counterexample:null</code> です。<code>sweep.inconclusive_scopes</code> は、
+全セルが不確定なスコープ(<code>{instances, values}</code>)を sweep の result によらず
+すべて列挙し、該当がなければ <code>[]</code> です。
 classification の欠落・未知・混在（<code>over_constrained</code> を含む）は真の失敗として
 <code>sweep_failed</code> / exit 1 になります。</p>
 <p><code>diff</code> は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
@@ -1091,7 +1098,7 @@ inline <code>implements</code> が top-level <code>result</code> へ伝播する
 生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
 baseline の verdict をそのまま返し(baseline が <code>verified</code> でなくなるため変異を1つも生成しません)、
 <code>ledger</code> と <code>fslc html</code> は畳み込まれた検証封筒から同じ exit を引き継ぎ、<code>sweep</code> は
-真の失敗なら <code>sweep_failed</code>、全セルが深さ不足なら <code>sweep_inconclusive</code> を返します。同じ <code>2</code> の
+真の失敗なら <code>sweep_failed</code>、深さ不足のセルしかないスコープがあれば <code>sweep_inconclusive</code> を返します。同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/design/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1136,13 +1143,13 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 </tr>
 <tr>
 <td><code>sweep_passed</code></td>
-<td>sweep グリッドに真の失敗がなく、決定済みの成功が1件以上ある。深さ不足の観測は <code>sweep.results</code> に残る</td>
+<td>sweep グリッドに真の失敗がなく、すべての <code>--instances</code>/<code>--values</code> スコープがいずれかの深さで決定済みの成功を持つ。深さ不足の観測は <code>sweep.results</code> に残る</td>
 <td>記録されたグリッドを確認する。これは非有界の証明ではない</td>
 </tr>
 <tr>
 <td><code>sweep_inconclusive</code></td>
-<td>すべての sweep セルが <code>insufficient_depth</code> だけを持つ <code>reachable_failed</code> で、<code>minimal_counterexample</code> は null</td>
-<td><code>--depth</code> を上げるか sweep 境界を調整して再実行する</td>
+<td>真の失敗はないが、<code>insufficient_depth</code> だけを持つ <code>reachable_failed</code> のセルしかない <code>--instances</code>/<code>--values</code> スコープが1つ以上ある。そのスコープは <code>sweep.inconclusive_scopes</code> に列挙され、<code>minimal_counterexample</code> は null</td>
+<td>列挙されたスコープの <code>--depth</code> を上げるか sweep 境界を調整して再実行する</td>
 </tr>
 <tr>
 <td><code>sweep_failed</code></td>
