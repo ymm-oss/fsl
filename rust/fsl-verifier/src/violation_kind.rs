@@ -93,7 +93,9 @@ pub const NON_HELPFUL_ACTION_INCREASES_MEASURE: &str = "non_helpful_action_incre
 /// A bounded search found a state with zero enabled actions (outside any
 /// declared `terminal` condition). Not a `Violation`-shaped struct field --
 /// `fslc`'s `verification_output.rs` renders this directly from
-/// `BmcResult::deadlock_trace`.
+/// `BmcResult::deadlock_trace`. Also a `RankFailure.kind` (`induction.rs`):
+/// a ranked `leadsTo` without `helpful` can be pending in an invariant state
+/// with no enabled action (#1189).
 pub const DEADLOCK: &str = "deadlock";
 
 /// Every value the constants above declare, in a stable order. Exhaustive by

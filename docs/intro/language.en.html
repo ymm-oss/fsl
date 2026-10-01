@@ -98,6 +98,12 @@
   terminal { &lt;expr&gt; }                   // intended terminal states (excluded from deadlock checking)
 }
 </code></pre>
+<p>Property names (<code>invariant</code>, <code>trans</code>, <code>unless</code>, <code>reachable</code>, <code>leadsTo</code>, and
+<code>until</code>) share one namespace within a spec: results, <code>--property</code> selection, and
+the Public Kernel are keyed by that name, so reusing it — within one kind or
+across kinds — is a <code>kind: "semantics"</code> check-time error located at the later
+declaration, naming the earlier one's location. An <code>until &lt;Name&gt;</code> also claims
+<code>&lt;Name&gt;_until_safety</code>, the name of the <code>trans</code> it lowers to (#1192).</p>
 <p>The optional string after the spec name is a <strong>spec-level tag</strong>
 (<code>"&lt;kind&gt;: &lt;intent&gt;"</code>, e.g. <code>spec ReturnUI "ui: screen flow" { … }</code>). Like the
 per-declaration tags, it is <strong>metadata only</strong> — never verified — and is surfaced by
