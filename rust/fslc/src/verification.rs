@@ -1377,7 +1377,9 @@ fn adjudicate_lemma(
             });
         }
     };
-    match block_on_native(fsl_verifier::prove_induction(
+    // Lemma truth only: the definedness obligation is asked in the target
+    // run, where the user invariants are in scope (#1196).
+    match block_on_native(fsl_verifier::prove_induction_invariants(
         &candidate,
         &mut solver,
         k_ind,

@@ -40,6 +40,10 @@ impl Drop for Fixture {
 }
 
 fn verify(fixture: &Fixture, engine: &str, depth: usize) -> (Value, i32) {
+    verify_with(fixture, engine, depth, &[])
+}
+
+fn verify_with(fixture: &Fixture, engine: &str, depth: usize, extra: &[&str]) -> (Value, i32) {
     let depth = depth.to_string();
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args([
@@ -53,6 +57,7 @@ fn verify(fixture: &Fixture, engine: &str, depth: usize) -> (Value, i32) {
             "ignore",
             "--no-cache",
         ])
+        .args(extra)
         .output()
         .expect("run native CLI");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -217,4 +222,122 @@ fn unreachable_partial_state_is_excluded_by_an_auxiliary_invariant() {
     let (output, status) = verify(&fixture, "induction", 2);
     assert_eq!(output["result"], "proved", "{output:#}");
     assert_eq!(status, 0, "{output:#}");
+}
+
+/// Review F1: the k-induction chain premises must not leak into the
+/// definedness queries. Here no `Inv` state has a 2-step successor chain
+/// (`P` excludes `x == 2`, the only successor of `x == 1` through `bad`, and
+/// `t` needs `x == 3`), so with the chain still asserted every definedness
+/// query would be vacuously `unsat`. `bad`'s guard divides by `d == 0` at
+/// `x == 1` (BMC step 1 → `partial_op` at step 2).
+const K_CHAIN: &str = r"
+spec KChain {
+  state { x: 0..3, d: 0..1 }
+  init { x = 0  d = 1 }
+  action go() { requires x == 0  x = 1  d = 0 }
+  action bad() { requires x == 1 and 1 / d > 1 and 1 / d < 1  x = 2 }
+  action t() { requires x == 3  x = 2 }
+  invariant P { x != 2 }
+}
+";
+
+#[test]
+fn an_unsatisfiable_k_chain_does_not_make_definedness_vacuous() {
+    let fixture = Fixture::new("k-chain", K_CHAIN);
+    let (output, status) = verify_with(&fixture, "induction", 1, &["--k", "2"]);
+    assert_partial_cti(&output, status, "_partial_bad", "bad");
+    let (bmc, _) = verify(&fixture, "bmc", 2);
+    assert_ne!(bmc["result"], "verified", "{bmc:#}");
+
+    // `--depth 0`: no base step reaches the guard; the step case alone must.
+    let fixture = Fixture::new(
+        "depth-zero",
+        r"
+spec DepthZero {
+  state { x: 0..3, d: 0..1 }
+  init { x = 1  d = 0 }
+  action bad() { requires 1 / d > 1 and 1 / d < 1  x = 2 }
+  invariant P { x <= 3 }
+}
+",
+    );
+    let (output, status) = verify(&fixture, "induction", 0);
+    assert_partial_cti(&output, status, "_partial_bad", "bad");
+}
+
+/// Review F2: `--lemma` adjudication asks only the lemma's truth; the
+/// division in `step` is protected by the user invariant `DPos`, which the
+/// lemma's candidate model does not contain.
+#[test]
+fn lemma_adjudication_does_not_ask_definedness_without_the_user_invariants() {
+    let fixture = Fixture::new(
+        "lemma",
+        r"
+spec LemmaReject {
+  state { x: 0..10, y: 0..10, d: 0..5 }
+  init { x = 0  y = 0  d = 1 }
+  action step() { requires x < 10 and x / d < 100  x = x + 1  y = y + 1 }
+  invariant DPos { d >= 1 }
+  invariant TopEq { x == 10 => y == 10 }
+}
+",
+    );
+    let (output, status) = verify_with(&fixture, "induction", 2, &["--lemma", "x == y"]);
+    assert_eq!(output["result"], "proved", "{output:#}");
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["lemmas"][0]["status"], "proved", "{output:#}");
+}
+
+/// `n` walks 0 → 1 → 2 while `q` goes [] → [1] → []; the size invariants
+/// keep every action defined, and each `PROBE` reaches `q.head()` only at
+/// `n == 2` (BMC step 2), beyond `--depth 1`. Each probe is `... or true` /
+/// `... and false` so its totalized truth is trivially inductive and only
+/// the definedness obligation can reject it.
+const SEQ_WALK: &str = r"
+spec SeqWalk {
+  state { q: Seq<Int, 2>, n: 0..2 }
+  init { q = Seq {}  n = 0 }
+  action add() { requires n == 0  q = q.push(1)  n = 1 }
+  action drop() { requires n == 1  q = q.pop()  n = 2 }
+  invariant EmptyAtZero { n != 0 or q.size() == 0 }
+  invariant OneAtOne { n != 1 or q.size() == 1 }
+  PROBE
+}
+";
+
+#[test]
+fn property_context_partial_operations_are_obligations() {
+    for (label, probe, name) in [
+        (
+            "invariant",
+            "invariant HeadProbe { n == 0 or q.head() >= 0 or true }",
+            "_partial_property_HeadProbe",
+        ),
+        (
+            "leadsto",
+            "leadsTo HeadTrigger { n >= 1 and q.head() > 5 and false ~> n == 2 }",
+            "_partial_property_HeadTrigger",
+        ),
+        (
+            "trans",
+            "trans HeadStep { n == 0 or old(n) == 0 or q.head() >= 0 or true }",
+            "_partial_property_HeadStep",
+        ),
+    ] {
+        let fixture = Fixture::new(label, &SEQ_WALK.replace("PROBE", probe));
+        let (output, status) = verify(&fixture, "induction", 1);
+        assert_eq!(status, 1, "{label}: {output:#}");
+        assert_eq!(output["result"], "unknown_cti", "{label}: {output:#}");
+        assert_eq!(
+            output["violation_kind"], "partial_op",
+            "{label}: {output:#}"
+        );
+        assert_eq!(output["invariant"], name, "{label}: {output:#}");
+        assert!(output.get("last_action").is_none(), "{label}: {output:#}");
+        // The same state is a real BMC `partial_op` once it is within depth.
+        let (bmc, _) = verify(&fixture, "bmc", 3);
+        assert_eq!(bmc["result"], "violated", "{label}: {bmc:#}");
+        assert_eq!(bmc["violation_kind"], "partial_op", "{label}: {bmc:#}");
+        assert_eq!(bmc["invariant"], name, "{label}: {bmc:#}");
+    }
 }

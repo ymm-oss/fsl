@@ -10,4 +10,11 @@ same short-circuit semantics as BMC (`d != 0 and x / d < 100` stays
 `proved`). A failure is `unknown_cti` with `violation_kind: "partial_op"` and
 `invariant: "_partial_<action>"` / `"_partial_property_<name>"`; when the state
 is unreachable, an auxiliary invariant that excludes it (e.g. `d != 0`)
-restores `proved`. The frozen Python reference still reports `proved`.
+restores `proved`. The k-induction chain premises are now popped before
+this obligation and the ranked `leadsTo` proof reuse the solver, so an
+unsatisfiable chain no longer makes them vacuous. `--lemma` adjudication still
+proves only the lemma's truth; definedness is checked in the target run.
+`--property <invariant>` (including `sweep --property`) narrows the premise to
+the selected invariant, so a division only a dropped invariant protects is now
+reported there as `_partial_<action>`. The frozen Python reference still
+reports `proved`.

@@ -262,6 +262,7 @@ The pre-pass is wired into the CLI's BMC path (`solve_bmc` in
 `rust/fslc/src/verification.rs`). The library entry points `verify_bounded*`
 and their other callers (the browser worker, `refine`, causal and mutation
 helpers) keep the full search.
+
 ### 2.6 Definedness obligation (#1196)
 
 The step case evaluates guards, bodies, and properties with the totalizing
@@ -300,7 +301,26 @@ independent of the base depth. `sat` is returned as `unknown_cti` with
 unreachable, like any CTI, and an auxiliary invariant that excludes it
 restores `proved`. When the undefined state is within `--depth`, the base
 case reports it first. The obligation is 1-step (it does not use the
-`--k` chain), which keeps it independent of the base depth.
+`--k` chain), which keeps it independent of the base depth. The k-induction
+premises (Inv and T over the `ind*` chain) are asserted inside a solver scope
+that is popped before this obligation and before the ranked-`leadsTo` proof
+reuse the solver; otherwise an unsatisfiable chain (no Inv state with k
+successors) would make every later query vacuously `unsat`.
+
+Scope of the premise: `Inv` is the set of invariants in the run's model.
+`--lemma` adjudication proves only the lemma's truth
+(`prove_induction_invariants`, no definedness), because its candidate model
+drops the user invariants and would otherwise reject a lemma whose actions are
+protected by one of them; a used lemma joins the target run as an auxiliary
+invariant, where this obligation is checked. `--property <invariant>` (and
+`sweep --property` under `--engine induction`) narrows the model to the
+selected invariant, so a division that only a dropped invariant protects is
+reported as `_partial_<action>` there — a sound-side change, since the
+narrowed run claims nothing the dropped invariant would have to carry.
+Selecting a `trans` keeps every invariant as hypothesis
+(`selected_transition_induction_model`). Non-partial undefinedness BMC fails
+closed on (checked i64 overflow, a finite `Map` read outside its key domain)
+is not part of this obligation.
 
 ## 3. Extracting the CTI (counterexample to induction)
 

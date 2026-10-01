@@ -170,14 +170,59 @@ fn attributed_property_condition<S: SmtSolver>(
 }
 
 /// Prove kernel invariants and transitions by k-induction after a successful
-/// bounded base case.
+/// bounded base case, then discharge the definedness obligation (#1196).
+///
+/// The k-induction premises (the invariant/transition chain over `ind*`
+/// states) live in a solver scope that is popped before the definedness
+/// obligation and before any later engine (ranked `leadsTo`) reuses the
+/// solver: an unsatisfiable chain must not make those queries vacuous.
 ///
 /// # Errors
 ///
 /// Returns [`VerifyError`] for unsupported symbolic expressions or solver
 /// failures.
-#[allow(clippy::too_many_lines)]
 pub async fn prove_induction<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    k_ind: usize,
+) -> Result<InductionResult, VerifyError> {
+    let result = prove_induction_invariants(model, solver, k_ind).await?;
+    if result.cti.is_some() {
+        return Ok(result);
+    }
+    let instances = action_instances(solver, model)?;
+    let cti = definedness_cti(solver, model, &instances).await?;
+    Ok(InductionResult {
+        k_used: result.k_used,
+        cti,
+    })
+}
+
+/// k-induction over invariants and transition properties only, without the
+/// definedness obligation. `fslc`'s `--lemma` adjudication uses this: a
+/// lemma's own truth does not depend on the definedness of the actions, and
+/// asking that definedness under the lemma alone (the user invariants are
+/// removed from the candidate model) would reject lemmas whose actions are
+/// protected by another invariant. A used lemma enters the target run as an
+/// auxiliary invariant, where [`prove_induction`] checks definedness.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] for unsupported symbolic expressions or solver
+/// failures.
+pub async fn prove_induction_invariants<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    k_ind: usize,
+) -> Result<InductionResult, VerifyError> {
+    solver.push();
+    let result = prove_induction_scoped(model, solver, k_ind).await;
+    solver.pop(1)?;
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+async fn prove_induction_scoped<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
     k_ind: usize,
@@ -278,8 +323,7 @@ pub async fn prove_induction<S: SmtSolver>(
 
         remaining = still_remaining;
         if remaining.is_empty() {
-            let cti = definedness_cti(solver, model, &instances).await?;
-            return Ok(InductionResult { k_used, cti });
+            return Ok(InductionResult { k_used, cti: None });
         }
     }
 
@@ -301,7 +345,10 @@ async fn partial_witness<S: SmtSolver>(
     upto: usize,
 ) -> Result<Option<Vec<fsl_core::TraceStep>>, VerifyError> {
     solver.push();
-    solver.assert(condition)?;
+    if let Err(error) = solver.assert(condition) {
+        solver.pop(1)?;
+        return Err(error.into());
+    }
     let outcome = match solver.check().await {
         Ok(SatResult::Sat) => {
             project_trace(solver, model, states, choices, instances, upto).map(Some)
