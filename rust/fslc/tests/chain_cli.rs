@@ -525,6 +525,11 @@ fn chain_impl_all_skipped_report_is_indeterminate_not_passed() {
     let dir = impl_report_project("impl-all-skipped", JUNIT_ALL_SKIPPED, 0, Some("report.xml"));
     let output = run(&dir, &["chain", "fsl-project.toml"]);
     let value = json(&output);
+    let table = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        table.contains("impl  command  failed  indeterminate  no test executed (0/2)"),
+        "{table}"
+    );
     assert_eq!(output.status.code(), Some(1), "{value:#}");
     assert_eq!(value["result"], "indeterminate", "{value:#}");
     let impl_layer = layer(&value, "impl");
@@ -670,6 +675,11 @@ fn chain_impl_without_report_or_evidence_is_indeterminate() {
             .is_some_and(|reason| reason.contains("names no report")),
         "{value:#}"
     );
+    let table = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        table.contains("impl  command  failed  indeterminate  evidence=missing"),
+        "{table}"
+    );
 
     // A failing command is still `failed`, not `indeterminate`.
     let dir = impl_report_project("impl-no-report-exit-1", JUNIT_ALL_SKIPPED, 1, None);
@@ -713,7 +723,7 @@ fn chain_impl_exit_code_evidence_is_explicit_and_warned() {
 #[test]
 fn chain_impl_unknown_key_is_a_parse_error_naming_it() {
     let dir = scratch_dir("impl-unknown-key");
-    // The command never runs: the typo is rejected first.
+    // The command never runs: the typo is rejected with the manifest.
     fs::write(
         dir.join("fsl-project.toml"),
         "[impl]\ncommand = \"unused\"\nreprot = \"s.xml\"\n",
@@ -723,12 +733,40 @@ fn chain_impl_unknown_key_is_a_parse_error_naming_it() {
     let value = json(&output);
     assert_eq!(output.status.code(), Some(2), "{value:#}");
     assert_eq!(value["result"], "error", "{value:#}");
-    let impl_layer = layer(&value, "impl");
-    assert_eq!(impl_layer["detail"]["kind"], "parse", "{value:#}");
+    assert_eq!(value["kind"], "parse", "{value:#}");
     assert!(
-        impl_layer["detail"]["message"]
+        value["message"]
             .as_str()
             .is_some_and(|message| message.contains("unknown [impl] key(s): [reprot]")),
+        "{value:#}"
+    );
+    assert!(value.get("layers").is_none(), "no layer may run: {value:#}");
+}
+
+#[test]
+fn chain_impl_unknown_key_is_reported_even_when_an_earlier_layer_would_fail() {
+    // Issue #1200: the `[impl]` table is validated with the manifest, before
+    // any layer runs, so a failing `[business]` layer (which stops the chain
+    // without --keep-going) cannot hide the typo.
+    let dir = scratch_dir("impl-unknown-key-after-failure");
+    copy_chain_fixture(&dir);
+    let manifest = fs::read_to_string(dir.join("fsl-project-broken.toml"))
+        .expect("read broken manifest")
+        .replace("evidence = \"exit_code\"\n", "reprot = \"s.xml\"\n");
+    assert!(manifest.contains("reprot"), "{manifest}");
+    fs::write(dir.join("fsl-project-typo.toml"), manifest).expect("write typo manifest");
+    // Control: the same broken manifest without the typo fails at a layer.
+    let control = json(&run(&dir, &["chain", "fsl-project-broken.toml"]));
+    assert_eq!(control["result"], "violated", "{control:#}");
+
+    let output = run(&dir, &["chain", "fsl-project-typo.toml"]);
+    let value = json(&output);
+    assert_eq!(output.status.code(), Some(2), "{value:#}");
+    assert_eq!(value["kind"], "parse", "{value:#}");
+    assert!(
+        value["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("[reprot]")),
         "{value:#}"
     );
 }
@@ -770,9 +808,5 @@ fn chain_impl_empty_report_key_is_a_parse_error() {
     let value = json(&output);
     assert_eq!(output.status.code(), Some(2), "{value:#}");
     assert_eq!(value["result"], "error", "{value:#}");
-    assert_eq!(
-        layer(&value, "impl")["detail"]["kind"],
-        "parse",
-        "{value:#}"
-    );
+    assert_eq!(value["kind"], "parse", "{value:#}");
 }

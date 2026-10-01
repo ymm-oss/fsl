@@ -338,7 +338,9 @@ exit 0, and PHPUnit's "No tests executed!" is not a failure by default. So an
 `[impl]` table must now say what its exit status is evidence of, and it may
 carry only three keys: `command`, `report`, and `evidence`. Any other key — a
 typo such as `reprot` included — is a `kind:"parse"` error at exit 2 that
-names the key, rather than a silently ignored requirement.
+names the key, rather than a silently ignored requirement. The table is
+checked with the manifest, before any layer runs, so the error is reported
+even when an earlier layer would fail and stop the chain.
 
 | `[impl]` keys | Command exit | Report | Layer `result` | Layer `exit_code` |
 |---|---|---|---|---|
@@ -351,7 +353,7 @@ names the key, rather than a silently ignored requirement.
 | `command` + `report` | 0 | a `<failure>`/`<error>` test case | `failed` | 1 |
 | `command` + `report` | 0 | 0 executed (none, or all skipped) | `indeterminate` | 1 |
 | `command` + `report` | 0 | missing, unchanged by the run, or not JUnit XML | `indeterminate` | 1 |
-| an unknown key, `report = ""`, `report` and `evidence` together, or `evidence` other than `"exit_code"` | — (not run) | — | `error` (`kind:"parse"`) | 2 |
+| an unknown key, `report = ""`, `report` and `evidence` together, or `evidence` other than `"exit_code"` | — (no layer runs) | — | top-level `error` (`kind:"parse"`, no `layers`) | 2 |
 
 - **What `report` is.** A path, relative to the manifest directory, of a JUnit
   XML file the command writes, or of a directory whose `*.xml` files are
@@ -406,6 +408,14 @@ names the key, rather than a silently ignored requirement.
   "message": ...}`, so the weaker evidence is never mistaken for a counted
   test run. Without either key the command still runs, so a failing command is
   `failed`; only its exit 0 becomes `indeterminate`.
+- **The table says why.** An `indeterminate` `[impl]` row's Detail column
+  reads `evidence=missing` (no `report`, no `evidence`), `no test executed
+  (E/T)`, or `report not read (missing, unchanged, or not JUnit)`; the full
+  sentence is in `detail.reason`.
+- **The frozen Python reference diverges.** `python -m fslc chain`
+  (`src/fslc/chain.py`, `_run_impl`) still judges `[impl]` by the exit code
+  alone and ignores `report` and `evidence`; the native chain is the
+  authoritative one (`AGENTS.md`), as for testgen in `DESIGN-bridge.md` §3.6.
 
 ### Parallel layers (`--jobs N`, issue #1151)
 

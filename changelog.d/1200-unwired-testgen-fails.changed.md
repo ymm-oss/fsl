@@ -16,7 +16,12 @@ time, and on Unix inode and change time are compared before and after).
 `evidence = "exit_code"` keeps the old exit-status decision for a command that
 is not a test suite, marked `detail.evidence: "exit_code_only"`, shown in the
 table, and reported in a top-level `warnings[]` entry `impl_exit_code_only`. An
-`[impl]` with neither key is `indeterminate` when its command exits 0. This is
+`[impl]` with neither key is `indeterminate` when its command exits 0, and the
+stderr table's Detail column says why (`evidence=missing`, `no test executed
+(E/T)`, `report not read ...`). A malformed `[impl]` table is rejected with the
+manifest, before any layer runs. The frozen Python reference
+(`python -m fslc chain`) is unchanged and still judges `[impl]` by the exit
+code alone, ignoring `report` and `evidence`. This is
 a breaking change of the generated test files and of every existing chain
 manifest with an `[impl]` table. Migration: wire `makeAdapter()` (pytest: the
 `Adapter` class) before running a regenerated suite, or regenerate with

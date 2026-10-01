@@ -3892,6 +3892,16 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         }
         return (output, 2);
     }
+    // Issue #1200: a malformed `[impl]` table (unknown key such as `reprot`,
+    // `report` with `evidence`, ...) is a manifest error, decided before any
+    // layer runs, so it is never hidden behind an earlier failing layer.
+    if let Some(Err(message)) = sections.get("impl").map(impl_evidence) {
+        let mut output = error_output("parse", &message);
+        if let Value::Object(output) = &mut output {
+            output.insert("manifest".to_owned(), json!(path.display().to_string()));
+        }
+        return (output, 2);
+    }
     let mut steps = Vec::<(String, String)>::new();
     for layer in ["business", "requirements", "design"] {
         if let Some(section) = sections.get(layer) {
@@ -4766,6 +4776,18 @@ fn format_chain_table(result: &Value) -> String {
             .and_then(Value::as_str)
         {
             format!("evidence={evidence}")
+        } else if layer.get("result").and_then(Value::as_str) == Some("indeterminate") {
+            // Say why nothing passed rather than leave the reader with `-`.
+            match impl_detail {
+                Some(detail) if detail.get("tests").is_some() => format!(
+                    "no test executed ({}/{})",
+                    detail["tests"]["executed"], detail["tests"]["total"]
+                ),
+                Some(detail) if detail.get("report").is_some() => {
+                    "report not read (missing, unchanged, or not JUnit)".to_owned()
+                }
+                _ => "evidence=missing".to_owned(),
+            }
         } else if let Some(tests) = impl_detail.and_then(|detail| detail.get("tests")) {
             format!("executed={}/{}", tests["executed"], tests["total"])
         } else {
