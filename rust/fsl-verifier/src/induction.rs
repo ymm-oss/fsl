@@ -456,8 +456,20 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
     let instances = action_instances(solver, model)?;
     let state0 = symbolic_state_with_suffix(solver, model, "rank0")?;
     let state1 = symbolic_state_with_suffix(solver, model, "rank1")?;
+    // The no_deadlock obligation ranges over every invariant state, so it is
+    // asked about a state the transition below does not constrain: `state0`
+    // always has its selected action enabled, which would hide exactly the
+    // pending states in which nothing is enabled (#1189).
+    let deadlock_state = symbolic_state_with_suffix(solver, model, "rank_deadlock")?;
     for property in properties(model) {
         solver.assert(&property_condition(solver, model, property, &state0, None)?)?;
+        solver.assert(&property_condition(
+            solver,
+            model,
+            property,
+            &deadlock_state,
+            None,
+        )?)?;
     }
     let choice = solver.constant("__rank_choice", &fsl_solver::Sort::Int)?;
     solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
@@ -688,63 +700,115 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
                 }
             }
 
-            // no_deadlock (helpful variant): a pending obligation must not
-            // reach a state where no matching helpful action instance is
-            // enabled -- otherwise none of them is ever obligated to fire by
-            // weak fairness.
-            if !property.helpful.is_empty() {
-                let mut enabled0_terms = Vec::with_capacity(helpful_idx.len());
-                for &deadlock_index in &helpful_idx {
-                    let action = &model.actions[instances[deadlock_index].action_index];
-                    let (guards, _) = crate::transition::action_guards(
-                        solver,
-                        model,
-                        action,
-                        &state0,
-                        &instances[deadlock_index].params,
-                    )?;
-                    enabled0_terms.push(solver.and(&guards)?);
+            // no_deadlock: a pending obligation must not reach a state where
+            // no action (with `helpful`: no matching helpful instance) is
+            // enabled -- nothing is then obligated to fire, so the ranking
+            // argument never runs. Mirrors the frozen Python reference's
+            // `_prove_leadsto_rank_no_deadlock`.
+            let p_dl = leadsto_condition(
+                solver,
+                model,
+                &property.before,
+                &deadlock_state,
+                &binding.symbolic,
+            )?;
+            let q_dl = leadsto_condition(
+                solver,
+                model,
+                &property.after,
+                &deadlock_state,
+                &binding.symbolic,
+            )?;
+            let enabled_candidates = if property.helpful.is_empty() {
+                (0..instances.len()).collect::<Vec<_>>()
+            } else {
+                helpful_idx.clone()
+            };
+            let mut enabled_terms = Vec::with_capacity(enabled_candidates.len());
+            for &deadlock_index in &enabled_candidates {
+                let action = &model.actions[instances[deadlock_index].action_index];
+                let (guards, _) = crate::transition::action_guards(
+                    solver,
+                    model,
+                    action,
+                    &deadlock_state,
+                    &instances[deadlock_index].params,
+                )?;
+                enabled_terms.push(solver.and(&guards)?);
+            }
+            let any_enabled = if enabled_terms.is_empty() {
+                solver.bool_value(false)
+            } else {
+                solver.or(&enabled_terms)?
+            };
+            let mut deadlock_bindings = binding.symbolic.clone();
+            let measure_dl = eval(
+                solver,
+                model,
+                measure_expr,
+                &deadlock_state,
+                &mut deadlock_bindings,
+                None,
+            )?;
+            let measure_dl = int_term(&measure_dl)?.clone();
+            solver.push();
+            solver.assert(&p_dl)?;
+            solver.assert(&solver.not(&q_dl)?)?;
+            solver.assert(&solver.not(&any_enabled)?)?;
+            match solver.check().await? {
+                SatResult::Sat => {
+                    let measure_value = model_int(solver, &measure_dl)?;
+                    let trace =
+                        project_trace(solver, model, &[deadlock_state], &[], &instances, 0)?;
+                    solver.pop(1)?;
+                    let failure = if property.helpful.is_empty() {
+                        RankFailure {
+                            name: property.name.clone(),
+                            bindings: binding.concrete,
+                            measure: measure_expr.clone(),
+                            kind: violation_kind::DEADLOCK.to_owned(),
+                            measure_value: Some(measure_value),
+                            measure_before: None,
+                            measure_after: None,
+                            action: None,
+                            trace,
+                            hint: "a pending leadsTo obligation must not reach a state with no enabled action before Q holds".to_owned(),
+                            message: format!(
+                                "leadsTo '{}' can be pending in a state with no enabled action",
+                                property.name
+                            ),
+                            helpful: Vec::new(),
+                            helpful_actions: Vec::new(),
+                        }
+                    } else {
+                        RankFailure {
+                            name: property.name.clone(),
+                            bindings: binding.concrete,
+                            measure: measure_expr.clone(),
+                            kind: violation_kind::HELPFUL_ACTION_NOT_ENABLED.to_owned(),
+                            measure_value: Some(measure_value),
+                            measure_before: None,
+                            measure_after: None,
+                            action: None,
+                            trace,
+                            hint: HELPFUL_PROGRESS_HINT.to_owned(),
+                            message: format!(
+                                "leadsTo '{}' can be pending while no matching helpful action instance is enabled",
+                                property.name
+                            ),
+                            helpful: property.helpful.clone(),
+                            helpful_actions: helpful_witnesses::<S>(&helpful_idx, &instances),
+                        }
+                    };
+                    return Ok(RankedLeadstoResult {
+                        proofs,
+                        failure: Some(failure),
+                    });
                 }
-                let any_helpful_enabled = if enabled0_terms.is_empty() {
-                    solver.bool_value(false)
-                } else {
-                    solver.or(&enabled0_terms)?
-                };
-                solver.push();
-                solver.assert(&pending)?;
-                solver.assert(&solver.not(&any_helpful_enabled)?)?;
-                match solver.check().await? {
-                    SatResult::Sat => {
-                        let measure_value = model_int(solver, &measure0)?;
-                        let trace = project_trace(solver, model, &[state0], &[], &instances, 0)?;
-                        solver.pop(1)?;
-                        return Ok(RankedLeadstoResult {
-                            proofs,
-                            failure: Some(RankFailure {
-                                name: property.name.clone(),
-                                bindings: binding.concrete,
-                                measure: measure_expr.clone(),
-                                kind: violation_kind::HELPFUL_ACTION_NOT_ENABLED.to_owned(),
-                                measure_value: Some(measure_value),
-                                measure_before: None,
-                                measure_after: None,
-                                action: None,
-                                trace,
-                                hint: HELPFUL_PROGRESS_HINT.to_owned(),
-                                message: format!(
-                                    "leadsTo '{}' can be pending while no matching helpful action instance is enabled",
-                                    property.name
-                                ),
-                                helpful: property.helpful.clone(),
-                                helpful_actions: helpful_witnesses::<S>(&helpful_idx, &instances),
-                            }),
-                        });
-                    }
-                    SatResult::Unsat => solver.pop(1)?,
-                    SatResult::Unknown => {
-                        solver.pop(1)?;
-                        return Err(VerifyError::new("solver returned unknown in ranking proof"));
-                    }
+                SatResult::Unsat => solver.pop(1)?,
+                SatResult::Unknown => {
+                    solver.pop(1)?;
+                    return Err(VerifyError::new("solver returned unknown in ranking proof"));
                 }
             }
 
