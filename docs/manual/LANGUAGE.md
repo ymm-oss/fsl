@@ -49,6 +49,13 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
 }
 ```
 
+Property names (`invariant`, `trans`, `unless`, `reachable`, `leadsTo`, and
+`until`) share one namespace within a spec: results, `--property` selection, and
+the Public Kernel are keyed by that name, so reusing it — within one kind or
+across kinds — is a `kind: "semantics"` check-time error located at the later
+declaration, naming the earlier one's location. An `until <Name>` also claims
+`<Name>_until_safety`, the name of the `trans` it lowers to (#1192).
+
 The optional string after the spec name is a **spec-level tag**
 (`"<kind>: <intent>"`, e.g. `spec ReturnUI "ui: screen flow" { … }`). Like the
 per-declaration tags, it is **metadata only** — never verified — and is surfaced by

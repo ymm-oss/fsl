@@ -621,6 +621,7 @@ impl ModelBuilder {
         // `none` is unreadable from every expression, and the misreading is
         // silent rather than an error (issue #570).
         crate::reserved::check_reserved_names(&self.spec)?;
+        reject_duplicate_property_names(&self.spec)?;
         self.collect_consts()?;
         self.collect_types()?;
         self.collect_declaration_annotations();
@@ -2361,6 +2362,46 @@ fn as_bool(value: &Value) -> Result<bool, ModelError> {
         Value::Bool(value) => Ok(*value),
         _ => Err(model_error("expected Boolean constant")),
     }
+}
+
+/// Reject two properties that share a name (issue #1192).
+///
+/// Property names form one namespace across `invariant`, `trans`, `unless`,
+/// `reachable`, `leadsTo`, and `until` (which also declares the
+/// `<name>_until_safety` trans it lowers to). Results are keyed by that name —
+/// the `leads_to`/`reachables` envelope maps, `--property` selection, origin
+/// and annotation lookup, and Public Kernel `source_kind` — so a second
+/// declaration silently collapses into the first: the induction engine
+/// reported a false `leadsTo` as `proved`. The error points at the later
+/// declaration and names the earlier one's location.
+fn reject_duplicate_property_names(spec: &SurfaceSpec) -> Result<(), ModelError> {
+    let mut seen: BTreeMap<String, (&'static str, Span)> = BTreeMap::new();
+    for item in &spec.items {
+        let (kind, span, names) = match item {
+            SpecItem::Invariant { name, span, .. } => ("invariant", *span, vec![name.clone()]),
+            SpecItem::Trans { name, span, .. } => ("trans", *span, vec![name.clone()]),
+            SpecItem::Unless { name, span, .. } => ("unless", *span, vec![name.clone()]),
+            SpecItem::Reachable { name, span, .. } => ("reachable", *span, vec![name.clone()]),
+            SpecItem::LeadsTo { name, span, .. } => ("leadsTo", *span, vec![name.clone()]),
+            SpecItem::Until { name, span, .. } => (
+                "until",
+                *span,
+                vec![name.clone(), format!("{name}_until_safety")],
+            ),
+            _ => continue,
+        };
+        for name in names {
+            if let Some((first_kind, first_span)) = seen.get(&name) {
+                return Err(model_error(format!(
+                    "duplicate property name '{name}': {kind} reuses the name of the {first_kind} declared at {}:{}",
+                    first_span.start.line, first_span.start.column
+                ))
+                .at(span));
+            }
+            seen.insert(name, (kind, span));
+        }
+    }
+    Ok(())
 }
 
 fn model_error(message: impl Into<String>) -> ModelError {
