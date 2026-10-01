@@ -761,6 +761,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `refines` if it matches a different valid abs branch. A variable init
   assigns on only some paths (not on any) keeps the prior single-value
   behavior.
+- Definedness failure (#1196): `unknown_cti` / `violation_kind:"partial_op"` with
+  `invariant` = `_partial_<action>` (guard, body, or reached `ensures`; also
+  `last_action`) or `_partial_property_<name>` (invariant, `leadsTo`, `trans`).
+  The CTI start satisfies every proved invariant and reaches a partial operation;
+  guard it with a short-circuit `and`/`=>`/`or`/`if`, or exclude an unreachable
+  start with an auxiliary invariant. Never `proved` while such a state exists.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,

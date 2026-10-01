@@ -263,6 +263,65 @@ The pre-pass is wired into the CLI's BMC path (`solve_bmc` in
 and their other callers (the browser worker, `refine`, causal and mutation
 helpers) keep the full search.
 
+### 2.6 Definedness obligation (#1196)
+
+The step case evaluates guards, bodies, and properties with the totalizing
+symbolic evaluator, so by itself it cannot see a reached partial operation
+(LANGUAGE.md §6), which BMC and the explicit engine report as `partial_op`
+(DESIGN-kernel-contract.md: "a reached partial expression is `partial_op`").
+After every invariant and transition property is proved, a definedness
+obligation is checked over a free state `s` and a free successor `s'`
+(no Init), mirroring BMC's per-step checks
+(`bmc::check_state_properties`, `bmc::check_action_partial_operations`):
+
+```
+Inv(s) ∧ first_partial(P, s)                              P: each invariant, leadsTo trigger/goal
+Inv(s) ∧ first_partial(guards_a, s)                       each action instance a
+Inv(s) ∧ enabled_a(s) ∧ first_partial(body_a, s)
+Inv(s) ∧ T(s,s') ∧ Inv(s') ∧ Trans(s,s') ∧ first_partial(R, s, s')
+                                                          R: each trans; each ensures reached
+                                                          (selected ∧ enabled ∧ body defined ∧
+                                                          earlier ensures defined and true)
+```
+
+`first_partial` is the same path-sensitive predicate BMC uses: guards in
+source order, `and`/`or`/`=>`/`if` short-circuit, and property context keeps
+division total while sequence access stays partial. So `d != 0 and x / d <
+100` is defined, `x / d < 100` alone is not. Only expressions with a static
+partial-operation candidate are queried, so specs without one issue no new
+solver checks. Checked i64 overflow is *not* part of this obligation (step
+states are unbounded integers); it remains a base-case fail-closed error.
+
+Soundness: every reachable state satisfies the proved invariants, and every
+real (defined) step is a step of the totalized `T`, so `unsat` for every
+query shows that no reachable state or step reaches a partial operation —
+independent of the base depth. `sat` is returned as `unknown_cti` with
+`violation_kind: "partial_op"` and `invariant: "_partial_<action>"` /
+`"_partial_property_<name>"` (the names BMC uses); the start state may be
+unreachable, like any CTI, and an auxiliary invariant that excludes it
+restores `proved`. When the undefined state is within `--depth`, the base
+case reports it first. The obligation is 1-step (it does not use the
+`--k` chain), which keeps it independent of the base depth. The k-induction
+premises (Inv and T over the `ind*` chain) are asserted inside a solver scope
+that is popped before this obligation and before the ranked-`leadsTo` proof
+reuse the solver; otherwise an unsatisfiable chain (no Inv state with k
+successors) would make every later query vacuously `unsat`.
+
+Scope of the premise: `Inv` is the set of invariants in the run's model.
+`--lemma` adjudication proves only the lemma's truth
+(`prove_induction_invariants`, no definedness), because its candidate model
+drops the user invariants and would otherwise reject a lemma whose actions are
+protected by one of them; a used lemma joins the target run as an auxiliary
+invariant, where this obligation is checked. `--property <invariant>` (and
+`sweep --property` under `--engine induction`) narrows the model to the
+selected invariant, so a division that only a dropped invariant protects is
+reported as `_partial_<action>` there — a sound-side change, since the
+narrowed run claims nothing the dropped invariant would have to carry.
+Selecting a `trans` keeps every invariant as hypothesis
+(`selected_transition_induction_model`). Non-partial undefinedness BMC fails
+closed on (checked i64 overflow, a finite `Map` read outside its key domain)
+is not part of this obligation.
+
 ## 3. Extracting the CTI (counterexample to induction)
 
 When the step case is sat, build a trace of k+1 states from the model.

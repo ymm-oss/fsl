@@ -157,6 +157,7 @@ unchanged before/after):
 | `LEADS_TO` | `leadsTo` | `bmc.rs::leadsto_violation`; `fslc`'s `verification_output.rs::render_leadsto_failure` (duplicate literal, now routed through the same constant) |
 | `INVARIANT` | `invariant` | `induction.rs`'s `InductionCti` construction in the k-induction base/step loop |
 | `TRANS` | `trans` | `induction.rs`'s `InductionCti` construction in the `k == 1` transition-property special case |
+| `PARTIAL_OP` | `partial_op` | `induction.rs::definedness_cti`, the step-case definedness obligation run after every invariant and transition property is proved (#1196) |
 | `UNBOUNDED_BELOW` | `unbounded_below` | `induction.rs::prove_ranked_leadstos`, the unconditional pre-check |
 | `PROGRESS_ACTION_NOT_FAIR` | `progress_action_not_fair` | `induction.rs::prove_ranked_leadstos`, the `helpful_fairness` check |
 | `HELPFUL_ACTION_ENABLEDNESS_NOT_STICKY` | `helpful_action_enabledness_not_sticky` | `induction.rs::prove_ranked_leadstos`, the `helpful_sticky` check |
@@ -175,6 +176,7 @@ of populating one of these fields.
 | `leadsTo` | `Exercised` | `NotApplicable` (Slice 1 boundary) |
 | `invariant` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
 | `trans` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
+| `partial_op` | `NotApplicable` (Slice 1 boundary) | `Exercised` |
 | `unbounded_below` | `NotApplicable` (induction-only ranking) | `Exercised` |
 | `progress_action_not_fair` | `NotApplicable` (induction-only ranking) | `Exercised` |
 | `helpful_action_enabledness_not_sticky` | `NotApplicable` (induction-only ranking) | `Exercised` |
@@ -191,7 +193,13 @@ Every `Exercised` cell cites a real, individually-read test:
 `induction_suggestions.rs`'s tests (confirmed via each test's assertion on
 the `--engine induction`-only fields `suggested_invariants`/`"trans"` that
 `render_induction_cti` only inserts for that exact `cti.kind`, not merely a
-test that happens to run the induction engine); the four ranked-liveness
+test that happens to run the induction engine); `partial_op` (added by #1196,
+making the registry 13 values) cites
+`issue_1196_induction_definedness.rs::partial_guard_is_never_proved_at_any_depth`,
+which asserts `result: "unknown_cti"` with `violation_kind: "partial_op"` —
+a field `render_induction_cti` only inserts for that `cti.kind`. Its `BMC`
+cell is the Slice 1 boundary: BMC's same-spelled `partial_op` violations come
+from `bmc.rs`'s plain `make_violation` sites; the four ranked-liveness
 kinds already exercised elsewhere cite `leadsto_helpful_ranking.rs`
 (`progress_action_not_fair`, `helpful_action_enabledness_not_sticky`,
 `helpful_action_not_enabled`, `non_helpful_action_increases_measure`); the

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! `violation_kind` axis: the 12-value `fsl_verifier::violation_kind::ALL`
+//! `violation_kind` axis: the 13-value `fsl_verifier::violation_kind::ALL`
 //! vocabulary (issue #646, #537 C3 slice 1). Rows are *referenced* from
 //! `fsl_verifier::violation_kind::ALL`, not re-owned.
 //!
@@ -10,7 +10,8 @@
 //! for `deadlock`, the BMC-only deadlock probe). Every cell is filled:
 //! `leadsTo`/`deadlock` are BMC-only, `invariant`/`trans`/the 8 ranked-leadsTo
 //! kinds are induction-only, so exactly half of this 12x2 matrix is
-//! `NotApplicable` by construction -- each with a citation to where that
+//! `NotApplicable` by construction (`partial_op` is induction-only in this
+//! registry: BMC's same-spelled kind is a plain `make_violation` site) -- each with a citation to where that
 //! structural fact is codified (see this module's `SLICE1_BOUNDARY` and
 //! `INDUCTION_ONLY_RANKING` bases, and `docs/design/DESIGN-assurance-matrix.md`'s
 //! "Slice 1 boundary" section, which records the reasoned scope decision
@@ -107,6 +108,23 @@ pub fn axis() -> Axis {
         (vk::TRANS, "BMC"),
         Claim::NotApplicable {
             reason: "same boundary as `invariant`: the plain BMC engine's transition violations are a separate, out-of-Slice-1-scope emission site",
+            basis: SLICE1_BOUNDARY,
+        },
+    );
+
+    cells.insert(
+        (vk::PARTIAL_OP, "induction"),
+        Claim::Exercised {
+            by: Citation {
+                path: "rust/fslc/tests/issue_1196_induction_definedness.rs",
+                anchor: "fn partial_guard_is_never_proved_at_any_depth()",
+            },
+        },
+    );
+    cells.insert(
+        (vk::PARTIAL_OP, "BMC"),
+        Claim::NotApplicable {
+            reason: "same boundary as `invariant`: the plain BMC engine's partial_op violations are emitted by bmc.rs's out-of-Slice-1-scope make_violation sites, which mirror fsl_runtime::Monitor's own registered outcome.kind spelling",
             basis: SLICE1_BOUNDARY,
         },
     );
@@ -270,6 +288,22 @@ spec AssuranceProbeTransCti {
     x = x - 1
   }
   trans NeverDecrease { x >= old(x) }
+}
+";
+
+const PARTIAL_OP_CTI_SRC: &str = r"
+spec AssuranceProbePartialOpCti {
+  state { x: Int, d: Int }
+  init { x = 5  d = 1 }
+  action dec() {
+    requires x > 0 and x / d < 100
+    x = x - 1
+  }
+  action zap() {
+    requires x == 3
+    d = 0
+  }
+  invariant NonNeg { x >= 0 }
 }
 ";
 
@@ -509,6 +543,15 @@ fn every_violation_kind_the_probe_corpus_emits_is_exactly_the_registered_set() {
     ))
     .expect("induction trans probe");
     observed.insert(trans.cti.expect("expected a trans CTI").kind);
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let partial = block_on(fsl_verifier::prove_induction(
+        &model(PARTIAL_OP_CTI_SRC),
+        &mut solver,
+        1,
+    ))
+    .expect("induction partial_op probe");
+    observed.insert(partial.cti.expect("expected a partial_op CTI").kind);
 
     for source in [
         UNBOUNDED_BELOW_SRC,

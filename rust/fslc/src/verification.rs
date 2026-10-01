@@ -505,6 +505,42 @@ fn suggested_invariants(
         .collect()
 }
 
+/// `last_action` for an induction `partial_op` CTI whose failure is in an
+/// action context (`_partial_<action>`), shaped like BMC's (#1196).
+fn insert_partial_cti_last_action(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    cti: &fsl_verifier::InductionCti,
+) {
+    let Some(action) = cti
+        .name
+        .strip_prefix("_partial_")
+        .filter(|rest| !rest.starts_with("property_"))
+        .and_then(|_| cti.trace.last())
+        .and_then(|step| step.action.as_ref())
+    else {
+        return;
+    };
+    let definition = model
+        .actions
+        .iter()
+        .find(|definition| definition.name == action.name);
+    let params = action
+        .params
+        .iter()
+        .map(|(name, value)| (name.clone(), ::fslc_rust::fsl_value_json(value)))
+        .collect::<Map<_, _>>();
+    output.insert(
+        "last_action".to_owned(),
+        origin_aware_action_json(
+            model,
+            &action.name,
+            &params,
+            definition.map_or(Value::Null, |definition| definition.span.python_loc()),
+        ),
+    );
+}
+
 fn render_induction_cti(
     model: &KernelModel,
     cti: &fsl_verifier::InductionCti,
@@ -515,16 +551,29 @@ fn render_induction_cti(
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("unknown_cti"));
+    let partial = cti.kind == fsl_verifier::violation_kind::PARTIAL_OP;
     let property_kind = if cti.kind == "trans" {
         "trans"
     } else {
         "invariant"
     };
-    let name = origin_aware_property_name(&mut output, model, property_kind, &cti.name);
+    let name = if partial {
+        // `_partial_<action>` / `_partial_property_<name>`: the same synthetic
+        // names BMC's `partial_op` violations carry (#1196).
+        display(&cti.name)
+    } else {
+        origin_aware_property_name(&mut output, model, property_kind, &cti.name)
+    };
     if cti.kind == "trans" {
         output.insert("trans".to_owned(), json!(name));
     }
+    if partial {
+        output.insert("violation_kind".to_owned(), json!(cti.kind));
+    }
     output.insert("invariant".to_owned(), json!(name));
+    if partial {
+        insert_partial_cti_last_action(&mut output, model, cti);
+    }
     output.insert("k".to_owned(), json!(cti.k));
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert("completeness".to_owned(), json!("bounded"));
@@ -536,7 +585,11 @@ fn render_induction_cti(
             "violated_at": cti.k,
         }),
     );
-    let mut hint = "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned();
+    let mut hint = if partial {
+        "this state satisfies every proved invariant but reaches a partial operation (division or remainder by zero, or head/pop/at/index outside a sequence) that BMC and the explicit engine report as partial_op; guard the operation (e.g. requires d != 0 and x / d < 100), or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
+    } else {
+        "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned()
+    };
     if cti.kind == "invariant" {
         let suggestions = suggested_invariants(model, &cti.trace);
         if !suggestions.is_empty() {
@@ -1324,7 +1377,9 @@ fn adjudicate_lemma(
             });
         }
     };
-    match block_on_native(fsl_verifier::prove_induction(
+    // Lemma truth only: the definedness obligation is asked in the target
+    // run, where the user invariants are in scope (#1196).
+    match block_on_native(fsl_verifier::prove_induction_invariants(
         &candidate,
         &mut solver,
         k_ind,

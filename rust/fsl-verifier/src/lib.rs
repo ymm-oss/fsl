@@ -32,7 +32,7 @@ pub use bmc::{
 };
 pub use induction::{
     InductionCti, InductionResult, RankFailure, RankProof, RankedLeadstoResult, prove_induction,
-    prove_ranked_leadstos, ranked_leadsto_lasso_discharges,
+    prove_induction_invariants, prove_ranked_leadstos, ranked_leadsto_lasso_discharges,
 };
 pub use refinement::{ProgressCheck, check_refinement_progress};
 pub use vacuity::{VacuityFinding, model_vacuity_findings};

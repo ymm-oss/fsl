@@ -633,13 +633,13 @@
             "name": "QueuedInActive"
           },
           {
-            "checks": 12,
+            "checks": 13,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "NoDuplicateQueue"
           },
           {
-            "checks": 12,
+            "checks": 13,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "QueueRowsQueued"
@@ -651,7 +651,7 @@
             "name": "QueuedInActive"
           },
           {
-            "checks": 20,
+            "checks": 22,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "complete"
@@ -1846,19 +1846,19 @@
             "name": "Finishes"
           },
           {
-            "checks": 32,
+            "checks": 34,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpEven"
           },
           {
-            "checks": 32,
+            "checks": 34,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpOdd"
           },
           {
-            "checks": 32,
+            "checks": 34,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "rotate"
