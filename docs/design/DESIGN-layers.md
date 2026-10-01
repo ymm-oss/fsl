@@ -287,8 +287,10 @@ returns one consolidated report. The human status table is written to stderr;
 the machine-readable JSON envelope is written to stdout and contains one
 `layers[]` entry per executed or skipped layer. The top-level result is
 `verified` when every layer passes, `violated` when a behavioral/refinement/impl
-layer fails, and `error` when any layer returns a spec/IO/internal error. The
-process exit code follows the existing `cli.exit_code` convention.
+layer fails, `indeterminate` when the only failing layer is an `[impl]` layer
+without evidence that a test executed (see "`[impl]` evidence" below), and
+`error` when any layer returns a spec/IO/internal error. The process exit code
+follows the existing `cli.exit_code` convention (`indeterminate` exits 1).
 
 ```toml
 [business]
@@ -305,7 +307,8 @@ refine_against = "requirements"
 mapping = "design_refines_requirements.fsl"
 
 [impl]
-command = "pytest -q"
+command = "pytest -q --junitxml=impl-report.xml"
+report = "impl-report.xml"
 ```
 
 The layer filenames above are placeholders for whatever the project calls its
@@ -322,6 +325,97 @@ resolves to `.`, not to an empty `current_dir`). By default the chain
 short-circuits on the first failed layer and marks the remaining planned
 layers as `skipped`; `--keep-going` records the failure and continues through
 the rest of the manifest.
+
+### `[impl]` evidence (issue #1200)
+
+An exit status of 0 does not say that any test ran. A suite whose tests are all
+skipped (for example a `fslc testgen --allow-unwired` scaffold whose adapter is
+not wired), or that collected none, exits 0 too, and before #1200 the chain
+reported that as a passing implementation layer. Runners reach that state in
+ordinary use: Gradle reports `UP-TO-DATE`/`NO-SOURCE` and runs nothing,
+`vitest --passWithNoTests` and a `swift test --filter` that matches nothing
+exit 0, and PHPUnit's "No tests executed!" is not a failure by default. So an
+`[impl]` table must now say what its exit status is evidence of, and it may
+carry only three keys: `command`, `report`, and `evidence`. Any other key — a
+typo such as `reprot` included — is a `kind:"parse"` error at exit 2 that
+names the key, rather than a silently ignored requirement. The table is
+checked with the manifest, before any layer runs, so the error is reported
+even when an earlier layer would fail and stop the chain.
+
+| `[impl]` keys | Command exit | Report | Layer `result` | Layer `exit_code` |
+|---|---|---|---|---|
+| `command` only | 0 | — | `indeterminate` | 1 |
+| `command` only | ≠ 0 | — | `failed` | 1 |
+| `command` + `evidence = "exit_code"` | 0 | — | `passed` (`detail.evidence: "exit_code_only"`, top-level `warnings[]`) | 0 |
+| `command` + `evidence = "exit_code"` | ≠ 0 | — | `failed` (`detail.evidence: "exit_code_only"`) | 1 |
+| `command` + `report` | ≠ 0 | any | `failed` | 1 |
+| `command` + `report` | 0 | ≥ 1 executed, 0 failure/error | `passed` | 0 |
+| `command` + `report` | 0 | a `<failure>`/`<error>` test case | `failed` | 1 |
+| `command` + `report` | 0 | 0 executed (none, or all skipped) | `indeterminate` | 1 |
+| `command` + `report` | 0 | missing, unchanged by the run, or not JUnit XML | `indeterminate` | 1 |
+| an unknown key, `report = ""`, `report` and `evidence` together, or `evidence` other than `"exit_code"` | — (no layer runs) | — | top-level `error` (`kind:"parse"`, no `layers`) | 2 |
+
+- **What `report` is.** A path, relative to the manifest directory, of a JUnit
+  XML file the command writes, or of a directory whose `*.xml` files are
+  summed (Gradle's `build/test-results/test`). JUnit XML is the one
+  machine-readable format every testgen target's runner writes:
+  `pytest --junitxml=FILE`, `vitest run --reporter=junit --outputFile=FILE`,
+  `swift test --xunit-output FILE`, Gradle/`kotlin.test` on the JVM,
+  `dart test --reporter json | tojunit`, `phpunit --log-junit FILE`.
+  Runner notes:
+  - **SwiftPM 6.** When XCTest also runs in the session, Swift Testing's
+    results do not go to `FILE` but to `FILE-swift-testing.xml` beside it
+    (`FILE` minus its extension, plus `-swift-testing`, plus the extension).
+    That is the path computation in
+    `swift-package-manager` `Sources/Commands/SwiftTestCommand.swift`
+    (`swiftTestingXUnitDestinationPath`, read at commit `166166b3`). A
+    generated Swift Testing suite therefore needs `report` to name that file,
+    or a directory holding both, or the run to pass `--disable-xctest`.
+  - **Gradle.** Pass `--rerun-tasks` (or `cleanTest`): an `UP-TO-DATE` test
+    task writes no new report, which the freshness rule below reads as
+    `indeterminate`, not as a pass.
+  - **Pipes.** `dart test --reporter json | tojunit > r.xml` reports the
+    converter's exit status, not the runner's, so a failing run can exit 0.
+    The report check still sees the failing `<testcase>`; the exit code alone
+    would not.
+- **How it is counted.** One test per `<testcase>` element; one with a
+  `<skipped>`, `<failure>`, or `<error>` child is skipped, failed, or erroring.
+  The `tests`/`skipped` attributes of `<testsuite>` are not read, because
+  runners differ in which ones they write. CDATA sections and comments are
+  removed first, and the start-tag scanner skips a `>` inside a quoted
+  attribute value, so neither captured test output nor a test name such as
+  `t[a/>b]` can fake or hide a marker (`rust/fslc/src/junit_report.rs`).
+- **Freshness.** Before the command runs, the chain records each existing
+  candidate file (the file, or every `*.xml` in the directory) by length,
+  modification time at full precision, and on Unix inode and change time.
+  After the run only files that are new or whose record changed count, so a
+  report left over from an earlier run is never this run's evidence, even one
+  written within the same second. A runner that rewrites identical bytes on a
+  file system that keeps neither precise modification nor change times can be
+  read as unchanged; that errs toward `indeterminate`. The chain never deletes
+  or writes the report.
+- **Partial skips pass.** A report with at least one executed test and some
+  skipped ones is `passed`; the counts are in the layer's `detail.tests`
+  (`total`, `executed`, `skipped`, `failures`, `errors`) for a reviewer to
+  read, and the stderr table shows `executed=E/T`. Only "nothing executed" is
+  decided as `indeterminate` here.
+- **Exit-code evidence is an explicit, visible opt-in.** A command that is not
+  a test suite (`make check`, a smoke script) declares
+  `evidence = "exit_code"`. Its layer is then decided by the exit status as
+  before #1200, but it carries `detail.evidence: "exit_code_only"`, the stderr
+  table shows `evidence=exit_code_only`, and the envelope gets a top-level
+  `warnings[]` entry `{"kind": "impl_exit_code_only", "layer": "impl",
+  "message": ...}`, so the weaker evidence is never mistaken for a counted
+  test run. Without either key the command still runs, so a failing command is
+  `failed`; only its exit 0 becomes `indeterminate`.
+- **The table says why.** An `indeterminate` `[impl]` row's Detail column
+  reads `evidence=missing` (no `report`, no `evidence`), `no test executed
+  (E/T)`, or `report not read (missing, unchanged, or not JUnit)`; the full
+  sentence is in `detail.reason`.
+- **The frozen Python reference diverges.** `python -m fslc chain`
+  (`src/fslc/chain.py`, `_run_impl`) still judges `[impl]` by the exit code
+  alone and ignores `report` and `evidence`; the native chain is the
+  authoritative one (`AGENTS.md`), as for testgen in `DESIGN-bridge.md` §3.6.
 
 ### Parallel layers (`--jobs N`, issue #1151)
 

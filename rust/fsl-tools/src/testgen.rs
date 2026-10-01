@@ -14,6 +14,60 @@ use serde_json::{Map, Value};
 
 use crate::public_kernel::{public_kernel_v1_root, required_array, required_object, required_str};
 
+/// What a generated test does while its adapter is not wired (issue #1200).
+///
+/// An unwired suite never calls the implementation, so a green run of it is
+/// not evidence that the implementation conforms. The default therefore fails
+/// every generated test; skipping is an explicit, generation-time opt-in that
+/// is visible in the generated file.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UnwiredAdapter {
+    /// Fail every generated test with an "adapter not wired" message.
+    #[default]
+    Fail,
+    /// Skip every generated test (the pre-#1200 behaviour), selected by
+    /// `fslc testgen --allow-unwired`. Not available for Kotlin, whose
+    /// kotlin.test has no portable runtime skip.
+    Skip,
+}
+
+/// The failure message of an unwired generated test, shared by every target
+/// whose adapter entry point is `makeAdapter()`.
+const NOT_WIRED_MESSAGE: &str = "adapter not wired: implement makeAdapter() to connect your implementation, or generate with `fslc testgen --allow-unwired` to skip instead";
+
+/// The pytest variant: its adapter is the `Adapter` class, not a factory.
+const PYTEST_NOT_WIRED_MESSAGE: &str = "adapter not wired: implement Adapter.reset/step/observe to connect your implementation, or generate with `fslc testgen --allow-unwired` to skip instead";
+
+/// The Kotlin variant: `--allow-unwired` is rejected for Kotlin.
+const KOTLIN_NOT_WIRED_MESSAGE: &str =
+    "adapter not wired: implement makeAdapter() to connect your implementation";
+
+/// Shared "until it is wired" header sentence for the failing default.
+const FAIL_HEADER_LINES: [&str; 4] = [
+    "Wire `makeAdapter()` to your implementation. Until it is wired, every test",
+    "FAILS with \"adapter not wired\" (issue #1200): a suite that never calls the",
+    "implementation is not evidence that it conforms. Generate with",
+    "`fslc testgen --allow-unwired` to skip instead.",
+];
+
+fn fail_header(prefix: &str) -> String {
+    FAIL_HEADER_LINES
+        .iter()
+        .map(|line| format!("{prefix}{line}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Fill a checked-in template's `__SOURCE__` and named slots.
+fn fill_template(template: &str, source_name: &str, slots: &[(&str, String)]) -> String {
+    let mut text = testgen_template(template, source_name);
+    for (key, value) in slots {
+        debug_assert!(text.contains(key), "template slot {key} missing");
+        text = text.replace(key, value);
+    }
+    text
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TestgenAction {
     name: String,
@@ -626,7 +680,7 @@ fn relative_spec_path(path: &TestgenPathContext) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-fn emit_pytest(input: &TestgenInput) -> String {
+fn emit_pytest(input: &TestgenInput, unwired: UnwiredAdapter) -> String {
     let path_expr = match input.path.output {
         TestgenOutputContext::WithoutOutput => python_string(&relative_spec_path(&input.path)),
         TestgenOutputContext::WithOutput { .. } => format!(
@@ -635,11 +689,23 @@ fn emit_pytest(input: &TestgenInput) -> String {
         ),
     };
     let source_name = &input.path.source_name;
+    let (unwired_doc, unwired_constant, unwired_action) = match unwired {
+        UnwiredAdapter::Fail => (
+            "Until Adapter is wired every test FAILS with \"adapter not wired\" (issue #1200);\n\
+             generate with `fslc testgen --allow-unwired` to skip instead.\n",
+            format!(
+                "\nADAPTER_NOT_WIRED = {}\n",
+                python_string(PYTEST_NOT_WIRED_MESSAGE)
+            ),
+            "pytest.fail(ADAPTER_NOT_WIRED, pytrace=False)",
+        ),
+        UnwiredAdapter::Skip => ("", String::new(), "pytest.skip('Adapter not implemented')"),
+    };
     let mut text = format!(
         r#""""Auto-generated conformance tests for FSL spec.
 Source: {source_name}
 Connect Adapter to your implementation, or use MonitorSelfAdapter for self-check.
-"""
+{unwired_doc}"""
 import random
 from pathlib import Path
 
@@ -648,7 +714,7 @@ import pytest
 from fslc.runtime import Monitor
 
 SPEC_PATH = {path_expr}
-
+{unwired_constant}
 
 class Adapter:
     """Connect your implementation to the spec actions/state.
@@ -710,7 +776,7 @@ def _assert_rejected(result, expected_kind):
         let separator = if scenario_index == 0 { "\n\n" } else { "\n" };
         let _ = write!(
             text,
-            "{separator}def {function}(adapter):\n    {}\n    if not _adapter_ready(adapter):\n        pytest.skip('Adapter not implemented')\n    adapter.reset()\n",
+            "{separator}def {function}(adapter):\n    {}\n    if not _adapter_ready(adapter):\n        {unwired_action}\n    adapter.reset()\n",
             python_string(&format!("Scenario: {name}"))
         );
         let steps = scenario["steps"].as_array().cloned().unwrap_or_default();
@@ -764,10 +830,10 @@ def _assert_rejected(result, expected_kind):
         }
     }
     text.push_str(
-        r#"
+        &r#"
 def test_random_walk_conformance(adapter):
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        __UNWIRED_ACTION__
     mon = Monitor(SPEC_PATH)
     mon.reset()
     adapter.reset()
@@ -788,7 +854,8 @@ def test_random_walk_conformance(adapter):
             )
         assert adapter.observe() == mon.state
 
-"#,
+"#
+        .replace("__UNWIRED_ACTION__", unwired_action),
     );
     text
 }
@@ -879,12 +946,93 @@ fn testgen_template(template: &str, source_name: &str) -> String {
     normalize_newlines(template).replace("__SOURCE__", source_name)
 }
 
+/// The Vitest template slots for one unwired-adapter behaviour (#1200).
+fn vitest_unwired_slots(unwired: UnwiredAdapter) -> [(&'static str, String); 3] {
+    match unwired {
+        UnwiredAdapter::Fail => [
+            ("__UNWIRED_HEADER__", fail_header(" * ")),
+            (
+                "__MAKE_ADAPTER_NOTE__",
+                "// Wire your implementation here. Throwing fails every test (\"adapter not wired\")."
+                    .to_owned(),
+            ),
+            (
+                "__UNWIRED_GUARD__",
+                [
+                    format!(
+                        "const ADAPTER_NOT_WIRED = {};",
+                        inline(&Value::String(NOT_WIRED_MESSAGE.to_owned()))
+                    ),
+                    String::new(),
+                    "let adapter: Adapter;".to_owned(),
+                    "let unwired: unknown = null;".to_owned(),
+                    "try {".to_owned(),
+                    "  adapter = makeAdapter();".to_owned(),
+                    "  adapter.reset();".to_owned(),
+                    "  adapter.observe();".to_owned(),
+                    "} catch (error) {".to_owned(),
+                    "  unwired = error;".to_owned(),
+                    "}".to_owned(),
+                    String::new(),
+                    "// An unwired adapter fails every test below; it is never skipped silently.".to_owned(),
+                    "function scenario(name: string, body: () => void): void {".to_owned(),
+                    "  test(name, () => {".to_owned(),
+                    "    if (unwired !== null) {".to_owned(),
+                    "      throw new Error(`${ADAPTER_NOT_WIRED} (${String(unwired)})`);".to_owned(),
+                    "    }".to_owned(),
+                    "    body();".to_owned(),
+                    "  });".to_owned(),
+                    "}".to_owned(),
+                ]
+                .join("\n"),
+            ),
+        ],
+        UnwiredAdapter::Skip => [
+            (
+                "__UNWIRED_HEADER__",
+                " * Wire `makeAdapter()` to your implementation. Until it is wired, every test is\n \
+                 * skipped (mirroring the pytest scaffold's skip-when-unwired behaviour)."
+                    .to_owned(),
+            ),
+            (
+                "__MAKE_ADAPTER_NOTE__",
+                "// Wire your implementation here. Throwing leaves the suite skipped (not failed)."
+                    .to_owned(),
+            ),
+            (
+                "__UNWIRED_GUARD__",
+                [
+                    "let adapter: Adapter;",
+                    "let wired = false;",
+                    "try {",
+                    "  adapter = makeAdapter();",
+                    "  adapter.reset();",
+                    "  adapter.observe();",
+                    "  wired = true;",
+                    "} catch {",
+                    "  // Adapter not wired yet — every test below is skipped.",
+                    "}",
+                    "const scenario = wired ? test : test.skip;",
+                ]
+                .join("\n"),
+            ),
+        ],
+    }
+}
+
 /// Emit a standalone Vitest conformance scaffold.
 #[must_use]
-fn emit_vitest(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let mut parts = vec![testgen_template(
+fn emit_vitest(
+    source_name: &str,
+    scenarios: &[Value],
+    walk: &Value,
+    unwired: UnwiredAdapter,
+) -> String {
+    let slots = vitest_unwired_slots(unwired);
+    let mut parts = vec![fill_template(
         include_str!("testgen_vitest.txt"),
         source_name,
+        &slots,
     )];
     parts.extend(scenarios.iter().map(vitest_scenario));
     let steps = walk["steps"].as_array().cloned().unwrap_or_default();
@@ -1089,17 +1237,63 @@ fn append_forbidden(lines: &mut Vec<String>, scenario: &Value, target: Target, i
 
 /// Emit a standalone Swift Testing conformance scaffold.
 #[must_use]
-fn emit_swift(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let mut parts = vec![testgen_template(
+fn emit_swift(
+    source_name: &str,
+    scenarios: &[Value],
+    walk: &Value,
+    unwired: UnwiredAdapter,
+) -> String {
+    let (slots, test_attribute) = match unwired {
+        UnwiredAdapter::Fail => (
+            [
+                ("__UNWIRED_HEADER__", fail_header("// ")),
+                (
+                    "__NOT_WIRED_ERROR__",
+                    format!(
+                        "enum FSLNotWired: Error, CustomStringConvertible {{\n    case notWired\n    var description: String {{ {} }}\n}}",
+                        quoted(NOT_WIRED_MESSAGE, Target::Swift)
+                    ),
+                ),
+                (
+                    "__MAKE_ADAPTER_NOTE__",
+                    "// Wire your implementation here. Throwing fails every test (\"adapter not wired\")."
+                        .to_owned(),
+                ),
+            ],
+            "@Test",
+        ),
+        UnwiredAdapter::Skip => (
+            [
+                (
+                    "__UNWIRED_HEADER__",
+                    "// Wire `makeAdapter()` to your implementation. Until it is wired every test is\n\
+                     // skipped (the `.enabled(if:)` trait checks the adapter and disables the test)."
+                        .to_owned(),
+                ),
+                (
+                    "__NOT_WIRED_ERROR__",
+                    "enum FSLNotWired: Error { case notWired }".to_owned(),
+                ),
+                (
+                    "__MAKE_ADAPTER_NOTE__",
+                    "// Wire your implementation here. Throwing leaves the suite skipped (not failed)."
+                        .to_owned(),
+                ),
+            ],
+            "@Test(.enabled(if: isAdapterWired()))",
+        ),
+    };
+    let mut parts = vec![fill_template(
         include_str!("testgen_swift.txt"),
         source_name,
+        &slots,
     )];
     let mut seen = BTreeMap::new();
     for scenario in scenarios {
         let (name, steps, states) = scenario_parts(scenario);
         let function = unique_ident(name, &mut seen, "scenario_");
         let mut lines = vec![
-            format!("@Test(.enabled(if: isAdapterWired())) func {function}() throws {{"),
+            format!("{test_attribute} func {function}() throws {{"),
             "    let a = try makeAdapter()".to_owned(),
             "    a.reset()".to_owned(),
         ];
@@ -1137,7 +1331,7 @@ fn emit_swift(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
         format!("[\n{},\n    ]", rows.join(",\n"))
     };
     parts.push([
-        "@Test(.enabled(if: isAdapterWired())) func randomWalkConformance() throws {".to_owned(),
+        format!("{test_attribute} func randomWalkConformance() throws {{"),
         "    // random-walk conformance (baked oracle trace)".to_owned(),
         "    let a = try makeAdapter()".to_owned(), "    a.reset()".to_owned(),
         format!("    let initial: [String: Any] = {}", literal(&walk["initial"], Target::Swift)),
@@ -1152,7 +1346,14 @@ fn emit_swift(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
 /// Emit a standalone kotlin.test conformance scaffold.
 #[must_use]
 fn emit_kotlin(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let preamble = testgen_template(include_str!("testgen_kotlin.txt"), source_name);
+    let preamble = fill_template(
+        include_str!("testgen_kotlin.txt"),
+        source_name,
+        &[(
+            "__NOT_WIRED_MESSAGE__",
+            quoted(KOTLIN_NOT_WIRED_MESSAGE, Target::Kotlin),
+        )],
+    );
     let mut lines = vec![format!("class {spec_name}ConformanceTest {{")];
     let mut seen = BTreeMap::new();
     for scenario in scenarios {
@@ -1162,7 +1363,7 @@ fn emit_kotlin(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &V
             "    @Test fun {}() {{",
             unique_ident(name, &mut seen, "scenario_")
         ));
-        lines.push("        val a = makeAdapter() ?: return".to_owned());
+        lines.push("        val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)".to_owned());
         lines.push("        a.reset()".to_owned());
         for (index, step) in steps.iter().enumerate() {
             lines.push(format!(
@@ -1200,7 +1401,7 @@ fn emit_kotlin(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &V
         String::new(),
         "    @Test fun randomWalkConformance() {".to_owned(),
         "        // random-walk conformance (baked oracle trace)".to_owned(),
-        "        val a = makeAdapter() ?: return".to_owned(),
+        "        val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)".to_owned(),
         "        a.reset()".to_owned(),
         format!(
             "        val initial: Map<String, Any?> = {}",
@@ -1220,14 +1421,72 @@ fn emit_kotlin(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &V
     format!("{preamble}\n\n{}\n", lines.join("\n"))
 }
 
+/// The Dart template slots and test terminator for one unwired-adapter
+/// behaviour (#1200).
+fn dart_unwired_slots(unwired: UnwiredAdapter) -> ([(&'static str, String); 2], &'static str) {
+    match unwired {
+        UnwiredAdapter::Fail => (
+            [
+                ("__UNWIRED_HEADER__", fail_header("// ")),
+                (
+                    "__MAKE_ADAPTER__",
+                    format!(
+                        "// Wire your implementation here. Return your adapter instead of throwing.\n\
+                         // Until then every test fails with \"adapter not wired\".\n\
+                         Adapter makeAdapter() =>\n    throw UnimplementedError({});",
+                        quoted(NOT_WIRED_MESSAGE, Target::Dart)
+                    ),
+                ),
+            ],
+            "  });",
+        ),
+        UnwiredAdapter::Skip => (
+            [
+                (
+                    "__UNWIRED_HEADER__",
+                    "// Wire `makeAdapter()` to your implementation. Until it is wired every test is\n\
+                     // skipped (a top-level probe sets `skip:` on each test), mirroring the other\n\
+                     // targets' skip-when-unwired behaviour."
+                        .to_owned(),
+                ),
+                (
+                    "__MAKE_ADAPTER__",
+                    "// Wire your implementation here. Return your adapter instead of throwing.\n\
+                     Adapter makeAdapter() =>\n    \
+                     throw UnimplementedError('wire your implementation: implement makeAdapter()');\n\
+                     \n\
+                     bool _adapterWired() {\n  \
+                       try {\n    \
+                         final a = makeAdapter();\n    \
+                         a.reset();\n    \
+                         a.observe();\n    \
+                         return true;\n  \
+                       } catch (_) {\n    \
+                         return false;\n  \
+                       }\n\
+                     }"
+                    .to_owned(),
+                ),
+            ],
+            "  }, skip: wired ? null : 'Adapter not wired');",
+        ),
+    }
+}
+
 /// Emit a standalone package:test Dart conformance scaffold.
 #[must_use]
-fn emit_dart(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let preamble = testgen_template(include_str!("testgen_dart.txt"), source_name);
-    let mut lines = vec![
-        "void main() {".to_owned(),
-        "  final wired = _adapterWired();".to_owned(),
-    ];
+fn emit_dart(
+    source_name: &str,
+    scenarios: &[Value],
+    walk: &Value,
+    unwired: UnwiredAdapter,
+) -> String {
+    let (slots, test_end) = dart_unwired_slots(unwired);
+    let preamble = fill_template(include_str!("testgen_dart.txt"), source_name, &slots);
+    let mut lines = vec!["void main() {".to_owned()];
+    if unwired == UnwiredAdapter::Skip {
+        lines.push("  final wired = _adapterWired();".to_owned());
+    }
     for scenario in scenarios {
         let (name, steps, states) = scenario_parts(scenario);
         lines.push(String::new());
@@ -1249,7 +1508,7 @@ fn emit_dart(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
             ));
         }
         append_forbidden(&mut lines, scenario, Target::Dart, "    ");
-        lines.push("  }, skip: wired ? null : 'Adapter not wired');".to_owned());
+        lines.push(test_end.to_owned());
     }
     let rows = walk["steps"]
         .as_array()
@@ -1285,7 +1544,7 @@ fn emit_dart(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
             .to_owned(),
         "      assertPartial(a.observe(), step['expected'] as Map<String, dynamic>);".to_owned(),
         "    }".to_owned(),
-        "  }, skip: wired ? null : 'Adapter not wired');".to_owned(),
+        test_end.to_owned(),
         "}".to_owned(),
     ]);
     format!("{preamble}\n\n{}\n", lines.join("\n"))
@@ -1293,14 +1552,44 @@ fn emit_dart(source_name: &str, scenarios: &[Value], walk: &Value) -> String {
 
 /// Emit a standalone `PHPUnit` conformance scaffold.
 #[must_use]
-fn emit_phpunit(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &Value) -> String {
-    let preamble = testgen_template(include_str!("testgen_php.txt"), source_name);
+fn emit_phpunit(
+    source_name: &str,
+    spec_name: &str,
+    scenarios: &[Value],
+    walk: &Value,
+    unwired: UnwiredAdapter,
+) -> String {
+    let (header, setup) = match unwired {
+        UnwiredAdapter::Fail => (
+            fail_header("// "),
+            format!(
+                "            $this->fail({} . ' (' . $e->getMessage() . ')');",
+                quoted(NOT_WIRED_MESSAGE, Target::Php)
+            ),
+        ),
+        UnwiredAdapter::Skip => (
+            "// Wire `makeAdapter()` to your implementation. Until it is wired, setUp() marks\n\
+             // every test skipped (mirroring the other targets' skip-when-unwired behaviour)."
+                .to_owned(),
+            "            $this->markTestSkipped('Adapter not wired: ' . $e->getMessage());"
+                .to_owned(),
+        ),
+    };
+    let preamble = fill_template(
+        include_str!("testgen_php.txt"),
+        source_name,
+        &[("__UNWIRED_HEADER__", header)],
+    );
     let mut lines = vec![
         format!("final class {spec_name}ConformanceTest extends TestCase"),
         "{".to_owned(),
-        normalize_newlines(include_str!("testgen_php_helpers.txt"))
-            .trim_end()
-            .to_owned(),
+        fill_template(
+            include_str!("testgen_php_helpers.txt"),
+            "",
+            &[("__UNWIRED_SETUP__", setup)],
+        )
+        .trim_end()
+        .to_owned(),
     ];
     let mut seen = BTreeMap::new();
     for scenario in scenarios {
@@ -1375,22 +1664,59 @@ fn emit_phpunit(source_name: &str, spec_name: &str, scenarios: &[Value], walk: &
 ///
 /// Rejects unknown targets instead of selecting an implicit fallback.
 pub fn generate_testgen(input: &TestgenInput, target: &str) -> Result<String, String> {
+    generate_testgen_with(input, target, UnwiredAdapter::Fail)
+}
+
+/// Generate one target scaffold with an explicit unwired-adapter behaviour.
+///
+/// # Errors
+///
+/// Rejects unknown targets, and [`UnwiredAdapter::Skip`] for Kotlin: kotlin.test
+/// has no portable runtime skip, so an unwired Kotlin test could only return
+/// early and pass, which is the silent green this option must not produce.
+pub fn generate_testgen_with(
+    input: &TestgenInput,
+    target: &str,
+    unwired: UnwiredAdapter,
+) -> Result<String, String> {
     let content = match target {
-        "pytest" => emit_pytest(input),
-        "vitest" => emit_vitest(&input.path.source_name, &input.scenarios, &input.walk),
-        "swift" => emit_swift(&input.path.source_name, &input.scenarios, &input.walk),
+        "pytest" => emit_pytest(input, unwired),
+        "vitest" => emit_vitest(
+            &input.path.source_name,
+            &input.scenarios,
+            &input.walk,
+            unwired,
+        ),
+        "swift" => emit_swift(
+            &input.path.source_name,
+            &input.scenarios,
+            &input.walk,
+            unwired,
+        ),
+        "kotlin" if unwired == UnwiredAdapter::Skip => {
+            return Err(
+                "--allow-unwired is not available for --target kotlin: kotlin.test has no portable runtime skip, so an unwired test would pass without calling the implementation"
+                    .to_owned(),
+            );
+        }
         "kotlin" => emit_kotlin(
             &input.path.source_name,
             &input.spec_name,
             &input.scenarios,
             &input.walk,
         ),
-        "dart" => emit_dart(&input.path.source_name, &input.scenarios, &input.walk),
+        "dart" => emit_dart(
+            &input.path.source_name,
+            &input.scenarios,
+            &input.walk,
+            unwired,
+        ),
         "phpunit" => emit_phpunit(
             &input.path.source_name,
             &input.spec_name,
             &input.scenarios,
             &input.walk,
+            unwired,
         ),
         _ => {
             return Err(format!(
@@ -1659,6 +1985,102 @@ mod tests {
         let input = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
             .expect("adapt valid input");
         assert!(generate_testgen(&input, "unknown").is_err());
+    }
+
+    /// Issue #1200: an unwired generated test fails by default on every
+    /// target, and only an explicit `UnwiredAdapter::Skip` restores the skip.
+    /// Swift, Kotlin, Dart, and `PHPUnit` have no toolchain in CI, so their
+    /// behaviour is fixed here on the generated text: the default carries the
+    /// failing construct and none of the skipping ones.
+    #[test]
+    fn unwired_adapter_fails_by_default_and_skips_only_on_opt_in() {
+        let (kernel, scenarios, walk) = contracts();
+        let input = public_kernel_testgen_input(&kernel, &path_context(), &scenarios, &walk)
+            .expect("adapt valid input");
+        let cases: [(&str, &[&str], &[&str]); 6] = [
+            (
+                "pytest",
+                &[
+                    "pytest.fail(ADAPTER_NOT_WIRED, pytrace=False)",
+                    PYTEST_NOT_WIRED_MESSAGE,
+                ],
+                &["pytest.skip("],
+            ),
+            (
+                "vitest",
+                &[
+                    "throw new Error(`${ADAPTER_NOT_WIRED} (${String(unwired)})`);",
+                    NOT_WIRED_MESSAGE,
+                ],
+                &["test.skip", "wired ? test"],
+            ),
+            (
+                "swift",
+                &[
+                    "@Test func ",
+                    "var description: String {",
+                    NOT_WIRED_MESSAGE,
+                ],
+                &[".enabled(if:"],
+            ),
+            (
+                "kotlin",
+                &[
+                    "val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)",
+                    "import kotlin.test.fail",
+                    KOTLIN_NOT_WIRED_MESSAGE,
+                ],
+                &["?: return"],
+            ),
+            (
+                "dart",
+                &["throw UnimplementedError('adapter not wired: ", "  });"],
+                &["skip:", "_adapterWired"],
+            ),
+            (
+                "phpunit",
+                &["$this->fail('adapter not wired: "],
+                &["markTestSkipped"],
+            ),
+        ];
+        for (target, present, absent) in cases {
+            let fail = generate_testgen(&input, target).expect("emit default");
+            assert_eq!(
+                fail,
+                generate_testgen_with(&input, target, UnwiredAdapter::Fail).expect("emit fail"),
+                "{target}: the default must be UnwiredAdapter::Fail"
+            );
+            for needle in present {
+                assert!(
+                    fail.contains(needle),
+                    "{target} default lacks {needle:?}:\n{fail}"
+                );
+            }
+            for needle in absent {
+                assert!(
+                    !fail.contains(needle),
+                    "{target} default still has {needle:?}:\n{fail}"
+                );
+            }
+            if target == "kotlin" {
+                let error = generate_testgen_with(&input, target, UnwiredAdapter::Skip)
+                    .expect_err("kotlin has no runtime skip");
+                assert!(error.contains("--allow-unwired is not available for --target kotlin"));
+                continue;
+            }
+            let skip =
+                generate_testgen_with(&input, target, UnwiredAdapter::Skip).expect("emit skip");
+            for needle in absent {
+                assert!(
+                    skip.contains(needle),
+                    "{target} opt-in lacks {needle:?}:\n{skip}"
+                );
+            }
+            assert!(
+                !skip.contains("adapter not wired: implement"),
+                "{target} opt-in still fails"
+            );
+        }
     }
 
     #[test]

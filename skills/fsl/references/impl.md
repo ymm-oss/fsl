@@ -70,34 +70,52 @@ emit the same scenarios:
   directly; the random walk is **baked at generation time** (the concrete Monitor
   runs the seed-fixed walk and the `(action, params, expected_state)` trace is
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
-  Until `makeAdapter()` is wired the suite is skipped. Output defaults to
+  Until `makeAdapter()` is wired every test fails. Output defaults to
   `<spec>.test.ts`.
 - `swift`: a self-contained Swift Testing file (`import Testing` / `@Test` /
   `#expect`; not XCTest), same `Adapter` contract and same baked walk. Dynamic
   state is `[String: Any]` with a bundled deep-equality + partial-match helper;
-  Option `None` bakes as the `FSLNull.instance` sentinel (no Foundation). Tests
-  are disabled via `@Test(.enabled(if: isAdapterWired()))` until `makeAdapter()`
-  is wired. Output defaults to `<SpecName>ConformanceTests.swift`.
+  Option `None` bakes as the `FSLNull.instance` sentinel (no Foundation). Every
+  test fails (`FSLNotWired`) until `makeAdapter()` is wired; `--allow-unwired`
+  disables them via `@Test(.enabled(if: isAdapterWired()))` instead. Output
+  defaults to `<SpecName>ConformanceTests.swift`.
 - `kotlin`: a self-contained kotlin.test file (multiplatform; JVM delegates to
   JUnit), same `Adapter` contract and same baked walk. Dynamic state is
   `Map<String, Any?>` — Kotlin's `==` is deep on `List`/`Map` and distinguishes
-  `Int`/`Double`, so the partial-match helper is a plain recursion. No portable
-  runtime skip, so an unwired `makeAdapter()` returns `null` and each test
-  returns early. Output defaults to `<SpecName>ConformanceTest.kt`.
+  `Int`/`Double`, so the partial-match helper is a plain recursion. An unwired
+  `makeAdapter()` returns `null` and each test fails with
+  `fail(ADAPTER_NOT_WIRED)`. kotlin.test has no portable runtime skip, so
+  `--allow-unwired` is rejected for Kotlin (exit 2). Output defaults to
+  `<SpecName>ConformanceTest.kt`.
 - `dart`: a self-contained `package:test` file (also runs under `flutter test`),
   same `Adapter` contract and same baked walk. Dynamic state is
   `Map<String, dynamic>`; Dart's `==` is reference-based on collections, so
   `assertPartial` recurses by the expected keys and compares leaves with the
-  `equals` matcher (the only dependency stays `package:test`). A top-level probe
-  sets `skip:` on each `test()` until `makeAdapter()` is wired. Output defaults
-  to `<spec_name>_conformance_test.dart`.
+  `equals` matcher (the only dependency stays `package:test`). Every test fails
+  until `makeAdapter()` is wired; `--allow-unwired` sets `skip:` on each `test()`
+  instead. Output defaults to `<spec_name>_conformance_test.dart`.
 - `phpunit`: a self-contained PHPUnit file (PHP 8.1+ / PHPUnit 10+,
   `strict_types`), same `Adapter` contract and same baked walk. Dynamic state is
   an associative `array`; leaves compare with `assertSame` (`===`) so int/float,
   bool and null never coerce (loose `==` would conflate `0 == "0"`).
   `assertPartial` recurses by the expected keys (maps order-independent; lists
-  pin length). `setUp()` skips every test until `makeAdapter()` is wired. Output
-  defaults to `<SpecName>ConformanceTest.php`.
+  pin length). `setUp()` fails every test until `makeAdapter()` is wired
+  (`markTestSkipped` under `--allow-unwired`). Output defaults to
+  `<SpecName>ConformanceTest.php`.
+
+**Unwired = fail, on every target (issue #1200, breaking).** Until the Adapter
+is wired, every generated test fails with a message starting `adapter not
+wired`. Do not treat a green run of a generated suite as conformance evidence
+until you have seen it execute tests against the implementation: a suite that
+never calls the implementation proves nothing. `fslc testgen --allow-unwired`
+(also `fslc domain testgen`) is the explicit opt-in that restores
+skip-until-wired; its output is byte-identical to the pre-#1200 scaffold, and
+Kotlin rejects it. An `--allow-unwired` suite exits 0 with every test skipped,
+so in `fslc chain` give `[impl]` a JUnit `report` (see `commands.md`, `chain`):
+then zero executed tests is `indeterminate`, never `passed`. An `[impl]` with
+neither `report` nor `evidence = "exit_code"` is `indeterminate` on exit 0, and
+`evidence = "exit_code"` is flagged `exit_code_only` with a warning — it is not
+conformance evidence for a generated suite.
 
 If a `reachable` target is not witnessed at the requested depth, `testgen` still
 generates tests for the scenarios it did witness and returns `warnings[]` with a

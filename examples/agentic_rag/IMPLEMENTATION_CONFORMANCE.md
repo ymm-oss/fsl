@@ -26,7 +26,7 @@ pytestで確認する。
 
 ```bash
 fslc testgen examples/agentic_rag/agentic_rag_design.fsl \
-  --depth 4 \
+  --depth 4 --allow-unwired \
   -o examples/agentic_rag/test_agentic_rag_design_conformance.py
 ```
 
@@ -44,7 +44,9 @@ depth 8やdepth 12の生成はこのモデルでは重い。深いシナリオ�
   examples/agentic_rag/test_agentic_rag_design_conformance.py -q
 ```
 
-Adapterが未実装の間はskipされる。これは正常で、生成直後にCIを壊さないための挙動である。
+`--allow-unwired`で生成したので、Adapterが未実装の間はskipされる。`fslc testgen`の既定では
+未配線のテストは失敗する（#1200）。全件skipの緑は実装が仕様に合っている証拠ではないので、
+Adapterを接続して実行件数が1件以上になるまで実装対応を主張しない。
 
 ## Adapter契約
 

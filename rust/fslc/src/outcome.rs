@@ -254,6 +254,9 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "impl_violated"
         | "sweep_failed"
         | "sweep_inconclusive"
+        // `chain` when its `[impl]` report records no executed test (#1200):
+        // a run that never called the implementation is not a pass.
+        | "indeterminate"
         // Dialect-level failures.
         | "observed_mismatch"
         | "replay_nonconformant"

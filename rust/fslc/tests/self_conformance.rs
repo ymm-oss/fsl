@@ -909,7 +909,7 @@ fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value
         | (CompoundCommand::Chain, "verified", 0)
         | (CompoundCommand::AnalyzeBatch, "analyzed", 0) => "finalize_pass",
         (CompoundCommand::Sweep, "sweep_failed" | "sweep_inconclusive", 1)
-        | (CompoundCommand::Chain, "violated", 1)
+        | (CompoundCommand::Chain, "violated" | "indeterminate", 1)
         | (CompoundCommand::Chain | CompoundCommand::AnalyzeBatch, "error", 2) => "finalize_fail",
         _ => {
             return Err(format!(
@@ -1301,6 +1301,44 @@ fn copy_chain_fixtures(destination: &Path) {
     }
 }
 
+/// The `[impl]` command-layer arm of [`chain_layer_fold_class`]. Exit-0
+/// outcomes other than `passed` (#1200) must carry the producer's `reason`.
+fn command_layer_fold_class(
+    layer: &Value,
+    status: &str,
+    result: &str,
+    exit_code: i64,
+    detail: &Value,
+) -> Result<FoldClass, String> {
+    // A rejected `[impl]` table (unknown key, empty `report`, both `report`
+    // and `evidence`) never runs its command (#1200).
+    if detail.get("returncode").is_none() {
+        return match (status, result, exit_code, detail["result"].as_str()) {
+            ("failed", "error", 2, Some("error")) if detail["kind"] == "parse" => {
+                Ok(FoldClass::Failure)
+            }
+            _ => Err(format!("contradictory command chain layer: {layer}")),
+        };
+    }
+    let return_code = detail
+        .get("returncode")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("command layer missing returncode: {layer}"))?;
+    match (status, result, exit_code, detail["result"].as_str()) {
+        ("passed", "passed", 0, Some("passed")) if return_code == 0 => Ok(FoldClass::Success),
+        ("failed", "failed", 1, Some("failed")) if return_code != 0 => Ok(FoldClass::Failure),
+        // #1200: exit 0, but the report records a failing test case, or
+        // nothing shows that any test executed.
+        ("failed", "failed", 1, Some("failed"))
+        | ("failed", "indeterminate", 1, Some("indeterminate"))
+            if return_code == 0 && detail["reason"].is_string() =>
+        {
+            Ok(FoldClass::Failure)
+        }
+        _ => Err(format!("contradictory command chain layer: {layer}")),
+    }
+}
+
 /// Independent adapter for `main.rs:3746-3765::chain_layer_passes` and the
 /// layer envelopes produced at `main.rs:3883-4107`. It deliberately does not
 /// call that function or the production outcome classifier.
@@ -1337,15 +1375,7 @@ fn chain_layer_fold_class(layer: &Value) -> Result<FoldClass, String> {
         .get("detail")
         .ok_or_else(|| format!("non-skipped chain layer missing detail: {layer}"))?;
     if kind == "command" {
-        let return_code = detail
-            .get("returncode")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| format!("command layer missing returncode: {layer}"))?;
-        return match (status, result, exit_code, detail["result"].as_str()) {
-            ("passed", "passed", 0, Some("passed")) if return_code == 0 => Ok(FoldClass::Success),
-            ("failed", "failed", 1, Some("failed")) if return_code != 0 => Ok(FoldClass::Failure),
-            _ => Err(format!("contradictory command chain layer: {layer}")),
-        };
+        return command_layer_fold_class(layer, status, result, exit_code, detail);
     }
     if !matches!(kind, "verify" | "check" | "refine") {
         return Err(format!(
@@ -1455,6 +1485,22 @@ fn chain_layer_adapter_is_fail_closed() {
         );
     }
 
+    // #1200: `failed` with exit 0 needs the report's reason, and
+    // `indeterminate` is only an exit-0 outcome.
+    for contradictory in [
+        json!({"layer":"impl","kind":"command","status":"failed","result":"failed","exit_code":1,
+               "detail":{"result":"failed","returncode":0}}),
+        json!({"layer":"impl","kind":"command","status":"failed","result":"indeterminate","exit_code":1,
+               "detail":{"result":"indeterminate","returncode":2,"reason":"x"}}),
+        json!({"layer":"impl","kind":"command","status":"passed","result":"indeterminate","exit_code":0,
+               "detail":{"result":"indeterminate","returncode":0,"reason":"x"}}),
+    ] {
+        assert!(
+            chain_layer_fold_class(&contradictory).is_err(),
+            "contradictory command layer must fail closed: {contradictory}"
+        );
+    }
+
     let mut missing_kind = valid;
     missing_kind
         .as_object_mut()
@@ -1550,6 +1596,98 @@ fn chain_layer_verdicts_conform_to_the_fold_model() {
         &command_failed_trace,
         "command-failed chain fold",
     );
+}
+
+#[test]
+fn chain_impl_evidence_verdicts_conform_to_the_fold_model() {
+    let directory = scratch_dir("chain-impl-evidence");
+    copy_chain_fixtures(&directory);
+
+    // #1200: the same exit-0 command without `evidence = "exit_code"` (and
+    // without a `report`) is `indeterminate`, a failure the chain cannot
+    // finalize as a pass.
+    let manifest = fs::read_to_string(directory.join("fsl-project.toml"))
+        .expect("read portable clean manifest");
+    assert!(
+        manifest.contains("evidence = \"exit_code\"\n"),
+        "{manifest}"
+    );
+    fs::write(
+        directory.join("fsl-project-no-evidence.toml"),
+        manifest.replace("evidence = \"exit_code\"\n", ""),
+    )
+    .expect("write no-evidence manifest");
+    let indeterminate = run_cli_at(
+        &directory,
+        &strings(&["chain", "fsl-project-no-evidence.toml"]),
+    );
+    assert_eq!(
+        indeterminate.output["result"], "indeterminate",
+        "{}",
+        indeterminate.output
+    );
+    assert_eq!(indeterminate.exit_code, 1, "{}", indeterminate.output);
+    let indeterminate_items = indeterminate.output["layers"]
+        .as_array()
+        .expect("indeterminate chain layers")
+        .clone();
+    assert!(
+        indeterminate_items
+            .iter()
+            .any(|item| item["result"] == "indeterminate"
+                && item["detail"]["returncode"] == 0
+                && chain_layer_fold_class(item) == Ok(FoldClass::Failure)),
+        "an exit-0 command without evidence must fold as failure: {}",
+        indeterminate.output
+    );
+    let indeterminate_trace =
+        chain_fold_trace(&indeterminate_items, &indeterminate).expect("map indeterminate chain");
+    assert_conformant(FOLD_SPEC, &indeterminate_trace, "indeterminate chain fold");
+    assert_nonconformant(
+        FOLD_SPEC,
+        &rejected_finalize_pass(&indeterminate_trace),
+        "indeterminate chain cannot finalize pass",
+    );
+
+    // #1200: exit 0 while the named report records a failing test case.
+    #[cfg(unix)]
+    {
+        fs::write(
+            directory.join("failing-junit.xml"),
+            "<testsuite tests=\"1\"><testcase name=\"a\"><failure message=\"boom\"/></testcase></testsuite>",
+        )
+        .expect("write failing junit fixture");
+        fs::write(
+            directory.join("fsl-project-report-fails.toml"),
+            "[impl]\ncommand = \"cp failing-junit.xml report.xml\"\nreport = \"report.xml\"\n",
+        )
+        .expect("write report-fails manifest");
+        let report_failed = run_cli_at(
+            &directory,
+            &strings(&["chain", "fsl-project-report-fails.toml"]),
+        );
+        assert_eq!(
+            report_failed.output["result"], "violated",
+            "{}",
+            report_failed.output
+        );
+        let report_failed_items = report_failed.output["layers"]
+            .as_array()
+            .expect("report-failed chain layers")
+            .clone();
+        assert!(
+            report_failed_items
+                .iter()
+                .any(|item| item["result"] == "failed"
+                    && item["detail"]["returncode"] == 0
+                    && chain_layer_fold_class(item) == Ok(FoldClass::Failure)),
+            "an exit-0 command whose report fails must fold as failure: {}",
+            report_failed.output
+        );
+        let report_failed_trace = chain_fold_trace(&report_failed_items, &report_failed)
+            .expect("map report-failed chain");
+        assert_conformant(FOLD_SPEC, &report_failed_trace, "report-failed chain fold");
+    }
 }
 
 #[test]

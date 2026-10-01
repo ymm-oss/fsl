@@ -76,8 +76,15 @@ rules in this skill.
    - requirements implements/refines business (`implements`, reported under the
      `implements` field of the requirements `verify` JSON)
    - design refines requirements with an explicit mapping (`fslc refine`)
-   - implementation conforms through generated tests or event-log replay
-   - gate the whole chain at once with `fslc chain` when a manifest exists
+   - implementation conforms through generated tests or event-log replay. A
+     generated suite counts only once it has executed tests against the wired
+     Adapter: unwired tests fail by default, and `--allow-unwired` makes them skip
+     (exit 0 with nothing run), so "the generated tests are green" is never the
+     conformance evidence by itself — check the executed count
+   - gate the whole chain at once with `fslc chain` when a manifest exists; give
+     `[impl]` a JUnit `report` so an all-skipped or empty run is `indeterminate`,
+     not `passed`. `evidence = "exit_code"` (flagged `exit_code_only`) is for
+     non-test commands and is never the implementation-conformance anchor
    - **testgen layer selection:** run `fslc testgen` on the spec at the **same
      layer granularity as the implementation** (design `spec` for design-aligned
      code). From upper layers, reuse **`forbidden` negatives only** — they stay
@@ -94,7 +101,7 @@ rules in this skill.
 | Business | `business` spec with policies, KPIs, goals | check, verify, induction |
 | Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed seam exits 1 with top-level `refinement_failed` or `impl_violated` |
 | Design | kernel `spec` plus mapping to requirements | check, verify, induction, refine |
-| Implementation | Adapter or event log connected to real behavior | testgen pytest or replay; do not claim conformance before this |
+| Implementation | Adapter or event log connected to real behavior | testgen run with ≥ 1 executed test against the wired Adapter (chain `[impl]` with `report` → `passed`, not `indeterminate`), or replay; do not claim conformance before this |
 | Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, optional mutate/vacuity |
 
 For every layer, also run:
@@ -126,8 +133,10 @@ For high-risk contracts, add the more expensive checks:
   contract for checked safety behavior.
 - Liveness/progress does not automatically propagate through refinement. Verify
   response properties at each layer that owns progress.
-- A green `testgen` pytest run or `replay` result is the implementation-conformance
-  anchor. Without an Adapter or log, the implementation is not yet checked.
+- A `testgen` run that executed tests against the wired Adapter, or a `replay`
+  result, is the implementation-conformance anchor. A green run alone is not:
+  an `--allow-unwired` suite is green with every test skipped. Without an
+  Adapter or log, the implementation is not yet checked.
 
 ## Human Decision Gates
 

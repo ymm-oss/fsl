@@ -118,10 +118,10 @@ fslc refine examples/agentic_rag/agentic_rag_design.fsl \
 # 実装conformance testの雛形を再生成する。
 # depth 4は浅い初期ハーネス用。深いcoverシナリオは重いので別途扱う。
 fslc testgen examples/agentic_rag/agentic_rag_design.fsl \
-  --depth 4 \
+  --depth 4 --allow-unwired \
   -o examples/agentic_rag/test_agentic_rag_design_conformance.py
 
-# Adapter未実装の間はskipされる。
+# --allow-unwired で生成したので、Adapter未実装の間はskipされる（既定では失敗する。#1200）。
 ./.venv/bin/python -m pytest \
   examples/agentic_rag/test_agentic_rag_design_conformance.py -q
 
@@ -163,7 +163,7 @@ fslc mutate examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl \
 - design層の浅い`verify`: `verified`、ただし深いaction未到達のvacuity warningは許容
 - requirements→businessの`refine`: `refines`、かつ`progress.BP1..BP4`が確認される
 - design→requirementsの`refine`: `refines`、かつ`progress.RequestEventuallyHandled`が確認される
-- conformance pytest: Adapter未実装ならskip。Adapter接続後はscenario replayとrandom walkが実装を検査する
+- conformance pytest: `--allow-unwired`で生成した雛形はAdapter未実装ならskip（全件skipは実装の証拠ではない）。Adapter接続後はscenario replayとrandom walkが実装を検査する
 - ネガティブプローブ:
   - guard迂回とtool承認迂回は`refinement_failed / abs_requires_failed`
   - liveness喪失は`refinement_failed / progress_lost / leadsTo`

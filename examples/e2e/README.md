@@ -47,8 +47,10 @@ The engineer writes a near-implementation design and real code in `3_design.fsl`
 ./.venv/bin/python -m fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8
 
 # 7. To regenerate the implementation-conformance harness
-#    Note: the Adapter skeleton is regenerated too, so after regenerating, restore the wiring in impl/test_conformance.py
-./.venv/bin/python -m fslc testgen examples/e2e/3_design.fsl -o examples/e2e/impl/test_conformance.py
+#    Note: the Adapter skeleton is regenerated too, so after regenerating, restore the wiring in impl/test_conformance.py.
+#    Use the native `fslc`: its scaffold fails every test until the Adapter is wired (#1200);
+#    the frozen Python reference (`python -m fslc testgen`) still emits the older skipping one.
+fslc testgen examples/e2e/3_design.fsl -o examples/e2e/impl/test_conformance.py
 
 # 8. Check the FSL-independent Python implementation with the generated harness
 (cd examples/e2e/impl && ../../../.venv/bin/python -m pytest -q)

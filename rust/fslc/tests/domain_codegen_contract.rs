@@ -112,6 +112,10 @@ fn assert_generation_succeeds(spec: &str, target: &str) {
 }
 
 fn domain_testgen_digest() -> String {
+    domain_testgen_digest_with(&[])
+}
+
+fn domain_testgen_digest_with(extra: &[&str]) -> String {
     let root = root();
     let output_path = root.join("rust/target/domain-codegen-contract/domain.test.ts");
     if let Some(parent) = output_path.parent() {
@@ -124,8 +128,9 @@ fn domain_testgen_digest() -> String {
             "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
             "--target",
             "vitest",
-            "-o",
         ])
+        .args(extra)
+        .arg("-o")
         .arg(&output_path)
         .current_dir(root)
         .output()
@@ -184,8 +189,17 @@ fn domain_testgen_adapter_and_effects_match_the_typestate_contract_golden() {
     // state space as a result (reviewed diff: pre-fix scenarios show
     // `Order.status: "Status_Approved"` surviving `event.PaymentTimedOut:
     // true`; post-fix scenarios correctly show `"Status_Failed"`).
+    //
+    // #1200 regenerated it again: an unwired adapter now fails every test
+    // instead of skipping it, and the guidance names `fslc domain testgen
+    // --allow-unwired` (the command that regenerates this file). `--allow-unwired` must still reproduce the
+    // pre-#1200 skipping scaffold byte for byte.
     assert_eq!(
         domain_testgen_digest(),
+        "25864d9a1ed4de9ff2d3191181f6ef1897580f51e9ebf432326ba609850e5683"
+    );
+    assert_eq!(
+        domain_testgen_digest_with(&["--allow-unwired"]),
         "162a3acd293591147d84dff8a57c4b27038557ebcfdd02c9b938c91a58b6dbf3"
     );
 }
@@ -205,4 +219,31 @@ fn every_valid_domain_corpus_entry_generates_all_five_targets() {
             assert_generation_succeeds(spec, target);
         }
     }
+}
+
+/// Issue #1200: the shared emitters' unwired guidance names the generic
+/// command; a domain scaffold must name the one that regenerates it.
+#[test]
+fn domain_testgen_unwired_guidance_names_domain_testgen() {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "domain",
+            "testgen",
+            "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",
+            "--target",
+            "vitest",
+        ])
+        .current_dir(root())
+        .output()
+        .expect("run domain testgen");
+    assert!(output.status.success());
+    let content = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        content.contains("`fslc domain testgen --allow-unwired`"),
+        "{content}"
+    );
+    assert!(
+        !content.contains("`fslc testgen --allow-unwired`"),
+        "{content}"
+    );
 }
