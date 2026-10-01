@@ -323,6 +323,78 @@ short-circuits on the first failed layer and marks the remaining planned
 layers as `skipped`; `--keep-going` records the failure and continues through
 the rest of the manifest.
 
+### Parallel layers (`--jobs N`, issue #1151)
+
+`--jobs N` runs up to `N` layers at once. The default is 1, the serial loop
+above. The core count is not the default because memory multiplies with
+workers, and single verifications in this repository have measured 11 GB
+(#697) and 28 GB (#1041). The job count does not change the result: stdout,
+the stderr table, and the exit code are those of `--jobs 1`. Two figures are
+exempt. Elapsed times differ between any two runs. The solver's `memory_mb`
+is Z3's per-process peak, so while other workers run it includes their
+memory. The contract is the one #1108 set for `sweep`/`mutate`:
+
+- **Which steps may overlap.** A layer's result depends only on its own
+  manifest table, the target table of its refine link, and the files those
+  name. It never depends on another layer's result. The chain's order decides
+  only which layers run at all. So all `spec` and refine steps may run
+  concurrently, with one exception. Two `spec` layers whose files have
+  identical bytes can share a verify-cache entry (the keys are
+  content-addressed, #1148). Run serially, the later layer would hit the entry
+  the earlier one wrote. Such layers therefore run in one worker, in manifest
+  order, and get the same `cache` annotation as in a serial run. `[impl]` is
+  a side effect, and whether it runs at all depends on the earlier layers. It
+  runs alone after every other step, and only when the serial loop would
+  reach it.
+- **One Z3 context per step, at every job count.** z3 0.20 keeps one
+  `Context` per thread, and it is not `Send`. A context that has already built
+  an earlier layer's terms can lead the solver to a different witness for the
+  next layer. Measured on `examples/agentic_rag` at depth 8, the design
+  layer's `reachable_failed` witness and solver counts from a serial chain
+  differed from `fslc verify agentic_rag_design.fsl --depth 8` for the same
+  file and depth. So each `spec` and refine step runs on a thread of its own,
+  including at `--jobs 1`. That thread has the same 8 MiB stack as the main
+  worker. As a result a layer reports what `fslc verify` reports for it, which
+  is also what the verify cache holds. This changes the serial chain's output
+  for such manifests, from the order-dependent witness to the standalone one.
+- **Order.** Each step's result goes into the slot for its manifest position.
+  The existing aggregation reads the slots in manifest order, so the order in
+  which steps complete never reaches the output.
+- **First failure and early exit.** Workers claim steps in manifest order.
+  Without `--keep-going`, a failing step stops workers from starting any later
+  step. A panicking step does the same with or without `--keep-going`. Every
+  step before the serial run's first stopping step still runs, because
+  skipping one would require an earlier stopping step. The report is decided
+  once every step up to that point has reported, and the chain then prints it
+  and exits without waiting. A solver cannot be interrupted from outside its
+  thread, so a later step that is already running is detached, and the
+  process exits under it. Measured on a release build, with a `[business]`
+  layer that fails at step 0 and the slow `[design]` test layer at depth 11
+  (0.91 s on its own): without the early exit `--jobs 4` took 0.89–1.02 s
+  against 0.04–0.09 s at `--jobs 1`, because the discarded design layer ran
+  to the end. With it, `--jobs 4` takes 0.03–0.05 s. The output was the same
+  in all runs, and 100 repeated `--jobs 4` runs all exited 1 with identical
+  output. Steps print nothing, so a detached step cannot write
+  after the table. A detached step killed while storing a cache entry leaves
+  at most its temporary file (see below). One that finishes in the moment
+  before the process exits still stores its entry. That entry is a correct
+  verdict, but a following run can hit it where a run after a serial chain
+  would miss. A panic is re-raised with its original payload only when the
+  manifest-order walk reaches it, which is where the serial loop panics.
+  The one stderr difference left is a panic in a later step that a serial run
+  would never have started: its panic message can still be printed before
+  the process exits.
+- **Cache writes.** An entry is written to a temporary file and then renamed
+  into place. The temporary name carries a per-process sequence number as
+  well as the process id, so two workers in one process never write through
+  the same temporary file. A failed write or rename removes the temporary
+  file. The cache key does not include the job count.
+
+The manifest bounds the speed-up. A chain has at most three `spec` layers
+and three refine links, so the longest layer sets the floor. Verifying many
+independent specs of a project in one pass is a different axis, and so is
+the `sweep`/`mutate` grid of #1108.
+
 The manifest reader is fail-closed (issue #489): a top-level section name
 other than `[business]`, `[requirements]`, `[design]`, or `[impl]` — including
 a plain typo — is a `kind: "parse"` error at exit 2 rather than a silently

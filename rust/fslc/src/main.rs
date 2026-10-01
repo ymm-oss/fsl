@@ -1553,23 +1553,29 @@ fn command() -> Result<(Value, i32), String> {
         }
         "chain" => {
             let mut keep_going = false;
-            let mut path = PathBuf::from("fsl-project.toml");
-            if let Some(first) = args.next() {
-                if first == "--keep-going" {
-                    keep_going = true;
-                } else if first.starts_with('-') {
-                    return Err(format!("unknown chain option '{first}'"));
-                } else {
-                    path = PathBuf::from(first);
-                }
-            }
-            for option in args.by_ref() {
+            let mut jobs = 1_usize;
+            let mut path = None;
+            while let Some(option) = args.next() {
                 match option.as_str() {
                     "--keep-going" => keep_going = true,
-                    _ => return Err(format!("unknown chain option '{option}'")),
+                    "--jobs" => {
+                        jobs = args
+                            .next()
+                            .ok_or_else(|| "--jobs requires a value".to_owned())?
+                            .parse()
+                            .ok()
+                            .filter(|jobs| *jobs > 0)
+                            .ok_or_else(|| "--jobs must be a positive integer".to_owned())?;
+                    }
+                    _ if option.starts_with('-') => {
+                        return Err(format!("unknown chain option '{option}'"));
+                    }
+                    _ if path.is_none() => path = Some(PathBuf::from(option)),
+                    _ => return Err(format!("unexpected chain argument '{option}'")),
                 }
             }
-            let result = run_project_chain(&path, keep_going);
+            let path = path.unwrap_or_else(|| PathBuf::from("fsl-project.toml"));
+            let result = run_project_chain(&path, keep_going, jobs);
             eprintln!("{}", format_chain_table(&result.0));
             Ok(result)
         }
@@ -3804,7 +3810,7 @@ fn parse_manifest_depth(layer: &str, key: &str, raw: &str) -> Result<usize, Stri
     clippy::too_many_lines,
     clippy::unnecessary_unwrap
 )]
-fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
+fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(_) => {
@@ -3878,224 +3884,15 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
+    let mut results = run_chain_steps(&steps, &sections, base, keep_going, jobs);
     let mut layers = Vec::new();
-    for (index, (kind, layer)) in steps.iter().enumerate() {
-        let section = &sections[layer];
-        let (entry, failed) = if kind == "spec" {
-            if let Some(file) = section.values.get("file") {
-                let file_path = base.join(file);
-                let (detail, status, check_kind, depth) = if let Some(raw_depth) =
-                    section.values.get("depth")
-                {
-                    match parse_manifest_depth(layer, "depth", raw_depth) {
-                        Ok(depth) => {
-                            // Issue #1147: go through the same options path
-                            // `verify` and `sweep` use, so an unchanged layer is a
-                            // verify-cache hit. Every field other than `depth` and
-                            // `deadlock` is the value `run_verify` hard-coded.
-                            let options = CliVerifyOptions {
-                                depth,
-                                deadlock: section
-                                    .values
-                                    .get("deadlock")
-                                    .map_or("warn", String::as_str)
-                                    .to_owned(),
-                                ..CliVerifyOptions::default()
-                            };
-                            let (detail, status) = run_verify_cli(&file_path, &file_path, &options);
-                            (detail, status, "verify", Some(depth))
-                        }
-                        Err(message) => (
-                            json!({"result": "error", "kind": "parse", "message": message}),
-                            2,
-                            "verify",
-                            None,
-                        ),
-                    }
-                } else {
-                    let (detail, status) = run_check(&file_path, &file_path);
-                    (detail, status, "check", None)
-                };
-                let passed = chain_layer_passes(&detail, status);
-                let layer_status = if passed { "passed" } else { "failed" };
-                let result = detail.get("result").cloned().unwrap_or(Value::Null);
-                let effective_status = if passed { 0 } else { status.max(1) };
-                let mut entry = json!({
-                    "layer": layer,
-                    "kind": check_kind,
-                    "file": file_path.display().to_string(),
-                    "status": layer_status,
-                    "result": result,
-                    "exit_code": effective_status,
-                    "detail": detail,
-                });
-                if let Some(depth) = depth
-                    && let Value::Object(entry) = &mut entry
-                {
-                    entry.insert("depth".to_owned(), json!(depth));
-                }
-                (entry, !passed)
-            } else {
-                let detail = json!({
-                    "result": "error",
-                    "kind": "io",
-                    "message": format!("[{layer}] file is required"),
-                });
-                (
-                    json!({
-                        "layer": layer,
-                        "kind": "check",
-                        "status": "failed",
-                        "result": "error",
-                        "exit_code": 2,
-                        "detail": detail,
-                    }),
-                    true,
-                )
-            }
-        } else if kind == "refine" {
-            let target = section
-                .values
-                .get("refine_against")
-                .map_or("", String::as_str);
-            let target_section = sections.get(target);
-            let mapping = section.values.get("mapping");
-            if mapping.is_none()
-                || target_section
-                    .and_then(|target| target.values.get("file"))
-                    .is_none()
-            {
-                let detail = json!({
-                    "result": "error",
-                    "kind": "io",
-                    "message": format!("[{layer}] unknown refine_against layer: {target}"),
-                });
-                (
-                    json!({
-                        "layer": format!("{layer}->{target}"),
-                        "kind": "refine",
-                        "status": "failed",
-                        "result": "error",
-                        "exit_code": 2,
-                        "detail": detail,
-                    }),
-                    true,
-                )
-            } else {
-                let file_path = base.join(&section.values["file"]);
-                let target_path = base.join(&target_section.expect("checked").values["file"]);
-                let mapping_path = base.join(mapping.expect("checked"));
-                // Precedence: an explicit `refine_depth` or `depth` on this layer wins
-                // outright, even if malformed (a present-but-invalid key must error, not
-                // silently fall through to the next candidate or the default).
-                let depth_result = if let Some(raw) = section.values.get("refine_depth") {
-                    parse_manifest_depth(layer, "refine_depth", raw)
-                } else if let Some(raw) = section.values.get("depth") {
-                    parse_manifest_depth(layer, "depth", raw)
-                } else if let Some(raw) =
-                    target_section.and_then(|target| target.values.get("depth"))
-                {
-                    parse_manifest_depth(target, "depth", raw)
-                } else {
-                    Ok(8)
-                };
-                match depth_result {
-                    Ok(depth) => {
-                        let (detail, status) =
-                            run_refine(&file_path, &target_path, &mapping_path, depth);
-                        let passed = chain_layer_passes(&detail, status);
-                        (
-                            json!({
-                                "layer": format!("{layer}->{target}"),
-                                "kind": "refine",
-                                "file": file_path.display().to_string(),
-                                "against": target,
-                                "abs_file": target_path.display().to_string(),
-                                "mapping": mapping_path.display().to_string(),
-                                "depth": depth,
-                                "status": if passed { "passed" } else { "failed" },
-                                "result": detail.get("result").cloned().unwrap_or(Value::Null),
-                                "exit_code": if passed { 0 } else { status.max(1) },
-                                "detail": detail,
-                            }),
-                            !passed,
-                        )
-                    }
-                    Err(message) => {
-                        let detail =
-                            json!({"result": "error", "kind": "parse", "message": message});
-                        (
-                            json!({
-                                "layer": format!("{layer}->{target}"),
-                                "kind": "refine",
-                                "status": "failed",
-                                "result": "error",
-                                "exit_code": 2,
-                                "detail": detail,
-                            }),
-                            true,
-                        )
-                    }
-                }
-            }
-        } else {
-            let command = section.values.get("command").cloned().unwrap_or_default();
-            if command.is_empty() {
-                let detail = json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
-            } else {
-                #[cfg(target_family = "windows")]
-                let completed = std::process::Command::new("cmd")
-                    .args(["/C", &command])
-                    .current_dir(base)
-                    .output();
-                #[cfg(not(target_family = "windows"))]
-                let completed = std::process::Command::new("sh")
-                    .args(["-c", &command])
-                    .current_dir(base)
-                    .output();
-                match completed {
-                    Ok(completed) => {
-                        let passed = completed.status.success();
-                        let code = completed.status.code().unwrap_or(1);
-                        let detail = json!({
-                            "result": if passed { "passed" } else { "failed" },
-                            "command": command,
-                            "returncode": code,
-                            "stdout": String::from_utf8_lossy(&completed.stdout),
-                            "stderr": String::from_utf8_lossy(&completed.stderr),
-                        });
-                        (
-                            json!({
-                                "layer": "impl", "kind": "command", "command": command,
-                                "status": if passed { "passed" } else { "failed" },
-                                "result": if passed { "passed" } else { "failed" },
-                                "exit_code": if passed { 0 } else { 1 }, "detail": detail,
-                            }),
-                            !passed,
-                        )
-                    }
-                    Err(error) => {
-                        let detail =
-                            json!({"result": "error", "kind": "io", "message": error.to_string()});
-                        (
-                            json!({
-                                "layer": "impl", "kind": "command", "command": command,
-                                "status": "failed", "result": "error", "exit_code": 2,
-                                "detail": detail,
-                            }),
-                            true,
-                        )
-                    }
-                }
-            }
-        };
+    for (index, slot) in results.iter_mut().enumerate() {
+        // Every step up to and including the first failure has run at any
+        // job count (see `run_chain_steps`), so a missing result here is a
+        // scheduler defect, not a skipped layer.
+        let (entry, failed) = slot
+            .take()
+            .expect("every chain step up to the first failure has a result");
         layers.push(entry);
         if failed && !keep_going {
             for (remaining_kind, remaining_layer) in &steps[index + 1..] {
@@ -4160,6 +3957,464 @@ fn run_project_chain(path: &Path, keep_going: bool) -> (Value, i32) {
         1
     };
     (Value::Object(output), status)
+}
+
+/// The result slot of each planned chain step, in manifest order. `None` is a
+/// step that never ran because an earlier step failed first.
+type ChainStepResults = Vec<Option<(Value, bool)>>;
+
+/// Groups the non-`impl` steps into the units one worker runs in order.
+///
+/// Two `spec` layers whose files have the same bytes can share verify-cache
+/// entries (the key is content-addressed, issue #1148, and the cross-depth
+/// pointer ignores depth). Run serially, the later one may be a cache hit on
+/// the earlier one's entry, which adds a `cache` annotation to its output; run
+/// concurrently, it would miss. Keeping such layers in one group, in manifest
+/// order, preserves the serial run's cache interaction exactly. Grouping on
+/// the root file's bytes is conservative: it covers every pair that can share
+/// a key, plus some that cannot. Refine and `impl` steps never touch the
+/// cache.
+fn chain_step_groups(
+    steps: &[(String, String)],
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+) -> Vec<Vec<usize>> {
+    let mut groups = Vec::<Vec<usize>>::new();
+    let mut by_source = std::collections::BTreeMap::<Vec<u8>, usize>::new();
+    for (index, (kind, layer)) in steps.iter().enumerate() {
+        if kind == "impl" {
+            continue;
+        }
+        let source = (kind == "spec")
+            .then(|| sections[layer].values.get("file"))
+            .flatten()
+            .and_then(|file| std::fs::read(base.join(file)).ok());
+        match source {
+            Some(source) => {
+                if let Some(&group) = by_source.get(&source) {
+                    groups[group].push(index);
+                } else {
+                    by_source.insert(source, groups.len());
+                    groups.push(vec![index]);
+                }
+            }
+            None => groups.push(vec![index]),
+        }
+    }
+    groups
+}
+
+/// Runs one chain step on a thread of its own, so it gets a fresh Z3 context.
+///
+/// z3 0.20 keeps one `Context` per thread. A context that has already built
+/// an earlier layer's terms can steer the solver to a different witness (and
+/// different statistics) for the next layer than a fresh one does, so a
+/// layer's result would depend on which layers ran before it on the same
+/// thread: measured on `examples/agentic_rag`, the serial chain's design
+/// layer reported a different `reachable_failed` witness than
+/// `fslc verify agentic_rag_design.fsl` for the same file and depth. With a
+/// thread per step, a layer reports what `fslc verify` reports (and what the
+/// verify cache holds), at any job count.
+fn run_chain_step_isolated(
+    kind: &str,
+    layer: &str,
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+) -> (Value, bool) {
+    std::thread::scope(|scope| {
+        let step = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .name("fslc-chain-step".to_owned())
+            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base))
+            .expect("spawn a chain step thread");
+        step.join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+/// How many chain workers `--jobs` starts: never more than there are groups
+/// to claim, so `--jobs 64` on a three-layer manifest starts three.
+fn chain_worker_count(jobs: usize, groups: usize) -> usize {
+    jobs.min(groups)
+}
+
+/// What a chain worker reports for one step: its result, or the payload of a
+/// panic inside it.
+type ChainStepMessage = (usize, std::thread::Result<(Value, bool)>);
+
+/// Runs the planned chain steps on up to `jobs` workers (issue #1151) and
+/// returns each step's result in manifest order.
+///
+/// `jobs == 1` is the serial loop: steps run one after another in manifest
+/// order and the loop stops at the first failure unless `keep_going`.
+///
+/// With `jobs > 1`, workers claim groups (see [`chain_step_groups`]) in
+/// manifest order. At any job count every `spec`/refine step runs on a fresh
+/// thread with its own Z3 context ([`run_chain_step_isolated`]); z3 0.20's
+/// `Context` is thread-local and not `Send`. The output is the same as the
+/// serial loop's because:
+///
+/// - a step's result never depends on another step's result
+///   ([`run_chain_step`]), and layers sharing a cache key stay serial;
+/// - results are sent to this thread with their manifest index and are
+///   aggregated by that index, never by completion order;
+/// - a step that stops the serial loop -- a failure without `keep_going`, or
+///   a panic -- lowers `cutoff`, and no worker starts a step past it. Every
+///   step before the serial run's stopping step `F` still runs: skipping one
+///   would take an earlier stopping step, and `F` is the earliest;
+/// - this thread returns as soon as every step up to the cutoff has reported.
+///   Workers still running a later step are not joined: they are detached,
+///   and the process exits under them once the report is printed, so a
+///   discarded layer does not hold up the run (a solver cannot be interrupted
+///   from outside its thread). A step prints nothing itself, so a straggler
+///   cannot write after the table; one killed while storing a cache entry
+///   leaves at most its temporary file, because entries are renamed into
+///   place;
+/// - a panic is re-raised with its original payload only when the walk in
+///   manifest order reaches it, where the serial loop would have panicked;
+/// - the `[impl]` command is a side effect whose running at all depends on the
+///   earlier layers, so it runs alone, after every other step has reported,
+///   and only when the serial loop would have reached it.
+fn run_chain_steps(
+    steps: &[(String, String)],
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+    keep_going: bool,
+    jobs: usize,
+) -> ChainStepResults {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mut results: ChainStepResults = vec![None; steps.len()];
+    if jobs <= 1 {
+        for (index, (kind, layer)) in steps.iter().enumerate() {
+            let result = run_chain_step_isolated(kind, layer, sections, base);
+            let failed = result.1;
+            results[index] = Some(result);
+            if failed && !keep_going {
+                break;
+            }
+        }
+        return results;
+    }
+    let groups = Arc::new(chain_step_groups(steps, sections, base));
+    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf()));
+    let next_group = Arc::new(AtomicUsize::new(0));
+    let cutoff = Arc::new(AtomicUsize::new(usize::MAX));
+    let (sender, receiver) = std::sync::mpsc::channel::<ChainStepMessage>();
+    for worker in 0..chain_worker_count(jobs, groups.len()) {
+        let (groups, shared, next_group, cutoff, sender) = (
+            Arc::clone(&groups),
+            Arc::clone(&shared),
+            Arc::clone(&next_group),
+            Arc::clone(&cutoff),
+            sender.clone(),
+        );
+        std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .name(format!("fslc-chain-{worker}"))
+            .spawn(move || {
+                let (steps, sections, base) = &*shared;
+                while let Some(group) = groups.get(next_group.fetch_add(1, Ordering::SeqCst)) {
+                    for &index in group {
+                        if index > cutoff.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let (kind, layer) = &steps[index];
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            run_chain_step_isolated(kind, layer, sections, base)
+                        }));
+                        let ends_serial_loop = result
+                            .as_ref()
+                            .map_or(true, |(_, failed)| *failed && !keep_going);
+                        if ends_serial_loop {
+                            cutoff.fetch_min(index, Ordering::SeqCst);
+                        }
+                        let panicked = result.is_err();
+                        // The receiver is gone once the report is decided;
+                        // a straggler's result is simply dropped.
+                        if sender.send((index, result)).is_err() || panicked {
+                            return;
+                        }
+                    }
+                }
+            })
+            .expect("spawn a chain worker thread");
+    }
+    drop(sender);
+
+    let pending = |slots: &[Option<std::thread::Result<(Value, bool)>>], stop: usize| {
+        steps
+            .iter()
+            .enumerate()
+            .take_while(|(index, _)| *index <= stop)
+            .any(|(index, (kind, _))| kind != "impl" && slots[index].is_none())
+    };
+    let mut slots = steps.iter().map(|_| None).collect::<Vec<_>>();
+    let mut stop = usize::MAX;
+    while pending(&slots, stop) {
+        // Every worker holding a sender has exited: nothing more can arrive.
+        let Ok((index, result)) = receiver.recv() else {
+            break;
+        };
+        if result
+            .as_ref()
+            .map_or(true, |(_, failed)| *failed && !keep_going)
+        {
+            stop = stop.min(index);
+        }
+        slots[index] = Some(result);
+    }
+    for (index, slot) in slots.into_iter().enumerate() {
+        if index > stop {
+            break;
+        }
+        match slot {
+            Some(Ok(result)) => results[index] = Some(result),
+            Some(Err(payload)) => std::panic::resume_unwind(payload),
+            None => {}
+        }
+    }
+    if stop == usize::MAX
+        && let Some(index) = steps.iter().position(|(kind, _)| kind == "impl")
+    {
+        let (kind, layer) = &steps[index];
+        results[index] = Some(run_chain_step(kind, layer, sections, base));
+    }
+    results
+}
+
+/// Runs one planned chain step and returns its `layers[]` entry plus whether
+/// it failed. A step reads only its own manifest section, the target section
+/// of a refine link, and the files they name: its result never depends on
+/// another step's result, which is what lets `run_chain_steps` run steps
+/// concurrently and still aggregate them exactly as the serial loop does.
+#[allow(
+    clippy::bool_to_int_with_if,
+    clippy::manual_let_else,
+    clippy::single_match_else,
+    clippy::too_many_lines,
+    clippy::unnecessary_unwrap
+)]
+fn run_chain_step(
+    kind: &str,
+    layer: &str,
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+) -> (Value, bool) {
+    let section = &sections[layer];
+    if kind == "spec" {
+        if let Some(file) = section.values.get("file") {
+            let file_path = base.join(file);
+            let (detail, status, check_kind, depth) =
+                if let Some(raw_depth) = section.values.get("depth") {
+                    match parse_manifest_depth(layer, "depth", raw_depth) {
+                        Ok(depth) => {
+                            // Issue #1147: go through the same options path
+                            // `verify` and `sweep` use, so an unchanged layer is a
+                            // verify-cache hit. Every field other than `depth` and
+                            // `deadlock` is the value `run_verify` hard-coded.
+                            let options = CliVerifyOptions {
+                                depth,
+                                deadlock: section
+                                    .values
+                                    .get("deadlock")
+                                    .map_or("warn", String::as_str)
+                                    .to_owned(),
+                                ..CliVerifyOptions::default()
+                            };
+                            let (detail, status) = run_verify_cli(&file_path, &file_path, &options);
+                            (detail, status, "verify", Some(depth))
+                        }
+                        Err(message) => (
+                            json!({"result": "error", "kind": "parse", "message": message}),
+                            2,
+                            "verify",
+                            None,
+                        ),
+                    }
+                } else {
+                    let (detail, status) = run_check(&file_path, &file_path);
+                    (detail, status, "check", None)
+                };
+            let passed = chain_layer_passes(&detail, status);
+            let layer_status = if passed { "passed" } else { "failed" };
+            let result = detail.get("result").cloned().unwrap_or(Value::Null);
+            let effective_status = if passed { 0 } else { status.max(1) };
+            let mut entry = json!({
+                "layer": layer,
+                "kind": check_kind,
+                "file": file_path.display().to_string(),
+                "status": layer_status,
+                "result": result,
+                "exit_code": effective_status,
+                "detail": detail,
+            });
+            if let Some(depth) = depth
+                && let Value::Object(entry) = &mut entry
+            {
+                entry.insert("depth".to_owned(), json!(depth));
+            }
+            (entry, !passed)
+        } else {
+            let detail = json!({
+                "result": "error",
+                "kind": "io",
+                "message": format!("[{layer}] file is required"),
+            });
+            (
+                json!({
+                    "layer": layer,
+                    "kind": "check",
+                    "status": "failed",
+                    "result": "error",
+                    "exit_code": 2,
+                    "detail": detail,
+                }),
+                true,
+            )
+        }
+    } else if kind == "refine" {
+        let target = section
+            .values
+            .get("refine_against")
+            .map_or("", String::as_str);
+        let target_section = sections.get(target);
+        let mapping = section.values.get("mapping");
+        if mapping.is_none()
+            || target_section
+                .and_then(|target| target.values.get("file"))
+                .is_none()
+        {
+            let detail = json!({
+                "result": "error",
+                "kind": "io",
+                "message": format!("[{layer}] unknown refine_against layer: {target}"),
+            });
+            (
+                json!({
+                    "layer": format!("{layer}->{target}"),
+                    "kind": "refine",
+                    "status": "failed",
+                    "result": "error",
+                    "exit_code": 2,
+                    "detail": detail,
+                }),
+                true,
+            )
+        } else {
+            let file_path = base.join(&section.values["file"]);
+            let target_path = base.join(&target_section.expect("checked").values["file"]);
+            let mapping_path = base.join(mapping.expect("checked"));
+            // Precedence: an explicit `refine_depth` or `depth` on this layer wins
+            // outright, even if malformed (a present-but-invalid key must error, not
+            // silently fall through to the next candidate or the default).
+            let depth_result = if let Some(raw) = section.values.get("refine_depth") {
+                parse_manifest_depth(layer, "refine_depth", raw)
+            } else if let Some(raw) = section.values.get("depth") {
+                parse_manifest_depth(layer, "depth", raw)
+            } else if let Some(raw) = target_section.and_then(|target| target.values.get("depth")) {
+                parse_manifest_depth(target, "depth", raw)
+            } else {
+                Ok(8)
+            };
+            match depth_result {
+                Ok(depth) => {
+                    let (detail, status) =
+                        run_refine(&file_path, &target_path, &mapping_path, depth);
+                    let passed = chain_layer_passes(&detail, status);
+                    (
+                        json!({
+                            "layer": format!("{layer}->{target}"),
+                            "kind": "refine",
+                            "file": file_path.display().to_string(),
+                            "against": target,
+                            "abs_file": target_path.display().to_string(),
+                            "mapping": mapping_path.display().to_string(),
+                            "depth": depth,
+                            "status": if passed { "passed" } else { "failed" },
+                            "result": detail.get("result").cloned().unwrap_or(Value::Null),
+                            "exit_code": if passed { 0 } else { status.max(1) },
+                            "detail": detail,
+                        }),
+                        !passed,
+                    )
+                }
+                Err(message) => {
+                    let detail = json!({"result": "error", "kind": "parse", "message": message});
+                    (
+                        json!({
+                            "layer": format!("{layer}->{target}"),
+                            "kind": "refine",
+                            "status": "failed",
+                            "result": "error",
+                            "exit_code": 2,
+                            "detail": detail,
+                        }),
+                        true,
+                    )
+                }
+            }
+        }
+    } else {
+        let command = section.values.get("command").cloned().unwrap_or_default();
+        if command.is_empty() {
+            let detail =
+                json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
+            (
+                json!({
+                    "layer": "impl", "kind": "command", "status": "failed",
+                    "result": "error", "exit_code": 2, "detail": detail,
+                }),
+                true,
+            )
+        } else {
+            #[cfg(target_family = "windows")]
+            let completed = std::process::Command::new("cmd")
+                .args(["/C", &command])
+                .current_dir(base)
+                .output();
+            #[cfg(not(target_family = "windows"))]
+            let completed = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .current_dir(base)
+                .output();
+            match completed {
+                Ok(completed) => {
+                    let passed = completed.status.success();
+                    let code = completed.status.code().unwrap_or(1);
+                    let detail = json!({
+                        "result": if passed { "passed" } else { "failed" },
+                        "command": command,
+                        "returncode": code,
+                        "stdout": String::from_utf8_lossy(&completed.stdout),
+                        "stderr": String::from_utf8_lossy(&completed.stderr),
+                    });
+                    (
+                        json!({
+                            "layer": "impl", "kind": "command", "command": command,
+                            "status": if passed { "passed" } else { "failed" },
+                            "result": if passed { "passed" } else { "failed" },
+                            "exit_code": if passed { 0 } else { 1 }, "detail": detail,
+                        }),
+                        !passed,
+                    )
+                }
+                Err(error) => {
+                    let detail =
+                        json!({"result": "error", "kind": "io", "message": error.to_string()});
+                    (
+                        json!({
+                            "layer": "impl", "kind": "command", "command": command,
+                            "status": "failed", "result": "error", "exit_code": 2,
+                            "detail": detail,
+                        }),
+                        true,
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn format_chain_table(result: &Value) -> String {
@@ -17406,6 +17661,36 @@ fn block_on_native<F: Future>(future: F) -> F::Output {
     match future.as_mut().poll(&mut context) {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("native Z3 backend unexpectedly yielded Pending"),
+    }
+}
+
+#[cfg(test)]
+mod chain_jobs_tests {
+    use super::*;
+
+    #[test]
+    fn chain_starts_no_more_workers_than_there_are_groups() {
+        // A business/requirements/design manifest with distinct files, and
+        // `[impl]`, which is never a group: three groups.
+        let mut sections = std::collections::BTreeMap::new();
+        let base = std::env::temp_dir().join(format!("fslc-1151-groups-{}", std::process::id()));
+        std::fs::create_dir_all(&base).expect("create scratch dir");
+        let mut steps = Vec::new();
+        for layer in ["business", "requirements", "design"] {
+            let file = format!("{layer}.fsl");
+            std::fs::write(base.join(&file), format!("// {layer}\n")).expect("write layer");
+            let mut section = ManifestSection::default();
+            section.values.insert("file".to_owned(), file);
+            sections.insert(layer.to_owned(), section);
+            steps.push(("spec".to_owned(), layer.to_owned()));
+        }
+        sections.insert("impl".to_owned(), ManifestSection::default());
+        steps.push(("impl".to_owned(), "impl".to_owned()));
+        let groups = chain_step_groups(&steps, &sections, &base);
+        std::fs::remove_dir_all(&base).expect("remove scratch dir");
+        assert_eq!(groups, vec![vec![0], vec![1], vec![2]]);
+        assert_eq!(chain_worker_count(64, groups.len()), 3);
+        assert_eq!(chain_worker_count(2, groups.len()), 2);
     }
 }
 

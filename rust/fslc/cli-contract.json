@@ -636,7 +636,7 @@
           "chain"
         ],
         "prog": "fslc chain",
-        "help": "usage: fslc chain [-h] [--keep-going] [path]\n\npositional arguments:\n  path\n\noptions:\n  -h, --help    show this help message and exit\n  --keep-going\n",
+        "help": "usage: fslc chain [-h] [--keep-going] [--jobs JOBS] [path]\n\npositional arguments:\n  path\n\noptions:\n  -h, --help    show this help message and exit\n  --keep-going\n  --jobs JOBS   run up to JOBS independent layers concurrently (default 1);\n                the report and exit code do not depend on JOBS\n",
         "actions": [
           {
             "dest": "help",
@@ -665,6 +665,15 @@
             "nargs": 0,
             "default": false,
             "action": "store_true"
+          },
+          {
+            "dest": "jobs",
+            "required": false,
+            "flags": [
+              "--jobs"
+            ],
+            "default": 1,
+            "action": "store"
           }
         ],
         "commands": []

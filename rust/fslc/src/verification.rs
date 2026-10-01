@@ -1738,6 +1738,32 @@ fn verified_cross_depth_output(
     .then_some(output)
 }
 
+/// A temporary-file name no other writer uses. The entry is written there and
+/// then renamed into place, so a reader sees either no entry or a whole one.
+/// The process id alone is not enough since `chain --jobs` (issue #1151):
+/// two worker threads of one process storing the same key or the same
+/// cross-depth pointer would write through one temporary file, and a rename
+/// could publish their interleaved bytes. The per-process sequence number
+/// keeps every writer's temporary file its own.
+fn cache_temporary_name(stem: &str) -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(".{stem}.{}.{sequence}.tmp", std::process::id())
+}
+
+/// Writes `bytes` to `temporary` and renames it onto `destination`. The cache
+/// is best-effort, so a failure is not reported, but the temporary file is
+/// removed: its name is unique per writer, so a leftover would never be
+/// overwritten by a later store.
+fn publish_cache_file(temporary: &Path, destination: &Path, bytes: Option<Vec<u8>>) {
+    let published = bytes.is_some_and(|bytes| {
+        std::fs::write(temporary, bytes).is_ok() && std::fs::rename(temporary, destination).is_ok()
+    });
+    if !published {
+        let _ = std::fs::remove_file(temporary);
+    }
+}
+
 fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if !valid_cache_key(key) || !valid_cache_key(xdepth) {
         return;
@@ -1759,7 +1785,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if std::fs::create_dir_all(parent).is_err() {
         return;
     }
-    let temporary = parent.join(format!(".{}.{}.tmp", key, std::process::id()));
+    let temporary = parent.join(cache_temporary_name(key));
     let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
     let entry = json!({
         "schema": "fslc-rust-cache.v2",
@@ -1773,13 +1799,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         },
         "output": output,
     });
-    if serde_json::to_vec(&entry)
-        .ok()
-        .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-        .is_some()
-    {
-        let _ = std::fs::rename(&temporary, path);
-    }
+    publish_cache_file(&temporary, &path, serde_json::to_vec(&entry).ok());
     if output.get("result").and_then(Value::as_str) == Some("violated")
         && let Some(step) = output.get("violated_at_step").and_then(Value::as_u64)
         && let Some(root) = cache_root()
@@ -1787,19 +1807,15 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         let directory = root.join("verify/v3/xdepth");
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
-            let temporary = directory.join(format!(".{xdepth}.{}.tmp", std::process::id()));
-            if serde_json::to_vec(&json!({
+            let temporary = directory.join(cache_temporary_name(xdepth));
+            let bytes = serde_json::to_vec(&json!({
                 "schema": "fslc-rust-cache-pointer.v2",
                 "xdepth": xdepth,
                 "entry_key": key,
                 "violated_at_step": step,
             }))
-            .ok()
-            .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-            .is_some()
-            {
-                let _ = std::fs::rename(temporary, pointer);
-            }
+            .ok();
+            publish_cache_file(&temporary, &pointer, bytes);
         }
     }
 }
