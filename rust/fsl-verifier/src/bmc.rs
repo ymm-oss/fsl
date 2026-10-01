@@ -232,7 +232,7 @@ pub async fn verify_bounded_selected<S: SmtSolver>(
     depth: usize,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<BmcResult, VerifyError> {
-    verify_bounded_config(model, solver, depth, checked_bounds, None).await
+    verify_bounded_config(model, solver, depth, checked_bounds, None, &BTreeSet::new()).await
 }
 
 /// Verify from a complete concrete logical-state snapshot instead of spec init.
@@ -248,7 +248,50 @@ pub async fn verify_bounded_from_state<S: SmtSolver>(
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: &BTreeMap<String, FslValue>,
 ) -> Result<BmcResult, VerifyError> {
-    verify_bounded_config(model, solver, depth, checked_bounds, Some(initial_state)).await
+    verify_bounded_config(
+        model,
+        solver,
+        depth,
+        checked_bounds,
+        Some(initial_state),
+        &BTreeSet::new(),
+    )
+    .await
+}
+
+/// [`verify_bounded_selected`] / [`verify_bounded_from_state`], except that the
+/// bounded fair-lasso search is skipped for every `leadsTo` whose position in
+/// `model.leadstos` is in `lasso_discharged` (#1149).
+///
+/// `lasso_discharged` must come from
+/// [`crate::ranked_leadsto_lasso_discharges`] for the same `model` and
+/// `checked_bounds`, computed on a separate solver session. Only the lasso
+/// probes are withdrawn: the per-step stagnation (pending deadlock), `within`
+/// deadline, and definedness checks still run for those properties, because
+/// the ranking obligations say nothing about a pending state with no enabled
+/// action. The returned verdict is the one the full search would return; see
+/// `docs/design/DESIGN-induction.md` §2.5 for the argument.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] for the same failures as [`verify_bounded`].
+pub async fn verify_bounded_discharging<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    depth: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    initial_state: Option<&BTreeMap<String, FslValue>>,
+    lasso_discharged: &BTreeSet<usize>,
+) -> Result<BmcResult, VerifyError> {
+    verify_bounded_config(
+        model,
+        solver,
+        depth,
+        checked_bounds,
+        initial_state,
+        lasso_discharged,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_lines)]
@@ -258,6 +301,7 @@ async fn verify_bounded_config<S: SmtSolver>(
     depth: usize,
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
+    lasso_discharged: &BTreeSet<usize>,
 ) -> Result<BmcResult, VerifyError> {
     if model.actions.is_empty() {
         return Err(VerifyError::new("spec has no actions"));
@@ -458,8 +502,16 @@ async fn verify_bounded_config<S: SmtSolver>(
     }
     if result.leadsto_violation.is_none() {
         let unrolled_depth = states.len() - 1;
-        result.leadsto_violation =
-            check_leadstos(solver, model, &states, &choices, &instances, unrolled_depth).await?;
+        result.leadsto_violation = check_leadstos(
+            solver,
+            model,
+            &states,
+            &choices,
+            &instances,
+            unrolled_depth,
+            lasso_discharged,
+        )
+        .await?;
     }
     // The solver-dependent vacuity lanes run last, after every witness,
     // reachable, and deadlock trace has been projected. They ask nothing about
@@ -1359,13 +1411,21 @@ async fn check_leadstos<S: SmtSolver>(
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
     depth: usize,
+    lasso_discharged: &BTreeSet<usize>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     let canonical = states
         .iter()
         .take(depth + 1)
         .map(|state| canonical_constraint(solver, model, state))
         .collect::<Result<Vec<_>, _>>()?;
-    for property in &model.leadstos {
+    for (index, property) in model.leadstos.iter().enumerate() {
+        // A ranking proof already showed every fair lasso below is `unsat`
+        // for this property (#1149); asking the solver again changes nothing
+        // but the cost. Every property not in the set keeps its full search.
+        // Keyed by position: two `leadsTo` blocks may share a name.
+        if lasso_discharged.contains(&index) {
+            continue;
+        }
         solver.set_query_context("leadsTo", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
             for loop_start in 0..depth {

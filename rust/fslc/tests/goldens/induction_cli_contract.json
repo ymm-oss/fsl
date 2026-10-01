@@ -1012,13 +1012,13 @@
             "name": "XRange"
           },
           {
-            "checks": 76,
+            "checks": 21,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "ReachFive"
           },
           {
-            "checks": 3,
+            "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "ReachFive"
@@ -1146,7 +1146,7 @@
             "name": "ReachFive"
           },
           {
-            "checks": 3,
+            "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "ReachFive"
@@ -1279,7 +1279,7 @@
             "name": "ReachFive"
           },
           {
-            "checks": 1,
+            "checks": 2,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "ReachFive"
@@ -1407,13 +1407,13 @@
             "name": "NonNeg"
           },
           {
-            "checks": 8,
+            "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo",
             "name": "Responds"
           },
           {
-            "checks": 12,
+            "checks": 24,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "Responds"
@@ -1554,7 +1554,7 @@
             "name": "Responds"
           },
           {
-            "checks": 2,
+            "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "Responds"
@@ -1692,7 +1692,7 @@
             "name": "Responds"
           },
           {
-            "checks": 2,
+            "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "Responds"
@@ -1834,7 +1834,7 @@
             "name": "Finishes"
           },
           {
-            "checks": 2,
+            "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "Finishes"
@@ -2018,7 +2018,7 @@
             "name": "Finishes"
           },
           {
-            "checks": 4,
+            "checks": 8,
             "elapsed_s": "<elapsed>",
             "kind": "leadsTo_rank",
             "name": "Finishes"

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::recursion;
 use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
@@ -448,10 +448,74 @@ fn helpful_witnesses<S: SmtSolver>(
 ///
 /// Returns [`VerifyError`] for unsupported measures, symbolic expressions, or
 /// solver failures.
-#[allow(clippy::too_many_lines)]
 pub async fn prove_ranked_leadstos<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
+) -> Result<RankedLeadstoResult, VerifyError> {
+    prove_ranked_leadstos_assuming(model, solver, None).await
+}
+
+/// The positions in `model.leadstos` of the ranked `leadsTo` properties whose
+/// bounded fair-lasso search a BMC run may skip (#1149), because the ranking
+/// obligations of [`prove_ranked_leadstos`] hold for them over every state
+/// that satisfies exactly the properties that same BMC run checks at every
+/// unrolled step.
+///
+/// Properties are identified by position, never by name: `check` accepts two
+/// `leadsTo` blocks with the same name, and a name key would let one block's
+/// ranking proof withdraw the other block's search.
+///
+/// `checked_bounds` must be the implicit type-bound selection the BMC run
+/// uses (`None` = every `_bounds_*`); a bound the run does not check is not
+/// assumed here, because an unrolled state may violate it. The ranking stops
+/// at its first failing property, so only the properties proved before it
+/// are returned. Any ranking error (unsupported measure, solver `unknown` --
+/// including a solver timeout -- or fail-closed filters) returns the empty
+/// set: the fast path never reports anything itself, it only withdraws probes
+/// whose answer it has already shown to be `unsat`. See
+/// `docs/design/DESIGN-induction.md` §2.5.
+pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> BTreeSet<usize> {
+    let ranked = model
+        .leadstos
+        .iter()
+        .enumerate()
+        .filter(|(_, property)| property.decreases.is_some())
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if ranked.is_empty() {
+        return BTreeSet::new();
+    }
+    let Ok(result) = prove_ranked_leadstos_assuming(model, solver, checked_bounds).await else {
+        return BTreeSet::new();
+    };
+    // The ranking walks `model.leadstos` in order, skips the unranked ones,
+    // and pushes one proof per ranked property until its first failure, so
+    // its proofs are the ranked properties' prefix, position for position.
+    // The length and by-name check below therefore cannot fail by
+    // construction (names may repeat, but position i's proof carries
+    // position i's name); it exists only so that a future reordering of that
+    // loop discharges nothing instead of the wrong property.
+    if result.proofs.len() > ranked.len()
+        || result
+            .proofs
+            .iter()
+            .zip(&ranked)
+            .any(|(proof, &index)| proof.name != model.leadstos[index].name)
+    {
+        return BTreeSet::new();
+    }
+    ranked.into_iter().take(result.proofs.len()).collect()
+}
+
+#[allow(clippy::too_many_lines)]
+async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<RankedLeadstoResult, VerifyError> {
     let instances = action_instances(solver, model)?;
     let state0 = symbolic_state_with_suffix(solver, model, "rank0")?;
@@ -462,6 +526,11 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
     // pending states in which nothing is enabled (#1189).
     let deadlock_state = symbolic_state_with_suffix(solver, model, "rank_deadlock")?;
     for property in properties(model) {
+        if let (Property::Bound(_), Some(selected)) = (property, checked_bounds)
+            && !selected.contains(&property.name(model))
+        {
+            continue;
+        }
         solver.assert(&property_condition(solver, model, property, &state0, None)?)?;
         solver.assert(&property_condition(
             solver,

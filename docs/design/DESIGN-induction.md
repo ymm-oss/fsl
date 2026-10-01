@@ -149,6 +149,120 @@ Failure of any of these is `unknown_cti` / `rank_failure`:
   proof obligation over invariant states, returned as `unknown_cti` /
   `violation_kind:"leadsTo_rank"` if it fails.
 
+### 2.5 Ranking as a BMC fast path for the lasso search (#1149)
+
+`verify` (BMC, and the base case of `--engine induction`) runs the §2.3
+ranking obligations as a pre-pass for every `leadsTo` that declares
+`decreases`, and skips the bounded fair-lasso search
+(`DESIGN-temporal.md` §2.1–2.2; `check_leadstos` in
+`rust/fsl-verifier/src/bmc.rs`) for each property the ranking discharges.
+A discharge is a position in `model.leadstos`, which the ranking and the
+lasso search both walk in order — never a property name, because `check`
+accepts two `leadsTo` blocks with the same name, and a name key would let one
+block's ranking withdraw the other block's search. That search is `B·D(D+1)(2D+1)/6` probes for `B` bindings at depth `D` — the
+cubic term — and the ranking is a constant number of checks per binding.
+
+**What is still claimed.** For each `leadsTo` block, exactly what the full
+search claims for that block: no fair lasso counterexample with a loop inside
+the first `D` steps. `result`,
+`completeness:"bounded"`, `leads_to.<name>.checked_to_depth`, and every
+witness are unchanged; the property is *not* reported `proved`. The ranking
+could only support an unbounded claim if the invariants it assumes were
+themselves proved inductive, which BMC does not do — that promotion remains
+the induction engine's (§2.3, §4).
+
+**Why the skipped probes are all `unsat`.** The pre-pass assumes, at the
+pre-state, exactly the properties the same BMC run checks at every unrolled
+step: every user invariant, and each `_bounds_*` the run's property
+selection keeps (`checked_bounds`; a bound the run does not check is not
+assumed, because an unrolled state may then violate it). BMC reaches the
+lasso search only after every one of those checks came back `unsat` at every
+step, so every unrolled state satisfies the ranking's premise. Take any
+candidate lasso: a pending step `p`, a loop `states[i..j]` with
+`states[j] ==L states[i]`, and `¬Q` on every state from `min(i, p)` to `j`.
+Each step of it is a real transition, so the ranking's transition obligation
+applies to it:
+
+- Without `helpful`: every step from a pending state establishes `Q` (ruled
+  out) or keeps `P` with `M` strictly smaller. So every state from `p` on is
+  pending, and `M` strictly decreases around the loop back to the state it
+  started from — impossible. No lasso exists, fair or not.
+- With `helpful`: the non-helpful steps keep the obligation pending without
+  increasing `M`, and a helpful step strictly decreases it, so no helpful
+  instance fires inside the loop. `no_deadlock` makes some matching helpful
+  instance enabled at each loop state; with one instance it is enabled at
+  all of them, and with several, `helpful_sticky` keeps an enabled one
+  enabled around the loop (it never fires there and `Q` never holds). That
+  instance is `fair` (`helpful_fairness`), so the loop violates the weak
+  fairness condition every lasso probe conjoins (`DESIGN-temporal.md` §2.2).
+  No *fair* lasso exists, which is what the search asks for.
+
+`M`, `P`, and `Q` are functions of the state (and the binding), so their value
+at a loop's closing state is their value at its head. Measures whose
+evaluation leaves a term unconstrained are covered too: the ranking is
+proved for every value of that term.
+
+**What is not skipped.** The per-step stagnation probe (pending deadlock,
+`DESIGN-temporal.md` §2.4), the `within` deadline probe, and the per-step
+definedness checks of `P`/`Q` still run for a discharged property. Since
+#1189 the ranking includes a no-deadlock obligation over the same premise (a
+pending invariant state has an enabled action — a matching helpful one when
+`helpful` is declared), so a discharged property has no reachable pending
+deadlock and its stagnation probes are all `unsat` too. They are kept
+anyway: the fast path's argument above does not need that obligation, and
+the stagnation term is only quadratic, `B·(D+1)(D+2)/2`. A ranked `leadsTo`
+that stalls fails the no-deadlock obligation, so nothing is discharged and
+the stall is reported exactly as before (`stutter: true`).
+
+**Fail-closed fallback.** The ranking stops at its first failing property;
+only the properties proved before it are discharged, and every other
+`leadsTo` keeps the full search. A ranking error (unsupported measure,
+solver `unknown`, fail-closed `where` filters) discharges nothing and is not
+reported — the BMC run then produces whatever it produced before, including
+its own error. The same holds when the pre-pass cannot run at all (no
+thread, no solver) and when it panics: the run proceeds without it (the
+panic message still reaches stderr). The pre-pass never reports a verdict or
+a witness of its own.
+
+**Budget.** Every pre-pass check has a 5 s wall-clock limit
+(`RANKING_PREPASS_CHECK_TIMEOUT_MS`); a check that runs out answers
+`unknown` and so discharges nothing. The number of checks is linear in
+bindings × action instances. The limit depends on machine load, so load can
+decide whether the shortcut is taken, and with it `cost`. It can never turn
+`verified` into `violated` or the reverse: a discharged lasso search has no
+`sat` probe to find. The one outcome load can move is error versus verdict —
+when the shortcut is not taken, a lasso probe that the solver answers
+`unknown` makes the run an error, as it always did, while a run that took
+the shortcut never asks that probe.
+
+**Solver isolation.** The pre-pass runs on its own thread with its own Z3
+solver. The native backend's `Solver::new()` uses the thread's default
+context, and running the ranking in the BMC thread — even on a separate
+`Solver` — was observed to change which model Z3 returns for later BMC
+witness queries (the lasso trace of `helpful` specs whose ranking fails). On
+its own thread the BMC session's query history up to the lasso search is
+exactly what it is without the pre-pass. The byte-identity claim is narrower
+than "every witness": it covers the fallback path, a lasso search that runs
+with nothing discharged before it in the same run (in particular every run
+whose ranking failed on its first ranked property), whose witness is then
+byte-identical to the full search's. A lasso search that runs *after* a
+discharged property starts from a session that skipped that property's
+probes; its verdict is the full search's (the skipped probes were `unsat`),
+but Z3 may return a different, equally valid lasso witness (the corpus
+differential observed none).
+
+**Envelope change.** Only `cost`: `cost.properties` gains a
+`{"kind":"leadsTo_rank","name":<leadsTo>}` row for each ranked `leadsTo`
+(its checks and time are also in `cost.solver`), and the `leadsTo` row of a
+discharged property drops to the stagnation probe count. `--engine
+induction` runs the ranking twice — once in its base-case BMC and once as
+the §2.3 proof — so its `leadsTo_rank` row doubles.
+
+The pre-pass is wired into the CLI's BMC path (`solve_bmc` in
+`rust/fslc/src/verification.rs`). The library entry points `verify_bounded*`
+and their other callers (the browser worker, `refine`, causal and mutation
+helpers) keep the full search.
+
 ## 3. Extracting the CTI (counterexample to induction)
 
 When the step case is sat, build a trace of k+1 states from the model.
