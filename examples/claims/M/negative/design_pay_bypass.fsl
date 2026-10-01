@@ -1,0 +1,68 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: forbidden
+// SPDX-License-Identifier: Apache-2.0
+
+// Negative control: weakened pay_submit guard allows payment before assessment.
+requirements InsuranceClaimDesignPayBypass {
+  implements InsuranceClaimM from "../claims_M.fsl" {
+    map claim[c: ClaimId] = Claim {
+      st:
+        if d[c].st == DIntake then Intake
+        else if d[c].st == DAssessment then Assessment
+        else if d[c].st == DApproved then Approved
+        else if d[c].st == DPaySubmitted then Paid
+        else Posted,
+      days: 0,
+      amount: d[c].amount,
+    }
+    map paid = paid_ghost
+    map posted = posted_ghost
+
+    action receive(c, a) -> receive(c, a)
+    action pay_submit(c) -> pay(c)
+  }
+
+  type ClaimId = 0..1
+  type Amount = 0..3
+  type Day = 0..3
+  type LedgerCount = 0..2
+
+  enum DSt { DIntake, DAssessment, DApproved, DPaySubmitted, DPosted }
+
+  struct DClaim { st: DSt, amount: Amount, days: Day }
+
+  state {
+    d: Map<ClaimId, DClaim>,
+    paid_ghost: LedgerCount,
+    posted_ghost: LedgerCount,
+  }
+
+  init {
+    forall c: ClaimId { d[c] = DClaim { st: DIntake, amount: 0, days: 0 } }
+    paid_ghost = 0
+    posted_ghost = 0
+  }
+
+  fair action receive(c: ClaimId, a: Amount) {
+    requires d[c].st == DIntake
+    requires a > 0
+    d[c] = DClaim { st: DAssessment, amount: a, days: 0 }
+  }
+
+  fair action pay_submit(c: ClaimId) {
+    requires d[c].st == DApproved or d[c].st == DIntake
+    requires paid_ghost < 2
+    d[c].st = DPaySubmitted
+    paid_ghost = paid_ghost + 1
+  }
+
+  invariant PaidGhostConsistent {
+    paid_ghost == count(c: ClaimId where d[c].st == DPaySubmitted or d[c].st == DPosted)
+  }
+
+  forbidden FB-1 "Payment before assessment is rejected" {
+    pay_submit(0)
+    expect rejected
+  }
+}

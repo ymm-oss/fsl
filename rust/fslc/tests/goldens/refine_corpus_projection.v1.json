@@ -860,5 +860,41 @@
         ]
       }
     }
+  },
+  "examples/claims/L/claims_L_requirements_refines_business.fsl": {
+    "fsl": "1.0",
+    "impl": "InsuranceClaimL",
+    "abs": "InsuranceClaimBusiness",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "advance_day": "stutter",
+      "assess": "approve",
+      "lapse": "lapse",
+      "pay": "pay",
+      "post_ledger": "post",
+      "receive": "intake",
+      "resubmit": "resubmit",
+      "return_to_claimant": "return_case",
+      "withdraw": "withdraw"
+    }
+  },
+  "examples/claims/L/claims_L_design_refines_requirements.fsl": {
+    "fsl": "1.0",
+    "impl": "InsuranceClaimDesignL",
+    "abs": "InsuranceClaimL",
+    "result": "refines",
+    "checked_to_depth": 6,
+    "action_map": {
+      "advance_day": "advance_day",
+      "assess": "assess",
+      "lapse": "lapse",
+      "pay_confirm": "post_ledger",
+      "pay_submit": "pay",
+      "receive": "receive",
+      "resubmit": "resubmit",
+      "return_to_claimant": "return_to_claimant",
+      "withdraw": "withdraw"
+    }
   }
 }

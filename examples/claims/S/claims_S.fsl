@@ -1,0 +1,337 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Insurance claim processing (requirements layer, S tier) — minimal complete form.
+// Bounded domain: ClaimId/Day/LedgerCount range types only (no unbounded Int).
+//
+// Domain: intake (受付) → assessment (査定) → payment (支払) → ledger posting (台帳記帳),
+// with return-for-correction (差戻し), withdrawal (取下げ), statute-of-limitations lapse (時効),
+// and re-assessment (再査定).
+requirements InsuranceClaimS {
+  type ClaimId = 0..1
+  type Day = 0..3
+  type LedgerCount = 0..2
+  const LAPSE_AFTER = 3
+
+  enum CSt {
+    Intake, Assessment, Returned, Reassessment,
+    Approved, Paid, Posted, Withdrawn, Lapsed
+  }
+
+  struct Claim { st: CSt, days: Day }
+
+  state {
+    claim: Map<ClaimId, Claim>,
+    paid: LedgerCount,
+    posted: LedgerCount,
+  }
+
+  init {
+    forall c: ClaimId { claim[c] = Claim { st: Intake, days: 0 } }
+    paid = 0
+    posted = 0
+  }
+
+  requirement REQ-1 "Reception and assessment pipeline" {
+    fair action receive(c: ClaimId) {
+      requires claim[c].st == Intake
+      claim[c].st = Assessment
+    }
+    fair action assess(c: ClaimId) {
+      requires claim[c].st == Assessment or claim[c].st == Reassessment
+      claim[c].st = Approved
+    }
+    fair action return_to_claimant(c: ClaimId) {
+      requires claim[c].st == Assessment or claim[c].st == Reassessment
+      claim[c].st = Returned
+    }
+  }
+
+  requirement REQ-2 "Resubmission after return for correction" {
+    fair action resubmit(c: ClaimId) {
+      requires claim[c].st == Returned
+      claim[c].st = Reassessment
+    }
+  }
+
+  requirement REQ-3 "Payment and ledger posting" {
+    fair action pay(c: ClaimId) {
+      requires claim[c].st == Approved
+      requires paid < 2
+      claim[c].st = Paid
+      paid = paid + 1
+    }
+    fair action post_ledger(c: ClaimId) {
+      requires claim[c].st == Paid
+      requires posted < 2
+      claim[c].st = Posted
+      posted = posted + 1
+    }
+    invariant LedgerConsistent {
+      paid == count(c: ClaimId where claim[c].st == Paid or claim[c].st == Posted)
+        and posted == count(c: ClaimId where claim[c].st == Posted)
+    }
+  }
+
+  requirement REQ-4 "Withdrawal and statute of limitations" {
+    fair action withdraw(c: ClaimId) {
+      requires claim[c].st == Intake or claim[c].st == Assessment
+        or claim[c].st == Returned or claim[c].st == Reassessment
+      claim[c].st = Withdrawn
+    }
+    fair action advance_day(c: ClaimId) {
+      requires claim[c].st != Paid and claim[c].st != Posted
+        and claim[c].st != Withdrawn
+      // `and claim[c].st != Lapsed` was removed here: unreachable. `Lapsed` implies
+      // `days == LAPSE_AFTER` (see `LapsedMeetsWaitingPeriod` below), so the guard just
+      // below already rejects `advance_day` on a `Lapsed` claim. Widening `Day`'s upper
+      // bound would not revive this conjunct — the invariant ties the two regardless of bound.
+      requires claim[c].days < LAPSE_AFTER
+      claim[c].days = claim[c].days + 1
+    }
+    fair action lapse(c: ClaimId) {
+      requires claim[c].st == Intake or claim[c].st == Assessment
+        or claim[c].st == Returned or claim[c].st == Reassessment
+      requires claim[c].days >= LAPSE_AFTER
+      claim[c].st = Lapsed
+    }
+    invariant LapsedMeetsWaitingPeriod {
+      forall c: ClaimId where claim[c].st == Lapsed {
+        claim[c].days >= LAPSE_AFTER
+      }
+    }
+  }
+
+  forbidden FB-1 "Withdrawal from an approved claim is rejected" {
+    receive(0)
+    assess(0)
+    withdraw(0)
+    expect rejected
+  }
+
+  forbidden FB-2 "Advance day on a withdrawn claim is rejected" {
+    receive(1)
+    withdraw(1)
+    advance_day(1)
+    expect rejected
+  }
+
+  forbidden FB-3 "Lapse before the waiting period is rejected" {
+    receive(0)
+    lapse(0)
+    expect rejected
+  }
+
+  forbidden FB-4 "Advance day after payment is rejected" {
+    receive(0)
+    assess(0)
+    pay(0)
+    advance_day(0)
+    expect rejected
+  }
+
+  forbidden FB-6 "Withdrawal from a paid claim is rejected" {
+    receive(0)
+    assess(0)
+    pay(0)
+    withdraw(0)
+    expect rejected
+  }
+
+  forbidden FB-7 "Withdrawal from a posted claim is rejected" {
+    receive(0)
+    assess(0)
+    pay(0)
+    post_ledger(0)
+    withdraw(0)
+    expect rejected
+  }
+
+  // `FB-5` used to sit here with the same title minus "after waiting"; once its masking
+  // was fixed it became byte-identical to this trace (one property, two ids), so it was
+  // deleted rather than kept as a duplicate.
+  forbidden FB-8 "Lapse from an approved claim after waiting is rejected" {
+    receive(0)
+    assess(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    expect rejected
+  }
+
+  forbidden FB-9 "Advance day on a lapsed claim is rejected" {
+    receive(1)
+    advance_day(1)
+    advance_day(1)
+    advance_day(1)
+    lapse(1)
+    advance_day(1)
+    expect rejected
+  }
+
+  forbidden FB-10 "Advance day on a posted claim is rejected" {
+    receive(0)
+    assess(0)
+    pay(0)
+    post_ledger(0)
+    advance_day(0)
+    expect rejected
+  }
+
+  forbidden FB-11 "Lapse from a paid claim is rejected" {
+    receive(0)
+    assess(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    pay(0)
+    lapse(0)
+    expect rejected
+  }
+
+  forbidden FB-12 "Lapse from a posted claim is rejected" {
+    receive(0)
+    assess(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    pay(0)
+    post_ledger(0)
+    lapse(0)
+    expect rejected
+  }
+
+  // `forbidden` + `expect rejected` cannot separate two outcomes: the guard rejected the
+  // call, or an unrelated invariant broke afterward. FB-13/FB-14 used to live here but passed only because
+  // `LedgerConsistent` tripped, not the stage guard (measured: remove `LedgerConsistent`
+  // and the old `forbidden` reports the violation). `trans` states the transition itself,
+  // independent of `LedgerConsistent`. Needs `verify --depth 8` to reach the violation.
+  trans LapseNotFromPaid "FB-13 replacement: lapse can never fire out of a paid stage" {
+    forall c: ClaimId {
+      old(claim[c].st) == Paid => claim[c].st != Lapsed
+    }
+  }
+
+  trans LapseNotFromPosted "FB-14 replacement: lapse can never fire out of a posted stage" {
+    forall c: ClaimId {
+      old(claim[c].st) == Posted => claim[c].st != Lapsed
+    }
+  }
+
+  forbidden FB-15 "Withdrawal from a withdrawn claim is rejected" {
+    receive(0)
+    withdraw(0)
+    withdraw(0)
+    expect rejected
+  }
+
+  forbidden FB-16 "Withdrawal from a lapsed claim is rejected" {
+    receive(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    withdraw(0)
+    expect rejected
+  }
+
+  forbidden FB-17 "Lapse from a withdrawn claim after waiting is rejected" {
+    receive(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    withdraw(0)
+    lapse(0)
+    expect rejected
+  }
+
+  forbidden FB-18 "Repeated lapse is rejected" {
+    receive(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    lapse(0)
+    expect rejected
+  }
+
+  acceptance AC-1 "Happy path: intake through ledger posting" {
+    receive(0)
+    assess(0)
+    pay(0)
+    post_ledger(0)
+    expect claim[0].st == Posted and posted == 1
+  }
+
+  acceptance AC-2 "Return, resubmit, and re-assessment" {
+    receive(1)
+    return_to_claimant(1)
+    resubmit(1)
+    assess(1)
+    expect claim[1].st == Approved
+  }
+
+  acceptance AC-3 "Withdrawal before assessment completes" {
+    receive(1)
+    withdraw(1)
+    expect claim[1].st == Withdrawn
+  }
+
+  acceptance AC-4 "Statute of limitations after the waiting period" {
+    receive(1)
+    advance_day(1)
+    advance_day(1)
+    advance_day(1)
+    lapse(1)
+    expect claim[1].st == Lapsed
+  }
+
+  acceptance AC-5 "Withdrawal is available at intake" {
+    withdraw(0)
+    expect claim[0].st == Withdrawn
+  }
+
+  acceptance AC-6 "Withdrawal is available after return for correction" {
+    receive(0)
+    return_to_claimant(0)
+    withdraw(0)
+    expect claim[0].st == Withdrawn
+  }
+
+  acceptance AC-7 "Withdrawal is available during reassessment" {
+    receive(0)
+    return_to_claimant(0)
+    resubmit(0)
+    withdraw(0)
+    expect claim[0].st == Withdrawn
+  }
+
+  acceptance AC-8 "Statute lapse is available at intake after waiting" {
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    expect claim[0].st == Lapsed
+  }
+
+  acceptance AC-9 "Statute lapse is available after return for correction" {
+    receive(0)
+    return_to_claimant(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    expect claim[0].st == Lapsed
+  }
+
+  acceptance AC-10 "Statute lapse is available during reassessment" {
+    receive(0)
+    return_to_claimant(0)
+    resubmit(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    expect claim[0].st == Lapsed
+  }
+}

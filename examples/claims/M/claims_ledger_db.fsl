@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Claim ledger schema evolution for insurance benefit processing (M tier db layer).
+dbsystem ClaimLedgerAddBenefitAmount {
+  database claims_db {
+    schema 0
+    table insurance_claims {
+      column claim_id: Int present backfilled not_null;
+      column status: Text present backfilled not_null;
+      column benefit_amount: Int absent;
+    }
+    table claim_ledger_entries {
+      column entry_id: Int present backfilled not_null;
+      column claim_id: Int present backfilled not_null;
+      column posted: Bool present backfilled not_null;
+    }
+  }
+
+  migration add_benefit_amount from 0 to 1 {
+    add insurance_claims.benefit_amount nullable;
+  }
+
+  artifact claims_service_v1 {
+    reads insurance_claims.claim_id, insurance_claims.status;
+    writes insurance_claims.status;
+  }
+
+  artifact claims_service_v2 {
+    reads insurance_claims.claim_id, insurance_claims.status, insurance_claims.benefit_amount;
+    writes insurance_claims.status, insurance_claims.benefit_amount;
+  }
+
+  artifact ledger_worker_v1 {
+    reads claim_ledger_entries.claim_id, claim_ledger_entries.posted;
+    writes claim_ledger_entries.posted;
+  }
+
+  environment production {
+    schema 0..1;
+    active claims_service_v1 when schema 0..0;
+    supported claims_service_v1 when schema 0..0;
+    active claims_service_v2 when schema 1..1;
+    supported claims_service_v2 when schema 1..1;
+    active ledger_worker_v1 when schema 0..1;
+    supported ledger_worker_v1 when schema 0..1;
+  }
+
+  check compatibility {
+    rule all_active_reads_exist;
+    rule all_active_writes_exist;
+    rule removed_only_after_unused;
+    rule not_null_after_backfill;
+  }
+}

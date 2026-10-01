@@ -1,0 +1,189 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Insurance claim processing (requirements layer, L tier) — extends M with
+// business-layer `implements` and the same bounded kernel domain as M.
+requirements InsuranceClaimL {
+  implements InsuranceClaimBusiness from "claims_L_business.fsl" {
+    map stage[c: Claim] =
+      if claim[c].st == Intake then BReceived
+      else if claim[c].st == Assessment or claim[c].st == Reassessment then BUnderReview
+      else if claim[c].st == Approved then BApproved
+      else if claim[c].st == Paid then BPaid
+      else if claim[c].st == Posted then BPosted
+      else if claim[c].st == Returned then BReturned
+      else if claim[c].st == Withdrawn then BWithdrawn
+      else BLapsed
+
+    action receive(c, a) -> intake(c)
+    action assess(c) -> approve(c)
+    action return_to_claimant(c) -> return_case(c)
+    action resubmit(c) -> resubmit(c)
+    action pay(c) -> pay(c)
+    action post_ledger(c) -> post(c)
+    action withdraw(c) -> withdraw(c)
+    action advance_day(c) -> stutter
+    action lapse(c) -> lapse(c)
+  }
+
+  type Claim = 0..1
+  type Amount = 0..3
+  type Day = 0..3
+  type LedgerCount = 0..2
+  const LAPSE_AFTER = 3
+
+  enum CSt {
+    Intake, Assessment, Returned, Reassessment,
+    Approved, Paid, Posted, Withdrawn, Lapsed
+  }
+
+  struct ClaimRecord { st: CSt, days: Day, amount: Amount }
+
+  state {
+    claim: Map<Claim, ClaimRecord>,
+    paid: LedgerCount,
+    posted: LedgerCount,
+  }
+
+  init {
+    forall c: Claim { claim[c] = ClaimRecord { st: Intake, days: 0, amount: 0 } }
+    paid = 0
+    posted = 0
+  }
+
+  requirement REQ-1 "Reception and assessment pipeline" {
+    fair action receive(c: Claim, a: Amount) {
+      requires claim[c].st == Intake
+      requires a > 0
+      claim[c].st = Assessment
+      claim[c].amount = a
+    }
+    fair action assess(c: Claim) {
+      requires claim[c].st == Assessment or claim[c].st == Reassessment
+      claim[c].st = Approved
+    }
+    fair action return_to_claimant(c: Claim) {
+      requires claim[c].st == Assessment or claim[c].st == Reassessment
+      claim[c].st = Returned
+    }
+  }
+
+  requirement REQ-2 "Resubmission after return for correction" {
+    fair action resubmit(c: Claim) {
+      requires claim[c].st == Returned
+      claim[c].st = Reassessment
+    }
+  }
+
+  requirement REQ-3 "Payment and ledger posting" {
+    fair action pay(c: Claim) {
+      requires claim[c].st == Approved
+      requires paid < 2
+      claim[c].st = Paid
+      paid = paid + 1
+    }
+    fair action post_ledger(c: Claim) {
+      requires claim[c].st == Paid
+      requires posted < 2
+      claim[c].st = Posted
+      posted = posted + 1
+    }
+    invariant LedgerConsistent {
+      paid == count(c: Claim where claim[c].st == Paid or claim[c].st == Posted)
+        and posted == count(c: Claim where claim[c].st == Posted)
+    }
+  }
+
+  requirement REQ-4 "Withdrawal and statute of limitations" {
+    fair action withdraw(c: Claim) {
+      requires claim[c].st == Intake or claim[c].st == Assessment
+        or claim[c].st == Returned or claim[c].st == Reassessment
+      claim[c].st = Withdrawn
+    }
+    fair action advance_day(c: Claim) {
+      requires claim[c].st != Paid and claim[c].st != Posted
+        and claim[c].st != Withdrawn and claim[c].st != Lapsed
+      requires claim[c].days < LAPSE_AFTER
+      claim[c].days = claim[c].days + 1
+    }
+    fair     action lapse(c: Claim) {
+      requires claim[c].st == Intake or claim[c].st == Assessment
+        or claim[c].st == Returned or claim[c].st == Reassessment
+      requires claim[c].days >= LAPSE_AFTER
+      claim[c].st = Lapsed
+    }
+    invariant LapsedMeetsWaitingPeriod {
+      forall c: Claim where claim[c].st == Lapsed {
+        claim[c].days >= LAPSE_AFTER
+      }
+    }
+  }
+
+  forbidden FB-1 "Withdrawal from an approved claim is rejected" {
+    receive(0, 1)
+    assess(0)
+    withdraw(0)
+    expect rejected
+  }
+
+  forbidden FB-2 "Advance day on a withdrawn claim is rejected" {
+    receive(1, 2)
+    withdraw(1)
+    advance_day(1)
+    expect rejected
+  }
+
+  forbidden FB-3 "Lapse before the waiting period is rejected" {
+    receive(0, 1)
+    lapse(0)
+    expect rejected
+  }
+
+  forbidden FB-4 "Advance day after payment is rejected" {
+    receive(0, 1)
+    assess(0)
+    pay(0)
+    advance_day(0)
+    expect rejected
+  }
+
+  forbidden FB-5 "Lapse from an approved claim is rejected" {
+    receive(0, 1)
+    assess(0)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    expect rejected
+  }
+
+  acceptance AC-1 "Happy path: intake through ledger posting" {
+    receive(0, 1)
+    assess(0)
+    pay(0)
+    post_ledger(0)
+    expect claim[0].st == Posted and posted == 1
+  }
+
+  acceptance AC-2 "Return, resubmit, and re-assessment" {
+    receive(1, 2)
+    return_to_claimant(1)
+    resubmit(1)
+    assess(1)
+    expect claim[1].st == Approved
+  }
+
+  acceptance AC-3 "Withdrawal before assessment completes" {
+    receive(1, 3)
+    withdraw(1)
+    expect claim[1].st == Withdrawn
+  }
+
+  acceptance AC-4 "Statute of limitations after the waiting period" {
+    receive(0, 1)
+    advance_day(0)
+    advance_day(0)
+    advance_day(0)
+    lapse(0)
+    expect claim[0].st == Lapsed
+  }
+}
