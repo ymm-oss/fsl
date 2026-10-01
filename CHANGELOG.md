@@ -5,6 +5,42 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.8.1] - 2026-10-01
+
+- Fixed (#1189): `verify --engine induction` no longer reports a ranked
+  `leadsTo ... decreases M` as `proved` / `unbounded` when the obligation can be
+  pending in a state where nothing that must fire is enabled. The ranking proof
+  asserted the transition relation on its pre-state, which forced some action
+  to be enabled there, so the `no_deadlock` obligation of
+  `docs/design/DESIGN-induction.md` §2.3 never saw such a state: without
+  `helpful` it was not checked at all, and with `helpful` a pending state in
+  which no action at all was enabled was skipped. The obligation is now asked
+  over an unconstrained invariant state and fails as `unknown_cti` /
+  `violation_kind: "leadsTo_rank"` with `rank_failure: "deadlock"` (or
+  `helpful_action_not_enabled`), as in the frozen Python reference. It is a
+  proof obligation over invariant states, so `--deadlock` does not disable it,
+  and an unreachable deadlocked pending state blocks the proof until an
+  invariant excludes it.
+  Visible change: at a depth large enough for the base-case BMC to find the
+  stall, such a spec now reports `unknown_cti` / `rank_failure: "deadlock"`
+  instead of `violated` / `leadsTo` (the existing rule prefers the rank failure
+  when the base case shows a leadsTo violation, as Python does); the exit code
+  stays 1.
+- Fixed (#1192): `check` accepted a spec that declared two properties with the
+  same name, and every result keyed by that name collapsed them — with two
+  `leadsTo L`, `verify --engine induction` reported `proved`/`unbounded`
+  although the second `L` is false. Property names (`invariant`, `trans`,
+  `unless`, `reachable`, `leadsTo`, `until`, and the `<name>_until_safety` trans
+  an `until` lowers to) now share one namespace; a reuse, within a kind or
+  across kinds, is a located `kind: "semantics"` error at the later declaration
+  that names the earlier one's location, so `check` and `verify` exit 2. No spec
+  under `specs/`, `examples/`, or the test fixtures reused a property name. The
+  frozen Python reference still accepts such specs.
+  Still accepted: a user invariant named `_bounds_<var>` shares its name with
+  the generated type-bound invariant for `<var>`. Both are still checked
+  separately (a false one is still reported `violated`), but the name appears
+  twice in `invariants_checked`.
+
 ## [4.8.0] - 2026-09-29
 
 - `fsl check` fence marking and `tools/check-doc-fences.py` gate the FSL in complete-specification fences under `docs/`, and report how many `fsl` fences remain unchecked (#1137).
@@ -6342,7 +6378,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.8.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.8.1...HEAD
+[4.8.1]: https://github.com/ymm-oss/fsl/compare/v4.8.0...v4.8.1
 [4.8.0]: https://github.com/ymm-oss/fsl/compare/v4.7.0...v4.8.0
 [4.7.0]: https://github.com/ymm-oss/fsl/compare/v4.6.0...v4.7.0
 [4.6.0]: https://github.com/ymm-oss/fsl/compare/v4.5.0...v4.6.0
