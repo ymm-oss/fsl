@@ -50,6 +50,14 @@ pub const INVARIANT: &str = "invariant";
 /// but violates a `transition` property. `InductionCti.kind`, `induction.rs`.
 pub const TRANS: &str = "trans";
 
+/// A k-induction definedness obligation (#1196) found a state (or one step)
+/// that satisfies every proved invariant but reaches one of LANGUAGE.md §6's
+/// partial operations in a guard, body, invariant, `leadsTo` expression,
+/// `transition` property, or reached `ensures`. `InductionCti.kind`,
+/// `induction.rs`. BMC's own `partial_op` violations use the same spelling
+/// but are emitted by `bmc.rs`'s out-of-Slice-1 `make_violation` sites.
+pub const PARTIAL_OP: &str = "partial_op";
+
 /// A `leadsTo`'s `decreases` measure can be negative in some state where the
 /// trigger is pending, so it cannot serve as a ranking function.
 /// `RankFailure.kind`, `induction.rs`.
@@ -108,6 +116,7 @@ pub const ALL: &[&str] = &[
     LEADS_TO,
     INVARIANT,
     TRANS,
+    PARTIAL_OP,
     UNBOUNDED_BELOW,
     PROGRESS_ACTION_NOT_FAIR,
     HELPFUL_ACTION_ENABLEDNESS_NOT_STICKY,
