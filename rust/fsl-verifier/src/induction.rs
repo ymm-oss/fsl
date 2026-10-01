@@ -495,6 +495,10 @@ pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
     // The ranking walks `model.leadstos` in order, skips the unranked ones,
     // and pushes one proof per ranked property until its first failure, so
     // its proofs are the ranked properties' prefix, position for position.
+    // The length and by-name check below therefore cannot fail by
+    // construction (names may repeat, but position i's proof carries
+    // position i's name); it exists only so that a future reordering of that
+    // loop discharges nothing instead of the wrong property.
     if result.proofs.len() > ranked.len()
         || result
             .proofs

@@ -168,9 +168,12 @@ fn a_discharged_lasso_search_keeps_the_bounded_verdict() {
     }
 }
 
-/// `check` accepts two `leadsTo` blocks with the same name, so a discharge is
-/// a position in `model.leadstos`, never a name: the rankable `L` must not
-/// withdraw the search of the unranked (and false) `L` next to it.
+/// A discharge is a position in `model.leadstos`, never a name: the rankable
+/// `L` must not withdraw the search of the unranked (and false) `L` next to
+/// it. Since #1192 `build_model` rejects duplicate property names, so the
+/// duplicate is made after building, standing in for any model a future
+/// front end might hand the verifier; the verifier must not rely on the
+/// front end for this.
 const DUPLICATE_NAMES: &str = r"
 spec DuplicateNames {
   state { x: 0..1, y: 0..5 }
@@ -184,14 +187,15 @@ spec DuplicateNames {
     y = y + 1
   }
   leadsTo L { y < 5 ~> y == 5 decreases 5 - y }
-  leadsTo L { x == 0 ~> x == 2 }
+  leadsTo M { x == 0 ~> x == 2 }
 }
 ";
 
 #[test]
 fn a_discharge_names_a_position_not_a_leadsto_name() {
-    let model = model(DUPLICATE_NAMES);
+    let mut model = model(DUPLICATE_NAMES);
     assert_eq!(model.leadstos.len(), 2);
+    model.leadstos[1].name = "L".to_owned();
     let discharged = discharges(&model, None);
     assert_eq!(discharged, positions(&[0]));
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
@@ -208,4 +212,32 @@ fn a_discharge_names_a_position_not_a_leadsto_name() {
     assert_eq!(violation.name, "L");
     let details = violation.leads_to.expect("leadsTo details");
     assert!(details.loop_start.is_some(), "{details:?}");
+}
+
+/// Every transition from a pending state decreases `x`, but `dec` stops at
+/// `x == 2`, where `x > 0` is pending with nothing enabled. The ranking's
+/// no-deadlock obligation (#1189) fails, so the property is not discharged:
+/// a failure on any obligation, not only the progress ones, withdraws
+/// nothing.
+const STALLS: &str = r"
+spec Stalls {
+  state { x: 0..5 }
+  init { x = 5 }
+  action dec() {
+    requires x > 2
+    x = x - 1
+  }
+  leadsTo Drain { x > 0 ~> x == 0 decreases x }
+}
+";
+
+#[test]
+fn a_ranking_that_fails_its_no_deadlock_obligation_discharges_nothing() {
+    let model = model(STALLS);
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let ranked = block_on(fsl_verifier::prove_ranked_leadstos(&model, &mut solver))
+        .expect("prove_ranked_leadstos");
+    let failure = ranked.failure.expect("the ranking must fail");
+    assert_eq!(failure.kind, fsl_verifier::violation_kind::DEADLOCK);
+    assert_eq!(discharges(&model, None), BTreeSet::new());
 }

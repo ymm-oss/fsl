@@ -204,12 +204,15 @@ proved for every value of that term.
 
 **What is not skipped.** The per-step stagnation probe (pending deadlock,
 `DESIGN-temporal.md` §2.4), the `within` deadline probe, and the per-step
-definedness checks of `P`/`Q` still run for a discharged property. The
-fast path does not rely on a no-deadlock obligation: the ranking session
-only considers pre-states that have a successor, so its transition
-obligations say nothing about a pending state with no enabled action. A
-ranked `leadsTo` can still be violated by a stall, and is still reported as
-one (`stutter: true`). The stagnation term is quadratic, `B·(D+1)(D+2)/2`.
+definedness checks of `P`/`Q` still run for a discharged property. Since
+#1189 the ranking includes a no-deadlock obligation over the same premise (a
+pending invariant state has an enabled action — a matching helpful one when
+`helpful` is declared), so a discharged property has no reachable pending
+deadlock and its stagnation probes are all `unsat` too. They are kept
+anyway: the fast path's argument above does not need that obligation, and
+the stagnation term is only quadratic, `B·(D+1)(D+2)/2`. A ranked `leadsTo`
+that stalls fails the no-deadlock obligation, so nothing is discharged and
+the stall is reported exactly as before (`stutter: true`).
 
 **Fail-closed fallback.** The ranking stops at its first failing property;
 only the properties proved before it are discharged, and every other
@@ -224,17 +227,29 @@ a witness of its own.
 **Budget.** Every pre-pass check has a 5 s wall-clock limit
 (`RANKING_PREPASS_CHECK_TIMEOUT_MS`); a check that runs out answers
 `unknown` and so discharges nothing. The number of checks is linear in
-bindings × action instances. Because the limit depends on machine load, it
-can only decide whether the shortcut is taken — and therefore `cost` — never
-the verdict or a witness.
+bindings × action instances. The limit depends on machine load, so load can
+decide whether the shortcut is taken, and with it `cost`. It can never turn
+`verified` into `violated` or the reverse: a discharged lasso search has no
+`sat` probe to find. The one outcome load can move is error versus verdict —
+when the shortcut is not taken, a lasso probe that the solver answers
+`unknown` makes the run an error, as it always did, while a run that took
+the shortcut never asks that probe.
 
 **Solver isolation.** The pre-pass runs on its own thread with its own Z3
 solver. The native backend's `Solver::new()` uses the thread's default
 context, and running the ranking in the BMC thread — even on a separate
 `Solver` — was observed to change which model Z3 returns for later BMC
 witness queries (the lasso trace of `helpful` specs whose ranking fails). On
-its own thread the BMC session's query history is exactly what it is without
-the pre-pass, so fallback witnesses are byte-identical to the full search.
+its own thread the BMC session's query history up to the lasso search is
+exactly what it is without the pre-pass. The byte-identity claim is narrower
+than "every witness": it covers the fallback path, a lasso search that runs
+with nothing discharged before it in the same run (in particular every run
+whose ranking failed on its first ranked property), whose witness is then
+byte-identical to the full search's. A lasso search that runs *after* a
+discharged property starts from a session that skipped that property's
+probes; its verdict is the full search's (the skipped probes were `unsat`),
+but Z3 may return a different, equally valid lasso witness (the corpus
+differential observed none).
 
 **Envelope change.** Only `cost`: `cost.properties` gains a
 `{"kind":"leadsTo_rank","name":<leadsTo>}` row for each ranked `leadsTo`

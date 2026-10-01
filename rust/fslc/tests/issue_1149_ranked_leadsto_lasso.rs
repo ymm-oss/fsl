@@ -62,6 +62,11 @@ fn checks(output: &Value, kind: &str, name: &str) -> u64 {
         .sum()
 }
 
+/// Ranking checks for one unparameterised action and one binding: the lower
+/// bound, the no-deadlock obligation (#1189), and one per-action progress
+/// query -- independent of depth.
+const RANK_CHECKS: u64 = 3;
+
 fn stagnation(depth: u64) -> u64 {
     (depth + 1) * (depth + 2) / 2
 }
@@ -112,9 +117,9 @@ fn a_ranked_leadsto_drops_the_lasso_search_and_keeps_the_envelope() {
         assert!(ranked["leads_to"]["Reach"].get("proved").is_none());
 
         // Fast path: only the stagnation probes remain, plus a constant
-        // number of ranking checks independent of depth.
+        // number of ranking checks independent of depth (`RANK_CHECKS`).
         assert_eq!(checks(&ranked, "leadsTo", "Reach"), stagnation(depth));
-        assert_eq!(checks(&ranked, "leadsTo_rank", "Reach"), 2);
+        assert_eq!(checks(&ranked, "leadsTo_rank", "Reach"), RANK_CHECKS);
         // Negative control: without `decreases` the full cubic search runs.
         assert_eq!(
             checks(&plain, "leadsTo", "Reach"),
@@ -163,7 +168,7 @@ fn a_false_ranked_leadsto_is_still_violated_with_a_lasso_witness() {
         .collect::<Vec<_>>();
     assert_eq!(xs, vec![0, 1, 0]);
     // The ranking ran and failed, then the lasso search found the loop.
-    assert_eq!(checks(&output, "leadsTo_rank", "Never"), 2);
+    assert_eq!(checks(&output, "leadsTo_rank", "Never"), RANK_CHECKS);
     assert!(
         checks(&output, "leadsTo", "Never") > stagnation(8),
         "{output}"
@@ -180,18 +185,19 @@ fn an_inconclusive_ranking_falls_back_to_the_full_search() {
     assert_eq!(status, 0, "{output}");
     assert_eq!(output["result"], "verified");
     assert_eq!(output["completeness"], "bounded");
-    assert_eq!(checks(&output, "leadsTo_rank", "Reach"), 2);
+    assert_eq!(checks(&output, "leadsTo_rank", "Reach"), RANK_CHECKS);
     assert_eq!(
         checks(&output, "leadsTo", "Reach"),
         stagnation(8) + lasso(8)
     );
 }
 
-/// The ranking obligations say nothing about a pending state with no enabled
-/// action, so the stagnation probes are kept for a discharged property:
-/// `dec` stops at `x == 2`, where `x > 0` is pending forever. The ranking
-/// holds (every transition from a pending state decreases `x`), yet the
-/// verdict is still the stagnation violation.
+/// A ranked `leadsTo` that stalls: `dec` stops at `x == 2`, where `x > 0` is
+/// pending forever. Every transition from a pending state does decrease `x`,
+/// but the ranking's no-deadlock obligation (#1189) fails, so nothing is
+/// discharged and the stagnation probe reports the stall as before. (The
+/// stagnation probes also run for a discharged property; see
+/// `docs/design/DESIGN-induction.md` §2.5.)
 const RANKED_STALL: &str = r"
 spec IssueRankedStall {
   state { x: 0..5 }
@@ -205,7 +211,7 @@ spec IssueRankedStall {
 ";
 
 #[test]
-fn a_discharged_property_still_reports_a_pending_deadlock() {
+fn a_ranked_leadsto_that_stalls_is_still_reported() {
     let (output, status) = verify_source("ranked_stall", RANKED_STALL, &["--depth", "8"]);
     assert_eq!(status, 1, "{output}");
     assert_eq!(output["result"], "violated");
@@ -283,14 +289,14 @@ fn a_failed_ranking_leaves_the_fallback_witness_unchanged() {
     assert_eq!(without_cost(&plain), without_cost(&ranked));
 }
 
-/// `check` accepts two `leadsTo` blocks with the same name. The rankable `L`
-/// must not withdraw the lasso search of the other, false `L` (`flip`
-/// alternates `x` forever once `y == 5`): every variant stays `violated`
-/// under both engines, as it was before #1149.
-///
-/// Calibration: keying the discharge by name instead of position turns all
-/// three BMC runs into `verified` and the first two induction runs into
-/// `proved` (`completeness:"unbounded"`).
+/// Two `leadsTo` blocks with one name: the rankable `L` could, with a
+/// name-keyed discharge, withdraw the lasso search of the other, false `L`.
+/// Since #1192 `check` rejects the spec outright, so through the CLI the
+/// collision cannot reach the verifier at all; the position key is pinned at
+/// the library level by
+/// `ranked_leadsto_lasso_discharge.rs::a_discharge_names_a_position_not_a_leadsto_name`.
+/// Here: every variant -- either order, and the false block ranked with a
+/// failing measure -- is an error under both engines, never a verdict.
 const DUPLICATE_NAMES: &str = r"
 spec IssueDuplicateNames {
   state { x: 0..1, y: 0..5 }
@@ -309,7 +315,7 @@ spec IssueDuplicateNames {
 ";
 
 #[test]
-fn a_duplicated_leadsto_name_cannot_withdraw_the_other_blocks_search() {
+fn a_duplicated_leadsto_name_never_reaches_a_verdict() {
     let ranked = "  leadsTo L { y < 5 ~> y == 5 decreases 5 - y }\n";
     let false_block = "  leadsTo L { x == 0 ~> x == 2 }\n";
     let reversed = DUPLICATE_NAMES.replace(
@@ -317,35 +323,25 @@ fn a_duplicated_leadsto_name_cannot_withdraw_the_other_blocks_search() {
         &format!("{false_block}{ranked}"),
     );
     assert_ne!(reversed, DUPLICATE_NAMES, "fixture edit must apply");
-    // The false block also ranked, with a measure that fails.
     let failing_rank =
         DUPLICATE_NAMES.replace("{ x == 0 ~> x == 2 }", "{ x == 0 ~> x == 2 decreases 1 }");
     assert_ne!(failing_rank, DUPLICATE_NAMES, "fixture edit must apply");
 
-    // `(result, violation_kind)` per engine, identical to the pre-#1149
-    // binary: with the false block ranked too, the induction engine prefers
-    // that block's rank failure over the raw BMC lasso (as it always has).
-    let violated = ("violated", "leadsTo");
-    for (tag, source, induction) in [
-        ("dup_ranked_first", DUPLICATE_NAMES.to_owned(), violated),
-        ("dup_ranked_second", reversed, violated),
-        (
-            "dup_failing_rank",
-            failing_rank,
-            ("unknown_cti", "leadsTo_rank"),
-        ),
+    for (tag, source) in [
+        ("dup_ranked_first", DUPLICATE_NAMES.to_owned()),
+        ("dup_ranked_second", reversed),
+        ("dup_failing_rank", failing_rank),
     ] {
-        for (engine, (result, kind)) in [("bmc", violated), ("induction", induction)] {
+        for engine in ["bmc", "induction"] {
             let (output, status) =
                 verify_source(tag, &source, &["--depth", "8", "--engine", engine]);
-            assert_eq!(status, 1, "{tag} {engine}: {output}");
-            assert_eq!(output["result"], result, "{tag} {engine}");
-            assert_eq!(output["violation_kind"], kind, "{tag} {engine}");
-            assert_eq!(output["completeness"], "bounded", "{tag} {engine}");
-            if kind == "leadsTo" {
-                assert_eq!(output["invariant"], "L", "{tag} {engine}");
-                assert!(output["loop_start"].is_u64(), "{tag} {engine}: {output}");
-            }
+            assert_eq!(status, 2, "{tag} {engine}: {output}");
+            assert_eq!(output["result"], "error", "{tag} {engine}");
+            let message = output["message"].as_str().unwrap_or_default();
+            assert!(
+                message.contains("duplicate property name 'L'"),
+                "{tag} {engine}: {message}"
+            );
         }
     }
 }
