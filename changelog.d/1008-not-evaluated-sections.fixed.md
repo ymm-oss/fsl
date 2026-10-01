@@ -13,5 +13,8 @@ that declares no such check keeps the key absent, and an unfiltered `verify`
 envelope is unchanged. A selected run now also reports the same compose
 warnings (`fair_not_inherited`) and `no_user_invariants` suppression as a full
 run; `--property` used to drop them. The Worker has no selection options and
-always runs the full set. Porting the frozen Python reference's per-scenario
+always runs the full set. `sweep`, whose cells always carry scope overrides,
+copies each skipped section into the cell's `summary` row and reports the
+union over cells as `sweep.not_evaluated: {sections, reasons}`; the grid
+verdict and exit code are unchanged. Porting the frozen Python reference's per-scenario
 `acceptance_skipped` downgrade under overrides remains a follow-up.

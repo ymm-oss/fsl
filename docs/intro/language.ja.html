@@ -1088,6 +1088,16 @@ semantics / io / vacuous / …)を返した場合、それは反例ではあり�
 すべて列挙し、該当がなければ <code>[]</code> です。
 classification の欠落・未知・混在（<code>over_constrained</code> を含む）は真の失敗として
 <code>sweep_failed</code> / exit 1 になります。</p>
+<p>sweep の各セルは <code>--instances</code>/<code>--values</code> 付きで走るので、セルが宣言済みの検査を
+<code>not_evaluated</code> として報告することがあります(§7「選択した run が評価しない検査」):
+spec に <code>acceptance</code>/<code>forbidden</code> シナリオがあれば <code>requirement_traces</code>、<code>--property</code>
+付きなら <code>implements</code> です。グリッドの verdict は変わりませんが、その裏に省略を
+隠しません: そうしたセルの <code>summary</code> 行にはセクション名が値 <code>"not_evaluated"</code> で
+入り、<code>sweep.not_evaluated: {"sections": [...], "reasons": [...]}</code> が全セルの和集合
+(sections は整列、reasons は初出順)になります。どのセルも何も省略していなければ
+このキーはありません。したがって <code>sweep.not_evaluated</code> 付きの <code>sweep_passed</code> は
+それらのセクションについて何も述べていません。スコープ無しの <code>check</code> / <code>verify</code>
+で確かめてください。</p>
 <p><code>diff</code> は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は <code>behavior_added</code>、OLD→NEW の失敗は
 <code>behavior_removed</code> です。ユーザー invariant の連言の間の含意を別途検査し

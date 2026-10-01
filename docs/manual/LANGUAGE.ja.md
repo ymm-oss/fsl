@@ -1006,6 +1006,17 @@ semantics / io / vacuous / …)を返した場合、それは反例ではあり�
 classification の欠落・未知・混在（`over_constrained` を含む）は真の失敗として
 `sweep_failed` / exit 1 になります。
 
+sweep の各セルは `--instances`/`--values` 付きで走るので、セルが宣言済みの検査を
+`not_evaluated` として報告することがあります(§7「選択した run が評価しない検査」):
+spec に `acceptance`/`forbidden` シナリオがあれば `requirement_traces`、`--property`
+付きなら `implements` です。グリッドの verdict は変わりませんが、その裏に省略を
+隠しません: そうしたセルの `summary` 行にはセクション名が値 `"not_evaluated"` で
+入り、`sweep.not_evaluated: {"sections": [...], "reasons": [...]}` が全セルの和集合
+(sections は整列、reasons は初出順)になります。どのセルも何も省略していなければ
+このキーはありません。したがって `sweep.not_evaluated` 付きの `sweep_passed` は
+それらのセクションについて何も述べていません。スコープ無しの `check` / `verify`
+で確かめてください。
+
 `diff` は、ソーステキストではなく状態機械の意味を比較します。有界の refinement を
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
 `behavior_removed` です。ユーザー invariant の連言の間の含意を別途検査し

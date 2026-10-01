@@ -586,6 +586,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
   a missing file) is returned verbatim — exit code and `kind` unchanged.
+  Cells always carry `--instances`/`--values`, so a check a cell skips
+  (`requirement_traces` for acceptance/forbidden scenarios, `implements` under
+  `--property`) is surfaced, not hidden behind the grid verdict: the cell's
+  `summary` row gets `"<section>": "not_evaluated"` and
+  `sweep.not_evaluated: {sections, reasons}` is the union over cells (absent
+  when nothing was skipped). `sweep_passed` says nothing about those sections —
+  check them on an unscoped run.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest

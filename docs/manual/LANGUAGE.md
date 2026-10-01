@@ -1043,6 +1043,18 @@ result, and is `[]` when there is none. Missing, unknown, or mixed
 classifications, including `over_constrained`, are true failures and return
 `sweep_failed`/exit 1.
 
+Every sweep cell runs with `--instances`/`--values`, so a cell can report a
+declared check as `not_evaluated` (§7, "Checks a selected run does not
+evaluate"): `requirement_traces` whenever the spec has `acceptance`/`forbidden`
+scenarios, and `implements` under `--property`. The grid verdict does not
+change, but the skip is not hidden behind it: each such cell's `summary` row
+carries the section name with the value `"not_evaluated"`, and
+`sweep.not_evaluated: {"sections": [...], "reasons": [...]}` is the union over
+all cells (sections sorted, reasons in first-seen order). The key is absent when
+no cell skipped anything. A `sweep_passed` grid with `sweep.not_evaluated`
+therefore says nothing about those sections; check them on an unscoped
+`check`/`verify`.
+
 `diff` compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is `behavior_added`, while
 OLD→NEW failure is `behavior_removed`. It separately checks implication between

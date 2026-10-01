@@ -543,7 +543,13 @@ pub fn not_evaluated_section(reasons: &[&str], fields: Map<String, Value>) -> Va
 /// Unlike [`attach_requirements_implements`] this never touches the top-level
 /// `result` or the exit status: the section records what this run did *not*
 /// check, and the verdict keeps speaking only for what it did. An `error`
-/// envelope carries no section, matching every other nested verdict.
+/// envelope carries no section, matching every other nested verdict. The
+/// later steps that turn a success envelope into an `error` one
+/// (`--vacuity error`, `--strict-tags`, the cache-divergence check) each build
+/// a fresh envelope rather than rewriting `result` in place, so a section
+/// attached here never survives onto an `error` envelope either; the
+/// `--vacuity error` case is pinned by
+/// `issue_1008_not_evaluated::vacuity_error_envelope_drops_the_section`.
 pub fn attach_not_evaluated(envelope: &mut Value, key: &str, section: Value) {
     let Value::Object(map) = envelope else {
         return;

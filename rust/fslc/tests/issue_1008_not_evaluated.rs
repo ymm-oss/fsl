@@ -333,3 +333,116 @@ fn property_selection_keeps_compose_warnings() {
         assert_eq!(kinds, 1, "args={extra:?}: {output:#}");
     }
 }
+
+/// Rejecting control for `attach_not_evaluated`'s error-envelope rule: when
+/// `--vacuity error` replaces a selected run's envelope with an `error` one,
+/// no `not_evaluated` section survives onto it (mutation: carry the section
+/// over into the vacuity error envelope). The `warn` run is the control that
+/// the fixture is vacuous and that the section was attached before.
+#[test]
+fn vacuity_error_envelope_drops_the_section() {
+    let path = fixture("impl_vacuous.fsl");
+    let base = ["verify", path.as_str(), "--depth", "3", "--no-cache"];
+    let mut warn = base.to_vec();
+    warn.extend_from_slice(&["--property", "Hollow"]);
+    let (warned, warned_status) = run(&warn);
+    assert_eq!(warned_status, 0, "{warned:#}");
+    assert_eq!(
+        warned["implements"]["result"], "not_evaluated",
+        "{warned:#}"
+    );
+    let mut error = warn.clone();
+    error.extend_from_slice(&["--vacuity", "error"]);
+    let (errored, errored_status) = run(&error);
+    assert_eq!(errored_status, 2, "{errored:#}");
+    assert_eq!(errored["result"], "error", "{errored:#}");
+    assert!(errored.get("implements").is_none(), "{errored:#}");
+    assert!(errored.get("requirement_traces").is_none(), "{errored:#}");
+}
+
+fn sweep(arguments: &[&str]) -> (Value, i32) {
+    let mut full = vec!["sweep"];
+    full.extend_from_slice(arguments);
+    let cache = std::env::temp_dir().join(format!(
+        "fsl-issue-1008-sweep-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir(&cache).expect("sweep cache dir must not already exist");
+    let result = run_with_env(&full, &[("FSLC_CACHE_DIR", cache.as_path())]);
+    let _ = std::fs::remove_dir_all(&cache);
+    result
+}
+
+/// detector (mutation: `sweep` aggregates only `result`/`checked_to_depth`
+/// and hides the cells' skipped acceptance replay behind `sweep_passed`).
+/// The grid verdict is unchanged on purpose; the skip is surfaced.
+#[test]
+fn sweep_surfaces_skipped_requirement_traces() {
+    let path = fixture("impl_failing_acceptance.fsl");
+    let (output, status) = sweep(&[&path, "--depth", "1..2", "--values", "Limit=0..3"]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "sweep_passed", "{output:#}");
+    assert_eq!(
+        output["sweep"]["not_evaluated"],
+        json!({"sections": ["requirement_traces"], "reasons": ["bounds_override"]}),
+        "{output:#}"
+    );
+    let rows = output["sweep"]["results"].as_array().expect("sweep rows");
+    assert!(!rows.is_empty(), "{output:#}");
+    for row in rows {
+        assert_eq!(
+            row["summary"]["requirement_traces"], "not_evaluated",
+            "{row:#}"
+        );
+        assert!(row["summary"].get("implements").is_none(), "{row:#}");
+    }
+}
+
+/// detector (mutation: the sweep union drops `implements` skipped by
+/// `--property`, or loses its reason)
+#[test]
+fn sweep_surfaces_a_seam_skipped_by_property_selection() {
+    let path = fixture("impl_broken.fsl");
+    let (output, status) = sweep(&[
+        &path,
+        "--depth",
+        "1..2",
+        "--values",
+        "Limit=0..3",
+        "--property",
+        "Small",
+    ]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "sweep_passed", "{output:#}");
+    assert_eq!(
+        output["sweep"]["not_evaluated"],
+        json!({
+            "sections": ["implements", "requirement_traces"],
+            "reasons": ["property_selection", "bounds_override"],
+        }),
+        "{output:#}"
+    );
+    for row in output["sweep"]["results"].as_array().expect("sweep rows") {
+        assert_eq!(row["summary"]["implements"], "not_evaluated", "{row:#}");
+    }
+}
+
+/// Rejecting control: a sweep with nothing skipped has no
+/// `sweep.not_evaluated` key and no per-row section entries.
+#[test]
+fn sweep_without_skipped_checks_adds_no_key() {
+    let path = fixture("abs.fsl");
+    let (output, status) = sweep(&[&path, "--depth", "1..2", "--values", "Limit=0..3"]);
+    assert_eq!(status, 0, "{output:#}");
+    assert!(output["sweep"].get("not_evaluated").is_none(), "{output:#}");
+    for row in output["sweep"]["results"].as_array().expect("sweep rows") {
+        assert!(
+            row["summary"].get("requirement_traces").is_none(),
+            "{row:#}"
+        );
+    }
+}
