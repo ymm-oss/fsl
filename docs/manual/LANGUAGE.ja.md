@@ -47,6 +47,12 @@ spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata bad
 }
 ```
 
+性質名（`invariant`・`trans`・`unless`・`reachable`・`leadsTo`・`until`）は spec の中で
+1 つの名前空間を共有します。結果・`--property` の選択・Public Kernel がこの名前で引かれる
+ため、同じ種類でも種類をまたいでも同じ名前を再び使うと `kind: "semantics"` の check 時
+エラーになり、後の宣言の位置を指して先の宣言の位置を示します。`until <Name>` は、降ろし先の
+`trans` の名前 `<Name>_until_safety` も占めます（#1192）。
+
 spec 名の後の省略可能な文字列は **spec レベルタグ**です
 (`"<kind>: <intent>"`、例: `spec ReturnUI "ui: screen flow" { … }`)。宣言ごとの
 タグと同様、これは**メタデータのみ**であり — 決して検証されず — `fslc explain` /

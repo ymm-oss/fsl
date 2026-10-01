@@ -98,6 +98,11 @@
   terminal { &lt;expr&gt; }                   // intended terminal states (excluded from deadlock checking)
 }
 </code></pre>
+<p>性質名（<code>invariant</code>・<code>trans</code>・<code>unless</code>・<code>reachable</code>・<code>leadsTo</code>・<code>until</code>）は spec の中で
+1 つの名前空間を共有します。結果・<code>--property</code> の選択・Public Kernel がこの名前で引かれる
+ため、同じ種類でも種類をまたいでも同じ名前を再び使うと <code>kind: "semantics"</code> の check 時
+エラーになり、後の宣言の位置を指して先の宣言の位置を示します。<code>until &lt;Name&gt;</code> は、降ろし先の
+<code>trans</code> の名前 <code>&lt;Name&gt;_until_safety</code> も占めます（#1192）。</p>
 <p>spec 名の後の省略可能な文字列は <strong>spec レベルタグ</strong>です
 (<code>"&lt;kind&gt;: &lt;intent&gt;"</code>、例: <code>spec ReturnUI "ui: screen flow" { … }</code>)。宣言ごとの
 タグと同様、これは<strong>メタデータのみ</strong>であり — 決して検証されず — <code>fslc explain</code> /
