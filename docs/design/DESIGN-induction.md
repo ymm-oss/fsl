@@ -19,7 +19,8 @@ edge cases.
   - Unbounded proof of unranked `leadsTo` (it remains a bounded lasso/stutter
     check attached as `leads_to.<name>.checked_to_depth`)
   - Inductive proof of `ensures` (ensures is a single-transition property, so
-    induction is unnecessary — see §5)
+    no k-chain is needed; it is a one-step obligation under the proved
+    invariants instead — see §2.7)
   - IC3/PDR (no automatic strengthening from CTIs. Returning the CTI to the LLM
     is the v1.1 bet)
 
@@ -321,6 +322,32 @@ Selecting a `trans` keeps every invariant as hypothesis
 (`selected_transition_induction_model`). Non-partial undefinedness BMC fails
 closed on (checked i64 overflow, a finite `Map` read outside its key domain)
 is not part of this obligation.
+
+### 2.7 Ensures obligation (#1217)
+
+`ensures` is checked by BMC on every reached step, but before #1217 the step
+case never asked it, so a false `ensures` beyond `--depth` was reported
+`proved`/`unbounded`. It is now part of the same one-step obligation as §2.6,
+over the same scope (free `s`, `s'`, the k-chain popped, no Init):
+
+```
+Inv(s) ∧ T(s,s') ∧ Inv(s') ∧ Trans(s,s') ∧ reached(E, s, s') ∧ defined(E) ∧ ¬E(s, s')
+```
+
+for every `ensures` E of every action instance. `reached` is BMC's
+(`bmc::check_state_properties`): the instance is the selected one, its
+guards are enabled, its body is defined, and every earlier `ensures` of the
+action is defined and true; E's own `partial_op` is asked first (§2.6).
+
+Soundness is the §2.6 argument: every reachable step goes from and to states
+that satisfy the proved invariants (and the proved `trans`) and is a step of
+`T`, so `unsat` shows no reachable step falsifies a reached `ensures`. `sat` is
+`unknown_cti` with `violation_kind: "ensures"`, `invariant: "<action>"` and
+`last_action` (BMC's `ensures` naming), a two-state CTI whose last step is the
+attempted action. An `ensures` whose truth follows from an invariant stays
+`proved` because `Inv(s)` is a premise; an unreachable CTI start is excluded
+with an auxiliary invariant as usual. `--lemma` adjudication does not ask it
+(`prove_induction_invariants`, §2.6).
 
 ## 3. Extracting the CTI (counterexample to induction)
 

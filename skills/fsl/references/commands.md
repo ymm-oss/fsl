@@ -767,6 +767,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   The CTI start satisfies every proved invariant and reaches a partial operation;
   guard it with a short-circuit `and`/`=>`/`or`/`if`, or exclude an unreachable
   start with an auxiliary invariant. Never `proved` while such a state exists.
+- Ensures failure (#1217): `unknown_cti` / `violation_kind:"ensures"` with
+  `invariant` = the action name and `last_action`; a two-state CTI between
+  invariant states whose last step falsifies the reached `ensures`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,

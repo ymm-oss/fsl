@@ -505,18 +505,22 @@ fn suggested_invariants(
         .collect()
 }
 
-/// `last_action` for an induction `partial_op` CTI whose failure is in an
-/// action context (`_partial_<action>`), shaped like BMC's (#1196).
-fn insert_partial_cti_last_action(
+/// `last_action` for an induction CTI whose failure is in an action context
+/// — a `partial_op` named `_partial_<action>` (#1196) or an `ensures`
+/// (#1217) — shaped like BMC's.
+fn insert_action_cti_last_action(
     output: &mut Map<String, Value>,
     model: &KernelModel,
     cti: &fsl_verifier::InductionCti,
 ) {
-    let Some(action) = cti
-        .name
-        .strip_prefix("_partial_")
-        .filter(|rest| !rest.starts_with("property_"))
-        .and_then(|_| cti.trace.last())
+    let action_context = cti.kind == fsl_verifier::violation_kind::ENSURES
+        || cti
+            .name
+            .strip_prefix("_partial_")
+            .is_some_and(|rest| !rest.starts_with("property_"));
+    let Some(action) = action_context
+        .then(|| cti.trace.last())
+        .flatten()
         .and_then(|step| step.action.as_ref())
     else {
         return;
@@ -552,12 +556,13 @@ fn render_induction_cti(
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("unknown_cti"));
     let partial = cti.kind == fsl_verifier::violation_kind::PARTIAL_OP;
+    let ensures = cti.kind == fsl_verifier::violation_kind::ENSURES;
     let property_kind = if cti.kind == "trans" {
         "trans"
     } else {
         "invariant"
     };
-    let name = if partial {
+    let name = if partial || ensures {
         // `_partial_<action>` / `_partial_property_<name>`: the same synthetic
         // names BMC's `partial_op` violations carry (#1196).
         display(&cti.name)
@@ -567,12 +572,12 @@ fn render_induction_cti(
     if cti.kind == "trans" {
         output.insert("trans".to_owned(), json!(name));
     }
-    if partial {
+    if partial || ensures {
         output.insert("violation_kind".to_owned(), json!(cti.kind));
     }
     output.insert("invariant".to_owned(), json!(name));
-    if partial {
-        insert_partial_cti_last_action(&mut output, model, cti);
+    if partial || ensures {
+        insert_action_cti_last_action(&mut output, model, cti);
     }
     output.insert("k".to_owned(), json!(cti.k));
     output.insert("checked_to_depth".to_owned(), json!(depth));
@@ -585,7 +590,9 @@ fn render_induction_cti(
             "violated_at": cti.k,
         }),
     );
-    let mut hint = if partial {
+    let mut hint = if ensures {
+        "this step starts and ends in states that satisfy every proved invariant, but the action's ensures is false after it (BMC reports the same step as violated ensures if it is reachable); fix the action body or the ensures, or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
+    } else if partial {
         "this state satisfies every proved invariant but reaches a partial operation (division or remainder by zero, or head/pop/at/index outside a sequence) that BMC and the explicit engine report as partial_op; guard the operation (e.g. requires d != 0 and x / d < 100), or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
     } else {
         "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned()

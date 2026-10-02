@@ -267,8 +267,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-verifier/src/induction.rs",
-        427,
-        "definedness_cti",
+        432,
+        "step_obligation_cti",
         ResultOption
     ),
     entry!(

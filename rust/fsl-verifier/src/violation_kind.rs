@@ -58,6 +58,13 @@ pub const TRANS: &str = "trans";
 /// but are emitted by `bmc.rs`'s out-of-Slice-1 `make_violation` sites.
 pub const PARTIAL_OP: &str = "partial_op";
 
+/// A k-induction step obligation (#1217) found one step between states that
+/// satisfy every proved invariant on which an action's reached, defined
+/// `ensures` is false. `InductionCti.kind`, `induction.rs`. BMC's own
+/// `ensures` violations use the same spelling but are emitted by `bmc.rs`'s
+/// out-of-Slice-1 `make_violation` sites.
+pub const ENSURES: &str = "ensures";
+
 /// A `leadsTo`'s `decreases` measure can be negative in some state where the
 /// trigger is pending, so it cannot serve as a ranking function.
 /// `RankFailure.kind`, `induction.rs`.
@@ -117,6 +124,7 @@ pub const ALL: &[&str] = &[
     INVARIANT,
     TRANS,
     PARTIAL_OP,
+    ENSURES,
     UNBOUNDED_BELOW,
     PROGRESS_ACTION_NOT_FAIR,
     HELPFUL_ACTION_ENABLEDNESS_NOT_STICKY,
