@@ -1,0 +1,22 @@
+// #1218 review: `respond` lacks `requires cases[c] == Accepted`, so FB-1's
+// single step `respond(1)` is accepted — a broken forbidden. Under
+// `--instances Case=1` id 1 does not exist and the call is "rejected" only
+// because of the override: the scenario must be reported as skipped, never
+// as a pass.
+requirements ForbiddenFinalUnguarded {
+  entity Case
+  enum St { Waiting, Accepted, Responded }
+  state { cases: Map<Case, St> }
+  init { forall c: Case { cases[c] = Waiting } }
+  requirement REQ-1 "accept" {
+    action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  requirement REQ-2 "respond" {
+    action respond(c: Case) { cases[c] = Responded }
+  }
+  forbidden FB-1 "cannot respond before accept" {
+    respond(1)
+    expect rejected
+  }
+}
+verify { instances Case = 3 }

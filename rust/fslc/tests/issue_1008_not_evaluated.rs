@@ -7,7 +7,10 @@
 //! Before #1008, `--property`, `--exclude-property`, and `--from-state` removed
 //! the inline `implements` key with no reason, and `--instances`/`--values`
 //! skipped the requirements `acceptance`/`forbidden` replay with no trace in
-//! the envelope at all. A consumer could not tell "nothing declared" from
+//! the envelope at all. Since #1218 a scoped run replays the scenarios and
+//! skips only the ones its scope puts out of range; those are what
+//! `requirement_traces` reports (`issue_1218_acceptance_replay.rs` pins the
+//! replay itself). A consumer could not tell "nothing declared" from
 //! "declared but not checked", and a broken seam passed a selected run with
 //! exit 0 looking exactly like a spec without one.
 //!
@@ -233,13 +236,69 @@ fn unscoped_verify_rejects_the_failing_acceptance() {
     assert_eq!(output["kind"], "acceptance", "{output:#}");
 }
 
-/// detector (mutation: restore the silent `--instances`/`--values` skip of the
-/// requirements trace replay). The verdict is unchanged on purpose: porting the
-/// per-scenario skip is a separate contract decision, and until then the run
-/// must at least not read as if the scenarios passed.
+/// detector (mutation: restore the pre-#1218 skip of the whole replay under
+/// `--instances`/`--values`, which reported this run as `verified` with a
+/// `not_evaluated` section). `expect n == 2` references no out-of-scope
+/// value, so a scoped run replays it and fails exactly like an unscoped one.
 #[test]
-fn bounds_override_reports_requirement_traces_not_evaluated() {
+fn bounds_override_replays_the_failing_acceptance() {
     let path = fixture("impl_failing_acceptance.fsl");
+    let (output, status) = run(&[
+        "verify",
+        &path,
+        "--depth",
+        "3",
+        "--no-cache",
+        "--values",
+        "Limit=0..2",
+    ]);
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["result"], "error", "{output:#}");
+    assert_eq!(output["kind"], "acceptance", "{output:#}");
+    assert_eq!(output["trace_type"], "acceptance", "{output:#}");
+    assert!(output.get("requirement_traces").is_none(), "{output:#}");
+}
+
+/// detector (mutation: a scenario skipped as out of scope is not reported, or
+/// is reported without the skipped id and reference). `pick(2)` is outside
+/// `Limit=0..1`, so AC-1 is skipped and the section lists it.
+#[test]
+fn bounds_override_reports_the_out_of_scope_scenario_not_evaluated() {
+    let path = fixture("impl_out_of_scope_acceptance.fsl");
+    let (output, status) = run(&[
+        "verify",
+        &path,
+        "--depth",
+        "3",
+        "--no-cache",
+        "--values",
+        "Limit=0..1",
+    ]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "verified", "{output:#}");
+    assert_eq!(output["implements"]["result"], "refines", "{output:#}");
+    assert_eq!(
+        output["requirement_traces"],
+        json!({
+            "result": "not_evaluated",
+            "reason": "bounds_override",
+            "reasons": ["bounds_override"],
+            "skipped": [{
+                "kind": "acceptance",
+                "id": "AC-1",
+                "reference": "pick(2): argument 2 for 'v' is outside its domain",
+            }],
+        }),
+        "{output:#}"
+    );
+}
+
+/// Rejecting control (mutation: attach the section whenever scenarios are
+/// declared under a scope): a scope that keeps every scenario in range
+/// replays them all and has no `requirement_traces` key.
+#[test]
+fn bounds_override_replaying_every_scenario_adds_no_section() {
+    let path = fixture("impl_out_of_scope_acceptance.fsl");
     let (output, status) = run(&[
         "verify",
         &path,
@@ -251,25 +310,14 @@ fn bounds_override_reports_requirement_traces_not_evaluated() {
     ]);
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "verified", "{output:#}");
-    assert_eq!(output["implements"]["result"], "refines", "{output:#}");
-    assert_eq!(
-        output["requirement_traces"],
-        json!({
-            "acceptance": 1,
-            "forbidden": 0,
-            "result": "not_evaluated",
-            "reason": "bounds_override",
-            "reasons": ["bounds_override"],
-        }),
-        "{output:#}"
-    );
+    assert!(output.get("requirement_traces").is_none(), "{output:#}");
 }
 
 /// detector (mutation: an unextractable trace contract is treated as "no
-/// scenarios" under a scoped run). The unscoped run is the control: it
-/// rejects the duplicate id.
+/// scenarios", or as not evaluated, under a scoped run). The scoped run
+/// rejects the duplicate id exactly like the unscoped control.
 #[test]
-fn bounds_override_reports_an_unextractable_trace_contract() {
+fn bounds_override_rejects_an_unextractable_trace_contract() {
     let path = fixture("impl_duplicate_acceptance.fsl");
     let (unscoped, unscoped_status) = run(&["verify", &path, "--depth", "3", "--no-cache"]);
     assert_eq!(unscoped_status, 2, "{unscoped:#}");
@@ -283,16 +331,10 @@ fn bounds_override_reports_an_unextractable_trace_contract() {
         "--values",
         "Limit=0..2",
     ]);
-    assert_eq!(status, 0, "{output:#}");
-    assert_eq!(
-        output["requirement_traces"],
-        json!({
-            "result": "not_evaluated",
-            "reason": "bounds_override",
-            "reasons": ["bounds_override"],
-        }),
-        "{output:#}"
-    );
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], "semantics", "{output:#}");
+    assert_eq!(output["message"], unscoped["message"], "{output:#}");
+    assert!(output.get("requirement_traces").is_none(), "{output:#}");
 }
 
 /// Rejecting control: a scoped run of a spec without acceptance/forbidden
@@ -378,26 +420,39 @@ fn sweep(arguments: &[&str]) -> (Value, i32) {
 }
 
 /// detector (mutation: `sweep` aggregates only `result`/`checked_to_depth`
-/// and hides the cells' skipped acceptance replay behind `sweep_passed`).
-/// The grid verdict is unchanged on purpose; the skip is surfaced.
+/// and hides the cells' skipped scenarios behind `sweep_passed`). Only the
+/// cells whose scope puts `pick(2)` out of range (`Limit=0..0`, `0..1`) skip
+/// AC-1; the grid verdict is unchanged and the skip is surfaced.
 #[test]
 fn sweep_surfaces_skipped_requirement_traces() {
-    let path = fixture("impl_failing_acceptance.fsl");
+    let path = fixture("impl_out_of_scope_acceptance.fsl");
     let (output, status) = sweep(&[&path, "--depth", "1..2", "--values", "Limit=0..3"]);
     assert_eq!(status, 0, "{output:#}");
     assert_eq!(output["result"], "sweep_passed", "{output:#}");
     assert_eq!(
         output["sweep"]["not_evaluated"],
-        json!({"sections": ["requirement_traces"], "reasons": ["bounds_override"]}),
+        json!({
+            "sections": ["requirement_traces"],
+            "reasons": ["bounds_override"],
+            "skipped": [{"kind": "acceptance", "id": "AC-1"}],
+        }),
         "{output:#}"
     );
     let rows = output["sweep"]["results"].as_array().expect("sweep rows");
     assert!(!rows.is_empty(), "{output:#}");
     for row in rows {
-        assert_eq!(
-            row["summary"]["requirement_traces"], "not_evaluated",
-            "{row:#}"
-        );
+        let upper = row["scope"]["values"]["Limit"][1].as_i64().expect("upper");
+        if upper < 2 {
+            assert_eq!(
+                row["summary"]["requirement_traces"], "not_evaluated",
+                "{row:#}"
+            );
+        } else {
+            assert!(
+                row["summary"].get("requirement_traces").is_none(),
+                "{row:#}"
+            );
+        }
         assert!(row["summary"].get("implements").is_none(), "{row:#}");
     }
 }
@@ -406,7 +461,7 @@ fn sweep_surfaces_skipped_requirement_traces() {
 /// `--property`, or loses its reason)
 #[test]
 fn sweep_surfaces_a_seam_skipped_by_property_selection() {
-    let path = fixture("impl_broken.fsl");
+    let path = fixture("impl_out_of_scope_acceptance.fsl");
     let (output, status) = sweep(&[
         &path,
         "--depth",
@@ -423,12 +478,23 @@ fn sweep_surfaces_a_seam_skipped_by_property_selection() {
         json!({
             "sections": ["implements", "requirement_traces"],
             "reasons": ["property_selection", "bounds_override"],
+            "skipped": [{"kind": "acceptance", "id": "AC-1"}],
         }),
         "{output:#}"
     );
     for row in output["sweep"]["results"].as_array().expect("sweep rows") {
         assert_eq!(row["summary"]["implements"], "not_evaluated", "{row:#}");
     }
+}
+
+/// detector (mutation: sweep cells skip the scenario replay again). A failing
+/// in-range acceptance is an error the sweep returns, not a passing grid.
+#[test]
+fn sweep_returns_the_failing_acceptance() {
+    let path = fixture("impl_failing_acceptance.fsl");
+    let (output, status) = sweep(&[&path, "--depth", "1..2", "--values", "Limit=0..3"]);
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], "acceptance", "{output:#}");
 }
 
 /// Rejecting control: a sweep with nothing skipped has no

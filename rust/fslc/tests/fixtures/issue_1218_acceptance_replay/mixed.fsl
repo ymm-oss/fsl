@@ -1,0 +1,27 @@
+// #1218: under `--instances Case=1`, AC-1 references id 1 and is skipped;
+// AC-2 and FB-2 stay in range and are still replayed.
+requirements Mixed {
+  entity Case
+  enum St { Waiting, Accepted, Responded }
+  state { cases: Map<Case, St> }
+  init { forall c: Case { cases[c] = Waiting } }
+  requirement REQ-1 "accept" {
+    action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  requirement REQ-2 "respond" {
+    action respond(c: Case) { requires cases[c] == Accepted  cases[c] = Responded }
+  }
+  acceptance AC-1 "second case" {
+    accept(1)
+    expect cases[1] == Accepted
+  }
+  acceptance AC-2 "first case" {
+    accept(0)
+    expect cases[0] == Accepted
+  }
+  forbidden FB-2 "cannot respond before accept" {
+    respond(0)
+    expect rejected
+  }
+}
+verify { instances Case = 3 }

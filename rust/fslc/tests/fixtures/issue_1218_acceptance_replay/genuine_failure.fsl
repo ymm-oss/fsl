@@ -1,0 +1,15 @@
+// Port of GENUINE_FAILURE_SRC: an in-range acceptance whose `expect` is false.
+requirements GenuineFail {
+  entity Case
+  enum St { Waiting, Accepted, Responded }
+  state { cases: Map<Case, St> }
+  init { forall c: Case { cases[c] = Waiting } }
+  requirement REQ-1 "accept" {
+    fair action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  acceptance AC-2 "genuinely wrong expect" {
+    accept(0)
+    expect cases[0] == Waiting
+  }
+}
+verify { instances Case = 3 }

@@ -385,6 +385,20 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
+        "rust/fslc/src/verification_output.rs",
+        781,
+        "validate_requirement_trace_contract",
+        ResultTupleOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        992,
+        "validate_requirement_trace_source_scoped",
+        ResultTupleOption
+    ),
+    entry!(
+        Verdict,
         "rust/fslc/src/main.rs",
         14872,
         "validate_requirement_traces_from_source",
@@ -1285,7 +1299,8 @@ fn can_resolve_verdict_call(
         "requirements_implements_output"
         | "governance_output"
         | "governance_output_async"
-        | "validate_requirement_trace_source" => {
+        | "validate_requirement_trace_source"
+        | "validate_requirement_trace_source_scoped" => {
             qualified_verification_output_call(tokens, function)
         }
         _ => false,

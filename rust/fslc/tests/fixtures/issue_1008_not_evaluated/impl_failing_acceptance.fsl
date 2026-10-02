@@ -1,6 +1,6 @@
 // #1008: a sound seam, but an acceptance scenario whose `expect` is false.
-// An unscoped `verify` rejects it (exit 2); `--instances`/`--values` does not
-// replay it, and must say so in `requirement_traces`.
+// An unscoped `verify` rejects it (exit 2), and so does a scoped one: it
+// references no value outside any `--values Limit=...` scope (#1218).
 requirements CountedReq {
   implements CountedFlow from "abs.fsl" { maps auto }
 

@@ -1,0 +1,16 @@
+// Port of EXPECT_OUT_OF_RANGE_SRC: only the `expect` indexes an id outside
+// a shrunken `--instances Case=1`.
+requirements ReproExpect {
+  entity Case
+  enum St { Waiting, Accepted, Responded }
+  state { cases: Map<Case, St> }
+  init { forall c: Case { cases[c] = Waiting } }
+  requirement REQ-1 "accept" {
+    fair action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  acceptance AC-1 "expect indexes out of range" {
+    accept(0)
+    expect cases[1] == Accepted
+  }
+}
+verify { instances Case = 3 }

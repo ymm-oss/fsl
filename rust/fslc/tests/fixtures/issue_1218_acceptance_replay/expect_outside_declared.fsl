@@ -1,0 +1,16 @@
+// #1218 review: `cases[7]` is outside the declared `Case = 3` too, so the
+// unscoped run rejects AC-1; `--instances Case=3` must not excuse it.
+requirements ExpectOutsideDeclared {
+  entity Case
+  enum St { Waiting, Accepted }
+  state { cases: Map<Case, St> }
+  init { forall c: Case { cases[c] = Waiting } }
+  requirement REQ-1 "accept" {
+    action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  acceptance AC-1 "expect indexes an undeclared id" {
+    accept(0)
+    expect cases[7] == Accepted
+  }
+}
+verify { instances Case = 3 }

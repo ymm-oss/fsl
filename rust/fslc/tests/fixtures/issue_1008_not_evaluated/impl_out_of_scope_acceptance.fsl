@@ -1,0 +1,26 @@
+// #1008/#1218: a sound seam and an acceptance scenario that passes, but whose
+// `pick(2)` argument lies outside a shrunken `--values Limit=0..0` / `0..1`.
+// Those scopes skip it (`requirement_traces: not_evaluated`); `0..2` and up
+// replay it.
+requirements CountedReq {
+  implements CountedFlow from "abs.fsl" { maps auto }
+
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() maps bump() {
+    n = 0
+  }
+  action pick(v: Limit) maps bump() {
+    n = 0
+  }
+  invariant Small { n <= 3 }
+
+  acceptance AC-1 "picking two keeps zero" {
+    pick(2)
+    expect n == 0
+  }
+}
+verify {
+  values Limit = 0..3
+}

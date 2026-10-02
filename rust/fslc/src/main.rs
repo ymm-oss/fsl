@@ -3605,6 +3605,9 @@ fn run_sweep(
     // hide it: the union over cells is surfaced as `sweep.not_evaluated`.
     let mut not_evaluated_sections = std::collections::BTreeSet::new();
     let mut not_evaluated_reasons = Vec::<String>::new();
+    // #1218: the scenarios any cell skipped as out of its scope, as
+    // `(kind, id)` pairs, so the grid names what it did not replay.
+    let mut not_evaluated_skipped = std::collections::BTreeSet::<(String, String)>::new();
     for instances in instance_combinations {
         for upper_values in &value_upper_combinations {
             let values = upper_values
@@ -3708,6 +3711,19 @@ fn run_sweep(
                             not_evaluated_reasons.push(reason.to_owned());
                         }
                     }
+                    for skip in nested
+                        .get("skipped")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
+                        if let (Some(kind), Some(id)) = (
+                            skip.get("kind").and_then(Value::as_str),
+                            skip.get("id").and_then(Value::as_str),
+                        ) {
+                            not_evaluated_skipped.insert((kind.to_owned(), id.to_owned()));
+                        }
+                    }
                 }
                 let entry = json!({
                     "scope": {
@@ -3775,13 +3791,17 @@ fn run_sweep(
     if !not_evaluated_sections.is_empty()
         && let Some(sweep) = output.get_mut("sweep").and_then(Value::as_object_mut)
     {
-        sweep.insert(
-            "not_evaluated".to_owned(),
-            json!({
-                "sections": not_evaluated_sections,
-                "reasons": not_evaluated_reasons,
-            }),
-        );
+        let mut not_evaluated = json!({
+            "sections": not_evaluated_sections,
+            "reasons": not_evaluated_reasons,
+        });
+        if !not_evaluated_skipped.is_empty() {
+            not_evaluated["skipped"] = not_evaluated_skipped
+                .iter()
+                .map(|(kind, id)| json!({"kind": kind, "id": id}))
+                .collect();
+        }
+        sweep.insert("not_evaluated".to_owned(), not_evaluated);
     }
     (Value::Object(output), i32::from(result != "sweep_passed"))
 }

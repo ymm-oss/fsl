@@ -1,0 +1,23 @@
+// #1218 review: the `expect` fails on a division by zero, in every world.
+// That `cases[2]` is out of range under `--instances Case=2` must not make
+// the error look like an out-of-scope reference.
+requirements ExpectOtherError {
+  entity Case
+  enum St { Waiting, Accepted }
+  state {
+    cases: Map<Case, St>,
+    z: Int
+  }
+  init {
+    forall c: Case { cases[c] = Waiting }
+    z = 0
+  }
+  requirement REQ-1 "accept" {
+    action accept(c: Case) { requires cases[c] == Waiting  cases[c] = Accepted }
+  }
+  acceptance AC-1 "divides by zero" {
+    accept(0)
+    expect (10 / z == 1) or cases[2] == Accepted
+  }
+}
+verify { instances Case = 3 }
