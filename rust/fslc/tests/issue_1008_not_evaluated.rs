@@ -431,7 +431,11 @@ fn sweep_surfaces_skipped_requirement_traces() {
     assert_eq!(output["result"], "sweep_passed", "{output:#}");
     assert_eq!(
         output["sweep"]["not_evaluated"],
-        json!({"sections": ["requirement_traces"], "reasons": ["bounds_override"]}),
+        json!({
+            "sections": ["requirement_traces"],
+            "reasons": ["bounds_override"],
+            "skipped": [{"kind": "acceptance", "id": "AC-1"}],
+        }),
         "{output:#}"
     );
     let rows = output["sweep"]["results"].as_array().expect("sweep rows");
@@ -474,6 +478,7 @@ fn sweep_surfaces_a_seam_skipped_by_property_selection() {
         json!({
             "sections": ["implements", "requirement_traces"],
             "reasons": ["property_selection", "bounds_override"],
+            "skipped": [{"kind": "acceptance", "id": "AC-1"}],
         }),
         "{output:#}"
     );

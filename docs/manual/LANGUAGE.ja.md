@@ -397,9 +397,16 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 の場合 — 挙動は変わらずハードエラー(exit 2、`trace_type: "acceptance"` /
 `"forbidden"`)です。上書きが宣言と同じ範囲でも同じです。`fslc sweep` の各セルは
 上書き付きで走るので、同じ規則がセルごとに適用されます: 範囲内で失敗するシナリオが
-あれば、sweep は `sweep_passed` ではなくそのエラーを返します。forbidden シナリオの
-*最後の* step はこの方法では免除されません: 範囲外の最後の呼び出しは、上書きなしと
-同じく拒否として扱われます。これにより、spec の acceptance シナリオが
+あれば、sweep は `sweep_passed` ではなくそのエラーを返します。範囲外とみなすのは
+上書きが取り除いた参照だけです(spec の宣言した境界の内側で、上書き後の境界の外側)。
+`expect` の評価エラーは、同じ `expect` が宣言どおりの世界で評価できる場合だけ免除
+されます。宣言した境界の外の参照(したがって何も変えない上書きや無関係な上書き)や、
+宣言どおりの世界でも起きる `expect` のエラー(ゼロ除算)は、上書きなしと同じ
+ハードエラーのままです。forbidden シナリオの*最後の* step が、上書きが引数を
+取り除いたためだけに「拒否」された場合は guard を何も確かめていないので、充足とは
+数えず `forbidden_skipped` として報告します。この3条件は frozen Python 参照実装より
+厳しく、Python は範囲外の参照をすべてスキップし、範囲外の参照を含む `expect` の
+エラーをすべて免除し、範囲外の最後の step を拒否として数えます。これにより、spec の acceptance シナリオが
 元の `verify { instances Case = N }` 境界向けに書かれていても、`--instances Case=1
 --property <Liveness>` が使えます。
 
@@ -408,8 +415,10 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 "reason": "bounds_override", "reasons": [...], "skipped": [{"kind", "id",
 "reference"}, ...]}` も残ります(§7「選択した run が評価しない検査」)。すべての
 シナリオを replay したときはこのキーはありません。native CLI は上の規則をそのまま
-実装しており、frozen Python 参照実装(`tests/test_acceptance_override_skip.py`)とも
-その6ケースで一致します。
+実装しています。frozen Python 参照実装(`tests/test_acceptance_override_skip.py`)とは
+その6ケースで一致し、違うのは上に記した点だけです。`fslc sweep` では
+`sweep.not_evaluated.skipped` が、どれかのセルがスキップした全シナリオの
+`{kind, id}` を並べます。
 
 `fair` は弱い公平性(weak fairness)のアノテーションです: その action インスタンス
 が継続的に enabled であり続けるなら、いずれ実行される、という仮定です。

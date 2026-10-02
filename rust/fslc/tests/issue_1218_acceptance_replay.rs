@@ -339,3 +339,126 @@ fn a_cached_scoped_run_replays_the_skip_warning_once() {
         "{cached:#}"
     );
 }
+
+// --- Independent review of 7f1fdf86: a skip must be the override's doing ---
+
+/// detector (mutation: exclude a forbidden scenario's final step from the
+/// out-of-scope check). `respond` has no guard, so FB-1 is broken; under
+/// `Case=1` its `respond(1)` is "rejected" only because id 1 no longer exists.
+/// That tested no guard, so it is skipped and reported, never a silent pass.
+#[test]
+fn forbidden_final_step_removed_by_the_override_is_skipped_not_passed() {
+    let (unscoped, unscoped_status) = verify("forbidden_final_unguarded.fsl", "3", &[]);
+    assert_eq!(unscoped_status, 2, "{unscoped:#}");
+    assert_eq!(unscoped["kind"], "forbidden", "{unscoped:#}");
+    let (in_scope, in_scope_status) = verify(
+        "forbidden_final_unguarded.fsl",
+        "3",
+        &["--instances", "Case=2"],
+    );
+    assert_eq!(in_scope_status, 2, "{in_scope:#}");
+    assert_eq!(in_scope["kind"], "forbidden", "{in_scope:#}");
+    assert_eq!(in_scope["trace_type"], "forbidden", "{in_scope:#}");
+
+    let (output, status) = verify(
+        "forbidden_final_unguarded.fsl",
+        "3",
+        &["--instances", "Case=1"],
+    );
+    assert_eq!(status, 0, "{output:#}");
+    let skipped = skip_warnings(&output, "forbidden_skipped");
+    assert_eq!(skipped.len(), 1, "{output:#}");
+    assert_eq!(skipped[0]["id"], "FB-1", "{output:#}");
+    assert_eq!(
+        output["requirement_traces"]["skipped"],
+        serde_json::json!([{
+            "kind": "forbidden",
+            "id": "FB-1",
+            "reference": "respond(1): argument 1 for 'c' is outside its domain",
+        }]),
+        "{output:#}"
+    );
+    assert_eq!(
+        output["requirement_traces"]["result"], "not_evaluated",
+        "{output:#}"
+    );
+}
+
+/// detector (mutation: judge "out of scope" against the overridden domain
+/// only). `pay(7)` is outside the declared `Amount = 0..3` as well, so no
+/// override removed it: a no-op override, an override on another name, and a
+/// shrinking one all keep the unscoped hard error.
+#[test]
+fn argument_outside_the_declared_domain_is_not_excused() {
+    let (unscoped, unscoped_status) = verify("argument_outside_declared.fsl", "3", &[]);
+    assert_acceptance_failure(&unscoped, unscoped_status, "AC-1");
+    for extra in [
+        &["--values", "Amount=0..3"][..],
+        &["--values", "Other=0..1"][..],
+        &["--values", "Amount=0..1"][..],
+    ] {
+        let (output, status) = verify("argument_outside_declared.fsl", "3", extra);
+        assert_acceptance_failure(&output, status, "AC-1");
+        assert!(
+            skip_warnings(&output, "acceptance_skipped").is_empty(),
+            "{output:#}"
+        );
+    }
+}
+
+/// detector (mutation: same as above, for an `expect` index). `cases[7]` is
+/// outside the declared `Case = 3`; the unscoped error stays under overrides.
+#[test]
+fn expect_index_outside_the_declared_domain_is_not_excused() {
+    let (unscoped, unscoped_status) = verify("expect_outside_declared.fsl", "3", &[]);
+    assert_eq!(unscoped_status, 2, "{unscoped:#}");
+    for instances in ["Case=3", "Case=1"] {
+        let (output, status) = verify(
+            "expect_outside_declared.fsl",
+            "3",
+            &["--instances", instances],
+        );
+        assert_eq!(status, 2, "{output:#}");
+        assert_eq!(output["result"], "error", "{output:#}");
+        assert_eq!(output["kind"], unscoped["kind"], "{output:#}");
+        assert_eq!(output["message"], unscoped["message"], "{output:#}");
+    }
+}
+
+/// detector (mutation: excuse any `expect` error when the expression has an
+/// out-of-range index somewhere). The error is a division by zero in every
+/// world; `cases[2]` being out of range under `Case=2` did not cause it.
+#[test]
+fn expect_error_the_override_did_not_cause_is_not_excused() {
+    let (unscoped, unscoped_status) = verify("expect_other_error.fsl", "3", &[]);
+    assert_eq!(unscoped_status, 2, "{unscoped:#}");
+    assert_eq!(unscoped["message"], "division by zero", "{unscoped:#}");
+    let (output, status) = verify("expect_other_error.fsl", "3", &["--instances", "Case=2"]);
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], unscoped["kind"], "{output:#}");
+    assert_eq!(output["message"], "division by zero", "{output:#}");
+}
+
+/// detector (mutation: sweep cells excuse references outside the declared
+/// domain). Every cell of a no-op-ish sweep keeps the unscoped error.
+#[test]
+fn sweep_does_not_pass_a_scenario_outside_the_declared_domain() {
+    let path = fixture("argument_outside_declared.fsl");
+    let (output, status) = sweep(&[&path, "--values", "Amount=0..3", "--depth", "1..1"]);
+    assert_ne!(output["result"], "sweep_passed", "{output:#}");
+    assert_acceptance_failure(&output, status, "AC-1");
+}
+
+/// The sweep grid names the scenarios its cells skipped (`sweep.not_evaluated
+/// .skipped`, the union of the cells' `requirement_traces.skipped`).
+#[test]
+fn sweep_not_evaluated_lists_the_skipped_scenarios() {
+    let path = fixture("mixed.fsl");
+    let (output, status) = sweep(&[&path, "--instances", "Case=1..2", "--depth", "2..2"]);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(
+        output["sweep"]["not_evaluated"]["skipped"],
+        serde_json::json!([{"kind": "acceptance", "id": "AC-1"}]),
+        "{output:#}"
+    );
+}

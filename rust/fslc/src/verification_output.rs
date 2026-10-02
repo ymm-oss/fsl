@@ -1066,15 +1066,23 @@ impl SkippedRequirementTrace {
 /// `--instances`/`--values` overrides (#1218, the frozen Python reference's
 /// per-scenario skip from #89).
 ///
-/// Every scenario is replayed against the overridden `model`. One whose replay
-/// fails *purely* because it references a value outside the overridden scope
-/// — an action argument outside its parameter domain in an acceptance step or
-/// a forbidden setup step, or a map index outside its key domain in an
-/// acceptance `expect` — is skipped and returned; any other failure (a false
-/// `expect`, an unmet `requires`, an accepted forbidden step) is the same hard
-/// failure an unscoped run reports, in the same scenario order. A forbidden
-/// scenario's final step is not a reference that can be out of scope: an
-/// out-of-domain final call is rejected, exactly as without overrides.
+/// Every scenario is replayed against the overridden `model`. A reference is
+/// *out of scope* only when the override removed it: it lies outside the
+/// overridden domain but inside the `declared` (un-overridden) one. A scenario
+/// is skipped and returned when
+///
+/// - its replay fails at an acceptance step or a forbidden setup step whose
+///   argument is out of scope;
+/// - its acceptance `expect` fails to evaluate on an out-of-scope map index,
+///   while the same `expect` evaluates in the declared world; or
+/// - it is a forbidden scenario whose final step was "rejected" with an
+///   out-of-scope argument, which tested no guard.
+///
+/// Any other failure (a false `expect`, an unmet `requires`, an accepted
+/// forbidden step, a reference outside the declared domain too, an `expect`
+/// error the declared world shares) is the same hard failure an unscoped run
+/// reports, in the same scenario order. Without a `declared` model nothing is
+/// attributed to the override, so every failure is hard (fail closed).
 ///
 /// # Errors
 ///
@@ -1085,6 +1093,7 @@ pub fn validate_requirement_trace_source_scoped(
     envelope: &Map<String, Value>,
     source: &str,
     model: &KernelModel,
+    declared: Option<&KernelModel>,
 ) -> Result<(Option<Value>, Vec<SkippedRequirementTrace>), String> {
     let Some(contract) =
         fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
@@ -1111,28 +1120,71 @@ pub fn validate_requirement_trace_source_scoped(
             },
         };
         let outcome = validate_requirement_trace_contract(envelope, &single, model);
-        if matches!(outcome, Ok((None, _))) {
-            continue;
-        }
-        if let Some(reference) = out_of_scope_reference(model, kind, case) {
-            skipped.push(SkippedRequirementTrace {
-                kind,
-                id: case.id.clone(),
-                reference,
-            });
-            continue;
-        }
-        let (failure, _) = outcome?;
-        return Ok((failure, skipped));
+        // Without the declared model nothing can be attributed to the
+        // override, so every failure stays hard (fail closed).
+        let Some(declared) = declared else {
+            if matches!(outcome, Ok((None, _))) {
+                continue;
+            }
+            let (failure, _) = outcome?;
+            return Ok((failure, skipped));
+        };
+        let reference = if matches!(outcome, Ok((None, _))) {
+            // A forbidden final step "rejected" only because the override
+            // removed its argument has not tested the guard at all.
+            if kind != "forbidden" {
+                continue;
+            }
+            match removed_final_step_argument(model, declared, case) {
+                Some(reference) => reference,
+                None => continue,
+            }
+        } else if let Some(reference) =
+            out_of_scope_reference(envelope, &single, model, declared, kind, case)
+        {
+            reference
+        } else {
+            let (failure, _) = outcome?;
+            return Ok((failure, skipped));
+        };
+        skipped.push(SkippedRequirementTrace {
+            kind,
+            id: case.id.clone(),
+            reference,
+        });
     }
     Ok((None, skipped))
 }
 
-/// The first reference of a failing scenario that lies outside `model`'s
-/// (overridden) scope, replaying it up to the first step that is not
-/// enabled; `None` when the failure has another cause.
-fn out_of_scope_reference(
+/// The argument of a forbidden scenario's final step that the override
+/// removed from every same-named action's domain, replaying its setup steps
+/// in the overridden `model` (which all succeeded).
+fn removed_final_step_argument(
     model: &KernelModel,
+    declared: &KernelModel,
+    case: &fsl_core::RequirementsTraceCase,
+) -> Option<String> {
+    let (last, setup) = case.steps.split_last()?;
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).ok()?;
+    for step in setup {
+        let (_, instance) = requirement_step_match(&monitor, step).ok()?;
+        if monitor.step(&instance?).ok()?.violation.is_some() {
+            return None;
+        }
+    }
+    let (arguments, _) = requirement_step_match(&monitor, last).ok()?;
+    out_of_domain_argument(model, declared, last, &arguments)
+}
+
+/// The first reference of a failing scenario that the override removed: it
+/// lies outside `model`'s (overridden) scope but inside the `declared` one.
+/// Replays the scenario up to the first step that is not enabled; `None` when
+/// the failure has another cause.
+fn out_of_scope_reference(
+    envelope: &Map<String, Value>,
+    single: &fsl_core::RequirementsTraceContract,
+    model: &KernelModel,
+    declared: &KernelModel,
     kind: &str,
     case: &fsl_core::RequirementsTraceCase,
 ) -> Option<String> {
@@ -1144,7 +1196,7 @@ fn out_of_scope_reference(
     };
     for step in &case.steps[..setup] {
         let (arguments, instance) = requirement_step_match(&monitor, step).ok()?;
-        if let Some(reference) = out_of_domain_argument(model, step, &arguments) {
+        if let Some(reference) = out_of_domain_argument(model, declared, step, &arguments) {
             return Some(reference);
         }
         let result = monitor.step(&instance?).ok()?;
@@ -1167,17 +1219,62 @@ fn out_of_scope_reference(
         None,
     )
     .err()?;
-    out_of_domain_index(model, &monitor.state, &expression)
-        .map(|reference| format!("expect indexes {reference} outside its key domain"))
+    let reference = out_of_domain_index(model, &monitor.state, &expression)?;
+    // The error must be the override's doing: the same scenario's `expect`
+    // has to *evaluate* in the declared world (to `true` or `false`). An
+    // error there too (a division by zero, an index never in scope) is the
+    // unscoped run's hard error, not an out-of-scope reference.
+    if !expectation_evaluates(envelope, single, declared) {
+        return None;
+    }
+    Some(format!("expect indexes {reference} outside its key domain"))
 }
 
-/// Describe the argument of `step` that no same-named action of `model`
-/// admits, or `None` when some action's parameter domains admit them all.
+/// Whether replaying `single` (one acceptance scenario) in `model` reaches
+/// and evaluates its `expect` without an evaluation error.
+fn expectation_evaluates(
+    envelope: &Map<String, Value>,
+    single: &fsl_core::RequirementsTraceContract,
+    model: &KernelModel,
+) -> bool {
+    let Some(case) = single.acceptance.first() else {
+        return false;
+    };
+    match validate_requirement_trace_contract(envelope, single, model) {
+        Ok((None, _)) => true,
+        Ok((Some(failure), _)) => {
+            failure.get("expect").is_some()
+                && failure.get("failed_step") == Some(&json!(case.steps.len()))
+        }
+        Err(_) => false,
+    }
+}
+
+/// Describe the argument of `step` that no same-named action of the
+/// overridden `model` admits but some same-named action of the `declared`
+/// model does — a reference the override removed. `None` when `model` admits
+/// the arguments, or when `declared` does not either (the reference was never
+/// in scope, so a skip would turn the unscoped hard error into a pass).
 fn out_of_domain_argument(
     model: &KernelModel,
+    declared: &KernelModel,
     step: &fsl_core::RequirementsTraceStep,
     arguments: &[FslValue],
 ) -> Option<String> {
+    let declared_monitor = fsl_runtime::Monitor::new(declared.clone()).ok()?;
+    let declared_admits = requirement_actions_by_name(&declared_monitor, step)
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+        .any(|action| {
+            action
+                .params
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, value)| parameter_admits(declared, parameter, value))
+        });
+    if !declared_admits {
+        return None;
+    }
     let monitor = fsl_runtime::Monitor::new(model.clone()).ok()?;
     let actions = requirement_actions_by_name(&monitor, step)
         .into_iter()

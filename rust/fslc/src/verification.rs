@@ -2249,15 +2249,22 @@ fn prepare_cli_verification_from_source(
         None
     };
     // #1218: `--instances`/`--values` replays the scenarios against the
-    // overridden model too. Only a scenario that references a value outside
-    // the overridden scope is skipped (with a warning); any other failure is
-    // the same hard error an unscoped run reports.
+    // overridden model too. Only a scenario that references a value the
+    // override removed from scope, and that holds in the declared world, is
+    // skipped (with a warning); any other failure is the same hard error an
+    // unscoped run reports.
     let requirement_trace_skips = match &snapshot_model {
         Ok(model) if has_scope => {
+            // The declared (un-overridden) model decides whether the override
+            // is what put a reference out of scope. Loaded without the
+            // recorder: the scoped path never resolves through it either, so
+            // the cache key's dependency domain is unchanged.
+            let declared = load_model_from_source(path, source).ok();
             match fslc_rust::verification_output::validate_requirement_trace_source_scoped(
                 &envelope(),
                 source,
                 model,
+                declared.as_ref(),
             ) {
                 Ok((Some(failure), _)) => return Err((failure, 2)),
                 Ok((None, skipped)) => skipped,

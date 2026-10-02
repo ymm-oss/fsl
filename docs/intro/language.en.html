@@ -435,8 +435,17 @@ overrides — or for any other failure (a false <code>expect</code>, an unmet <c
 <code>"forbidden"</code>), including when the override equals the declared range. Every
 <code>fslc sweep</code> cell runs with overrides, so the same rule applies per cell: a
 failing in-range scenario makes the sweep return that error rather than
-<code>sweep_passed</code>. A forbidden scenario's <em>final</em> step is not excused this way:
-an out-of-range final call is a rejection, exactly as without overrides. This is what makes <code>--instances Case=1
+<code>sweep_passed</code>. A reference counts as out of range only when the override
+removed it — it is inside the spec's declared bounds but outside the overridden
+ones — and an <code>expect</code> error is excused only when the same <code>expect</code> evaluates
+in the declared world; a reference outside the declared bounds (so a no-op or
+unrelated override) or an <code>expect</code> error the declared world shares (a division
+by zero) stays the unscoped hard error. A forbidden scenario whose <em>final</em> step
+is "rejected" only because the override removed its argument tested no guard,
+so it is reported as <code>forbidden_skipped</code> rather than counted as satisfied. These
+three conditions are stricter than the frozen Python reference, which skips any
+out-of-range reference, excuses any <code>expect</code> error that mentions one, and counts
+an out-of-range final step as a rejection. This is what makes <code>--instances Case=1
 --property &lt;Liveness&gt;</code> usable even when the spec's acceptance scenarios were
 written against the original <code>verify { instances Case = N }</code> bound.</p>
 <p><strong>Envelope (#1008, #1218).</strong> When a scoped run skips any scenario this way,
@@ -444,8 +453,10 @@ the envelope also keeps <code>requirement_traces: {"result": "not_evaluated",
 "reason": "bounds_override", "reasons": [...], "skipped": [{"kind", "id",
 "reference"}, ...]}</code> (§7, "Checks a selected run does not evaluate"); the key
 is absent when every scenario was replayed. The native CLI implements the rule
-above as stated, and the frozen Python reference
-(<code>tests/test_acceptance_override_skip.py</code>) agrees on its six cases.</p>
+above as stated; the frozen Python reference
+(<code>tests/test_acceptance_override_skip.py</code>) agrees on its six cases and differs
+only where noted above. In <code>fslc sweep</code>, <code>sweep.not_evaluated.skipped</code> lists
+the <code>{kind, id}</code> of every scenario any cell skipped.</p>
 <p><code>fair</code> is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 Fairness applies to a whole action instance. To model fairness only under a

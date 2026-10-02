@@ -580,7 +580,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   Without an override, or for a failure unrelated to bounds, the scenario
   still hard-errors as before (exit 2) — also when the override equals the
   declared range, and in every `sweep` cell, so a failing in-range scenario
-  never yields `verified` / `sweep_passed`. When any scenario was skipped,
+  never yields `verified` / `sweep_passed`. Only a reference the override
+  removed (inside the declared bounds, outside the overridden ones) is
+  excused; one outside the declared bounds keeps the unscoped error, and a
+  forbidden final step "rejected" only because its argument was removed is
+  reported as `forbidden_skipped`, not satisfied. When any scenario was skipped,
   the envelope also carries `requirement_traces: {result: "not_evaluated",
   reason: "bounds_override", skipped: [{kind, id, reference}, ...]}`; the key
   is absent when every scenario was replayed. When the spec has an inline `implements`, the
