@@ -546,3 +546,27 @@ every run).
   no self-diff finds a violating final or setup step. The 5 forbidden-bearing files whose
   `check` is not `ok` report the same accepted-step `kind: "forbidden"` error, byte for
   byte, at base and with #1213.
+- #1229, base #1213 at `40be1c2a` → head #1229 on top of it (no `.fsl` differs between
+  the two trees; the commits after the first #1229 commit change no Rust source). Each
+  binary is built in, and run inside, its own tree, twice: within each binary only the
+  three excluded wall-clock fields differ, and base → head differs in nothing else in any
+  of the four base/head pairings (the `agentic_rag` `scenarios` exceeded 300 seconds in
+  all four runs and finished on its rerun). `check` verdicts are the same 391 `ok`, 154
+  `error`, 3 `causal_model_checked`, 3 `refinement_failed`, 1 `impl_violated` on both
+  sides; verdict changes 0, forbidden `rejected_by` changes 0, other differences 0, and no
+  output carries `out_of_scope_argument`. Of the 39 requirements `forbidden`
+  declarations, 31 are emitted as `requires_failed` scenarios on both sides, 5 are the
+  accepted-step errors above, and the 3 in
+  `examples/multi_agent_system/multi_agent_requirements.fsl` pass the gate (`check` is
+  `ok` on both sides) but are not emitted because `scenarios` stops at
+  `reachable_failed` within depth 8, identically on both sides. The 25 self-diffs keep
+  19 `no_semantic_change`, 5 `unknown` / `forbidden_replay_failed` and the AI document's
+  parse error. No corpus forbidden has a final step outside an `entity` / `number`
+  verify scope, so the ok → error transition set of §2 is empty for the corpus. The
+  inline fixtures of the five `issue_1212_forbidden_bad_call.rs` diff tests whose expected
+  `reason` this change rewrote were checked with both binaries: they move from `check`
+  `ok` to the out-of-scope error where their final step leaves the scope (`respond(7)`
+  under `instances Case = 3`, `add(9)` under `values Qty = 0..3`, `respond(7, 1)`, and
+  the unguarded `respond(2)` under `instances Case = 2`) and stay `ok` otherwise
+  (`respond(1, 9)`, the guarded `respond(2)` under `instances Case = 3`, and the kernel
+  and `type Case = 0..2` specs).
