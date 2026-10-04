@@ -36,6 +36,7 @@ mod domain;
 mod domain_lowering;
 mod expr_text;
 mod model;
+pub mod obligation;
 mod origin;
 mod partial_operation;
 mod public_kernel;

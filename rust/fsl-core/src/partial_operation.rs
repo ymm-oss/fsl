@@ -107,6 +107,16 @@ pub fn expression_has_partial_operation_candidate(expr: &Expr) -> bool {
     found
 }
 
+/// Visit every untyped candidate of `expr`, binder parts included, in the walk
+/// [`expression_has_partial_operation_candidate`] answers from, for a caller
+/// that tells the kinds apart.
+pub(crate) fn for_each_partial_operation_candidate(
+    expr: &Expr,
+    visit: &mut impl FnMut(PartialOperation),
+) {
+    walk_expr(expr, &mut Untyped, visit);
+}
+
 /// [`expression_has_partial_operation_candidate`] for a binder's range,
 /// collection and `where` parts.
 #[must_use]
@@ -147,7 +157,7 @@ pub fn action_has_partial_operation_candidate(action: &ActionDef) -> bool {
             .any(expression_has_partial_operation_candidate)
 }
 
-fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
+pub(crate) fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
     match statement {
         Statement::Assign { target, value, .. } => {
             expression_has_partial_operation_candidate(value)
