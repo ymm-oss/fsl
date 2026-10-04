@@ -111,7 +111,7 @@ fn origin_aware_action_json(
     fallback_loc: Value,
 ) -> Value {
     let Some(origin) = model.action_origin(name) else {
-        return json!({"name": display(name), "params": params, "loc": fallback_loc});
+        return json!({"name": model.action_display_name(name), "params": params, "loc": fallback_loc});
     };
     let loc = origin
         .primary
@@ -120,8 +120,8 @@ fn origin_aware_action_json(
         .map_or(fallback_loc, fsl_syntax::Span::python_loc);
     json!({
         "name": ::fslc_rust::origin_display_name(origin)
-            .map_or_else(|| display(name), str::to_owned),
-        "generated_name": display(name),
+            .map_or_else(|| model.action_display_name(name), str::to_owned),
+        "generated_name": model.action_display_name(name),
         "params": params,
         "loc": loc,
         "origin": ::fslc_rust::internal_origin_json(origin),
@@ -138,9 +138,15 @@ struct SolvedBmc {
     statistics: fsl_solver::VerificationStatistics,
 }
 
-fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStatistics) -> Value {
-    serde_json::to_value(statistics.with_elapsed(started.elapsed().as_secs_f64()))
-        .expect("verification cost serializes")
+fn verification_cost(
+    model: &KernelModel,
+    started: Instant,
+    statistics: &fsl_solver::VerificationStatistics,
+) -> Value {
+    fslc_rust::verification_output::cost_json(
+        model,
+        statistics.with_elapsed(started.elapsed().as_secs_f64()),
+    )
 }
 
 fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
@@ -637,7 +643,10 @@ fn render_induction_cti(
             ),
         );
     }
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
+    output.insert(
+        "cost".to_owned(),
+        verification_cost(model, started, statistics),
+    );
     (Value::Object(output), 1)
 }
 
@@ -723,7 +732,10 @@ fn render_rank_failure(
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert("completeness".to_owned(), json!("bounded"));
     output.insert("trace_type".to_owned(), json!("induction_cti"));
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
+    output.insert(
+        "cost".to_owned(),
+        verification_cost(model, started, statistics),
+    );
     (Value::Object(output), 1)
 }
 
@@ -824,7 +836,10 @@ fn render_induction_success(
         };
         output.insert("note".to_owned(), json!(note));
     }
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
+    output.insert(
+        "cost".to_owned(),
+        verification_cost(model, started, statistics),
+    );
     (Value::Object(output), 0)
 }
 

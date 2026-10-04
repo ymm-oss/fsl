@@ -1796,7 +1796,14 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — その action をインターリービングから除外します。</li>
 <li>(<code>=</code> のない)通常の <code>action</code> も書けます(グルー action)。</li>
 <li>JSON の表示: 物理名 <code>alias__x</code> は <code>alias.x</code> として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。</li>
+  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
+  コンポーネントの action の公開名は alias と action 名から作るので、
+  <code>use X as a__b</code> の action <code>c</code> は <code>a__b.c</code> です。コンポーネントの action を名指す
+  すべてのコマンド — testgen、conformance、Monitor、verify / scenarios のトレース、
+  <code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を使います。
+  v1 の <code>replay</code> トレースでは、コンポーネントの action を <code>alias.action</code> と書いても
+  旧来の <code>alias__action</code> と書いてもかまいません。どちらも同じ action を指します
+  (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。</li>
 </ul>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8

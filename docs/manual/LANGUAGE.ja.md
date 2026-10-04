@@ -1754,6 +1754,13 @@ compose OrderSystem {
 - (`=` のない)通常の `action` も書けます(グルー action)。
 - JSON の表示: 物理名 `alias__x` は `alias.x` として出力されます(状態のキー、
   action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
+  コンポーネントの action の公開名は alias と action 名から作るので、
+  `use X as a__b` の action `c` は `a__b.c` です。コンポーネントの action を名指す
+  すべてのコマンド — testgen、conformance、Monitor、verify / scenarios のトレース、
+  `state_mismatch.action` を含む `replay` の出力 — がこの `alias.action` 形を使います。
+  v1 の `replay` トレースでは、コンポーネントの action を `alias.action` と書いても
+  旧来の `alias__action` と書いてもかまいません。どちらも同じ action を指します
+  (`docs/design/DESIGN-replay-trace.md` を参照)。
 
 ```bash
 fslc check  specs/order_system.fsl

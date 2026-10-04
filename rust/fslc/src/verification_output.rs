@@ -726,7 +726,7 @@ fn requirement_actions_by_name<'a>(
         .filter(|action| {
             action.name == step.name
                 || action.name.starts_with(&branch_prefix)
-                || display_name(&action.name) == step.name
+                || monitor.model.action_display_name(&action.name) == step.name
         })
         .collect()
 }
@@ -976,7 +976,7 @@ fn validate_requirement_trace_contract(
                 return Ok((Some(Value::Object(output)), has_contract));
             }
             accepted_trace.push(json!({
-                "action": display_name(&instance.action),
+                "action": model.action_display_name(&instance.action),
                 "params": params,
             }));
             if is_final {
@@ -1596,7 +1596,7 @@ pub fn render_boundary_output(
             let mut value = json!({
                 "name": action_origin
                     .and_then(origin_display_name)
-                    .map_or_else(|| display_name(&action.name), str::to_owned),
+                    .map_or_else(|| model.action_display_name(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
@@ -1607,7 +1607,7 @@ pub fn render_boundary_output(
             {
                 value.insert(
                     "generated_name".to_owned(),
-                    json!(display_name(&action.name)),
+                    json!(model.action_display_name(&action.name)),
                 );
                 value.insert("origin".to_owned(), internal_origin_json(origin));
             }
@@ -1623,7 +1623,7 @@ pub fn render_boundary_output(
         }
     }
     output.insert("trace".to_owned(), rendered_trace);
-    finish(&mut output, violation.step, options);
+    finish(&mut output, model, violation.step, options);
     if violation.kind == "partial_op" {
         output.insert(
             "faithfulness_class".to_owned(),
@@ -1887,8 +1887,7 @@ fn render_explicit_budget(
     );
     output.insert(
         "cost".to_owned(),
-        serde_json::to_value(statistics.with_elapsed(elapsed_s))
-            .expect("verification cost serializes"),
+        cost_json(model, statistics.with_elapsed(elapsed_s)),
     );
     let mut value = Value::Object(output);
     add_explicit_metadata(&mut value, result);
@@ -1950,8 +1949,7 @@ fn render_explicit_success(
     );
     output.insert(
         "cost".to_owned(),
-        serde_json::to_value(statistics.with_elapsed(elapsed_s))
-            .expect("verification cost serializes"),
+        cost_json(model, statistics.with_elapsed(elapsed_s)),
     );
     let mut value = Value::Object(output);
     add_explicit_metadata(&mut value, result);
@@ -2097,7 +2095,7 @@ fn render_violation(
                 let mut rendered = json!({
                     "name": origin
                         .and_then(origin_display_name)
-                        .map_or_else(|| display_name(&action.name), str::to_owned),
+                        .map_or_else(|| model.action_display_name(&action.name), str::to_owned),
                     "params": action.params.iter().map(|(name, value)| (
                         name.clone(), fsl_value_json(value)
                     )).collect::<Map<_, _>>(),
@@ -2108,7 +2106,7 @@ fn render_violation(
                 {
                     rendered.insert(
                         "generated_name".to_owned(),
-                        json!(display_name(&action.name)),
+                        json!(model.action_display_name(&action.name)),
                     );
                     rendered.insert("origin".to_owned(), internal_origin_json(origin));
                 }
@@ -2124,7 +2122,7 @@ fn render_violation(
         }
     }
     output.insert("trace".to_owned(), trace);
-    finish(&mut output, violation.step, options);
+    finish(&mut output, model, violation.step, options);
     output.insert(
         "trace_type".to_owned(),
         json!(if violation.name.starts_with("_deadline_") {
@@ -2239,7 +2237,7 @@ fn render_reachable_failure(
             "add a single-shot reachable for the action / raise --depth"
         }),
     );
-    finish(&mut output, options.depth, options);
+    finish(&mut output, model, options.depth, options);
     output.insert("trace_type".to_owned(), json!("reachable"));
     (Value::Object(output), 1)
 }
@@ -2280,11 +2278,11 @@ fn render_deadlock_failure(
             "last_action".to_owned(),
             trace.last().and_then(|entry| entry.action.as_ref()).map_or(
                 Value::Null,
-                |action| json!({"name": display_name(&action.name)}),
+                |action| json!({"name": model.action_display_name(&action.name)}),
             ),
         );
     }
-    finish(&mut output, step, options);
+    finish(&mut output, model, step, options);
     output.insert("trace_type".to_owned(), json!("deadlock"));
     (Value::Object(output), 1)
 }
@@ -2336,7 +2334,7 @@ fn render_leadsto_failure(
     output.insert("stutter".to_owned(), json!(details.stutter));
     output.insert("trace".to_owned(), trace_json(model, &violation.trace));
     output.insert("hint".to_owned(), json!(details.hint));
-    finish(&mut output, options.depth, options);
+    finish(&mut output, model, options.depth, options);
     output.insert("trace_type".to_owned(), json!("leadsTo"));
     (Value::Object(output), 1)
 }
@@ -2393,17 +2391,21 @@ fn render_success(
             )),
         );
     }
-    finish(&mut output, options.depth, options);
+    finish(&mut output, model, options.depth, options);
     (Value::Object(output), 0)
 }
 
-fn finish(output: &mut Map<String, Value>, checked: usize, options: &BmcOutputOptions<'_>) {
+fn finish(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    checked: usize,
+    options: &BmcOutputOptions<'_>,
+) {
     output.insert("checked_to_depth".to_owned(), json!(checked));
     output.insert("completeness".to_owned(), json!("bounded"));
     output.insert(
         "cost".to_owned(),
-        serde_json::to_value(options.statistics.with_elapsed(options.elapsed_s))
-            .expect("verification cost serializes"),
+        cost_json(model, options.statistics.with_elapsed(options.elapsed_s)),
     );
 }
 
@@ -2822,6 +2824,31 @@ fn violation_blame_json(
         entry.insert("violating_bindings".to_owned(), violating_bindings);
     }
     json!({"conjuncts": [conjunct]})
+}
+
+/// Serialize solver cost, publishing compose component names the way every
+/// other field of the envelope does.
+///
+/// # Panics
+///
+/// Never in practice: `VerificationCost` holds only strings and numbers.
+#[must_use]
+pub fn cost_json(model: &KernelModel, cost: fsl_solver::VerificationCost<'_>) -> Value {
+    let mut value = serde_json::to_value(cost).expect("verification cost serializes");
+    for property in value
+        .get_mut("properties")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(public) = property["name"]
+            .as_str()
+            .and_then(|name| model.compose_public_name(name))
+        {
+            property["name"] = json!(public);
+        }
+    }
+    value
 }
 
 fn origin_aware_property_name(

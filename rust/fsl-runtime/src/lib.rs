@@ -2876,7 +2876,7 @@ pub fn never_enabled_action_warning(
     let origin = model.action_origin(&action.name);
     let name = origin
         .and_then(origin_display_name)
-        .map_or_else(|| display_name(&action.name), str::to_owned);
+        .map_or_else(|| model.action_display_name(&action.name), str::to_owned);
     // Keep this public diagnostic aligned with all other action JSON: a
     // source-backed lowered action reports the authored primary location,
     // while a kernel action retains its own declaration span. Zero spans are
@@ -2901,7 +2901,7 @@ pub fn never_enabled_action_warning(
         if let Some(origin) = origin {
             entry.insert(
                 "generated_name".to_owned(),
-                json!(display_name(&action.name)),
+                json!(model.action_display_name(&action.name)),
             );
             entry.insert("origin".to_owned(), internal_origin_json(origin));
         }

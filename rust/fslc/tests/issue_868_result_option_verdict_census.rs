@@ -315,6 +315,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-core/src/model.rs",
+        384,
+        "resolve_replay_action",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-core/src/refinement.rs",
         1249,
         "requirements_implements",

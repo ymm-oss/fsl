@@ -203,7 +203,11 @@ state divergence is exit 1 with leaf mismatches. `initial` is checked against
 `init` leaves any state variable free (BMC explores every admissible value
 there), `initial` is trusted as the concrete starting point directly instead
 of failing `initial_state_mismatch` against an arbitrary default value for
-that variable. Bare arrays/`{events}` are the
+that variable. A compose spec's component action is written `alias.action`
+(the name testgen, conformance, and the Monitor emit); the older
+`alias__action` is still accepted for the same action, and replay output,
+including `state_mismatch.action`, always uses `alias.action`. Sync actions and
+non-compose actions match their exact name only. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/design/DESIGN-replay-trace.md`.
 

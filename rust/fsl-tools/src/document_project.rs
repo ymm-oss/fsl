@@ -499,7 +499,7 @@ fn push_action_claim(
             requirements: requirement_ids,
             subject: json!({
                 "action": action.name,
-                "display_name": display_name(&action.name),
+                "display_name": model.action_display_name(&action.name),
                 "parameters": parameters,
             }),
             enablement: Some(enablement),

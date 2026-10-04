@@ -35,7 +35,8 @@ conformance anchor (§5), not as a substitute for design-layer positive tests.
 Wire the generated file's `Adapter` to the implementation:
 - `reset()`: bring the implementation to the same initial state as init
 - `step(action, params)`: execute one action (in composition, `"alias.action"` names
-  also arrive)
+  also arrive; `use X as a__b` with action `c` arrives as `"a__b.c"`, and a v1
+  `fslc replay` trace uses the same names)
 - `observe() -> dict`: project the implementation state onto the spec's logical-state
   form (keys are state-variable names / composition uses `alias.var`; enum = name
   string, Option = None|value, Seq = list, Map = dict with string keys, struct = dict)

@@ -1815,6 +1815,13 @@ compose OrderSystem {
 - An ordinary `action` (without `=`) can also be written (a glue action).
 - JSON display: the physical name `alias__x` is output as `alias.x` (state keys,
   action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
+  A component action's public name is built from its alias and its action name,
+  so `use X as a__b` with action `c` is `a__b.c`. Every command that names a
+  component action — testgen, conformance, Monitor, verify/scenarios traces, and
+  `replay` output including `state_mismatch.action` — uses this `alias.action`
+  form. A v1 `replay` trace may write a component action as `alias.action` or as
+  the older `alias__action`; both name the same action (see
+  `docs/design/DESIGN-replay-trace.md`).
 
 ```bash
 fslc check  specs/order_system.fsl

@@ -142,7 +142,7 @@ pub fn conformance_vectors_for_version(
         let before = conformance_state_json(model, &monitor.state)?;
         for (action, params) in &all_calls {
             let action_json = json!({
-                "name":display_name(action),
+                "name":model.action_display_name(action),
                 "params":params.iter().map(|(name,value)|(name.clone(),fsl_value_json(value))).collect::<serde_json::Map<_,_>>()
             });
             let mut successor = monitor.clone();
@@ -159,7 +159,10 @@ pub fn conformance_vectors_for_version(
                 vectors.push(json!({
                     "state":state_id,"action":action_json,
                     "outcome":{
-                        "kind":violation.kind,"name":violation.name,
+                        "kind":violation.kind,
+                        "name":model
+                            .compose_violation_display_name(&violation.name)
+                            .unwrap_or(violation.name),
                         "state_changed":after != before,"state":after,
                         "attempted_state":attempted
                     }
@@ -404,7 +407,7 @@ pub fn testgen_trace_vectors(model: &KernelModel) -> Result<TestgenWalk, String>
             return Ok(TestgenWalk::Violated { violation, trace });
         }
         steps.push(json!({
-            "action": display_name(&action),
+            "action": model.action_display_name(&action),
             "params": params,
             "expected": ordered_object(&state_json(&monitor.state), &state_order)
         }));

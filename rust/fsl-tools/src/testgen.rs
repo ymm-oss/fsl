@@ -563,6 +563,8 @@ pub fn public_kernel_testgen_input(
 ///
 /// The caller supplies checked names and declaration order only; emitters still
 /// consume the same normalized input and never receive a private model or AST.
+/// Action names are already public (`alias.action`): only the model knows a
+/// component action's alias boundary, so they are used verbatim.
 ///
 /// # Errors
 ///
@@ -582,10 +584,7 @@ pub fn compose_testgen_input(
         state_order,
         actions
             .into_iter()
-            .map(|(name, params)| TestgenAction {
-                name: display_name(&name),
-                params,
-            })
+            .map(|(name, params)| TestgenAction { name, params })
             .collect(),
         scenarios,
         walk,

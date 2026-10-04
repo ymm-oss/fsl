@@ -5037,9 +5037,19 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                 name: action_name,
                 params,
             } => {
-                let Some(action) = model.actions.iter().find(|action| {
-                    action.name == *action_name
-                        || !versioned && display(&action.name) == *action_name
+                let resolved = match model.resolve_replay_action(action_name) {
+                    Ok(resolved) => resolved,
+                    Err(error) => return (error_output("io", &error), 2),
+                };
+                let Some(action) = resolved.or_else(|| {
+                    (!versioned)
+                        .then(|| {
+                            model
+                                .actions
+                                .iter()
+                                .find(|action| display(&action.name) == *action_name)
+                        })
+                        .flatten()
                 }) else {
                     return replay_failure(
                         &model,
@@ -5092,13 +5102,15 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                         json!({
                             "kind": violation.kind,
                             "check":"safety",
-                            "name": display(&violation.name),
-                            "action": display(&action.name),
+                            "name": model
+                                .compose_violation_display_name(&violation.name)
+                                .unwrap_or_else(|| display(&violation.name)),
+                            "action": model.action_display_name(&action.name),
                             "params": params,
                         }),
                     );
                 }
-                (json!(action.name), "action")
+                (json!(replay_action_name(&model, &action.name)), "action")
             }
         };
         if let Some(state) = &event.state {
@@ -5614,7 +5626,10 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
                         let action = model
                             .actions
                             .iter()
-                            .find(|action| display(&action.name) == source_action)
+                            .find(|action| {
+                                model.action_display_name(&action.name) == source_action
+                                    || display(&action.name) == source_action
+                            })
                             .ok_or_else(|| {
                                 format!("no action mapping for log action '{source_action}'")
                             })?;
@@ -5936,7 +5951,7 @@ fn run_scenarios_mode_from_source(
                 Some(json!({
                     "message": format!(
                         "action '{}' was enabled but no cover trace could be built within depth {depth}",
-                        display(&action.name)
+                        model.action_display_name(&action.name)
                     ),
                 }))
             }
@@ -5948,7 +5963,7 @@ fn run_scenarios_mode_from_source(
         .iter()
         .filter_map(|(name, witness)| witness.as_ref().map(|witness| (name, witness)))
     {
-        let mut scenario = scenario_from_trace(&witness.trace);
+        let mut scenario = scenario_from_trace(&model, &witness.trace);
         scenario.insert("name".to_owned(), json!(format!("reach_{}", display(name))));
         scenario.insert("kind".to_owned(), json!("reachable"));
         scenario.insert("property".to_owned(), json!(display(name)));
@@ -5995,7 +6010,7 @@ fn run_scenarios_mode_from_source(
         }
     }));
     for response in responses {
-        let mut scenario = scenario_from_trace(&response.trace);
+        let mut scenario = scenario_from_trace(&model, &response.trace);
         let mut suffix = String::new();
         for (name, value) in &response.bindings {
             suffix.push('_');
@@ -6038,17 +6053,20 @@ fn run_scenarios_mode_from_source(
         let Some(trace) = covers.get(name) else {
             continue;
         };
-        let mut scenario = scenario_from_trace(trace);
-        scenario.insert("name".to_owned(), json!(format!("cover_{}", display(name))));
+        let mut scenario = scenario_from_trace(&model, trace);
+        scenario.insert(
+            "name".to_owned(),
+            json!(format!("cover_{}", model.action_display_name(name))),
+        );
         scenario.insert("kind".to_owned(), json!("action_coverage"));
-        scenario.insert("action".to_owned(), json!(display(name)));
+        scenario.insert("action".to_owned(), json!(model.action_display_name(name)));
         insert_requirement_metadata(&mut scenario, &action.annotations, action.meta.as_ref());
         scenarios.push(Value::Object(scenario));
     }
     if let Some(trace) = &result.deadlock_trace
         && deadlock_mode != "ignore"
     {
-        let mut scenario = scenario_from_trace(trace);
+        let mut scenario = scenario_from_trace(&model, trace);
         scenario.insert("name".to_owned(), json!("deadlock_terminal"));
         scenario.insert("kind".to_owned(), json!("deadlock"));
         scenario.insert(
@@ -6222,7 +6240,7 @@ fn requirement_trace_scenarios_from_source(
     Ok(scenarios)
 }
 
-fn scenario_from_trace(trace: &[fsl_core::TraceStep]) -> Map<String, Value> {
+fn scenario_from_trace(model: &KernelModel, trace: &[fsl_core::TraceStep]) -> Map<String, Value> {
     let mut scenario = Map::new();
     scenario.insert(
         "steps".to_owned(),
@@ -6232,7 +6250,7 @@ fn scenario_from_trace(trace: &[fsl_core::TraceStep]) -> Map<String, Value> {
                 .filter_map(|entry| entry.action.as_ref())
                 .map(|action| {
                     json!({
-                        "action": display(&action.name),
+                        "action": model.action_display_name(&action.name),
                         "params": action.params.iter().map(|(name, value)| (
                             name.clone(), fslc_rust::fsl_value_json(value)
                         )).collect::<Map<_, _>>(),
@@ -6617,7 +6635,11 @@ fn strict_tag_warnings_from_source(
             warnings.push(json!({
                 "kind": "untagged",
                 "element": element,
-                "name": display(name),
+                "name": if element == "action" {
+                    model.action_display_name(name)
+                } else {
+                    display(name)
+                },
                 "loc": span.python_loc(),
                 "hint": hint,
             }));
@@ -9217,7 +9239,7 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
             });
             if let (Some(from), Some(to)) = (from, to) {
                 transitions.push(json!({
-                    "action": display(&action.name),
+                    "action": model.action_display_name(&action.name),
                     "from": from,
                     "to": to,
                 }));
@@ -9274,7 +9296,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             let mut value = json!({
                 "name": origin
                     .and_then(fslc_rust::origin_display_name)
-                    .map_or_else(|| fslc_rust::display_name(&action.name), str::to_owned),
+                    .map_or_else(|| model.action_display_name(&action.name), str::to_owned),
                 "params": action.params.iter().map(|param|param_skeleton(model,param)).collect::<Vec<_>>(),
                 "requires_text": action.requires.iter().map(|expr|format!("requires {}",fslc_rust::source_expr_text(model,expr))).collect::<Vec<_>>(),
                 "ensures_text": action.ensures.iter().map(|expr|format!("ensures {}",fslc_rust::source_expr_text(model,expr))).collect::<Vec<_>>(),
@@ -9293,7 +9315,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             {
                 value.insert(
                     "generated_name".to_owned(),
-                    json!(fslc_rust::display_name(&action.name)),
+                    json!(model.action_display_name(&action.name)),
                 );
                 value.insert(
                     "origin".to_owned(),
@@ -9387,7 +9409,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             let mut entry = json!({
                 "kind":"partial_op",
                 "name":fslc_rust::display_name(&format!("_partial_{}", action.name)),
-                "action":fslc_rust::display_name(&action.name),
+                "action":model.action_display_name(&action.name),
                 "loc":span.python_loc(),
                 "text":text,
                 "requirement":Value::Null,
@@ -9451,7 +9473,7 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                         model
                             .actions
                             .iter()
-                            .find(|action| fslc_rust::display_name(&action.name) == name)
+                            .find(|action| model.action_display_name(&action.name) == name)
                             .map(|action| {
                                 requirement_metadata(&action.annotations, action.meta.as_ref())
                             })
@@ -9491,7 +9513,7 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                     let params = model
                         .actions
                         .iter()
-                        .find(|action| fslc_rust::display_name(&action.name) == action_name)
+                        .find(|action| model.action_display_name(&action.name) == action_name)
                         .map_or_else(Vec::new, |action| {
                             action
                                 .params
@@ -9531,7 +9553,7 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
             model
                 .actions
                 .iter()
-                .map(|action| format!("cover_{}", fslc_rust::display_name(&action.name))),
+                .map(|action| format!("cover_{}", model.action_display_name(&action.name))),
         )
         .enumerate()
         .map(|(index, name)| (name, index))
@@ -10196,7 +10218,7 @@ fn invariant_violation_explanation(
             let mut value = json!({
                 "name": origin
                     .and_then(fslc_rust::origin_display_name)
-                    .map_or_else(|| display(&action.name), str::to_owned),
+                    .map_or_else(|| model.action_display_name(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
@@ -10205,7 +10227,10 @@ fn invariant_violation_explanation(
             if let Some(origin) = origin
                 && let Value::Object(value) = &mut value
             {
-                value.insert("generated_name".to_owned(), json!(display(&action.name)));
+                value.insert(
+                    "generated_name".to_owned(),
+                    json!(model.action_display_name(&action.name)),
+                );
                 value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
                 if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
                     value.insert("loc".to_owned(), span.python_loc());
@@ -10544,7 +10569,7 @@ fn run_explain_from_source(
             let origin = model.action_origin(&action.name);
             let display_name = origin
                 .and_then(fslc_rust::origin_display_name)
-                .map_or_else(|| display(&action.name), str::to_owned);
+                .map_or_else(|| model.action_display_name(&action.name), str::to_owned);
             let params = action
                 .params
                 .iter()
@@ -10959,7 +10984,7 @@ fn collect_oracle_killers(
         if action.ensures.is_empty() {
             continue;
         }
-        let label = display(&action.name);
+        let label = model.action_display_name(&action.name);
         if isolated_oracle_kills(
             isolate_model_for_ensures(model, &action.name),
             depth,
@@ -12488,7 +12513,7 @@ fn run_testgen_from_source(
                 .iter()
                 .map(|action| {
                     (
-                        action.name.clone(),
+                        model.action_display_name(&action.name),
                         action
                             .params
                             .iter()
@@ -13865,11 +13890,12 @@ struct SemanticReview {
 }
 
 fn semantic_action_record(
+    model: &KernelModel,
     enabled: &fsl_runtime::EnabledAction,
     successor: &fsl_runtime::State,
 ) -> Value {
     json!({
-        "name":fslc_rust::display_name(&enabled.action),
+        "name":model.action_display_name(&enabled.action),
         "params":enabled.params.iter().map(|(name,value)|(name.clone(),fslc_rust::fsl_value_json(value))).collect::<Map<_,_>>(),
         "successor":fslc_rust::state_json(successor),
     })
@@ -13986,7 +14012,7 @@ fn bounded_semantic_review(
                                 "bounded_evidence":{"available":true,"depth":4,"reachable_at_step":step},
                                 "trace":fslc_rust::trace_json(model,&trace),
                                 "state":fslc_rust::state_json(&monitor.state),
-                                "actions":[semantic_action_record(left,&left_state),semantic_action_record(right,&right_state)],
+                                "actions":[semantic_action_record(model,left,&left_state),semantic_action_record(model,right,&right_state)],
                                 "action_nodes":[format!("action:{}",left.action),format!("action:{}",right.action)],
                                 "divergent_state":divergent_state,
                             })
@@ -15431,12 +15457,12 @@ fn diff_shape_mismatch(implementation: &KernelModel, abstraction: &KernelModel) 
     let implementation_actions = implementation
         .actions
         .iter()
-        .map(|action| display(&action.name))
+        .map(|action| implementation.action_display_name(&action.name))
         .collect::<std::collections::BTreeSet<_>>();
     let abstraction_actions = abstraction
         .actions
         .iter()
-        .map(|action| display(&action.name))
+        .map(|action| abstraction.action_display_name(&action.name))
         .collect::<std::collections::BTreeSet<_>>();
     if implementation_state == abstraction_state && implementation_actions == abstraction_actions {
         return None;
@@ -15533,7 +15559,7 @@ fn semantic_diff_direction(
                 .iter()
                 .find(|candidate| candidate.name == action.name);
             json!({
-                "name":display(&action.name),
+                "name":implementation.action_display_name(&action.name),
                 "params":action.params.iter().map(|(name,value)|(
                     name.clone(),fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_,_>>(),
@@ -16749,7 +16775,7 @@ fn run_refine(
             output.insert(
                 "impl_action".to_owned(),
                 json!({
-                    "name": display(&action.name),
+                    "name": implementation.action_display_name(&action.name),
                     "params": action.params.iter().map(|(name, value)| (
                         name.clone(), fslc_rust::fsl_value_json(value)
                     )).collect::<Map<_, _>>(),
@@ -17483,6 +17509,14 @@ struct ValidatedReplayEvent {
     state: Value,
 }
 
+/// The action name a v1 replay accepts back: `alias.action` for a compose
+/// component action, the exact Kernel name for every other action.
+fn replay_action_name(model: &KernelModel, name: &str) -> String {
+    model
+        .compose_action(name)
+        .map_or_else(|| name.to_owned(), fsl_core::ComposeName::display)
+}
+
 fn validate_versioned_replay_events(
     model: &KernelModel,
     events: &[fslc_rust::replay_trace::ReplayEvent],
@@ -17502,9 +17536,8 @@ fn validate_versioned_replay_events(
                 fslc_rust::replay_trace::ReplayStep::Stutter => ValidatedReplayStep::Stutter,
                 fslc_rust::replay_trace::ReplayStep::Action { name, params } => {
                     let params = model
-                        .actions
-                        .iter()
-                        .find(|action| action.name == *name)
+                        .resolve_replay_action(name)
+                        .map_err(|error| format!("event {index}: {error}"))?
                         .map(|action| parse_versioned_params(model, action, params, index))
                         .transpose()?;
                     ValidatedReplayStep::Action(params)
@@ -17524,7 +17557,7 @@ fn parse_versioned_params(
     if values.len() != action.params.len() {
         return Err(format!(
             "event {event_index} parameter mismatch for action '{}'",
-            action.name
+            replay_action_name(model, &action.name)
         ));
     }
     action
@@ -17559,7 +17592,7 @@ fn parse_params(
     if values.len() != action.params.len() {
         return Err(format!(
             "parameter mismatch for action '{}'",
-            display(&action.name)
+            model.action_display_name(&action.name)
         ));
     }
     action
