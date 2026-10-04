@@ -128,6 +128,54 @@ pub fn lvalue_has_partial_operation_candidate(target: &LValue) -> bool {
     }
 }
 
+/// Whether any `requires`/`let`, statement, or `ensures` of `action` can
+/// reach a partial operation. The verifier skips its implicit `partial_op`
+/// queries when no action of the model has a candidate.
+#[must_use]
+pub fn action_has_partial_operation_candidate(action: &ActionDef) -> bool {
+    action.guards.iter().any(|guard| match guard {
+        ActionGuard::Let(_, expr) | ActionGuard::Requires(expr) => {
+            expression_has_partial_operation_candidate(expr)
+        }
+    }) || action
+        .statements
+        .iter()
+        .any(statement_has_partial_operation_candidate)
+        || action
+            .ensures
+            .iter()
+            .any(expression_has_partial_operation_candidate)
+}
+
+fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
+    match statement {
+        Statement::Assign { target, value, .. } => {
+            expression_has_partial_operation_candidate(value)
+                || lvalue_has_partial_operation_candidate(target)
+        }
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            expression_has_partial_operation_candidate(condition)
+                || then_statements
+                    .iter()
+                    .chain(else_statements)
+                    .any(statement_has_partial_operation_candidate)
+        }
+        Statement::ForAll {
+            binder, statements, ..
+        } => {
+            binder_has_partial_operation_candidate(binder)
+                || statements
+                    .iter()
+                    .any(statement_has_partial_operation_candidate)
+        }
+    }
+}
+
 /// One partial-operation site inside an action, attributed to the clause that
 /// contains it.
 #[derive(Clone, Copy, Debug)]

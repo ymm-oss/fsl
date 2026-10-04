@@ -77,7 +77,8 @@ pub use origin::{
     type_target,
 };
 pub use partial_operation::{
-    ActionPartialOperation, PartialOperation, PartialOperationClause, action_partial_operations,
+    ActionPartialOperation, PartialOperation, PartialOperationClause,
+    action_has_partial_operation_candidate, action_partial_operations,
     binder_has_partial_operation_candidate, expression_has_partial_operation_candidate,
     lvalue_has_partial_operation_candidate,
 };
