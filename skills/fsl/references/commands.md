@@ -314,7 +314,21 @@ between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
 scenarios against NEW. Its stable finding kinds are `behavior_added`,
 `behavior_removed`, `invariant_weakened`, `invariant_strengthened`,
 `forbidden_relaxed`, `scope_changed`, and `unknown`; an empty report uses
-`no_semantic_change`. A changed `verify` scope is explicit and comparison uses
+`no_semantic_change`. In the forbidden replay (`docs/design/DESIGN-semantic-diff.md`,
+"Forbidden replay") a NEW final step that its guard disables preserves the OLD
+rejection, and so does a final step that OLD and NEW both reject as `bad_call`
+outside a range or enum parameter type. A `bad_call` decided by an `entity` /
+`number` verify scope (`instances` / `values` declared on either side, including
+the NEW scope OLD is replayed under) tried no guard, so it stays `unknown` /
+`forbidden_step_unrelatable`. An OLD final step that names no action, or no
+variant of that arity, is `unknown` / `forbidden_replay_failed`. Before #1212 a
+both-side range `bad_call` was `unknown`, so that forbidden failed `--forbid
+unknown` and no longer does, and an OLD unknown action was preserved (the
+measured cases already exited 1 on the `unknown` that NEW's added action or
+changed arity produces; see
+`docs/design/DESIGN-forbidden.md` §2.1). Known gap (#1239): a NEW
+*setup* step that its guard disables is also reported as preserved, although NEW
+never runs the final step. A changed `verify` scope is explicit and comparison uses
 NEW's shared entity/number bounds. Findings exit 0 because the command is an
 analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
 verdict is bounded by `--depth`, and a mapping only resolves the direction

@@ -1037,7 +1037,15 @@ sweep の各セルは `--instances`/`--values` 付きで走るので、セルが
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
 `behavior_removed` です。ユーザー invariant の連言の間の含意を別途検査し
 (`invariant_weakened` / `invariant_strengthened`)、OLD の `forbidden` シナリオを
-NEW に対して replay します(`forbidden_relaxed`)。方向性のある失敗は反例の
+NEW に対して replay します(`forbidden_relaxed`)。NEW の最後のステップがガードで
+無効なら OLD の拒否は保たれ、両側が range / enum のパラメータ型の外の `bad_call` として
+拒否する最後のステップも保たれます。どちらかの側で宣言された `entity` / `number` の
+verify スコープが決めた `bad_call` は `unknown` / `forbidden_step_unrelatable`、
+どの action も arity も指さない OLD の最後のステップは `unknown` /
+`forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
+ステップも保たれたと報告されます。
+[`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md) の "Forbidden replay"
+を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
 不一致は、`--mapping` がその方向を提供しない限り `unknown` です。任意のマッピング
 が自動で反転されることはありません。
@@ -2878,7 +2886,37 @@ DESIGN-*.md があります)。
   「拒否されるべき操作列」を書くと、check 時に、最後のステップが拒否される
   (not-enabled または違反)ことが replay 検証されます。受理されてしまった場合は
   `kind:"forbidden"` です(制約不足 = ガードの欠落の検出。安全性の invariant は
-  これについて沈黙します)。`acceptance`(must-allow)の双対です。
+  これについて沈黙します)。scenario の `rejected_by`(testgen が assert します)は、
+  ガードによる拒否なら `requires_failed`、パラメータの検査される値域の外の引数なら
+  `bad_call` です。その値域は、範囲型や enum のパラメータでは宣言された型ですが、
+  `entity`(`verify { instances }`)や `number`(`verify { values }`)のパラメータでは
+  検証の範囲です。`instances Case = 3` の下で最後のステップ `accept(7)` は `bad_call`
+  となり、ガードを一度も評価せずに forbidden を充足しますが、実装はその呼び出しを
+  受け付ける可能性があります(issue #1229 で扱います)。最後のステップがどの action も、
+  その arity の variant も指さない場合は拒否ではなく、`message` 付きの
+  `kind:"forbidden"` エラーです。これは破壊的変更です。4.8.1 までは、そのステップで
+  forbidden が充足していたので、`check` は通り、ほかのコマンドが何を報告するかは仕様の
+  残りの部分で決まっていました。`verify`、`sweep`、`chain`、`mutate`、`html`、`ledger` は
+  検証が通れば exit 0、通らなければ exit 1 で、`scenarios`、`testgen`、
+  `counterexample export`、`approval create` は exit 2 になることもありました。
+  今は `check`、`verify`(どのエンジンでも)、`sweep`、`chain`、`scenarios`、`testgen`、
+  `mutate` の baseline、`counterexample export`、`html`、`ledger`、
+  `approval create --kind scenarios` / `html` が exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant を報告しません。`html`、`ledger`、
+  `approval create --kind html` の stdout は生成結果(`result: "generated"`)で、このエラーは
+  レポートの中に載ります(`html` と `ledger` はレポートを書き出します)。`chain` はこのエラーを
+  `[requirements]` 層の `detail` に載せ、それ以外はこのエラー(`error` / `kind: "forbidden"`)を
+  出力します。以前に作った `scenarios` / `html` の記録の `approval check` は
+  exit 2 です。exit 2 にならないのは次の 3 つです。`explain` は exit 0 のままで、witness は
+  ありません(既知の欠落 #1242: `explain` は gate のエラーを捨て、`html` の witness 欄も
+  同じです)。`approval create --kind ledger` は exit 0 で、エラーを載せた ledger を
+  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
+  その ledger が実時間の `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる
+  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の `approval check` は
+  `drifted`(exit 0)です。
+  `fslc diff` は forbidden の判定を 2 つ変えるので、`--forbid unknown` の exit が変わることがあります。各コマンドの
+  変更前と変更後の実測は [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
+  `acceptance`(must-allow)の双対です。
   → [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md)
 - **Vacuity 検査(`--vacuity`)** — verified/proved のパスの上で、
   `never_enabled_action`(検査した深さ内で action の enabled な instance がない。
