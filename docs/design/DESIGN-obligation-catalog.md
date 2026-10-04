@@ -48,19 +48,31 @@ A row's id is `(kind, site variant, name, span offsets, [action, index])`:
 
 ### Rows
 
+"Definedness" below is three rows on the same site: `PartialDefined` (a
+partial operation of `docs/manual/LANGUAGE.md` §6), `NoOverflow` (`i64`
+overflow of `+ - * / %`, unary `-`, `abs`, `sum`) and `KeyInDomain` (a `Map`
+index outside the finite key domain).
+
 | Family | Rows |
 |---|---|
 | `init` | `InitSatisfiable@Init` |
 | state variable `v` | `Holds@TypeBound(v)`, vacuous when the type has no bound to violate |
-| `invariant` | `Holds`, `PartialDefined` |
-| `trans`, `unless`, `until` safety | `Holds@Trans`, `PartialDefined@Trans` |
-| `reachable` | `Witnessed`, `PartialDefined` |
-| `leadsTo` (and `until` progress) | `Responds@LeadsTo`, `PartialDefined@Trigger`, `PartialDefined@Goal` |
-| `terminal` (when declared) | `PartialDefined@Terminal` |
-| action `a` | `PartialDefined@Guard(a)`, `PartialDefined@Body(a)`; per `ensures` *i*: `Holds@Ensures(a, i)`, `PartialDefined@Ensures(a, i)` |
+| `invariant` | `Holds`, definedness |
+| `trans`, `unless`, `until` safety | `Holds@Trans`, definedness |
+| `reachable` | `Witnessed`, definedness |
+| `leadsTo` (and `until` progress) | `Responds@LeadsTo`; `Deadline@LeadsTo` with `within`; definedness of `Trigger` and `Goal` |
+| ranked `leadsTo` (`decreases`) | definedness of `Measure`; `RankLowerBound@LeadsTo`, `RankNoDeadlock@LeadsTo`; `RankStep(L, a)` for every action `a`; with `helpful`, `RankHelpfulFair@LeadsTo` and `RankHelpfulSticky@LeadsTo` |
+| `terminal` (when declared) | definedness of `Terminal` |
+| action `a` | definedness of `Guard(a)` and `Body(a)`; per `ensures` *i*: `Holds@Ensures(a, i)` and its definedness |
 | model | `NoDeadlock@Model` |
 
 Each family has one generator function in `rust/fsl-core/src/obligation.rs`.
+The rank rows follow the ranking proof of
+[`DESIGN-induction.md`](DESIGN-induction.md) §2.3. Whether a `helpful` action
+matches, and so whether stickiness has two instances to compare, is decided per
+binding by the engine, so both `helpful` rows exist whenever `helpful` is
+declared; `RankStep` is per action, not per action instance, because instances
+depend on parameter domains.
 
 ### Static vacuity
 
@@ -74,7 +86,21 @@ skips no real question.
   verifier's own skip decision, `action_has_partial_operation_candidate`, which
   moved from `fsl-verifier` into `fsl-core` for this purpose. In property
   context (`invariant`, `trans`, `reachable`, `leadsTo`, `terminal`) `/` and `%`
-  are total ([`DESIGN-divmod.md`](DESIGN-divmod.md)) and do not count.
+  are total ([`DESIGN-divmod.md`](DESIGN-divmod.md)) and do not count. A
+  `decreases` measure is evaluated without a definedness check today, so it
+  uses the action-context predicate, which counts `/` and `%`.
+- `NoOverflow` is syntactic: the site contains `+ - * / %`, unary `-`, `abs`
+  or a `sum` aggregate -- the operations whose result the verifier checks
+  against the `i64` range.
+- `KeyInDomain` is typed. Every index read and indexed assignment counts unless
+  the collection is a `Seq` (a `Seq` read is a `PartialDefined` site) or the
+  collection is a `Map` whose key type contains the index's static type: a
+  range inside the key range, the same enum, or `Bool`. A numeric literal
+  index counts as the range of its value. Finite key types are exactly ranges,
+  enums and `Bool` (`check` rejects `Map<Int, _>` and composite keys). Names
+  are typed in the scope the evaluators use -- action parameters, `let`s,
+  `requires` and `and`/`=>` pattern bindings, binder variables -- and a name
+  that cannot be typed makes its indexes count.
 - `Holds@TypeBound(v)` is vacuous for the types `--engine induction` asks no
   type-bound obligation for (`Int`, `Bool`, `Relation`, and composites of them).
 
@@ -85,16 +111,25 @@ skips no real question.
   which has no trace cases; they arrive with their generator and tests in P1-c.
 - A row carries no `claim`, `group` or `catalog_version` field; all three are
   derived from the kind. `PartialDefined` is a required row of its property's
-  claim (#1196 reports `_partial_<name>` per property).
+  claim (#1196 reports `_partial_<name>` per property). `NoOverflow`,
+  `KeyInDomain` and the `Measure` rows belong to a separate model-definedness
+  claim, so an unrelated overflow does not weaken an invariant's claim.
+- `TotalDefined` is split into `NoOverflow` and `KeyInDomain` because engines
+  support them differently: `--engine induction` asks neither today, and #1221
+  is the key-domain half.
 - `init` definedness has no row in P1-a.
 
 ## Verification
 
 `rust/fsl-core/tests/obligation_catalog.rs` (T2) pins each fixture's catalog as
 an exact multiset and checks that ids are unique. The fixtures are the
-reproducers of #1192, #1196 and #1217, plus one fixture with every non-ranked
-family. Every kind and every site variant occurs in some fixture, and removing
-any generator call fails at least one test. Generator coverage is calibrated
+reproducers of #1189, #1192, #1196, #1217 and #1221, the `helpful` fixture of
+#473, a fixture with every non-ranked family, and controls for each overflow and
+key-domain case; every fixture except the rewritten #1192 model passes `fslc
+check`. A scope override (`verify { instances / values }`) leaves the catalog
+unchanged, and a property-selected model owes a subset of the full model's rows
+with the kept sites' rows unchanged. Every kind and every site variant occurs in
+some fixture, and removing any generator call fails at least one test. Generator coverage is calibrated
 with `cargo mutants --no-config --package fsl-core --file
 fsl-core/src/obligation.rs` (run from `rust/`), which must leave no surviving
 mutant.
