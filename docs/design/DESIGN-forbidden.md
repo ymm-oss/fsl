@@ -24,32 +24,80 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
 ## 2. Semantics (concrete Monitor replay, at check time)
 
 - The premise steps `steps[0..n-2]` must all be `ok` (enabled and no violation).
-- Success if and only if the **last step is rejected**, that is, **not enabled**:
+- Success if and only if the **last step is rejected**, that is, **not enabled** for one of
+  these reasons:
   - `requires_failed` — every argument lies in its parameter domain and a `requires` guard
     refuses the call. A "correct prohibition by a guard" that is invisible as a safety
     invariant;
-  - `bad_call` — no action of that name and arity has every argument in its parameter
-    domain (DESIGN-bridge.md 1.2), so no guard is ever evaluated.
+  - `bad_call` — every action of that name and arity has an argument outside its declared
+    parameter type (DESIGN-bridge.md 1.2), so no guard is ever evaluated and an
+    implementation must reject the call at its decoding boundary.
 
   The scenario's `rejected_by` names which one, and the generated negative test asserts that
   kind, so an out-of-domain call is never asserted as a guard refusal (issue #1212). The Monitor's
   `bad_call` in DESIGN-bridge.md 1.2 also covers an unknown action or a missing parameter;
   for a forbidden last step those are not rejections (below), so here `bad_call` means only
-  an argument outside the parameter domain.
-  - The parameter domain is the **checked value domain**, not always the declared type. For
-    a range type (`0..100`, `type Amount = 0..100`) or an enum it is the declared type. For
-    an `entity` it is the `verify { instances E = N }` scope, and for a `number` it is the
-    `verify { values N = lo..hi }` scope: `accept(7)` under `instances Case = 3`, or
-    `add(9)` under `values Qty = 0..3`, is a `bad_call`. Such a last step satisfies the
-    forbidden **without evaluating any guard**, although an implementation, which has no
-    such bound, may accept that call. Issue #1229 tracks changing this `check` verdict for
-    `entity` / `number`; until it lands, a forbidden that is meant to test a guard must use
-    an argument inside the checked scope. `fslc diff` already does not treat such a
-    `bad_call` as a rejection: it preserves a forbidden that OLD and NEW both reject as
-    `bad_call` only when, on both sides, every same-named action of that arity has an
-    argument outside a range or enum parameter type; a `bad_call` decided by an `entity` /
-    `number` scope (including one that the NEW scope introduces when OLD is replayed
-    under it) stays `unknown` / `forbidden_step_unrelatable` (DESIGN-semantic-diff.md).
+  an argument outside the declared parameter type.
+- **Outside the verify scope (issue #1229, breaking).** The declared type bounds a
+  range type (`0..100`, `type Amount = 0..100`) or an enum, but not an `entity` (or a
+  business / requirements `process`, lowered as one) or a `number`: their finite domain is
+  the `verify { instances E = N }` / `verify { values N = lo..hi }` scope, and an
+  implementation has no such bound. A last step whose only out-of-domain arguments are
+  integers outside such a scope — `respond(7)` under `instances Case = 3`, `add(9)` or
+  `add(-1)` under `values Qty = 0..3` — evaluated no guard and may be accepted, so it is
+  **not** a rejection. It is a `kind: "forbidden"` error carrying `failed_step`, `step`,
+  `step_results: []`, `message`, `out_of_scope_argument` (`{parameter, value, type, scope: [lo, hi]}`), a `loc`
+  at that step, and a hint to widen the scope or move the argument inside it.
+  - Classification is per same-named action (branch variants included): `requires_failed`
+    if one admits every argument; else this error if one is excluded only by verify scopes;
+    else `bad_call`. So `pay(7, 500)` with `a: Amount = 0..100` stays `bad_call` — the
+    type rejects 500 whatever the id. One classifier (`requirement_unenabled_step` with
+    the source's `verify_scope_type_names`) serves `check` / `verify`, `scenarios` /
+    `testgen`, `mutate`, and `fslc diff`, so they cannot disagree.
+  - `--instances` / `--values` (#1218): when the override alone removed the argument (it
+    lies inside the declared scope), the case is `forbidden_skipped` / `not_evaluated`, as
+    for any scenario the override put out of scope. An argument outside the declared scope
+    stays this error, as it is unscoped, unless the override widens the scope to include it:
+    then the guard is evaluated, and the run judges the forbidden on that evaluation.
+  - `fslc diff`: an OLD final step outside the verify scope the comparison uses (including
+    the NEW scope OLD is replayed under) is `unknown` / `forbidden_replay_failed` (no OLD
+    guard decided it), like an OLD final step that violates. An OLD `bad_call` is preserved
+    only when NEW, classified with NEW's own scope types, rejects the step as `bad_call` too;
+    one only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`. NEW's scope
+    types are known only for a spec, business, or requirements NEW; a compose takes its
+    components' scopes from files its source does not contain, and the other dialects
+    generate their entity types while lowering, so for those NEW an OLD `bad_call` is never
+    preserved (it falls to `unknown` / `forbidden_step_unrelatable`). Before #1229 an OLD
+    final step outside its scope was `unknown` / `forbidden_step_unrelatable` too, and a
+    compose NEW that rejected an OLD `bad_call` as `bad_call` preserved it: the scope
+    types were then read from the `verify` blocks of the two compared sources only, and
+    a compose's component scopes are in other files.
+  - `fslc ledger` summarizes the error as a final step outside the verify scope; its next
+    action is the error's widen-or-move hint, not an accepted or unresolved step's.
+  - Migration: the step used to satisfy the forbidden (`rejected_by: "requires_failed"`
+    before #1212, `"bad_call"` since), so `check` passed and the generated test asserted a
+    rejection no guard made. Every command that runs the forbidden gate now stops on such a
+    step with `error` / `kind: "forbidden"` / exit 2; §2.1 has each command's measured
+    exit status and output, with the rest of the spec verified and violated. When the rest
+    verified, they exited 0 before; `counterexample export` already exited 2 (nothing to
+    export). When it was violated, they exited 1 with its counterexample, except
+    `approval create`, which exited 2. The exceptions: `explain` still exits 0 with
+    `witnesses: []` (where the rest verified, it listed the forbidden's witness);
+    `approval create --kind ledger` creates a record of a ledger listing the error (where
+    the rest verified, it created one before too); and `approval check` of a ledger
+    record created before reports `drifted` (exit 0). In `fslc mutate`, a mutant that
+    narrows an `entity` / `number` scope (`type_bound_hi_minus1` / `type_bound_lo_plus1`
+    on that type) so that a forbidden final step falls outside it is now killed with
+    `killed_by: "forbidden"` where it survived, so kill rates can shift toward
+    `forbidden`. The fix is to widen the scope or to
+    change the step to an in-scope value the guard rejects. Corpus sweep (#1229): no
+    forbidden under `specs/`, `examples/`, `rust/fslc/tests/fixtures/` or `tests/fixtures/`
+    changes verdict (§6).
+  - No opt-out. A must-forbid on a value the implementation is expected to reject as
+    nonexistent is a decode-boundary contract, which a range type states. Re-evaluate only
+    if implementations are to reject an `entity` / `number` outside its scope as part of
+    their type contract; then this case returns to `bad_call` and the testgen contract
+    must say so.
 - **Strict default (issue #1213, breaking).** A last step that is enabled and then
   stops with a runtime **violation** (`invariant` / `trans` / `ensures` / `type_bound` /
   `partial_op`, every kind the Monitor reports for an enabled step) is **not** a rejection:
@@ -332,6 +380,81 @@ OLD could be recorded: the first, second, and last):
 | guardless Wallet with `NonNegative` against itself | preserved | `unknown` / `forbidden_replay_failed` | exit 0 → 0 | exit 0 → 1 |
 | guarded Wallet against itself (control) | preserved | preserved | exit 0 → 0 | exit 0 → 0 |
 
+**#1229** (before: #1213 at `40be1c2a`; after: #1229 on top of it; each binary built in its
+own materialized tree). The specs are `cases` and `cart` of
+`rust/fslc/tests/issue_1229_forbidden_verify_scope.rs`: `respond(c: Case)` guarded by
+`requires cases[c] == Accepted` under `instances Case = 3` with the last step `respond(7)`,
+and `add(q: Qty)` guarded by `requires q > 0` under `values Qty = 0..3` with the last step
+`add(9)`, which the guard admits. Both verify; the third column adds
+`invariant NoneAccepted { forall c: Case { cases[c] != Accepted } }` to the first, which
+`accept` breaks at depth 1 away from the forbidden trace. Each command's whole stdout and
+every file it writes were kept, from two runs of each binary, and compared; outside what
+the table states, they differ only in `cache` (`key` hashes the binary; `hit` / `source`
+depend on the run order), `approved_at`, wall-clock `elapsed_s` (also inside the `html`
+report and an approval record that embeds it), and the path of the measuring directory
+inside a generated test. Default depth 3:
+
+| command | `respond(7)` under `instances Case = 3` | `add(9)` under `values Qty = 0..3` | `respond(7)`, with `NoneAccepted` |
+|---|---|---|---|
+| `check` | exit 0 → 2: `ok` → the error (`message`, `failed_step`, `step`, `step_results: []`, `out_of_scope_argument`, hint, `loc`) | same | same |
+| `verify` at `--depth` 1 and 3 | `verified` (exit 0) → 2 | same | `violated` (exit 1, the `NoneAccepted` counterexample) → 2, no counterexample |
+| `verify --engine induction` | `proved` (exit 0) → 2 | same | `violated` (exit 1) → 2 |
+| `verify --engine explicit` / `auto` (one run, exit status and `result` only; `auto` chose `explicit`) | `verified` (exit 0) → the error (exit 2) | same | `violated` (exit 1) → the error (exit 2) |
+| `sweep --depth 1..3` | `sweep_passed` (exit 0) → 2 | same | `sweep_failed` (exit 1) → 2 |
+| `chain` | `verified` (exit 0) → `kind: "chain"`, `failed: ["requirements"]`, the layer's `detail` is the error (exit 2) | same | `violated` (exit 1) → 2, same |
+| `scenarios` (depth 1, 3, 8) | exit 0 with every scenario, the forbidden one as `rejected_by: "bad_call"` → 2, no scenarios | same | `violated` (exit 1) → 2 |
+| `testgen` (depth 1, 3) | exit 0 writing a test that asserts `bad_call` → 2, no file | same | `violated` (exit 1), no file → 2, no file |
+| `mutate` | `mutated` (exit 0; its `requires_remove` mutants survive) → 2, no mutants | same | `violated` (exit 1) → 2 |
+| `html` | exit 0 → 2; the report is still written, but its status goes from `verified` (bounded, depth 3) to `error` / `not_run`, the action-coverage marks are gone, and the witnesses section loses its witnesses (`cover_accept`, `cover_respond`, `forbidden_FB-1`) | same (`cover_add`, `forbidden_FB-1`) | exit 1 → 2; the report is still written, its status and every property `not_run`, and the `NoneAccepted` counterexample trace is gone; its witnesses section was already empty |
+| `ledger` | exit 0 → 2; the ledger is still written, gains an `FB-1` row (the step is outside the verify scope; next action: the hint), and every requirement row goes from `確認済（承認可）` / `bounded(BMC depth 3)` to `反例なし` / `not_run` | same | exit 1 → 2; the ledger is still written, the spec-wide `NoneAccepted` finding is replaced by the `FB-1` row, and every requirement row's assurance goes from `bounded(BMC depth 1)` to `not_run` |
+| `counterexample export` | exit 2 → 2: `no counterexample to export: verification succeeded` → the error; no file before or after | same | exit 1 writing the `NoneAccepted` reproducer → 2, no file |
+| `explain` (depth 1, 3) | exit 0 → 0, but `witnesses` goes from 2 entries at depth 1 and 3 at depth 3 to `[]` | exit 0 → 0, but `witnesses` goes from 2 entries to `[]` | exit 0 → 0; `witnesses` was and stays `[]` |
+| `approval create --kind scenarios` | exit 0 creating a record → 2, no record | same | exit 2 (`violated`) → 2 (the error) |
+| `approval create --kind html` | exit 0 creating a record → 2, no record (stdout is the `html` result) | same | exit 2 → 2 |
+| `approval create --kind ledger` | exit 0 → 0: a record is still created, of the ledger that now lists the error | same | exit 2 (`reviewed artifact does not match a fresh rendering`: a violated spec's ledger embeds wall-clock `elapsed_s`) → exit 0, a record |
+| `approval check` of a record created before | `scenarios`: `approved` → the error (exit 2); `html`: `approved` → exit 2; `ledger`: `approved` → `drifted` (exit 0) | same | none could be created |
+| Worker `check` / `verify` | the native error, pinned by the unit test `worker_reports_an_out_of_scope_forbidden_final_step_like_native` (the Worker has no CLI to run) | same function | same function |
+
+The same `respond(7)` with `respond` unguarded — the issue's case of a broken guard —
+`add(-1)` below the scope, and a requirements `process Claim` with the last step
+`finish(5)` under `instances Claim = 2` give the same exit status as the first two columns
+for every command. The controls keep every exit status and output: `respond(2)` and
+`add(0)`, inside the scope and refused by the guard (`requires_failed`), and `respond(7)`
+with `type Case = 0..2` instead of `entity Case` and `add(9)` with `type Qty = 0..3`
+instead of `number Qty` (a `bad_call` outside a declared type) — except `mutate` on the two
+in-scope controls: the mutant `type_bound_hi_minus1` of `type Case hi` (and
+`type_bound_lo_plus1` of `type Qty lo`) puts the final step outside the narrowed scope,
+and moves from `survived` to `killed` with `killed_by: "forbidden"` (kill rate 0.2609 →
+0.3043, and 0.3125 → 0.375).
+
+Under a bounds override (`verify --depth 3`): `--instances Case=2` with the unguarded last
+step `respond(2)`, and `--values Qty=0..2` with `add(3)`, are `verified` with `FB-1` in
+`requirement_traces.skipped` (#1218) before and after; with `respond(7)` (guarded or not)
+or `add(9)` they move from `verified` (exit 0) to the error (exit 2), because the value is
+outside the declared scope too. A widening override evaluates the guard, before and after:
+`--instances Case=8` with `respond(7)` is `verified` (the guard refuses it) and, unguarded,
+the accepted-step error (exit 2); `--values Qty=0..9` with `add(9)` is the accepted-step
+error (exit 2).
+
+For `FB-1`, `diff --depth 0` and `diff --git` report the following, and so does `approval diff`
+of a `scenarios` record created before (in the first two rows OLD can no longer be
+recorded after #1229, and `approval diff` of a record created before reports the after
+finding with exit 0):
+
+| OLD → NEW | before | after | `--forbid unknown` |
+|---|---|---|---|
+| `respond(7)` under `instances Case = 3`, `add(9)` under `values Qty = 0..3`, or `finish(5)` under `instances Claim = 2`, against itself | `unknown` / `forbidden_step_unrelatable` | `unknown` / `forbidden_replay_failed` | exit 1 → 1 |
+| OLD `entity Case` with `respond(7)` → kernel NEW with `type Case = 0..2` | `unknown` / `forbidden_step_unrelatable` | `unknown` / `forbidden_replay_failed` | exit 1 → 1 |
+| OLD `type Case = 0..2` with `respond(7)` → NEW `entity Case` under `instances Case = 3`; OLD `type Qty = 0..3` with `add(9)` → requirements NEW `number Qty` under `values Qty = 0..3` | `unknown` / `forbidden_step_unrelatable` | unchanged | exit 1 → 1 |
+| OLD `type Qty = 0..3` with `add(9)` → compose NEW whose component declares `number Qty` under `values Qty = 0..3` | preserved | `unknown` / `forbidden_step_unrelatable` | exit 0 → 1 |
+| `respond(7)` with `type Case = 0..2`, `add(9)` with `type Qty = 0..3`, or `respond(2)` under `instances Case = 3`, against itself (controls) | preserved | preserved | exit 0 → 0 |
+
+`--forbid forbidden_relaxed` exits 0 before and after in every row. `diff --git` with
+`--forbid forbidden_relaxed,unknown` follows the `--forbid unknown` column, and `approval
+diff` exits 0 in every row. Only the compose row changes an exit: before #1229 a compose
+NEW's `bad_call` counted as one outside a declared type, although its component bounds
+`Qty` by a verify scope.
+
 ## 3. Ripple (verification engine and Monitor unmodified)
 
 - grammar.py: `forbidden_def` (`expect rejected` inline) + transformer.
@@ -340,8 +463,9 @@ OLD could be recorded: the first, second, and last):
   differing in "premise all ok / last expected to be ok:False / no `expect` state evaluation."
   Because `Monitor.step()` returns `ok:False` + `kind` for rejection via requires_failed /
   invariant / type_bound / partial_op / ensures, the outcome is decided from step()'s
-  return alone. The frozen Python reference still counts the violation kinds as a
-  rejection; the native CLI does not since #1213 (§2).
+  return alone. The frozen Python reference still counts the violation kinds, and a final
+  step outside the verify scope, as a rejection; the native CLI does not since #1213 and
+  #1229 (§2).
 - cli.py: `_forbidden_error` wired into both the check and verify paths. bmc.py: emits
   `forbidden_<ID>` (with `rejected_by`) into `scenarios` → for testgen's negative tests.
 
@@ -361,8 +485,18 @@ Native (`rust/fslc/tests/`): `issue_1212_forbidden_bad_call.rs` (`bad_call` vs
 `counterexample export`, `scenarios`, `testgen`, `html`, and `ledger` stop at the gate, with
 `html` and `ledger` still writing their report; `mutate` kills a guard-dropping mutant with
 the forbidden; `diff` OLD/NEW violations and their `--forbid` exits; the undefined-guard
-regression). The Worker's `check` / `verify` errors are
-pinned against native in `rust/fsl-wasm/src/lib.rs`.
+regression), and `issue_1229_forbidden_verify_scope.rs` (the `entity` / `number` /
+`process` reproductions and the below-scope boundary are errors in `check`; `verify` with
+BMC at `--depth` 2 and 3, induction, explicit, and auto, `sweep`, the `[requirements]` layer
+of `chain`, `counterexample export`, `scenarios`, `testgen`, and the `mutate` baseline return
+the error, and `html` and `ledger` exit 2 and still write their report, with `ledger`
+naming the scope; in-scope guard refusals stay `requires_failed` in `check` and
+`scenarios`; a range-type violation stays `bad_call` alongside an out-of-scope id;
+override skip versus declared-scope error, and a widening override; `diff` of an OLD
+out-of-scope final step and of an OLD `bad_call` that a requirements or compose NEW only
+puts outside a verify scope). `fsl-core`'s `requirements_stage.rs` pins which types
+`verify_scope_type_names` reports for each document kind. The Worker's `check` / `verify`
+errors are pinned against native in `rust/fsl-wasm/src/lib.rs`.
 
 ## 5. Related
 

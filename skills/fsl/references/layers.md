@@ -97,8 +97,9 @@ the relevant role skill directs it.
   then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
   accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
-  verifies at check time that the last step is rejected (not enabled; a
-  runtime violation does not count since #1213) — otherwise `kind: "forbidden"`.
+  verifies at check time that the last step is rejected (not enabled; neither a
+  runtime violation, since #1213, nor an argument outside the `entity` / `number`
+  verify scope, since #1229, counts) — otherwise `kind: "forbidden"`.
   Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
   required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
   `branches`, and explicit `maps` only for hard cases such as multi-entity
@@ -364,20 +365,25 @@ verify {
   (`docs/design/DESIGN-forbidden.md` §2.1). If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
-  outside the parameter's checked value domain). For an `entity` / `number`
-  parameter that domain is the `verify { instances / values }` scope, not a type:
-  a last step such as
-  `accept(7)` under `instances Case = 3` is a `bad_call` that satisfies the
-  forbidden without evaluating any guard, while an implementation may accept it
-  (#1229) — keep forbidden arguments inside the scope to test the guard. A last
+  outside the parameter's declared range or enum type). Since #1229 a last step
+  whose argument is outside the `verify { instances / values }` scope of an
+  `entity` / `number` parameter (a `process` counts as an `entity`), such as
+  `accept(7)` under `instances Case = 3`, is not a rejection: no guard was
+  evaluated and an implementation may accept it. It is a `kind: "forbidden"`
+  error with `out_of_scope_argument` — widen the scope or move the argument
+  inside it. Under a `--instances` / `--values` override that alone removed the
+  argument, the forbidden is `forbidden_skipped` instead. Breaking: such a step
+  used to satisfy the forbidden (as `requires_failed` before #1212, `bad_call`
+  since), so `check` passed. A last
   step naming no action or no variant of that arity is a `kind: "forbidden"`
   error with a `message`, not a rejection (breaking after 4.8.1: `check` used to
-  pass, and what the other commands reported depended on the rest of the spec;
-  now every command that runs this check exits 2 with no verdict, scenario, or
-  test, except `explain`, which exits 0 with no witnesses (known gap #1242),
-  `approval create --kind ledger`, which exits 0 and records a ledger that
-  lists the error (#1243), and `approval check` of a ledger record, which
-  reports `drifted` (exit 0); `docs/design/DESIGN-forbidden.md` §2.1).
+  pass, and what the other commands reported depended on the rest of the spec).
+  On either step every command that runs this check now exits 2 with no
+  verdict, scenario, or test, except `explain`, which exits 0 with no
+  witnesses (known gap #1242), `approval create --kind ledger`, which exits 0
+  and records a ledger that lists the error (#1243), and `approval check` of a
+  ledger record, which reports `drifted` (exit 0) —
+  `docs/design/DESIGN-forbidden.md` §2.1.
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use

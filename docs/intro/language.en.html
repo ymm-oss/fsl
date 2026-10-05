@@ -441,8 +441,10 @@ ones — and an <code>expect</code> error is excused only when the same <code>ex
 in the declared world; a reference outside the declared bounds (so a no-op or
 unrelated override) or an <code>expect</code> error the declared world shares (a division
 by zero) stays the unscoped hard error. A forbidden scenario whose <em>final</em> step
-is "rejected" only because the override removed its argument tested no guard,
-so it is reported as <code>forbidden_skipped</code> rather than counted as satisfied. These
+is outside the overridden scope only because the override removed its argument
+tested no guard, so it is reported as <code>forbidden_skipped</code> rather than counted as
+satisfied; a final step outside the declared scope is the unscoped
+<code>kind:"forbidden"</code> error (#1229). These
 three conditions are stricter than the frozen Python reference, which skips any
 out-of-range reference, excuses any <code>expect</code> error that mentions one, and counts
 an out-of-range final step as a rejection. This is what makes <code>--instances Case=1
@@ -2965,7 +2967,8 @@ DESIGN-*.md).</p>
 <ul>
 <li><strong><code>forbidden</code> (negative acceptance criteria)</strong> — a requirements-dialect
   construct. Write an "operation sequence that should be rejected," and at check
-  time it is replay-verified that the last step is rejected, i.e. not enabled.
+  time it is replay-verified that the last step is rejected, i.e. not enabled
+  because a guard refuses it or its argument is outside the declared type.
   If it is accepted, <code>kind:"forbidden"</code> (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
   about). <strong>Since #1213 (breaking)</strong> a last step that is enabled and then
@@ -2992,15 +2995,22 @@ DESIGN-*.md).</p>
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
   The scenario's <code>rejected_by</code> (asserted by testgen) is
   <code>requires_failed</code> for a guard refusal and <code>bad_call</code> for an argument outside
-  the checked value domain of its parameter. That domain is the declared type
-  for a range or enum parameter, but the verification scope for an <code>entity</code>
-  (<code>verify { instances }</code>) or <code>number</code> (<code>verify { values }</code>) parameter: under
-  <code>instances Case = 3</code>, a last step <code>accept(7)</code> is a <code>bad_call</code> and satisfies
-  the forbidden without evaluating any guard, although an implementation may
-  accept that call (issue #1229 tracks this). A last step naming no action, or
-  no variant of that arity, is a <code>kind:"forbidden"</code> error with a <code>message</code>, not
-  a rejection. This is a breaking change: through 4.8.1 such a step
-  satisfied the forbidden, so <code>check</code> passed, and what the other commands
+  the declared range or enum type of its parameter (an implementation must
+  reject it at its decoding boundary). <strong>Since #1229 (breaking)</strong> an argument
+  outside the verification scope of an <code>entity</code> (<code>verify { instances }</code>, which
+  also bounds a <code>process</code>) or <code>number</code> (<code>verify { values }</code>) parameter is not a
+  rejection: under <code>instances Case = 3</code>, a last step <code>accept(7)</code> evaluates no
+  guard, and an implementation, which has no such bound, may accept that call.
+  It is a <code>kind:"forbidden"</code> error with <code>out_of_scope_argument</code> (<code>{parameter,
+  value, type, scope}</code>). To migrate, widen the scope to include the value, or
+  move the argument inside the scope so the guard is tested. Under a
+  <code>--instances</code> / <code>--values</code> override that alone removed the argument, the
+  forbidden is reported as <code>forbidden_skipped</code> (not evaluated) instead. A last
+  step naming no action, or no variant of that arity, is a <code>kind:"forbidden"</code>
+  error with a <code>message</code>, not a rejection. Both are breaking changes: such a
+  step used to satisfy the forbidden (one naming no callable action through
+  4.8.1, one outside the verification scope as <code>requires_failed</code> before #1212
+  and <code>bad_call</code> since), so <code>check</code> passed, and what the other commands
   reported depended on the rest of the spec: <code>verify</code>, <code>sweep</code>, <code>chain</code>,
   <code>mutate</code>, <code>html</code>, and <code>ledger</code> exited 0 when it verified and 1 when it did
   not, while <code>scenarios</code>, <code>testgen</code>, <code>counterexample export</code>, and <code>approval
@@ -3009,9 +3019,9 @@ DESIGN-*.md).</p>
   export</code>, <code>html</code>, <code>ledger</code>, and <code>approval create --kind scenarios</code> / <code>html</code>
   exit 2 and report no verdict, counterexample, scenario, test, or mutant for
   the rest of the spec. <code>html</code>, <code>ledger</code>, and <code>approval create --kind html</code>
-  print the generated result (<code>result: "generated"</code>) with this error inside
+  print the generated result (<code>result: "generated"</code>) with the error inside
   the report (<code>html</code> and <code>ledger</code> still write their report); <code>chain</code> reports
-  it as the <code>[requirements]</code> layer's <code>detail</code>; the others print this error
+  it as the <code>[requirements]</code> layer's <code>detail</code>; the others print the error
   (<code>error</code> / <code>kind: "forbidden"</code>). <code>approval check</code> of a <code>scenarios</code> or <code>html</code> record created
   before exits 2. Three do not exit 2: <code>explain</code> still exits 0, with no
   witnesses (known gap #1242: <code>explain</code> discards the gate's error, and so
@@ -3020,8 +3030,8 @@ DESIGN-*.md).</p>
   whose rest has a violation it used to exit 2 only because that ledger
   embeds wall-clock <code>elapsed_s</code> (whether a ledger whose forbidden gate fails
   may be approved is tracked by #1243); and <code>approval check</code> of a ledger record
-  created before reports <code>drifted</code> (exit 0). <code>fslc diff</code> changes two
-  forbidden verdicts, which can change a <code>--forbid unknown</code> exit. The
+  created before reports <code>drifted</code> (exit 0). <code>fslc diff</code> changes forbidden
+  verdicts for both steps, which can change a <code>--forbid unknown</code> exit. The
   before/after of every command, measured, is in
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
   The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>

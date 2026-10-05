@@ -76,11 +76,16 @@ final step; only a disabled final step is evidence of a preserved rejection.
 A final step that both OLD and NEW reject as `bad_call` outside a declared type
 is preserved too, even though NEW cannot relate its arguments to an action: on
 both sides, every same-named action of that arity has an argument outside a
-range or enum parameter type. A `bad_call` decided by an `entity` / `number`
-verify scope (`instances` / `values` declared on either side, including the NEW
-scope OLD is replayed under) tried no
-guard on either side, so it stays `unknown` / `forbidden_step_unrelatable`
-(DESIGN-forbidden.md §2, issue #1229). An OLD final step that names no action,
+range or enum parameter type. Each side is classified with its own `entity` /
+`number` types (DESIGN-forbidden.md §2), so a type that either side declares as
+an `instances` / `values` scope never yields a preserved `bad_call`. NEW's are
+known only for a spec, business, or requirements NEW, so a compose or
+other-dialect NEW never preserves a forbidden this way. An OLD final step
+outside an `entity` / `number` verify scope (including the NEW scope OLD is
+replayed under) was rejected by no guard (#1229), so it is `unknown` with
+`forbidden_replay_failed`; one only NEW's scope excludes is `unknown` /
+`forbidden_step_unrelatable`. Before #1229 both were `unknown` /
+`forbidden_step_unrelatable`. An OLD final step that names no action,
 or no variant of that arity, is `unknown` / `forbidden_replay_failed`. A NEW
 final step that is enabled and then stops with a runtime violation is not a
 rejection either (DESIGN-forbidden.md §2, #1213): it is `forbidden_relaxed`, and

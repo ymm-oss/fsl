@@ -1503,6 +1503,45 @@ mod tests {
         }
     }
 
+    /// #1229: a last step outside the `entity` verify scope evaluated no
+    /// guard; the Worker reports the native error, not a `bad_call` rejection.
+    #[test]
+    fn worker_reports_an_out_of_scope_forbidden_final_step_like_native() {
+        let source = |final_step: &str| {
+            format!(
+                "requirements Respond {{\n  entity Case\n  enum St {{ Waiting, Accepted, Responded }}\n  state {{ cases: Map<Case, St> }}\n  init {{ forall c: Case {{ cases[c] = Waiting }} }}\n  requirement REQ-1 \"respond\" {{\n    action respond(c: Case) {{ requires cases[c] == Accepted  cases[c] = Responded }}\n  }}\n  forbidden FB-1 \"cannot respond before accepting\" {{\n    {final_step}\n    expect rejected\n  }}\n}}\nverify {{ instances Case = 3 }}"
+            )
+        };
+        let request = |command: &str, final_step: &str| Request {
+            cmd: command.to_owned(),
+            source: source(final_step),
+            source_file: "respond.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        for command in ["check", "verify"] {
+            let request = request(command, "respond(7)");
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden final step outside the verify scope",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["out_of_scope_argument"],
+                json!({"parameter": "c", "value": 7, "type": "Case", "scope": [0, 2]}),
+                "{command}: {worker:#}"
+            );
+        }
+        // Control: a guard refusal inside the scope satisfies the forbidden.
+        let worker = block_on(check(&request("check", "respond(2)"), TEST_SOLVER_VERSION));
+        assert_eq!(worker["result"], "ok", "{worker:#}");
+    }
+
     /// Parity control for #1008 (mutation: the Worker gains a selection
     /// option that skips the trace replay the way native `--instances` does).
     /// A request carrying the native selection keys is still a full run: it

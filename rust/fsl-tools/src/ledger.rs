@@ -314,6 +314,9 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                     ForbiddenFailure::Unresolved(message) => {
                         format!("禁止フローの最後の step が呼び出せる action を指していない（{message}）")
                     }
+                    ForbiddenFailure::OutsideScope(message) => format!(
+                        "禁止フローの最後の step の引数が検証の範囲の外にあり、ガードを試していない（拒否ではない。{message}）"
+                    ),
                     ForbiddenFailure::Setup(step) => {
                         format!("禁止フローの前提 step {step} が実行できない（trace が壊れている）")
                     }
@@ -413,6 +416,9 @@ enum ForbiddenFailure<'a> {
     Violation(&'a str, &'a str),
     /// The final step names no action, or no variant of that arity.
     Unresolved(&'a str),
+    /// An argument of the final step is outside an `entity` / `number`
+    /// verify scope, so no guard decided it (#1229).
+    OutsideScope(&'a str),
     /// A setup step is not enabled or not ok (`forbidden_setup`).
     Setup(String),
     Other,
@@ -429,6 +435,9 @@ fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
             raw["violation"]["name"].as_str().unwrap_or(""),
         ),
         Some("forbidden") if raw.get("accepted_step").is_some() => ForbiddenFailure::Accepted,
+        Some("forbidden") if raw.get("out_of_scope_argument").is_some() => {
+            ForbiddenFailure::OutsideScope(raw.get("message").and_then(Value::as_str).unwrap_or(""))
+        }
         Some("forbidden") => raw
             .get("message")
             .and_then(Value::as_str)
@@ -458,6 +467,10 @@ fn translate(finding: &Finding) -> String {
             ),
             ForbiddenFailure::Unresolved(_) => format!(
                 "禁止フロー『{}』の最後の手順が仕様の action を指しておらず、禁止を判定できない。action 名か引数の数を直す。",
+                finding.name
+            ),
+            ForbiddenFailure::OutsideScope(_) => format!(
+                "禁止フロー『{}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。",
                 finding.name
             ),
             ForbiddenFailure::Setup(_) => format!(
@@ -512,6 +525,9 @@ fn next_action(finding: &Finding) -> String {
                 ForbiddenFailure::Accepted => "ガードを追加 / 責任者がリスク受容",
                 ForbiddenFailure::Violation(..) => "ガードを追加 / 違反を直して禁止フローを見直す",
                 ForbiddenFailure::Unresolved(_) => "禁止フローの step の action 名・引数を修正",
+                ForbiddenFailure::OutsideScope(_) => {
+                    "検証の範囲を広げる / step の引数を範囲内に直す"
+                }
                 ForbiddenFailure::Setup(_) => "禁止フローの前提手順を修正",
                 ForbiddenFailure::Other => "付録の生 JSON を確認",
             },
