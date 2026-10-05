@@ -20,10 +20,13 @@ covers P1-a only.
 ## Contract
 
 `fsl_core::obligation::catalog(&KernelModel) -> Catalog` lists one row per
-authored site and aspect. It is a pure function of the model: no solver, no
-property selection, no verification scope. It lives in `fsl-core`, the owner of
-the semantic model, so every crate that may read it -- `fsl-verifier`,
-`fsl-runtime`, `fsl-tools` -- already depends on it
+authored site and aspect. It is a pure function of the model: no solver and no
+property selection. A verification scope (`verify { instances / values }`,
+`--values`) adds or removes no row, but it resizes the model's types, and
+static vacuity compares resolved types: a `Map` index of one type into a key of
+another can be in domain at one size and not at another. It lives in
+`fsl-core`, the owner of the semantic model, so every crate that may read it
+-- `fsl-verifier`, `fsl-runtime`, `fsl-tools` -- already depends on it
 ([`DESIGN-rust-components.md`](DESIGN-rust-components.md)).
 
 **No consumer reads the catalog in P1-a.** Engine, CLI, Worker and Public
@@ -56,7 +59,7 @@ index outside the finite key domain).
 | Family | Rows |
 |---|---|
 | `init` | `InitSatisfiable@Init` |
-| state variable `v` | `Holds@TypeBound(v)`, vacuous when the type has no bound to violate |
+| state variable `v` | `Holds@TypeBound(v)` |
 | `invariant` | `Holds`, definedness |
 | `trans`, `unless`, `until` safety | `Holds@Trans`, definedness |
 | `reachable` | `Witnessed`, definedness |
@@ -76,10 +79,18 @@ depend on parameter domains.
 
 ### Static vacuity
 
-A row is `statically_vacuous` when no evaluation of its site can fail it. The
-predicate is a syntactic over-approximation: it may call a row non-vacuous that
-no state can fail, never the reverse, so an engine that skips a vacuous row
-skips no real question.
+A row is `statically_vacuous` when its site holds no candidate for it.
+Candidates over-approximate: a row no state can fail may keep a candidate,
+never the reverse, so a vacuous row is one no evaluation of its site can fail
+and an engine that skips it skips no real question. `KeyInDomain` and the value
+types it uses carry one premise: every state variable the site reads satisfies
+its type bound. Each engine checks a state's type bounds before its
+invariants, `trans` and `ensures` (explicit, bmc and induction all report
+`_bounds_<v>` first), so the premise holds wherever the `Holds@TypeBound` rows
+are checked. A run that does not check them (`--property` selects a property
+and drops the bounds) cannot rely on a key row's vacuity: there an out-of-type
+value reaches the index and explicit reports a key-domain miss. The P1-c fold
+must keep that order.
 
 - `PartialDefined` uses the partial-operation inventory of `fsl-core`
   (#1166). An action's guard, body and `ensures` use the same functions as the
@@ -92,28 +103,55 @@ skips no real question.
 - `NoOverflow` is syntactic: the site contains `+ - * / %`, unary `-`, `abs`
   or a `sum` aggregate -- the operations whose result the verifier checks
   against the `i64` range.
-- `KeyInDomain` is typed. Every index read and indexed assignment counts unless
-  the collection is a `Seq` (a `Seq` read is a `PartialDefined` site) or the
-  collection is a `Map` whose key type contains the index's static type: a
-  range inside the key range, the same enum, or `Bool`. A numeric literal
-  index counts as the range of its value. Finite key types are exactly ranges,
-  enums and `Bool` (`check` rejects `Map<Int, _>` and composite keys). Names
-  are typed in the scope the evaluators use -- action parameters, `let`s,
-  `requires` and `and`/`=>` pattern bindings, binder variables -- and a name
-  that cannot be typed makes its indexes count.
-- `Holds@TypeBound(v)` is vacuous for the types `--engine induction` asks no
-  type-bound obligation for (`Int`, `Bool`, `Relation`, and composites of them).
+- `KeyInDomain` is typed by values, not by `check`. Every index read and
+  indexed assignment counts unless the collection is a `Seq` (a `Seq` read is
+  a `PartialDefined` site) or a `Map` whose key type holds every value of the
+  index: a range inside the key range, the same enum, or `Bool`. Finite key
+  types are exactly ranges, enums and `Bool` (`check` rejects `Map<Int, _>`
+  and composite keys). `check` types some forms from one operand -- a
+  conditional from its `then` branch, `s.add(e)` and `q.push(e)` from the
+  receiver -- so its type is no bound. An index is bounded only by an allowlist
+  of forms: a numeric literal (the range of its value), `true`/`false`, a name
+  typed in scope, an enum member, a struct field, a `Map` or `Seq` element
+  (`m[i]`, `head`, `at`), `old` of one of these, and a conditional whose
+  branches join (the hull of two ranges, or one type). Every other form --
+  arithmetic, `abs`, `size`, `add`, `push` -- counts, even where its value
+  happens to fit.
+- Names are typed as the evaluators bind them. Action parameters come first,
+  then each `let` in clause order; a binder variable is typed inside its
+  `where` filter and body, and a binder over a collection takes the item type
+  of a bounded collection. An `is some(v)` pattern never rebinds a parameter,
+  `let` or binder (`or_insert` in both evaluators), but it binds `v` for
+  everything evaluated after it in the same context (an action's guard, body
+  and `ensures` are one; each property expression is one), whether or not the
+  path there required the match. So outside a parameter, `let` or binder, `v`
+  is typed as the join of every payload of its patterns in the context and its
+  base meaning (a state variable, constant or enum member); without a join it
+  is untyped, and every index through an untyped name counts.
+- `Holds@TypeBound(v)` is vacuous only for `Int`, `Bool` and `Option`s of
+  them, which the type-bound check (`value_conforms` in `fsl-runtime`) accepts
+  whatever they hold. Every other type keeps a live row, including the two
+  `check` does not protect: a `Map` assigned a map over a narrower key range
+  breaks its key-set bound, and a relation's `add` admits an out-of-type pair
+  (explicit and bmc report `_bounds_<v>` for both, and induction for the
+  relation).
 
 ## Decisions
 
 - `Corresponds`, `Accepted` and `Rejected` (refinement steps, acceptance and
   forbidden traces) are not P1-a kinds. `catalog` takes only a `KernelModel`,
   which has no trace cases; they arrive with their generator and tests in P1-c.
-- A row carries no `claim`, `group` or `catalog_version` field; all three are
-  derived from the kind. `PartialDefined` is a required row of its property's
-  claim (#1196 reports `_partial_<name>` per property). `NoOverflow`,
-  `KeyInDomain` and the `Measure` rows belong to a separate model-definedness
-  claim, so an unrelated overflow does not weaken an invariant's claim.
+- A row carries no `claim`, `group` or `catalog_version` field; they are
+  derived from the kind and the site variant, since the kind alone does not
+  decide the claim. `PartialDefined` is a required row of its property's
+  claim (#1196 reports `_partial_<name>` per property), except at a `Measure`.
+  `NoOverflow`, `KeyInDomain` and the three `Measure` definedness rows belong
+  to a separate model-definedness claim, so an unrelated overflow does not
+  weaken an invariant's claim.
+- An invariant owes one `Holds@Invariant` row, not a base row and a step row
+  (#1202 names both for `--engine induction`). Base and step are how one
+  engine discharges that row; the catalog lists what the model owes, and how
+  each engine covers a row is the per-engine support table of P1-b.
 - `TotalDefined` is split into `NoOverflow` and `KeyInDomain` because engines
   support them differently: `--engine induction` asks neither today, and #1221
   is the key-domain half.
@@ -122,14 +160,39 @@ skips no real question.
 ## Verification
 
 `rust/fsl-core/tests/obligation_catalog.rs` (T2) pins each fixture's catalog as
-an exact multiset and checks that ids are unique. The fixtures are the
-reproducers of #1189, #1192, #1196, #1217 and #1221, the `helpful` fixture of
-#473, a fixture with every non-ranked family, and controls for each overflow and
-key-domain case; every fixture except the rewritten #1192 model passes `fslc
-check`. A scope override (`verify { instances / values }`) leaves the catalog
-unchanged, and a property-selected model owes a subset of the full model's rows
-with the kept sites' rows unchanged. Every kind and every site variant occurs in
-some fixture, and removing any generator call fails at least one test. Generator coverage is calibrated
-with `cargo mutants --no-config --package fsl-core --file
-fsl-core/src/obligation.rs` (run from `rust/`), which must leave no surviving
-mutant.
+an exact multiset and checks that ids are unique; `catalog` also
+`debug_assert`s unique ids, and an exhaustive match with a compile-time
+assertion keeps `ObligationKind::ALL` complete and in order. The fixtures are:
+
+- the reproducers of #1189, #1192, #1196, #1217 and #1221, the `helpful`
+  fixture of #473, and a fixture with every non-ranked family;
+- controls for each overflow and key-domain case, and one site per bounded
+  index form against the forms left unbounded;
+- the false-vacuity reproducers of the first independent review, each of which
+  `fslc verify --engine explicit` and `--engine bmc` fail, with in-domain
+  controls (a conditional of two members, a fresh pattern name, a parameter a
+  pattern cannot rebind) that stay vacuous, and two pattern bindings only the
+  join over a whole context types soundly (also failing in both engines);
+- a template that puts a live key candidate (`m[i]`), a live overflow
+  candidate (`x + 1`) and a control (`0`) in every operand position the walk
+  recurses through -- each `Expr`, `Statement`, `Binder` and `LValue` operand
+  and each of an action's guard, body and `ensures` -- and requires the live
+  rows to be exactly the candidate's sites. An `EnumMember` index, a
+  predicate call and a stage access, which no built model holds, are written
+  into a built model by hand.
+
+Every fixture except the rewritten #1192 model passes `fslc check`. A scope
+override adds or removes no row and, where every index has its key's own type,
+changes none (`a_scope_override_keeps_every_row`); an index of another type
+can turn live at a larger size (`a_scope_override_can_make_a_key_row_live`). A
+property-selected model's catalog drops the unselected sites' rows, so the
+P1-c ledger must call `catalog` on the full model. Every kind and every site
+variant occurs in some fixture.
+
+The tests are calibrated against faults injected by hand, one at a time:
+deleting each `push_*` call, each row a generator pushes, each candidate
+predicate, each recursion of the walk and each value-typing rule fails at
+least one T2 test. `cargo mutants --no-config --package fsl-core --file
+fsl-core/src/obligation.rs` (run from `rust/`) must leave no surviving
+mutant; it mutates operators and bodies but deletes no call, which is why the
+injected faults are needed.
