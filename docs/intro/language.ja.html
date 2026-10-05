@@ -1123,7 +1123,9 @@ NEW に対して replay します(<code>forbidden_relaxed</code>)。NEW の最�
 拒否する最後のステップも保たれます。どちらかの側で宣言された <code>entity</code> / <code>number</code> の
 verify スコープが決めた <code>bad_call</code> は <code>unknown</code> / <code>forbidden_step_unrelatable</code>、
 どの action も arity も指さない OLD の最後のステップは <code>unknown</code> /
-<code>forbidden_replay_failed</code> です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
+<code>forbidden_replay_failed</code> です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
+ステップは <code>forbidden_relaxed</code>、違反する OLD の最後のステップや NEW のセットアップの
+ステップは <code>unknown</code> / <code>forbidden_replay_failed</code> です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
 ステップも保たれたと報告されます。
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a> の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
@@ -2885,9 +2887,29 @@ DESIGN-*.md があります)。</p>
 <ul>
 <li><strong><code>forbidden</code>(否定の受け入れ基準)</strong> — requirements ダイアレクトの構成物です。
   「拒否されるべき操作列」を書くと、check 時に、最後のステップが拒否される
-  (not-enabled または違反)ことが replay 検証されます。受理されてしまった場合は
+  (not-enabled である)ことが replay 検証されます。受理されてしまった場合は
   <code>kind:"forbidden"</code> です(制約不足 = ガードの欠落の検出。安全性の invariant は
-  これについて沈黙します)。scenario の <code>rejected_by</code>(testgen が assert します)は、
+  これについて沈黙します)。<strong>#1213 から(破壊的変更)</strong>、最後のステップが
+  enabled で、実行時の違反(<code>invariant</code> / <code>trans</code> / <code>ensures</code> / <code>type_bound</code> / <code>partial_op</code>)で
+  止まる場合も <code>violation</code> 付きの <code>kind:"forbidden"</code> です。違反は拒否ではありません。
+  以前の版はこれを充足として数えていました。移行するには、その呼び出しを拒否する
+  <code>requires</code> を書き足します。opt-out はありません。この検査は BMC や induction より前に
+  走るので、そうした spec の <code>verify</code> は、<code>--depth</code> やエンジンによらず、このエラー
+  (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
+  深さが違反に届けば <code>violated</code>(exit 1)、届かなければ <code>verified</code>(exit 0)、
+  <code>--engine induction</code> ではその判定です。この検査を走らせる他のコマンドも exit 2 で
+  止まります(<code>scenarios</code> と <code>testgen</code> は scenario もテストファイルも出力せず、<code>html</code> と
+  <code>ledger</code> はレポートを書き出します)。ただし次の 3 つは exit 2 に
+  なりません。<code>explain</code> は exit 0 のままで witness はありません(既知の欠落 #1242:
+  <code>explain</code> は gate のエラーを捨て、<code>html</code> の witness 欄も同じです)。
+  <code>approval create --kind ledger</code> は exit 0 で、エラーを載せた ledger を記録します。
+  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
+  <code>elapsed_s</code> を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
+  #1243 で扱います)。以前に作った ledger の記録の <code>approval check</code> は <code>drifted</code>
+  (exit 0)です。<code>fslc diff</code> はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  出力の実測は
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1 にあります。
+  scenario の <code>rejected_by</code>(testgen が assert します)は、
   ガードによる拒否なら <code>requires_failed</code>、パラメータの検査される値域の外の引数なら
   <code>bad_call</code> です。その値域は、範囲型や enum のパラメータでは宣言された型ですが、
   <code>entity</code>(<code>verify { instances }</code>)や <code>number</code>(<code>verify { values }</code>)のパラメータでは

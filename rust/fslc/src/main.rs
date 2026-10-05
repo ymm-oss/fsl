@@ -6196,27 +6196,35 @@ fn requirement_trace_scenarios_from_source(
                 .map(|(param, value)| (param.name().to_owned(), fslc_rust::fsl_value_json(value)))
                 .collect(),
         );
-        let (action_name, rejected_by) = if let Some(instance) = instance {
+        if let Some(instance) = instance {
+            // `validate_requirement_trace_source` rejects an enabled final
+            // step whether it is accepted or stops with a violation (#1213),
+            // so an enabled final step here means the two walks disagree.
             let result = monitor.step(&instance).map_err(|error| error.to_string())?;
-            let violation = result.violation.ok_or_else(|| {
-                format!(
+            return Err(match result.violation {
+                Some(violation) => format!(
+                    "forbidden '{}' final step violated {} '{}' after validation",
+                    case.id,
+                    violation.kind,
+                    display(&violation.name),
+                ),
+                None => format!(
                     "forbidden '{}' final step was accepted after validation",
                     case.id
-                )
-            })?;
-            (display(&instance.action), violation.kind)
-        } else {
-            let unenabled = fslc_rust::verification_output::requirement_unenabled_step(
-                &monitor, final_step, &arguments,
-            )?;
-            let kind = unenabled.rejected_by().ok_or_else(|| {
-                format!(
-                    "forbidden '{}' final step names no callable action after validation",
-                    case.id
-                )
-            })?;
-            (final_step.name.clone(), kind.to_owned())
-        };
+                ),
+            });
+        }
+        let action_name = final_step.name.clone();
+        let rejected_by = fslc_rust::verification_output::requirement_unenabled_step(
+            &monitor, final_step, &arguments,
+        )?
+        .rejected_by()
+        .ok_or_else(|| {
+            format!(
+                "forbidden '{}' final step names no callable action after validation",
+                case.id
+            )
+        })?;
         scenarios.push(json!({
             "name":format!("forbidden_{}",case.id),
             "kind":"forbidden",
@@ -15654,10 +15662,15 @@ fn old_forbidden_arguments(
         return Ok((arguments, Some(unenabled)));
     };
     let stepped = monitor.step(&instance).map_err(|error| error.to_string())?;
+    // #1213: an enabled OLD final step does not satisfy the forbidden even
+    // when it stops with a violation, so there is no OLD rejection to relax.
     match (is_final, stepped.violation.is_some()) {
-        (false, false) | (true, true) => Ok((arguments, None)),
+        (false, false) => Ok((arguments, None)),
         (false, true) => Err("OLD forbidden setup was rejected".to_owned()),
         (true, false) => Err("OLD forbidden final step was accepted".to_owned()),
+        (true, true) => {
+            Err("OLD forbidden final step violated instead of being rejected".to_owned())
+        }
     }
 }
 
@@ -15779,8 +15792,15 @@ fn forbidden_case_finding(
                 ));
             }
         };
-        if stepped.violation.is_some() {
-            return None;
+        if let Some(violation) = &stepped.violation {
+            return Some(forbidden_violation_finding(
+                case,
+                (index, step),
+                is_final,
+                violation,
+                accepted_trace,
+                &monitor,
+            ));
         }
         accepted_trace.push(json!({
             "step":index+1,"state":fslc_rust::state_json(&monitor.state),
@@ -15790,14 +15810,53 @@ fn forbidden_case_finding(
                 )).collect::<Map<_,_>>()},
         }));
     }
-    Some(json!({
-        "kind":"forbidden_relaxed","id":case.id,
-        "witness":{
-            "trace_type":"counterexample","trace":accepted_trace,
-            "accepted_step":case.steps.last().map(|step|step.name.clone()),
-            "state":fslc_rust::state_json(&monitor.state),
-        },
-    }))
+    Some(forbidden_relaxed(case, accepted_trace, &monitor, None))
+}
+
+/// The finding for a NEW step that is enabled and then stops with a violation.
+fn forbidden_violation_finding(
+    case: &fsl_core::RequirementsTraceCase,
+    step: (usize, &fsl_core::RequirementsTraceStep),
+    is_final: bool,
+    violation: &fsl_runtime::Violation,
+    accepted_trace: Vec<Value>,
+    monitor: &fsl_runtime::Monitor,
+) -> Value {
+    if !is_final {
+        // NEW never reaches the final step, so it neither preserves nor
+        // relaxes the OLD rejection.
+        return forbidden_unknown(
+            &case.id,
+            "forbidden_replay_failed",
+            Some(step),
+            &format!(
+                "NEW forbidden setup violated {} '{}'",
+                violation.kind,
+                display(&violation.name)
+            ),
+        );
+    }
+    // #1213: NEW enables the final step the OLD guard rejected; that it then
+    // stops with a violation is not a rejection.
+    let violation = json!({"kind":violation.kind,"name":display(&violation.name)});
+    forbidden_relaxed(case, accepted_trace, monitor, Some(violation))
+}
+
+fn forbidden_relaxed(
+    case: &fsl_core::RequirementsTraceCase,
+    trace: Vec<Value>,
+    monitor: &fsl_runtime::Monitor,
+    violation: Option<Value>,
+) -> Value {
+    let mut witness = json!({
+        "trace_type":"counterexample","trace":Value::Array(trace),
+        "accepted_step":case.steps.last().map(|step|step.name.clone()),
+        "state":fslc_rust::state_json(&monitor.state),
+    });
+    if let Some(violation) = violation {
+        witness["violation"] = violation;
+    }
+    json!({"kind":"forbidden_relaxed","id":case.id,"witness":witness})
 }
 
 /// `scoped` names the `entity` / `number` types of either side, whose checked

@@ -1162,8 +1162,11 @@ OLD rejection, and so does a final step both sides reject as <code>bad_call</cod
 a range or enum parameter type; a <code>bad_call</code> decided by an <code>entity</code> / <code>number</code>
 verify scope declared on either side is <code>unknown</code> /
 <code>forbidden_step_unrelatable</code>, and an OLD final step naming no action or arity is
-<code>unknown</code> / <code>forbidden_replay_failed</code> (known gap #1239: a guard-disabled NEW
-setup step is also reported as preserved; see
+<code>unknown</code> / <code>forbidden_replay_failed</code>. Since #1213 a NEW final step that is
+enabled and then stops with a runtime violation is <code>forbidden_relaxed</code>, and an
+OLD final step or a NEW setup step that violates is <code>unknown</code> /
+<code>forbidden_replay_failed</code> (known gap #1239: a guard-disabled NEW setup step is
+also reported as preserved; see
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a>, "Forbidden
 replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
@@ -2962,10 +2965,32 @@ DESIGN-*.md).</p>
 <ul>
 <li><strong><code>forbidden</code> (negative acceptance criteria)</strong> — a requirements-dialect
   construct. Write an "operation sequence that should be rejected," and at check
-  time it is replay-verified that the last step is rejected (not-enabled or a
-  violation). If it is accepted, <code>kind:"forbidden"</code> (detection of
+  time it is replay-verified that the last step is rejected, i.e. not enabled.
+  If it is accepted, <code>kind:"forbidden"</code> (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
-  about). The scenario's <code>rejected_by</code> (asserted by testgen) is
+  about). <strong>Since #1213 (breaking)</strong> a last step that is enabled and then
+  stops with a runtime violation (<code>invariant</code> / <code>trans</code> / <code>ensures</code> /
+  <code>type_bound</code> / <code>partial_op</code>) is also <code>kind:"forbidden"</code>, with a <code>violation</code> field: a
+  violation is not a rejection. Earlier versions counted it as satisfied; to
+  migrate, add the <code>requires</code> that rejects the call. There is no opt-out.
+  Because this check runs before BMC and induction, <code>verify</code> on such a spec now
+  ends with this error (exit 2) at any <code>--depth</code> and engine, where earlier
+  versions reported whatever the engine reached: with BMC, <code>violated</code> (exit 1)
+  when the depth reached the violation, <code>verified</code> (exit 0) when it did not;
+  with <code>--engine induction</code>, its own verdict. Every other command that runs this
+  check exits 2 too (<code>scenarios</code> and <code>testgen</code> with no scenario and no test
+  file; <code>html</code> and <code>ledger</code> still write their report), except three:
+  <code>explain</code> still exits 0 with no witnesses (known gap #1242: <code>explain</code>
+  discards the gate's error, and so does the witnesses section of <code>html</code>);
+  <code>approval create --kind ledger</code> exits 0 with a record of the ledger, which
+  lists the error — where the depth reached the violation it used to exit 2
+  only because that ledger embeds wall-clock <code>elapsed_s</code> (whether a ledger
+  whose forbidden gate fails may be approved is tracked by #1243); and
+  <code>approval check</code> of a ledger record created before reports <code>drifted</code>
+  (exit 0). <code>fslc diff</code> reports the violation (below).
+  The measured before/after of each command, exit status and output, is in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
+  The scenario's <code>rejected_by</code> (asserted by testgen) is
   <code>requires_failed</code> for a guard refusal and <code>bad_call</code> for an argument outside
   the checked value domain of its parameter. That domain is the declared type
   for a range or enum parameter, but the verification scope for an <code>entity</code>

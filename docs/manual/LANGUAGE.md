@@ -1082,8 +1082,11 @@ OLD rejection, and so does a final step both sides reject as `bad_call` outside
 a range or enum parameter type; a `bad_call` decided by an `entity` / `number`
 verify scope declared on either side is `unknown` /
 `forbidden_step_unrelatable`, and an OLD final step naming no action or arity is
-`unknown` / `forbidden_replay_failed` (known gap #1239: a guard-disabled NEW
-setup step is also reported as preserved; see
+`unknown` / `forbidden_replay_failed`. Since #1213 a NEW final step that is
+enabled and then stops with a runtime violation is `forbidden_relaxed`, and an
+OLD final step or a NEW setup step that violates is `unknown` /
+`forbidden_replay_failed` (known gap #1239: a guard-disabled NEW setup step is
+also reported as preserved; see
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md), "Forbidden
 replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
@@ -2962,10 +2965,32 @@ DESIGN-*.md).
 
 - **`forbidden` (negative acceptance criteria)** — a requirements-dialect
   construct. Write an "operation sequence that should be rejected," and at check
-  time it is replay-verified that the last step is rejected (not-enabled or a
-  violation). If it is accepted, `kind:"forbidden"` (detection of
+  time it is replay-verified that the last step is rejected, i.e. not enabled.
+  If it is accepted, `kind:"forbidden"` (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
-  about). The scenario's `rejected_by` (asserted by testgen) is
+  about). **Since #1213 (breaking)** a last step that is enabled and then
+  stops with a runtime violation (`invariant` / `trans` / `ensures` /
+  `type_bound` / `partial_op`) is also `kind:"forbidden"`, with a `violation` field: a
+  violation is not a rejection. Earlier versions counted it as satisfied; to
+  migrate, add the `requires` that rejects the call. There is no opt-out.
+  Because this check runs before BMC and induction, `verify` on such a spec now
+  ends with this error (exit 2) at any `--depth` and engine, where earlier
+  versions reported whatever the engine reached: with BMC, `violated` (exit 1)
+  when the depth reached the violation, `verified` (exit 0) when it did not;
+  with `--engine induction`, its own verdict. Every other command that runs this
+  check exits 2 too (`scenarios` and `testgen` with no scenario and no test
+  file; `html` and `ledger` still write their report), except three:
+  `explain` still exits 0 with no witnesses (known gap #1242: `explain`
+  discards the gate's error, and so does the witnesses section of `html`);
+  `approval create --kind ledger` exits 0 with a record of the ledger, which
+  lists the error — where the depth reached the violation it used to exit 2
+  only because that ledger embeds wall-clock `elapsed_s` (whether a ledger
+  whose forbidden gate fails may be approved is tracked by #1243); and
+  `approval check` of a ledger record created before reports `drifted`
+  (exit 0). `fslc diff` reports the violation (below).
+  The measured before/after of each command, exit status and output, is in
+  [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1.
+  The scenario's `rejected_by` (asserted by testgen) is
   `requires_failed` for a guard refusal and `bad_call` for an argument outside
   the checked value domain of its parameter. That domain is the declared type
   for a range or enum parameter, but the verification scope for an `entity`
