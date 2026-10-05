@@ -11,9 +11,8 @@ use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guard_definedness, action_guards,
-    action_has_partial_operation_candidate, action_instances, action_statements_evaluation_status,
-    init_constraints, transition_constraint,
+    ActionInstance, action_guard_definedness, action_guards, action_instances,
+    action_statements_evaluation_status, init_constraints, transition_constraint,
 };
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
@@ -364,10 +363,6 @@ async fn verify_bounded_config<S: SmtSolver>(
         .collect::<BTreeSet<_>>();
     let mut states = vec![initial];
     let mut choices = Vec::new();
-    let has_action_partial_operation_candidates = model
-        .actions
-        .iter()
-        .any(action_has_partial_operation_candidate);
 
     for step in 0..=depth {
         let property_checks = StatePropertyChecks {
@@ -390,7 +385,6 @@ async fn verify_bounded_config<S: SmtSolver>(
         }
 
         if step < depth
-            && has_action_partial_operation_candidates
             && let Some(violation) =
                 check_action_partial_operations(solver, model, &states, &choices, &instances, step)
                     .await?
@@ -894,6 +888,11 @@ async fn check_action_partial_operations<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     step: usize,
 ) -> Result<Option<BmcViolation>, VerifyError> {
+    if instances.is_empty() {
+        return Ok(None);
+    }
+    let mut evaluations = Vec::with_capacity(instances.len());
+    let mut undefined = Vec::with_capacity(2 * instances.len());
     for instance in instances {
         let action = &model.actions[instance.action_index];
         let guard_evaluation =
@@ -905,27 +904,30 @@ async fn check_action_partial_operations<S: SmtSolver>(
             &states[step],
             &guard_evaluation.bindings,
         )?;
-        let mut ensures_have_partial_operation = false;
-        for ensure in &action.ensures {
-            ensures_have_partial_operation |= evaluation_status(
-                solver,
-                model,
-                ensure,
-                &states[step],
-                &guard_evaluation.bindings,
-                Some(&states[step]),
-            )?
-            .has_partial_operation;
-        }
-        if !guard_evaluation.has_partial_operation
-            && !body_status.has_partial_operation
-            && !ensures_have_partial_operation
-        {
-            continue;
-        }
+        let guard_undefined = solver.not(&guard_evaluation.defined)?;
+        let body_undefined = solver.and(&[
+            guard_evaluation.enabled.clone(),
+            solver.not(&body_status.fully_defined)?,
+        ])?;
+        undefined.push(guard_undefined.clone());
+        undefined.push(body_undefined.clone());
+        evaluations.push((
+            instance,
+            guard_evaluation,
+            body_status,
+            guard_undefined,
+            body_undefined,
+        ));
+    }
+    // One disjunctive probe answers the common all-defined case; only a
+    // `sat` answer re-asks per instance, in the order the errors are reported.
+    solver.set_query_context("partial_op", "actions");
+    let any_undefined = probe(solver, &solver.or(&undefined)?).await?;
+    for (instance, guard_evaluation, body_status, guard_undefined, body_undefined) in evaluations {
+        let action = &model.actions[instance.action_index];
         let guard_failure = guard_evaluation.first_partial;
         solver.set_query_context("partial_op", &action.name);
-        if probe(solver, &guard_failure).await? {
+        if guard_evaluation.has_partial_operation && probe(solver, &guard_failure).await? {
             return Ok(Some(
                 make_action_partial_operation_violation(
                     solver,
@@ -941,8 +943,7 @@ async fn check_action_partial_operations<S: SmtSolver>(
                 .await?,
             ));
         }
-        let guard_undefined = solver.not(&guard_evaluation.defined)?;
-        if probe(solver, &guard_undefined).await? {
+        if any_undefined && probe(solver, &guard_undefined).await? {
             return Err(VerifyError::new(format!(
                 "action '{}' guard evaluation has a non-partial failure",
                 action.name
@@ -951,7 +952,7 @@ async fn check_action_partial_operations<S: SmtSolver>(
 
         let body_failure =
             solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
-        if probe(solver, &body_failure).await? {
+        if body_status.has_partial_operation && probe(solver, &body_failure).await? {
             return Ok(Some(
                 make_action_partial_operation_violation(
                     solver,
@@ -967,11 +968,7 @@ async fn check_action_partial_operations<S: SmtSolver>(
                 .await?,
             ));
         }
-        let body_undefined = solver.and(&[
-            guard_evaluation.enabled.clone(),
-            solver.not(&body_status.fully_defined)?,
-        ])?;
-        if probe(solver, &body_undefined).await? {
+        if any_undefined && probe(solver, &body_undefined).await? {
             return Err(VerifyError::new(format!(
                 "action '{}' body evaluation has a non-partial failure",
                 action.name
