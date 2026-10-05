@@ -161,8 +161,9 @@ must keep that order.
 
 `rust/fsl-core/tests/obligation_catalog.rs` (T2) pins each fixture's catalog as
 an exact multiset and checks that ids are unique; `catalog` also
-`debug_assert`s unique ids, and an exhaustive match with a compile-time
-assertion keeps `ObligationKind::ALL` complete and in order. The fixtures are:
+`debug_assert`s unique ids, and an exhaustive match whose arms look each kind
+up in `ObligationKind::ALL` at compile time keeps `ALL` complete (a kind
+missing from it fails `cargo check`). The fixtures are:
 
 - the reproducers of #1189, #1192, #1196, #1217 and #1221, the `helpful`
   fixture of #473, and a fixture with every non-ranked family;

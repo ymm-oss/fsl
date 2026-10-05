@@ -82,37 +82,40 @@ impl ObligationKind {
         Self::NoDeadlock,
     ];
 
-    /// This kind's index in [`Self::ALL`]. The match is exhaustive, so a new
-    /// kind does not compile until it has an index here; the assertion below
-    /// requires `ALL[i]` to be the kind of index `i`, and [`catalog`] checks
-    /// that every kind it generates is at its index.
+    /// This kind's index in [`Self::ALL`]. The match is exhaustive and each
+    /// arm looks its kind up at compile time, so a kind missing from `ALL`
+    /// does not build; [`catalog`] checks that every kind it generates is at
+    /// its index.
     const fn position(self) -> usize {
         match self {
-            Self::Holds => 0,
-            Self::Witnessed => 1,
-            Self::Responds => 2,
-            Self::Deadline => 3,
-            Self::PartialDefined => 4,
-            Self::NoOverflow => 5,
-            Self::KeyInDomain => 6,
-            Self::RankLowerBound => 7,
-            Self::RankNoDeadlock => 8,
-            Self::RankStep => 9,
-            Self::RankHelpfulFair => 10,
-            Self::RankHelpfulSticky => 11,
-            Self::InitSatisfiable => 12,
-            Self::NoDeadlock => 13,
+            Self::Holds => const { Self::index_in_all(Self::Holds) },
+            Self::Witnessed => const { Self::index_in_all(Self::Witnessed) },
+            Self::Responds => const { Self::index_in_all(Self::Responds) },
+            Self::Deadline => const { Self::index_in_all(Self::Deadline) },
+            Self::PartialDefined => const { Self::index_in_all(Self::PartialDefined) },
+            Self::NoOverflow => const { Self::index_in_all(Self::NoOverflow) },
+            Self::KeyInDomain => const { Self::index_in_all(Self::KeyInDomain) },
+            Self::RankLowerBound => const { Self::index_in_all(Self::RankLowerBound) },
+            Self::RankNoDeadlock => const { Self::index_in_all(Self::RankNoDeadlock) },
+            Self::RankStep => const { Self::index_in_all(Self::RankStep) },
+            Self::RankHelpfulFair => const { Self::index_in_all(Self::RankHelpfulFair) },
+            Self::RankHelpfulSticky => const { Self::index_in_all(Self::RankHelpfulSticky) },
+            Self::InitSatisfiable => const { Self::index_in_all(Self::InitSatisfiable) },
+            Self::NoDeadlock => const { Self::index_in_all(Self::NoDeadlock) },
         }
     }
-}
 
-const _: () = {
-    let mut index = 0;
-    while index < ObligationKind::ALL.len() {
-        assert!(ObligationKind::ALL[index].position() == index);
-        index += 1;
+    const fn index_in_all(kind: Self) -> usize {
+        let mut index = 0;
+        while index < Self::ALL.len() {
+            if Self::ALL[index] as usize == kind as usize {
+                return index;
+            }
+            index += 1;
+        }
+        panic!("an ObligationKind is missing from ObligationKind::ALL")
     }
-};
+}
 
 /// An authored declaration: its name and the byte offsets of its span. A
 /// checked model has unique property names (#1192); the offsets keep two
