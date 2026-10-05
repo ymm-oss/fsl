@@ -444,7 +444,8 @@ by zero) stays the unscoped hard error. A forbidden scenario whose <em>final</em
 is outside the overridden scope only because the override removed its argument
 tested no guard, so it is reported as <code>forbidden_skipped</code> rather than counted as
 satisfied; a final step outside the declared scope is the unscoped
-<code>kind:"forbidden"</code> error (#1229). These
+<code>kind:"forbidden"</code> error (#1229), unless the override widens the scope to
+include it, in which case the guard is evaluated. These
 three conditions are stricter than the frozen Python reference, which skips any
 out-of-range reference, excuses any <code>expect</code> error that mentions one, and counts
 an out-of-range final step as a rejection. This is what makes <code>--instances Case=1
@@ -1161,9 +1162,15 @@ the conjunctions of user invariants (<code>invariant_weakened</code> /
 <code>invariant_strengthened</code>) and replays OLD <code>forbidden</code> scenarios against NEW
 (<code>forbidden_relaxed</code>). A NEW final step that its guard disables preserves the
 OLD rejection, and so does a final step both sides reject as <code>bad_call</code> outside
-a range or enum parameter type; a <code>bad_call</code> decided by an <code>entity</code> / <code>number</code>
-verify scope declared on either side is <code>unknown</code> /
-<code>forbidden_step_unrelatable</code>, and an OLD final step naming no action or arity is
+a range or enum parameter type. Each side is classified with its own <code>entity</code> /
+<code>number</code> types: since #1229 an OLD final step outside its verify scope is
+<code>unknown</code> / <code>forbidden_replay_failed</code> (no OLD guard rejected it), and an OLD
+<code>bad_call</code> that only NEW's scope excludes is <code>unknown</code> /
+<code>forbidden_step_unrelatable</code> (before #1229 both were
+<code>forbidden_step_unrelatable</code>). A compose NEW, or a NEW of another dialect whose
+<code>entity</code> / <code>number</code> types are not in its source, never preserves an OLD
+<code>bad_call</code>; before #1229 a compose NEW that rejected the step as <code>bad_call</code>
+did, so such a forbidden now fails <code>--forbid unknown</code>. An OLD final step naming no action or arity is
 <code>unknown</code> / <code>forbidden_replay_failed</code>. Since #1213 a NEW final step that is
 enabled and then stops with a runtime violation is <code>forbidden_relaxed</code>, and an
 OLD final step or a NEW setup step that violates is <code>unknown</code> /

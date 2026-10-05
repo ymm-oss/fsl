@@ -421,7 +421,8 @@ by zero) stays the unscoped hard error. A forbidden scenario whose *final* step
 is outside the overridden scope only because the override removed its argument
 tested no guard, so it is reported as `forbidden_skipped` rather than counted as
 satisfied; a final step outside the declared scope is the unscoped
-`kind:"forbidden"` error (#1229). These
+`kind:"forbidden"` error (#1229), unless the override widens the scope to
+include it, in which case the guard is evaluated. These
 three conditions are stricter than the frozen Python reference, which skips any
 out-of-range reference, excuses any `expect` error that mentions one, and counts
 an out-of-range final step as a rejection. This is what makes `--instances Case=1
@@ -1081,9 +1082,15 @@ the conjunctions of user invariants (`invariant_weakened` /
 `invariant_strengthened`) and replays OLD `forbidden` scenarios against NEW
 (`forbidden_relaxed`). A NEW final step that its guard disables preserves the
 OLD rejection, and so does a final step both sides reject as `bad_call` outside
-a range or enum parameter type; a `bad_call` decided by an `entity` / `number`
-verify scope declared on either side is `unknown` /
-`forbidden_step_unrelatable`, and an OLD final step naming no action or arity is
+a range or enum parameter type. Each side is classified with its own `entity` /
+`number` types: since #1229 an OLD final step outside its verify scope is
+`unknown` / `forbidden_replay_failed` (no OLD guard rejected it), and an OLD
+`bad_call` that only NEW's scope excludes is `unknown` /
+`forbidden_step_unrelatable` (before #1229 both were
+`forbidden_step_unrelatable`). A compose NEW, or a NEW of another dialect whose
+`entity` / `number` types are not in its source, never preserves an OLD
+`bad_call`; before #1229 a compose NEW that rejected the step as `bad_call`
+did, so such a forbidden now fails `--forbid unknown`. An OLD final step naming no action or arity is
 `unknown` / `forbidden_replay_failed`. Since #1213 a NEW final step that is
 enabled and then stops with a runtime violation is `forbidden_relaxed`, and an
 OLD final step or a NEW setup step that violates is `unknown` /

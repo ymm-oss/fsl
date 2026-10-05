@@ -85,7 +85,8 @@ outside an `entity` / `number` verify scope (including the NEW scope OLD is
 replayed under) was rejected by no guard (#1229), so it is `unknown` with
 `forbidden_replay_failed`; one only NEW's scope excludes is `unknown` /
 `forbidden_step_unrelatable`. Before #1229 both were `unknown` /
-`forbidden_step_unrelatable`. An OLD final step that names no action,
+`forbidden_step_unrelatable`, and a compose NEW that rejected an OLD `bad_call`
+as `bad_call` preserved it. An OLD final step that names no action,
 or no variant of that arity, is `unknown` / `forbidden_replay_failed`. A NEW
 final step that is enabled and then stops with a runtime violation is not a
 rejection either (DESIGN-forbidden.md §2, #1213): it is `forbidden_relaxed`, and

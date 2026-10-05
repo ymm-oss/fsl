@@ -405,7 +405,8 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 ハードエラーのままです。forbidden シナリオの*最後の* step が、上書きが引数を
 取り除いたためだけに上書き後の範囲の外にある場合は guard を何も確かめていないので、
 充足とは数えず `forbidden_skipped` として報告します。宣言した範囲の外にある最後の
-step は、上書きなしと同じ `kind:"forbidden"` エラーです(#1229)。この3条件は frozen Python 参照実装より
+step は、上書きなしと同じ `kind:"forbidden"` エラーです(#1229)。ただし上書きが範囲を広げて
+その値を含める場合は guard を評価します。この3条件は frozen Python 参照実装より
 厳しく、Python は範囲外の参照をすべてスキップし、範囲外の参照を含む `expect` の
 エラーをすべて免除し、範囲外の最後の step を拒否として数えます。これにより、spec の acceptance シナリオが
 元の `verify { instances Case = N }` 境界向けに書かれていても、`--instances Case=1
@@ -1040,10 +1041,15 @@ sweep の各セルは `--instances`/`--values` 付きで走るので、セルが
 (`invariant_weakened` / `invariant_strengthened`)、OLD の `forbidden` シナリオを
 NEW に対して replay します(`forbidden_relaxed`)。NEW の最後のステップがガードで
 無効なら OLD の拒否は保たれ、両側が range / enum のパラメータ型の外の `bad_call` として
-拒否する最後のステップも保たれます。どちらかの側で宣言された `entity` / `number` の
-verify スコープが決めた `bad_call` は `unknown` / `forbidden_step_unrelatable`、
-どの action も arity も指さない OLD の最後のステップは `unknown` /
-`forbidden_replay_failed` です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
+拒否する最後のステップも保たれます。各側はそれぞれ自分の `entity` / `number` の型で
+判定されます。#1229 から、verify スコープの外にある OLD の最後のステップは `unknown` /
+`forbidden_replay_failed`(OLD のガードが拒否していない)、NEW のスコープだけが外す OLD の
+`bad_call` は `unknown` / `forbidden_step_unrelatable` です(#1229 より前はどちらも
+`forbidden_step_unrelatable` でした)。compose の NEW や、`entity` / `number` の型が
+ソースにない他のダイアレクトの NEW は、OLD の `bad_call` を保ちません。#1229 より前は、
+そのステップを `bad_call` として拒否する compose の NEW が保っていたので、そうした
+forbidden は今は `--forbid unknown` に落ちます。どの action も arity も指さない OLD の最後のステップは
+`unknown` / `forbidden_replay_failed` です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
 ステップは `forbidden_relaxed`、違反する OLD の最後のステップや NEW のセットアップの
 ステップは `unknown` / `forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
 ステップも保たれたと報告されます。

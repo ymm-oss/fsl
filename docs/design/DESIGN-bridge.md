@@ -78,8 +78,9 @@ The result of `step` (the same vocabulary as verify's JSON):
   Current guard and outcome priority must be read from the maintained Kernel
   transition/failure contract linked above, not inferred from this paragraph.
 - An unknown action name, a missing parameter, or being out of type range is `kind: "bad_call"`.
-  A `forbidden` last step narrows this: only an argument outside the parameter's checked
-  value domain is a `bad_call` rejection there; an unknown action or arity is a check error
+  A `forbidden` last step narrows this: only an argument outside the parameter's declared
+  range or enum type is a `bad_call` rejection there; an unknown action or arity, and an
+  argument outside an `entity` / `number` verify scope (#1229), is a check error
   (DESIGN-forbidden.md §2).
 
 ### 1.3 Determinism of init

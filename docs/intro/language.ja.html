@@ -430,7 +430,8 @@ impl 側だけの carried number(例: business の抽象には存在しない <c
 ハードエラーのままです。forbidden シナリオの<em>最後の</em> step が、上書きが引数を
 取り除いたためだけに上書き後の範囲の外にある場合は guard を何も確かめていないので、
 充足とは数えず <code>forbidden_skipped</code> として報告します。宣言した範囲の外にある最後の
-step は、上書きなしと同じ <code>kind:"forbidden"</code> エラーです(#1229)。この3条件は frozen Python 参照実装より
+step は、上書きなしと同じ <code>kind:"forbidden"</code> エラーです(#1229)。ただし上書きが範囲を広げて
+その値を含める場合は guard を評価します。この3条件は frozen Python 参照実装より
 厳しく、Python は範囲外の参照をすべてスキップし、範囲外の参照を含む <code>expect</code> の
 エラーをすべて免除し、範囲外の最後の step を拒否として数えます。これにより、spec の acceptance シナリオが
 元の <code>verify { instances Case = N }</code> 境界向けに書かれていても、<code>--instances Case=1
@@ -1121,10 +1122,15 @@ classification の欠落・未知・混在（<code>over_constrained</code> を�
 (<code>invariant_weakened</code> / <code>invariant_strengthened</code>)、OLD の <code>forbidden</code> シナリオを
 NEW に対して replay します(<code>forbidden_relaxed</code>)。NEW の最後のステップがガードで
 無効なら OLD の拒否は保たれ、両側が range / enum のパラメータ型の外の <code>bad_call</code> として
-拒否する最後のステップも保たれます。どちらかの側で宣言された <code>entity</code> / <code>number</code> の
-verify スコープが決めた <code>bad_call</code> は <code>unknown</code> / <code>forbidden_step_unrelatable</code>、
-どの action も arity も指さない OLD の最後のステップは <code>unknown</code> /
-<code>forbidden_replay_failed</code> です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
+拒否する最後のステップも保たれます。各側はそれぞれ自分の <code>entity</code> / <code>number</code> の型で
+判定されます。#1229 から、verify スコープの外にある OLD の最後のステップは <code>unknown</code> /
+<code>forbidden_replay_failed</code>(OLD のガードが拒否していない)、NEW のスコープだけが外す OLD の
+<code>bad_call</code> は <code>unknown</code> / <code>forbidden_step_unrelatable</code> です(#1229 より前はどちらも
+<code>forbidden_step_unrelatable</code> でした)。compose の NEW や、<code>entity</code> / <code>number</code> の型が
+ソースにない他のダイアレクトの NEW は、OLD の <code>bad_call</code> を保ちません。#1229 より前は、
+そのステップを <code>bad_call</code> として拒否する compose の NEW が保っていたので、そうした
+forbidden は今は <code>--forbid unknown</code> に落ちます。どの action も arity も指さない OLD の最後のステップは
+<code>unknown</code> / <code>forbidden_replay_failed</code> です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
 ステップは <code>forbidden_relaxed</code>、違反する OLD の最後のステップや NEW のセットアップの
 ステップは <code>unknown</code> / <code>forbidden_replay_failed</code> です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
 ステップも保たれたと報告されます。
