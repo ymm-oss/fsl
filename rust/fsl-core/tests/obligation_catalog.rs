@@ -737,7 +737,7 @@ spec BoundedIndexes {
   invariant Size { m[qk.size()] >= 0 }
   trans OldIndex { m[old(exact)] >= 0 }
   invariant AbsIndex { m[abs(exact)] >= 0 }
-  invariant CondLow { m[if b then low else exact] >= 0 }
+  invariant CondLow { m[if b then exact else low] >= 0 }
   invariant CondEnum { paint[if b then color else Red] >= 0 }
   invariant SetBinder { forall x in sk { m[x] >= 0 } }
   invariant RangeBinder { forall j in 0..2 { m[j] >= 0 } }
@@ -816,6 +816,111 @@ fn key_rows_bound_only_typed_index_forms() {
         &model,
         &expected.iter().map(String::as_str).collect::<Vec<_>>(),
     );
+}
+
+/// Pattern bindings that only the join over a whole context types soundly;
+/// `fslc verify --engine explicit` and `bmc` report a key-domain miss for
+/// both. `Nested`: `pp is some(o2)` rebinds the state variable `o2` to a
+/// `W` option, so `v` is a `W` -- only if `o2` is untyped while the payloads
+/// are typed. `across`: the guard binds `exact` to a `W` and the body's
+/// `p is some(exact)` keeps it, so the body's `K` payload alone is too narrow.
+const PATTERN_JOINS: &str = r"
+spec PatternJoins {
+  type K = 0..2
+  type V = 0..9
+  type W = 0..5
+  state {
+    m: Map<K, V>, pp: Option<Option<W>>, o2: Option<K>, o: Option<W>, p: Option<K>, exact: K
+  }
+  init { forall k: K { m[k] = 0 }  pp = some(some(5))  o2 = none  o = some(5)  p = some(0)  exact = 0 }
+  action across() { requires o is some(exact)  if p is some(exact) { m[exact] = 1 } }
+  invariant Nested { pp is some(o2) and o2 is some(v) and m[v] >= 0 }
+}
+";
+
+#[test]
+fn pattern_types_join_across_the_context() {
+    assert_catalog(
+        &model(PATTERN_JOINS),
+        &[
+            "InitSatisfiable@Init",
+            "Holds@TypeBound(m#0)",
+            "Holds@TypeBound(pp#1)",
+            "Holds@TypeBound(o2#2)",
+            "Holds@TypeBound(o#3)",
+            "Holds@TypeBound(p#4)",
+            "Holds@TypeBound(exact#5)",
+            "Holds@Invariant(Nested)",
+            "PartialDefined@Invariant(Nested)",
+            "NoOverflow@Invariant(Nested) [v]",
+            "KeyInDomain@Invariant(Nested)",
+            "PartialDefined@Guard(across) [v]",
+            "NoOverflow@Guard(across) [v]",
+            "KeyInDomain@Guard(across) [v]",
+            "PartialDefined@Body(across)",
+            "NoOverflow@Body(across) [v]",
+            "KeyInDomain@Body(across)",
+            "NoDeadlock@Model",
+        ],
+    );
+}
+
+/// A predicate call and a stage access are expanded and lowered before a
+/// model is built, but a hand-built model can hold them; the walk still
+/// reaches their operands. `Called`/`Staged` wrap `m[high]`, the controls
+/// wrap `high`.
+const UNLOWERED: &str = r"
+spec Unlowered {
+  type K = 0..2
+  type V = 0..9
+  state { m: Map<K, V>, high: 0..5 }
+  init { forall k: K { m[k] = 0 }  high = 0 }
+  action idle() { high = 0 }
+  invariant Called { m[high] >= 0 }
+  invariant Staged { m[high] >= 0 }
+  invariant CalledControl { high >= 0 }
+  invariant StagedControl { high >= 0 }
+}
+";
+
+#[test]
+fn unlowered_forms_reach_their_operands() {
+    let mut model = model(UNLOWERED);
+    for invariant in &mut model.invariants {
+        let span = invariant.span;
+        let KernelExpr::Binary { left, .. } = &mut invariant.expr else {
+            panic!("{} is not a comparison", invariant.name);
+        };
+        let operand = Box::new(std::mem::replace(left.as_mut(), KernelExpr::Num(0)));
+        **left = if invariant.name.starts_with("Called") {
+            KernelExpr::Call {
+                name: "p".to_owned(),
+                args: vec![*operand],
+                span,
+            }
+        } else {
+            KernelExpr::Stage {
+                process: None,
+                entity: operand,
+                entity_span: span,
+                span,
+            }
+        };
+    }
+    let key = |name: &str| {
+        catalog(&model)
+            .obligations
+            .into_iter()
+            .find(|row| {
+                row.id.kind == ObligationKind::KeyInDomain
+                    && matches!(&row.id.site, Site::Invariant(at) if at.name == name)
+            })
+            .map(|row| row.statically_vacuous)
+    };
+    assert_eq!(key("Called"), Some(false));
+    assert_eq!(key("Staged"), Some(false));
+    assert_eq!(key("CalledControl"), Some(true));
+    assert_eq!(key("StagedControl"), Some(true));
 }
 
 /// Overflow candidates (`abs`, unary `-`, `sum`, two chained `+`/`-`) against
