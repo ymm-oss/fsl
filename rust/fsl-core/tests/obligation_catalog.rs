@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
 
 //! T2 of `docs/design/DESIGN-obligation-catalog.md` (#1202): the minimum
 //! obligation catalog of each rule family, pinned as an exact multiset per
-//! fixture. Dropping any generator -- a family, a row kind, a site, or a
-//! vacuity predicate -- changes a fixture's rows and fails here. The fixtures
-//! are the reproducers of #1189, #1192, #1196, #1217 and #1221.
+//! fixture. The fixtures are the reproducers of #1189, #1192, #1196, #1217
+//! and #1221, and the false-vacuity reproducers of the first P1-a review.
+//! `candidates_reach_the_row_from_every_operand_position` puts one live
+//! candidate in each operand position the vacuity walk recurses through.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::obligation::{Obligation, ObligationId, ObligationKind, Site, SiteRef, catalog};
 use fsl_core::{
-    FsResolver, KernelModel, Span, build_model, parse_kernel_source,
+    FsResolver, KernelExpr, KernelModel, Span, build_model, parse_kernel_source,
     parse_kernel_source_with_bounds,
 };
 
@@ -391,9 +393,11 @@ fn issue_1221_out_of_domain_map_read_is_a_key_obligation() {
     );
 }
 
-/// The key-domain predicate: a read or write is in domain only when the
-/// index's static type (or literal value) lies inside the key type. Each
-/// site isolates one case; `Two`/`Writes` hold two misses, `Seq` a `Seq` read.
+/// The key-domain predicate: a read or write is in domain only when every
+/// value of the index lies inside the key type. Each site isolates one case;
+/// `Two`/`Writes` hold two misses, `SeqRead` a `Seq` read. `opt` and `Pattern`
+/// bind the state variable `high`'s name to a `K` payload: outside the binding
+/// `high` may be either, so its type is their join `0..5`.
 const KEY_DOMAINS: &str = r"
 spec KeyDomains {
   type K = 0..2
@@ -442,36 +446,375 @@ spec KeyDomains {
 }
 ";
 
+const KEY_DOMAINS_ROWS: &[&str] = &[
+    "InitSatisfiable@Init",
+    "Holds@TypeBound(m#0)",
+    "Holds@TypeBound(w#1)",
+    "Holds@TypeBound(paint#2)",
+    "Holds@TypeBound(flag#3)",
+    "Holds@TypeBound(q#4)",
+    "Holds@TypeBound(o#5)",
+    "Holds@TypeBound(exact#6)",
+    "Holds@TypeBound(inner#7)",
+    "Holds@TypeBound(high#8)",
+    "Holds@TypeBound(low#9)",
+    "Holds@TypeBound(color#10)",
+    "Holds@TypeBound(b#11) [v]",
+    "Holds@Invariant(Exact)",
+    "PartialDefined@Invariant(Exact)",
+    "NoOverflow@Invariant(Exact) [v]",
+    "KeyInDomain@Invariant(Exact) [v]",
+    "Holds@Invariant(Inner)",
+    "PartialDefined@Invariant(Inner)",
+    "NoOverflow@Invariant(Inner) [v]",
+    "KeyInDomain@Invariant(Inner) [v]",
+    "Holds@Invariant(High)",
+    "PartialDefined@Invariant(High)",
+    "NoOverflow@Invariant(High) [v]",
+    "KeyInDomain@Invariant(High)",
+    "Holds@Invariant(Below)",
+    "PartialDefined@Invariant(Below)",
+    "NoOverflow@Invariant(Below) [v]",
+    "KeyInDomain@Invariant(Below)",
+    "Holds@Invariant(LitIn)",
+    "PartialDefined@Invariant(LitIn)",
+    "NoOverflow@Invariant(LitIn) [v]",
+    "KeyInDomain@Invariant(LitIn) [v]",
+    "Holds@Invariant(LitOut)",
+    "PartialDefined@Invariant(LitOut)",
+    "NoOverflow@Invariant(LitOut) [v]",
+    "KeyInDomain@Invariant(LitOut)",
+    "Holds@Invariant(Paint)",
+    "PartialDefined@Invariant(Paint)",
+    "NoOverflow@Invariant(Paint) [v]",
+    "KeyInDomain@Invariant(Paint) [v]",
+    "Holds@Invariant(Flag)",
+    "PartialDefined@Invariant(Flag)",
+    "NoOverflow@Invariant(Flag) [v]",
+    "KeyInDomain@Invariant(Flag) [v]",
+    "Holds@Invariant(Bound)",
+    "PartialDefined@Invariant(Bound)",
+    "NoOverflow@Invariant(Bound) [v]",
+    "KeyInDomain@Invariant(Bound) [v]",
+    "Holds@Invariant(Shadow)",
+    "PartialDefined@Invariant(Shadow)",
+    "NoOverflow@Invariant(Shadow) [v]",
+    "KeyInDomain@Invariant(Shadow) [v]",
+    "Holds@Invariant(Pattern)",
+    "PartialDefined@Invariant(Pattern)",
+    "NoOverflow@Invariant(Pattern) [v]",
+    "KeyInDomain@Invariant(Pattern)",
+    "Holds@Invariant(Filtered)",
+    "PartialDefined@Invariant(Filtered)",
+    "NoOverflow@Invariant(Filtered) [v]",
+    "KeyInDomain@Invariant(Filtered)",
+    "Holds@Invariant(Two)",
+    "PartialDefined@Invariant(Two)",
+    "NoOverflow@Invariant(Two) [v]",
+    "KeyInDomain@Invariant(Two)",
+    "Holds@Invariant(SeqRead)",
+    "PartialDefined@Invariant(SeqRead)",
+    "NoOverflow@Invariant(SeqRead) [v]",
+    "KeyInDomain@Invariant(SeqRead) [v]",
+    "PartialDefined@Guard(write) [v]",
+    "NoOverflow@Guard(write) [v]",
+    "KeyInDomain@Guard(write) [v]",
+    "PartialDefined@Body(write)",
+    "NoOverflow@Body(write) [v]",
+    "KeyInDomain@Body(write) [v]",
+    "PartialDefined@Guard(writeHigh) [v]",
+    "NoOverflow@Guard(writeHigh) [v]",
+    "KeyInDomain@Guard(writeHigh) [v]",
+    "PartialDefined@Body(writeHigh)",
+    "NoOverflow@Body(writeHigh) [v]",
+    "KeyInDomain@Body(writeHigh)",
+    "PartialDefined@Guard(writes) [v]",
+    "NoOverflow@Guard(writes) [v]",
+    "KeyInDomain@Guard(writes) [v]",
+    "PartialDefined@Body(writes)",
+    "NoOverflow@Body(writes) [v]",
+    "KeyInDomain@Body(writes)",
+    "PartialDefined@Guard(lets)",
+    "NoOverflow@Guard(lets) [v]",
+    "KeyInDomain@Guard(lets) [v]",
+    "PartialDefined@Body(lets)",
+    "NoOverflow@Body(lets) [v]",
+    "KeyInDomain@Body(lets) [v]",
+    "PartialDefined@Guard(opt) [v]",
+    "NoOverflow@Guard(opt) [v]",
+    "KeyInDomain@Guard(opt) [v]",
+    "PartialDefined@Body(opt)",
+    "NoOverflow@Body(opt) [v]",
+    "KeyInDomain@Body(opt)",
+    "PartialDefined@Guard(all) [v]",
+    "NoOverflow@Guard(all) [v]",
+    "KeyInDomain@Guard(all) [v]",
+    "PartialDefined@Body(all)",
+    "NoOverflow@Body(all) [v]",
+    "KeyInDomain@Body(all) [v]",
+    "PartialDefined@Guard(branch) [v]",
+    "NoOverflow@Guard(branch) [v]",
+    "KeyInDomain@Guard(branch) [v]",
+    "PartialDefined@Body(branch)",
+    "NoOverflow@Body(branch) [v]",
+    "KeyInDomain@Body(branch)",
+    "NoDeadlock@Model",
+];
+
 #[test]
 fn key_rows_follow_the_index_type() {
-    let rows = catalog(&model(KEY_DOMAINS)).obligations;
-    let live = rows
-        .iter()
-        .filter(|row| row.id.kind == ObligationKind::KeyInDomain && !row.statically_vacuous)
-        .map(|row| site_text(&row.id.site))
-        .collect::<BTreeSet<_>>();
-    let expected = [
-        "Body(writeHigh)",
-        "Body(writes)",
-        "Body(branch)",
-        "Invariant(High)",
-        "Invariant(Below)",
-        "Invariant(LitOut)",
-        "Invariant(Filtered)",
-        "Invariant(Two)",
+    assert_catalog(&model(KEY_DOMAINS), KEY_DOMAINS_ROWS);
+}
+
+/// False-vacuity reproducers of the first P1-a review: each `KeyInDomain`
+/// row below but `CondJoin`, `FreshPattern` and `paramKeeps` failed in
+/// `fslc verify --engine explicit` (and `bmc`) while the catalog marked it
+/// vacuous, because the index was typed by what `check` infers -- the `then`
+/// branch of a conditional, the receiver of `push`/`add`, a pattern binding
+/// that `check` lets shadow a state variable, binder or parameter -- or by a
+/// pattern the evaluators had not bound. The three exceptions are in-domain
+/// controls: a conditional whose branches both lie in `K`, a pattern name
+/// with no other meaning, and a parameter a pattern cannot rebind. The type
+/// bounds of a relation and of `Map<K, Int>` can fail; `Option<Int>` cannot.
+const FALSE_VACUITY: &str = r"
+spec FalseVacuity {
+  type K = 0..2
+  type V = 0..9
+  type W = 0..5
+  type Small = 0..0
+  state {
+    m: Map<K, V>, n: Map<Small, V>, s: Set<K>, q: Seq<K, 2>,
+    o: Option<W>, p: Option<K>, exact: K, high: W, b: Bool,
+    r: relation K -> K, mi: Map<K, Int>, oi: Option<Int>
+  }
+  init {
+    forall k: K { m[k] = 0 }
+    forall k: Small { n[k] = 0 }
+    forall k: K { mi[k] = 0 }
+    s = Set {}  q = Seq {}  o = some(5)  p = some(0)  exact = 0  high = 5  b = false
+    r = Set {}  oi = none
+  }
+  invariant CondIndex { m[if b then exact else high] >= 0 }
+  invariant CondMap { (if b then m else n)[exact] >= 0 }
+  invariant PushHead { m[q.push(high).head()] >= 0 }
+  invariant AddBinder { forall x in s.add(high) { m[x] >= 0 } }
+  invariant CondPattern { (if o is some(exact) then m[exact] else 0) >= 0 }
+  invariant WherePattern { forall k: K where o is some(exact) { m[exact] >= 0 } }
+  invariant OrPattern { p is some(high) or m[high] >= 0 }
+  invariant TwicePattern { o is some(exact) and p is some(exact) and m[exact] >= 0 }
+  invariant BinderPattern { forall exact: W { p is some(exact) => m[exact] >= 0 } }
+  invariant CondJoin { m[if b then exact else 0] >= 0 }
+  invariant FreshPattern { p is some(v) => m[v] >= 0 }
+  action condLet() { let k = if b then exact else high  requires m[k] >= 0  b = not b }
+  action ifPattern() { if o is some(exact) { m[exact] = 1 } }
+  action paramPattern(exact: W) { requires p is some(exact)  m[exact] = 1 }
+  action paramKeeps(exact: K) { requires o is some(exact)  m[exact] = 1 }
+}
+";
+
+#[test]
+fn false_vacuity_reproducers_are_live() {
+    assert_catalog(
+        &model(FALSE_VACUITY),
+        &[
+            "InitSatisfiable@Init",
+            "Holds@TypeBound(m#0)",
+            "Holds@TypeBound(n#1)",
+            "Holds@TypeBound(s#2)",
+            "Holds@TypeBound(q#3)",
+            "Holds@TypeBound(o#4)",
+            "Holds@TypeBound(p#5)",
+            "Holds@TypeBound(exact#6)",
+            "Holds@TypeBound(high#7)",
+            "Holds@TypeBound(b#8) [v]",
+            "Holds@TypeBound(r#9)",
+            "Holds@TypeBound(mi#10)",
+            "Holds@TypeBound(oi#11) [v]",
+            "Holds@Invariant(CondIndex)",
+            "PartialDefined@Invariant(CondIndex)",
+            "NoOverflow@Invariant(CondIndex) [v]",
+            "KeyInDomain@Invariant(CondIndex)",
+            "Holds@Invariant(CondMap)",
+            "PartialDefined@Invariant(CondMap)",
+            "NoOverflow@Invariant(CondMap) [v]",
+            "KeyInDomain@Invariant(CondMap)",
+            "Holds@Invariant(PushHead)",
+            "PartialDefined@Invariant(PushHead)",
+            "NoOverflow@Invariant(PushHead) [v]",
+            "KeyInDomain@Invariant(PushHead)",
+            "Holds@Invariant(AddBinder)",
+            "PartialDefined@Invariant(AddBinder)",
+            "NoOverflow@Invariant(AddBinder) [v]",
+            "KeyInDomain@Invariant(AddBinder)",
+            "Holds@Invariant(CondPattern)",
+            "PartialDefined@Invariant(CondPattern)",
+            "NoOverflow@Invariant(CondPattern) [v]",
+            "KeyInDomain@Invariant(CondPattern)",
+            "Holds@Invariant(WherePattern)",
+            "PartialDefined@Invariant(WherePattern)",
+            "NoOverflow@Invariant(WherePattern) [v]",
+            "KeyInDomain@Invariant(WherePattern)",
+            "Holds@Invariant(OrPattern)",
+            "PartialDefined@Invariant(OrPattern)",
+            "NoOverflow@Invariant(OrPattern) [v]",
+            "KeyInDomain@Invariant(OrPattern)",
+            "Holds@Invariant(TwicePattern)",
+            "PartialDefined@Invariant(TwicePattern)",
+            "NoOverflow@Invariant(TwicePattern) [v]",
+            "KeyInDomain@Invariant(TwicePattern)",
+            "Holds@Invariant(BinderPattern)",
+            "PartialDefined@Invariant(BinderPattern)",
+            "NoOverflow@Invariant(BinderPattern) [v]",
+            "KeyInDomain@Invariant(BinderPattern)",
+            "Holds@Invariant(CondJoin)",
+            "PartialDefined@Invariant(CondJoin)",
+            "NoOverflow@Invariant(CondJoin) [v]",
+            "KeyInDomain@Invariant(CondJoin) [v]",
+            "Holds@Invariant(FreshPattern)",
+            "PartialDefined@Invariant(FreshPattern)",
+            "NoOverflow@Invariant(FreshPattern) [v]",
+            "KeyInDomain@Invariant(FreshPattern) [v]",
+            "PartialDefined@Guard(condLet)",
+            "NoOverflow@Guard(condLet) [v]",
+            "KeyInDomain@Guard(condLet)",
+            "PartialDefined@Body(condLet) [v]",
+            "NoOverflow@Body(condLet) [v]",
+            "KeyInDomain@Body(condLet) [v]",
+            "PartialDefined@Guard(ifPattern) [v]",
+            "NoOverflow@Guard(ifPattern) [v]",
+            "KeyInDomain@Guard(ifPattern) [v]",
+            "PartialDefined@Body(ifPattern)",
+            "NoOverflow@Body(ifPattern) [v]",
+            "KeyInDomain@Body(ifPattern)",
+            "PartialDefined@Guard(paramPattern) [v]",
+            "NoOverflow@Guard(paramPattern) [v]",
+            "KeyInDomain@Guard(paramPattern) [v]",
+            "PartialDefined@Body(paramPattern)",
+            "NoOverflow@Body(paramPattern) [v]",
+            "KeyInDomain@Body(paramPattern)",
+            "PartialDefined@Guard(paramKeeps) [v]",
+            "NoOverflow@Guard(paramKeeps) [v]",
+            "KeyInDomain@Guard(paramKeeps) [v]",
+            "PartialDefined@Body(paramKeeps)",
+            "NoOverflow@Body(paramKeeps) [v]",
+            "KeyInDomain@Body(paramKeeps) [v]",
+            "NoDeadlock@Model",
+        ],
+    );
+}
+
+/// One index per form whose value the catalog bounds by a type: a literal,
+/// an enum member, a field, a map value, `head`/`at`, `old`, a conditional of
+/// two members, a set binder and a range binder are in domain. `size`, `abs`
+/// and a conditional with a branch below `K` are left live even where the
+/// value happens to fit: the catalog bounds no value it does not type.
+/// `Member` is lowered from `paint[Red]` and rebuilt with `Color.Red` as an
+/// `EnumMember`, which no surface text produces.
+const BOUNDED_INDEXES: &str = r"
+spec BoundedIndexes {
+  type K = 0..2
+  type V = 0..9
+  type Low = -1..2
+  enum Color { Red, Blue }
+  struct Rec { k: K }
+  state {
+    m: Map<K, V>, mk: Map<K, K>, paint: Map<Color, V>, flag: Map<Bool, V>,
+    qk: Seq<K, 2>, sk: Set<K>, rec: Rec, exact: K, low: Low, color: Color, b: Bool
+  }
+  init {
+    forall k: K { m[k] = 0 }
+    forall k: K { mk[k] = 0 }
+    forall c: Color { paint[c] = 0 }
+    qk = Seq {}  sk = Set {}  rec = Rec { k: 0 }  exact = 0  low = 0  color = Red  b = false
+  }
+  action flip() { b = not b }
+  invariant BoolLiteral { flag[true] >= 0 }
+  invariant Member { paint[Red] >= 0 }
+  invariant FieldIndex { m[rec.k] >= 0 }
+  invariant MapValue { m[mk[exact]] >= 0 }
+  invariant Head { qk.size() == 0 or m[qk.head()] >= 0 }
+  invariant At { qk.size() == 0 or m[qk.at(0)] >= 0 }
+  invariant Size { m[qk.size()] >= 0 }
+  trans OldIndex { m[old(exact)] >= 0 }
+  invariant AbsIndex { m[abs(exact)] >= 0 }
+  invariant CondLow { m[if b then low else exact] >= 0 }
+  invariant CondEnum { paint[if b then color else Red] >= 0 }
+  invariant SetBinder { forall x in sk { m[x] >= 0 } }
+  invariant RangeBinder { forall j in 0..2 { m[j] >= 0 } }
+}
+";
+
+#[test]
+fn key_rows_bound_only_typed_index_forms() {
+    let mut model = model(BOUNDED_INDEXES);
+    let member = model
+        .invariants
+        .iter_mut()
+        .find(|invariant| invariant.name == "Member")
+        .expect("Member invariant");
+    let KernelExpr::Binary { left, .. } = &mut member.expr else {
+        panic!("Member is not a comparison: {:?}", member.expr);
+    };
+    let KernelExpr::Index(_, index) = left.as_mut() else {
+        panic!("Member does not index: {left:?}");
+    };
+    assert_eq!(**index, KernelExpr::Var("Red".to_owned()));
+    **index = KernelExpr::EnumMember {
+        type_name: "Color".to_owned(),
+        member: "Red".to_owned(),
+    };
+    let property = |name: &str, key_vacuous: bool, overflow_vacuous: bool| {
+        let v = |vacuous: bool| if vacuous { " [v]" } else { "" };
+        [
+            format!("Holds@{name}"),
+            format!("PartialDefined@{name}"),
+            format!("NoOverflow@{name}{}", v(overflow_vacuous)),
+            format!("KeyInDomain@{name}{}", v(key_vacuous)),
+        ]
+    };
+    let mut expected = [
+        "InitSatisfiable@Init",
+        "Holds@TypeBound(m#0)",
+        "Holds@TypeBound(mk#1)",
+        "Holds@TypeBound(paint#2)",
+        "Holds@TypeBound(flag#3)",
+        "Holds@TypeBound(qk#4)",
+        "Holds@TypeBound(sk#5)",
+        "Holds@TypeBound(rec#6)",
+        "Holds@TypeBound(exact#7)",
+        "Holds@TypeBound(low#8)",
+        "Holds@TypeBound(color#9)",
+        "Holds@TypeBound(b#10) [v]",
+        "PartialDefined@Guard(flip) [v]",
+        "NoOverflow@Guard(flip) [v]",
+        "KeyInDomain@Guard(flip) [v]",
+        "PartialDefined@Body(flip) [v]",
+        "NoOverflow@Body(flip) [v]",
+        "KeyInDomain@Body(flip) [v]",
+        "NoDeadlock@Model",
     ]
-    .into_iter()
     .map(str::to_owned)
-    .collect::<BTreeSet<_>>();
-    assert_eq!(live, expected);
-    let key_sites = rows
-        .iter()
-        .filter(|row| row.id.kind == ObligationKind::KeyInDomain)
-        .count();
-    assert_eq!(
-        key_sites,
-        7 * 2 + 14,
-        "every action guard/body and invariant"
+    .to_vec();
+    for (name, key_vacuous, overflow_vacuous) in [
+        ("Invariant(BoolLiteral)", true, true),
+        ("Invariant(Member)", true, true),
+        ("Invariant(FieldIndex)", true, true),
+        ("Invariant(MapValue)", true, true),
+        ("Invariant(Head)", true, true),
+        ("Invariant(At)", true, true),
+        ("Invariant(Size)", false, true),
+        ("Trans(OldIndex)", true, true),
+        ("Invariant(AbsIndex)", false, false),
+        ("Invariant(CondLow)", false, true),
+        ("Invariant(CondEnum)", true, true),
+        ("Invariant(SetBinder)", true, true),
+        ("Invariant(RangeBinder)", true, true),
+    ] {
+        expected.extend(property(name, key_vacuous, overflow_vacuous));
+    }
+    assert_catalog(
+        &model,
+        &expected.iter().map(String::as_str).collect::<Vec<_>>(),
     );
 }
 
@@ -716,10 +1059,14 @@ fn action_sites_carry_the_action_span() {
     );
 }
 
-/// Property selection removes sites from the model the engines see; the rows
-/// of the sites it keeps are unchanged and it adds none.
+/// Property selection removes sites from the model the engines see, and the
+/// catalog of that model drops their rows. #1201 needs every row of a
+/// selected run -- the unselected ones `NotRun` -- so the ledger (P1-c) must
+/// call `catalog` on the full model, never on the selected one; this pins
+/// that the selected model's catalog is only a subset, with the kept sites'
+/// rows unchanged.
 #[test]
-fn a_selected_model_owes_a_subset_with_identical_kept_rows() {
+fn a_selected_model_drops_rows_so_the_ledger_needs_the_full_model() {
     let full = model(FAMILIES);
     let mut selected = full.clone();
     selected
@@ -743,8 +1090,8 @@ fn a_selected_model_owes_a_subset_with_identical_kept_rows() {
     assert_eq!(peek(&selected_rows), peek(&full_rows));
 }
 
-/// `entity`/`number` sizes are a verification scope, not a declaration: a
-/// scope override leaves every row as it is.
+/// `entity`/`number` sizes are a verification scope. Where every index has
+/// the key's own type, as here, an override leaves every row as it is.
 const SCOPED: &str = r"
 spec Scoped {
   entity Claim
@@ -757,6 +1104,22 @@ spec Scoped {
 verify { instances Claim = 2  values Amount = 0..2 }
 ";
 
+const SCOPED_ROWS: &[&str] = &[
+    "InitSatisfiable@Init",
+    "Holds@TypeBound(amount#0)",
+    "Holds@Invariant(NonNeg)",
+    "PartialDefined@Invariant(NonNeg)",
+    "NoOverflow@Invariant(NonNeg) [v]",
+    "KeyInDomain@Invariant(NonNeg) [v]",
+    "PartialDefined@Guard(set) [v]",
+    "NoOverflow@Guard(set) [v]",
+    "KeyInDomain@Guard(set) [v]",
+    "PartialDefined@Body(set)",
+    "NoOverflow@Body(set) [v]",
+    "KeyInDomain@Body(set) [v]",
+    "NoDeadlock@Model",
+];
+
 #[test]
 fn a_scope_override_keeps_every_row() {
     let declared = model(SCOPED);
@@ -768,7 +1131,228 @@ fn a_scope_override_keeps_every_row() {
     .expect("override lowers");
     let overridden = build_model(kernel).expect("override builds");
     assert_ne!(declared.types, overridden.types, "the override took effect");
-    assert_eq!(catalog(&declared), catalog(&overridden));
+    assert_catalog(&declared, SCOPED_ROWS);
+    assert_catalog(&overridden, SCOPED_ROWS);
+}
+
+/// An index of another type is in domain only for the sizes that make it
+/// so: declared, `Amount = 0..1` lies in `Claim`'s `0..1` and `fslc verify
+/// --engine explicit` proves the spec; with `--values Amount=0..3` it reports
+/// `map assignment index outside key domain`, and the row is live.
+const SCOPE_FLIP: &str = r"
+spec ScopeFlip {
+  entity Claim
+  number Amount
+  type V = 0..9
+  state { seen: Map<Claim, V>, a: Amount }
+  init { forall c: Claim { seen[c] = 0 }  a = 0 }
+  action bump() { requires a < 1  a = a + 1 }
+  action pick(x: Amount) { seen[x] = 1 }
+}
+verify { instances Claim = 2  values Amount = 0..1 }
+";
+
+#[test]
+fn a_scope_override_can_make_a_key_row_live() {
+    assert_catalog(
+        &model(SCOPE_FLIP),
+        &[
+            "InitSatisfiable@Init",
+            "Holds@TypeBound(seen#0)",
+            "Holds@TypeBound(a#1)",
+            "PartialDefined@Guard(bump) [v]",
+            "NoOverflow@Guard(bump) [v]",
+            "KeyInDomain@Guard(bump) [v]",
+            "PartialDefined@Body(bump) [v]",
+            "NoOverflow@Body(bump)",
+            "KeyInDomain@Body(bump) [v]",
+            "PartialDefined@Guard(pick) [v]",
+            "NoOverflow@Guard(pick) [v]",
+            "KeyInDomain@Guard(pick) [v]",
+            "PartialDefined@Body(pick)",
+            "NoOverflow@Body(pick) [v]",
+            "KeyInDomain@Body(pick) [v]",
+            "NoDeadlock@Model",
+        ],
+    );
+    let kernel = parse_kernel_source_with_bounds(
+        SCOPE_FLIP,
+        &BTreeMap::new(),
+        &BTreeMap::from([("Amount".to_owned(), (0, 3))]),
+    )
+    .expect("override lowers");
+    assert_catalog(
+        &build_model(kernel).expect("override builds"),
+        &[
+            "InitSatisfiable@Init",
+            "Holds@TypeBound(seen#0)",
+            "Holds@TypeBound(a#1)",
+            "PartialDefined@Guard(bump) [v]",
+            "NoOverflow@Guard(bump) [v]",
+            "KeyInDomain@Guard(bump) [v]",
+            "PartialDefined@Body(bump) [v]",
+            "NoOverflow@Body(bump)",
+            "KeyInDomain@Body(bump) [v]",
+            "PartialDefined@Guard(pick) [v]",
+            "NoOverflow@Guard(pick) [v]",
+            "KeyInDomain@Guard(pick) [v]",
+            "PartialDefined@Body(pick)",
+            "NoOverflow@Body(pick) [v]",
+            "KeyInDomain@Body(pick)",
+            "NoDeadlock@Model",
+        ],
+    );
+}
+
+/// One site per operand position of the vacuity walk, each holding `HOLE`
+/// and nothing else that can fail: `m[i]` (`i: Int`) is a live key candidate,
+/// `x + 1` a live overflow candidate and `0` neither. Every variant passes
+/// `fslc check`. `Expr::Call` and `Expr::Stage` are lowered away before a
+/// `KernelModel` exists, and a `leadsTo` binder reads no state.
+const POSITIONS: &str = r"
+spec Positions {
+  type K = 0..2
+  type V = 0..9
+  struct Rec { f: V }
+  state {
+    m: Map<K, V>, w: Map<K, V>, recs: Map<K, Rec>, q: Seq<V, 2>, s: Set<K>,
+    o: Option<V>, r: relation K -> K, i: Int, x: Int, y: Int, b: Bool
+  }
+  init {
+    forall k: K { m[k] = 0 }
+    forall k: K { w[k] = 0 }
+    forall k: K { recs[k] = Rec { f: 0 } }
+    q = Seq {}  s = Set {}  o = none  r = Set {}  i = 0  x = 0  y = 0  b = false
+  }
+  invariant Neg { -(HOLE) <= 0 }
+  invariant Abs { abs(HOLE) >= 0 }
+  trans Old { old(HOLE) >= 0 }
+  invariant SomeOf { some(HOLE) != none }
+  invariant NotOf { not (HOLE > 0) }
+  invariant FieldOf { recs[if HOLE > 0 then 0 else 1].f >= 0 }
+  invariant IsOf { (if HOLE > 0 then o else o) is none }
+  invariant SetItem { Set { HOLE }.contains(0) }
+  invariant SeqItem { Seq { HOLE }.size() > 0 }
+  invariant StructField { Rec { f: HOLE } == Rec { f: 0 } }
+  invariant IndexBase { (if HOLE > 0 then m else w)[0] >= 0 }
+  invariant IndexIndex { q.size() == 0 or q[HOLE] >= 0 }
+  invariant MinLeft { min(HOLE, 0) >= 0 }
+  invariant MaxRight { max(0, HOLE) >= 0 }
+  invariant BinaryLeft { HOLE >= 0 }
+  invariant BinaryRight { 0 <= HOLE }
+  invariant MethodReceiver { (if HOLE > 0 then q else q).size() >= 0 }
+  invariant MethodArg { q.contains(HOLE) or true }
+  invariant CondCondition { (if HOLE > 0 then 0 else 1) >= 0 }
+  invariant CondThen { (if b then HOLE else 0) >= 0 }
+  invariant CondElse { (if b then 0 else HOLE) >= 0 }
+  invariant QuantBody { forall k: K { HOLE >= 0 } }
+  invariant QuantWhere { forall k: K where HOLE > 0 { true } }
+  invariant QuantLo { forall k in HOLE..2 { true } }
+  invariant QuantHi { forall k in 0..HOLE { true } }
+  invariant QuantCollection { forall v in (if HOLE > 0 then s else s) { true } }
+  invariant SumValue { sum(k: K of HOLE) >= 0 }
+  invariant CountWhere { count(k: K where HOLE > 0) >= 0 }
+  invariant ReachFirst { reachable(if HOLE > 0 then r else r, 0, 0) or true }
+  invariant ReachSecond { reachable(r, if HOLE > 0 then 0 else 1, 0) or true }
+  invariant ReachThird { reachable(r, 0, if HOLE > 0 then 0 else 1) or true }
+  reachable Witness { HOLE > 0 }
+  leadsTo Trig { HOLE > 0 ~> b }
+  leadsTo Goal { b ~> HOLE > 0 }
+  leadsTo Meas { b ~> not b decreases HOLE }
+  terminal { HOLE > 0 }
+  action assignValue() { y = HOLE }
+  action assignTarget() { w[if HOLE > 0 then 0 else 1] = 0 }
+  action assignField() { recs[if HOLE > 0 then 0 else 1].f = 0 }
+  action ifCondition() { if HOLE > 0 { y = 0 } }
+  action ifThen() { if b { y = HOLE } }
+  action ifElse() { if b { y = 0 } else { y = HOLE } }
+  action forallBody() { forall k: K { w[k] = HOLE } }
+  action forallWhere() { forall k: K where HOLE > 0 { w[k] = 0 } }
+  action guardRequires() { requires HOLE > 0  y = 0 }
+  action guardLet() { let z = HOLE  requires z > 0  y = 0 }
+  action ensuresOf() { y = 0  ensures HOLE >= 0 }
+}
+";
+
+/// `(site, whether the site overflows without the hole)`, with the walk
+/// steps between the site and its hole.
+const OPERAND_POSITIONS: &[(&str, bool)] = &[
+    ("Invariant(Neg)", true),              // Neg
+    ("Invariant(Abs)", true),              // UnaryNamed abs
+    ("Trans(Old)", false),                 // UnaryNamed old
+    ("Invariant(SomeOf)", false),          // Some
+    ("Invariant(NotOf)", false),           // Not
+    ("Invariant(FieldOf)", false),         // Field, Index index, Conditional condition
+    ("Invariant(IsOf)", false),            // Is
+    ("Invariant(SetItem)", false),         // Set items, Method receiver
+    ("Invariant(SeqItem)", false),         // Seq items
+    ("Invariant(StructField)", false),     // Struct fields
+    ("Invariant(IndexBase)", false),       // Index collection
+    ("Invariant(IndexIndex)", false),      // Index index
+    ("Invariant(MinLeft)", false),         // BinaryNamed left
+    ("Invariant(MaxRight)", false),        // BinaryNamed right
+    ("Invariant(BinaryLeft)", false),      // Binary left
+    ("Invariant(BinaryRight)", false),     // Binary right
+    ("Invariant(MethodReceiver)", false),  // Method receiver
+    ("Invariant(MethodArg)", false),       // Method args
+    ("Invariant(CondCondition)", false),   // Conditional condition
+    ("Invariant(CondThen)", false),        // Conditional then
+    ("Invariant(CondElse)", false),        // Conditional else
+    ("Invariant(QuantBody)", false),       // Quantified body
+    ("Invariant(QuantWhere)", false),      // binder where
+    ("Invariant(QuantLo)", false),         // binder range lo
+    ("Invariant(QuantHi)", false),         // binder range hi
+    ("Invariant(QuantCollection)", false), // binder collection
+    ("Invariant(SumValue)", true),         // Aggregate value
+    ("Invariant(CountWhere)", false),      // Aggregate binder
+    ("Invariant(ReachFirst)", false),      // TernaryNamed first
+    ("Invariant(ReachSecond)", false),     // TernaryNamed second
+    ("Invariant(ReachThird)", false),      // TernaryNamed third
+    ("Reachable(Witness)", false),         // reachable
+    ("Trigger(Trig)", false),              // leadsTo trigger
+    ("Goal(Goal)", false),                 // leadsTo goal
+    ("Measure(Meas)", false),              // decreases
+    ("Terminal", false),                   // terminal
+    ("Body(assignValue)", false),          // Assign value
+    ("Body(assignTarget)", false),         // LValue index
+    ("Body(assignField)", false),          // LValue field
+    ("Body(ifCondition)", false),          // If condition
+    ("Body(ifThen)", false),               // If then
+    ("Body(ifElse)", false),               // If else
+    ("Body(forallBody)", false),           // ForAll statements
+    ("Body(forallWhere)", false),          // ForAll binder
+    ("Guard(guardRequires)", false),       // requires
+    ("Guard(guardLet)", false),            // let
+    ("Ensures(ensuresOf#0)", false),       // ensures
+];
+
+#[test]
+fn candidates_reach_the_row_from_every_operand_position() {
+    let live = |hole: &str, kind: ObligationKind| {
+        catalog(&model(&POSITIONS.replace("HOLE", hole)))
+            .obligations
+            .iter()
+            .filter(|row| row.id.kind == kind && !row.statically_vacuous)
+            .map(|row| site_text(&row.id.site))
+            .collect::<BTreeSet<_>>()
+    };
+    let sites = |filter: fn(bool) -> bool| {
+        OPERAND_POSITIONS
+            .iter()
+            .filter(|(_, own)| filter(*own))
+            .map(|(site, _)| (*site).to_owned())
+            .collect::<BTreeSet<_>>()
+    };
+    let every = sites(|_| true);
+    assert_eq!(
+        every.len(),
+        OPERAND_POSITIONS.len(),
+        "a site is listed twice"
+    );
+    assert_eq!(live("m[i]", ObligationKind::KeyInDomain), every);
+    assert_eq!(live("x + 1", ObligationKind::NoOverflow), every);
+    assert_eq!(live("0", ObligationKind::KeyInDomain), BTreeSet::new());
+    assert_eq!(live("0", ObligationKind::NoOverflow), sites(|own| own));
 }
 
 /// Every kind and every site variant is exercised by some fixture above, so

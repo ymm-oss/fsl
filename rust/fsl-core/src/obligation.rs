@@ -10,18 +10,17 @@
 //! model -- no solver, no property selection -- so the rows a run owes exist
 //! before any engine decides which of them it discharges.
 
-use fsl_syntax::{Binder, Expr, LValue, Span, Statement};
+use std::collections::BTreeMap;
+
+use fsl_syntax::{Binder, Expr, LValue, Pattern, Span, Statement};
 
 use crate::partial_operation::{
     for_each_partial_operation_candidate, statement_has_partial_operation_candidate,
 };
-use crate::typecheck::{
-    TypeEnv, base_env, binder_type, extend_pattern_binding, infer_type, resolve,
-};
+use crate::typecheck::{TypeEnv, base_env, binder_type, resolve, struct_field_type};
 use crate::{
-    ActionDef, ActionGuard, KernelAggregateKind, KernelModel, LeadsToDef, ParamDef,
-    PartialOperation, PropertyDef, TypeDef, TypeRef, expression_has_partial_operation_candidate,
-    recursion,
+    ActionDef, ActionGuard, KernelAggregateKind, KernelModel, ParamDef, PartialOperation,
+    PropertyDef, TypeRef, expression_has_partial_operation_candidate, recursion,
 };
 
 /// The aspect of a site an obligation asks about.
@@ -82,7 +81,38 @@ impl ObligationKind {
         Self::InitSatisfiable,
         Self::NoDeadlock,
     ];
+
+    /// This kind's index in [`Self::ALL`]. The match is exhaustive, so a new
+    /// kind does not compile until it has an index here; the assertion below
+    /// requires `ALL[i]` to be the kind of index `i`, and [`catalog`] checks
+    /// that every kind it generates is at its index.
+    const fn position(self) -> usize {
+        match self {
+            Self::Holds => 0,
+            Self::Witnessed => 1,
+            Self::Responds => 2,
+            Self::Deadline => 3,
+            Self::PartialDefined => 4,
+            Self::NoOverflow => 5,
+            Self::KeyInDomain => 6,
+            Self::RankLowerBound => 7,
+            Self::RankNoDeadlock => 8,
+            Self::RankStep => 9,
+            Self::RankHelpfulFair => 10,
+            Self::RankHelpfulSticky => 11,
+            Self::InitSatisfiable => 12,
+            Self::NoDeadlock => 13,
+        }
+    }
 }
+
+const _: () = {
+    let mut index = 0;
+    while index < ObligationKind::ALL.len() {
+        assert!(ObligationKind::ALL[index].position() == index);
+        index += 1;
+    }
+};
 
 /// An authored declaration: its name and the byte offsets of its span. A
 /// checked model has unique property names (#1192); the offsets keep two
@@ -159,9 +189,14 @@ pub struct ObligationId {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Obligation {
     pub id: ObligationId,
-    /// No evaluation of the site can fail this obligation, by a syntactic
-    /// over-approximation: an engine that asks nothing here skips no
-    /// question. Only type-bound and definedness rows can be vacuous.
+    /// The site holds no candidate for this obligation: no partial operation,
+    /// no overflowing operator, no index the catalog cannot place inside its
+    /// key type, or a state type every value conforms to. Only type-bound and
+    /// definedness rows can be vacuous. Candidates over-approximate, so a
+    /// vacuous row is one no evaluation of the site can fail -- for
+    /// `KeyInDomain`, provided the state it reads satisfies the model's
+    /// `Holds@TypeBound` rows; a run that leaves one of those unchecked cannot
+    /// rely on it.
     pub statically_vacuous: bool,
 }
 
@@ -185,6 +220,21 @@ pub fn catalog(model: &KernelModel) -> Catalog {
     push_terminal(&mut rows, model);
     push_actions(&mut rows, model);
     push_model(&mut rows);
+    debug_assert!(
+        rows.0
+            .iter()
+            .all(|row| ObligationKind::ALL.get(row.id.kind.position()) == Some(&row.id.kind)),
+        "a generated kind is missing from ObligationKind::ALL"
+    );
+    debug_assert_eq!(
+        rows.0
+            .iter()
+            .map(|row| &row.id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        rows.0.len(),
+        "two obligations share an id"
+    );
     Catalog {
         obligations: rows.0,
     }
@@ -207,7 +257,7 @@ impl Rows {
 
     /// The three definedness rows of `site`: partial operations, overflow,
     /// and out-of-domain `Map` keys.
-    fn definedness(&mut self, site: &Site, has_partial_operation: bool, found: Found) {
+    fn definedness(&mut self, site: &Site, has_partial_operation: bool, found: &Found) {
         self.push(
             ObligationKind::PartialDefined,
             site.clone(),
@@ -218,9 +268,7 @@ impl Rows {
     }
 
     /// The definedness rows of a property-context expression.
-    fn property_definedness(&mut self, site: &Site, scope: &Scope<'_>, expr: &Expr) {
-        let mut found = Found::default();
-        scope.expr(expr, &mut found);
+    fn property_definedness(&mut self, site: &Site, found: &Found, expr: &Expr) {
         self.definedness(site, property_has_partial_operation(expr), found);
     }
 }
@@ -235,7 +283,7 @@ fn push_state(rows: &mut Rows, model: &KernelModel) {
             var: var.clone(),
             position,
         };
-        rows.push(ObligationKind::Holds, site, !has_bounds(model, ty));
+        rows.push(ObligationKind::Holds, site, !has_bounds(ty));
     }
 }
 
@@ -253,34 +301,38 @@ fn push_properties(
     properties: &[PropertyDef],
     site: fn(SiteRef) -> Site,
 ) {
-    let scope = Scope::new(model);
     for property in properties {
         let site = site(SiteRef::new(&property.name, property.span));
         rows.holds(ObligationKind::Holds, &site);
-        rows.property_definedness(&site, &scope, &property.expr);
+        let found = expression_found(model, &[], &property.expr);
+        rows.property_definedness(&site, &found, &property.expr);
     }
 }
 
 fn push_reachables(rows: &mut Rows, model: &KernelModel) {
-    let scope = Scope::new(model);
     for property in &model.reachables {
         let site = Site::Reachable(SiteRef::new(&property.name, property.span));
         rows.holds(ObligationKind::Witnessed, &site);
-        rows.property_definedness(&site, &scope, &property.expr);
+        let found = expression_found(model, &[], &property.expr);
+        rows.property_definedness(&site, &found, &property.expr);
     }
 }
 
+/// A `leadsTo`'s trigger, goal and measure are each evaluated from its binder
+/// bindings alone. Its binders take no `where` filter or collection and have
+/// static range bounds (`static_leadsto_bindings`), so they read no state.
 fn push_leadstos(rows: &mut Rows, model: &KernelModel) {
     for property in &model.leadstos {
         let at = SiteRef::new(&property.name, property.span);
-        let scope = Scope::leadsto(model, property);
         let leads_to = Site::LeadsTo(at.clone());
         rows.holds(ObligationKind::Responds, &leads_to);
         if property.within.is_some() {
             rows.holds(ObligationKind::Deadline, &leads_to);
         }
-        rows.property_definedness(&Site::Trigger(at.clone()), &scope, &property.before);
-        rows.property_definedness(&Site::Goal(at), &scope, &property.after);
+        let trigger = expression_found(model, &property.binders, &property.before);
+        rows.property_definedness(&Site::Trigger(at.clone()), &trigger, &property.before);
+        let goal = expression_found(model, &property.binders, &property.after);
+        rows.property_definedness(&Site::Goal(at), &goal, &property.after);
     }
 }
 
@@ -294,13 +346,10 @@ fn push_ranks(rows: &mut Rows, model: &KernelModel) {
             continue;
         };
         let at = SiteRef::new(&property.name, property.span);
-        let scope = Scope::leadsto(model, property);
-        let mut found = Found::default();
-        scope.expr(measure, &mut found);
         rows.definedness(
             &Site::Measure(at.clone()),
             expression_has_partial_operation_candidate(measure),
-            found,
+            &expression_found(model, &property.binders, measure),
         );
         let leads_to = Site::LeadsTo(at.clone());
         rows.holds(ObligationKind::RankLowerBound, &leads_to);
@@ -321,7 +370,8 @@ fn push_ranks(rows: &mut Rows, model: &KernelModel) {
 
 fn push_terminal(rows: &mut Rows, model: &KernelModel) {
     if let Some(terminal) = &model.terminal {
-        rows.property_definedness(&Site::Terminal, &Scope::new(model), terminal);
+        let found = expression_found(model, &[], terminal);
+        rows.property_definedness(&Site::Terminal, &found, terminal);
     }
 }
 
@@ -331,11 +381,42 @@ fn push_actions(rows: &mut Rows, model: &KernelModel) {
     }
 }
 
-/// An action's sites share one scope: parameters, then each `let` and each
-/// `requires` pattern binding in clause order, as the evaluators bind them.
 fn push_action(rows: &mut Rows, model: &KernelModel, action: &ActionDef) {
     let at = SiteRef::new(&action.name, action.span);
-    let mut scope = Scope::new(model);
+    let mut found = settle(model, |outer| action_found(outer, action)).into_iter();
+    let guard_partial = action.guards.iter().any(|clause| match clause {
+        ActionGuard::Let(_, expr) | ActionGuard::Requires(expr) => {
+            expression_has_partial_operation_candidate(expr)
+        }
+    });
+    let guard = found.next().unwrap_or_default();
+    rows.definedness(&Site::Guard(at.clone()), guard_partial, &guard);
+    let body_partial = action
+        .statements
+        .iter()
+        .any(statement_has_partial_operation_candidate);
+    let body = found.next().unwrap_or_default();
+    rows.definedness(&Site::Body(at.clone()), body_partial, &body);
+    for (index, (ensures, found)) in action.ensures.iter().zip(found).enumerate() {
+        let site = Site::Ensures {
+            action: at.clone(),
+            index,
+        };
+        rows.holds(ObligationKind::Holds, &site);
+        rows.definedness(
+            &site,
+            expression_has_partial_operation_candidate(ensures),
+            &found,
+        );
+    }
+}
+
+/// The candidates of an action's guard, body and each `ensures`, in that
+/// order. They are one evaluation context: parameters, then each `let` in
+/// clause order, and every pattern binding reaches the clauses, statements
+/// and `ensures` evaluated after it.
+fn action_found(outer: &Scope<'_>, action: &ActionDef) -> Vec<Found> {
+    let mut scope = outer.clone();
     for param in &action.params {
         let ty = match param {
             ParamDef::Typed { ty, .. } => ty.clone(),
@@ -346,44 +427,90 @@ fn push_action(rows: &mut Rows, model: &KernelModel, action: &ActionDef) {
     let mut guard = Found::default();
     for clause in &action.guards {
         match clause {
-            ActionGuard::Requires(expr) => {
-                scope.expr(expr, &mut guard);
-                scope.bind_pattern(expr);
-            }
+            ActionGuard::Requires(expr) => scope.expr(expr, &mut guard),
             ActionGuard::Let(name, expr) => {
                 scope.expr(expr, &mut guard);
-                scope.bind(name, infer_type(expr, &scope.env, model, None).ok());
+                scope.bind(name, scope.value_type(expr));
             }
         }
     }
-    let guard_partial = action.guards.iter().any(|clause| match clause {
-        ActionGuard::Let(_, expr) | ActionGuard::Requires(expr) => {
-            expression_has_partial_operation_candidate(expr)
-        }
-    });
-    rows.definedness(&Site::Guard(at.clone()), guard_partial, guard);
     let mut body = Found::default();
     for statement in &action.statements {
         scope.statement(statement, &mut body);
     }
-    let body_partial = action
-        .statements
-        .iter()
-        .any(statement_has_partial_operation_candidate);
-    rows.definedness(&Site::Body(at.clone()), body_partial, body);
-    for (index, ensures) in action.ensures.iter().enumerate() {
-        let site = Site::Ensures {
-            action: at.clone(),
-            index,
-        };
-        rows.holds(ObligationKind::Holds, &site);
+    let mut found = vec![guard, body];
+    for ensures in &action.ensures {
+        let mut item = Found::default();
+        scope.expr(ensures, &mut item);
+        found.push(item);
+    }
+    found
+}
+
+/// The candidates of one property-context expression under `binders`.
+fn expression_found(model: &KernelModel, binders: &[Binder], expr: &Expr) -> Found {
+    settle(model, |outer| {
+        let scope = binders
+            .iter()
+            .fold(outer.clone(), |scope, binder| scope.enter(binder));
         let mut found = Found::default();
-        scope.expr(ensures, &mut found);
-        rows.definedness(
-            &site,
-            expression_has_partial_operation_candidate(ensures),
-            found,
-        );
+        scope.expr(expr, &mut found);
+        vec![found]
+    })
+    .pop()
+    .unwrap_or_default()
+}
+
+/// Walk one evaluation context from the outermost scope its `is some(v)`
+/// patterns allow. A pattern never rebinds a parameter, `let` or binder
+/// already in scope (`or_insert` in both evaluators), but it binds `v` for
+/// everything evaluated after it in the context once it matches, whether or
+/// not the path to that point required the match. So wherever `v` is not a
+/// parameter, `let` or binder it may name any of its patterns' payloads or
+/// the state variable, constant or enum member `v` (the base scope types all
+/// three; `build_model` rejects a duplicate member): its outermost type is the
+/// join of all of them, and none when they do not join or a payload's type
+/// is not bounded. The second walk types the payloads with every pattern name
+/// untyped, so no payload type rests on another pattern.
+fn settle<'m>(model: &'m KernelModel, walk: impl Fn(&Scope<'m>) -> Vec<Found>) -> Vec<Found> {
+    let base = Scope::new(model);
+    let mut outer = base.clone();
+    for name in patterns(&walk(&base)).keys() {
+        outer.env.remove(name);
+    }
+    for (name, payload) in patterns(&walk(&outer)) {
+        let ty = match base.env.get(&name) {
+            Some(ty) => join(resolve(model, ty).ok(), payload),
+            None => payload,
+        };
+        outer.bind(&name, ty);
+    }
+    walk(&outer)
+}
+
+/// Every pattern name of `found`, with the join of its payload types.
+fn patterns(found: &[Found]) -> BTreeMap<String, Option<TypeRef>> {
+    let mut joined = BTreeMap::new();
+    for item in found {
+        for (name, payload) in &item.patterns {
+            joined
+                .entry(name.clone())
+                .and_modify(|ty: &mut Option<TypeRef>| *ty = join(ty.take(), payload.clone()))
+                .or_insert_with(|| payload.clone());
+        }
+    }
+    joined
+}
+
+/// A type holding every value of two resolved types: the hull of two ranges,
+/// or the type itself when both are the same. `None` is a value of no known
+/// type.
+fn join(left: Option<TypeRef>, right: Option<TypeRef>) -> Option<TypeRef> {
+    match (left?, right?) {
+        (TypeRef::Range(left_lo, left_hi), TypeRef::Range(right_lo, right_hi)) => {
+            Some(TypeRef::Range(left_lo.min(right_lo), left_hi.max(right_hi)))
+        }
+        (left, right) => (left == right).then_some(left),
     }
 }
 
@@ -404,32 +531,36 @@ fn property_has_partial_operation(expr: &Expr) -> bool {
     found
 }
 
-/// Whether a value of `ty` can fall outside its declared type. The verifier's
-/// `fsl-verifier/src/induction.rs` asks a type-bound obligation for exactly
-/// these state variables.
-fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
+/// Whether some value a state variable of type `ty` can hold fails the
+/// type-bound check (`value_conforms` in `fsl-runtime`). Only `Int`, `Bool`
+/// and options of them conform whatever they hold: a `Map` can be assigned a
+/// map over a narrower key range and a relation can gain an out-of-type pair
+/// (`check` accepts both), and every engine reports the bound.
+fn has_bounds(ty: &TypeRef) -> bool {
     match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
+        TypeRef::Int | TypeRef::Bool => false,
+        TypeRef::Option(inner) => has_bounds(inner),
+        TypeRef::Range(_, _)
+        | TypeRef::Set(_)
+        | TypeRef::Seq(_, _)
+        | TypeRef::Map(_, _)
+        | TypeRef::Relation(_, _)
+        | TypeRef::Named(_) => true,
     }
 }
 
-/// The overflow and `Map`-key candidates found in a site.
-#[derive(Clone, Copy, Default)]
+/// The overflow and `Map`-key candidates found in a site, and the payload type
+/// of each `is some(v)` pattern it evaluates (`None` when not bounded).
+#[derive(Clone, Default)]
 struct Found {
     overflow: bool,
     key: bool,
+    patterns: BTreeMap<String, Option<TypeRef>>,
 }
 
-/// The static types visible at one point of a site. A name whose type cannot
-/// be inferred is left out, so an index through it counts as a candidate.
+/// The names visible at one point of a site, each with a type that holds
+/// every value it can have there. A name without one is left out, so an index
+/// through it counts as a candidate.
 #[derive(Clone)]
 struct Scope<'m> {
     model: &'m KernelModel,
@@ -444,15 +575,6 @@ impl<'m> Scope<'m> {
         }
     }
 
-    /// The scope of a `leadsTo`'s trigger, goal and measure: its binders.
-    fn leadsto(model: &'m KernelModel, property: &LeadsToDef) -> Self {
-        let mut scope = Self::new(model);
-        for binder in &property.binders {
-            scope = scope.enter(binder);
-        }
-        scope
-    }
-
     fn bind(&mut self, name: &str, ty: Option<TypeRef>) {
         match ty {
             Some(ty) => self.env.insert(name.to_owned(), ty),
@@ -460,46 +582,76 @@ impl<'m> Scope<'m> {
         };
     }
 
+    /// The scope of a binder's `where` filter and body. A typed binder ranges
+    /// over its type's domain and a range binder with literal bounds over
+    /// that range; a collection binder over the members of its collection.
     fn enter(&self, binder: &Binder) -> Self {
+        let ty = match binder {
+            Binder::Collection { collection, .. } => match self.value_type(collection) {
+                Some(TypeRef::Set(item) | TypeRef::Seq(item, _)) => resolve(self.model, &item).ok(),
+                _ => None,
+            },
+            Binder::Typed { .. } | Binder::Range { .. } => {
+                binder_type(binder, &self.env, self.model).ok()
+            }
+        };
         let mut scope = self.clone();
-        scope.bind(
-            binder_name(binder),
-            binder_type(binder, &self.env, self.model).ok(),
-        );
+        scope.bind(binder_name(binder), ty);
         scope
     }
 
-    /// Add `expr`'s `is some(v)` bindings. When they cannot be typed nothing
-    /// in scope keeps a type, so no index is mistaken for an in-domain one.
-    fn bind_pattern(&mut self, expr: &Expr) {
-        if extend_pattern_binding(expr, &mut self.env, self.model).is_err() {
-            self.env.clear();
-        }
+    /// A resolved type that holds every value `expr` can evaluate to, for the
+    /// forms whose values are bounded by a declaration: a literal, a name in
+    /// scope, an enum member, a field, a `Map` or `Seq` element (`m[i]`,
+    /// `head`, `at`) and `old` of one, and a conditional whose branches join.
+    /// `check` types other forms -- `s.add(e)`, `q.push(e)`, a struct
+    /// literal, a conditional -- from one operand alone, so they get none.
+    fn value_type(&self, expr: &Expr) -> Option<TypeRef> {
+        let ty = match expr {
+            Expr::Num(value) => TypeRef::Range(*value, *value),
+            Expr::Bool(_) => TypeRef::Bool,
+            Expr::Var(name) => self.env.get(name)?.clone(),
+            Expr::EnumMember { type_name, .. } => TypeRef::Named(type_name.clone()),
+            Expr::Field(base, field) => match self.value_type(base)? {
+                TypeRef::Named(name) => struct_field_type(self.model, &name, field).ok()?,
+                _ => return None,
+            },
+            Expr::Index(base, _) => match self.value_type(base)? {
+                TypeRef::Map(_, item) | TypeRef::Seq(item, _) => *item,
+                _ => return None,
+            },
+            Expr::Method { receiver, name, .. } if name == "head" || name == "at" => {
+                match self.value_type(receiver)? {
+                    TypeRef::Seq(item, _) => *item,
+                    _ => return None,
+                }
+            }
+            Expr::UnaryNamed { name, expr, .. } if name == "old" => return self.value_type(expr),
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => return join(self.value_type(then_expr), self.value_type(else_expr)),
+            _ => return None,
+        };
+        resolve(self.model, &ty).ok()
     }
 
     /// Whether indexing a collection of type `collection` with `index` can
     /// miss a `Map`'s key domain. A `Seq` read is a partial operation, not a
     /// key-domain miss.
     fn key_may_miss(&self, collection: Option<TypeRef>, index: &Expr) -> bool {
-        match collection.and_then(|ty| resolve(self.model, &ty).ok()) {
+        match collection {
             Some(TypeRef::Map(key, _)) => !self.within(index, &key),
             Some(TypeRef::Seq(_, _)) => false,
             _ => true,
         }
     }
 
-    /// Whether `index`'s static type, or its value for a literal, lies inside
-    /// `key`. A finite key type is a range, an enum, or `Bool` (`Map<Int, _>`
-    /// is rejected by `check`).
+    /// Whether every value of `index` lies inside `key`. A finite key type is
+    /// a range, an enum, or `Bool` (`Map<Int, _>` is rejected by `check`).
     fn within(&self, index: &Expr, key: &TypeRef) -> bool {
-        let index = match index {
-            Expr::Num(value) => Some(TypeRef::Range(*value, *value)),
-            _ => infer_type(index, &self.env, self.model, None).ok(),
-        };
-        match (
-            index.and_then(|ty| resolve(self.model, &ty).ok()),
-            resolve(self.model, key).ok(),
-        ) {
+        match (self.value_type(index), resolve(self.model, key).ok()) {
             (Some(TypeRef::Range(lo, hi)), Some(TypeRef::Range(key_lo, key_hi))) => {
                 key_lo <= lo && hi <= key_hi
             }
@@ -525,11 +677,27 @@ impl<'m> Scope<'m> {
                 found.overflow |= name == "abs";
                 self.expr(item, found);
             }
+            Expr::Is {
+                expr: item,
+                pattern,
+            } => {
+                if let Pattern::Some(name) = pattern {
+                    let payload = match self.value_type(item) {
+                        Some(TypeRef::Option(inner)) => resolve(self.model, &inner).ok(),
+                        _ => None,
+                    };
+                    found
+                        .patterns
+                        .entry(name.clone())
+                        .and_modify(|ty| *ty = join(ty.take(), payload.clone()))
+                        .or_insert(payload);
+                }
+                self.expr(item, found);
+            }
             Expr::Some(item)
             | Expr::Not(item)
             | Expr::Field(item, _)
-            | Expr::Stage { entity: item, .. }
-            | Expr::Is { expr: item, .. } => self.expr(item, found),
+            | Expr::Stage { entity: item, .. } => self.expr(item, found),
             Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
                 for item in items {
                     self.expr(item, found);
@@ -541,8 +709,7 @@ impl<'m> Scope<'m> {
                 }
             }
             Expr::Index(collection, index) => {
-                let ty = infer_type(collection, &self.env, self.model, None).ok();
-                found.key |= self.key_may_miss(ty, index);
+                found.key |= self.key_may_miss(self.value_type(collection), index);
                 self.expr(collection, found);
                 self.expr(index, found);
             }
@@ -553,9 +720,7 @@ impl<'m> Scope<'m> {
             Expr::Binary { op, left, right } => {
                 found.overflow |= matches!(op.as_str(), "+" | "-" | "*" | "/" | "%");
                 self.expr(left, found);
-                let mut right_scope = self.clone();
-                right_scope.bind_pattern(left);
-                right_scope.expr(right, found);
+                self.expr(right, found);
             }
             Expr::Method { receiver, args, .. } => {
                 self.expr(receiver, found);
@@ -666,7 +831,7 @@ impl<'m> Scope<'m> {
                     .state
                     .iter()
                     .find(|(var, _)| var == name)
-                    .map(|(_, ty)| ty.clone());
+                    .and_then(|(_, ty)| resolve(self.model, ty).ok());
                 found.key |= self.key_may_miss(ty, index);
                 self.expr(index, found);
             }
