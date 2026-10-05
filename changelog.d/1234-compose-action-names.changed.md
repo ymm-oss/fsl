@@ -1,13 +1,31 @@
-Changed (#1234): a compose component action now has one public name,
-`alias.action`, across testgen, conformance, the Monitor, verify/scenarios/explain
-traces, and `fslc replay`. A v1 replay trace can now write `bank.settle`, the
-name testgen emits, so a generated test's actions replay `conformant` instead of
-failing with `bad_call`. v1 replay still accepts the older `bank__settle` for
-the same action, looked up in the model's table of component actions rather
-than rewritten; sync actions and non-compose actions such as `foo__bar` keep
-exact-name matching. Replay's `state_mismatch.action` now reports `bank.settle`
-where it used to echo `bank__settle`. The name is built from the `use` alias
-and the action name, so `use X as a__b` with action `c` is `a__b.c` (it was
-`a.b__c`), matching the frozen Python reference. Two other outputs that still
-printed internal names now use the public form: conformance outcome names
-(`_requires_failed_bank.settle`) and verify's `cost.properties[].name`.
+Changed (#1234), **breaking for stored `fslc analyze` node IDs of compose
+specs**: a compose component action now has one public name, `alias.action`,
+built from the `use` alias and the action name, so `use X as a__b` with action
+`c` is `a__b.c` (it was `a.b__c`, and some outputs printed the internal
+`a__b__c`), matching the frozen Python reference. Every command that names a
+component action uses it: verify on every engine (traces, `action_coverage`,
+`action_profile`, `cost.properties[].name`, vacuity warnings, induction CTIs),
+sweep, scenarios, explain, testgen, conformance, mutate, refine, diff, html,
+ledger, analyze, and `fslc replay`, including names built from the action such
+as `_requires_failed_bank.settle`, `_partial_op_bank.settle`, and
+`_partial_bank.settle`. Lists keyed by these names are ordered by the published
+name, so `acct.go` sorts before `acct2.go`. A v1 replay trace can now write
+`bank.settle`, the name testgen emits, so a generated test's actions replay
+`conformant` instead of failing with `bad_call`. v1 replay still accepts the
+older `bank__settle` for the same action, looked up in the model's table of
+component actions rather than rewritten; sync actions and non-compose actions
+such as `foo__bar` keep exact-name matching. Replay's `state_mismatch.action`
+and `bad_call.action` report `bank.settle` where they used to echo
+`bank__settle`. The breaking part: in `fslc analyze` output (the default graph,
+`--profile ai-review`, and `--export tag-review`), the node IDs of a component
+action and of its requires, effect, and ensures clauses move from
+`action:bank__settle`, `guard:bank__settle:0`, `effect:bank__settle:0`, and
+`ensures:bank__settle:0` to `action:bank.settle`, `guard:bank.settle:0`,
+`effect:bank.settle:0`, and `ensures:bank.settle:0`, and edge IDs and endpoints
+follow. To migrate, rewrite stored node IDs and `--focus` arguments from
+`alias__action` to `alias.action`: `--focus action:bank.settle` already
+resolved for an alias without `__` and keeps resolving, while
+`--focus action:bank__settle` now fails with "unknown analyze focus node"
+(exit 2). State and property node IDs are unchanged. `fslc document` claim
+IDs and fingerprints are unchanged, because the document projection rejects
+compose specs. Non-compose specs print the same output as before.

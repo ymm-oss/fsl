@@ -14,7 +14,7 @@ use super::{
     load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
     load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output,
+    semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
     validate_requirement_traces_from_source, validate_specialized_document_from_source,
 };
 
@@ -571,7 +571,7 @@ fn render_induction_cti(
     let name = if partial || ensures {
         // `_partial_<action>` / `_partial_property_<name>`: the same synthetic
         // names BMC's `partial_op` violations carry (#1196).
-        display(&cti.name)
+        model.action_scoped_display_name(&cti.name, trace_last_action(&cti.trace))
     } else {
         origin_aware_property_name(&mut output, model, property_kind, &cti.name)
     };
@@ -757,9 +757,8 @@ fn render_induction_success(
     output.insert(
         "k_used".to_owned(),
         Value::Object(
-            induction
-                .k_used
-                .iter()
+            ::fslc_rust::verification_output::sorted_by_public_name(model, &induction.k_used)
+                .into_iter()
                 .map(|(name, k)| (display(name), json!(k)))
                 .collect(),
         ),
@@ -1385,7 +1384,11 @@ fn adjudicate_lemma(
             "expression":source,"name":name,"status":"rejected","used":false,
             "proof":{
                 "result":"violated","violation_kind":violation.kind,
-                "invariant":display(&violation.name),"violated_at_step":violation.step,
+                "invariant":candidate.action_scoped_display_name(
+                    &violation.name,
+                    violation.last_action.as_deref(),
+                ),
+                "violated_at_step":violation.step,
                 "trace": ::fslc_rust::trace_json(&candidate, &violation.trace),
             },
         });
@@ -1418,7 +1421,10 @@ fn adjudicate_lemma(
             json!({
                 "expression":source,"name":name,"status":"rejected","used":false,
                 "proof":{
-                    "result":"unknown_cti","invariant":display(&cti.name),"k":cti.k,
+                    "result":"unknown_cti",
+                    "invariant":candidate
+                        .action_scoped_display_name(&cti.name, trace_last_action(&cti.trace)),
+                    "k":cti.k,
                     "checked_to_depth":depth,"completeness":"bounded",
                     "trace_type":"induction_cti",
                     "cti":{

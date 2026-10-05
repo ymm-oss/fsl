@@ -438,7 +438,7 @@ fn push_action_claim(
 ) {
     let _ = dialect;
     let target = action_target(&action.name);
-    let claim_id = format!("{target}#operation");
+    let claim_id = format!("action:{}#operation", model.action_key(&action.name));
     let links = model.requirements_for(&target);
     let kind_ids = kind_ids_from(model.annotations_for(&target));
     let requirement_ids = record_links(&links, &kind_ids, &claim_id, source_path, agg);
@@ -468,7 +468,7 @@ fn push_action_claim(
         .collect();
     let fairness = if action.fair { "weak" } else { "none" };
 
-    let subject_core = json!({"action": action.name, "parameters": parameters});
+    let subject_core = json!({"action": model.action_key(&action.name), "parameters": parameters});
     let enablement = json!({"mode": "all", "expressions": expressions});
     let effects = json!({"commit": "simultaneous", "reads": "pre_state", "statements": statements});
     let postconditions_value = Value::Array(postconditions);
@@ -498,7 +498,7 @@ fn push_action_claim(
             kind: ClaimKind::Operation,
             requirements: requirement_ids,
             subject: json!({
-                "action": action.name,
+                "action": model.action_key(&action.name),
                 "display_name": model.action_display_name(&action.name),
                 "parameters": parameters,
             }),

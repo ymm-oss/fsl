@@ -1859,9 +1859,13 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
   A component action's public name is built from its alias and its action name,
   so <code>use X as a__b</code> with action <code>c</code> is <code>a__b.c</code>. Every command that names a
-  component action — testgen, conformance, Monitor, verify/scenarios traces, and
-  <code>replay</code> output including <code>state_mismatch.action</code> — uses this <code>alias.action</code>
-  form. A v1 <code>replay</code> trace may write a component action as <code>alias.action</code> or as
+  component action — verify, sweep, scenarios, explain, testgen, conformance,
+  mutate, refine, diff, html, ledger, analyze (including graph IDs such as
+  <code>action:a__b.c</code>), and <code>replay</code> output including <code>state_mismatch.action</code> — uses
+  this <code>alias.action</code> form, including in names derived from the action such as
+  <code>_requires_failed_a__b.c</code>. State keys keep the rule above, so the state <code>n</code> of
+  <code>use X as a__b</code> is shown as <code>a.b__n</code> (the frozen Python reference shows
+  <code>a__b.n</code>). A v1 <code>replay</code> trace may write a component action as <code>alias.action</code> or as
   the older <code>alias__action</code>; both name the same action (see
   <code>docs/design/DESIGN-replay-trace.md</code>).</li>
 </ul>

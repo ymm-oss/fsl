@@ -1783,6 +1783,79 @@ mod tests {
         assert_worker_implements_error_matches_native(&incomplete, "incomplete enum abstraction");
     }
 
+    /// #1234: aliases `acct` and `acct2` publish `acct.*` before `acct2.*`,
+    /// although the internal `acct2__*` sorts before `acct__*`; `parity.mjs`
+    /// rejects a `cost.properties` that is not in published order.
+    #[test]
+    fn compose_names_are_published_in_published_order() {
+        let request = Request {
+            cmd: "verify".to_owned(),
+            source: "compose Accounts {\n  use Counter as acct from \"counter.fsl\"\n  use Counter as acct2 from \"counter.fsl\"\n}\n".to_owned(),
+            source_file: "accounts.fsl".to_owned(),
+            files: BTreeMap::from([(
+                "counter.fsl".to_owned(),
+                "spec Counter { state { n: 0..2 } init { n = 0 } action go() { requires n < 2 n = n + 1 } invariant Inv { n <= 2 } }".to_owned(),
+            )]),
+            options: Options::default(),
+        };
+        let (model, _) = build(&request, TEST_SOLVER_VERSION).expect("compose model");
+        let result = BmcResult {
+            spec: model.name.clone(),
+            depth: 2,
+            violation: None,
+            leadsto_violation: None,
+            reachables: BTreeMap::new(),
+            reachable_diagnostics: BTreeMap::new(),
+            deadlock_step: None,
+            deadlock_trace: None,
+            action_coverage: BTreeMap::from([
+                ("acct2__go".to_owned(), true),
+                ("acct__go".to_owned(), true),
+            ]),
+            frontier_progress: false,
+            vacuity: Vec::new(),
+        };
+        let statistics = fsl_solver::VerificationStatistics {
+            solver: fsl_solver::SolverStatistics {
+                checks: 2,
+                ..fsl_solver::SolverStatistics::default()
+            },
+            properties: ["acct2__Inv", "acct__Inv"]
+                .into_iter()
+                .map(|name| fsl_solver::PropertyStatistics {
+                    kind: "invariant".to_owned(),
+                    name: name.to_owned(),
+                    checks: 1,
+                    elapsed_s: 0.0,
+                })
+                .collect(),
+        };
+
+        let envelope = render_verify(
+            &model,
+            &Options::default(),
+            &result,
+            TEST_SOLVER_VERSION,
+            &statistics,
+            0.0,
+        );
+
+        let properties = envelope["cost"]["properties"]
+            .as_array()
+            .expect("cost properties")
+            .iter()
+            .map(|property| property["name"].as_str().expect("property name"))
+            .collect::<Vec<_>>();
+        assert_eq!(properties, ["acct.Inv", "acct2.Inv"], "{envelope:#}");
+        let coverage = envelope["action_coverage"]
+            .as_object()
+            .expect("action coverage")
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(coverage, ["acct.go", "acct2.go"], "{envelope:#}");
+    }
+
     #[test]
     fn verified_result_contains_shared_warnings() {
         let model = model_from(

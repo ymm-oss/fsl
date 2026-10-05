@@ -380,7 +380,9 @@ refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
 node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
-reports); `--focus` accepts either a node's raw id or its displayed name.
+reports); `--focus` accepts either a node's raw id or its displayed name. A
+compose component action and its clauses use the action's public name in both
+id and label (`action:a__b.c`, `guard:a__b.c:0`, label `a__b.c`).
 `action_dependency_graph`'s `enables`/`conflicts_with` edges carry every
 shared read/write state bridge for the action pair in `states` (plural);
 `state` (singular) is only the first one, kept for backward compatibility.

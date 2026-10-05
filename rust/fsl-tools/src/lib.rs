@@ -47,8 +47,8 @@ pub use ai_stochastic::{
     evaluate_migration, evaluate_observed_property, evaluate_statistical_property,
 };
 pub use analysis::{
-    analyze_model, analyze_tsg, build_tsg, conservation_review_findings, review_finding,
-    structural_review_findings,
+    action_node_id, analyze_model, analyze_tsg, build_tsg, conservation_review_findings,
+    review_finding, structural_review_findings,
 };
 pub use analysis_export::export_analysis_graph;
 pub use causal::{

@@ -330,45 +330,80 @@ impl KernelModel {
         self.compose_names.actions.get(name)
     }
 
-    /// Public name of an action: `alias.action` for a compose component
-    /// action, the existing [`crate::display_name`] rendering otherwise.
+    /// Public spelling of `name` when it is, or was built from, the compose
+    /// component action `action`; `None` for every other name.
+    ///
+    /// This is the only place a component action's public spelling is
+    /// produced; [`Self::action_display_name`], [`Self::action_key`], and
+    /// [`Self::action_scoped_display_name`] differ only in how they render a
+    /// name no component owns. [`crate::display_name`] parses the
+    /// non-injective internal name and misspells an alias that contains `__`.
+    ///
+    /// `name` is either the action itself or a name the Monitor or the
+    /// verifier built while `action` stepped: a kind prefix followed by the
+    /// internal action name (`_requires_failed_<action>`,
+    /// `_partial_op_<action>`, `_partial_<action>`). The prefix is kept and the
+    /// action suffix is respelled from the structural table, so no list of
+    /// prefixes has to track the builders.
+    #[must_use]
+    pub fn component_public_name(&self, name: &str, action: &str) -> Option<String> {
+        let component = self.compose_action(action)?;
+        let prefix = name.strip_suffix(action)?;
+        (prefix.is_empty() || prefix.starts_with('_') && prefix.ends_with('_'))
+            .then(|| format!("{prefix}{}", component.display()))
+    }
+
+    /// Public name of an action in a human-facing field: `alias.action` for a
+    /// compose component action, the [`crate::display_name`] rendering
+    /// otherwise.
     #[must_use]
     pub fn action_display_name(&self, name: &str) -> String {
-        self.compose_action(name)
-            .map_or_else(|| crate::display_name(name), crate::ComposeName::display)
+        self.component_public_name(name, name)
+            .unwrap_or_else(|| crate::display_name(name))
     }
 
-    /// Public spelling of a Monitor violation name that embeds a compose
-    /// component action (`_requires_failed_<action>`, `_partial_<action>`), or
-    /// `None` for every other violation name.
+    /// Public name of an action in an identifier field (a replay echo, a
+    /// graph node ID, a claim key, a mutation target): `alias.action` for a
+    /// compose component action, the exact Kernel name otherwise.
     #[must_use]
-    pub fn compose_violation_display_name(&self, name: &str) -> Option<String> {
-        ["_requires_failed_", "_partial_"]
-            .into_iter()
-            .find_map(|prefix| {
-                let component = self.compose_action(name.strip_prefix(prefix)?)?;
-                Some(format!("{prefix}{}", component.display()))
-            })
+    pub fn action_key(&self, name: &str) -> String {
+        self.component_public_name(name, name)
+            .unwrap_or_else(|| name.to_owned())
     }
 
-    /// Public spelling of any name derived from a compose component
+    /// Public spelling of a violation, CTI, or mutation-kill name produced
+    /// while `action` stepped (see [`Self::component_public_name`]), or the
+    /// [`crate::display_name`] rendering of any other name.
+    #[must_use]
+    pub fn action_scoped_display_name(&self, name: &str, action: Option<&str>) -> String {
+        action
+            .and_then(|action| self.component_public_name(name, action))
+            .unwrap_or_else(|| crate::display_name(name))
+    }
+
+    /// Public spelling of a name derived from a compose component
     /// declaration: an action, a state variable, a property, or the
-    /// `_bounds_<state>` / `_requires_failed_<action>` / `_partial_<action>`
-    /// names built from them. `None` for every other name.
+    /// `_bounds_<state>` name built from a state variable. `None` for every
+    /// other name.
     ///
     /// Actions use their structural `alias.action`; state and property names
     /// keep the [`crate::display_name`] rendering every other output uses.
     #[must_use]
     pub fn compose_public_name(&self, name: &str) -> Option<String> {
         let declared = |name: &str| self.compose_names.declarations.contains(name);
-        self.compose_action(name)
-            .map(crate::ComposeName::display)
-            .or_else(|| self.compose_violation_display_name(name))
+        self.component_public_name(name, name)
             .or_else(|| declared(name).then(|| crate::display_name(name)))
             .or_else(|| {
                 let state = name.strip_prefix("_bounds_")?;
                 declared(state).then(|| format!("_bounds_{}", crate::display_name(state)))
             })
+    }
+
+    /// Give a model rebuilt from this model's lowered surface spec (a mutant
+    /// or a counterfactual candidate) the compose component names of
+    /// `original`; the surface spec does not carry them.
+    pub fn inherit_compose_names(&mut self, original: &Self) {
+        self.compose_names.clone_from(&original.compose_names);
     }
 
     /// Resolve an action name written in a v1 replay trace.
@@ -398,7 +433,11 @@ impl KernelModel {
             many => Err(format!(
                 "action '{spelling}' is ambiguous: it matches {}",
                 many.iter()
-                    .map(|action| format!("'{}'", self.action_display_name(&action.name)))
+                    .map(|action| format!(
+                        "'{}' (internal '{}')",
+                        self.action_display_name(&action.name),
+                        action.name
+                    ))
                     .collect::<Vec<_>>()
                     .join(", ")
             )),
@@ -2586,7 +2625,7 @@ mod compose_name_tests {
             .expect_err("ambiguous spelling must not pick an action");
         assert_eq!(
             error,
-            "action 'left.go' is ambiguous: it matches 'left.go', 'left.go'"
+            "action 'left.go' is ambiguous: it matches 'left.go' (internal 'left__go'), 'left.go' (internal 'right__go')"
         );
     }
 }

@@ -2,7 +2,7 @@
 
 //! Backend-neutral JSON rendering for bounded verification results.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
 
@@ -1498,19 +1498,18 @@ pub fn render_boundary_output(
             .or_else(|| action.and_then(|action| model.action_origin(&action.name))),
         _ => action.and_then(|action| model.action_origin(&action.name)),
     };
+    let public_name = model
+        .action_scoped_display_name(&violation.name, action.map(|action| action.name.as_str()));
     output.insert(
         "invariant".to_owned(),
         json!(
             origin
                 .and_then(origin_display_name)
-                .map_or_else(|| display_name(&violation.name), str::to_owned)
+                .map_or_else(|| public_name.clone(), str::to_owned)
         ),
     );
     if let Some(origin) = origin {
-        output.insert(
-            "generated_name".to_owned(),
-            json!(display_name(&violation.name)),
-        );
+        output.insert("generated_name".to_owned(), json!(public_name));
         output.insert("origin".to_owned(), internal_origin_json(origin));
     }
     if let Some((_, property)) = partial_property {
@@ -1724,7 +1723,7 @@ pub fn render_explicit_output(
         } else {
             render_violation(envelope, model, violation, &options)
         };
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return Ok((output, status));
     }
 
@@ -1741,7 +1740,7 @@ pub fn render_explicit_output(
         };
         let (mut output, status) =
             render_deadlock_failure(envelope, model, &compatible, step, &options);
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return Ok((output, status));
     }
 
@@ -1783,7 +1782,7 @@ pub fn render_explicit_output(
         if result.closure {
             mark_reachables_definitively_unreachable(&mut output);
         }
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return Ok((output, status));
     }
 
@@ -1890,7 +1889,7 @@ fn render_explicit_budget(
         cost_json(model, statistics.with_elapsed(elapsed_s)),
     );
     let mut value = Value::Object(output);
-    add_explicit_metadata(&mut value, result);
+    add_explicit_metadata(&mut value, model, result);
     (value, 1)
 }
 
@@ -1916,7 +1915,7 @@ fn render_explicit_success(
             skip_vacuity_probe,
         };
         let (mut output, status) = render_success(output, model, compatible, &options);
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return (output, status);
     }
 
@@ -1952,11 +1951,15 @@ fn render_explicit_success(
         cost_json(model, statistics.with_elapsed(elapsed_s)),
     );
     let mut value = Value::Object(output);
-    add_explicit_metadata(&mut value, result);
+    add_explicit_metadata(&mut value, model, result);
     (value, 0)
 }
 
-fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResult) {
+fn add_explicit_metadata(
+    output: &mut Value,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+) {
     let Some(output) = output.as_object_mut() else {
         return;
     };
@@ -1971,12 +1974,11 @@ fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResul
     output.insert(
         "action_profile".to_owned(),
         Value::Object(
-            result
-                .action_profile
-                .iter()
+            sorted_by_public_name(model, &result.action_profile)
+                .into_iter()
                 .map(|(name, stats)| {
                     (
-                        display_name(name),
+                        model.action_display_name(name),
                         json!({
                             "enabled": stats.enabled,
                             "fired": stats.fired,
@@ -2040,18 +2042,17 @@ fn render_violation(
         )
     };
     let origin = model.property_origin(property_kind, &violation.name);
+    let public_name =
+        model.action_scoped_display_name(&violation.name, violation.last_action.as_deref());
     let rendered_name = origin
         .and_then(origin_display_name)
-        .map_or_else(|| display_name(&violation.name), str::to_owned);
+        .map_or_else(|| public_name.clone(), str::to_owned);
     if violation.kind == "trans" {
         output.insert("trans".to_owned(), json!(rendered_name));
     }
     output.insert("invariant".to_owned(), json!(rendered_name));
     if let Some(origin) = origin {
-        output.insert(
-            "generated_name".to_owned(),
-            json!(display_name(&violation.name)),
-        );
+        output.insert("generated_name".to_owned(), json!(public_name));
         output.insert("origin".to_owned(), internal_origin_json(origin));
     }
     if let Some(property) = property {
@@ -2440,9 +2441,8 @@ fn add_common(
     output.insert(
         "reachables".to_owned(),
         Value::Object(
-            result
-                .reachables
-                .iter()
+            sorted_by_public_name(model, &result.reachables)
+                .into_iter()
                 .filter_map(|(name, witness)| {
                     witness.as_ref().map(|witness| {
                         (
@@ -2460,12 +2460,11 @@ fn add_common(
     output.insert(
         "action_coverage".to_owned(),
         Value::Object(
-            result
-                .action_coverage
-                .iter()
+            sorted_by_public_name(model, &result.action_coverage)
+                .into_iter()
                 .map(|(name, covered)| {
                     (
-                        display_name(name),
+                        model.action_display_name(name),
                         if *covered {
                             json!(true)
                         } else {
@@ -2547,7 +2546,7 @@ fn solver_vacuity_warnings(model: &KernelModel, result: &BmcResult) -> Vec<Value
 }
 
 fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
-    let label = display_name(finding.name());
+    let label = model.action_display_name(finding.name());
     let (message, hint) = match finding {
         VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
             let names = frozen_vars
@@ -2681,8 +2680,26 @@ fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
         .filter_map(|step| step.detail.as_ref())
         .flat_map(|detail| detail.split(','))
         .filter(|name| !name.is_empty())
-        .map(display_name)
+        .map(|name| model.action_display_name(name))
         .collect()
+}
+
+/// Entries of a map keyed by internal Kernel name, in the order of the name
+/// the output publishes for a compose component declaration: alias `acct2`
+/// sorts its internal `acct2__go` before `acct__go`, but its public
+/// `acct2.go` after `acct.go`. Every other name keeps its internal order.
+#[must_use]
+pub fn sorted_by_public_name<'a, V>(
+    model: &KernelModel,
+    entries: &'a BTreeMap<String, V>,
+) -> Vec<(&'a String, &'a V)> {
+    let mut entries = entries.iter().collect::<Vec<_>>();
+    entries.sort_by_cached_key(|(name, _)| {
+        model
+            .compose_public_name(name)
+            .unwrap_or_else(|| (*name).clone())
+    });
+    entries
 }
 
 fn invariant_names_selected(
@@ -2847,6 +2864,17 @@ pub fn cost_json(model: &KernelModel, cost: fsl_solver::VerificationCost<'_>) ->
         {
             property["name"] = json!(public);
         }
+    }
+    // The solver orders properties by internal `(kind, name)`; the published
+    // order is by the published name (`acct.Inv` before `acct2.Inv`, whose
+    // internal names sort the other way).
+    if let Some(properties) = value.get_mut("properties").and_then(Value::as_array_mut) {
+        properties.sort_by_cached_key(|property| {
+            (
+                property["kind"].as_str().unwrap_or_default().to_owned(),
+                property["name"].as_str().unwrap_or_default().to_owned(),
+            )
+        });
     }
     value
 }

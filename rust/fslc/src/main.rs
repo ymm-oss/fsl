@@ -5083,7 +5083,9 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                                     "kind": "bad_call",
                                     "check":"safety",
                                     "message": message,
-                                    "action": action_name,
+                                    "action": model
+                                        .component_public_name(&action.name, &action.name)
+                                        .unwrap_or_else(|| action_name.clone()),
                                     "params": params,
                                 }),
                             );
@@ -5103,14 +5105,13 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                             "kind": violation.kind,
                             "check":"safety",
                             "name": model
-                                .compose_violation_display_name(&violation.name)
-                                .unwrap_or_else(|| display(&violation.name)),
+                                .action_scoped_display_name(&violation.name, Some(&action.name)),
                             "action": model.action_display_name(&action.name),
                             "params": params,
                         }),
                     );
                 }
-                (json!(replay_action_name(&model, &action.name)), "action")
+                (json!(model.action_key(&action.name)), "action")
             }
         };
         if let Some(state) = &event.state {
@@ -5626,10 +5627,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
                         let action = model
                             .actions
                             .iter()
-                            .find(|action| {
-                                model.action_display_name(&action.name) == source_action
-                                    || display(&action.name) == source_action
-                            })
+                            .find(|action| log_action_matches(&model, action, source_action))
                             .ok_or_else(|| {
                                 format!("no action mapping for log action '{source_action}'")
                             })?;
@@ -5783,7 +5781,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
                 .find(|instance| instance.action == target_action && instance.params == parsed)
             else {
                 return (
-                    json!({"fsl":"1.0","result":"nonconformant","spec":model.name,"mapping":mapping.name,"source":"jsonl_mapping","failed_at_event":record_index,"failed_at_record":record_index,"log_line":line_number,"violation":{"ok":false,"kind":"requires_failed","source_action":source_action,"mapped_action":display(&target_action)},"state_before":before,"note":NOTE}),
+                    json!({"fsl":"1.0","result":"nonconformant","spec":model.name,"mapping":mapping.name,"source":"jsonl_mapping","failed_at_event":record_index,"failed_at_record":record_index,"log_line":line_number,"violation":{"ok":false,"kind":"requires_failed","source_action":source_action,"mapped_action":model.action_display_name(&target_action)},"state_before":before,"note":NOTE}),
                     1,
                 );
             };
@@ -5807,7 +5805,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
         let mismatches = json_mismatches(&expected, &parsed_observed, "");
         if !mismatches.is_empty() {
             return (
-                json!({"fsl":"1.0","result":"nonconformant","spec":model.name,"mapping":mapping.name,"source":"jsonl_mapping","failed_at_event":record_index,"failed_at_record":record_index,"log_line":line_number,"violation":{"kind":"state_mismatch","source_action":source_action,"action":display(&target_action),"expected_state":expected,"observed_state":parsed_observed,"mismatches":mismatches},"state_before":before,"note":NOTE}),
+                json!({"fsl":"1.0","result":"nonconformant","spec":model.name,"mapping":mapping.name,"source":"jsonl_mapping","failed_at_event":record_index,"failed_at_record":record_index,"log_line":line_number,"violation":{"kind":"state_mismatch","source_action":source_action,"action":model.action_display_name(&target_action),"expected_state":expected,"observed_state":parsed_observed,"mismatches":mismatches},"state_before":before,"note":NOTE}),
                 1,
             );
         }
@@ -6139,7 +6137,9 @@ fn requirement_trace_scenarios_from_source(
                     display(&violation.name),
                 ));
             }
-            steps.push(json!({"action":display(&instance.action),"params":params}));
+            steps.push(
+                json!({"action":model.action_display_name(&instance.action),"params":params}),
+            );
             states.push(fslc_rust::state_json(&monitor.state));
         }
         scenarios.push(json!({
@@ -6188,7 +6188,9 @@ fn requirement_trace_scenarios_from_source(
                     display(&violation.name),
                 ));
             }
-            steps.push(json!({"action":display(&instance.action),"params":params}));
+            steps.push(
+                json!({"action":model.action_display_name(&instance.action),"params":params}),
+            );
             states.push(fslc_rust::state_json(&monitor.state));
         }
         let final_step = case
@@ -6221,7 +6223,7 @@ fn requirement_trace_scenarios_from_source(
                     case.id
                 )
             })?;
-            (display(&instance.action), violation.kind)
+            (model.action_display_name(&instance.action), violation.kind)
         } else {
             (final_step.name.clone(), "requires_failed".to_owned())
         };
@@ -9408,7 +9410,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
         for (span, text) in action_partial_op_sites(model, action) {
             let mut entry = json!({
                 "kind":"partial_op",
-                "name":fslc_rust::display_name(&format!("_partial_{}", action.name)),
+                "name":model.action_scoped_display_name(&format!("_partial_{}", action.name), Some(&action.name)),
                 "action":model.action_display_name(&action.name),
                 "loc":span.python_loc(),
                 "text":text,
@@ -9691,7 +9693,10 @@ fn action_statement_removals(
     }
 }
 
-fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidate> {
+fn weakening_candidates(
+    spec: &fsl_syntax::SurfaceSpec,
+    action_label: &dyn Fn(&str) -> String,
+) -> Vec<WeakeningCandidate> {
     let mut candidates = Vec::new();
     for (item_index, item) in spec.items.iter().enumerate() {
         match item {
@@ -9723,7 +9728,7 @@ fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidat
                 fair,
                 ..
             } => {
-                let label = fslc_rust::display_name(name);
+                let label = action_label(name);
                 let mut require_number = 0;
                 for (part_index, part) in items.iter().enumerate() {
                     if let fsl_syntax::ActionItem::Requires(_, span) = part {
@@ -9789,7 +9794,12 @@ fn weakening_candidates(spec: &fsl_syntax::SurfaceSpec) -> Vec<WeakeningCandidat
     candidates
 }
 
-fn reachable_counterfactuals_from_source(path: &Path, source: &str, depth: usize) -> Value {
+fn reachable_counterfactuals_from_source(
+    names: &KernelModel,
+    path: &Path,
+    source: &str,
+    depth: usize,
+) -> Value {
     let Ok(parsed) = parse_surface_document_from_source(path, source) else {
         return json!([]);
     };
@@ -9809,10 +9819,11 @@ fn reachable_counterfactuals_from_source(path: &Path, source: &str, depth: usize
     };
     let lines = source.lines().collect::<Vec<_>>();
     let mut output = Vec::new();
-    for candidate in weakening_candidates(&document) {
+    for candidate in weakening_candidates(&document, &|name| names.action_display_name(name)) {
         let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
             continue;
         };
+        model.inherit_compose_names(names);
         // Counterfactuals below consume only invariant/reachable outcomes.
         // Re-running every leadsTo lasso for every weakening multiplies the
         // cost while discarding its result, especially for quantified
@@ -10281,7 +10292,12 @@ fn invariant_violation_explanation(
 }
 
 #[allow(clippy::too_many_lines)]
-fn invariant_counterfactuals_from_source(path: &Path, source: &str, depth: usize) -> Value {
+fn invariant_counterfactuals_from_source(
+    names: &KernelModel,
+    path: &Path,
+    source: &str,
+    depth: usize,
+) -> Value {
     let Ok(parsed) = parse_surface_document_from_source(path, source) else {
         return json!([]);
     };
@@ -10331,6 +10347,7 @@ fn invariant_counterfactuals_from_source(path: &Path, source: &str, depth: usize
         let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
             continue;
         };
+        model.inherit_compose_names(names);
         model.leadstos.clear();
         let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
             continue;
@@ -10371,7 +10388,7 @@ fn invariant_counterfactuals_from_source(path: &Path, source: &str, depth: usize
         let mut weakening = json!({
             "op": op,
             "loc": span.python_loc(),
-            "target": candidate.target,
+            "target": public_mutant_target(names, &candidate.target, candidate.action.as_deref()),
             "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
         });
         if candidate.action.as_deref() == Some("init")
@@ -10510,9 +10527,10 @@ fn run_explain_from_source(
     );
     output.insert(
         "counterfactuals".to_owned(),
-        invariant_counterfactuals_from_source(path, source, depth),
+        invariant_counterfactuals_from_source(&model, path, source, depth),
     );
-    let mut reachable_counterfactuals = reachable_counterfactuals_from_source(path, source, depth);
+    let mut reachable_counterfactuals =
+        reachable_counterfactuals_from_source(&model, path, source, depth);
     if let Value::Array(items) = &mut reachable_counterfactuals {
         for item in items {
             if let Value::Object(item) = item {
@@ -10744,7 +10762,12 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
             }
             return MutationOracle {
                 clean: false,
-                killed_by: Some(display(&violation.name)),
+                killed_by: Some(
+                    model.action_scoped_display_name(
+                        &violation.name,
+                        violation.last_action.as_deref(),
+                    ),
+                ),
                 killer_requirements: property_requirements(&model, &violation.name),
             };
         }
@@ -10776,7 +10799,11 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
     }
 }
 
-fn mutation_oracle(spec: fsl_syntax::SurfaceSpec, depth: usize) -> MutationOracle {
+fn mutation_oracle(
+    spec: fsl_syntax::SurfaceSpec,
+    depth: usize,
+    names: &KernelModel,
+) -> MutationOracle {
     let Ok(kernel) = fsl_core::lower_direct_spec(spec) else {
         return MutationOracle {
             clean: false,
@@ -10784,25 +10811,30 @@ fn mutation_oracle(spec: fsl_syntax::SurfaceSpec, depth: usize) -> MutationOracl
             killer_requirements: Vec::new(),
         };
     };
-    let Ok(model) = fsl_core::build_model(kernel) else {
+    let Ok(mut model) = fsl_core::build_model(kernel) else {
         return MutationOracle {
             clean: false,
             killed_by: Some("build_spec".to_owned()),
             killer_requirements: Vec::new(),
         };
     };
+    model.inherit_compose_names(names);
     mutation_oracle_for_model(model, depth)
 }
 
 fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle {
     if let Ok(fsl_runtime::BoundaryProbe {
-        finding: Some((violation, _)),
+        finding: Some((violation, trace)),
         ..
     }) = fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
     {
         return MutationOracle {
             clean: false,
-            killed_by: Some(violation.name.clone()),
+            killed_by: Some(
+                trace_last_action(&trace)
+                    .and_then(|action| model.component_public_name(&violation.name, action))
+                    .unwrap_or_else(|| violation.name.clone()),
+            ),
             killer_requirements: property_requirements(&model, &violation.name),
         };
     }
@@ -11343,6 +11375,20 @@ fn type_has_symbolic_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
+/// A built-in mutant's `target` (`<action> assignment`, `<action> requires
+/// #1`, ...) with its leading action spelled the way identifier fields spell it.
+fn public_mutant_target(model: &KernelModel, target: &str, action: Option<&str>) -> String {
+    action
+        .and_then(|action| {
+            let rest = target.strip_prefix(action)?;
+            Some(format!(
+                "{}{rest}",
+                model.component_public_name(action, action)?
+            ))
+        })
+        .unwrap_or_else(|| target.to_owned())
+}
+
 fn mutation_action_labels(
     document: &fsl_syntax::SurfaceDocument,
 ) -> std::collections::BTreeMap<String, String> {
@@ -11813,7 +11859,7 @@ fn run_mutate(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     for mutant in all_mutants.into_iter().take(max_mutants) {
         let mutated_spec = mutant.spec.clone();
-        let mut outcome = mutation_oracle(mutant.spec, depth);
+        let mut outcome = mutation_oracle(mutant.spec, depth, &model);
         if outcome.clean
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
             && let Ok(mutated_model) = fsl_core::build_model(kernel)
@@ -11869,7 +11915,7 @@ fn run_mutate(
             .as_ref()
             .and_then(|action| action_labels.get(action).map(|label| (action, label)))
             .map_or_else(
-                || mutant.target.clone(),
+                || public_mutant_target(&model, &mutant.target, mutant.action.as_deref()),
                 |(action, label)| mutant.target.replacen(action, label, 1),
             );
         let mut public = json!({
@@ -13516,8 +13562,8 @@ fn tag_review_output(model: &KernelModel) -> Value {
         tag_statement_effects(&action.statements, &[], &mut effects);
         declarations.push(json!({
             "kind":"action",
-            "name":action.name,
-            "node_id":format!("action:{}",action.name),
+            "name":model.action_key(&action.name),
+            "node_id":fsl_tools::action_node_id(model, &action.name),
             "tag":tag,
             "tags":tags,
             "loc":action.span.python_loc(),
@@ -13786,7 +13832,7 @@ fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
         .iter()
         .map(|action| {
             (
-                format!("action:{}", action.name),
+                fsl_tools::action_node_id(model, &action.name),
                 !action.annotations.source_order().is_empty(),
             )
         })
@@ -13841,7 +13887,8 @@ fn ai_progressless_findings(model: &KernelModel, tsg: &Value) -> Vec<Value> {
             expanded.push(last.to_owned());
         }
         let mut attached = model.actions.iter().any(|action| {
-            action.fair && cycle_actions.contains(format!("action:{}", action.name).as_str())
+            action.fair
+                && cycle_actions.contains(fsl_tools::action_node_id(model, &action.name).as_str())
         });
         if !attached {
             attached = model.leadstos.iter().any(|property| {
@@ -14013,7 +14060,7 @@ fn bounded_semantic_review(
                                 "trace":fslc_rust::trace_json(model,&trace),
                                 "state":fslc_rust::state_json(&monitor.state),
                                 "actions":[semantic_action_record(model,left,&left_state),semantic_action_record(model,right,&right_state)],
-                                "action_nodes":[format!("action:{}",left.action),format!("action:{}",right.action)],
+                                "action_nodes":[fsl_tools::action_node_id(model,&left.action),fsl_tools::action_node_id(model,&right.action)],
                                 "divergent_state":divergent_state,
                             })
                         };
@@ -14261,11 +14308,11 @@ fn ai_review_output(
         if !action.requires.is_empty()
             || semantic
                 .action_nodes
-                .contains(&format!("action:{}", action.name))
+                .contains(&fsl_tools::action_node_id(model, &action.name))
         {
             continue;
         }
-        let action_id = format!("action:{}", action.name);
+        let action_id = fsl_tools::action_node_id(model, &action.name);
         let writes = tsg["edges"]
             .as_array()
             .into_iter()
@@ -15543,7 +15590,9 @@ fn semantic_diff_direction(
         // (unlike ordinary findings, never opt-in via `--forbid`).
         let public = json!({
             "result":"impl_violated","checked_to_depth":depth,
-            "violation_kind":violation.kind,"invariant":display(&violation.name),
+            "violation_kind":violation.kind,
+            "invariant":implementation
+                .action_scoped_display_name(&violation.name, trace_last_action(&trace)),
             "violated_at_step":violation.step,
         });
         let raw = json!({
@@ -15766,7 +15815,7 @@ fn forbidden_case_finding(
         }
         accepted_trace.push(json!({
             "step":index+1,"state":fslc_rust::state_json(&monitor.state),
-            "action":{"name":display(&instance.action),
+            "action":{"name":new.action_display_name(&instance.action),
                 "params":instance.params.iter().map(|(name,value)|(
                     name.clone(),fslc_rust::fsl_value_json(value)
                 )).collect::<Map<_,_>>()},
@@ -16672,10 +16721,11 @@ fn impl_self_violation_output(
     output.insert("impl".to_owned(), json!(implementation.name));
     output.insert("result".to_owned(), json!("violated"));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
+    let name = implementation.action_scoped_display_name(&violation.name, trace_last_action(trace));
     if violation.kind == "trans" {
-        output.insert("trans".to_owned(), json!(display(&violation.name)));
+        output.insert("trans".to_owned(), json!(name));
     }
-    output.insert("invariant".to_owned(), json!(display(&violation.name)));
+    output.insert("invariant".to_owned(), json!(name));
     output.insert("violated_at_step".to_owned(), json!(violation.step));
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert(
@@ -17509,12 +17559,10 @@ struct ValidatedReplayEvent {
     state: Value,
 }
 
-/// The action name a v1 replay accepts back: `alias.action` for a compose
-/// component action, the exact Kernel name for every other action.
-fn replay_action_name(model: &KernelModel, name: &str) -> String {
-    model
-        .compose_action(name)
-        .map_or_else(|| name.to_owned(), fsl_core::ComposeName::display)
+/// Whether a JSONL log action selects `action` under `maps auto`: its public
+/// name, or the [`display`] spelling `maps auto` matched before #1234.
+fn log_action_matches(model: &KernelModel, action: &fsl_core::ActionDef, source: &str) -> bool {
+    model.action_display_name(&action.name) == source || display(&action.name) == source
 }
 
 fn validate_versioned_replay_events(
@@ -17557,7 +17605,7 @@ fn parse_versioned_params(
     if values.len() != action.params.len() {
         return Err(format!(
             "event {event_index} parameter mismatch for action '{}'",
-            replay_action_name(model, &action.name)
+            model.action_key(&action.name)
         ));
     }
     action
@@ -18127,6 +18175,15 @@ fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
 
 fn display(name: &str) -> String {
     fslc_rust::display_name(name)
+}
+
+/// Internal name of the action that took the last step of `trace`: the action
+/// a violation, CTI, or kill found at that step was produced by.
+fn trace_last_action(trace: &[TraceStep]) -> Option<&str> {
+    trace
+        .last()
+        .and_then(|step| step.action.as_ref())
+        .map(|action| action.name.as_str())
 }
 
 fn block_on_native<F: Future>(future: F) -> F::Output {
@@ -19120,7 +19177,7 @@ spec GrowFixture {
                 mutant.op == "requires_remove" && mutant.action.as_deref() == Some("dec")
             })
             .expect("dec requires_remove mutant present in source A");
-        let outcome = mutation_oracle(mutant.spec, 4);
+        let outcome = mutation_oracle(mutant.spec, 4, &model);
         assert!(
             !outcome.clean,
             "removing dec's requires guard must be killed by source A's NonNegative invariant, \

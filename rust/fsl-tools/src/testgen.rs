@@ -563,8 +563,9 @@ pub fn public_kernel_testgen_input(
 ///
 /// The caller supplies checked names and declaration order only; emitters still
 /// consume the same normalized input and never receive a private model or AST.
-/// Action names are already public (`alias.action`): only the model knows a
-/// component action's alias boundary, so they are used verbatim.
+/// State names are Kernel names, rendered here as the public Kernel adapter
+/// renders them. Action names are already public (`alias.action`) and are used
+/// verbatim: only the model knows a component action's alias boundary.
 ///
 /// # Errors
 ///

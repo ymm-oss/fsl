@@ -161,7 +161,7 @@ pub fn conformance_vectors_for_version(
                     "outcome":{
                         "kind":violation.kind,
                         "name":model
-                            .compose_violation_display_name(&violation.name)
+                            .component_public_name(&violation.name, action)
                             .unwrap_or(violation.name),
                         "state_changed":after != before,"state":after,
                         "attempted_state":attempted

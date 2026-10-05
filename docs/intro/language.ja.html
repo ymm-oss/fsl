@@ -1799,8 +1799,12 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
   action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
   コンポーネントの action の公開名は alias と action 名から作るので、
   <code>use X as a__b</code> の action <code>c</code> は <code>a__b.c</code> です。コンポーネントの action を名指す
-  すべてのコマンド — testgen、conformance、Monitor、verify / scenarios のトレース、
-  <code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を使います。
+  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
+  mutate、refine、diff、html、ledger、analyze(<code>action:a__b.c</code> のようなグラフの ID を
+  含む)、<code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を
+  使います。<code>_requires_failed_a__b.c</code> のように action から作る名前も同じです。
+  状態のキーは上の規則のままなので、<code>use X as a__b</code> の状態 <code>n</code> は <code>a.b__n</code> と
+  表示されます(凍結した Python 参照実装では <code>a__b.n</code>)。
   v1 の <code>replay</code> トレースでは、コンポーネントの action を <code>alias.action</code> と書いても
   旧来の <code>alias__action</code> と書いてもかまいません。どちらも同じ action を指します
   (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。</li>
