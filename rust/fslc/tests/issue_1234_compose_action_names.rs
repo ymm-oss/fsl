@@ -607,6 +607,62 @@ fn keyed_outputs_are_ordered_by_published_name() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// Detector (E5): `compose_testgen_input` takes public state names, so a
+/// compose scenario's expected state is ordered by declaration in every
+/// target. a2629636 passed Kernel names (`bank__cleared`), which never matched
+/// the scenarios' `bank.cleared` keys; pytest re-rendered them itself, while
+/// the other five targets put the only matching key, `withdrawn`, first.
+#[test]
+fn compose_scenario_expected_state_follows_declaration_order() {
+    const DECLARED: [&str; 5] = [
+        "bank.cleared",
+        "bank.pending",
+        "audit.balance",
+        "audit.log",
+        "withdrawn",
+    ];
+    let dir = scratch_dir("testgen-order");
+    let mut failures = Vec::new();
+    for target in ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"] {
+        let path = dir.join(format!("bank.{target}"));
+        let output = fslc(&[
+            "testgen",
+            BANK,
+            "--depth",
+            "2",
+            "--target",
+            target,
+            "-o",
+            path.to_str().expect("utf-8 path"),
+        ]);
+        assert_eq!(output.status.code(), Some(0), "{target}: {output:?}");
+        let text = std::fs::read_to_string(&path).expect("read generated scaffold");
+        let lines = text
+            .lines()
+            .filter(|line| {
+                (line.contains("assertPartial(") || line.contains("_assert_partial_expected("))
+                    && line.contains("bank.cleared")
+            })
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            failures.push(format!("{target}: no scenario expected-state assertion"));
+        }
+        for line in lines {
+            let positions = DECLARED
+                .iter()
+                .map(|key| {
+                    line.find(&format!("\"{key}\""))
+                        .or_else(|| line.find(&format!("'{key}'")))
+                })
+                .collect::<Option<Vec<_>>>();
+            if !positions.is_some_and(|positions| positions.is_sorted()) {
+                failures.push(format!("{target}: {}", line.trim()));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// Detector (E3): a component guard that divides by zero is a `partial_op`
 /// conformance outcome; 5b5e2177 renamed outcome names through a prefix
 /// table that lacked `_partial_op_`, so it printed `_partial_op_calc__div`.

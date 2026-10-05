@@ -28,4 +28,11 @@ resolved for an alias without `__` and keeps resolving, while
 `--focus action:bank__settle` now fails with "unknown analyze focus node"
 (exit 2). State and property node IDs are unchanged. `fslc document` claim
 IDs and fingerprints are unchanged, because the document projection rejects
-compose specs. Non-compose specs print the same output as before.
+compose specs. For a compose spec, `fslc testgen` now lists the keys of each
+scenario's expected state in state declaration order (`bank.cleared`,
+`bank.pending`, `audit.balance`, `audit.log`, `withdrawn` for
+`specs/bank_system.fsl`) in the vitest, swift, kotlin, dart, and phpunit
+scaffolds, as pytest already did; they used to list the compose spec's own
+state first and component state after it in name order. The values and the
+partial-match check are unchanged, so a generated test passes or fails as
+before. Non-compose specs print the same output as before.

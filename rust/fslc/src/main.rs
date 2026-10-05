@@ -12553,7 +12553,11 @@ fn run_testgen_from_source(
         fsl_tools::compose_testgen_input(
             &model.name,
             &path_context,
-            model.state.iter().map(|(name, _)| name.clone()).collect(),
+            model
+                .state
+                .iter()
+                .map(|(name, _)| fsl_core::display_name(name))
+                .collect(),
             model
                 .actions
                 .iter()
