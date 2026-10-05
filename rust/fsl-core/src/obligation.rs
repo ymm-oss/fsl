@@ -106,14 +106,21 @@ impl ObligationKind {
     }
 
     const fn index_in_all(kind: Self) -> usize {
-        let mut index = 0;
-        while index < Self::ALL.len() {
-            if Self::ALL[index] as usize == kind as usize {
-                return index;
+        Self::index_in(&Self::ALL, kind, 0)
+    }
+
+    /// `kind`'s index in `kinds`, counted from `offset`.
+    const fn index_in(kinds: &[Self], kind: Self, offset: usize) -> usize {
+        match kinds {
+            [first, rest @ ..] => {
+                if *first as usize == kind as usize {
+                    offset
+                } else {
+                    Self::index_in(rest, kind, offset + 1)
+                }
             }
-            index += 1;
+            [] => panic!("an ObligationKind is missing from ObligationKind::ALL"),
         }
-        panic!("an ObligationKind is missing from ObligationKind::ALL")
     }
 }
 
