@@ -84,10 +84,13 @@ Candidates over-approximate: a row no state can fail may keep a candidate,
 never the reverse, so a vacuous row is one no evaluation of its site can fail
 and an engine that skips it skips no real question. `KeyInDomain` and the value
 types it uses carry one premise: every state variable the site reads satisfies
-its type bound. Each engine checks a state's type bounds before its
-invariants, `trans` and `ensures` (explicit, bmc and induction all report
-`_bounds_<v>` first), so the premise holds wherever the `Holds@TypeBound` rows
-are checked. A run that does not check them (`--property` selects a property
+its type bound. Each engine checks a state's type bounds before it evaluates
+a site on that state (explicit, bmc and induction all report `_bounds_<v>`
+first when an out-of-type value reaches an index in an invariant, a `trans`,
+an `ensures`, a guard or a body), so the premise holds wherever the
+`Holds@TypeBound` rows are checked. An indexed assignment writes the map the
+state held before the action: `check` rejects an action that assigns the same
+state location twice, so no earlier statement can replace that map. A run that does not check them (`--property` selects a property
 and drops the bounds) cannot rely on a key row's vacuity: there an out-of-type
 value reaches the index and explicit reports a key-domain miss. The P1-c fold
 must keep that order.
@@ -117,14 +120,18 @@ must keep that order.
   branches join (the hull of two ranges, or one type). Every other form --
   arithmetic, `abs`, `size`, `add`, `push` -- counts, even where its value
   happens to fit.
-- Names are typed as the evaluators bind them. Action parameters come first,
-  then each `let` in clause order; a binder variable is typed inside its
-  `where` filter and body, and a binder over a collection takes the item type
-  of a bounded collection. An `is some(v)` pattern never rebinds a parameter,
-  `let` or binder (`or_insert` in both evaluators), but it binds `v` for
-  everything evaluated after it in the same context (an action's guard, body
-  and `ensures` are one; each property expression is one), whether or not the
-  path there required the match. So outside a parameter, `let` or binder, `v`
+- A name's type holds every value the evaluators can bind to it. Action
+  parameters come first, then each `let` in clause order; a binder variable
+  is typed inside its `where` filter and body, and a binder over a collection
+  takes the item type of a bounded collection. An `is some(v)` pattern never
+  rebinds a parameter, `let` or binder (`or_insert` in both evaluators), but
+  once it matches it can bind `v` for what is evaluated after it in the same
+  context (an action's guard, body and `ensures` are one; each property
+  expression is one, and a `leadsTo` trigger and goal are evaluated from
+  separate copies of the binder bindings), whether or not the path there
+  required the match. The catalog also lets a pattern inside a binder's scope
+  reach the rest of the context, which the evaluators do not: an
+  over-approximation. So outside a parameter, `let` or binder, `v`
   is typed as the join of every payload of its patterns in the context and its
   base meaning (a state variable, constant or enum member); without a join it
   is untyped, and every index through an untyped name counts.
