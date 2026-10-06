@@ -315,6 +315,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-core/src/dialect.rs",
+        3311,
+        "verify_scope_type_names",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-core/src/refinement.rs",
         1249,
         "requirements_implements",

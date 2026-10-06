@@ -67,7 +67,8 @@ emit the same scenarios:
   and runs the fixed-seed walk live as the oracle. Output defaults to `test_<spec>.py`.
 - `vitest`: a self-contained TypeScript (Vitest) file with the same `Adapter`
   contract (`reset`/`step`/`observe`). Deterministic and forbidden scenarios map
-  directly; the random walk is **baked at generation time** (the concrete Monitor
+  directly (a forbidden scenario asserts `ok == false` and `kind ==
+  rejected_by`, which is `requires_failed` or `bad_call`); the random walk is **baked at generation time** (the concrete Monitor
   runs the seed-fixed walk and the `(action, params, expected_state)` trace is
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
   Until `makeAdapter()` is wired every test fails. Output defaults to
