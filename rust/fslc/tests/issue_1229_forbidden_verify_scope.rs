@@ -164,14 +164,19 @@ fn a_number_final_step_outside_the_values_scope_is_not_a_rejection() {
     );
 }
 
-/// Migration: `verify` (BMC, induction, explicit, and auto), `sweep`,
-/// `counterexample export`,
-/// `testgen`, `mutate`, `html`, `ledger`, and the `[requirements]` layer of
-/// `chain` stop with exit 2 on this spec, which verifies, so each exited 0
-/// before #1229 except `counterexample export` (exit 2, nothing to export) —
-/// detector (mutation: classify the scope error only on the `check` path).
+/// Migration: `verify` (BMC at `--depth 2`, induction, explicit, and auto),
+/// `sweep`, `counterexample export`, `testgen`, `mutate`, `html`, `ledger`,
+/// and the `[requirements]` layer of `chain` exit 2 on this spec, which
+/// verifies, so each exited 0 before #1229 except `counterexample export`
+/// (exit 2, nothing to export) — detector (mutation: classify the scope error
+/// only on the `check` path). The error itself is asserted for `verify`,
+/// `sweep`, `counterexample export`, `testgen`, `mutate`, and `chain`'s
+/// `detail`; for `html` and `ledger` only the exit status and the written
+/// report. `scenarios` is in another test; `explain` and `approval` are not
+/// run here.
 #[test]
-fn the_gate_stops_verify_and_the_commands_built_on_it_on_an_out_of_scope_final_step() {
+fn an_out_of_scope_final_step_exits_2_in_verify_at_depth_2_and_three_engines_and_seven_listed_commands()
+ {
     let directory = scratch("gate-commands");
     std::fs::write(directory.join("spec.fsl"), cart("add(9)")).expect("write spec");
     for args in [
@@ -394,6 +399,18 @@ fn override_skip_and_declared_scope_error_do_not_conflict() {
         assert_eq!(status, 2, "{instances}: {output:#}");
         assert_eq!(output["kind"], "forbidden", "{instances}: {output:#}");
         assert_eq!(output["out_of_scope_argument"]["value"], 7, "{output:#}");
+        // The reported scope is the run's (overridden) one, not the declared
+        // `0..2` that makes the step an error (DESIGN-forbidden §2).
+        let scope = if instances == "Case=2" {
+            [0, 1]
+        } else {
+            [0, 2]
+        };
+        assert_eq!(
+            output["out_of_scope_argument"]["scope"],
+            json!(scope),
+            "{instances}: {output:#}"
+        );
         assert!(output.get("requirement_traces").is_none(), "{output:#}");
     }
 

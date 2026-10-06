@@ -59,6 +59,12 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     for any scenario the override put out of scope. An argument outside the declared scope
     stays this error, as it is unscoped, unless the override widens the scope to include it:
     then the guard is evaluated, and the run judges the forbidden on that evaluation.
+    The error's `out_of_scope_argument.scope` and the hint's `lo..hi` are the scope of the
+    model being run, so under an override they are the overridden range, not the declared
+    one that makes the step an error: `respond(7)` under `instances Case = 3` with
+    `--instances Case=2` reports `scope: [0, 1]` and "a value inside 0..1", while the
+    hint's "Widen the scope in verify { instances / values }" refers to the declared
+    block, whose range (`0..2`) the numbers do not show.
   - `fslc diff`: an OLD final step outside the verify scope the comparison uses (including
     the NEW scope OLD is replayed under) is `unknown` / `forbidden_replay_failed` (no OLD
     guard decided it), like an OLD final step that violates. An OLD `bad_call` is preserved
@@ -76,12 +82,15 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     action is the error's widen-or-move hint, not an accepted or unresolved step's.
   - Migration: the step used to satisfy the forbidden (`rejected_by: "requires_failed"`
     before #1212, `"bad_call"` since), so `check` passed and the generated test asserted a
-    rejection no guard made. Every command that runs the forbidden gate now stops on such a
-    step with `error` / `kind: "forbidden"` / exit 2; §2.1 has each command's measured
-    exit status and output, with the rest of the spec verified and violated. When the rest
+    rejection no guard made. The commands that run the forbidden gate now exit 2 on such a
+    step, except the three below. `html`, `ledger`, and `approval create --kind html` print
+    the generated result (`result: "generated"`) with the error inside the report; `chain`
+    prints `kind: "chain"` with the error as the `[requirements]` layer's `detail`; the
+    others print the error (`error` / `kind: "forbidden"`). §2.1 has each command's
+    measured exit status and output, with the rest of the spec verified and violated. When the rest
     verified, they exited 0 before; `counterexample export` already exited 2 (nothing to
     export). When it was violated, `check` still exited 0, `approval create` exited 2,
-    and the others exited 1 (`verify`, `html`, and `counterexample export` with its
+    and the others except `explain` exited 1 (`verify`, `html`, and `counterexample export` with its
     counterexample). The exceptions: `explain` still exits 0 with `witnesses: []` (known
     gap #1242; where the rest verified, it listed the forbidden's witness);
     `approval create --kind ledger` exits 0 with a record of a ledger listing the error
@@ -552,7 +561,10 @@ every run).
 - #1229, base #1213 at `5b1925de` → head #1229 on top of it (no `.fsl` differs between
   the two trees; the commits after the first #1229 commit change no Rust source). This
   was first run against #1213 at `40be1c2a`, whose Rust source is the same as
-  `5b1925de`'s, and re-run after #1229 moved onto `5b1925de`, with the same counts. Each
+  `5b1925de`'s, and re-run after #1229 moved onto `5b1925de`, with the same counts. #1229
+  then moved onto #1213 at `906bd7cc`, which differs from `5b1925de` only in documentation
+  and tests (no Rust source and no `.fsl`), so the counts below are `5b1925de`'s and were
+  not re-run. Each
   binary is built in, and run inside, its own tree, twice: within each binary only the
   three excluded wall-clock fields differ, and base → head differs in nothing else in any
   of the four base/head pairings (the `agentic_rag` `scenarios` exceeded 300 seconds in

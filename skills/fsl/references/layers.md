@@ -382,8 +382,10 @@ verify {
   verdict, scenario, or test, except `explain`, which exits 0 with no
   witnesses (known gap #1242), `approval create --kind ledger`, which exits 0
   and records a ledger that lists the error (#1243), and `approval check` of a
-  ledger record, which reports `drifted` (exit 0) —
-  `docs/design/DESIGN-forbidden.md` §2.1.
+  ledger record, which reports `drifted` (exit 0). `fslc diff` replays the
+  forbidden too but reports a finding whose exit status follows `--forbid`, and
+  an override that alone removed the argument gives `forbidden_skipped` as
+  above, with the exit status of the rest of the spec (0 when it verifies) — `docs/design/DESIGN-forbidden.md` §2.1.
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use

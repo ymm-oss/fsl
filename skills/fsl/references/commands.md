@@ -611,7 +611,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   excused; one outside the declared bounds keeps the unscoped error, and a
   forbidden final step outside the overridden scope only because its argument
   was removed is reported as `forbidden_skipped`, not satisfied (one outside the
-  declared scope is the unscoped `kind: "forbidden"` error, #1229). When any scenario was skipped,
+  declared scope is the unscoped `kind: "forbidden"` error, #1229, unless the
+  override widens the scope to include it, in which case the guard is
+  evaluated). When any scenario was skipped,
   the envelope also carries `requirement_traces: {result: "not_evaluated",
   reason: "bounds_override", skipped: [{kind, id, reference}, ...]}`; the key
   is absent when every scenario was replayed. When the spec has an inline `implements`, the
