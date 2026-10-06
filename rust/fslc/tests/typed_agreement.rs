@@ -544,11 +544,8 @@ fn partial_inventory_sweep_agrees_across_explain_kernel_verifier_and_runtime() {
         let observed = observe_inventory(&model.id, &model.source);
         let violated = ("violated".to_owned(), "partial_op/_partial_a".to_owned());
         let placement = model.placement;
-        let (expected_authored, expected_reads) = if placement.kernel_exclusion.is_some() {
-            (0, 0)
-        } else {
-            (placement.kernel_authored, placement.kernel_binder_reads)
-        };
+        let (expected_authored, expected_reads) =
+            (placement.kernel_authored, placement.kernel_binder_reads);
         let authored = observed
             .kernel_operations
             .iter()
@@ -629,6 +626,94 @@ fn partial_inventory_seq_binder_reads_are_guarded_and_not_listed_by_explain() {
     assert_eq!(
         observed.kernel_operations,
         vec![("at".to_owned(), true), ("at".to_owned(), true)]
+    );
+    assert_eq!(observed.bmc.0, "verified");
+    assert_eq!(observed.explicit.0, "proved");
+    assert_eq!(observed.monitor, None);
+}
+
+/// Issue #1190: the issue's three statement-level `forall` bodies whose partial
+/// operation reads the binder. The Public Kernel used to fail with "cannot
+/// type identifier 'k'"; it now lists one closed entry per candidate (no free
+/// `k`), explain lists the one authored site, and the verdicts are unchanged:
+/// the unguarded `at` fails, the guarded index read and `1 / (k + 1)` do not.
+#[test]
+fn forall_statement_partial_operations_on_the_binder_are_listed_per_candidate() {
+    let cases = [
+        (
+            "forall_statement_at_binder",
+            "forall k: K { m[k] = s.at(k) }",
+            "at",
+            ("violated", "partial_op/_partial_a"),
+            ("violated", "partial_op/_partial_a"),
+            Some("partial_op"),
+        ),
+        (
+            "forall_statement_guarded_index_binder",
+            "forall k: K { m[k] = if k < s.size() then s[k] else 0 }",
+            "index",
+            ("verified", "/"),
+            ("proved", "/"),
+            None,
+        ),
+        (
+            "forall_statement_divide_binder",
+            "forall k: K { m[k] = 1 / (k + 1) }",
+            "divide",
+            ("verified", "/"),
+            ("proved", "/"),
+            None,
+        ),
+    ];
+    for (id, body, operation, bmc, explicit, monitor) in cases {
+        let source = partial_inventory_source(body);
+        let observed = observe_inventory(id, &source);
+        assert_eq!(observed.explain_sites, 1, "{id}");
+        assert_eq!(
+            observed.kernel_operations,
+            vec![(operation.to_owned(), false); 3],
+            "{id}"
+        );
+        assert_eq!(
+            observed.bmc,
+            (bmc.0.to_owned(), bmc.1.to_owned()),
+            "{id}: bmc"
+        );
+        assert_eq!(
+            observed.explicit,
+            (explicit.0.to_owned(), explicit.1.to_owned()),
+            "{id}: explicit"
+        );
+        assert_eq!(observed.monitor.as_deref(), monitor, "{id}: monitor");
+
+        let dir =
+            std::env::temp_dir().join(format!("fslc-typed-agreement-1190-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch directory");
+        let path = dir.join(format!("{id}.fsl"));
+        std::fs::write(&path, &source).expect("write generated model");
+        let kernel = cli_json(&["kernel", path.to_str().expect("utf-8 path")]);
+        let _ = std::fs::remove_file(&path);
+        let listed = kernel["actions"][0]["partial_operations"].to_string();
+        assert!(
+            !listed.contains("\"name\":\"k\""),
+            "{id}: a failure condition still names the binder: {listed}"
+        );
+    }
+}
+
+/// Negative control for #1190: a statement-level `forall` whose body has no
+/// partial operation still lists nothing, and is not a violation.
+#[test]
+fn forall_statement_without_partial_operation_lists_nothing() {
+    let observed = observe_inventory(
+        "forall_statement_total",
+        &partial_inventory_source("forall k: K where k > 0 { m[k] = m[k] }"),
+    );
+    assert_eq!(observed.explain_sites, 0);
+    assert!(
+        observed.kernel_operations.is_empty(),
+        "{:?}",
+        observed.kernel_operations
     );
     assert_eq!(observed.bmc.0, "verified");
     assert_eq!(observed.explicit.0, "proved");
