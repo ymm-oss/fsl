@@ -97,9 +97,9 @@ the relevant role skill directs it.
   then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
   accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
-  verifies at check time that the last step is rejected (not-enabled or a
-  violation) — if accepted, `kind: "forbidden"`. Carried fields (`f: T`) accept
-  `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
+  verifies at check time that the last step is rejected (not enabled; a
+  runtime violation does not count since #1213) — otherwise `kind: "forbidden"`.
+  Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
   required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
   `branches`, and explicit `maps` only for hard cases such as multi-entity
   behavior, conservation rules, SLA/time, or history that needs kernel state.
@@ -352,15 +352,21 @@ verify {
   == `answer(0, 1)`); an undefined name is a check-time error.
 - `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
-  **the last step is rejected** (not-enabled, or an
-  invariant/type_bound/partial_op/ensures violation). If accepted,
+  **the last step is rejected**, i.e. not enabled. If accepted,
   `kind: "forbidden"` (detection of under-constraint = a missing guard that a safety
-  invariant stays silent about); if the premise is not enabled,
+  invariant stays silent about). Since #1213 an enabled last step that stops
+  with an invariant/trans/ensures/type_bound/partial_op violation is also
+  `kind: "forbidden"` (with `violation`): a violation is not a rejection, so write
+  the `requires` that rejects the call; every command that runs this check then
+  exits 2, except `explain` (exit 0, no witnesses; known gap #1242), `approval
+  create --kind ledger` (exit 0, records a ledger that lists the error; #1243),
+  and `approval check` of a ledger record (`drifted`, exit 0)
+  (`docs/design/DESIGN-forbidden.md` §2.1). If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
-  outside the parameter's checked value domain; any other kind means the spec
-  itself is a verify violation). For an `entity` / `number` parameter that domain
-  is the `verify { instances / values }` scope, not a type: a last step such as
+  outside the parameter's checked value domain). For an `entity` / `number`
+  parameter that domain is the `verify { instances / values }` scope, not a type:
+  a last step such as
   `accept(7)` under `instances Case = 3` is a `bad_call` that satisfies the
   forbidden without evaluating any guard, while an implementation may accept it
   (#1229) — keep forbidden arguments inside the scope to test the guard. A last

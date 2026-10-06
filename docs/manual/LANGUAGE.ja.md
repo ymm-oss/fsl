@@ -1042,7 +1042,9 @@ NEW に対して replay します(`forbidden_relaxed`)。NEW の最後のステ�
 拒否する最後のステップも保たれます。どちらかの側で宣言された `entity` / `number` の
 verify スコープが決めた `bad_call` は `unknown` / `forbidden_step_unrelatable`、
 どの action も arity も指さない OLD の最後のステップは `unknown` /
-`forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
+`forbidden_replay_failed` です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
+ステップは `forbidden_relaxed`、違反する OLD の最後のステップや NEW のセットアップの
+ステップは `unknown` / `forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
 ステップも保たれたと報告されます。
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md) の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
@@ -2884,9 +2886,29 @@ DESIGN-*.md があります)。
 
 - **`forbidden`(否定の受け入れ基準)** — requirements ダイアレクトの構成物です。
   「拒否されるべき操作列」を書くと、check 時に、最後のステップが拒否される
-  (not-enabled または違反)ことが replay 検証されます。受理されてしまった場合は
+  (not-enabled である)ことが replay 検証されます。受理されてしまった場合は
   `kind:"forbidden"` です(制約不足 = ガードの欠落の検出。安全性の invariant は
-  これについて沈黙します)。scenario の `rejected_by`(testgen が assert します)は、
+  これについて沈黙します)。**#1213 から(破壊的変更)**、最後のステップが
+  enabled で、実行時の違反(`invariant` / `trans` / `ensures` / `type_bound` / `partial_op`)で
+  止まる場合も `violation` 付きの `kind:"forbidden"` です。違反は拒否ではありません。
+  以前の版はこれを充足として数えていました。移行するには、その呼び出しを拒否する
+  `requires` を書き足します。opt-out はありません。この検査は BMC や induction より前に
+  走るので、そうした spec の `verify` は、`--depth` やエンジンによらず、このエラー
+  (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
+  深さが違反に届けば `violated`(exit 1)、届かなければ `verified`(exit 0)、
+  `--engine induction` ではその判定です。この検査を走らせる他のコマンドも exit 2 で
+  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力せず、`html` と
+  `ledger` はレポートを書き出します)。ただし次の 3 つは exit 2 に
+  なりません。`explain` は exit 0 のままで witness はありません(既知の欠落 #1242:
+  `explain` は gate のエラーを捨て、`html` の witness 欄も同じです)。
+  `approval create --kind ledger` は exit 0 で、エラーを載せた ledger を記録します。
+  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
+  `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
+  #1243 で扱います)。以前に作った ledger の記録の `approval check` は `drifted`
+  (exit 0)です。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  出力の実測は
+  [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
+  scenario の `rejected_by`(testgen が assert します)は、
   ガードによる拒否なら `requires_failed`、パラメータの検査される値域の外の引数なら
   `bad_call` です。その値域は、範囲型や enum のパラメータでは宣言された型ですが、
   `entity`(`verify { instances }`)や `number`(`verify { values }`)のパラメータでは

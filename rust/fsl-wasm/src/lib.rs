@@ -1474,6 +1474,35 @@ mod tests {
         assert_eq!(worker["result"], "ok", "{worker:#}");
     }
 
+    /// #1213: without the guard the last step is enabled and breaks the
+    /// `balance` bound; the Worker reports the native violation error.
+    #[test]
+    fn worker_reports_a_violating_forbidden_final_step_like_native() {
+        for command in ["check", "verify"] {
+            let mut request = forbidden_wallet_request(command, "withdraw(60)");
+            request.source = request.source.replace("requires amount <= balance  ", "");
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden violating final step",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["violation"]["kind"], "type_bound",
+                "{command}: {worker:#}"
+            );
+            assert_eq!(worker["step_results"], json!([]), "{command}: {worker:#}");
+            assert!(
+                worker.get("accepted_step").is_none(),
+                "{command}: {worker:#}"
+            );
+        }
+    }
+
     /// Parity control for #1008 (mutation: the Worker gains a selection
     /// option that skips the trace replay the way native `--instances` does).
     /// A request carrying the native selection keys is still a full run: it

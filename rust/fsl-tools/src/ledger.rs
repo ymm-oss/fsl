@@ -308,6 +308,9 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                     ForbiddenFailure::Accepted => {
                         "禁止フローが仕様上許容されている（accepted_trace あり）".to_owned()
                     }
+                    ForbiddenFailure::Violation(kind, name) => format!(
+                        "禁止フローの最後の step が実行可能で、実行時違反（{kind} '{name}'）で止まった（拒否ではない）"
+                    ),
                     ForbiddenFailure::Unresolved(message) => {
                         format!("禁止フローの最後の step が呼び出せる action を指していない（{message}）")
                     }
@@ -406,6 +409,8 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
 /// accepted final step; no other shape is evidence of a missing guard.
 enum ForbiddenFailure<'a> {
     Accepted,
+    /// The final step is enabled and stops with a runtime violation (#1213).
+    Violation(&'a str, &'a str),
     /// The final step names no action, or no variant of that arity.
     Unresolved(&'a str),
     /// A setup step is not enabled or not ok (`forbidden_setup`).
@@ -418,6 +423,10 @@ fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
         Some("forbidden_setup") => ForbiddenFailure::Setup(
             raw.get("failed_step")
                 .map_or_else(|| "null".to_owned(), Value::to_string),
+        ),
+        Some("forbidden") if raw.get("violation").is_some() => ForbiddenFailure::Violation(
+            raw["violation"]["kind"].as_str().unwrap_or(""),
+            raw["violation"]["name"].as_str().unwrap_or(""),
         ),
         Some("forbidden") if raw.get("accepted_step").is_some() => ForbiddenFailure::Accepted,
         Some("forbidden") => raw
@@ -441,6 +450,10 @@ fn translate(finding: &Finding) -> String {
         "forbidden" => match forbidden_failure(&finding.raw) {
             ForbiddenFailure::Accepted => format!(
                 "禁止フロー『{}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。",
+                finding.name
+            ),
+            ForbiddenFailure::Violation(..) => format!(
+                "禁止フロー『{}』の最後の操作をガードが拒否せず、実行すると実行時違反になる。拒否すべきならガードを追加し、許容すべきなら違反を直して禁止フローを見直す。",
                 finding.name
             ),
             ForbiddenFailure::Unresolved(_) => format!(
@@ -497,6 +510,7 @@ fn next_action(finding: &Finding) -> String {
             "reachable" => "受入条件に到達 trace を追加 / ガードを緩める",
             "forbidden" => match forbidden_failure(&finding.raw) {
                 ForbiddenFailure::Accepted => "ガードを追加 / 責任者がリスク受容",
+                ForbiddenFailure::Violation(..) => "ガードを追加 / 違反を直して禁止フローを見直す",
                 ForbiddenFailure::Unresolved(_) => "禁止フローの step の action 名・引数を修正",
                 ForbiddenFailure::Setup(_) => "禁止フローの前提手順を修正",
                 ForbiddenFailure::Other => "付録の生 JSON を確認",

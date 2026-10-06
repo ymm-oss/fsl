@@ -1070,6 +1070,8 @@ fn validate_requirement_trace_contract(
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         let mut accepted_trace = Vec::new();
         for (index, step) in case.steps.iter().enumerate() {
+            // A guard that cannot be evaluated here must stay an error, never
+            // a not-enabled rejection that satisfies the forbidden (#1191).
             let (arguments, instance) = requirement_step_match(&monitor, step)?;
             let is_final = index + 1 == case.steps.len();
             let Some(instance) = instance else {
@@ -1116,9 +1118,42 @@ fn validate_requirement_trace_contract(
                     .collect(),
             );
             let result = monitor.step(&instance).map_err(|error| error.to_string())?;
-            if result.violation.is_some() {
+            if let Some(violation) = &result.violation {
                 if is_final {
-                    break;
+                    // Issue #1213: an enabled final step that stops with a
+                    // runtime violation was not rejected — its guard admits
+                    // the call. Counting it as satisfying `expect rejected`
+                    // would let a reachable spec bug stand in for the
+                    // missing guard, so the strict default fails closed.
+                    let mut output = requirement_failure_base(envelope, "forbidden", case);
+                    output.insert("failed_step".to_owned(), json!(index));
+                    output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                    output.insert("step_results".to_owned(), json!([]));
+                    output.insert(
+                        "violation".to_owned(),
+                        json!({
+                            "kind": violation.kind,
+                            "name": display_name(&violation.name),
+                            "action": display_name(&instance.action),
+                            "params": params,
+                        }),
+                    );
+                    output.insert("accepted_trace".to_owned(), Value::Array(accepted_trace));
+                    output.insert("state".to_owned(), state_json(&monitor.state));
+                    output.insert(
+                        "loc".to_owned(),
+                        json!({"line": step.line, "column": step.column}),
+                    );
+                    output.insert(
+                        "hint".to_owned(),
+                        json!(format!(
+                            "the last step was enabled and stopped with a runtime violation ({} '{}'), which is not a rejection: a forbidden case is satisfied only when the last step is not enabled (requires_failed / bad_call). If this call must be rejected, add a requires that rejects it. If the call should be allowed, the forbidden is wrong: fix the violation the step reaches and revise or remove the forbidden.",
+                            violation.kind,
+                            display_name(&violation.name),
+                        )),
+                    );
+                    output.insert("trace_type".to_owned(), json!("forbidden"));
+                    return Ok((Some(Value::Object(output)), has_contract));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));

@@ -81,7 +81,17 @@ verify scope (`instances` / `values` declared on either side, including the NEW
 scope OLD is replayed under) tried no
 guard on either side, so it stays `unknown` / `forbidden_step_unrelatable`
 (DESIGN-forbidden.md §2, issue #1229). An OLD final step that names no action,
-or no variant of that arity, is `unknown` / `forbidden_replay_failed`.
+or no variant of that arity, is `unknown` / `forbidden_replay_failed`. A NEW
+final step that is enabled and then stops with a runtime violation is not a
+rejection either (DESIGN-forbidden.md §2, #1213): it is `forbidden_relaxed`, and
+its witness carries `violation` (`{kind, name}`). An OLD final step that is
+enabled and then violates was never a rejection to preserve, so it is `unknown`
+with `forbidden_replay_failed`.
+A NEW setup step that is enabled and then violates is `unknown` with
+`forbidden_replay_failed` as well: NEW never reaches the final step, so it
+neither preserves nor relaxes the OLD rejection. The same reasoning applies to
+a NEW setup step that its guard disables, but that step is still reported as
+preserved (the known gap above, issue #1239).
 
 ## Scope changes
 

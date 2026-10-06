@@ -328,8 +328,14 @@ measured cases already exited 1 on the `unknown` that NEW's added action or
 changed arity produces; see
 `docs/design/DESIGN-forbidden.md` §2.1). Known gap (#1239): a NEW
 *setup* step that its guard disables is also reported as preserved, although NEW
-never runs the final step. A changed `verify` scope is explicit and comparison uses
-NEW's shared entity/number bounds. Findings exit 0 because the command is an
+never runs the final step. Since #1213 a NEW final step that is enabled and then
+stops with a runtime violation is `forbidden_relaxed` too (its witness carries
+`violation`): a violation is not a rejection. An OLD final step or a NEW setup
+step that violates is `unknown` / `forbidden_replay_failed`; before #1213 all
+three were preserved, so that forbidden now fails `--forbid forbidden_relaxed`
+(NEW final violation) or `--forbid unknown` (the other two), where it failed
+neither. A changed
+`verify` scope is explicit and comparison uses NEW's shared entity/number bounds. Findings exit 0 because the command is an
 analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
 verdict is bounded by `--depth`, and a mapping only resolves the direction
 declared in its `impl`/`abs` fields (it is never inverted).

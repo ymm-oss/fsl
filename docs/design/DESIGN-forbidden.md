@@ -24,21 +24,18 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
 ## 2. Semantics (concrete Monitor replay, at check time)
 
 - The premise steps `steps[0..n-2]` must all be `ok` (enabled and no violation).
-- Success if the **last step is rejected**. Rejection has two forms:
-  - (a) **not-enabled** (`requires_failed` / out-of-domain `bad_call`) — the **primary use**.
-    A "correct prohibition by a guard" that is invisible as a safety invariant.
-  - (b) **violation on execution** (`invariant` / `type_bound` / `partial_op` / `ensures`).
-    But a reachable violating state ⇒ means **the spec itself is violated under verify**
-    (case b is the signal "forbidden is satisfied but the spec is buggy"). The output's
-    `rejected_by` carries this distinction.
-  - `rejected_by` names the Monitor outcome: `requires_failed` when every argument lies in
-    its parameter domain and a `requires` guard refuses the call, `bad_call` when no action
-    of that name and arity has every argument in its parameter domain (DESIGN-bridge.md
-    1.2), or the violation kind of (b). The generated negative test asserts that kind, so an
-    out-of-domain call is never asserted as a guard refusal (issue #1212). The Monitor's
-    `bad_call` in DESIGN-bridge.md 1.2 also covers an unknown action or a missing
-    parameter; for a forbidden last step those are not rejections (next bullet), so here
-    `bad_call` means only an argument outside the parameter domain.
+- Success if and only if the **last step is rejected**, that is, **not enabled**:
+  - `requires_failed` — every argument lies in its parameter domain and a `requires` guard
+    refuses the call. A "correct prohibition by a guard" that is invisible as a safety
+    invariant;
+  - `bad_call` — no action of that name and arity has every argument in its parameter
+    domain (DESIGN-bridge.md 1.2), so no guard is ever evaluated.
+
+  The scenario's `rejected_by` names which one, and the generated negative test asserts that
+  kind, so an out-of-domain call is never asserted as a guard refusal (issue #1212). The Monitor's
+  `bad_call` in DESIGN-bridge.md 1.2 also covers an unknown action or a missing parameter;
+  for a forbidden last step those are not rejections (below), so here `bad_call` means only
+  an argument outside the parameter domain.
   - The parameter domain is the **checked value domain**, not always the declared type. For
     a range type (`0..100`, `type Amount = 0..100`) or an enum it is the declared type. For
     an `entity` it is the `verify { instances E = N }` scope, and for a `number` it is the
@@ -53,6 +50,103 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     argument outside a range or enum parameter type; a `bad_call` decided by an `entity` /
     `number` scope (including one that the NEW scope introduces when OLD is replayed
     under it) stays `unknown` / `forbidden_step_unrelatable` (DESIGN-semantic-diff.md).
+- **Strict default (issue #1213, breaking).** A last step that is enabled and then
+  stops with a runtime **violation** (`invariant` / `trans` / `ensures` / `type_bound` /
+  `partial_op`, every kind the Monitor reports for an enabled step) is **not** a rejection:
+  the guard admits the call, and only a reachable spec bug stops it.
+  It is a `kind: "forbidden"` error carrying `failed_step`, `step_results: []` (as every
+  error about one step), `violation` (`{kind, name, action, params}`), `accepted_trace` (the
+  setup steps), the `state` before the last step (the Monitor does not commit a violating
+  step), and a hint. Before #1213 this case counted as satisfied with `rejected_by` set to
+  the violation kind ("forbidden is satisfied but the spec is buggy"), so a forbidden could
+  pass while the very guard it states was missing — the opposite of "the strength of a claim
+  is its weakest evidence" and of failing closed.
+  - Migration — the forbidden replay is a gate that every caller of it listed in §2.1 runs **before**
+    BMC, induction, or scenario generation (§3), so not only `check` changes:
+    - `verify` on such a spec now stops at the gate with `error` / `kind: "forbidden"`
+      (exit 2) whatever its engine or `--depth`, and **no BMC or induction trace is
+      produced**; the `violation`, `accepted_trace`, and `state` of the error are the only
+      trace. Before, the spec passed the gate and `verify` reported whatever its engine
+      reached: with BMC, `violated` / exit 1 when `--depth` reaches the violation, but
+      `verified` / exit 0 when the violation needs more steps than `--depth`; with
+      `--engine induction`, its own verdict (`violated`, or `unknown_cti` when the
+      violation is far away). So the exit status moves from **0 or 1 to 2**, and a CI job
+      keyed on exit 0, exit 1, or `result: "violated"` is affected.
+    - `sweep`, `chain`, `mutate`, `html`, and `ledger` move from 0 or 1 to 2 the same way,
+      but only `sweep` and `mutate` print the same `error` / `kind: "forbidden"`: `chain`
+      prints `kind: "chain"` with `failed: ["requirements"]` and that error as the layer's
+      `detail`, and `html` and `ledger` print the generated result (`result: "generated"`)
+      and still write their report, with the verification `not_run`: `html` with the
+      forbidden hint, `ledger` with the violation under `FB-1`.
+      `counterexample export` exits 2 with that error and without a reproducer
+      (before: exit 1 with one when its depth reached the violation, otherwise exit 2 with
+      nothing to export). `approval create --kind scenarios` / `html` exits 2 without a
+      record (before: exit 2 on `violated`, otherwise a record); `--kind scenarios` prints
+      that error, and `--kind html` the generated `html` result. `approval check` of
+      such a record created before exits 2.
+      `scenarios` and `testgen` exit 2 with no scenario and no test file. `scenarios` used
+      to exit 1 (`violated`) when its depth reached the violation, and otherwise exited 0
+      and emitted the forbidden scenario with `rejected_by: "invariant"`; `testgen` exited 1
+      (`violated`) without a test file on every spec measured in §2.1, even at `--depth 1`,
+      because its own check reached the violation (`checked_to_depth: 21` on the
+      eleven-step spec).
+    - Three commands do not exit 2. `explain` still exits 0, but where `scenarios` used to
+      succeed its `witnesses` (and the `html` witnesses section) become empty (a known gap
+      tracked by issue #1242). `approval create --kind ledger` exits 0 with a record of a
+      ledger that lists the error: when its depth reached the violation it used to exit 2,
+      only because that ledger embeds wall-clock `elapsed_s` and so never matched a fresh
+      rendering, and otherwise it exited 0 (not folding the verdict into the status is
+      the #592 design; whether a ledger whose forbidden gate fails may be approved is
+      tracked by issue #1243). `approval check` of a ledger record created before reports
+      `drifted` (exit 0). §2.1 has the measured exit status and output of each command
+      before and after.
+    - `fslc mutate`: the requirement oracle (`apply_requirement_mutation_oracle`) runs on
+      mutants the bounded oracle leaves clean. Such a mutant whose forbidden last step is
+      now enabled and violates is killed with `killed_by: "forbidden"` (and the forbidden's
+      requirement IDs as `killer_requirements`) where it used to survive, so kill rates
+      and the `killed_by` distribution can shift toward `forbidden`.
+    - The fix for an affected spec is the `requires` that rejects the call — the guard the
+      forbidden states — keeping the invariant as a separate safety property. The corpus
+      sweep is recorded in §6.
+  - No opt-out (`expect rejected_or_violated` or similar) is provided. A forbidden claims
+    that the call is rejected; a violation reached by an enabled last step is evidence that
+    the rejecting guard is missing, never that it exists, so the lax reading let `check`
+    (which runs no BMC) pass and let testgen assert a violation kind as a rejection. The
+    strict error itself reports that violation (kind, name, action, arguments, setup trace,
+    state before the last step). It does not report what `verify` used to report after the gate: the
+    verdicts of the other properties, the shortest counterexample (which can be shorter
+    than the forbidden's trace or reach a different violation), and the `counterexample
+    export` reproducer only come back once the forbidden or the guard is fixed. The corpus has no
+    forbidden that relies on the lax reading. The change errors at once rather than being
+    staged by `--edition` (DESIGN-migration.md): an edition stages a syntax change whose
+    canonical rewrite leaves the checked model unchanged (`migrate` compares Public Kernel
+    JSON before and after), while the fix here adds a guard and so changes the model; keeping
+    the lax reading for a release would keep a fail-open verdict, and §6 finds no corpus
+    forbidden that the change affects. Re-evaluate only if a real spec needs a
+    must-forbid whose only rejection is a runtime check that cannot be stated as a guard.
+  - `fslc diff` follows the same rule: a NEW final step that is enabled and then violates is
+    `forbidden_relaxed`, and an OLD final step that violates
+    is `unknown` / `forbidden_replay_failed` (OLD never rejected it). A NEW setup step that is
+    enabled and then violates is `unknown` / `forbidden_replay_failed` too: NEW never reaches
+    the final step, so it neither preserves nor relaxes the OLD rejection. A NEW setup step
+    that its guard disables never reaches the final step either, yet `fslc diff` still
+    reports it as preserved: a known gap tracked by issue #1239 (DESIGN-semantic-diff.md).
+  - The witness of a violation-carrying `forbidden_relaxed` differs from an accepted one:
+    the final step was rolled back, so `trace` ends at the last setup step and `state` is the
+    state before the final step; `violation` (`{kind, name}`) names what stopped it, and
+    `accepted_step` still names the final step's action.
+  - The frozen Python reference (`src/fslc/acceptance.py`) keeps the reading from before #1213; it
+    is not the product surface (AGENTS.md "Authority and scope").
+- A last step whose `requires` cannot be evaluated in the state the setup reaches (a partial
+  operation such as a division by zero in the guard) is not a rejection either: no guard
+  decided the call. Today the replay stops with `error` / `semantics` (issue #1191). A fix
+  for #1191 must keep this case out of `requires_failed`: reading an undefined guard as
+  disabled would satisfy the forbidden without a decided guard (fail-open), and would let
+  `fslc diff` preserve an OLD rejection that a NEW undefined guard never decided. The
+  regression tests `a_final_step_whose_guard_is_undefined_does_not_satisfy_the_forbidden`
+  and `diff_does_not_preserve_a_forbidden_whose_new_guard_is_undefined` pin both; they
+  require only that `check` is not `ok` (non-zero exit) and that `diff` does not preserve the
+  forbidden, so a #1191 fix may change the error's shape.
 - A last step that names no action, or no variant of that arity, is not a rejection: it is a
   `kind: "forbidden"` error carrying `failed_step` and `message` (`unknown action '<name>' in
   forbidden` / `arity mismatch for action '<name>' in forbidden`), so a typo cannot satisfy
@@ -120,7 +214,7 @@ dispatch, are:
   `--forbid`, so its exit stays 0).
 
 Measured with debug `fslc` binaries (`cargo build -p fslc-rust --bin fslc`), each built in
-its own materialized tree: main at `458040f3` (before) and this change (after).
+its own materialized tree: main at `458040f3`, #1212 on top of it, and #1213 on top of #1212.
 The "before" classification is also the latest release's. The tag `v4.8.1` is not an
 ancestor of `458040f3`, so each function was extracted from `git show v4.8.1:<path>` and
 `git show 458040f3:<path>` (signature through its matching brace) and compared as text. The
@@ -133,8 +227,10 @@ following are identical as whole functions: `requirement_step_match`,
 `forbidden_case_finding`, `forbidden_diff_findings`, `forbidden_unknown` and
 `old_forbidden_arguments` (`main.rs`). `fsl-runtime` differs between the two, so this
 covers how the gate and `diff` classify a last step's Monitor outcome, not which steps the
-Monitor enables. The spec is
-the Wallet of `rust/fslc/tests/issue_1212_forbidden_bad_call.rs` (`withdraw` guarded by
+Monitor enables.
+
+**#1212** (before: `458040f3`; after: #1212). The spec is the Wallet of
+`rust/fslc/tests/issue_1212_forbidden_bad_call.rs` (`withdraw` guarded by
 `requires amount <= balance`, balance 50, forbidden `withdraw(10)` then the last step below).
 The first two columns verify; the third adds `invariant NotThirty { balance != 30 }`, which
 `withdraw(20)` breaks at depth 1 away from the forbidden trace, so it shows that what a
@@ -189,6 +285,53 @@ cannot declare two actions of one name, so a NEW that adds the arity while keepi
 `withdraw` cannot be written. `--forbid forbidden_relaxed` exits 0 before and after in every
 row.
 
+**#1213** (before: #1212, and `458040f3` gives the same exit status and verdict in every row;
+after: #1213). The specs are the guardless Wallet of
+`rust/fslc/tests/issue_1213_forbidden_strict.rs` (`withdraw` without `requires`,
+`invariant NonNegative`, balance 50) with three forbidden traces whose last step breaks
+`NonNegative`: `withdraw(10) withdraw(60)` (one step reaches the violation), `withdraw(30)
+withdraw(30)` under `type Amount = 0..30` (two steps), and eleven `withdraw(5)` under
+`type Amount = 0..5` (eleven steps, beyond every `--depth` used here; `testgen`'s own check
+runs to depth 21 and reaches it). Default depth 3 unless stated:
+
+| command | `withdraw(10) withdraw(60)` | `withdraw(30) withdraw(30)` | eleven `withdraw(5)` |
+|---|---|---|---|
+| `check` | exit 0 → 2 | exit 0 → 2 | exit 0 → 2 |
+| `verify --depth 1` | `violated` (exit 1) → 2 | `verified` (exit 0) → 2 | `verified` (exit 0) → 2 |
+| `verify --depth 3` | `violated` (exit 1) → 2 | `violated` (exit 1) → 2 | `verified` (exit 0) → 2 |
+| `verify --engine induction` | `violated` (exit 1) → 2 | `violated` (exit 1) → 2 | `unknown_cti` (exit 1) → 2 |
+| `sweep --depth 1..3` | `sweep_failed` (exit 1) → 2 | `sweep_failed` (exit 1) → 2 | `sweep_passed` (exit 0) → 2 |
+| `chain` | `violated` (exit 1) → 2: its `[requirements]` layer fails | same | `verified` (exit 0) → 2, same |
+| `scenarios` | `violated` (exit 1) → 2 at depth 1 and 3 | exit 0 with the forbidden scenario as `rejected_by: "invariant"` at depth 1, `violated` (exit 1) at depth 3 → 2 | exit 0 with `rejected_by: "invariant"` at depth 1, 3 and 8 → 2 |
+| `testgen` (depth 1 and 3) | `violated` (exit 1) → 2; no test file before or after | same | same |
+| `mutate` | `violated` (exit 1) → 2 | `violated` (exit 1) → 2 | exit 0 → 2: the baseline stops, no mutants |
+| `html` | exit 1 → 2; the report is still written, its status goes from `violated` to `error` / `not_run` with the forbidden hint, `NonNegative`'s assurance becomes `not_run`, and the counterexample trace is gone; its witnesses section was already empty | same | exit 0 → 2; the report is still written, its status goes from `verified` (bounded, depth 3) to `error` / `not_run`, and the action-coverage marks and both witnesses (`cover_withdraw`, `forbidden_FB-1`) are gone |
+| `ledger` | exit 1 → 2; the ledger is still written, the spec-wide `NonNegative` finding is replaced by an `FB-1` row (`forbidden`, the violation), and the requirement row's assurance becomes `not_run` | same | exit 0 → 2; the ledger is still written, gains the `FB-1` row (it had no finding), and the requirement row goes from `確認済（承認可）` to `not_run` |
+| `counterexample export` | exit 1 writing a reproducer → 2 with no file | same | exit 2 (`kind: "semantics"`, nothing to export) → the forbidden error, no file |
+| `approval create --kind scenarios` | exit 2 (`violated`) → the forbidden error | same | exit 0 creating a record → exit 2, no record |
+| `approval create --kind html` | exit 2 → 2, no record | same | exit 0 creating a record → 2, no record (stdout is the `html` result) |
+| `approval create --kind ledger` | exit 2 (`reviewed artifact does not match a fresh rendering`: a violated spec's ledger embeds wall-clock `elapsed_s`) → exit 0, a record of the ledger that lists the error | same | exit 0 → 0, a record of the ledger that now lists the error |
+| `approval check` of a record created before | none could be created | none could be created | `scenarios`, `html`: `approved` (exit 0) → exit 2; `ledger`: `approved` → `drifted` (exit 0) |
+| `explain` (depth 1, 3) | exit 0 → 0; `witnesses` was and stays `[]` | exit 0 → 0; at depth 1 `witnesses` goes from 2 entries (`cover_withdraw`, `forbidden_FB-1`) to `[]`, at depth 3 it was already `[]` | exit 0 → 0; `witnesses` goes from the same 2 entries to `[]` at depth 1 and 3 |
+| Worker `check` / `verify` | the native error, pinned by the unit test `worker_reports_a_violating_forbidden_final_step_like_native` | same function | same function |
+
+After #1213, `scenarios` and `testgen` emit no scenario and write no test file, and `ledger`
+reports the violation under `FB-1`. `mutate --depth 1` on the two-step Wallet
+*with* `requires amount <= balance` exits 0 before and after, but its `requires_remove` mutant
+moves from `survived` to `killed` with `killed_by: "forbidden"`.
+
+For `FB-1`, `diff --depth 0` and `diff --git` report the following (`approval diff` of a
+`scenarios` record created before reports the same findings with exit 0, in the rows whose
+OLD could be recorded: the first, second, and last):
+
+| OLD → NEW | before | after | `--forbid forbidden_relaxed` | `--forbid unknown` |
+|---|---|---|---|---|
+| guarded Wallet with `NonNegative` → kernel Wallet without the guard (NEW final step violates) | preserved | `forbidden_relaxed` | exit 0 → 1 | exit 0 → 0 |
+| guarded Wallet → kernel Wallet with `invariant Floor { balance >= 45 }` (NEW setup step violates) | preserved | `unknown` / `forbidden_replay_failed` | exit 0 → 0 | exit 0 → 1 |
+| guardless Wallet with `NonNegative` → guarded Wallet (OLD final step violates) | preserved | `unknown` / `forbidden_replay_failed` | exit 0 → 0 | exit 0 → 1 |
+| guardless Wallet with `NonNegative` against itself | preserved | `unknown` / `forbidden_replay_failed` | exit 0 → 0 | exit 0 → 1 |
+| guarded Wallet against itself (control) | preserved | preserved | exit 0 → 0 | exit 0 → 0 |
+
 ## 3. Ripple (verification engine and Monitor unmodified)
 
 - grammar.py: `forbidden_def` (`expect rejected` inline) + transformer.
@@ -196,17 +339,30 @@ row.
 - acceptance.py: `replay_forbidden` / `validate_forbidden`. A copy of `replay_acceptance`,
   differing in "premise all ok / last expected to be ok:False / no `expect` state evaluation."
   Because `Monitor.step()` returns `ok:False` + `kind` for rejection via requires_failed /
-  invariant / type_bound / partial_op / ensures, both (a) and (b) are decided from step()'s
-  return alone.
+  invariant / type_bound / partial_op / ensures, the outcome is decided from step()'s
+  return alone. The frozen Python reference still counts the violation kinds as a
+  rejection; the native CLI does not since #1213 (§2).
 - cli.py: `_forbidden_error` wired into both the check and verify paths. bmc.py: emits
   `forbidden_<ID>` (with `rejected_by`) into `scenarios` → for testgen's negative tests.
 
-## 4. Tests (tests/test_forbidden.py)
+## 4. Tests
 
-Case-a satisfied + scenario / accepted → `kind:"forbidden"` + accepted_trace / broken setup →
-`forbidden_setup` / case b (rejected_by=type_bound and verify violated) / empty steps / the
-verify gate fires before BMC. Gallery positive example (`small_forbidden_guarded_cancel.fsl` →
-verified) and incorrect example (`forbidden_op_accepted.fsl` → error/forbidden).
+`tests/test_forbidden.py` (frozen Python reference): case-a satisfied + scenario / accepted →
+`kind:"forbidden"` + accepted_trace / broken setup → `forbidden_setup` / case b (a type_bound
+violation: still `ok` with `rejected_by: "type_bound"` and `verify` `violated`, the reading
+before #1213) / empty steps / the verify gate fires before BMC. Gallery positive example
+(`small_forbidden_guarded_cancel.fsl` → verified) and incorrect example
+(`forbidden_op_accepted.fsl` → error/forbidden).
+
+Native (`rust/fslc/tests/`): `issue_1212_forbidden_bad_call.rs` (`bad_call` vs
+`requires_failed`, unresolved last steps, `loc`, both-side `bad_call` in `diff`) and
+`issue_1213_forbidden_strict.rs` (case b is `kind:"forbidden"` for each violation kind;
+`verify` at `--depth` 1, 2, and 3 and with `--engine induction`, `sweep`, `chain`,
+`counterexample export`, `scenarios`, `testgen`, `html`, and `ledger` stop at the gate, with
+`html` and `ledger` still writing their report; `mutate` kills a guard-dropping mutant with
+the forbidden; `diff` OLD/NEW violations and their `--forbid` exits; the undefined-guard
+regression). The Worker's `check` / `verify` errors are
+pinned against native in `rust/fsl-wasm/src/lib.rs`.
 
 ## 5. Related
 
@@ -249,3 +405,10 @@ every run).
   differences 0. The ok → error transition set of §2 (an unknown-action or arity-mismatch
   last step) is empty for the corpus, no emitted forbidden scenario moves from
   `requires_failed` to `bad_call`, and no self-diff verdict moves.
+- #1213, on top of #1212, with the same base runs: base → #1213 verdict changes 0,
+  forbidden `rejected_by` changes 0, other differences 0, so #1212 → #1213 differs only in
+  the excluded wall-clock fields. All 31 emitted forbidden scenarios are `requires_failed`
+  on both sides, so no corpus forbidden relied on a violation kind as its rejection, and
+  no self-diff finds a violating final or setup step. The 5 forbidden-bearing files whose
+  `check` is not `ok` report the same accepted-step `kind: "forbidden"` error, byte for
+  byte, at base and with #1213.
