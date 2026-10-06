@@ -818,6 +818,94 @@ fn key_rows_bound_only_typed_index_forms() {
     );
 }
 
+/// The negative controls of `BOUNDED_INDEXES`: each bounded form typed by a
+/// declaration wider than `K` (`W = 0..5`), so typing it narrower than its
+/// declaration would make a live row vacuous. A range parameter, a `Map`
+/// element, a range binder with a literal, a state and a conditional upper
+/// bound, `head`/`at` of a `Seq<W>`, `old` of a `W` and the second field of
+/// a struct each reach `5`; `fslc verify --engine explicit` and `--engine
+/// bmc` report a key-domain miss for each as a spec of its own. `PairKey`,
+/// the struct's first field, is the in-domain control.
+const WIDE_INDEXES: &str = r"
+spec WideIndexes {
+  type K = 0..2
+  type V = 0..9
+  type W = 0..5
+  struct Pair { k: K, w: W }
+  state { m: Map<K, V>, n: Map<K, W>, qw: Seq<W, 2>, pair: Pair, exact: K, high: W, b: Bool }
+  init {
+    forall k: K { m[k] = 0 }
+    forall k: K { n[k] = 5 }
+    qw = Seq {}  pair = Pair { k: 0, w: 5 }  exact = 0  high = 5  b = false
+  }
+  action put(i in 0..5) { m[i] = 1 }
+  action pushw() { requires qw.size() < 2  qw = qw.push(5) }
+  invariant ReadThrough { m[n[exact]] >= 0 }
+  invariant RangeLiteral { forall j in 0..5 { m[j] >= 0 } }
+  invariant RangeHigh { forall j in 0..high { m[j] >= 0 } }
+  invariant RangeCond { forall j in 0..(if b then exact else high) { m[j] >= 0 } }
+  invariant WideHead { qw.size() == 0 or m[qw.head()] >= 0 }
+  invariant WideAt { qw.size() == 0 or m[qw.at(0)] >= 0 }
+  trans OldHigh { m[old(high)] >= 0 }
+  invariant PairKey { m[pair.k] >= 0 }
+  invariant PairWide { m[pair.w] >= 0 }
+}
+";
+
+#[test]
+fn key_rows_stay_live_for_indexes_wider_than_the_key() {
+    let mut expected = [
+        "InitSatisfiable@Init",
+        "Holds@TypeBound(m#0)",
+        "Holds@TypeBound(n#1)",
+        "Holds@TypeBound(qw#2)",
+        "Holds@TypeBound(pair#3)",
+        "Holds@TypeBound(exact#4)",
+        "Holds@TypeBound(high#5)",
+        "Holds@TypeBound(b#6) [v]",
+        "PartialDefined@Guard(put) [v]",
+        "NoOverflow@Guard(put) [v]",
+        "KeyInDomain@Guard(put) [v]",
+        "PartialDefined@Body(put)",
+        "NoOverflow@Body(put) [v]",
+        "KeyInDomain@Body(put)",
+        "PartialDefined@Guard(pushw) [v]",
+        "NoOverflow@Guard(pushw) [v]",
+        "KeyInDomain@Guard(pushw) [v]",
+        "PartialDefined@Body(pushw) [v]",
+        "NoOverflow@Body(pushw) [v]",
+        "KeyInDomain@Body(pushw) [v]",
+        "NoDeadlock@Model",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    for (name, key_vacuous) in [
+        ("Invariant(ReadThrough)", false),
+        ("Invariant(RangeLiteral)", false),
+        ("Invariant(RangeHigh)", false),
+        ("Invariant(RangeCond)", false),
+        ("Invariant(WideHead)", false),
+        ("Invariant(WideAt)", false),
+        ("Trans(OldHigh)", false),
+        ("Invariant(PairKey)", true),
+        ("Invariant(PairWide)", false),
+    ] {
+        expected.extend([
+            format!("Holds@{name}"),
+            format!("PartialDefined@{name}"),
+            format!("NoOverflow@{name} [v]"),
+            format!(
+                "KeyInDomain@{name}{}",
+                if key_vacuous { " [v]" } else { "" }
+            ),
+        ]);
+    }
+    assert_catalog(
+        &model(WIDE_INDEXES),
+        &expected.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+}
+
 /// Pattern bindings that only the join over a whole context types soundly;
 /// `fslc verify --engine explicit` and `bmc` report a key-domain miss for
 /// both. `Nested`: `pp is some(o2)` rebinds the state variable `o2` to a
@@ -907,20 +995,37 @@ fn unlowered_forms_reach_their_operands() {
             }
         };
     }
-    let key = |name: &str| {
-        catalog(&model)
-            .obligations
-            .into_iter()
-            .find(|row| {
-                row.id.kind == ObligationKind::KeyInDomain
-                    && matches!(&row.id.site, Site::Invariant(at) if at.name == name)
-            })
-            .map(|row| row.statically_vacuous)
-    };
-    assert_eq!(key("Called"), Some(false));
-    assert_eq!(key("Staged"), Some(false));
-    assert_eq!(key("CalledControl"), Some(true));
-    assert_eq!(key("StagedControl"), Some(true));
+    assert_catalog(
+        &model,
+        &[
+            "InitSatisfiable@Init",
+            "Holds@TypeBound(m#0)",
+            "Holds@TypeBound(high#1)",
+            "Holds@Invariant(Called)",
+            "PartialDefined@Invariant(Called)",
+            "NoOverflow@Invariant(Called) [v]",
+            "KeyInDomain@Invariant(Called)",
+            "Holds@Invariant(Staged)",
+            "PartialDefined@Invariant(Staged)",
+            "NoOverflow@Invariant(Staged) [v]",
+            "KeyInDomain@Invariant(Staged)",
+            "Holds@Invariant(CalledControl)",
+            "PartialDefined@Invariant(CalledControl) [v]",
+            "NoOverflow@Invariant(CalledControl) [v]",
+            "KeyInDomain@Invariant(CalledControl) [v]",
+            "Holds@Invariant(StagedControl)",
+            "PartialDefined@Invariant(StagedControl) [v]",
+            "NoOverflow@Invariant(StagedControl) [v]",
+            "KeyInDomain@Invariant(StagedControl) [v]",
+            "PartialDefined@Guard(idle) [v]",
+            "NoOverflow@Guard(idle) [v]",
+            "KeyInDomain@Guard(idle) [v]",
+            "PartialDefined@Body(idle) [v]",
+            "NoOverflow@Body(idle) [v]",
+            "KeyInDomain@Body(idle) [v]",
+            "NoDeadlock@Model",
+        ],
+    );
 }
 
 /// Overflow candidates (`abs`, unary `-`, `sum`, two chained `+`/`-`) against
