@@ -1974,19 +1974,21 @@ fn add_explicit_metadata(
     output.insert(
         "action_profile".to_owned(),
         Value::Object(
-            sorted_by_public_name(model, &result.action_profile)
-                .into_iter()
-                .map(|(name, stats)| {
-                    (
-                        model.action_display_name(name),
-                        json!({
-                            "enabled": stats.enabled,
-                            "fired": stats.fired,
-                            "no_op": stats.no_op,
-                        }),
-                    )
-                })
-                .collect(),
+            sorted_by_published(&result.action_profile, |name| {
+                model.action_display_name(name)
+            })
+            .into_iter()
+            .map(|(name, _, stats)| {
+                (
+                    name,
+                    json!({
+                        "enabled": stats.enabled,
+                        "fired": stats.fired,
+                        "no_op": stats.no_op,
+                    }),
+                )
+            })
+            .collect(),
         ),
     );
 }
@@ -2441,12 +2443,12 @@ fn add_common(
     output.insert(
         "reachables".to_owned(),
         Value::Object(
-            sorted_by_public_name(model, &result.reachables)
+            sorted_by_published(&result.reachables, display_name)
                 .into_iter()
-                .filter_map(|(name, witness)| {
+                .filter_map(|(name, _, witness)| {
                     witness.as_ref().map(|witness| {
                         (
-                            display_name(name),
+                            name,
                             json!({
                                 "witnessed_at_step": witness.step,
                                 "witness": trace_json(model, &witness.trace),
@@ -2460,11 +2462,11 @@ fn add_common(
     output.insert(
         "action_coverage".to_owned(),
         Value::Object(
-            sorted_by_public_name(model, &result.action_coverage)
+            sorted_by_published(&result.action_coverage, |name| model.action_display_name(name))
                 .into_iter()
-                .map(|(name, covered)| {
+                .map(|(published, name, covered)| {
                     (
-                        model.action_display_name(name),
+                        published,
                         if *covered {
                             json!(true)
                         } else {
@@ -2684,21 +2686,21 @@ fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
         .collect()
 }
 
-/// Entries of a map keyed by internal Kernel name, in the order of the name
-/// the output publishes for a compose component declaration: alias `acct2`
-/// sorts its internal `acct2__go` before `acct__go`, but its public
-/// `acct2.go` after `acct.go`. Every other name keeps its internal order.
+/// Entries of a map keyed by internal Kernel name, each with the name
+/// `publish` gives it, ordered by that published name: alias `acct2` sorts its
+/// internal `acct2__go` before `acct__go`, but its published `acct2.go` after
+/// `acct.go`. The caller prints the returned name, so the order is the order of
+/// the printed keys.
 #[must_use]
-pub fn sorted_by_public_name<'a, V>(
-    model: &KernelModel,
+pub fn sorted_by_published<'a, V>(
     entries: &'a BTreeMap<String, V>,
-) -> Vec<(&'a String, &'a V)> {
-    let mut entries = entries.iter().collect::<Vec<_>>();
-    entries.sort_by_cached_key(|(name, _)| {
-        model
-            .compose_public_name(name)
-            .unwrap_or_else(|| (*name).clone())
-    });
+    publish: impl Fn(&str) -> String,
+) -> Vec<(String, &'a String, &'a V)> {
+    let mut entries = entries
+        .iter()
+        .map(|(name, value)| (publish(name), name, value))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| (&left.0, left.1).cmp(&(&right.0, right.1)));
     entries
 }
 

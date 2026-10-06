@@ -5925,13 +5925,14 @@ fn run_scenarios_mode_from_source(
         Ok(covers) => covers,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
-    let mut scenario_warnings = result
-        .reachables
+    let reachables =
+        fslc_rust::verification_output::sorted_by_published(&result.reachables, display);
+    let mut scenario_warnings = reachables
         .iter()
-        .filter(|(_, witness)| witness.is_none())
-        .map(|(name, _)| {
+        .filter(|(_, _, witness)| witness.is_none())
+        .map(|(name, _, _)| {
             json!({
-                "message":format!("reachable {} not witnessed at depth {depth}; try --depth >= {}",display(name),depth+1),
+                "message":format!("reachable {name} not witnessed at depth {depth}; try --depth >= {}",depth+1),
                 "hint":format!("try --depth >= {}",depth+1),
             })
         })
@@ -5956,20 +5957,18 @@ fn run_scenarios_mode_from_source(
         }))
         .collect::<Vec<_>>();
     let mut scenarios = Vec::new();
-    for (name, witness) in result
-        .reachables
-        .iter()
-        .filter_map(|(name, witness)| witness.as_ref().map(|witness| (name, witness)))
-    {
+    for (published, name, witness) in reachables.iter().filter_map(|(published, name, witness)| {
+        witness.as_ref().map(|witness| (published, name, witness))
+    }) {
         let mut scenario = scenario_from_trace(&model, &witness.trace);
-        scenario.insert("name".to_owned(), json!(format!("reach_{}", display(name))));
+        scenario.insert("name".to_owned(), json!(format!("reach_{published}")));
         scenario.insert("kind".to_owned(), json!("reachable"));
-        scenario.insert("property".to_owned(), json!(display(name)));
-        scenario.insert("final_check".to_owned(), json!(display(name)));
+        scenario.insert("property".to_owned(), json!(published));
+        scenario.insert("final_check".to_owned(), json!(published));
         if let Some(property) = model
             .reachables
             .iter()
-            .find(|property| property.name == *name)
+            .find(|property| property.name == **name)
         {
             insert_requirement_metadata(
                 &mut scenario,
@@ -14407,6 +14406,7 @@ fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, source: &str) -> 
     let mut edge_additions = Vec::new();
     let spec_id = format!("spec:{}", model.name);
     add_scenario_items(
+        model,
         source,
         &spec_id,
         &mut known_ids,
@@ -14434,6 +14434,7 @@ fn enrich_tsg_from_source(mut tsg: Value, model: &KernelModel, source: &str) -> 
 /// Project `acceptance`/`forbidden` cases, the requirements that cover them,
 /// and their step ordering.
 fn add_scenario_items(
+    model: &KernelModel,
     source: &str,
     spec_id: &str,
     known_ids: &mut std::collections::BTreeSet<String>,
@@ -14478,7 +14479,7 @@ fn add_scenario_items(
             // the id carries the step index so a scenario that calls the same
             // action twice does not collapse into one edge.
             for (index, step) in case.steps.iter().enumerate() {
-                let action_id = format!("action:{}", step.name);
+                let action_id = fsl_tools::action_node_id(model, &step.name);
                 // A validated case can only name a declared action, so this
                 // holds in practice; skipping rather than fabricating an
                 // `action` node keeps the graph free of invented declarations
@@ -14841,8 +14842,9 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         }
         for correspondence in checked_refinement.action_correspondences.values() {
             let name = &correspondence.impl_action.0;
-            let map_id = format!("action_map:{layer}->{target}:{name}");
-            let mut map_node = project_analysis_node(&map_id, "action_map", name);
+            let key = implementation.model.action_key(name);
+            let map_id = format!("action_map:{layer}->{target}:{key}");
+            let mut map_node = project_analysis_node(&map_id, "action_map", &key);
             if let Value::Object(object) = &mut map_node {
                 object.insert("loc".to_owned(), correspondence.span.python_loc());
                 object.insert("layer".to_owned(), json!(layer));
@@ -14854,15 +14856,18 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
                 &mut edges,
                 project_analysis_edge(&refinement_id, "declares", &map_id),
             );
-            let impl_id = format!("{layer}:action:{name}");
+            let impl_id = format!(
+                "{layer}:{}",
+                fsl_tools::action_node_id(&implementation.model, name)
+            );
             insert_analysis_item(
                 &mut edges,
                 project_analysis_edge(&map_id, "maps_action", &impl_id),
             );
             match &correspondence.target {
                 fsl_core::ActionCorrespondenceTarget::Stutter => {
-                    let stutter_id = format!("stutter_map:{layer}->{target}:{name}");
-                    let mut stutter = project_analysis_node(&stutter_id, "stutter_map", name);
+                    let stutter_id = format!("stutter_map:{layer}->{target}:{key}");
+                    let mut stutter = project_analysis_node(&stutter_id, "stutter_map", &key);
                     stutter
                         .as_object_mut()
                         .expect("node object")
@@ -14874,14 +14879,13 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
                     );
                 }
                 fsl_core::ActionCorrespondenceTarget::Action { action, .. } => {
-                    let abs_id = format!("{target}:action:{}", action.0);
+                    let abs_node = fsl_tools::action_node_id(&abstraction.model, &action.0);
+                    let abs_id = format!("{target}:{abs_node}");
                     insert_analysis_item(
                         &mut edges,
                         project_analysis_edge(&impl_id, "maps_action", &abs_id),
                     );
-                    if let Some(requirements) =
-                        abstraction.covers.get(&format!("action:{}", action.0))
-                    {
+                    if let Some(requirements) = abstraction.covers.get(&abs_node) {
                         for requirement in requirements {
                             let mut anchor = project_analysis_edge(
                                 &format!("{target}:{requirement}"),
@@ -16959,11 +16963,12 @@ fn run_refine(
     output.insert(
         "action_map".to_owned(),
         Value::Object(
-            checked
-                .action_map
-                .iter()
-                .map(|(name, target)| (display(name), json!(display(target))))
-                .collect(),
+            fslc_rust::verification_output::sorted_by_published(&checked.action_map, |name| {
+                implementation.action_display_name(name)
+            })
+            .into_iter()
+            .map(|(name, _, target)| (name, json!(abstraction.action_display_name(target))))
+            .collect(),
         ),
     );
     if checked.abs_has_ensures {
@@ -16978,15 +16983,17 @@ fn run_refine(
         output.insert(
             "progress".to_owned(),
             Value::Object(
-                progress
-                    .checked
-                    .iter()
-                    .map(|(name, actions)| {
+                fslc_rust::verification_output::sorted_by_published(&progress.checked, display)
+                    .into_iter()
+                    .map(|(name, _, actions)| {
                         (
-                            display(name),
+                            name,
                             json!({
                                 "checked_to_depth": depth,
-                                "actions": actions,
+                                "actions": actions
+                                    .iter()
+                                    .map(|action| implementation.action_key(action))
+                                    .collect::<Vec<_>>(),
                             }),
                         )
                     })

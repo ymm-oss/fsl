@@ -757,9 +757,9 @@ fn render_induction_success(
     output.insert(
         "k_used".to_owned(),
         Value::Object(
-            ::fslc_rust::verification_output::sorted_by_public_name(model, &induction.k_used)
+            ::fslc_rust::verification_output::sorted_by_published(&induction.k_used, display)
                 .into_iter()
-                .map(|(name, k)| (display(name), json!(k)))
+                .map(|(name, _, k)| (name, json!(k)))
                 .collect(),
         ),
     );

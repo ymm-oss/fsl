@@ -407,24 +407,25 @@ fn bank_system_command_outputs_never_publish_internal_names() {
             true,
         ),
     ];
+    let mut failures = Vec::new();
     for (arguments, publishes_names) in commands {
         let output = fslc(&arguments);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.code().is_some_and(|code| code <= 1),
-            "{arguments:?}: {stdout}"
-        );
-        if publishes_names {
-            assert!(
-                stdout.contains("\"bank."),
-                "{arguments:?} must publish compose names: {stdout}"
-            );
+        if !output.status.code().is_some_and(|code| code <= 1) {
+            failures.push(format!("{arguments:?}: exit {:?}", output.status.code()));
         }
-        assert!(!stdout.contains("bank__"), "{arguments:?} leaked: {stdout}");
+        if publishes_names && !stdout.contains("\"bank.") {
+            failures.push(format!("{arguments:?}: publishes no compose name"));
+        }
+        if stdout.contains("bank__") {
+            failures.push(format!("{arguments:?}: leaked bank__"));
+        }
     }
-    let generated = std::fs::read_to_string(generated).expect("read generated test");
-    assert!(generated.contains("bank.settle"));
-    assert!(!generated.contains("bank__"));
+    let generated = std::fs::read_to_string(generated).unwrap_or_default();
+    if !generated.contains("bank.settle") || generated.contains("bank__") {
+        failures.push("testgen harness: missing bank.settle or leaked bank__".to_owned());
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 const COUNTER: &str = "spec Counter {\n  state { n: 0..3 }\n  init { n = 0 }\n  action go() {\n    requires n < 2\n    n = n + 1\n    ensures n >= 1\n  }\n  action reset() {\n    requires n == 2\n    n = 0\n  }\n  action stuck() {\n    requires n == 3\n    n = 0\n  }\n  invariant Inv { n <= 2 }\n}\n";
@@ -440,11 +441,28 @@ const ENSURES: &str = "spec Ens {\n  state { n: 0..3 }\n  init { n = 0 }\n  acti
 const SAFE_DIVIDER: &str = "spec SafeDiv {\n  state { d: 0..1, q: 0..10 }\n  init {\n    d = 1\n    q = 0\n  }\n  action split() {\n    q = 10 / d\n  }\n  action reset() {\n    requires q >= 0\n    q = 0\n  }\n}\n";
 /// A requirement-tagged action with no `requires`, for the review exports.
 const TAGGED: &str = "spec Tagged {\n  state { n: 0..20 }\n  init { n = 0 }\n  action bump() \"REQ-1: raises `n`\" {\n    n = n + 1\n  }\n}\n";
+/// One invariant, reachable, and leadsTo per alias, so `acct` and `acct2`
+/// key every per-property list.
+const RANKED_COMPONENT: &str = "spec Rc {\n  state { n: 0..2 }\n  init { n = 0 }\n  fair action go() {\n    requires n < 2\n    n = n + 1\n  }\n  fair action back() {\n    requires n == 2\n    n = 0\n  }\n  invariant Inv { n <= 2 }\n  reachable Top { n == 2 }\n  leadsTo Back { n == 2 ~> n == 0 }\n}\n";
+/// Glue action `z__a` is published `z.a` (string rule), component `z.go` is
+/// `z.go`: their internal names sort `z__a` after `z.go`'s key.
+const RANKED: &str = "compose Ranked {\n  use Rc as acct from \"rc.fsl\"\n  use Rc as acct2 from \"rc.fsl\"\n  use Rc as z from \"rc.fsl\"\n  action z__a() {\n    requires z__n == 0\n    z__n = 1\n  }\n}\n";
+/// Glue `z__a` and component `z.b` move the two counters in opposite
+/// directions, a weighted-sum conservation candidate over both actions.
+const PAIR: &str = "spec Pair {\n  state { x: Int, y: Int }\n  init {\n    x = 0\n    y = 0\n  }\n  action b() {\n    x = x - 1\n    y = y + 1\n  }\n}\n";
+const CONSERVE: &str = "compose Conserve {\n  use Pair as z from \"pair.fsl\"\n  action z__a() {\n    z__x = z__x + 1\n    z__y = z__y - 1\n  }\n}\n";
+/// `left` and `right` are always enabled and disagree on `Low`: a divergent
+/// choice the `@undecided` on `left` acknowledges.
+const CHOICE: &str = "spec Choice {\n  state { x: 0..2 }\n  init { x = 0 }\n  @undecided(\"which branch wins is still open\")\n  action left() {\n    x = 1\n  }\n  action right() {\n    x = 2\n  }\n  invariant Low { x <= 1 }\n}\n";
+/// A requirement-tagged `up`/`down` cycle; with no fairness it is
+/// progressless, with `fair` actions it is not.
+const LOOP: &str = "spec Loop {\n  state { n: 0..2 }\n  init { n = 0 }\n  @requirement(\"REQ-LOOP\", \"the counter cycles\")\n  action up() {\n    requires n < 2\n    n = n + 1\n  }\n  action down() {\n    requires n == 2\n    n = 0\n  }\n}\n";
 
 /// Every component action of the fixtures below; a component action may
 /// appear only as `<alias>.<action>`.
-const FIXTURE_ACTIONS: [&str; 8] = [
-    "go", "reset", "stuck", "div", "bump", "split", "drop", "inc",
+const FIXTURE_ACTIONS: [&str; 15] = [
+    "go", "reset", "stuck", "div", "bump", "split", "drop", "inc", "back", "left", "right", "up",
+    "down", "prepare", "finish",
 ];
 
 fn write_dunder_fixture(dir: &Path) {
@@ -504,6 +522,33 @@ fn write_dunder_fixture(dir: &Path) {
             "log-map.fsl",
             "refinement DunderLogMapping {\n  impl DunderProductionLog\n  abs Dunder\n  maps auto\n}\n"
                 .to_owned(),
+        ),
+        ("rc.fsl", RANKED_COMPONENT.to_owned()),
+        ("ranked.fsl", RANKED.to_owned()),
+        (
+            "ranked-map.fsl",
+            "refinement RankedSelf {\n  impl Ranked\n  abs Ranked\n  maps auto\n  preserve progress {\n    respond acct2__Back by acct2__back\n    respond acct__Back by acct__back\n  }\n}\n"
+                .to_owned(),
+        ),
+        ("pair.fsl", PAIR.to_owned()),
+        ("conserve.fsl", CONSERVE.to_owned()),
+        ("choice.fsl", CHOICE.to_owned()),
+        ("loop.fsl", LOOP.to_owned()),
+        (
+            "fairloop.fsl",
+            LOOP.replace("spec Loop", "spec FairLoop")
+                .replace("  action ", "  fair action "),
+        ),
+        (
+            "review.fsl",
+            compose(
+                "Review",
+                &[
+                    ("Choice", "a__b", "choice.fsl"),
+                    ("Loop", "acct", "loop.fsl"),
+                    ("FairLoop", "acct2", "fairloop.fsl"),
+                ],
+            ),
         ),
     ] {
         std::fs::write(dir.join(file), source).expect("write fixture");
@@ -707,6 +752,11 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
     let tagcomp = path_arg(&dir, "tagcomp.fsl");
     let ensures = path_arg(&dir, "ensures.fsl");
     let safe = path_arg(&dir, "safe.fsl");
+    let review = path_arg(&dir, "review.fsl");
+    let ranked = path_arg(&dir, "ranked.fsl");
+    let ranked_map = path_arg(&dir, "ranked-map.fsl");
+    let review_report = path_arg(&dir, "review.html");
+    let review_ledger = path_arg(&dir, "review.md");
 
     // Log and trace inputs reuse the state keys conformance prints.
     let conformance = json_of(&fslc(&["conformance", &dunder, "--depth", "1"]));
@@ -947,6 +997,39 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             vec!["a__b.stuck"],
         ),
         (
+            vec!["check", &review, "--strict-tags"],
+            0,
+            None,
+            vec!["\"name\": \"a__b.right\""],
+        ),
+        (
+            vec!["analyze", &review, "--profile", "ai-review"],
+            0,
+            None,
+            vec![
+                "\"action:a__b.left\"",
+                "\"declaration\": \"action a__b.left\"",
+            ],
+        ),
+        (
+            vec!["html", &review, "-o", &review_report],
+            1,
+            Some(&review_report),
+            vec!["action a__b.left"],
+        ),
+        (
+            vec!["ledger", &review, "--depth", "2", "-o", &review_ledger],
+            1,
+            Some(&review_ledger),
+            vec!["a__b.left"],
+        ),
+        (
+            vec!["refine", &ranked, &ranked, &ranked_map, "--depth", "3"],
+            0,
+            None,
+            vec!["\"acct.back\""],
+        ),
+        (
             vec!["diff", &split, &split],
             1,
             None,
@@ -1022,6 +1105,499 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
         let wrong = wrong_action_spellings(&text);
         if !wrong.is_empty() {
             failures.push(format!("{label}: wrong spellings {wrong:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Two refinement projects with a compose layer, as the implementation
+/// (`impl/`) or as the abstraction (`abs/`) of the mapping. In each, only the
+/// action map anchors `REQ-1` in the lower layer.
+fn write_project_fixtures(dir: &Path) {
+    let chain = root().join("tests/fixtures/chain");
+    let implementation = dir.join("impl");
+    let abstraction = dir.join("abs");
+    for project in [&implementation, &abstraction] {
+        std::fs::create_dir_all(project).expect("create project dir");
+    }
+    for file in ["business.fsl", "requirements.fsl", "fsl-project.toml"] {
+        std::fs::copy(chain.join(file), implementation.join(file)).expect("copy chain fixture");
+    }
+    std::fs::copy(
+        chain.join("design.fsl"),
+        implementation.join("component.fsl"),
+    )
+    .expect("copy chain design");
+    for (project, file, source) in [
+        (
+            &implementation,
+            "design.fsl",
+            "compose ChainCompose {\n  use ChainDesign as a__b from \"component.fsl\"\n}\n",
+        ),
+        (
+            &implementation,
+            "design_refines_requirements.fsl",
+            "refinement ChainComposeRefinesRequirements {\n  impl ChainCompose\n  abs ChainRequirements\n\n  map req[i: Item] = if a__b__design[i] == DDone then RDone else RDraft\n\n  action a__b__prepare(i) -> stutter\n  action a__b__finish(i) -> finish(i)\n}\n",
+        ),
+        (&abstraction, "tagged.fsl", TAGGED),
+        (
+            &abstraction,
+            "requirements.fsl",
+            "compose TagComp {\n  use Tagged as a__b from \"tagged.fsl\"\n}\n",
+        ),
+        (
+            &abstraction,
+            "design.fsl",
+            "spec Impl {\n  state { m: 0..20 }\n  init { m = 0 }\n  action step() {\n    m = m + 1\n  }\n}\n",
+        ),
+        (
+            &abstraction,
+            "map.fsl",
+            "refinement ImplRefinesTagComp {\n  impl Impl\n  abs TagComp\n\n  map a__b__n = m\n\n  action step() -> a__b__bump()\n}\n",
+        ),
+        (
+            &abstraction,
+            "fsl-project.toml",
+            "[requirements]\nfile = \"requirements.fsl\"\n\n[design]\nfile = \"design.fsl\"\ndepth = 2\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\n",
+        ),
+    ] {
+        std::fs::write(project.join(file), source).expect("write project fixture");
+    }
+}
+
+/// Edges of an analyze graph with an endpoint that is not a node ID.
+fn dangling_edges(graph: &Value) -> Vec<String> {
+    let ids = graph["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|node| node["id"].as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    graph["edges"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|edge| {
+            [&edge["from"], &edge["to"]]
+                .iter()
+                .any(|end| !end.as_str().is_some_and(|id| ids.contains(id)))
+        })
+        .map(|edge| format!("{} -{}-> {}", edge["from"], edge["kind"], edge["to"]))
+        .collect()
+}
+
+/// Detector (r2 F1): the project traceability graph built its action-map
+/// edges from the Kernel name (`design:action:a__b__finish`) while the layer
+/// graph names the node `design:action:a__b.finish`. On aca90678 the
+/// `maps_action` and `lower_anchor` edges pointed at no node, and with a
+/// compose abstraction `REQ-1` lost its lower anchor and was reported as a
+/// `traceability_gap`; 458040f3 printed the internal `a__b__finish`.
+#[test]
+fn project_traceability_graph_edges_end_at_published_action_nodes() {
+    let dir = scratch_dir("project");
+    write_project_fixtures(&dir);
+    let mut failures = Vec::new();
+    for (project, action_node) in [
+        ("impl", "design:action:a__b.finish"),
+        ("abs", "requirements:action:a__b.bump"),
+    ] {
+        let manifest = path_arg(&dir.join(project), "fsl-project.toml");
+        let output = fslc(&["analyze", &manifest, "--projection", "traceability_graph"]);
+        if output.status.code() != Some(0) {
+            failures.push(format!("{project}: exit {:?}", output.status.code()));
+            continue;
+        }
+        let graph = json_of(&output);
+        let dangling = dangling_edges(&graph);
+        if !dangling.is_empty() {
+            failures.push(format!("{project}: dangling edges {dangling:?}"));
+        }
+        let edges = graph["edges"].as_array().expect("edges");
+        if !edges.iter().any(|edge| {
+            edge["kind"] == "maps_action"
+                && (edge["from"] == action_node || edge["to"] == action_node)
+        }) {
+            failures.push(format!("{project}: no maps_action edge at {action_node}"));
+        }
+        if !edges.iter().any(|edge| {
+            edge["kind"] == "lower_anchor" && edge["from"] == "requirements:requirement:REQ-1"
+        }) {
+            failures.push(format!("{project}: REQ-1 has no lower anchor"));
+        }
+        let gaps = graph["findings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|finding| finding["finding_type"] == "traceability_gap")
+            .count();
+        if gaps != 0 {
+            failures.push(format!("{project}: {gaps} traceability gaps"));
+        }
+        let wrong = wrong_action_spellings(&String::from_utf8_lossy(&output.stdout));
+        if !wrong.is_empty() {
+            failures.push(format!("{project}: wrong spellings {wrong:?}"));
+        }
+    }
+    let design = path_arg(&dir.join("impl"), "design.fsl");
+    let mapping = path_arg(&dir.join("impl"), "design_refines_requirements.fsl");
+    for (arguments, has_edges) in [
+        (vec!["analyze", design.as_str()], true),
+        (
+            vec!["analyze", &design, "--projection", "action_state_graph"],
+            true,
+        ),
+        (
+            vec![
+                "analyze",
+                &design,
+                "--projection",
+                "action_dependency_graph",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "analyze",
+                &design,
+                "--projection",
+                "requirement_property_graph",
+            ],
+            false,
+        ),
+        (
+            vec!["analyze", &design, "--projection", "property_state_graph"],
+            false,
+        ),
+        (
+            vec![
+                "analyze",
+                &design,
+                "--projection",
+                "impact_graph",
+                "--focus",
+                "action:a__b.finish",
+            ],
+            true,
+        ),
+        (vec!["analyze", &mapping], true),
+    ] {
+        let output = fslc(&arguments);
+        let label = arguments[2..].join(" ");
+        if output.status.code() != Some(0) {
+            failures.push(format!("{label}: exit {:?}", output.status.code()));
+            continue;
+        }
+        let graph = json_of(&output);
+        let dangling = dangling_edges(&graph);
+        if !dangling.is_empty() {
+            failures.push(format!("{label}: dangling edges {dangling:?}"));
+        }
+        if has_edges && graph["edges"].as_array().is_none_or(Vec::is_empty) {
+            failures.push(format!("{label}: no edges"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+fn object_keys(value: &Value) -> Vec<String> {
+    value
+        .as_object()
+        .map(|object| object.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// `names` in their printed order, when they are not sorted or lack one of
+/// `required`.
+fn misordered(label: &str, names: &[String], required: &[&str]) -> Option<String> {
+    let mut sorted = names.to_vec();
+    sorted.sort();
+    (names != sorted || required.iter().any(|name| !names.iter().any(|n| n == name)))
+        .then(|| format!("{label}: {names:?}"))
+}
+
+/// Detector (r2 F2): every list is ordered by the name it prints. On
+/// aca90678 the glue action `z__a` (printed `z.a`) sorted by its internal
+/// name after `z.go`, scenarios listed `reach_acct2.Top` before
+/// `reach_acct.Top`, refine printed `action_map` and `progress` in internal
+/// order, and the conservation candidate listed `action:z__a` before
+/// `action:z.b`. `k_used` and BMC `reachables` (fixed in a2629636) fail the
+/// same way if they return to internal order.
+#[test]
+fn every_list_is_ordered_by_the_name_it_prints() {
+    let dir = scratch_dir("printed-order");
+    write_dunder_fixture(&dir);
+    let ranked = path_arg(&dir, "ranked.fsl");
+    let ranked_map = path_arg(&dir, "ranked-map.fsl");
+    let verify = json_of(&fslc(&["verify", &ranked, "--depth", "4", "--no-cache"]));
+    let induction = json_of(&fslc(&[
+        "verify",
+        &ranked,
+        "--engine",
+        "induction",
+        "--no-cache",
+    ]));
+    let scenarios = json_of(&fslc(&["scenarios", &ranked, "--depth", "4"]));
+    let refine = json_of(&fslc(&[
+        "refine",
+        &ranked,
+        &ranked,
+        &ranked_map,
+        "--depth",
+        "3",
+    ]));
+    let review = json_of(&fslc(&[
+        "analyze",
+        &path_arg(&dir, "conserve.fsl"),
+        "--profile",
+        "ai-review",
+    ]));
+    let reach = scenarios["scenarios"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|scenario| scenario["name"].as_str())
+        .filter(|name| name.starts_with("reach_"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let effects = review["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|finding| finding["finding_type"] == "conservation_candidate")
+        .flat_map(|finding| {
+            finding["witness"]["action_net_effects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|effect| effect["action"].as_str())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let failures = [
+        misordered(
+            "verify reachables",
+            &object_keys(&verify["reachables"]),
+            &["acct.Top", "acct2.Top"],
+        ),
+        misordered(
+            "verify action_coverage",
+            &object_keys(&verify["action_coverage"]),
+            &["z.a", "z.go"],
+        ),
+        misordered(
+            "induction k_used",
+            &object_keys(&induction["k_used"]),
+            &["acct.Inv", "acct2.Inv"],
+        ),
+        misordered(
+            "scenarios reach_*",
+            &reach,
+            &["reach_acct.Top", "reach_acct2.Top"],
+        ),
+        misordered(
+            "refine action_map",
+            &object_keys(&refine["action_map"]),
+            &["acct.back", "acct2.back", "z.a"],
+        ),
+        misordered(
+            "refine progress",
+            &object_keys(&refine["progress"]),
+            &["acct.Back", "acct2.Back"],
+        ),
+        misordered(
+            "conservation action_net_effects",
+            &effects,
+            &["action:z.b", "action:z__a"],
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Detector (r2 F4): ai-review joins findings to component actions by node
+/// ID. With the internal ID in the semantic records, `a__b.left`/`right` are
+/// reported as unguarded; with it in the `@undecided` record, their divergent
+/// choice is not acknowledged; with it in the progressless metadata, the
+/// tagged `acct` cycle is missed; with it in the fairness check, the fair
+/// `acct2` cycle is reported.
+#[test]
+fn ai_review_joins_component_actions_by_published_node_id() {
+    let dir = scratch_dir("ai-review");
+    write_dunder_fixture(&dir);
+    let output = fslc(&[
+        "analyze",
+        &path_arg(&dir, "review.fsl"),
+        "--profile",
+        "ai-review",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json_of(&output));
+    let review = json_of(&output);
+    let findings = review["findings"].as_array().expect("findings");
+    let involves = |finding: &Value, node: &str| {
+        finding["involved_nodes"]
+            .as_array()
+            .is_some_and(|nodes| nodes.iter().any(|involved| involved == node))
+    };
+    let of_kind = |kind: &str| {
+        findings
+            .iter()
+            .filter(|finding| finding["finding_type"] == kind)
+            .collect::<Vec<_>>()
+    };
+    let mut failures = Vec::new();
+    let acknowledged = of_kind("divergent_choice").into_iter().any(|finding| {
+        involves(finding, "action:a__b.left")
+            && involves(finding, "action:a__b.right")
+            && finding["acknowledged"] == true
+            && finding["acknowledged_by"][0]["declaration"] == "action a__b.left"
+    });
+    if !acknowledged {
+        failures.push("left/right divergent choice is not acknowledged".to_owned());
+    }
+    let unguarded = of_kind("unguarded_action");
+    if !unguarded.is_empty() {
+        failures.push(format!("unguarded actions reported: {unguarded:?}"));
+    }
+    let cycles = of_kind("progressless_cycle");
+    if !cycles
+        .iter()
+        .any(|finding| involves(finding, "action:acct.up") && involves(finding, "action:acct.down"))
+    {
+        failures.push(format!("acct cycle missed: {cycles:?}"));
+    }
+    if cycles.iter().any(|finding| {
+        involves(finding, "action:acct2.up") || involves(finding, "action:acct2.down")
+    }) {
+        failures.push(format!("fair acct2 cycle reported: {cycles:?}"));
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Detector (r2 F4): a lemma rejected by a bounded violation names the
+/// violation from the action that stepped; 458040f3 printed
+/// `_partial_a.b__split`. The lemma's induction checks only the lemma, so its
+/// `unknown_cti` branch never names an action.
+#[test]
+fn rejected_lemma_names_the_violation_from_the_action() {
+    let dir = scratch_dir("lemma");
+    write_dunder_fixture(&dir);
+    let output = fslc(&[
+        "verify",
+        &path_arg(&dir, "split.fsl"),
+        "--engine",
+        "induction",
+        "--lemma",
+        "a__b__q >= 0",
+        "--no-cache",
+    ]);
+    assert_eq!(output.status.code(), Some(1), "{:#}", json_of(&output));
+    let verify = json_of(&output);
+    let proof = &verify["lemmas"][0]["proof"];
+    assert_eq!(proof["result"], "violated", "{verify:#}");
+    assert_eq!(proof["invariant"], "_partial_a__b.split", "{verify:#}");
+    assert_eq!(
+        wrong_action_spellings(&String::from_utf8_lossy(&output.stdout)),
+        Vec::<String>::new()
+    );
+}
+
+/// Preservation: `causal observe-expectations` cannot take a compose
+/// companion (expectation lowering requires a plain spec), so its `maps auto`
+/// log lookup never sees a component action. This pins that boundary.
+#[test]
+fn causal_observation_rejects_a_compose_companion() {
+    let dir = scratch_dir("causal");
+    std::fs::copy(
+        root().join("examples/causal/incident_system.fsl"),
+        dir.join("incident_system.fsl"),
+    )
+    .expect("copy companion");
+    for (file, source) in [
+        (
+            "companion.fsl",
+            "compose IncidentCompose {\n  use IncidentSystem as a__b from \"incident_system.fsl\"\n}\n",
+        ),
+        (
+            "causal.fsl",
+            "causal ComposeIncident {\n  uses ops from \"companion.fsl\"\n\n  timebase day\n  horizon 365\n\n  clock ops_clock {\n    kernel ops\n    1 tick = 1 day\n  }\n\n  variable guardrails {\n    role intervention\n    binds action ops.a__b__deploy_guardrails\n  }\n\n  variable mttr {\n    role outcome\n    observes state ops.a__b__mttr_hours\n    cadence 7\n  }\n\n  claim C guardrails -> mttr {\n    version 1\n    status active\n    polarity negative\n    lag 1..45\n    persists 1..90\n    basis hypothesis\n  }\n\n  expectation E_Visible {\n    trigger action ops.a__b__deploy_guardrails\n    response predicate ops { a__b__guardrails >= 1 }\n    within 1\n    clock ops_clock\n    derived_from_claim C\n  }\n}\n",
+        ),
+        (
+            "log-map.fsl",
+            "refinement LogMap {\n  impl ComposeLog\n  abs IncidentCompose\n  maps auto\n}\n",
+        ),
+        (
+            "log.jsonl",
+            "{\"action\":\"a__b.deploy_guardrails\",\"params\":{},\"state\":{\"a.b__guardrails\":1,\"a.b__alert_precision\":3,\"a.b__mttr_hours\":24}}\n",
+        ),
+        (
+            "scope.json",
+            "{\"population\": [\"all_users\"], \"environment\": [\"production\"]}\n",
+        ),
+    ] {
+        std::fs::write(dir.join(file), source).expect("write causal fixture");
+    }
+    let output = fslc(&[
+        "causal",
+        "observe-expectations",
+        &path_arg(&dir, "causal.fsl"),
+        "--from-log",
+        &path_arg(&dir, "log.jsonl"),
+        "--mapping",
+        &path_arg(&dir, "log-map.fsl"),
+        "--scope",
+        &path_arg(&dir, "scope.json"),
+        "--period-start",
+        "2026-01-01",
+        "--period-end",
+        "2026-03-31",
+    ]);
+    let result = json_of(&output);
+    assert_eq!(output.status.code(), Some(2), "{result:#}");
+    assert!(
+        result["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("requires a plain kernel spec target")),
+        "{result:#}"
+    );
+}
+
+/// Detector (r2 F3): a non-compose state named `a__b__c` is published
+/// `a.b__c`. On 458040f3 testgen passed that public name through the string
+/// rule a second time (`a.b.c`) and rejected its own walk with "unknown state
+/// fields" (exit 2); every target now generates a scaffold keyed `a.b__c`.
+#[test]
+fn non_compose_state_with_two_separators_generates_every_target() {
+    let dir = scratch_dir("two-separators");
+    let spec = dir.join("state.fsl");
+    std::fs::write(
+        &spec,
+        "spec S {\n  state { a__b__c: 0..1 }\n  init { a__b__c = 0 }\n  action go() {\n    requires a__b__c < 1\n    a__b__c = 1\n  }\n}\n",
+    )
+    .expect("write spec");
+    let mut failures = Vec::new();
+    for target in ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"] {
+        let path = dir.join(format!("state.{target}"));
+        let output = fslc(&[
+            "testgen",
+            spec.to_str().expect("utf-8 path"),
+            "--target",
+            target,
+            "-o",
+            path.to_str().expect("utf-8 path"),
+        ]);
+        if output.status.code() != Some(0) {
+            failures.push(format!(
+                "{target}: exit {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout)
+            ));
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        if !text.contains("a.b__c") || text.contains("a.b.c") {
+            failures.push(format!("{target}: state key is not a.b__c"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");

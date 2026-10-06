@@ -703,10 +703,8 @@ pub fn conservation_review_findings(model: &KernelModel) -> Vec<Value> {
         return Vec::new();
     }
     let mut excluded = BTreeSet::new();
-    let mut actions = model.actions.iter().collect::<Vec<_>>();
-    actions.sort_by_key(|action| &action.name);
     let mut rows = Vec::new();
-    for action in actions {
+    for action in &model.actions {
         let mut deltas = BTreeMap::new();
         scan_counter_statements(
             &action.statements,
@@ -718,6 +716,7 @@ pub fn conservation_review_findings(model: &KernelModel) -> Vec<Value> {
         );
         rows.push((action_node_id(model, &action.name), deltas));
     }
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
     let eligible = counters
         .iter()
         .filter(|counter| {
