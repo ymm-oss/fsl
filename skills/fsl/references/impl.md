@@ -38,7 +38,10 @@ Wire the generated file's `Adapter` to the implementation:
   also arrive; `use X as a__b` with action `c` arrives as `"a__b.c"`, and a v1
   `fslc replay` trace uses the same names)
 - `observe() -> dict`: project the implementation state onto the spec's logical-state
-  form (keys are state-variable names / composition uses `alias.var`; enum = name
+  form (keys are state-variable names / composition uses `alias.var`, except that
+  with an alias containing `__` the key keeps the older rule: state `n` of
+  `use X as a__b` is `"a.b__n"`, while the frozen Python reference uses
+  `"a__b.n"`; enum = name
   string, Option = None|value, Seq = list, Map = dict with string keys, struct = dict)
 
 The random-walk test uses the Monitor (the spec's concrete interpreter) as the

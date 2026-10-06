@@ -105,7 +105,16 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    `--from-log`), `refine`, `diff`, `mutate`, `html`, `ledger`, and `analyze`
    publishes this name. `analyze` graph IDs carry it too
    (`action:alias.name`, `guard:alias.name:<i>`, `effect:alias.name:<i>`,
-   `ensures:alias.name:<i>`). Keyed lists are ordered by the published name. A v1
+   `ensures:alias.name:<i>`), as do the nodes' `name` fields, `--export
+   tag-review` names, `undecided:` records (`declaration`/`node`), and the
+   project `traceability_graph` (`action_map:`/`stutter_map:` IDs and
+   `maps_action` endpoints such as `design:action:alias.name`). Every graph and
+   finding builds an action's node ID through one function (`action_node_id`),
+   so an edge never ends at an ID no node declares. The frozen Python reference
+   keeps `action:alias__name` in these IDs; this is an intended difference
+   (decision 4 of #1234 makes the key `.` as well). Keyed lists are ordered by
+   the name they print, sorted with the same function that renders the key, so
+   a glue action `z__a` (printed `z.a`) sorts before `z.b`. A v1
    replay trace resolves a component action through the same table, accepting
    `alias.name` and the pre-#1234 `alias__name`; sync and glue actions keep exact
    physical-name matching. Public Kernel export (`kernel`, `typestate`) and the
