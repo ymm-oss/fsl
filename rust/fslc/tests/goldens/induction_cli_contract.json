@@ -64,7 +64,7 @@
             "name": "OneEntry"
           },
           {
-            "checks": 4,
+            "checks": 8,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -204,7 +204,7 @@
             "name": "SeenYellow"
           },
           {
-            "checks": 5,
+            "checks": 10,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -333,7 +333,7 @@
             "name": "NeverAboveCap"
           },
           {
-            "checks": 4,
+            "checks": 8,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -488,7 +488,7 @@
             "name": "OpenAtTop"
           },
           {
-            "checks": 7,
+            "checks": 14,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -675,7 +675,7 @@
             "name": "QueuedInActive"
           },
           {
-            "checks": 5,
+            "checks": 60,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -826,7 +826,7 @@
             "name": "XNonNegative"
           },
           {
-            "checks": 4,
+            "checks": 8,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -860,7 +860,7 @@
           "check_elapsed_s": "<number>",
           "checks": "<number>",
           "conflicts": "<number>",
-          "decisions": "<null>",
+          "decisions": "<number>",
           "memory_mb": "<number>",
           "propagations": "<number>"
         }
@@ -947,7 +947,7 @@
             "name": "XNonNegative"
           },
           {
-            "checks": 4,
+            "checks": 8,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -981,7 +981,7 @@
           "check_elapsed_s": "<number>",
           "checks": "<number>",
           "conflicts": "<number>",
-          "decisions": "<null>",
+          "decisions": "<number>",
           "memory_mb": "<number>",
           "propagations": "<number>"
         }
@@ -1078,7 +1078,7 @@
             "name": "XRange"
           },
           {
-            "checks": 5,
+            "checks": 10,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -1212,7 +1212,7 @@
             "name": "XRange"
           },
           {
-            "checks": 5,
+            "checks": 10,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -1351,7 +1351,7 @@
             "name": "XRange"
           },
           {
-            "checks": 5,
+            "checks": 10,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -1491,7 +1491,7 @@
             "name": "Responds"
           },
           {
-            "checks": 1,
+            "checks": 2,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -1638,7 +1638,7 @@
             "name": "Responds"
           },
           {
-            "checks": 1,
+            "checks": 2,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -1782,7 +1782,7 @@
             "name": "Responds"
           },
           {
-            "checks": 1,
+            "checks": 2,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -1924,7 +1924,7 @@
             "name": "Finishes"
           },
           {
-            "checks": 8,
+            "checks": 16,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -2120,7 +2120,7 @@
             "name": "NonNeg"
           },
           {
-            "checks": 8,
+            "checks": 16,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"
@@ -2282,7 +2282,7 @@
             "name": "NoNegativeStock"
           },
           {
-            "checks": 4,
+            "checks": 24,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "actions"

@@ -16,7 +16,11 @@ of the 552 corpus specs changed verdict, exit code, or message under `bmc`,
 traces) may differ because the solver answers additional queries, and
 `cost.properties` gains a `{"kind":"partial_op","name":"actions"}` row that
 answers the all-defined case once per step, so per-action `partial_op` check
-counts can drop (`docs/design/DESIGN-verification-cost.md`). `fslc mutate` uses
+counts can drop (`docs/design/DESIGN-verification-cost.md`). The row also
+counts the range-lemma queries that keep this check fast: each `Int` state
+leaf's bound at a step is kept only when the solver proves it entailed, and is
+conjoined only to the action definedness queries, whose answers it cannot
+change. `fslc mutate` uses
 the same check, so a mutant that removes an `init` assignment of an unbounded
 `Int` can now be reported `killed_by: "build_spec"` (the definedness error)
 instead of by an invariant. The induction step obligation (#1196) still

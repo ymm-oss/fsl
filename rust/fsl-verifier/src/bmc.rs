@@ -16,8 +16,8 @@ use crate::transition::{
 };
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
-    Bindings, SymbolicState, bool_term, bounds, concrete_value, i64_index, logical_equal,
-    symbolic_state, symbolic_state_with_suffix,
+    Bindings, SymbolicState, SymbolicValue, bool_term, bounds, concrete_value, i64_index,
+    logical_equal, symbolic_state, symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 
@@ -363,6 +363,7 @@ async fn verify_bounded_config<S: SmtSolver>(
         .collect::<BTreeSet<_>>();
     let mut states = vec![initial];
     let mut choices = Vec::new();
+    let mut range_lemmas = Vec::new();
 
     for step in 0..=depth {
         let property_checks = StatePropertyChecks {
@@ -385,9 +386,16 @@ async fn verify_bounded_config<S: SmtSolver>(
         }
 
         if step < depth
-            && let Some(violation) =
-                check_action_partial_operations(solver, model, &states, &choices, &instances, step)
-                    .await?
+            && let Some(violation) = check_action_partial_operations(
+                solver,
+                model,
+                &states,
+                &choices,
+                &instances,
+                step,
+                &mut range_lemmas,
+            )
+            .await?
         {
             result.violation = Some(violation);
             return Ok(result);
@@ -887,10 +895,14 @@ async fn check_action_partial_operations<S: SmtSolver>(
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
     step: usize,
+    range_lemmas: &mut Vec<S::Term>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     if instances.is_empty() {
         return Ok(None);
     }
+    // Range lemmas are charged with the disjunctive probe they serve.
+    solver.set_query_context("partial_op", "actions");
+    extend_range_lemmas(solver, &states[step], step, range_lemmas).await?;
     let mut evaluations = Vec::with_capacity(instances.len());
     let mut undefined = Vec::with_capacity(2 * instances.len());
     for instance in instances {
@@ -922,7 +934,14 @@ async fn check_action_partial_operations<S: SmtSolver>(
     // One disjunctive probe answers the common all-defined case; only a
     // `sat` answer re-asks per instance, in the order the errors are reported.
     solver.set_query_context("partial_op", "actions");
-    let any_undefined = probe(solver, &solver.or(&undefined)?).await?;
+    // The entailed range lemmas (`extend_range_lemmas`) are conjoined to the
+    // non-partial probes: the answers are unchanged, the solver no longer has
+    // to rediscover the bounds on every unrolled path.
+    let any_undefined = probe(
+        solver,
+        &with_lemmas(solver, range_lemmas, solver.or(&undefined)?)?,
+    )
+    .await?;
     for (instance, guard_evaluation, body_status, guard_undefined, body_undefined) in evaluations {
         let action = &model.actions[instance.action_index];
         let guard_failure = guard_evaluation.first_partial;
@@ -943,7 +962,9 @@ async fn check_action_partial_operations<S: SmtSolver>(
                 .await?,
             ));
         }
-        if any_undefined && probe(solver, &guard_undefined).await? {
+        if any_undefined
+            && probe(solver, &with_lemmas(solver, range_lemmas, guard_undefined)?).await?
+        {
             return Err(VerifyError::new(format!(
                 "action '{}' guard evaluation has a non-partial failure",
                 action.name
@@ -968,7 +989,9 @@ async fn check_action_partial_operations<S: SmtSolver>(
                 .await?,
             ));
         }
-        if any_undefined && probe(solver, &body_undefined).await? {
+        if any_undefined
+            && probe(solver, &with_lemmas(solver, range_lemmas, body_undefined)?).await?
+        {
             return Err(VerifyError::new(format!(
                 "action '{}' body evaluation has a non-partial failure",
                 action.name
@@ -1494,6 +1517,125 @@ async fn check_leadstos<S: SmtSolver>(
 async fn session_satisfiable<S: SmtSolver>(solver: &mut S) -> Result<bool, VerifyError> {
     solver.set_query_context("vacuity", "session");
     Ok(matches!(solver.check().await?, SatResult::Sat))
+}
+
+const RANGE_LEMMA_BASE_SHIFT: usize = 16;
+const RANGE_LEMMA_LIMIT_SHIFT: usize = 62;
+
+fn with_lemmas<S: SmtSolver>(
+    solver: &S,
+    range_lemmas: &[S::Term],
+    condition: S::Term,
+) -> Result<S::Term, VerifyError> {
+    if range_lemmas.is_empty() {
+        return Ok(condition);
+    }
+    let mut conjuncts = range_lemmas.to_vec();
+    conjuncts.push(condition);
+    Ok(solver.and(&conjuncts)?)
+}
+
+fn collect_int_terms<S: SmtSolver>(
+    solver: &S,
+    value: &SymbolicValue<S::Term>,
+    out: &mut Vec<S::Term>,
+) {
+    match value {
+        SymbolicValue::Scalar { term, .. } => {
+            if solver.sort(term) == fsl_solver::Sort::Int {
+                out.push(term.clone());
+            }
+        }
+        SymbolicValue::Option { value, .. } => collect_int_terms(solver, value, out),
+        SymbolicValue::Struct { fields, .. } => {
+            for field in fields.values() {
+                collect_int_terms(solver, field, out);
+            }
+        }
+        SymbolicValue::Map { entries, .. } => {
+            for (_, entry) in entries {
+                collect_int_terms(solver, entry, out);
+            }
+        }
+        SymbolicValue::Seq { slots, len, .. } => {
+            out.push(len.clone());
+            for slot in slots {
+                collect_int_terms(solver, slot, out);
+            }
+        }
+        SymbolicValue::SetLiteral(items) | SymbolicValue::SeqLiteral(items) => {
+            for item in items {
+                collect_int_terms(solver, item, out);
+            }
+        }
+        SymbolicValue::None | SymbolicValue::Set { .. } | SymbolicValue::Relation { .. } => {}
+    }
+}
+
+/// Range lemmas (#1240): `-B <= v <= B` for every Int leaf of the step's state,
+/// each kept only when the solver proves it is entailed by the assertions and
+/// the earlier lemmas. An entailed lemma does not change which models exist,
+/// so conjoining it to a query never changes that query's answer.
+async fn extend_range_lemmas<S: SmtSolver>(
+    solver: &mut S,
+    state: &SymbolicState<S::Term>,
+    step: usize,
+    range_lemmas: &mut Vec<S::Term>,
+) -> Result<(), VerifyError> {
+    // 2^16 * 4^step: an additive update of leaves bounded at the previous
+    // step stays inside the next bound. Past 2^62 a lemma no longer leaves the
+    // i64 headroom it exists to show, so no lemma is tried.
+    let Some(shift) = step
+        .checked_mul(2)
+        .and_then(|shift| shift.checked_add(RANGE_LEMMA_BASE_SHIFT))
+        .filter(|shift| *shift <= RANGE_LEMMA_LIMIT_SHIFT)
+    else {
+        return Ok(());
+    };
+    let bound = 1_i64 << shift;
+    let mut terms = Vec::new();
+    for value in state.values() {
+        collect_int_terms(solver, value, &mut terms);
+    }
+    let mut candidates = Vec::with_capacity(terms.len());
+    for term in &terms {
+        candidates.push(solver.and(&[
+            solver.ge(term, &solver.int_value(-bound))?,
+            solver.le(term, &solver.int_value(bound))?,
+        ])?);
+    }
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let mut query = range_lemmas.clone();
+    query.push(solver.not(&solver.and(&candidates)?)?);
+    if entailed(solver, &query).await? {
+        range_lemmas.extend(candidates);
+        return Ok(());
+    }
+    for candidate in candidates {
+        let mut query = range_lemmas.clone();
+        query.push(solver.not(&candidate)?);
+        if entailed(solver, &query).await? {
+            range_lemmas.push(candidate);
+        }
+    }
+    Ok(())
+}
+
+/// `true` only when the conjunction is proved unsatisfiable; `unknown` keeps
+/// the lemma out instead of failing the run.
+async fn entailed<S: SmtSolver>(solver: &mut S, query: &[S::Term]) -> Result<bool, VerifyError> {
+    solver.push();
+    if let Err(error) = solver.assert(&solver.and(query)?) {
+        solver.pop(1)?;
+        return Err(error.into());
+    }
+    let checked = solver.check().await;
+    let popped = solver.pop(1);
+    let result = checked?;
+    popped?;
+    Ok(result == SatResult::Unsat)
 }
 
 async fn probe_not<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {
