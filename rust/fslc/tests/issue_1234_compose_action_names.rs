@@ -447,6 +447,9 @@ const RANKED_COMPONENT: &str = "spec Rc {\n  state { n: 0..2 }\n  init { n = 0 }
 /// Glue action `z__a` is published `z.a` (string rule), component `z.go` is
 /// `z.go`: their internal names sort `z__a` after `z.go`'s key.
 const RANKED: &str = "compose Ranked {\n  use Rc as acct from \"rc.fsl\"\n  use Rc as acct2 from \"rc.fsl\"\n  use Rc as z from \"rc.fsl\"\n  action z__a() {\n    requires z__n == 0\n    z__n = 1\n  }\n}\n";
+/// Aliases `p__q`, `p`, `p2` publish `p.q__Back`, `p.Back`, `p2.Back`, whose
+/// internal names `p__q__Back`, `p__Back`, `p2__Back` sort the other way.
+const ORD: &str = "compose Ord {\n  use Rc as p__q from \"rc.fsl\"\n  use Rc as p from \"rc.fsl\"\n  use Rc as p2 from \"rc.fsl\"\n}\n";
 /// Glue `z__a` and component `z.b` move the two counters in opposite
 /// directions, a weighted-sum conservation candidate over both actions.
 const PAIR: &str = "spec Pair {\n  state { x: Int, y: Int }\n  init {\n    x = 0\n    y = 0\n  }\n  action b() {\n    x = x - 1\n    y = y + 1\n  }\n}\n";
@@ -529,17 +532,7 @@ fn write_dunder_fixture(dir: &Path) {
         ),
         ("rc.fsl", RANKED_COMPONENT.to_owned()),
         ("ranked.fsl", RANKED.to_owned()),
-        (
-            "ord.fsl",
-            compose(
-                "Ord",
-                &[
-                    ("Rc", "p__q", "rc.fsl"),
-                    ("Rc", "p", "rc.fsl"),
-                    ("Rc", "p2", "rc.fsl"),
-                ],
-            ),
-        ),
+        ("ord.fsl", ORD.to_owned()),
         (
             "ranked-map.fsl",
             "refinement RankedSelf {\n  impl Ranked\n  abs Ranked\n  maps auto\n  preserve progress {\n    respond acct2__Back by acct2__back\n    respond acct__Back by acct__back\n  }\n}\n"
