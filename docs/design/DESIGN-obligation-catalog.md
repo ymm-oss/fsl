@@ -84,16 +84,21 @@ Candidates over-approximate: a row no state can fail may keep a candidate,
 never the reverse, so a vacuous row is one no evaluation of its site can fail
 and an engine that skips it skips no real question. `KeyInDomain` and the value
 types it uses carry one premise: every state variable the site reads satisfies
-its type bound. Each engine checks a state's type bounds before it evaluates
-a site on that state (explicit, bmc and induction all report `_bounds_<v>`
-first when an out-of-type value reaches an index in an invariant, a `trans`,
-an `ensures`, a guard or a body), so the premise holds wherever the
-`Holds@TypeBound` rows are checked. An indexed assignment writes the map the
-state held before the action: `check` rejects an action that assigns the same
-state location twice, so no earlier statement can replace that map. A run that does not check them (`--property` selects a property
-and drops the bounds) cannot rely on a key row's vacuity: there an out-of-type
-value reaches the index and explicit reports a key-domain miss. The P1-c fold
-must keep that order.
+its type bound. The order is measured for five sites only: when an
+out-of-type value reaches an index in an invariant, a `trans`, an `ensures`,
+a guard or a body, explicit, bmc and induction all report `_bounds_<v>`
+first, so at those sites the premise holds wherever the `Holds@TypeBound`
+rows are checked. It is not measured for a `Trigger`, `Goal`, `Measure`,
+`reachable` or `terminal` site, and induction's ranking proof evaluates a
+measure on its `rank1` state, which carries no type-bound assumption (only
+`state0` and `deadlock_state` assume the properties), so a vacuous key row at
+these sites rests on the premise without a measured order. An indexed
+assignment writes the map the state held before the action: `check` rejects
+an action that assigns the same state location twice, so no earlier
+statement can replace that map. A run that does not check the bounds
+(`--property` selects a property and drops them) cannot rely on a key row's
+vacuity: there an out-of-type value reaches the index and explicit reports a
+key-domain miss. The P1-c fold must keep that order.
 
 - `PartialDefined` uses the partial-operation inventory of `fsl-core`
   (#1166). An action's guard, body and `ensures` use the same functions as the
@@ -120,7 +125,15 @@ must keep that order.
   branches join (the hull of two ranges, or one type). Every other form --
   arithmetic, `abs`, `size`, `add`, `push` -- counts, even where its value
   happens to fit.
-- A name's type holds every value the evaluators can bind to it. Action
+- A name's type holds every value the concrete evaluators can bind to it.
+  The symbolic evaluator is the exception: it binds an `is some(v)` pattern
+  even when the option is absent, and nothing constrains an absent option's
+  payload (the type bound and the state equalities cover a present value
+  only), so on that path bmc lets `v` take any value. With `p: Option<K>`
+  set to `none`, explicit proves `p is some(exact) or m[exact] >= 0` and bmc
+  reports it undefined, and bmc reports `p is some(exact) or exact >= 0`
+  violated at a state explicit accepts. The catalog follows the concrete
+  evaluators; that disagreement is an engine defect outside P1-a. Action
   parameters come first, then each `let` in clause order; a binder variable
   is typed inside its `where` filter and body, and a binder over a collection
   takes the item type of a bounded collection. An `is some(v)` pattern never
@@ -176,6 +189,15 @@ missing from it fails `cargo check`). The fixtures are:
   fixture of #473, and a fixture with every non-ranked family;
 - controls for each overflow and key-domain case, and one site per bounded
   index form against the forms left unbounded;
+- for each bounded form, a negative control whose declared type is wider than
+  the key (a range parameter, a `Map` element, a range binder with a literal,
+  a state and a conditional upper bound, `head`/`at` of a wider `Seq`, `old`
+  of a wider variable, the second field of a struct), each of which
+  `fslc verify --engine explicit` and `--engine bmc` fail as a spec of its
+  own. A non-literal range binder stays live only because `check` types it
+  `Int`: the state bound fails if that type is taken from the low bound, and
+  the conditional bound if it is inferred from `check`'s one-operand typing
+  of the bounds;
 - the false-vacuity reproducers of the first independent review, each of which
   `fslc verify --engine explicit` and `--engine bmc` fail, with in-domain
   controls (a conditional of two members, a fresh pattern name, a parameter a
@@ -200,7 +222,11 @@ variant occurs in some fixture.
 The tests are calibrated against faults injected by hand, one at a time:
 deleting each `push_*` call, each row a generator pushes, each candidate
 predicate, each recursion of the walk and each value-typing rule fails at
-least one T2 test. `cargo mutants --no-config --package fsl-core --file
+least one T2 test, and so does typing a form narrower than its declaration
+(a range parameter by its low end, a `Map` element by its key, `head`/`at`
+by the `Seq`'s positions, a field by the struct's first field, an `old`
+index as in domain, a non-literal range binder from its bounds' types).
+`cargo mutants --no-config --package fsl-core --file
 fsl-core/src/obligation.rs` (run from `rust/`) must leave no surviving
 mutant; it mutates operators and bodies but deletes no call, which is why the
 injected faults are needed.
