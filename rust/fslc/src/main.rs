@@ -12095,9 +12095,14 @@ fn run_mutate(
             }
         }
     }
-    let mut notes = vec![
-        "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure".to_owned(),
-    ];
+    // Without a gate, survivors are only a review queue; with one (#1237) they
+    // can fail the run, so the note must not claim otherwise. The ungated
+    // wording is pinned byte-for-byte by the issue_848 golden.
+    let mut notes = vec![if gate.requested() {
+        "possible equivalent mutants should be reviewed manually; this run requested a gate, so gate.passed decides the exit code and survivors (including possible equivalent mutants) count toward it".to_owned()
+    } else {
+        "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure".to_owned()
+    }];
     if discovered > max_mutants {
         notes.push(format!(
             "mutant cap {max_mutants} reached: {} dropped",

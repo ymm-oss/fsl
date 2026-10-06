@@ -282,6 +282,40 @@ fn without_a_flag_there_is_no_gate_and_survivors_exit_zero() {
     assert!(value.get("gate").is_none(), "{value}");
 }
 
+const UNGATED_NOTE: &str = "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure";
+const GATED_NOTE: &str = "possible equivalent mutants should be reviewed manually; this run requested a gate, so gate.passed decides the exit code and survivors (including possible equivalent mutants) count toward it";
+
+/// With a gate, survivors can fail the run, so the first note must not call
+/// them "not a hard failure"; without one the historical wording stays.
+#[test]
+fn the_survivor_note_matches_whether_a_gate_was_requested() {
+    let first_note = |value: &Value| value["notes"][0].as_str().map(str::to_owned);
+    let (value, _) = mutate_external(THREE_KILLED_ONE_SURVIVOR, &[]);
+    assert_eq!(first_note(&value).as_deref(), Some(UNGATED_NOTE), "{value}");
+    for flags in [
+        &["--fail-on-survivors"][..],
+        &["--min-kill-rate", "0"][..],
+        &["--fail-on-survivors", "--min-kill-rate", "0.9"][..],
+    ] {
+        let (value, _) = mutate_external(THREE_KILLED_ONE_SURVIVOR, flags);
+        assert_eq!(
+            first_note(&value).as_deref(),
+            Some(GATED_NOTE),
+            "{flags:?}: {value}"
+        );
+        assert!(
+            !value["notes"]
+                .as_array()
+                .expect("notes")
+                .iter()
+                .any(|note| note
+                    .as_str()
+                    .is_some_and(|n| n.contains("not a hard failure"))),
+            "{flags:?}: {value}"
+        );
+    }
+}
+
 /// The default stdout stays byte-identical to the checked-in #848 golden.
 #[test]
 fn default_stdout_is_byte_identical_to_the_issue_848_golden() {

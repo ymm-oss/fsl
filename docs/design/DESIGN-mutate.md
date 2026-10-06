@@ -235,6 +235,10 @@ reproduced from the JSON alone:
   fails `R = 0.7501`).
 - Built-in mutants beyond `--max-mutants` are not judged; their count is
   recorded as `gate.dropped` (and in `notes`) but does not fail the gate.
+- Because survivors can now fail the run, the first `notes` entry no longer
+  says they are "a review queue, not a hard failure"; it says the run
+  requested a gate and that `gate.passed` decides the exit code. The ungated
+  note is unchanged.
 
 A baseline that does not verify is re-emitted unchanged with its own exit code;
 the gate never applies to it and no `gate` key appears.
