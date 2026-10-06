@@ -8,8 +8,8 @@ use std::fmt;
 
 use fsl_syntax::{
     ActionItem, AnnotationRegistry, Binder, BusinessItem, Expr, LValue, Param, ParseError,
-    RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceBusiness,
-    SurfaceDocument, SurfaceRequirements, SurfaceSpec, TypeExpr, VerifyItem, parse_document,
+    RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceDocument, SurfaceSpec,
+    TypeExpr, VerifyItem, parse_document,
 };
 use serde_json::Value;
 
@@ -399,54 +399,96 @@ fn validate_direct_scope_overrides(
     validate_scope_override_names(&entities, &numbers, instances, values)
 }
 
+/// The names a `--instances` / `--values` override may bound in a
+/// `business` / `requirements` document (#1226), as `(entities, numbers)`.
+///
 /// The business dialect has no `number`: its bound names are the declared
-/// `entity` names (`lower_business` requires every process to have one).
-fn validate_business_scope_overrides(
-    business: &SurfaceBusiness,
-    instances: &std::collections::BTreeMap<String, i64>,
-    values: &std::collections::BTreeMap<String, (i64, i64)>,
-) -> Result<(), CoreError> {
-    let entities = business
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            BusinessItem::Entity(name, _) => Some(name.as_str()),
-            _ => None,
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    validate_scope_override_names(
-        &entities,
-        &std::collections::BTreeSet::new(),
-        instances,
-        values,
-    )
-}
-
-/// The requirements dialect bounds `entity` names, `number` names, and the
-/// name of every `process` (which `lower_requirements` adds as an entity when
-/// no `entity` of that name is declared).
-fn validate_requirements_scope_overrides(
-    requirements: &SurfaceRequirements,
-    instances: &std::collections::BTreeMap<String, i64>,
-    values: &std::collections::BTreeMap<String, (i64, i64)>,
-) -> Result<(), CoreError> {
+/// `entity` names (`lower_business` requires every process to have one). The
+/// requirements dialect bounds `entity` names, `number` names, and the name of
+/// every `process` (which `lower_requirements` adds as an entity when no
+/// `entity` of that name is declared). Other documents yield `None`.
+fn dialect_scope_override_names(
+    document: &SurfaceDocument,
+) -> Option<(
+    std::collections::BTreeSet<&str>,
+    std::collections::BTreeSet<&str>,
+)> {
     let mut entities = std::collections::BTreeSet::new();
     let mut numbers = std::collections::BTreeSet::new();
-    for item in &requirements.items {
-        match item {
-            RequirementsItem::Common(SpecItem::Entity(name, _)) => {
-                entities.insert(name.as_str());
+    match document {
+        SurfaceDocument::Business(business) => {
+            for item in &business.items {
+                if let BusinessItem::Entity(name, _) = item {
+                    entities.insert(name.as_str());
+                }
             }
-            RequirementsItem::Common(SpecItem::Number(name, _)) => {
-                numbers.insert(name.as_str());
-            }
-            RequirementsItem::Process(BusinessItem::Process { name, .. }) => {
-                entities.insert(name.name());
-            }
-            _ => {}
         }
+        SurfaceDocument::Requirements(requirements) => {
+            for item in &requirements.items {
+                match item {
+                    RequirementsItem::Common(SpecItem::Entity(name, _)) => {
+                        entities.insert(name.as_str());
+                    }
+                    RequirementsItem::Common(SpecItem::Number(name, _)) => {
+                        numbers.insert(name.as_str());
+                    }
+                    RequirementsItem::Process(BusinessItem::Process { name, .. }) => {
+                        entities.insert(name.name());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => return None,
     }
-    validate_scope_override_names(&entities, &numbers, instances, values)
+    Some((entities, numbers))
+}
+
+fn validate_dialect_scope_overrides(
+    document: &SurfaceDocument,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<(), CoreError> {
+    match dialect_scope_override_names(document) {
+        Some((entities, numbers)) => {
+            validate_scope_override_names(&entities, &numbers, instances, values)
+        }
+        None => Ok(()),
+    }
+}
+
+/// Restrict scope overrides to the names a `business` / `requirements`
+/// document lets [`parse_kernel_source_with_bounds`] override (#1226).
+///
+/// For an internal caller that derives overrides from a document's own
+/// `verify` block (`fslc diff`), where a bound naming no declared
+/// `entity` / `number` has never had any effect on the lowered model. Any
+/// other document's overrides are returned unchanged.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the source fails to parse.
+pub fn retain_dialect_scope_overrides(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+) -> Result<(InstanceOverrides, ValueOverrides), CoreError> {
+    let parsed = parse_document(SourceFile::new(source))?;
+    let Some((entities, numbers)) = dialect_scope_override_names(&parsed.surface) else {
+        return Ok((instances.clone(), values.clone()));
+    };
+    Ok((
+        instances
+            .iter()
+            .filter(|(name, _)| entities.contains(name.as_str()))
+            .map(|(name, value)| (name.clone(), *value))
+            .collect(),
+        values
+            .iter()
+            .filter(|(name, _)| numbers.contains(name.as_str()))
+            .map(|(name, value)| (name.clone(), *value))
+            .collect(),
+    ))
 }
 
 fn collect_spec_entity_number_names(
@@ -618,6 +660,7 @@ pub fn parse_kernel_source_with_bounds(
     }
 
     let parsed = parse_document(SourceFile::new(source))?;
+    validate_dialect_scope_overrides(&parsed.surface, instances, values)?;
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {
             validate_direct_scope_overrides(&spec, instances, values)?;
@@ -627,7 +670,6 @@ pub fn parse_kernel_source_with_bounds(
             lower_direct_spec(spec)
         }
         SurfaceDocument::Business(mut business) => {
-            validate_business_scope_overrides(&business, instances, values)?;
             for item in &mut business.items {
                 if let BusinessItem::VerifyBounds { items, .. } = item {
                     update_bounds(items, instances, values);
@@ -636,7 +678,6 @@ pub fn parse_kernel_source_with_bounds(
             lower_business(business)
         }
         SurfaceDocument::Requirements(mut requirements) => {
-            validate_requirements_scope_overrides(&requirements, instances, values)?;
             for item in &mut requirements.items {
                 if let RequirementsItem::Common(item) = item {
                     update(item, instances, values);

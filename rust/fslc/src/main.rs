@@ -15930,8 +15930,26 @@ fn run_diff(
             .map(|(name, value)| (name.clone(), *value))
             .collect(),
     };
+    // A `verify` bound that names no declared `entity`/`number` in a
+    // business/requirements document never shaped the lowered model, and the
+    // scoped loader now rejects it as an override (#1226): load with only the
+    // names it accepts, which leaves the re-scoped old model unchanged, and
+    // keep reporting the full `applied_to_old` scope as before.
     let old_model = if scope_changed {
-        match load_model_scoped(old, &overrides) {
+        let loadable = match fsl_core::retain_dialect_scope_overrides(
+            &old_source,
+            &overrides.instances,
+            &overrides.values,
+        ) {
+            Ok((instances, values)) => ScopeBounds { instances, values },
+            Err(error) => {
+                return (
+                    spec_load_error_output(&kernel_load_error(&old_source, &error)),
+                    2,
+                );
+            }
+        };
+        match load_model_scoped(old, &loadable) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         }

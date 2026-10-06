@@ -210,3 +210,73 @@ fn kernel_spec_rejection_is_unchanged() {
     assert_eq!(status, 1, "{output:#}");
     assert_eq!(output["result"], "violated", "{output:#}");
 }
+
+fn diff(old: &Path, new: &Path) -> (Value, i32) {
+    let old = old.display().to_string();
+    let new = new.display().to_string();
+    run(&["diff", &old, &new, "--depth", "2"])
+}
+
+fn scratch(tag: &str) -> PathBuf {
+    let scratch =
+        std::env::temp_dir().join(format!("fslc-issue-1226-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).expect("create scratch directory");
+    scratch
+}
+
+/// Preservation: `fslc diff` forwards the new document's own `verify` bounds
+/// to the scoped loader when the scope changed. A requirements bound naming
+/// no declared `entity`/`number` (`Ghost`; a separate, pre-existing gap lets
+/// it through `check`) never shaped the model; the diff must neither start
+/// failing on it nor drop it from `applied_to_old` — the output is the
+/// pre-#1226 one. Detector for forwarding it unfiltered (exit 2 with
+/// `verify values references undeclared number 'Ghost' at 1:1`).
+#[test]
+fn diff_keeps_an_undeclared_verify_bound_out_of_the_scoped_load() {
+    let scratch = scratch("diff-undeclared");
+    let source = |ghost_hi: i64| {
+        format!(
+            "requirements DiffGhost {{\n  number Amount\n  state {{ amount: Amount }}\n  init {{ amount = 0 }}\n}}\nverify {{ values Amount = 0..1; values Ghost = 1..{ghost_hi} }}\n"
+        )
+    };
+    let old = scratch.join("old.fsl");
+    let new = scratch.join("new.fsl");
+    std::fs::write(&old, source(3)).expect("write old");
+    std::fs::write(&new, source(4)).expect("write new");
+    let (output, status) = diff(&old, &new);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["result"], "semantic_diff", "{output:#}");
+    assert_eq!(output["summary"], serde_json::json!(["scope_changed"]));
+    assert_eq!(
+        output["scope"]["applied_to_old"]["values"],
+        serde_json::json!({"Amount": [0, 1], "Ghost": [1, 4]}),
+        "{output:#}"
+    );
+    std::fs::remove_dir_all(scratch).expect("remove scratch directory");
+}
+
+/// Preservation: a `process` name is still forwarded to the scoped load, so
+/// the old model is re-scoped to the new `Ticket` count.
+#[test]
+fn diff_still_rescopes_a_process_entity() {
+    let scratch = scratch("diff-process");
+    let source =
+        std::fs::read_to_string(repository_root().join(format!("{FIXTURE_DIR}/requirements.fsl")))
+            .expect("read fixture");
+    let old = scratch.join("old.fsl");
+    let new = scratch.join("new.fsl");
+    std::fs::write(&old, &source).expect("write old");
+    std::fs::write(
+        &new,
+        source.replace("instances Ticket = 1", "instances Ticket = 2"),
+    )
+    .expect("write new");
+    let (output, status) = diff(&old, &new);
+    assert_eq!(status, 0, "{output:#}");
+    assert_eq!(output["summary"], serde_json::json!(["scope_changed"]));
+    assert_eq!(output["scope"]["applied_to_old"]["instances"]["Ticket"], 2);
+    assert_eq!(output["directions"]["old_to_new"]["result"], "refines");
+    assert_eq!(output["directions"]["new_to_old"]["result"], "refines");
+    std::fs::remove_dir_all(scratch).expect("remove scratch directory");
+}

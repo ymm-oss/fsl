@@ -9,5 +9,6 @@ Python reference already did: `result: "error"`, `kind: "semantics"`,
 `verify values references undeclared number 'NAME' at 1:1`, exit 2 — the same
 message a kernel `spec` already produced. A requirements `process` name counts
 as an entity (it is one after lowering), and the business dialect, which has no
-`number`, rejects every `--values`. Kernel `spec` behavior and every override
-of a declared name are unchanged.
+`number`, rejects every `--values`. Kernel `spec` behavior, every override of
+a declared name, and `fslc diff` (which forwards a document's own `verify`
+bounds and keeps loading only the declared ones) are unchanged.
