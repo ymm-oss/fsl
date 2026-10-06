@@ -357,8 +357,21 @@ verify {
   `kind: "forbidden"` (detection of under-constraint = a missing guard that a safety
   invariant stays silent about); if the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
-  `rejected_by` — anything other than `requires_failed` means the spec itself is a
-  verify violation).
+  `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
+  outside the parameter's checked value domain; any other kind means the spec
+  itself is a verify violation). For an `entity` / `number` parameter that domain
+  is the `verify { instances / values }` scope, not a type: a last step such as
+  `accept(7)` under `instances Case = 3` is a `bad_call` that satisfies the
+  forbidden without evaluating any guard, while an implementation may accept it
+  (#1229) — keep forbidden arguments inside the scope to test the guard. A last
+  step naming no action or no variant of that arity is a `kind: "forbidden"`
+  error with a `message`, not a rejection (breaking after 4.8.1: `check` used to
+  pass, and what the other commands reported depended on the rest of the spec;
+  now every command that runs this check exits 2 with no verdict, scenario, or
+  test, except `explain`, which exits 0 with no witnesses (known gap #1242),
+  `approval create --kind ledger`, which exits 0 and records a ledger that
+  lists the error (#1243), and `approval check` of a ledger record, which
+  reports `drifted` (exit 0); `docs/design/DESIGN-forbidden.md` §2.1).
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use

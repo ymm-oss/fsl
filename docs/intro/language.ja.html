@@ -1118,7 +1118,15 @@ classification の欠落・未知・混在（<code>over_constrained</code> を�
 両方向に実行します: NEW→OLD の失敗は <code>behavior_added</code>、OLD→NEW の失敗は
 <code>behavior_removed</code> です。ユーザー invariant の連言の間の含意を別途検査し
 (<code>invariant_weakened</code> / <code>invariant_strengthened</code>)、OLD の <code>forbidden</code> シナリオを
-NEW に対して replay します(<code>forbidden_relaxed</code>)。方向性のある失敗は反例の
+NEW に対して replay します(<code>forbidden_relaxed</code>)。NEW の最後のステップがガードで
+無効なら OLD の拒否は保たれ、両側が range / enum のパラメータ型の外の <code>bad_call</code> として
+拒否する最後のステップも保たれます。どちらかの側で宣言された <code>entity</code> / <code>number</code> の
+verify スコープが決めた <code>bad_call</code> は <code>unknown</code> / <code>forbidden_step_unrelatable</code>、
+どの action も arity も指さない OLD の最後のステップは <code>unknown</code> /
+<code>forbidden_replay_failed</code> です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
+ステップも保たれたと報告されます。
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a> の "Forbidden replay"
+を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
 不一致は、<code>--mapping</code> がその方向を提供しない限り <code>unknown</code> です。任意のマッピング
 が自動で反転されることはありません。</p>
@@ -2879,7 +2887,37 @@ DESIGN-*.md があります)。</p>
   「拒否されるべき操作列」を書くと、check 時に、最後のステップが拒否される
   (not-enabled または違反)ことが replay 検証されます。受理されてしまった場合は
   <code>kind:"forbidden"</code> です(制約不足 = ガードの欠落の検出。安全性の invariant は
-  これについて沈黙します)。<code>acceptance</code>(must-allow)の双対です。
+  これについて沈黙します)。scenario の <code>rejected_by</code>(testgen が assert します)は、
+  ガードによる拒否なら <code>requires_failed</code>、パラメータの検査される値域の外の引数なら
+  <code>bad_call</code> です。その値域は、範囲型や enum のパラメータでは宣言された型ですが、
+  <code>entity</code>(<code>verify { instances }</code>)や <code>number</code>(<code>verify { values }</code>)のパラメータでは
+  検証の範囲です。<code>instances Case = 3</code> の下で最後のステップ <code>accept(7)</code> は <code>bad_call</code>
+  となり、ガードを一度も評価せずに forbidden を充足しますが、実装はその呼び出しを
+  受け付ける可能性があります(issue #1229 で扱います)。最後のステップがどの action も、
+  その arity の variant も指さない場合は拒否ではなく、<code>message</code> 付きの
+  <code>kind:"forbidden"</code> エラーです。これは破壊的変更です。4.8.1 までは、そのステップで
+  forbidden が充足していたので、<code>check</code> は通り、ほかのコマンドが何を報告するかは仕様の
+  残りの部分で決まっていました。<code>verify</code>、<code>sweep</code>、<code>chain</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code> は
+  検証が通れば exit 0、通らなければ exit 1 で、<code>scenarios</code>、<code>testgen</code>、
+  <code>counterexample export</code>、<code>approval create</code> は exit 2 になることもありました。
+  今は <code>check</code>、<code>verify</code>(どのエンジンでも)、<code>sweep</code>、<code>chain</code>、<code>scenarios</code>、<code>testgen</code>、
+  <code>mutate</code> の baseline、<code>counterexample export</code>、<code>html</code>、<code>ledger</code>、
+  <code>approval create --kind scenarios</code> / <code>html</code> が exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant を報告しません。<code>html</code>、<code>ledger</code>、
+  <code>approval create --kind html</code> の stdout は生成結果(<code>result: "generated"</code>)で、このエラーは
+  レポートの中に載ります(<code>html</code> と <code>ledger</code> はレポートを書き出します)。<code>chain</code> はこのエラーを
+  <code>[requirements]</code> 層の <code>detail</code> に載せ、それ以外はこのエラー(<code>error</code> / <code>kind: "forbidden"</code>)を
+  出力します。以前に作った <code>scenarios</code> / <code>html</code> の記録の <code>approval check</code> は
+  exit 2 です。exit 2 にならないのは次の 3 つです。<code>explain</code> は exit 0 のままで、witness は
+  ありません(既知の欠落 #1242: <code>explain</code> は gate のエラーを捨て、<code>html</code> の witness 欄も
+  同じです)。<code>approval create --kind ledger</code> は exit 0 で、エラーを載せた ledger を
+  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
+  その ledger が実時間の <code>elapsed_s</code> を埋め込むためでした(forbidden の gate が落ちる
+  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の <code>approval check</code> は
+  <code>drifted</code>(exit 0)です。
+  <code>fslc diff</code> は forbidden の判定を 2 つ変えるので、<code>--forbid unknown</code> の exit が変わることがあります。各コマンドの
+  変更前と変更後の実測は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1 にあります。
+  <code>acceptance</code>(must-allow)の双対です。
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity 検査(<code>--vacuity</code>)</strong> — verified/proved のパスの上で、
   <code>never_enabled_action</code>(検査した深さ内で action の enabled な instance がない。

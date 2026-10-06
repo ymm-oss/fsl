@@ -1431,6 +1431,49 @@ mod tests {
         );
     }
 
+    /// A forbidden wallet whose last step is `final_step`, refused by a guard
+    /// when it is `withdraw(60)` after `withdraw(10)`.
+    fn forbidden_wallet_request(cmd: &str, final_step: &str) -> Request {
+        Request {
+            cmd: cmd.to_owned(),
+            source: format!(
+                "requirements Wallet {{\n  type Amount = 0..100\n  state {{ balance: 0..100 }}\n  init {{ balance = 50 }}\n  requirement REQ-1 \"withdraw\" {{\n    action withdraw(amount: Amount) {{ requires amount <= balance  balance = balance - amount }}\n  }}\n  forbidden FB-1 \"overdraft\" {{\n    withdraw(10)\n    {final_step}\n    expect rejected\n  }}\n}}"
+            ),
+            source_file: "wallet.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        }
+    }
+
+    /// #1212: the Worker stops on a forbidden last step that names no action
+    /// with the native error, not a vacuously satisfied rejection.
+    #[test]
+    fn worker_reports_an_unknown_forbidden_final_action_like_native() {
+        for command in ["check", "verify"] {
+            let request = forbidden_wallet_request(command, "withdrew(60)");
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden unknown action",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["message"], "unknown action 'withdrew' in forbidden",
+                "{command}: {worker:#}"
+            );
+        }
+        // Control: a guard refusal satisfies the forbidden.
+        let worker = block_on(check(
+            &forbidden_wallet_request("check", "withdraw(60)"),
+            TEST_SOLVER_VERSION,
+        ));
+        assert_eq!(worker["result"], "ok", "{worker:#}");
+    }
+
     /// Parity control for #1008 (mutation: the Worker gains a selection
     /// option that skips the trace replay the way native `--instances` does).
     /// A request carrying the native selection keys is still a full run: it

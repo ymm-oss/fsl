@@ -1077,7 +1077,15 @@ refinement in both directions: NEW→OLD failure is `behavior_added`, while
 OLD→NEW failure is `behavior_removed`. It separately checks implication between
 the conjunctions of user invariants (`invariant_weakened` /
 `invariant_strengthened`) and replays OLD `forbidden` scenarios against NEW
-(`forbidden_relaxed`). Directional failures include counterexample witnesses.
+(`forbidden_relaxed`). A NEW final step that its guard disables preserves the
+OLD rejection, and so does a final step both sides reject as `bad_call` outside
+a range or enum parameter type; a `bad_call` decided by an `entity` / `number`
+verify scope declared on either side is `unknown` /
+`forbidden_step_unrelatable`, and an OLD final step naming no action or arity is
+`unknown` / `forbidden_replay_failed` (known gap #1239: a guard-disabled NEW
+setup step is also reported as preserved; see
+[`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md), "Forbidden
+replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
 are `unknown` unless `--mapping` supplies that direction. An arbitrary mapping
 is never inverted automatically.
@@ -2957,7 +2965,41 @@ DESIGN-*.md).
   time it is replay-verified that the last step is rejected (not-enabled or a
   violation). If it is accepted, `kind:"forbidden"` (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
-  about). The dual of `acceptance` (must-allow). → [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md)
+  about). The scenario's `rejected_by` (asserted by testgen) is
+  `requires_failed` for a guard refusal and `bad_call` for an argument outside
+  the checked value domain of its parameter. That domain is the declared type
+  for a range or enum parameter, but the verification scope for an `entity`
+  (`verify { instances }`) or `number` (`verify { values }`) parameter: under
+  `instances Case = 3`, a last step `accept(7)` is a `bad_call` and satisfies
+  the forbidden without evaluating any guard, although an implementation may
+  accept that call (issue #1229 tracks this). A last step naming no action, or
+  no variant of that arity, is a `kind:"forbidden"` error with a `message`, not
+  a rejection. This is a breaking change: through 4.8.1 such a step
+  satisfied the forbidden, so `check` passed, and what the other commands
+  reported depended on the rest of the spec: `verify`, `sweep`, `chain`,
+  `mutate`, `html`, and `ledger` exited 0 when it verified and 1 when it did
+  not, while `scenarios`, `testgen`, `counterexample export`, and `approval
+  create` could also exit 2. Now `check`, `verify` (every engine), `sweep`,
+  `chain`, `scenarios`, `testgen`, the `mutate` baseline, `counterexample
+  export`, `html`, `ledger`, and `approval create --kind scenarios` / `html`
+  exit 2 and report no verdict, counterexample, scenario, test, or mutant for
+  the rest of the spec. `html`, `ledger`, and `approval create --kind html`
+  print the generated result (`result: "generated"`) with this error inside
+  the report (`html` and `ledger` still write their report); `chain` reports
+  it as the `[requirements]` layer's `detail`; the others print this error
+  (`error` / `kind: "forbidden"`). `approval check` of a `scenarios` or `html` record created
+  before exits 2. Three do not exit 2: `explain` still exits 0, with no
+  witnesses (known gap #1242: `explain` discards the gate's error, and so
+  does the witnesses section of `html`); `approval create --kind ledger`
+  exits 0 with a record of the ledger, which lists the error — on a spec
+  whose rest has a violation it used to exit 2 only because that ledger
+  embeds wall-clock `elapsed_s` (whether a ledger whose forbidden gate fails
+  may be approved is tracked by #1243); and `approval check` of a ledger record
+  created before reports `drifted` (exit 0). `fslc diff` changes two
+  forbidden verdicts, which can change a `--forbid unknown` exit. The
+  before/after of every command, measured, is in
+  [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1.
+  The dual of `acceptance` (must-allow). → [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md)
 - **Vacuity check (`--vacuity`)** — on the verified/proved path, warns about
   `never_enabled_action` (an action has no enabled instance through the checked
   depth; bounded evidence, not a permanent-dead proof), `vacuous_implication`

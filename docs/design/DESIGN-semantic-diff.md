@@ -69,7 +69,19 @@ The finding carries `subject:"forbidden"`, the OLD case `id`, a stable
 `reason` (`forbidden_step_unrelatable` or `forbidden_replay_failed`), and the
 zero-based failing `step` plus `action` when available. A matching action that
 is disabled by its guard is a related rejection and therefore preserves the
-forbidden scenario; it is not reported as `unknown`.
+forbidden scenario; it is not reported as `unknown`. Known gap (issue #1239):
+the implementation applies this to a setup step as well, so a NEW setup step
+disabled by its guard is reported as preserved although NEW never runs the
+final step; only a disabled final step is evidence of a preserved rejection.
+A final step that both OLD and NEW reject as `bad_call` outside a declared type
+is preserved too, even though NEW cannot relate its arguments to an action: on
+both sides, every same-named action of that arity has an argument outside a
+range or enum parameter type. A `bad_call` decided by an `entity` / `number`
+verify scope (`instances` / `values` declared on either side, including the NEW
+scope OLD is replayed under) tried no
+guard on either side, so it stays `unknown` / `forbidden_step_unrelatable`
+(DESIGN-forbidden.md §2, issue #1229). An OLD final step that names no action,
+or no variant of that arity, is `unknown` / `forbidden_replay_failed`.
 
 ## Scope changes
 
