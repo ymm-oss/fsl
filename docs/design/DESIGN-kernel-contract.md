@@ -104,6 +104,21 @@ guard/body failures and is the exact uncommitted candidate for any later
 `type_bound`, `partial_op`, `invariant`, `trans`, or `ensures` failure. This
 rollback rule is shared by the schema and executable vectors.
 
+A guard (`let` or `requires`) that reaches a partial operation is that action's
+`partial_op` (`_partial_<action>`) in every engine, exactly like a body partial
+operation (#1191). The solver-free walks — explicit-state `verify`, Monitor
+BFS, the concrete boundary pre-pass below, refinement's self-violation walk,
+and the concrete cover/response/reachability walks — enumerate instances with
+`Monitor::candidates`, which returns such an instance as
+`ActionCandidate::GuardPartial` instead of aborting the whole walk with the raw
+evaluation error; `Monitor::step_candidate` turns it into the `partial_op`
+step (state unchanged, no `attempted_state`), the same evidence the symbolic
+engine's witness carries. Walks that only follow successful steps skip it like
+any other violating step. Such an instance is not *disabled* — its guard did
+not evaluate to `false` — so it keeps its state from being a deadlock and does
+not count toward action coverage. `Monitor::enabled` keeps returning the raw
+error for callers that need every guard to evaluate.
+
 ## Concrete boundary pre-pass budget
 
 Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free
