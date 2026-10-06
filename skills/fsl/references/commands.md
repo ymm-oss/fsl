@@ -317,10 +317,16 @@ scenarios against NEW. Its stable finding kinds are `behavior_added`,
 `no_semantic_change`. In the forbidden replay (`docs/design/DESIGN-semantic-diff.md`,
 "Forbidden replay") a NEW final step that its guard disables preserves the OLD
 rejection, and so does a final step that OLD and NEW both reject as `bad_call`
-outside a range or enum parameter type. A `bad_call` decided by an `entity` /
-`number` verify scope (`instances` / `values` declared on either side, including
-the NEW scope OLD is replayed under) tried no guard, so it stays `unknown` /
-`forbidden_step_unrelatable`. An OLD final step that names no action, or no
+outside a range or enum parameter type. Each side is classified with its own `entity` /
+`number` types: since #1229 an OLD final step outside its verify scope
+(including the NEW scope OLD is replayed under) is `unknown` /
+`forbidden_replay_failed`, since no OLD guard rejected it, and an OLD `bad_call`
+that only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`
+(before #1229 both were `forbidden_step_unrelatable`). A compose NEW, or a NEW
+of another dialect whose `entity` / `number` types are not in its source, never
+preserves an OLD `bad_call` (`unknown` / `forbidden_step_unrelatable`); before
+#1229 a compose NEW that rejected the step as `bad_call` preserved it, so such a
+forbidden now fails `--forbid unknown`. An OLD final step that names no action, or no
 variant of that arity, is `unknown` / `forbidden_replay_failed`. Before #1212 a
 both-side range `bad_call` was `unknown`, so that forbidden failed `--forbid
 unknown` and no longer does, and an OLD unknown action was preserved (the
@@ -603,8 +609,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   never yields `verified` / `sweep_passed`. Only a reference the override
   removed (inside the declared bounds, outside the overridden ones) is
   excused; one outside the declared bounds keeps the unscoped error, and a
-  forbidden final step "rejected" only because its argument was removed is
-  reported as `forbidden_skipped`, not satisfied. When any scenario was skipped,
+  forbidden final step outside the overridden scope only because its argument
+  was removed is reported as `forbidden_skipped`, not satisfied (one outside the
+  declared scope is the unscoped `kind: "forbidden"` error, #1229, unless the
+  override widens the scope to include it, in which case the guard is
+  evaluated). When any scenario was skipped,
   the envelope also carries `requirement_traces: {result: "not_evaluated",
   reason: "bounds_override", skipped: [{kind, id, reference}, ...]}`; the key
   is absent when every scenario was replayed. When the spec has an inline `implements`, the

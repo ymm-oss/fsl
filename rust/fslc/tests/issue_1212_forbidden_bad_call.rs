@@ -267,27 +267,29 @@ fn assert_single_unknown(output: &Value, reason: &str) {
     assert_eq!(findings[0]["reason"], reason, "{output:#}");
 }
 
-/// An `entity` argument outside `instances` is a `bad_call` decided by the
-/// verify scope, not by a type: no guard was tried on either side, so the
-/// forbidden is not preserved (C1, review r1 major-1).
+/// An `entity` argument outside `instances` is decided by the verify scope,
+/// not by a type: no guard was tried on either side, so the forbidden is not
+/// preserved (C1, review r1 major-1). Since #1229 OLD's `check` rejects that
+/// final step, so it is no OLD rejection at all (`forbidden_replay_failed`).
 #[test]
 fn diff_does_not_preserve_a_bad_call_decided_by_the_entity_scope() {
     let spec = cases("c: Case", "requires cases[c] == Accepted", "respond(7)", 3);
     let (output, status) = diff(&spec, &spec, "diff-entity-scope");
     assert_eq!(status, 0, "{output:#}");
-    assert_single_unknown(&output, "forbidden_step_unrelatable");
+    assert_single_unknown(&output, "forbidden_replay_failed");
 }
 
 /// OLD rejects `respond(2)` by its guard under `instances Case = 3`; NEW
 /// shrinks the scope to 2 and drops the guard. OLD is replayed under NEW's
-/// scope, so both sides report `bad_call` without trying a guard.
+/// scope, so neither side tries a guard: the replayed OLD final step is
+/// outside the verify scope (#1229).
 #[test]
 fn diff_does_not_preserve_a_bad_call_the_scope_change_introduced() {
     let old = cases("c: Case", "requires cases[c] == Accepted", "respond(2)", 3);
     let new = cases("c: Case", "", "respond(2)", 2);
     let (output, status) = diff(&old, &new, "diff-entity-scope-change");
     assert_eq!(status, 0, "{output:#}");
-    assert_single_unknown(&output, "forbidden_step_unrelatable");
+    assert_single_unknown(&output, "forbidden_replay_failed");
 }
 
 /// A `number` argument outside `values` is likewise decided by the scope.
@@ -308,7 +310,7 @@ fn diff_does_not_preserve_a_bad_call_decided_by_the_number_scope() {
 verify { values Qty = 0..3 }"#;
     let (output, status) = diff(spec, spec, "diff-number-scope");
     assert_eq!(status, 0, "{output:#}");
-    assert_single_unknown(&output, "forbidden_step_unrelatable");
+    assert_single_unknown(&output, "forbidden_replay_failed");
 }
 
 /// Boundary: an action with an `entity` and a range parameter. An argument
@@ -338,7 +340,7 @@ fn diff_preserves_only_the_type_contract_part_of_a_mixed_bad_call() {
     );
     let (output, status) = diff(&scoped, &scoped, "diff-mixed-entity");
     assert_eq!(status, 0, "{output:#}");
-    assert_single_unknown(&output, "forbidden_step_unrelatable");
+    assert_single_unknown(&output, "forbidden_replay_failed");
 }
 
 /// OLD's last step names no action. `check` rejects that case, so `diff`
@@ -384,20 +386,31 @@ const KERNEL_CASES: &str = r"spec Respond {
 }";
 
 /// A type is scope-bound when either side declares it as an `entity` /
-/// `number` scope. Only one side declares it here, so building that set from
-/// NEW alone (first pair) or OLD alone (second pair) would preserve a
-/// `bad_call` that one side decided by its verify scope.
+/// `number` scope. Only one side declares it here, so classifying OLD with
+/// NEW's types (first pair) or NEW with OLD's (second pair) would preserve a
+/// `bad_call` that one side decided by its verify scope. Since #1229 OLD's own
+/// scope makes the first OLD final step no rejection at all.
 #[test]
 fn diff_treats_a_type_either_side_scopes_as_scope_bound() {
     let entity = cases("c: Case", "requires cases[c] == Accepted", "respond(7)", 3);
     let typed = typed_cases();
-    for (old, new, name) in [
-        (entity.as_str(), KERNEL_CASES, "diff-union-old-entity"),
-        (typed.as_str(), entity.as_str(), "diff-union-new-entity"),
+    for (old, new, name, reason) in [
+        (
+            entity.as_str(),
+            KERNEL_CASES,
+            "diff-union-old-entity",
+            "forbidden_replay_failed",
+        ),
+        (
+            typed.as_str(),
+            entity.as_str(),
+            "diff-union-new-entity",
+            "forbidden_step_unrelatable",
+        ),
     ] {
         let (output, status) = diff(old, new, name);
         assert_eq!(status, 0, "{name}: {output:#}");
-        assert_single_unknown(&output, "forbidden_step_unrelatable");
+        assert_single_unknown(&output, reason);
     }
     // Controls: with `type Case = 0..2` on both sides the same step is a
     // type-contract `bad_call`, which is preserved.
