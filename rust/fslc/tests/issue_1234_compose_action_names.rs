@@ -411,7 +411,7 @@ fn bank_system_command_outputs_never_publish_internal_names() {
     for (arguments, publishes_names) in commands {
         let output = fslc(&arguments);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if !output.status.code().is_some_and(|code| code <= 1) {
+        if output.status.code().is_none_or(|code| code > 1) {
             failures.push(format!("{arguments:?}: exit {:?}", output.status.code()));
         }
         if publishes_names && !stdout.contains("\"bank.") {
@@ -1249,6 +1249,16 @@ fn project_traceability_graph_edges_end_at_published_action_nodes() {
             failures.push(format!("{project}: wrong spellings {wrong:?}"));
         }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Detector (r2 F1): every single-spec projection of the compose design layer
+/// and the analyze graph of its refinement end every edge at a declared node.
+#[test]
+fn compose_layer_projections_end_every_edge_at_a_node() {
+    let dir = scratch_dir("projections");
+    write_project_fixtures(&dir);
+    let mut failures = Vec::new();
     let design = path_arg(&dir.join("impl"), "design.fsl");
     let mapping = path_arg(&dir.join("impl"), "design_refines_requirements.fsl");
     for (arguments, has_edges) in [

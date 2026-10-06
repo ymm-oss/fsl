@@ -2692,10 +2692,10 @@ fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
 /// `acct.go`. The caller prints the returned name, so the order is the order of
 /// the printed keys.
 #[must_use]
-pub fn sorted_by_published<'a, V>(
-    entries: &'a BTreeMap<String, V>,
+pub fn sorted_by_published<V>(
+    entries: &BTreeMap<String, V>,
     publish: impl Fn(&str) -> String,
-) -> Vec<(String, &'a String, &'a V)> {
+) -> Vec<(String, &String, &V)> {
     let mut entries = entries
         .iter()
         .map(|(name, value)| (publish(name), name, value))
