@@ -399,14 +399,19 @@ fn push_action(rows: &mut Rows, model: &KernelModel, action: &ActionDef) {
             expression_has_partial_operation_candidate(expr)
         }
     });
-    let guard = found.next().unwrap_or_default();
+    let guard = found.next().expect("action_found yields the guard");
     rows.definedness(&Site::Guard(at.clone()), guard_partial, &guard);
     let body_partial = action
         .statements
         .iter()
         .any(statement_has_partial_operation_candidate);
-    let body = found.next().unwrap_or_default();
+    let body = found.next().expect("action_found yields the body");
     rows.definedness(&Site::Body(at.clone()), body_partial, &body);
+    assert_eq!(
+        found.len(),
+        action.ensures.len(),
+        "action_found yields one entry per ensures"
+    );
     for (index, (ensures, found)) in action.ensures.iter().zip(found).enumerate() {
         let site = Site::Ensures {
             action: at.clone(),
@@ -468,7 +473,7 @@ fn expression_found(model: &KernelModel, binders: &[Binder], expr: &Expr) -> Fou
         vec![found]
     })
     .pop()
-    .unwrap_or_default()
+    .expect("the walk yields one entry")
 }
 
 /// Walk one evaluation context from the outermost scope its `is some(v)`
