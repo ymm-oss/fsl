@@ -1287,8 +1287,8 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 </tr>
 <tr>
 <td><code>unknown_budget</code></td>
-<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or an inline <code>implements Abs from "file" { }</code> seam's correspondence search exceeded its fixed internal state budget (<code>check</code>/<code>verify</code>, no CLI flag)</td>
-<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For an inline <code>implements</code> seam: narrow the domain, or verify the layers separately with <code>fslc refine</code>/<code>fslc verify</code> instead of the combined check</td>
+<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline <code>implements Abs from "file" { }</code> seam (<code>check</code>/<code>verify</code>), <code>fslc refine</code> (single or chain), a <code>fslc chain</code> refine layer, or a governance <code>preservation</code> (§10, §13)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1713,6 +1713,18 @@ and abs, not a defect in the impl alone). <code>fslc diff</code> surfaces the sa
 condition as an <code>impl_violated</code> finding and fails its gate unconditionally
 (not subject to <code>--forbid</code>), since a self-violating side makes the
 comparison itself untrustworthy.</p>
+<p>The correspondence check that follows visits at most a fixed number of
+distinct impl states (50,000; no CLI flag — the same internal budget an inline
+<code>implements</code> seam uses, §13). When it reaches that budget before deciding
+within <code>--depth</code>, <code>refine</code> reports <code>result: "unknown_budget"</code> (exit 1) with
+<code>states_explored</code> and a <code>hint</code>, never <code>refines</code>: the unvisited part of the
+reachable set may still hold a mismatch. Lower <code>--depth</code>, or narrow the
+<code>verify {}</code> domains (<code>instances</code>/<code>values</code>) of both specs. A chain check stops
+at that link (<code>failed_link.kind</code> is <code>null</code>), a <code>fslc chain</code> refine layer fails
+with <code>result: "unknown_budget"</code>, and a governance <code>preservation</code> reports
+<code>unknown_budget</code> as its <code>result</code>. This changed verdicts: a refinement whose
+correspondence check reaches the budget used to report <code>refines</code> (exit 0).
+The self-consistency precondition above has no such budget.</p>
 <p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
 unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
 full type domain, not a value silently defaulted — <code>refine</code> checks it that
@@ -2519,7 +2531,10 @@ for a control that was never written.</p>
 </code></pre>
 <p><code>fslc check governance.fsl</code> validates all referenced controls, business files,
 policies/goals, and preservation files. Preservation blocks also run the declared
-refinement at depth 8 and report results under <code>governance.preservations</code>.</p>
+refinement at depth 8 and report results under <code>governance.preservations</code>:
+<code>refines</code>, <code>refinement_failed</code>, <code>violated</code> (the <code>after</code> spec breaks its own
+semantics, §10), or <code>unknown_budget</code> (the correspondence check reached its
+state budget, §10). The browser Worker reports the same values.</p>
 <h3 id="134-how-to-write-non-functional-requirements-nfrs">13.4 How to write non-functional requirements (NFRs)</h3>
 <p>The majority of NFRs can be written with the same machinery as functional
 requirements (details and demonstration in <code>DESIGN-nfr.md</code>):</p>

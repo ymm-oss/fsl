@@ -331,8 +331,9 @@ verify {
   requirements spec breaks its own bounds/invariants, so no refinement verdict
   was reached) / `unknown_budget` (the correspondence search hit its fixed
   internal state-count budget before deciding, with `implements.states_explored`
-  — narrow the domain, or verify the layers separately with `fslc refine`/
-  `fslc verify`; there is no CLI flag to raise this budget), plus `violation`
+  — narrow the domain, or verify each layer separately with `fslc verify`;
+  `fslc refine` shares the same budget and reports `unknown_budget` too;
+  there is no CLI flag to raise this budget), plus `violation`
   on the two failing (not budget-exhausted) values. A failing seam makes the
   command exit 1 with the same top-level `result`
   (`refinement_failed`/`impl_violated`/`unknown_budget`). Read

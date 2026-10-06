@@ -277,8 +277,22 @@ async fn governance_output(
                         .map_err(|failure| {
                             governance_error(failure.to_string(), preservation.span)
                         })?;
-                if checked.failure.is_some() {
-                    return Ok(json!("refinement_failed"));
+                // The same verdicts, in the same order, native governance
+                // reads off `run_refine`'s `result`: `unknown_budget` for a
+                // walk cut off by its state budget, `violated` for an impl
+                // that breaks its own semantics, and no progress stage for
+                // either.
+                match checked.verdict() {
+                    fsl_runtime::RefinementVerdict::BudgetExhausted { .. } => {
+                        return Ok(json!("unknown_budget"));
+                    }
+                    fsl_runtime::RefinementVerdict::ImplViolated { .. } => {
+                        return Ok(json!("violated"));
+                    }
+                    fsl_runtime::RefinementVerdict::Failed(_) => {
+                        return Ok(json!("refinement_failed"));
+                    }
+                    fsl_runtime::RefinementVerdict::Refines => {}
                 }
                 if !mapping.progress.is_empty() {
                     let mut solver = fsl_solver_z3js::Z3JsSolver::new();
@@ -295,11 +309,7 @@ async fn governance_output(
                         return Ok(json!("refinement_failed"));
                     }
                 }
-                Ok(json!(if checked.failure.is_some() {
-                    "refinement_failed"
-                } else {
-                    "refines"
-                }))
+                Ok(json!("refines"))
             }
         },
     )
@@ -1531,6 +1541,89 @@ mod tests {
         };
 
         assert_worker_governance_error_matches_native(&request, "missing governance dependency");
+    }
+
+    /// The governance request `rust/fslc/tests/refine_budget_unknown.rs`
+    /// runs through native `fslc check`, built from the same spec sources, so the
+    /// Worker's preservation `result` can be compared with native's value.
+    fn governance_request(after: &str, after_source: &str) -> Request {
+        let wide_abs = "spec WideMid {\n  type MV = 0..5\n  state { seq: Seq<MV, 6> }\n  \
+             init { seq = Seq {} }\n  action push(v: MV) {\n    requires seq.size() < 6\n    \
+             seq = seq.push(v)\n  }\n}\n";
+        let small_abs = "spec SmallAbs { type AQty = 0..3 state { n: AQty } init { n = 0 } \
+             action bump() { requires n < 3  n = n + 1 } }\n";
+        let (abs_name, abs_file, abs_source) = if after == "WideImpl" {
+            ("WideMid", "mid.fsl", wide_abs)
+        } else {
+            ("SmallAbs", "small_abs.fsl", small_abs)
+        };
+        Request {
+            cmd: "check".to_owned(),
+            source: format!(
+                "governance WideControls {{\n  control CTRL-WIDE \"The sequence is preserved\"\n\n  \
+                 preservation WidePreserved {{\n    before {abs_name} from \"{abs_file}\"\n    \
+                 after {after} from \"after.fsl\"\n    preserve CTRL-WIDE\n    \
+                 checked_by refinement \"map.fsl\"\n  }}\n}}\n"
+            ),
+            source_file: "governance.fsl".to_owned(),
+            files: BTreeMap::from([
+                (abs_file.to_owned(), abs_source.to_owned()),
+                ("after.fsl".to_owned(), after_source.to_owned()),
+                (
+                    "map.fsl".to_owned(),
+                    format!("refinement M {{ impl {after} abs {abs_name} maps auto }}\n"),
+                ),
+            ]),
+            options: Options::default(),
+        }
+    }
+
+    fn worker_preservation_result(request: &Request) -> Value {
+        let worker = block_on(check(request, TEST_SOLVER_VERSION));
+        worker["governance"]["preservations"][0]["result"].clone()
+    }
+
+    /// A correspondence walk cut off by its state budget (55,987 reachable
+    /// states at depth 8) is `unknown_budget`, as native reports -- not
+    /// `refines`.
+    #[test]
+    fn governance_reports_unknown_budget_for_a_cut_off_preservation() {
+        let request = governance_request(
+            "WideImpl",
+            "spec WideImpl {\n  type IV = 0..5\n  state { seq: Seq<IV, 6> }\n  \
+             init { seq = Seq {} }\n  action push(v: IV) {\n    requires seq.size() < 6\n    \
+             seq = seq.push(v)\n  }\n}\n",
+        );
+
+        assert_eq!(
+            worker_preservation_result(&request),
+            json!("unknown_budget")
+        );
+    }
+
+    /// An `after` spec that breaks its own type bound is `violated`, as native
+    /// reports -- the Worker used to read only `failure` and say `refines`.
+    #[test]
+    fn governance_reports_violated_for_a_self_violating_after_spec() {
+        let request = governance_request(
+            "SmallBroken",
+            "spec SmallBroken { type IQty = 0..3 state { n: IQty } \
+             init { n = 0 } action bump() { n = n + 1 } }\n",
+        );
+
+        assert_eq!(worker_preservation_result(&request), json!("violated"));
+    }
+
+    /// Control: a small, correct preservation still `refines`.
+    #[test]
+    fn governance_still_refines_a_small_preservation() {
+        let request = governance_request(
+            "SmallImpl",
+            "spec SmallImpl { type IQty = 0..3 state { n: IQty } init { n = 0 } \
+             action bump() { requires n < 3  n = n + 1 } }\n",
+        );
+
+        assert_eq!(worker_preservation_result(&request), json!("refines"));
     }
 
     /// The native `check`/`verify` rejection of an init that writes `m` from

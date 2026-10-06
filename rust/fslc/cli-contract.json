@@ -1810,7 +1810,7 @@
           "refine"
         ],
         "prog": "fslc refine",
-        "help": "usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]\n\npositional arguments:\n  impl\n  abs\n  mapping\n  rest           chain check: appending more (abs map) pairs runs an end-to-end\n                 composed check\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n",
+        "help": "usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]\n\npositional arguments:\n  impl\n  abs\n  mapping\n  rest           chain check: appending more (abs map) pairs runs an end-to-end\n                 composed check\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH  max depth; a correspondence search that reaches the fixed\n                 state budget returns unknown_budget\n",
         "actions": [
           {
             "dest": "help",

@@ -377,17 +377,15 @@ pub fn check_requirements_implements(
                 message: error.to_string(),
                 span: None,
             })?;
-    Ok(Some(
-        if let Some(states_explored) = checked.budget_exhausted {
+    Ok(Some(match checked.verdict() {
+        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
             // The correspondence walk hit `IMPLEMENTS_SEARCH_BUDGET` states
             // (issue #1041) before deciding `refines`/`refinement_failed`/
             // `impl_violated` within `depth`: reporting any of those would be a
             // false result, since the unvisited rest of the reachable set was
-            // never actually explored. Checked first, ahead of
-            // `impl_violation`/`failure`, because those fields are only
-            // meaningful on a walk that actually reached a decision --
-            // `check_refinement_with_budget` never sets more than one of the
-            // three outcomes.
+            // never actually explored. `RefinementCheck::verdict` reads this
+            // ahead of `impl_violation`/`failure`, because those fields are
+            // only meaningful on a walk that actually reached a decision.
             json!({
                 "abs": contract.abstraction.name,
                 "result": "unknown_budget",
@@ -395,7 +393,8 @@ pub fn check_requirements_implements(
                 "hint": "inline implements correspondence search reached its state budget; \
                          narrow the domain, or verify the layers separately with `fslc refine`/`fslc verify`",
             })
-        } else if let Some((violation, _)) = checked.impl_violation {
+        }
+        fsl_runtime::RefinementVerdict::ImplViolated { violation, .. } => {
             // The impl itself violates its own type bounds/invariants (#466):
             // a property of the refinement input, not a refinement fidelity
             // verdict, so it must not be reported `refines`.
@@ -404,16 +403,16 @@ pub fn check_requirements_implements(
                 "result": "impl_violated",
                 "violation": {"result": "violated", "kind": violation.kind},
             })
-        } else if let Some(failure) = checked.failure {
-            json!({
-                "abs": contract.abstraction.name,
-                "result": "refinement_failed",
-                "violation": {"result": "refinement_failed", "kind": failure.kind},
-            })
-        } else {
+        }
+        fsl_runtime::RefinementVerdict::Failed(failure) => json!({
+            "abs": contract.abstraction.name,
+            "result": "refinement_failed",
+            "violation": {"result": "refinement_failed", "kind": failure.kind},
+        }),
+        fsl_runtime::RefinementVerdict::Refines => {
             json!({"abs": contract.abstraction.name, "result": "refines"})
-        },
-    ))
+        }
+    }))
 }
 
 /// Attach inline `implements` metadata and, when the command envelope is still

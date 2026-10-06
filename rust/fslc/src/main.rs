@@ -16666,6 +16666,28 @@ fn impl_self_violation_output(
     output
 }
 
+/// `fslc refine`'s verdict when the correspondence walk hit
+/// `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET` before deciding within the depth:
+/// the same `unknown_budget` / `states_explored` vocabulary (and exit 1) the
+/// inline `implements` seam reports for the same cutoff. The progress stage
+/// is not run: a safety correspondence that was never decided cannot be the
+/// premise of a progress check.
+fn refine_budget_output(
+    checked: &fsl_runtime::RefinementCheck,
+    states_explored: usize,
+) -> Map<String, Value> {
+    let mut output = envelope();
+    output.insert("impl".to_owned(), json!(checked.implementation));
+    output.insert("abs".to_owned(), json!(checked.abstraction));
+    output.insert("result".to_owned(), json!("unknown_budget"));
+    output.insert("states_explored".to_owned(), json!(states_explored));
+    output.insert(
+        "hint".to_owned(),
+        json!("refinement correspondence search reached its fixed state budget before deciding within the depth; lower --depth or narrow the verify {} domains (instances/values) of both specs"),
+    );
+    output
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_refine(
     implementation_path: &Path,
@@ -16702,16 +16724,25 @@ fn run_refine(
             Ok(checked) => checked,
             Err(error) => return (error_output("type", &error.to_string()), 2),
         };
-    if let Some((violation, trace)) = checked.impl_violation {
-        return (
-            Value::Object(impl_self_violation_output(
-                &implementation,
-                &violation,
-                &trace,
-                checked.depth,
-            )),
-            1,
-        );
+    match checked.verdict() {
+        fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
+            return (
+                Value::Object(impl_self_violation_output(
+                    &implementation,
+                    violation,
+                    trace,
+                    checked.depth,
+                )),
+                1,
+            );
+        }
+        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
+            return (
+                Value::Object(refine_budget_output(&checked, states_explored)),
+                1,
+            );
+        }
+        fsl_runtime::RefinementVerdict::Failed(_) | fsl_runtime::RefinementVerdict::Refines => {}
     }
     let progress = if checked.failure.is_none() && !mapping.progress.is_empty() {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {

@@ -1245,8 +1245,8 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 </tr>
 <tr>
 <td><code>unknown_budget</code></td>
-<td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または inline <code>implements Abs from "file" { }</code> seam の対応探索が固定の内部状態予算を超えた(<code>check</code>/<code>verify</code>、CLI フラグ無し)</td>
-<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。inline <code>implements</code> seam の場合: domain を縮めるか、結合検査ではなく <code>fslc refine</code>/<code>fslc verify</code> で層を分けて検証する</td>
+<td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline <code>implements Abs from "file" { }</code> seam(<code>check</code>/<code>verify</code>)、<code>fslc refine</code>(単体・chain)、<code>fslc chain</code> の refine 層、governance の <code>preservation</code>(§10、§13)</td>
+<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1660,6 +1660,17 @@ action など)は <code>kind: "type"</code>(exit 2)です。<code>map_partial_op
 ません。<code>fslc diff</code> は同じ条件を <code>impl_violated</code> の finding として表面化させ、
 gate を無条件に(<code>--forbid</code> の対象ではなく)失敗させます。自己矛盾した側がある
 比較そのものが信頼できないためです。</p>
+<p>その後の対応検査がたどる impl の相異なる状態は、固定の上限(50,000。CLI フラグ
+無し — inline <code>implements</code> seam と同じ内部予算、§13)までです。<code>--depth</code> の範囲で
+判定がつく前にこの上限に達すると、<code>refine</code> は <code>result: "unknown_budget"</code>(exit 1)に
+<code>states_explored</code> と <code>hint</code> を付けて報告し、<code>refines</code> とは報告しません: たどって
+いない到達可能状態に不一致が残っているかもしれないためです。<code>--depth</code> を下げるか、
+両方の spec の <code>verify {}</code> の domain(<code>instances</code>/<code>values</code>)を縮めてください。chain
+検査はその link で止まり(<code>failed_link.kind</code> は <code>null</code>)、<code>fslc chain</code> の refine 層は
+<code>result: "unknown_budget"</code> で失敗し、governance の <code>preservation</code> は <code>result</code> に
+<code>unknown_budget</code> を報告します。これは判定の変更です: 対応検査が上限に達する
+refinement は、以前は <code>refines</code>(exit 0)を報告していました。上記の自己一貫性の
+precondition には、この上限はありません。</p>
 <p><code>init</code> がどの経路でも一度も代入しない状態変数(例えば、代入されていない <code>Bool</code>
 を読む <code>init if</code>)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
 本当に自由な初期値です — <code>refine</code> は impl 側でも abs 側でもこの通りに検査します。
@@ -2443,7 +2454,9 @@ or Rejected</code> — そして、同じ <code>(process, waypoint-set)</code> �
 <p><code>fslc check governance.fsl</code> は、参照されるすべてのコントロール、business ファイル、
 policy/goal、preservation ファイルを検証します。preservation ブロックはさらに、
 宣言された refinement を深さ 8 で実行し、結果を <code>governance.preservations</code> の下で
-報告します。</p>
+報告します: <code>refines</code>、<code>refinement_failed</code>、<code>violated</code>(<code>after</code> の spec がそれ自身の
+意味論を破る、§10)、<code>unknown_budget</code>(対応検査が状態の上限に達した、§10)のいずれか
+です。ブラウザの Worker も同じ値を報告します。</p>
 <h3 id="134-nfr">13.4 非機能要件(NFR)の書き方</h3>
 <p>NFR の大半は、機能要件と同じ機構で書けます(詳細とデモは <code>DESIGN-nfr.md</code>):</p>
 <table>

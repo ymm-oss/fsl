@@ -1123,7 +1123,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
-| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または inline `implements Abs from "file" { }` seam の対応探索が固定の内部状態予算を超えた(`check`/`verify`、CLI フラグ無し) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。inline `implements` seam の場合: domain を縮めるか、結合検査ではなく `fslc refine`/`fslc verify` で層を分けて検証する |
+| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
@@ -1599,6 +1599,18 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 ません。`fslc diff` は同じ条件を `impl_violated` の finding として表面化させ、
 gate を無条件に(`--forbid` の対象ではなく)失敗させます。自己矛盾した側がある
 比較そのものが信頼できないためです。
+
+その後の対応検査がたどる impl の相異なる状態は、固定の上限(50,000。CLI フラグ
+無し — inline `implements` seam と同じ内部予算、§13)までです。`--depth` の範囲で
+判定がつく前にこの上限に達すると、`refine` は `result: "unknown_budget"`(exit 1)に
+`states_explored` と `hint` を付けて報告し、`refines` とは報告しません: たどって
+いない到達可能状態に不一致が残っているかもしれないためです。`--depth` を下げるか、
+両方の spec の `verify {}` の domain(`instances`/`values`)を縮めてください。chain
+検査はその link で止まり(`failed_link.kind` は `null`)、`fslc chain` の refine 層は
+`result: "unknown_budget"` で失敗し、governance の `preservation` は `result` に
+`unknown_budget` を報告します。これは判定の変更です: 対応検査が上限に達する
+refinement は、以前は `refines`(exit 0)を報告していました。上記の自己一貫性の
+precondition には、この上限はありません。
 
 `init` がどの経路でも一度も代入しない状態変数(例えば、代入されていない `Bool`
 を読む `init if`)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
@@ -2420,7 +2432,9 @@ governance EnterpriseReturnControls {
 `fslc check governance.fsl` は、参照されるすべてのコントロール、business ファイル、
 policy/goal、preservation ファイルを検証します。preservation ブロックはさらに、
 宣言された refinement を深さ 8 で実行し、結果を `governance.preservations` の下で
-報告します。
+報告します: `refines`、`refinement_failed`、`violated`(`after` の spec がそれ自身の
+意味論を破る、§10)、`unknown_budget`(対応検査が状態の上限に達した、§10)のいずれか
+です。ブラウザの Worker も同じ値を報告します。
 
 ### 13.4 非機能要件(NFR)の書き方
 

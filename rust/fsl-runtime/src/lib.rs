@@ -1438,6 +1438,48 @@ pub struct RefinementCheck {
     pub budget_exhausted: Option<usize>,
 }
 
+/// The one decided reading of a [`RefinementCheck`]: every caller that turns
+/// a check into a verdict matches on this instead of reading the three
+/// outcome fields itself, so a caller cannot forget one of them. Before this
+/// existed, only inline `implements` read `budget_exhausted`; `fslc refine`,
+/// `fslc chain` and the governance preservation check reported a walk cut
+/// off by [`IMPLEMENTS_SEARCH_BUDGET`] as `refines`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
+pub enum RefinementVerdict<'a> {
+    /// The correspondence walk hit its state budget before deciding within
+    /// `depth`: neither `refines` nor a failure is known.
+    BudgetExhausted { states_explored: usize },
+    /// The implementation violates its own semantics within `depth`.
+    ImplViolated {
+        violation: &'a Violation,
+        trace: &'a [TraceStep],
+    },
+    /// An implementation transition does not correspond to the abstraction.
+    Failed(&'a RefinementFailure),
+    /// Every implementation transition within `depth` corresponds.
+    Refines,
+}
+
+impl RefinementCheck {
+    /// Read this check as exactly one verdict. `check_refinement_with_budget`
+    /// sets at most one of `budget_exhausted`, `impl_violation` and
+    /// `failure`; the order here only fixes which one wins should that ever
+    /// stop holding, and it puts the undecided outcome first so a decided
+    /// verdict is never read off an incomplete walk.
+    pub fn verdict(&self) -> RefinementVerdict<'_> {
+        if let Some(states_explored) = self.budget_exhausted {
+            RefinementVerdict::BudgetExhausted { states_explored }
+        } else if let Some((violation, trace)) = &self.impl_violation {
+            RefinementVerdict::ImplViolated { violation, trace }
+        } else if let Some(failure) = &self.failure {
+            RefinementVerdict::Failed(failure)
+        } else {
+            RefinementVerdict::Refines
+        }
+    }
+}
+
 /// Bounded-search budget for [`check_refinement`]'s correspondence walk
 /// (issue #1041). Unlike [`find_boundary_violation`]'s `budget` parameter,
 /// this one has no CLI-facing knob (`fslc check` stays a flag-free fast
