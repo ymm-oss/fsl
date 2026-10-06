@@ -10,9 +10,10 @@ existence check. This productizes mutation as a repeatable non-triviality check.
 
 `fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution]
 [--max-mutants N=200]
-[--from mutants.jsonl]`. Output
+[--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]`. Output
 `result:"mutated"`, exit 0 (a generator in the same family as scenarios/testgen;
-survivors are review data, not failures. `--fail-on-survivors` is future work).
+survivors are review data, not failures, unless an explicit gate is requested —
+see "Opt-in gate" below).
 **That is the code for its own result, not an unconditional 0.** `mutate` verifies the
 spec first and re-emits that baseline envelope unchanged when it is not `verified`, so a
 spec that fails its own verification exits with the baseline's code and produces no
@@ -205,6 +206,39 @@ external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
 Mutation uses the ordinary bounded verifier, including its normal termination
 after the initial state when a model has no action instances.
 
+### Opt-in gate (#1237)
+
+`--fail-on-survivors` and `--min-kill-rate R` (a number in `[0, 1]`; anything
+else is a usage error, exit 2) turn the run into a CI gate. Without either flag
+the envelope and exit code are byte-for-byte what they were. With one or both,
+`result` stays `"mutated"` and the envelope gains a `gate` object:
+
+```json
+{"gate":{"fail_on_survivors":true,"min_kill_rate":0.8,"judged":19,"survived":13,
+ "kill_rate":0.3158,"dropped":0,"violations":["survivors","kill_rate_below_min"],
+ "passed":false}}
+```
+
+`gate.passed` decides the exit code (0 when true, 1 when false), exactly as
+`semantic_diff`'s explicit gate does. The rules are fixed so the verdict can be
+reproduced from the JSON alone:
+
+- `judged` is `summary.killed + summary.survived`; `invalid` external records
+  are excluded, as in the kill-rate denominator.
+- Zero judged mutants fails either flag with the single violation
+  `no_judged_mutants` (for example `--max-mutants 0` with no `--from`): a run
+  that adjudicated nothing is not evidence that nothing survives.
+- `--fail-on-survivors` adds `survivors` when `survived > 0`. Survivors dead at
+  baseline count; there is no equivalent-mutant exclusion yet.
+- `--min-kill-rate R` adds `kill_rate_below_min` unless the published,
+  four-decimal `summary.kill_rate` is `>= R` (so `0.75` passes `R = 0.75` and
+  fails `R = 0.7501`).
+- Built-in mutants beyond `--max-mutants` are not judged; their count is
+  recorded as `gate.dropped` (and in `notes`) but does not fail the gate.
+
+A baseline that does not verify is re-emitted unchanged with its own exit code;
+the gate never applies to it and no `gate` key appears.
+
 ### What the score means (and does not)
 
 `kill_rate` is **bounded mutant-set sensitivity**: the fraction of a selected
@@ -216,7 +250,8 @@ runs that hold them fixed. It is not a production defect-detection rate, not a
 probability that the specification is correct, and not a completeness measure.
 
 Survivors are a review queue, not failures and not automatic missing-invariant
-findings. A survivor may be an equivalent mutant (same behavior, no property
+findings (the opt-in gate above is the user's explicit choice to treat them as
+failures; it does not change what a survivor means). A survivor may be an equivalent mutant (same behavior, no property
 can distinguish it), behavior dead at baseline (annotated via coverage), an
 effect only observable beyond the depth bound, or genuine under-constraint —
 only the last calls for a spec change. Symmetrically, `empty_formalization`

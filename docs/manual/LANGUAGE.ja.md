@@ -849,7 +849,8 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
-               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
+               [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
+                                                 # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
@@ -1081,7 +1082,8 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 と鍵のフォーマットは `docs/design/DESIGN-approval.md` で規定されています。
 
 Exit code: `0` = verified / proved / scenarios/testgen の生成 / conformant / refines /
-mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗しない限り) /
+mutated(明示的なゲートが失敗しない限り) / explained / analyzed /
+semantic_diff(明示的なゲートが失敗しない限り) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
@@ -2933,7 +2935,15 @@ DESIGN-*.md があります)。
   ではなく、trace case ID は宣言種別ごとに一意です。`--oracle-attribution`
   (opt-in) はミュータントごとの `killers` 配列と、oracle 表示名をキーにした
   `by_obligation` の sole/shared 集計を追加します。既定出力は変わらず、これらの
-  カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
+  カウントは観測された下界であり、完全性や正しさの尺度ではありません。
+  `--fail-on-survivors` と `--min-kill-rate R`(opt-in、`R` は `[0, 1]`)は
+  `gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}` を追加します。`result` は `mutated` のままで、
+  `gate.passed` が exit code を決めます(false なら 1)。判定済みミュータントが
+  0 件ならどちらのフラグでも不合格(`no_judged_mutants`)、`--min-kill-rate` は
+  公開される 4 桁丸めの `summary.kill_rate` と `>=` で比べ、`--max-mutants` で
+  落ちた組み込みミュータントは `gate.dropped` に記録するだけで不合格にしません。
+  どちらのフラグも無ければ出力と exit code は変わりません。→
   [`DESIGN-mutate.md`](../design/DESIGN-mutate.md)
 - **`fslc explain --readable`** — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement

@@ -1,0 +1,4 @@
+{"id": "checkout_guard_admits_empty_stock", "replace": {"target": "requires stock[i] > 0", "replacement": "requires stock[i] >= 0"}}
+{"id": "checkout_ensures_drops_decrement", "replace": {"target": "ensures stock[i] == old(stock[i]) - 1", "replacement": "ensures stock[i] == old(stock[i])"}}
+{"id": "checkout_skips_decrement", "replace": {"target": "stock[i] = stock[i] - 1", "replacement": "stock[i] = stock[i]"}}
+{"id": "add_to_cart_drops_empty_cart_guard", "replace": {"target": "requires cart[u] == none\n    cart[u] = some(i)", "replacement": "cart[u] = some(i)"}}

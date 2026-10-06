@@ -31,7 +31,8 @@
       <button class="btn op-collapse" type="button">Collapse all</button>
     </div>
     <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— docs/manual/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary><div class="tree-body"><p>The authoritative native CLI maps every JSON <code>result</code> to a process exit code through <code>rust/fslc/src/outcome.rs</code> <code>exit_status()</code>, which implements the table in <code>docs/manual/LANGUAGE.md</code>:</p><pre>Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+mutated (unless its explicit gate fails) / explained / analyzed /
+semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
@@ -618,7 +619,7 @@ and re-renders the spec, and compares claim/slot marker structure and
 claim-block digests. Exit codes: 0 document_conformant, 1 document_drifted,
 2 parse/type/semantics/schema/I/O error, 3 internal error.
 </pre></div></details></div></div></details>
-<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--oracle-attribution] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] file
+<details><summary>fslc mutate</summary><div class="tree-body"><pre>usage: fslc mutate [-h] [--depth DEPTH] [--by-requirement] [--oracle-attribution] [--max-mutants MAX_MUTANTS] [--from MUTANTS_FROM] [--fail-on-survivors] [--min-kill-rate MIN_KILL_RATE] file
 
 positional arguments:
   file
@@ -633,6 +634,12 @@ options:
   --max-mutants MAX_MUTANTS
   --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
                         built-in catalog
+  --fail-on-survivors   gate: exit 1 if any judged mutant survives, or if none
+                        was judged (opt-in; adds gate to the output)
+  --min-kill-rate MIN_KILL_RATE
+                        gate: exit 1 unless the four-decimal summary.kill_rate
+                        is &gt;= MIN_KILL_RATE in [0, 1], or if no mutant was
+                        judged (opt-in; adds gate to the output)
 </pre></div></details>
 <details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
 

@@ -113,7 +113,7 @@ fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-mutants N=200]
-              [--from mutants.jsonl]
+              [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <reproducer.json>
@@ -506,7 +506,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
-  whether it is killed by BMC/acceptance/forbidden/refinement. exit is always 0.
+  whether it is killed by BMC/acceptance/forbidden/refinement. exit is 0 unless an
+  opt-in gate is requested: `--fail-on-survivors` / `--min-kill-rate R` (`R` in
+  `[0, 1]`) add `gate{..., violations, passed}` and exit 1 when `passed` is
+  false. Zero judged mutants fails either flag (`no_judged_mutants`); the
+  threshold compares the published four-decimal `summary.kill_rate` with `>=`;
+  mutants dropped by `--max-mutants` are recorded as `gate.dropped`, not failed.
   `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
   sensitivity: it depends on the operator mix, `--max-mutants` cap, depth, and
   oracle, and a high value is not a real-bug detection probability, spec

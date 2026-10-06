@@ -165,6 +165,13 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         ),
+        // `main.rs` `run_mutate` (issue #1237): without `--fail-on-survivors`
+        // or `--min-kill-rate` there is no `gate` and the run succeeds as it
+        // always has; with one, `gate.passed` decides, and a `gate` lacking a
+        // boolean `passed` is not a pass.
+        "mutated" => class_of(output.get("gate").is_none_or(|gate| {
+            gate.get("passed").and_then(Value::as_bool).unwrap_or(false)
+        })),
         // `main.rs` `run_diff_git` batch: the same gate, aggregated. The
         // envelope publishes the decision as `gate.passed`.
         "semantic_diff_batch" => class_of(
@@ -200,7 +207,6 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "kernel"
         | "typestate"
         | "scenarios"
-        | "mutated"
         | "migrated"
         | "compared"
         | "compat_profile_generated"
@@ -625,11 +631,12 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
     match output.get("result").and_then(Value::as_str) {
         Some("error") => error_status,
         // Row 1: kernel verification verdicts plus inline `implements` failures
-        // folded into `check` / `verify` / `mutate` baselines. `nonconformant`,
+        // folded into `check` / `verify` / `mutate` baselines, and a `mutated`
+        // run whose explicit gate failed (#1237). `nonconformant`,
         // `sweep_failed`, and `observed_mismatch` still belong to other commands.
         Some(
             "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
-            | "refinement_failed" | "impl_violated",
+            | "refinement_failed" | "impl_violated" | "mutated",
         ) => 1,
         // A failure-class value outside this command's vocabulary, or one
         // nobody registered at all, is an internal inconsistency -- never a
@@ -958,6 +965,21 @@ mod tests {
         ] {
             assert_eq!(exit_status(&json!({"result": result}), 2), 1);
         }
+        // The opt-in gate (#1237): absent keeps the default, a failed or
+        // malformed gate exits 1 rather than falling through to 3.
+        assert_eq!(
+            exit_status(&json!({"result": "mutated", "gate": {"passed": true}}), 2),
+            0
+        );
+        assert_eq!(
+            exit_status(&json!({"result": "mutated", "gate": {"passed": false}}), 2),
+            1
+        );
+        assert_eq!(exit_status(&json!({"result": "mutated", "gate": {}}), 2), 1);
+        assert_eq!(
+            exit_status(&json!({"result": "mutated", "gate": {"passed": "yes"}}), 2),
+            1
+        );
         assert_eq!(exit_status(&json!({"result": "error"}), 2), 2);
         assert_eq!(exit_status(&json!({"result": "error"}), 3), 3);
         // An unmapped result is an internal inconsistency, never a silent

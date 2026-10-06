@@ -1241,8 +1241,28 @@ fn command() -> Result<(Value, i32), String> {
             let mut oracle_attribution = false;
             let mut typescript_only = false;
             let mut external_mutants = None;
+            let mut gate = MutationGate::default();
             while let Some(option) = args.next() {
                 match option.as_str() {
+                    // Issue #1237: the opt-in mutation gate belongs to `mutate`
+                    // alone; the other two commands sharing this loop reject it
+                    // instead of silently accepting a flag that cannot apply.
+                    "--fail-on-survivors" | "--min-kill-rate" if command != "mutate" => {
+                        return Err(format!("unknown {command} option '{option}'"));
+                    }
+                    "--fail-on-survivors" => gate.fail_on_survivors = true,
+                    "--min-kill-rate" => {
+                        let rate = args
+                            .next()
+                            .ok_or_else(|| "--min-kill-rate requires a value".to_owned())?
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|rate| rate.is_finite() && (0.0..=1.0).contains(rate))
+                            .ok_or_else(|| {
+                                "--min-kill-rate must be a number between 0 and 1".to_owned()
+                            })?;
+                        gate.min_kill_rate = Some(rate);
+                    }
                     "--depth" => {
                         depth = args
                             .next()
@@ -1279,6 +1299,7 @@ fn command() -> Result<(Value, i32), String> {
                     by_requirement,
                     oracle_attribution,
                     external_mutants.as_deref(),
+                    gate,
                 ),
                 "typestate" => run_typestate(&path),
                 _ => unreachable!(),
@@ -11666,6 +11687,55 @@ fn external_mutation_model(
     })
 }
 
+/// The opt-in `fslc mutate` gate (issue #1237). With neither flag set the
+/// envelope carries no `gate` and the run exits 0 exactly as before.
+#[derive(Debug, Clone, Copy, Default)]
+struct MutationGate {
+    fail_on_survivors: bool,
+    min_kill_rate: Option<f64>,
+}
+
+impl MutationGate {
+    fn requested(self) -> bool {
+        self.fail_on_survivors || self.min_kill_rate.is_some()
+    }
+
+    /// Decide the gate from the published `summary`, so the verdict can be
+    /// reproduced from the JSON alone: `--min-kill-rate` compares against the
+    /// four-decimal `summary.kill_rate` with `>=`. Zero judged mutants fails
+    /// either flag (`no_judged_mutants`): nothing was run, so nothing passed.
+    /// Mutants dropped by `--max-mutants` are recorded, not failed.
+    fn evaluate(self, summary: &Value, dropped: usize) -> Value {
+        let count = |key: &str| summary.get(key).and_then(Value::as_u64).unwrap_or(0);
+        let survived = count("survived");
+        let judged = count("killed") + survived;
+        let kill_rate = summary.get("kill_rate").cloned().unwrap_or(Value::Null);
+        let mut violations = Vec::new();
+        if judged == 0 {
+            violations.push("no_judged_mutants");
+        } else {
+            if self.fail_on_survivors && survived > 0 {
+                violations.push("survivors");
+            }
+            if let Some(minimum) = self.min_kill_rate
+                && kill_rate.as_f64().is_none_or(|rate| rate < minimum)
+            {
+                violations.push("kill_rate_below_min");
+            }
+        }
+        json!({
+            "fail_on_survivors": self.fail_on_survivors,
+            "min_kill_rate": self.min_kill_rate,
+            "judged": judged,
+            "survived": survived,
+            "kill_rate": kill_rate,
+            "dropped": dropped,
+            "violations": violations,
+            "passed": violations.is_empty(),
+        })
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_mutate(
     path: &Path,
@@ -11674,6 +11744,7 @@ fn run_mutate(
     by_requirement: bool,
     oracle_attribution: bool,
     external_mutants: Option<&Path>,
+    gate: MutationGate,
 ) -> (Value, i32) {
     // Capture one root-spec snapshot up front (#808): the baseline verify, the
     // Kernel/model load, the requirements-trace contract, and the surface
@@ -12080,7 +12151,15 @@ fn run_mutate(
     if let Some(kernel_source) = domain_kernel_source {
         output.insert("kernel_source".to_owned(), json!(kernel_source));
     }
-    (Value::Object(output), 0)
+    if gate.requested() {
+        let verdict = gate.evaluate(&output["summary"], discovered.saturating_sub(max_mutants));
+        output.insert("gate".to_owned(), verdict);
+    }
+    // The exit code stays a function of the envelope (#554/#601): `outcome`
+    // reads `gate.passed`, and a failed gate is row 1.
+    let output = Value::Object(output);
+    let status = mutate_exit_status(&output, 3);
+    (output, status)
 }
 
 fn run_typestate(path: &Path) -> (Value, i32) {
