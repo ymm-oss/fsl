@@ -80,12 +80,15 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     step with `error` / `kind: "forbidden"` / exit 2; §2.1 has each command's measured
     exit status and output, with the rest of the spec verified and violated. When the rest
     verified, they exited 0 before; `counterexample export` already exited 2 (nothing to
-    export). When it was violated, they exited 1 with its counterexample, except
-    `approval create`, which exited 2. The exceptions: `explain` still exits 0 with
-    `witnesses: []` (where the rest verified, it listed the forbidden's witness);
-    `approval create --kind ledger` creates a record of a ledger listing the error (where
-    the rest verified, it created one before too); and `approval check` of a ledger
-    record created before reports `drifted` (exit 0). In `fslc mutate`, a mutant that
+    export). When it was violated, `check` still exited 0, `approval create` exited 2,
+    and the others exited 1 (`verify`, `html`, and `counterexample export` with its
+    counterexample). The exceptions: `explain` still exits 0 with `witnesses: []` (known
+    gap #1242; where the rest verified, it listed the forbidden's witness);
+    `approval create --kind ledger` exits 0 with a record of a ledger listing the error
+    (where the rest verified, it created one before too; where it was violated, it exited
+    2 only because that ledger embeds wall-clock `elapsed_s`, and whether such a ledger
+    may be approved is tracked by #1243); and `approval check` of a ledger record created
+    before reports `drifted` (exit 0). In `fslc mutate`, a mutant that
     narrows an `entity` / `number` scope (`type_bound_hi_minus1` / `type_bound_lo_plus1`
     on that type) so that a forbidden final step falls outside it is now killed with
     `killed_by: "forbidden"` where it survived, so kill rates can shift toward
@@ -135,7 +138,7 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
       `scenarios` and `testgen` exit 2 with no scenario and no test file. `scenarios` used
       to exit 1 (`violated`) when its depth reached the violation, and otherwise exited 0
       and emitted the forbidden scenario with `rejected_by: "invariant"`; `testgen` exited 1
-      (`violated`) without a test file on every spec measured in §2.1, even at `--depth 1`,
+      (`violated`) without a test file on every #1213 spec measured in §2.1, even at `--depth 1`,
       because its own check reached the violation (`checked_to_depth: 21` on the
       eleven-step spec).
     - Three commands do not exit 2. `explain` still exits 0, but where `scenarios` used to
@@ -546,8 +549,10 @@ every run).
   no self-diff finds a violating final or setup step. The 5 forbidden-bearing files whose
   `check` is not `ok` report the same accepted-step `kind: "forbidden"` error, byte for
   byte, at base and with #1213.
-- #1229, base #1213 at `40be1c2a` → head #1229 on top of it (no `.fsl` differs between
-  the two trees; the commits after the first #1229 commit change no Rust source). Each
+- #1229, base #1213 at `5b1925de` → head #1229 on top of it (no `.fsl` differs between
+  the two trees; the commits after the first #1229 commit change no Rust source). This
+  was first run against #1213 at `40be1c2a`, whose Rust source is the same as
+  `5b1925de`'s, and re-run after #1229 moved onto `5b1925de`, with the same counts. Each
   binary is built in, and run inside, its own tree, twice: within each binary only the
   three excluded wall-clock fields differ, and base → head differs in nothing else in any
   of the four base/head pairings (the `agentic_rag` `scenarios` exceeded 300 seconds in
@@ -564,8 +569,8 @@ every run).
   parse error. No corpus forbidden has a final step outside an `entity` / `number`
   verify scope, so the ok → error transition set of §2 is empty for the corpus. The
   inline fixtures of the five `issue_1212_forbidden_bad_call.rs` diff tests whose expected
-  `reason` this change rewrote were checked with both binaries: they move from `check`
-  `ok` to the out-of-scope error where their final step leaves the scope (`respond(7)`
+  `reason` this change rewrote were checked with both binaries of the first run: they
+  move from `check` `ok` to the out-of-scope error where their final step leaves the scope (`respond(7)`
   under `instances Case = 3`, `add(9)` under `values Qty = 0..3`, `respond(7, 1)`, and
   the unguarded `respond(2)` under `instances Case = 2`) and stay `ok` otherwise
   (`respond(1, 9)`, the guarded `respond(2)` under `instances Case = 3`, and the kernel

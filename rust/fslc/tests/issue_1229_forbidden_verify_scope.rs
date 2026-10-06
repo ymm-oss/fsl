@@ -134,7 +134,7 @@ fn an_entity_final_step_outside_the_instances_scope_is_not_a_rejection() {
     let (output, status) = run_spec(&source, "entity-check", &["check"]);
     assert_outside_scope(&output, status, 7, "Case", [0, 2]);
     assert_eq!(output["out_of_scope_argument"]["parameter"], "c");
-    // An error about one step is located at that step.
+    // This error is located at its final step (line 13 of `cases`).
     assert_eq!(
         output["loc"],
         json!({"line": 13, "column": 5}),
