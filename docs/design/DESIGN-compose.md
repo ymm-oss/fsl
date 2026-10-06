@@ -102,8 +102,8 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    `verify` (all engines, including `action_coverage`, `action_profile`,
    `cost.properties`, vacuity warnings, and induction CTIs), `sweep`,
    `scenarios`, `explain`, `testgen`, `conformance`, `replay` (including
-   `--from-log`), `refine`, `diff`, `mutate`, `html`, `ledger`, and `analyze`
-   publishes this name. `analyze` graph IDs carry it too
+   `--from-log`), `refine`, `diff`, `mutate`, `html`, `ledger`, `analyze`, and
+   the `untagged` warnings of `check --strict-tags` publishes this name. `analyze` graph IDs carry it too
    (`action:alias.name`, `guard:alias.name:<i>`, `effect:alias.name:<i>`,
    `ensures:alias.name:<i>`), as do the nodes' `name` fields, `--export
    tag-review` names, `undecided:` records (`declaration`/`node`), and the

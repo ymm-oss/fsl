@@ -1861,7 +1861,7 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   so <code>use X as a__b</code> with action <code>c</code> is <code>a__b.c</code>. Every command that names a
   component action — verify, sweep, scenarios, explain, testgen, conformance,
   mutate, refine, diff, html, ledger, analyze (including graph IDs such as
-  <code>action:a__b.c</code>), and <code>replay</code> output including <code>state_mismatch.action</code> — uses
+  <code>action:a__b.c</code>), <code>check --strict-tags</code> warnings, and <code>replay</code> output including <code>state_mismatch.action</code> — uses
   this <code>alias.action</code> form, including in names derived from the action such as
   <code>_requires_failed_a__b.c</code>. State keys keep the rule above, so the state <code>n</code> of
   <code>use X as a__b</code> is shown as <code>a.b__n</code> (the frozen Python reference shows

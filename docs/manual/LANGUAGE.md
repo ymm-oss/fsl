@@ -1819,7 +1819,7 @@ compose OrderSystem {
   so `use X as a__b` with action `c` is `a__b.c`. Every command that names a
   component action — verify, sweep, scenarios, explain, testgen, conformance,
   mutate, refine, diff, html, ledger, analyze (including graph IDs such as
-  `action:a__b.c`), and `replay` output including `state_mismatch.action` — uses
+  `action:a__b.c`), `check --strict-tags` warnings, and `replay` output including `state_mismatch.action` — uses
   this `alias.action` form, including in names derived from the action such as
   `_requires_failed_a__b.c`. State keys keep the rule above, so the state `n` of
   `use X as a__b` is shown as `a.b__n` (the frozen Python reference shows

@@ -1758,7 +1758,7 @@ compose OrderSystem {
   `use X as a__b` の action `c` は `a__b.c` です。コンポーネントの action を名指す
   すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
   mutate、refine、diff、html、ledger、analyze(`action:a__b.c` のようなグラフの ID を
-  含む)、`state_mismatch.action` を含む `replay` の出力 — がこの `alias.action` 形を
+  含む)、`check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力 — がこの `alias.action` 形を
   使います。`_requires_failed_a__b.c` のように action から作る名前も同じです。
   状態のキーは上の規則のままなので、`use X as a__b` の状態 `n` は `a.b__n` と
   表示されます(凍結した Python 参照実装では `a__b.n`)。

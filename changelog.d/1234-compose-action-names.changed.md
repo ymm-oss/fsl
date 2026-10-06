@@ -6,7 +6,8 @@ built from the `use` alias and the action name, so `use X as a__b` with action
 component action uses it: verify on every engine (traces, `action_coverage`,
 `action_profile`, `cost.properties[].name`, vacuity warnings, induction CTIs),
 sweep, scenarios, explain, testgen, conformance, mutate, refine, diff, html,
-ledger, analyze, and `fslc replay`, including names built from the action such
+ledger, analyze, the `untagged` warnings of `check --strict-tags`, and
+`fslc replay`, including names built from the action such
 as `_requires_failed_bank.settle`, `_partial_op_bank.settle`, and
 `_partial_bank.settle`. Lists keyed by these names (`reachables`,
 `action_coverage`, `action_profile`, induction `k_used`, `cost.properties`,

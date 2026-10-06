@@ -1801,7 +1801,7 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
   <code>use X as a__b</code> の action <code>c</code> は <code>a__b.c</code> です。コンポーネントの action を名指す
   すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
   mutate、refine、diff、html、ledger、analyze(<code>action:a__b.c</code> のようなグラフの ID を
-  含む)、<code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を
+  含む)、<code>check --strict-tags</code> の警告、<code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を
   使います。<code>_requires_failed_a__b.c</code> のように action から作る名前も同じです。
   状態のキーは上の規則のままなので、<code>use X as a__b</code> の状態 <code>n</code> は <code>a.b__n</code> と
   表示されます(凍結した Python 参照実装では <code>a__b.n</code>)。
