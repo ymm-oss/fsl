@@ -128,8 +128,42 @@ fn verdict(output: &Value) -> Value {
     })
 }
 
+/// The `{line, column}` of the Public Kernel's only `partial_operations` site
+/// of action `a` (`fslc kernel`), the position every engine must report for a
+/// guard `partial_op` (#1191).
+fn kernel_partial_location(fixture: &Fixture) -> Value {
+    let sites = kernel_partial_locations(fixture);
+    assert_eq!(sites.len(), 1, "one guard site: {sites:#?}");
+    sites[0].clone()
+}
+
+/// Every `partial_operations` site of action `a`, in Kernel order.
+fn kernel_partial_locations(fixture: &Fixture) -> Vec<Value> {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["kernel", fixture.text()])
+        .output()
+        .expect("run native CLI");
+    let kernel: Value = serde_json::from_slice(&output.stdout).expect("kernel JSON");
+    let action = kernel["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|action| action["name"] == "a")
+        .expect("action a");
+    action["partial_operations"]
+        .as_array()
+        .expect("partial_operations")
+        .iter()
+        .map(|site| {
+            let span = &site["span"];
+            serde_json::json!({"line": span["line"], "column": span["column"]})
+        })
+        .collect()
+}
+
 fn assert_guard_partial(name: &str, source: &str, step: u64) {
     let fixture = Fixture::new(name, source);
+    let kernel_location = kernel_partial_location(&fixture);
     let mut verdicts = Vec::new();
     for engine in ["bmc", "explicit"] {
         let (output, status) = verify(&fixture, engine);
@@ -143,9 +177,10 @@ fn assert_guard_partial(name: &str, source: &str, step: u64) {
             output["invariant"], "_partial_a",
             "{name}/{engine}: {output:#}"
         );
-        assert!(
-            output["loc"]["line"].is_u64(),
-            "{name}/{engine}: partial_op must be located: {output:#}"
+        assert_eq!(
+            output["loc"], kernel_location,
+            "{name}/{engine}: a guard partial_op is located at its Public Kernel \
+             partial_operations span: {output:#}"
         );
         assert_eq!(
             output["violated_at_step"], step,
@@ -210,6 +245,122 @@ spec LaterHead {
 ",
         2,
     );
+}
+
+/// An action without a body has no statement to point at: the guard's Kernel
+/// span is its only location, in both engines (it used to be `null`).
+#[test]
+fn bodyless_action_guard_partial_op_is_located() {
+    assert_guard_partial(
+        "bodyless",
+        r"
+spec Bodyless {
+  type Small = 0..3
+  state { x: Small }
+  init { x = 0 }
+  action a() {
+    requires 2 / x == 0
+  }
+}
+",
+        1,
+    );
+}
+
+/// A nondeterministic init keeps BMC on the symbolic engine (no concrete
+/// boundary pre-pass); its guard `partial_op` is located at the same Kernel
+/// span.
+#[test]
+fn symbolic_bmc_guard_partial_op_is_located_at_the_kernel_span() {
+    let fixture = Fixture::new(
+        "symbolic-head",
+        r"
+spec SymbolicHead {
+  type Small = 0..3
+  state { s: Seq<Small, 3>, n: Small, b: Bool }
+  init { s = Seq {}  n = 0 }
+  action a() {
+    requires s.head() == 0
+    n = 1
+  }
+}
+",
+    );
+    let (output, status) = verify(&fixture, "bmc");
+    assert_eq!(status, 1, "{output:#}");
+    assert_eq!(output["violation_kind"], "partial_op", "{output:#}");
+    assert_eq!(
+        output["loc"],
+        kernel_partial_location(&fixture),
+        "{output:#}"
+    );
+}
+
+/// With several guard sites, the location is the site of the guard that
+/// actually failed, not the first one listed.
+#[test]
+fn guard_partial_op_is_located_at_the_failing_guard_site() {
+    let fixture = Fixture::new(
+        "second-guard",
+        r"
+spec SecondGuard {
+  type Small = 0..3
+  state { x: Small, n: Small }
+  init { x = 0  n = 0 }
+  action a() {
+    requires 2 / (x + 1) == 2
+    requires 2 / x == 0
+    n = 1
+  }
+}
+",
+    );
+    let sites = kernel_partial_locations(&fixture);
+    assert_eq!(sites.len(), 2, "{sites:#?}");
+    assert_ne!(sites[0], sites[1], "{sites:#?}");
+    for engine in ["bmc", "explicit"] {
+        let (output, status) = verify(&fixture, engine);
+        assert_eq!(status, 1, "{engine}: {output:#}");
+        assert_eq!(
+            output["violation_kind"], "partial_op",
+            "{engine}: {output:#}"
+        );
+        assert_eq!(output["loc"], sites[1], "{engine}: {output:#}");
+    }
+}
+
+/// A partial operation in the body keeps its existing location (the body's
+/// first statement), even when the action also has a guard: only a guard
+/// failure moves to the guard's Kernel span.
+#[test]
+fn body_partial_op_location_is_unchanged() {
+    let fixture = Fixture::new(
+        "body-head",
+        r"
+spec BodyHead {
+  type Small = 0..3
+  state { s: Seq<Small, 3>, n: Small }
+  init { s = Seq {}  n = 0 }
+  action a() {
+    requires n == 0
+    n = s.head()
+  }
+}
+",
+    );
+    for engine in ["bmc", "explicit"] {
+        let (output, status) = verify(&fixture, engine);
+        assert_eq!(status, 1, "{engine}: {output:#}");
+        assert_eq!(
+            output["violation_kind"], "partial_op",
+            "{engine}: {output:#}"
+        );
+        assert_eq!(
+            output["loc"],
+            serde_json::json!({"line": 8, "column": 5}),
+            "{engine}: {output:#}"
+        );
+    }
 }
 
 /// Negative controls: a guard that keeps the partial operation unreached

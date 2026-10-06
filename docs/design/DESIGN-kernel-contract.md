@@ -119,6 +119,14 @@ not evaluate to `false` — so it keeps its state from being a deadlock and does
 not count toward action coverage. `Monitor::enabled` keeps returning the raw
 error for callers that need every guard to evaluate.
 
+The `verify` envelope's `loc` for a guard `partial_op` is the span the Public
+Kernel's `partial_operations` gives that guard's site — the `requires` clause,
+or the action itself for a `let`, which carries no span of its own — in every
+engine, also for an action without a body. The renderer finds the failing guard
+by re-evaluating the guards on the trace's last pre-state
+(`fsl_runtime::guard_partial_operation`). A body `partial_op` keeps its
+existing location.
+
 ## Concrete boundary pre-pass budget
 
 Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free

@@ -3647,22 +3647,60 @@ fn evaluate_action_guards(
     state: &State,
     model: &KernelModel,
 ) -> Result<Option<Bindings>, RuntimeError> {
-    validate_action_parameters(action, params, model)?;
+    evaluate_action_guards_at(action, params, state, model).map_err(|(_, error)| error)
+}
+
+/// [`evaluate_action_guards`], also naming the index in `action.guards` of
+/// the guard whose evaluation failed (`None` when the parameters themselves
+/// were rejected).
+fn evaluate_action_guards_at(
+    action: &ActionDef,
+    params: &Bindings,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Option<Bindings>, (Option<usize>, RuntimeError)> {
+    validate_action_parameters(action, params, model).map_err(|error| (None, error))?;
     let mut bindings = params.clone();
-    for guard in &action.guards {
+    for (index, guard) in action.guards.iter().enumerate() {
+        let failed = |error| (Some(index), error);
         match guard {
             ActionGuard::Let(name, expression) => {
-                let value = eval(expression, state, &mut bindings, model, None)?;
+                let value = eval(expression, state, &mut bindings, model, None).map_err(failed)?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expression) => {
-                if !as_bool(eval(expression, state, &mut bindings, model, None)?)? {
+                let value = eval(expression, state, &mut bindings, model, None)
+                    .and_then(as_bool)
+                    .map_err(failed)?;
+                if !value {
                     return Ok(None);
                 }
             }
         }
     }
     Ok(Some(bindings))
+}
+
+/// The guard (an index into `action.guards`, in source order) whose
+/// evaluation reaches a partial operation when `action` is attempted with
+/// `params` in `state`, or `None` when every guard evaluates -- to `true` or
+/// to `false` -- or fails for another reason.
+///
+/// This is the guard a [`ActionCandidate::GuardPartial`] instance failed in,
+/// so a renderer can locate that `partial_op` at the guard's own Public
+/// Kernel `partial_operations` site instead of the action body (#1191).
+#[must_use]
+pub fn guard_partial_operation(
+    model: &KernelModel,
+    action: &str,
+    params: &Bindings,
+    state: &State,
+) -> Option<usize> {
+    let definition = model.actions.iter().find(|item| item.name == action)?;
+    match evaluate_action_guards_at(definition, params, state, model) {
+        Err((Some(index), error)) if is_partial_operation_error(&error) => Some(index),
+        _ => None,
+    }
 }
 
 /// Execute one `init` statement, threading `written` — the concrete value
