@@ -989,7 +989,7 @@ const fn placement(
 
 /// Every placement is in action context and outside `requires`/`let`, so the
 /// failure is a `partial_op` verdict. `K` has three values and `s` capacity 2.
-pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 12] = [
+pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 13] = [
     placement("plain", "y = OP", 1, 0),
     placement(
         "quantifier_body",
@@ -1030,6 +1030,13 @@ pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 12] = [
         0,
     ),
     placement("forall_statement_body", "forall k: K { m[k] = OP }", 3, 0),
+    // `where` excludes `k == 0`; its entry is still listed, guarded false.
+    placement(
+        "forall_statement_body_where",
+        "forall k: K where k > 0 { m[k] = OP }",
+        3,
+        0,
+    ),
     placement(
         "forall_statement_body_binder",
         "forall k: K { m[k] = if k >= 0 then OP else 0 }",

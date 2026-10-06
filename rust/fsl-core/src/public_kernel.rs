@@ -1065,6 +1065,14 @@ fn statement_partial(
             // one term per finite candidate, the binder's range/collection and
             // `where` walked under the enclosing guard, the body under the
             // candidate's own membership-and-`where` guard.
+            //
+            // A `forall` with nothing to list is not expanded at all, so its
+            // range need not be statically finite: `forall k in 0..x { m[k] =
+            // 1 }` lists nothing, as before #1190. With a partial operation, a
+            // non-constant range fails closed like a quantifier's.
+            if !crate::partial_operation::statement_has_partial_operation(statement, env, model) {
+                return Ok(());
+            }
             let binder = crate::substitute_binder(
                 binder.clone(),
                 replacements,

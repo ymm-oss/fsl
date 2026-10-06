@@ -101,7 +101,9 @@ indexed assignment target's index expression is listed like any other operand.
 A quantifier, an aggregate and a statement-level `forall` are expanded into one
 entry per finite candidate, with the binder replaced by the candidate and the
 failure condition guarded by the candidate's membership and `where`, so no
-failure condition names a bound variable (#1190). Every classified failure
+failure condition names a bound variable (#1190). A statement-level `forall`
+with no partial operation in its binder, `where` or body is not expanded, so its
+range need not have constant bounds. Every classified failure
 above rolls back the whole step: the Monitor returns the input state and leaves
 its internal state unchanged. For diagnostics, `attempted_state` is absent for
 guard/body failures and is the exact uncommitted candidate for any later
