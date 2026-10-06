@@ -461,9 +461,13 @@ fn validate_dialect_scope_overrides(
 /// document lets [`parse_kernel_source_with_bounds`] override (#1226).
 ///
 /// For an internal caller that derives overrides from a document's own
-/// `verify` block (`fslc diff`), where a bound naming no declared
-/// `entity` / `number` has never had any effect on the lowered model. Any
-/// other document's overrides are returned unchanged.
+/// `verify` block (`fslc diff`). A bound naming no declared `entity` /
+/// `number` is dropped from the overrides only; it is not inert in the
+/// document itself — a `verify` `values X = a..b` for a raw `type X = lo..hi`
+/// sets the default initial value of a requirements process field typed `X`
+/// (`lower_requirements`), and the document's own bound keeps doing so when
+/// the override is dropped. Any other document's overrides are returned
+/// unchanged.
 ///
 /// # Errors
 ///

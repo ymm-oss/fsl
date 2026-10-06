@@ -16,9 +16,9 @@
 //! declared `0..4` domain while echoing the override under `bounds_overrides`.
 //!
 //! Detectors name the mutation they kill: removing the
-//! `validate_requirements_scope_overrides` / `validate_business_scope_overrides`
-//! call (`origin/main`). Preservation controls pin the names that must still be
-//! accepted, including a `process` name with no `entity` line.
+//! `validate_dialect_scope_overrides` call (`origin/main`). Preservation
+//! controls pin the names that must still be accepted, including a `process`
+//! name with no `entity` line.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -278,5 +278,43 @@ fn diff_still_rescopes_a_process_entity() {
     assert_eq!(output["scope"]["applied_to_old"]["instances"]["Ticket"], 2);
     assert_eq!(output["directions"]["old_to_new"]["result"], "refines");
     assert_eq!(output["directions"]["new_to_old"]["result"], "refines");
+    std::fs::remove_dir_all(scratch).expect("remove scratch directory");
+}
+
+/// Detector (review r1 F1): an undeclared `verify` bound is not inert. Here
+/// `values X = 3..5` names a raw `type X = 0..10`, and it sets the default
+/// initial value (3) of the process field `level: X`. Old and new differ only
+/// in `instances Ticket`. Before #1226 `fslc diff` forwarded `X` to the scoped
+/// load resolved to the type domain `0..10`, which rewrote the old model's
+/// `values X` and its initial `level` to 0, and reported a false
+/// `behavior_removed` (`old_to_new` `refinement_failed`). The re-scoped old
+/// model now keeps the document's own bound, so only the shared
+/// `ZeroInit` violation and the scope change remain.
+#[test]
+fn diff_does_not_report_behavior_removed_for_a_raw_range_field_bound() {
+    let scratch = scratch("diff-raw-range-field");
+    let source = |tickets: u32| {
+        format!(
+            "requirements FieldX {{\n  type X = 0..10\n  process Ticket with level: X {{\n    stages Open, Closed\n    initial Open\n    transition close Open -> Closed by Agent\n      covers REQ-1 \"close\"\n  }}\n  invariant ZeroInit \"REQ-1: level starts at zero\" {{ forall c: Ticket {{ ticket_level[c] == 0 }} }}\n}}\nverify {{\n  instances Ticket = {tickets}\n  values X = 3..5\n}}\n"
+        )
+    };
+    let old = scratch.join("old.fsl");
+    let new = scratch.join("new.fsl");
+    std::fs::write(&old, source(1)).expect("write old");
+    std::fs::write(&new, source(2)).expect("write new");
+    let (output, status) = diff(&old, &new);
+    // `impl_violated` (the shared `ZeroInit` failure) trips the diff gate.
+    assert_eq!(status, 1, "{output:#}");
+    assert_eq!(output["result"], "semantic_diff", "{output:#}");
+    assert_eq!(
+        output["summary"],
+        serde_json::json!(["scope_changed", "impl_violated"]),
+        "{output:#}"
+    );
+    assert_eq!(
+        output["directions"]["old_to_new"]["result"], "impl_violated",
+        "{output:#}"
+    );
+    assert_eq!(output["scope"]["applied_to_old"]["instances"]["Ticket"], 2);
     std::fs::remove_dir_all(scratch).expect("remove scratch directory");
 }
