@@ -5982,6 +5982,35 @@ fn run_scenarios_mode_from_source(
         Ok(result) => result,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
+    // Both lists come keyed by internal property name (`p2__Back` before
+    // `p__Back`); print them in the order of the name they print (`p.Back`
+    // before `p2.Back`), as `reach_*` above. Within a property the runtime's
+    // binding order is kept.
+    let mut responses_by_property =
+        std::collections::BTreeMap::<String, Vec<fsl_runtime::LeadstoResponse>>::new();
+    for response in responses {
+        responses_by_property
+            .entry(response.property.clone())
+            .or_default()
+            .push(response);
+    }
+    let responses =
+        fslc_rust::verification_output::sorted_by_published(&responses_by_property, display)
+            .into_iter()
+            .flat_map(|(_, _, responses)| responses)
+            .collect::<Vec<_>>();
+    let mut missing_by_property = std::collections::BTreeMap::<String, Vec<_>>::new();
+    for (property, binding, triggered) in missing_responses {
+        missing_by_property
+            .entry(property.clone())
+            .or_default()
+            .push((property, binding, triggered));
+    }
+    let missing_responses =
+        fslc_rust::verification_output::sorted_by_published(&missing_by_property, display)
+            .into_iter()
+            .flat_map(|(_, _, missing)| missing)
+            .collect::<Vec<_>>();
     // One warning per (property, binding) with no response witness —
     // collapsing to one warning per property would hide every binding but
     // the first with a trace (issue #526). Word the two causes differently:

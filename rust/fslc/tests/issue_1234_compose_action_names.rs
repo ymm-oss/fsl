@@ -530,6 +530,17 @@ fn write_dunder_fixture(dir: &Path) {
         ("rc.fsl", RANKED_COMPONENT.to_owned()),
         ("ranked.fsl", RANKED.to_owned()),
         (
+            "ord.fsl",
+            compose(
+                "Ord",
+                &[
+                    ("Rc", "p__q", "rc.fsl"),
+                    ("Rc", "p", "rc.fsl"),
+                    ("Rc", "p2", "rc.fsl"),
+                ],
+            ),
+        ),
+        (
             "ranked-map.fsl",
             "refinement RankedSelf {\n  impl Ranked\n  abs Ranked\n  maps auto\n  preserve progress {\n    respond acct2__Back by acct2__back\n    respond acct__Back by acct__back\n  }\n}\n"
                 .to_owned(),
@@ -1252,8 +1263,13 @@ fn project_traceability_graph_edges_end_at_published_action_nodes() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// Detector (r2 F1): every single-spec projection of the compose design layer
-/// and the analyze graph of its refinement end every edge at a declared node.
+/// Guard, not a detector: every single-spec projection of the compose design
+/// layer and the analyze graph of its refinement end every edge at a declared
+/// node. These graphs already built action IDs with `action_node_id`, so they
+/// do not reach the r2 F1 defect (the project `traceability_graph` of
+/// `project_traceability_output`); with F1 reverted this test still passes,
+/// and `project_traceability_graph_edges_end_at_published_action_nodes` is
+/// the test that fails.
 #[test]
 fn compose_layer_projections_end_every_edge_at_a_node() {
     let dir = scratch_dir("projections");
@@ -1317,6 +1333,62 @@ fn compose_layer_projections_end_every_edge_at_a_node() {
             failures.push(format!("{label}: no edges"));
         }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Detector (r3 minor 1): scenarios print `respond_*` and the leadsTo
+/// warnings in the order of the property name they print. Aliases `p__q`,
+/// `p`, `p2` publish `p.q__Back`, `p.Back`, `p2.Back`, whose internal names
+/// `p__q__Back`, `p__Back`, `p2__Back` sort the other way; on 888921a1 both
+/// lists came out `p2`, `p`, `p.q__` while `reach_*` was already ascending.
+#[test]
+fn leadsto_scenarios_and_warnings_are_ordered_by_the_name_they_print() {
+    let dir = scratch_dir("respond-order");
+    write_dunder_fixture(&dir);
+    let ord = path_arg(&dir, "ord.fsl");
+    let names = |scenarios: &Value, prefix: &str| {
+        scenarios["scenarios"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|scenario| scenario["name"].as_str())
+            .filter(|name| name.starts_with(prefix))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let warned = |scenarios: &Value| {
+        scenarios["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|warning| warning["message"].as_str())
+            .filter_map(|message| message.strip_prefix("leadsTo "))
+            .filter_map(|rest| rest.split(' ').next())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let deep = json_of(&fslc(&["scenarios", &ord, "--depth", "4"]));
+    let shallow = json_of(&fslc(&["scenarios", &ord, "--depth", "2"]));
+    let failures = [
+        misordered(
+            "scenarios reach_*",
+            &names(&deep, "reach_"),
+            &["reach_p.Top", "reach_p.q__Top", "reach_p2.Top"],
+        ),
+        misordered(
+            "scenarios respond_*",
+            &names(&deep, "respond_"),
+            &["respond_p.Back", "respond_p.q__Back", "respond_p2.Back"],
+        ),
+        misordered(
+            "leadsTo warnings",
+            &warned(&shallow),
+            &["p.Back", "p.q__Back", "p2.Back"],
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
     assert!(failures.is_empty(), "{failures:#?}");
 }
 

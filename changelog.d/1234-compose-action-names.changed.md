@@ -11,7 +11,8 @@ ledger, analyze, the `untagged` warnings of `check --strict-tags`, and
 as `_requires_failed_bank.settle`, `_partial_op_bank.settle`, and
 `_partial_bank.settle`. Lists keyed by these names (`reachables`,
 `action_coverage`, `action_profile`, induction `k_used`, `cost.properties`,
-scenarios `reach_*`, refine `action_map` and `progress`, and the ai-review
+scenarios `reach_*` and `respond_*`, the leadsTo warnings of `fslc scenarios`,
+refine `action_map` and `progress`, and the ai-review
 conservation findings) are ordered by the name they print, so `acct.go` sorts
 before `acct2.go`, and a glue action `z__a`, printed `z.a`, sorts before the
 component action `z.b`. `fslc refine` success output now prints `action_map`
