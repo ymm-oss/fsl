@@ -519,6 +519,10 @@ fn write_dunder_fixture(dir: &Path) {
             "refinement SplitSelf {\n  impl Split\n  abs Split\n  maps auto\n}\n".to_owned(),
         ),
         (
+            "safe-map.fsl",
+            "refinement SafeSelf {\n  impl Safe\n  abs Safe\n  maps auto\n}\n".to_owned(),
+        ),
+        (
             "log-map.fsl",
             "refinement DunderLogMapping {\n  impl DunderProductionLog\n  abs Dunder\n  maps auto\n}\n"
                 .to_owned(),
@@ -755,6 +759,7 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
     let review = path_arg(&dir, "review.fsl");
     let ranked = path_arg(&dir, "ranked.fsl");
     let ranked_map = path_arg(&dir, "ranked-map.fsl");
+    let safe_map = path_arg(&dir, "safe-map.fsl");
     let review_report = path_arg(&dir, "review.html");
     let review_ledger = path_arg(&dir, "review.md");
 
@@ -1028,6 +1033,12 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             0,
             None,
             vec!["\"acct.back\""],
+        ),
+        (
+            vec!["refine", &safe, &safe, &safe_map, "--depth", "3"],
+            0,
+            None,
+            vec!["\"a__b.split\": \"a__b.split\""],
         ),
         (
             vec!["diff", &split, &split],
@@ -1601,4 +1612,29 @@ fn non_compose_state_with_two_separators_generates_every_target() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A non-compose action whose name contains `__` is printed with `.`, so a
+/// keyed list orders it by that form: `step.a` before `step2`.
+#[test]
+fn non_compose_separator_names_are_ordered_by_the_printed_name() {
+    let dir = scratch_dir("non-compose-order");
+    let spec = dir.join("order.fsl");
+    std::fs::write(
+        &spec,
+        "spec Order {\n  state { n: 0..2 }\n  init { n = 0 }\n  action step2() {\n    requires n < 2\n    n = n + 1\n  }\n  action step__a() {\n    requires n > 0\n    n = n - 1\n  }\n  invariant Inv { n <= 2 }\n}\n",
+    )
+    .expect("write spec");
+    let output = fslc(&[
+        "verify",
+        spec.to_str().expect("utf-8 path"),
+        "--depth",
+        "3",
+        "--no-cache",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        object_keys(&json_of(&output)["action_coverage"]),
+        ["step.a", "step2"]
+    );
 }
