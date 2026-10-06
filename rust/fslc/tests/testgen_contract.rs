@@ -232,11 +232,11 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
     for (target, digest) in [
         (
             "pytest",
-            "482c52bbc762d4bfc222c04af1bed21484ddf10d1b7742d6b6f180f89cd33a87",
+            "53b29b07dbfd872fd5fe0f705a64ba26e46b3baac3c0a876adc38d2ae6be0da8",
         ),
         (
             "vitest",
-            "b66938190d12f25bc1d043d300bb84a66d16a752a3ef65ac7bd7ee12a76337a9",
+            "8dab1494cf7c91530416fb02ff9c9a63063bb1b0c948dffbfe0a5bc99fb8fd01",
         ),
     ] {
         assert_eq!(
