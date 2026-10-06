@@ -1166,7 +1166,7 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
 | `unknown_cti` / `partial_op` | A state satisfying every proved invariant reaches a partial operation (§6) in a guard, body, property, or reached `ensures` | Guard the operation with a short-circuit `and`/`=>`/`or`/`if`, or add an auxiliary invariant that excludes the state if it is unreachable |
 | `unknown_cti` / `ensures` | An action's reached `ensures` is false on a step between states that satisfy every proved invariant | Fix the body or the `ensures`; if the start state is unreachable, add an auxiliary invariant that excludes it |
-| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget |
+| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` and `fslc mutate` do not read this cutoff yet (`diff` reports `no_semantic_change` / exit 0, `mutate` counts the mutant as survived) |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `--engine auto` composes explicit and bmc: it tries explicit first (faster,
@@ -1665,7 +1665,9 @@ at that link (`failed_link.kind` is `null`), a `fslc chain` refine layer fails
 with `result: "unknown_budget"`, and a governance `preservation` reports
 `unknown_budget` as its `result`. This changed verdicts: a refinement whose
 correspondence check reaches the budget used to report `refines` (exit 0).
-The self-consistency precondition above has no such budget.
+The self-consistency precondition above has no such budget. `fslc diff` and
+`fslc mutate` do not read this cutoff yet: `fslc diff` still reports
+`no_semantic_change` (exit 0) and `fslc mutate` counts the mutant as survived.
 
 A state variable `init` never assigns on any path (an `init if` reading an
 unassigned `Bool`, for example) is a genuinely free initial value across its

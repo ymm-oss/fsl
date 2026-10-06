@@ -16724,7 +16724,7 @@ fn run_refine(
             Ok(checked) => checked,
             Err(error) => return (error_output("type", &error.to_string()), 2),
         };
-    match checked.verdict() {
+    let failure = match checked.verdict() {
         fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
             return (
                 Value::Object(impl_self_violation_output(
@@ -16742,9 +16742,10 @@ fn run_refine(
                 1,
             );
         }
-        fsl_runtime::RefinementVerdict::Failed(_) | fsl_runtime::RefinementVerdict::Refines => {}
-    }
-    let progress = if checked.failure.is_none() && !mapping.progress.is_empty() {
+        fsl_runtime::RefinementVerdict::Failed(failure) => Some(failure),
+        fsl_runtime::RefinementVerdict::Refines => None,
+    };
+    let progress = if failure.is_none() && !mapping.progress.is_empty() {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
             Err(error) => return (error_output("internal", &error.to_string()), 3),
@@ -16765,14 +16766,14 @@ fn run_refine(
     let mut output = envelope();
     output.insert("impl".to_owned(), json!(checked.implementation));
     output.insert("abs".to_owned(), json!(checked.abstraction));
-    if let Some(failure) = checked.failure {
+    if let Some(failure) = failure {
         output.insert("result".to_owned(), json!("refinement_failed"));
         output.insert("kind".to_owned(), json!(failure.kind));
-        if let Some(at) = failure.at {
+        if let Some(at) = &failure.at {
             output.insert("at".to_owned(), json!(at));
         }
         output.insert("violated_at_step".to_owned(), json!(failure.step));
-        if let Some(action) = failure.impl_action {
+        if let Some(action) = &failure.impl_action {
             let definition = implementation
                 .actions
                 .iter()

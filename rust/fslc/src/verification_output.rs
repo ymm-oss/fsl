@@ -391,7 +391,8 @@ pub fn check_requirements_implements(
                 "result": "unknown_budget",
                 "states_explored": states_explored,
                 "hint": "inline implements correspondence search reached its state budget; \
-                         narrow the domain, or verify the layers separately with `fslc refine`/`fslc verify`",
+                         narrow the verify {} domains of both layers, or verify each layer separately \
+                         with `fslc verify` (`fslc refine` shares the same budget)",
             })
         }
         fsl_runtime::RefinementVerdict::ImplViolated { violation, .. } => {

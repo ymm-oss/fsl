@@ -10,3 +10,6 @@ already used. The Worker governance path also reports a self-violating
 a refinement whose correspondence check visits more than 50,000 states
 previously reported `refines` / exit 0 and now reports `unknown_budget` /
 exit 1; lower `--depth` or narrow both layers' `verify {}` domains.
+`fslc diff` and `fslc mutate` do not read this cutoff yet: on a cut-off
+check `fslc diff` still reports `no_semantic_change` (exit 0) and
+`fslc mutate` still counts the mutant as survived.

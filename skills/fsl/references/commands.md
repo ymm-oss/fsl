@@ -757,7 +757,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
   refine layer fails with `result:"unknown_budget"`, and a governance
   preservation reports `unknown_budget`. Such a run used to report `refines`
-  (exit 0). The self-consistency precondition is not budgeted.
+  (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
+  and `fslc mutate` do not read this cutoff yet (`diff` reports
+  `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
 - **action-correspondence argument partial_op (#512)**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action
