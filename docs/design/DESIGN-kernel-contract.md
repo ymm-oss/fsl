@@ -104,6 +104,19 @@ guard/body failures and is the exact uncommitted candidate for any later
 `type_bound`, `partial_op`, `invariant`, `trans`, or `ensures` failure. This
 rollback rule is shared by the schema and executable vectors.
 
+`partial_operations` is an action-context list only. An `init` statement's
+partial operations (and its other failure sites, such as a `Map` key outside
+the finite key domain or a checked integer overflow) are not published in the
+Public Kernel: an init failure is neither a rollback nor a `partial_op`
+violation, because there is no prior state to return to and no step to blame.
+Init definedness is a verifier obligation instead: every engine (explicit,
+`bmc`, `induction`) reports an init that some initial state cannot evaluate as
+a `semantics` error with exit code 2, and the symbolic engines locate it at the
+failing init statement (e.g. `division by zero in init at 9:5`; #1258). The
+schema is unchanged. Publishing init failure conditions, should a Kernel
+consumer need them, would add a field with its own `state_effect_on_failure`
+value and so a minor schema version.
+
 ## Concrete boundary pre-pass budget
 
 Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free
