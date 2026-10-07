@@ -6,7 +6,7 @@
 // once (`nativeVerdict`, removed in d30f456 / issue 287) but test-browser.mjs
 // no longer imports this module -- the corpus parity run it does instead
 // (415 real specs/examples documents, each through native and the Worker) is
-// strictly stronger than these 9 inline sources, so that comparison is not
+// strictly stronger than these inline sources, so that comparison is not
 // worth restoring (issue 585). Do not reintroduce an import of `cases` there
 // on the assumption these are meant to be parity-checked; they are not.
 export const cases = [
@@ -194,6 +194,47 @@ verify {
     job.status = 1
   }
   invariant NeverAdvance { job.status == 0 }
+}`,
+  },
+  {
+    // An action undefined at step 0 on a path that then ends in a terminal
+    // state (issue #1240, review r2 F1). The definedness pass must reset the
+    // z3js solver: if the search's later-step transitions (each requires a
+    // successor) stayed asserted, the dead-ending path would vanish from the
+    // step-0 question and the Worker would report "verified". The parity
+    // corpus has no definedness error, so it cannot catch a reset that fails.
+    id: "definedness-guard-before-terminal",
+    expected: "error",
+    expect: { message: "action 'go' guard evaluation has a non-partial failure" },
+    options: { depth: 4, deadlock: "ignore" },
+    source: `spec BrowserGuardThenDeadlock {
+  state { junk: Int, x: Int, done: Bool }
+  init {
+    x = 9223372036854775807
+    done = false
+  }
+  action go() { requires done == false  requires x + 1 > 0  done = true }
+  terminal { done }
+}`,
+  },
+  {
+    // The same shape with a finite Map written outside its key domain.
+    id: "definedness-map-before-terminal",
+    expected: "error",
+    expect: { message: "action 'write' body evaluation has a non-partial failure" },
+    options: { depth: 4, deadlock: "ignore" },
+    source: `spec BrowserMapThenDeadlock {
+  type K = 0..3
+  type V = 0..1
+  type I = 0..5
+  state { junk: Int, m: Map<K, V>, i: I, done: Bool }
+  init {
+    forall k: K { m[k] = 0 }
+    i = 5
+    done = false
+  }
+  action write() { requires done == false  m[i] = 1  done = true }
+  terminal { done }
 }`,
   },
 ];

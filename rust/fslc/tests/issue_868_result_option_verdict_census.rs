@@ -232,8 +232,22 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
+        373,
+        "check_action_definedness",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
         498,
         "check_state_properties",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1065,
+        "check_typed_action_partial_operations",
         ResultOption
     ),
     entry!(
@@ -640,6 +654,7 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 246, "not"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 248, "or"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 284, "pop"),
+    unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 287, "reset"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 270, "select"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 271, "store"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 260, "sub"),

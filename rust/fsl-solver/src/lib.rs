@@ -282,6 +282,9 @@ pub trait SmtSolver {
 
     fn push(&mut self);
     fn pop(&mut self, levels: u32) -> SolverResult<()>;
+    /// Remove every assertion and scope, keeping the configuration, the
+    /// metrics, and every term already built (they stay valid).
+    fn reset(&mut self) -> SolverResult<()>;
     fn assert(&mut self, term: &Self::Term) -> SolverResult<()>;
     fn assert_and_track(&mut self, term: &Self::Term, tracker: &Self::Term) -> SolverResult<()>;
     fn check(&mut self) -> CheckFuture<'_>;
