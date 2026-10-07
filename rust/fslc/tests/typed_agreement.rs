@@ -829,6 +829,37 @@ fn forall_statement_without_partial_operation_needs_no_constant_range() {
     }
 }
 
+/// Review r2 m1 for #1190: the positive control of
+/// `forall_statement_without_partial_operation_needs_no_constant_range`. With
+/// a partial operation in the body, a range whose bound is not a constant fails
+/// closed instead of listing nothing. Swallowing the candidate error would
+/// silently produce a false empty list.
+fn assert_kernel_fails_on_non_constant_range(id: &str, body: &str) {
+    let kernel = kernel_for_body(id, body);
+    assert_eq!(kernel["result"], "error", "{id}: {kernel}");
+    assert!(
+        kernel.to_string().contains("is not an integer const"),
+        "{id}: {kernel}"
+    );
+}
+
+#[test]
+fn forall_statement_with_division_needs_a_constant_range() {
+    assert_kernel_fails_on_non_constant_range(
+        "forall_statement_state_bound_divide",
+        "forall k in 0..x { m[k] = 2 / x }",
+    );
+}
+
+/// A `Seq` index read counts as a partial operation, unlike a `Map` one.
+#[test]
+fn forall_statement_with_seq_read_needs_a_constant_range() {
+    assert_kernel_fails_on_non_constant_range(
+        "forall_statement_state_bound_seq_read",
+        "forall k in 0..x { m[k] = s[k] }",
+    );
+}
+
 #[test]
 fn operation_sweep_agrees_across_all_three_engines() {
     let mut summary = SweepSummary::default();
