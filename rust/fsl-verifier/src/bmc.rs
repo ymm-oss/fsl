@@ -7,7 +7,7 @@ use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
 use crate::eval::{eval, evaluation_status, property_evaluation_status};
-use crate::init_definedness::{init_failure_sites, init_may_fail};
+use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
@@ -509,9 +509,19 @@ async fn init_definedness_failure<S: SmtSolver>(
     initial: &SymbolicState<S::Term>,
 ) -> Result<Option<VerifyError>, VerifyError> {
     let sites = init_failure_sites(solver, model, initial)?;
-    if sites.is_empty() {
-        return Ok(None);
-    }
+    first_init_failure(solver, model, initial, sites).await
+}
+
+/// Whether init is defined is decided by `init_evaluation_status` alone,
+/// asked whatever `sites` holds (the gate that keeps an init with nothing
+/// that can fail from building terms is `init_may_fail`). `sites` only name
+/// the failure; an undefined init that no site names is still an error.
+async fn first_init_failure<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    initial: &SymbolicState<S::Term>,
+    sites: Vec<InitFailureSite<S::Term>>,
+) -> Result<Option<VerifyError>, VerifyError> {
     let undefined = solver.not(&init_evaluation_status(solver, model, initial)?.fully_defined)?;
     solver.set_query_context("init", "definedness");
     if !probe(solver, &undefined).await? {
@@ -2023,5 +2033,65 @@ async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool
         SatResult::Sat => Ok(true),
         SatResult::Unsat => Ok(false),
         SatResult::Unknown => Err(VerifyError::new("solver returned unknown")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use fsl_core::{FsResolver, build_model, parse_kernel_source};
+
+    use super::*;
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(result) => result,
+            Poll::Pending => panic!("native solver unexpectedly yielded Pending"),
+        }
+    }
+
+    /// #1258 m1: the definedness verdict does not depend on the failure
+    /// sites. An undefined init that no site names (here, every site
+    /// dropped) is still an error, under the generic message.
+    #[test]
+    fn an_undefined_init_no_site_names_is_still_an_error() {
+        let source = "spec InitDiv {
+  type Small = 0..3
+  state {
+    d: Small,
+    x: Int
+  }
+  init {
+    d = 0
+    x = 6 / d
+  }
+  action tick() {
+    requires d < 3
+    d = d + 1
+  }
+  invariant Ok { x >= 0 }
+}
+";
+        let kernel =
+            parse_kernel_source(source, &FsResolver::new(std::path::Path::new("."))).expect("parse");
+        let model = build_model(kernel).expect("build model");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+        let initial = symbolic_state(&solver, &model, 0).expect("initial state");
+        for constraint in init_constraints(&solver, &model, &initial).expect("init") {
+            solver.assert(&constraint).expect("assert init");
+        }
+        assert_state_bounds(&mut solver, &model, None, &initial).expect("bounds");
+
+        let sites = init_failure_sites(&solver, &model, &initial).expect("sites");
+        assert!(!sites.is_empty(), "the full site list names the division");
+        let error = block_on(first_init_failure(&mut solver, &model, &initial, Vec::new()))
+            .expect("asked")
+            .expect("undefined");
+        assert_eq!(error.message, "init evaluation is undefined");
     }
 }

@@ -15,8 +15,9 @@
 //! evaluator gives for the same failure, located at the init statement. The
 //! sites only name the failure: whether init is defined is decided by
 //! `transition::init_evaluation_status`, the same `evaluation_status` the
-//! action checks use. An empty site list means no init statement contains an
-//! operation that can fail, so the definedness query is not asked at all.
+//! action checks use, and it is asked whenever [`init_may_fail`] lets the
+//! question through, whatever the site list holds. An undefined init that no
+//! site names is reported as `init evaluation is undefined`.
 
 use fsl_core::{
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
