@@ -5,8 +5,7 @@ satisfies the forbidden. It evaluated no guard, and an implementation, which
 has no such bound, may accept the call (for example `respond(7)` under
 `instances Case = 3`, or `add(9)` under `values Qty = 0..3` when the guard
 admits 9). It used to count as satisfied, with `rejected_by:
-"requires_failed"` before #1212 and `"bad_call"` since, so the generated test
-asserted a rejection no guard made. It is now a `kind: "forbidden"` error
+"requires_failed"`, so the generated test asserted a rejection no guard made. It is now a `kind: "forbidden"` error
 (exit 2) with `failed_step`, `step`, `step_results: []`, `message`,
 `out_of_scope_argument` (`{parameter, value, type, scope}`), a `loc` at that
 step, and a hint. An argument outside a declared range or enum type stays a
@@ -38,7 +37,7 @@ print the error (`error` / `kind: "forbidden"`); `chain` prints `kind:
 verification `not_run`.
 `scenarios` and `testgen` now exit 2 with no scenario and no test file; when
 the rest of the spec verified they used to exit 0, emitting the forbidden
-scenario as `rejected_by: "bad_call"` and a test asserting it (otherwise
+scenario as `rejected_by: "requires_failed"` and a test asserting it (otherwise
 `violated`, exit 1). `counterexample export` returns this error and writes no
 file, where it exported the rest of the spec's counterexample, or exited 2
 with nothing to export. `explain` still exits 0, with empty `witnesses` (where the rest of the spec
@@ -62,10 +61,9 @@ on the measured specs it survived before. `fslc diff` classifies each side with 
 `unknown`), and an OLD `bad_call` is preserved only when NEW also rejects it
 as `bad_call` outside a declared type. A compose NEW, or a NEW of another
 dialect whose entity types are not in its source, never preserves an OLD
-`bad_call`: before #1229 a compose NEW that rejected the step as `bad_call`
-preserved it even when its component bounds that type by a verify scope, so
-such a forbidden is now `unknown` / `forbidden_step_unrelatable` and fails
-`--forbid unknown`. `diff --git` and `approval diff` report the same findings.
+`bad_call`, even when it rejects the step as `bad_call`, since its component
+may bound that type by a verify scope: such a forbidden is `unknown` /
+`forbidden_step_unrelatable` and fails `--forbid unknown`. `diff --git` and `approval diff` report the same findings.
 Fix an affected spec by widening the scope so it includes the value, or by
 changing the step to an in-scope value the guard rejects (the error's
 `out_of_scope_argument` and hint name the parameter, value, and scope). If the
