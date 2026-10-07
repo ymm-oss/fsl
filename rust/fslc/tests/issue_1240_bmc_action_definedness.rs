@@ -342,3 +342,119 @@ spec EnsuresOverflowNd {
         "action 'inc' ensures evaluation has a non-partial failure",
     );
 }
+
+/// Detector for the definedness pass's `solver.reset()` (#1240 review r2,
+/// F1): an action is undefined at step 0 or 1, and the path then ends in a
+/// `terminal { done }` state with no successor. Without the reset, the
+/// search's later-step transitions (each requires a successor state) stay
+/// asserted, every path that dead-ends is removed from the early steps'
+/// questions, and both engines report `verified` / `proved` with exit 0.
+/// `terminal` keeps the deadlock witness (and its replay) out of the way.
+#[test]
+fn undefinedness_before_a_terminal_dead_end_is_reported() {
+    let cases = [
+        (
+            "guard-then-deadlock",
+            r"
+spec GuardThenDeadlock {
+  state { junk: Int, x: Int, done: Bool }
+  init {
+    x = 9223372036854775807
+    done = false
+  }
+  action go() { requires done == false  requires x + 1 > 0  done = true }
+  terminal { done }
+}
+",
+            "action 'go' guard evaluation has a non-partial failure",
+        ),
+        (
+            "body-then-deadlock",
+            r"
+spec BodyThenDeadlock {
+  state { junk: Int, x: Int, done: Bool }
+  init {
+    x = 9223372036854775807
+    done = false
+  }
+  action go() { requires done == false  done = x + 1 > 0 }
+  terminal { done }
+}
+",
+            "action 'go' body evaluation has a non-partial failure",
+        ),
+        (
+            "late-then-deadlock",
+            r"
+spec LateThenDeadlock {
+  state { junk: Int, x: Int, n: Int, done: Bool }
+  init {
+    x = 9223372036854775806
+    n = 0
+    done = false
+  }
+  action tick() { requires n == 0  n = 1 }
+  action go() { requires n == 1  requires done == false  requires x + 2 > 0  done = true }
+  terminal { done }
+}
+",
+            "action 'go' guard evaluation has a non-partial failure",
+        ),
+        (
+            "map-then-deadlock",
+            r"
+spec MapThenDeadlock {
+  type K = 0..3
+  type V = 0..1
+  type I = 0..5
+  state { junk: Int, m: Map<K, V>, i: I, done: Bool }
+  init {
+    forall k: K { m[k] = 0 }
+    i = 5
+    done = false
+  }
+  action write() { requires done == false  m[i] = 1  done = true }
+  terminal { done }
+}
+",
+            "action 'write' body evaluation has a non-partial failure",
+        ),
+    ];
+    for (name, source, message) in cases {
+        let fixture = Fixture::new(name, source);
+        for engine in ["bmc", "induction"] {
+            let (output, status) = verify(&fixture, engine, 4);
+            assert_semantics_error(&output, status, message);
+        }
+    }
+}
+
+/// Pins the definedness pass's range at the step the search stopped in
+/// (#1240 review r2, F2): in one step, `a` overflows with no typed
+/// partial-operation candidate and the later `b` has a typed division
+/// candidate. The pass must ask that step, so `a`'s non-partial failure is
+/// the semantics error, as `c5c5398d` (definedness asked inside the search)
+/// reports it; without the step, the replay reports an internal overflow
+/// (exit 3).
+#[test]
+fn same_step_non_partial_failure_precedes_a_later_partial_op() {
+    let fixture = Fixture::new(
+        "same-step-order",
+        r"
+spec SameStepOrder {
+  state { junk: Int, x: Int, d: Int }
+  init {
+    x = 9223372036854775807
+  }
+  action a() { requires x + 1 > 0  junk = 1 }
+  action b() { requires 10 / d > 0  junk = 2 }
+}
+",
+    );
+    let (output, status) = verify(&fixture, "bmc", 4);
+    assert_semantics_error(
+        &output,
+        status,
+        "action 'a' guard evaluation has a non-partial failure",
+    );
+}

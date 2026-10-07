@@ -336,6 +336,11 @@ async fn verify_bounded_session<S: SmtSolver>(
     // move the backend's internal state, and the native and browser Z3 builds
     // then resolve under-determined witnesses differently; the native/Worker
     // evidence is byte-compared (see the vacuity note in `verify_bounded_config`).
+    // The reset is also needed for soundness, not only parity: the search has
+    // asserted the transitions of later steps, each of which requires a
+    // successor state, so without it every path that dead-ends after step `s`
+    // would be missing from the step-`s` questions and an undefined action on
+    // such a path would go unreported (see `check_action_definedness`).
     // The search itself still asks the typed partial-operation probes it
     // always asked, so its verdicts and evidence are the ones it produced
     // before the definedness pass existed.
@@ -370,6 +375,15 @@ async fn verify_bounded_session<S: SmtSolver>(
 /// The type bounds asserted here are the ones the search proved at the same
 /// steps (`check_state_properties` asserts each after proving it), so they
 /// are entailed and cannot change any answer.
+///
+/// The reset carries soundness, not only native/Worker parity. The search
+/// leaves the transitions of every step it unrolled asserted, and a
+/// transition has no stutter: it requires a successor state. Those later-step
+/// constraints are not entailed at an earlier step, so asking step `s` on top
+/// of them drops every path that dead-ends after `s` (for example in a
+/// `terminal` state), and an action undefined on such a path would be
+/// reported `verified`. Asked here, step `s` sees only the initial states,
+/// the transitions of steps `0..s`, and the bounds of `0..=s`.
 async fn check_action_definedness<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
