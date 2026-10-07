@@ -681,7 +681,7 @@
             "name": "actions"
           },
           {
-            "checks": 12,
+            "checks": 32,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "complete"
@@ -1930,19 +1930,19 @@
             "name": "actions"
           },
           {
-            "checks": 10,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpEven"
           },
           {
-            "checks": 10,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpOdd"
           },
           {
-            "checks": 10,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "rotate"

@@ -11,8 +11,9 @@ use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guard_definedness, action_guards, action_instances,
-    action_statements_evaluation_status, init_constraints, transition_constraint,
+    ActionInstance, action_guard_definedness, action_guards,
+    action_has_partial_operation_candidate, action_instances, action_statements_evaluation_status,
+    init_constraints, transition_constraint,
 };
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
@@ -231,7 +232,7 @@ pub async fn verify_bounded_selected<S: SmtSolver>(
     depth: usize,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<BmcResult, VerifyError> {
-    verify_bounded_config(model, solver, depth, checked_bounds, None, &BTreeSet::new()).await
+    verify_bounded_session(model, solver, depth, checked_bounds, None, &BTreeSet::new()).await
 }
 
 /// Verify from a complete concrete logical-state snapshot instead of spec init.
@@ -247,7 +248,7 @@ pub async fn verify_bounded_from_state<S: SmtSolver>(
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: &BTreeMap<String, FslValue>,
 ) -> Result<BmcResult, VerifyError> {
-    verify_bounded_config(
+    verify_bounded_session(
         model,
         solver,
         depth,
@@ -282,7 +283,7 @@ pub async fn verify_bounded_discharging<S: SmtSolver>(
     initial_state: Option<&BTreeMap<String, FslValue>>,
     lasso_discharged: &BTreeSet<usize>,
 ) -> Result<BmcResult, VerifyError> {
-    verify_bounded_config(
+    verify_bounded_session(
         model,
         solver,
         depth,
@@ -293,6 +294,193 @@ pub async fn verify_bounded_discharging<S: SmtSolver>(
     .await
 }
 
+/// How far the bounded search got before it returned: the last step it
+/// entered, and whether it had reached that step's action checks.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct SearchProgress {
+    step: usize,
+    actions_checked: bool,
+}
+
+impl SearchProgress {
+    /// The steps whose action definedness precedes the search's outcome: every
+    /// step it left, plus the one it stopped in once that step's action checks
+    /// were reached. Actions are checked below `depth` only.
+    fn definedness_limit(self, depth: usize) -> usize {
+        (self.step + usize::from(self.actions_checked)).min(depth)
+    }
+}
+
+async fn verify_bounded_session<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    depth: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+    initial_state: Option<&BTreeMap<String, FslValue>>,
+    lasso_discharged: &BTreeSet<usize>,
+) -> Result<BmcResult, VerifyError> {
+    let mut progress = SearchProgress::default();
+    let searched = verify_bounded_config(
+        model,
+        solver,
+        depth,
+        checked_bounds,
+        initial_state,
+        lasso_discharged,
+        &mut progress,
+    )
+    .await;
+    // #1240: every action instance's definedness is asked in a second session
+    // on the reset solver, after the search has produced all of its evidence.
+    // Asked inside the search, those queries (and even the terms they build)
+    // move the backend's internal state, and the native and browser Z3 builds
+    // then resolve under-determined witnesses differently; the native/Worker
+    // evidence is byte-compared (see the vacuity note in `verify_bounded_config`).
+    // The search itself still asks the typed partial-operation probes it
+    // always asked, so its verdicts and evidence are the ones it produced
+    // before the definedness pass existed.
+    let limit = progress.definedness_limit(depth);
+    if let Some(step) =
+        check_action_definedness(model, solver, checked_bounds, initial_state, limit).await?
+    {
+        // A `partial_op` the definedness pass reports is one the search's own
+        // typed probes report at the same step and stop on: both ask the same
+        // questions of the same unrolling, in the same instance order.
+        if progress
+            != (SearchProgress {
+                step,
+                actions_checked: true,
+            })
+        {
+            return Err(VerifyError::new(format!(
+                "action definedness pass disagrees with the bounded search at step {step}"
+            )));
+        }
+    }
+    searched
+}
+
+/// The action definedness pass (#1240): a fresh unrolling of the same
+/// initial states and transitions on the reset solver, asking
+/// [`check_action_partial_operations`] at each step below `limit` in
+/// declaration order. A non-partial failure is returned as the error the
+/// search would have reported at that point; `Some(step)` is a `partial_op`
+/// at `step`, which the caller leaves to the search's own report.
+///
+/// The type bounds asserted here are the ones the search proved at the same
+/// steps (`check_state_properties` asserts each after proving it), so they
+/// are entailed and cannot change any answer.
+async fn check_action_definedness<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
+    initial_state: Option<&BTreeMap<String, FslValue>>,
+    limit: usize,
+) -> Result<Option<usize>, VerifyError> {
+    if limit == 0 {
+        return Ok(None);
+    }
+    solver.reset()?;
+    let instances = action_instances(solver, model)?;
+    if instances.is_empty() {
+        return Ok(None);
+    }
+    let initial = symbolic_state(solver, model, 0)?;
+    if let Some(snapshot) = initial_state {
+        assert_snapshot_state(solver, model, &initial, snapshot)?;
+    } else {
+        for constraint in init_constraints(solver, model, &initial)? {
+            solver.assert(&constraint)?;
+        }
+    }
+    let mut states = vec![initial];
+    let mut choices = Vec::new();
+    let mut range_lemmas = Vec::new();
+    for step in 0..limit {
+        for (name, _) in &model.state {
+            if checked_bounds.is_some_and(|selected| !selected.contains(&format!("_bounds_{name}")))
+            {
+                continue;
+            }
+            let valid = bounds(
+                solver,
+                model,
+                states[step]
+                    .get(name)
+                    .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?,
+            )?;
+            solver.assert(&valid)?;
+        }
+        if check_action_partial_operations(
+            solver,
+            model,
+            &states,
+            &choices,
+            &instances,
+            step,
+            &mut range_lemmas,
+        )
+        .await?
+        .is_some()
+        {
+            return Ok(Some(step));
+        }
+        if step + 1 < limit {
+            unroll_step(solver, model, &instances, &mut states, &mut choices, step)?;
+        }
+    }
+    Ok(None)
+}
+
+/// Pin `initial` to a complete concrete logical-state snapshot.
+fn assert_snapshot_state<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    initial: &SymbolicState<S::Term>,
+    snapshot: &BTreeMap<String, FslValue>,
+) -> Result<(), VerifyError> {
+    for name in snapshot.keys() {
+        if !model.state.iter().any(|(candidate, _)| candidate == name) {
+            return Err(VerifyError::new(format!("unknown state variable '{name}'")));
+        }
+    }
+    for (name, ty) in &model.state {
+        let value = snapshot
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("missing state variable '{name}'")))?;
+        let symbolic = initial
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("missing symbolic state '{name}'")))?;
+        let concrete = concrete_value(solver, model, ty, value)?;
+        solver.assert(&logical_equal(solver, model, symbolic, &concrete)?)?;
+    }
+    Ok(())
+}
+
+/// Unroll one transition out of `states[step]`: a fresh `step + 1` state and
+/// `__choice@step`, constrained to an action instance whose transition holds.
+fn unroll_step<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    instances: &[ActionInstance<S::Term>],
+    states: &mut Vec<SymbolicState<S::Term>>,
+    choices: &mut Vec<S::Term>,
+    step: usize,
+) -> Result<(), VerifyError> {
+    let next = symbolic_state(solver, model, step + 1)?;
+    let choice = solver.constant(&format!("__choice@{step}"), &fsl_solver::Sort::Int)?;
+    let lower = solver.ge(&choice, &solver.int_value(0))?;
+    let upper = solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?;
+    solver.assert(&lower)?;
+    solver.assert(&upper)?;
+    let transition =
+        transition_constraint(solver, model, instances, &states[step], &next, &choice)?;
+    solver.assert(&transition)?;
+    states.push(next);
+    choices.push(choice);
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 async fn verify_bounded_config<S: SmtSolver>(
     model: &KernelModel,
@@ -301,6 +489,7 @@ async fn verify_bounded_config<S: SmtSolver>(
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
     lasso_discharged: &BTreeSet<usize>,
+    progress: &mut SearchProgress,
 ) -> Result<BmcResult, VerifyError> {
     if model.actions.is_empty() {
         return Err(VerifyError::new("spec has no actions"));
@@ -308,21 +497,7 @@ async fn verify_bounded_config<S: SmtSolver>(
     let instances = action_instances(solver, model)?;
     let initial = symbolic_state(solver, model, 0)?;
     if let Some(snapshot) = initial_state {
-        for name in snapshot.keys() {
-            if !model.state.iter().any(|(candidate, _)| candidate == name) {
-                return Err(VerifyError::new(format!("unknown state variable '{name}'")));
-            }
-        }
-        for (name, ty) in &model.state {
-            let value = snapshot
-                .get(name)
-                .ok_or_else(|| VerifyError::new(format!("missing state variable '{name}'")))?;
-            let symbolic = initial
-                .get(name)
-                .ok_or_else(|| VerifyError::new(format!("missing symbolic state '{name}'")))?;
-            let concrete = concrete_value(solver, model, ty, value)?;
-            solver.assert(&logical_equal(solver, model, symbolic, &concrete)?)?;
-        }
+        assert_snapshot_state(solver, model, &initial, snapshot)?;
     } else {
         for constraint in init_constraints(solver, model, &initial)? {
             solver.assert(&constraint)?;
@@ -363,12 +538,19 @@ async fn verify_bounded_config<S: SmtSolver>(
         .collect::<BTreeSet<_>>();
     let mut states = vec![initial];
     let mut choices = Vec::new();
-    let mut range_lemmas = Vec::new();
+    let has_action_partial_operation_candidates = model
+        .actions
+        .iter()
+        .any(action_has_partial_operation_candidate);
 
     for step in 0..=depth {
         let property_checks = StatePropertyChecks {
             checked_bounds,
             pending_reachables: &pending_reachables,
+        };
+        *progress = SearchProgress {
+            step,
+            actions_checked: false,
         };
         if let Some(violation) = check_state_properties(
             solver,
@@ -385,15 +567,11 @@ async fn verify_bounded_config<S: SmtSolver>(
             return Ok(result);
         }
 
+        progress.actions_checked = true;
         if step < depth
-            && let Some(violation) = check_action_partial_operations(
-                solver,
-                model,
-                &states,
-                &choices,
-                &instances,
-                step,
-                &mut range_lemmas,
+            && has_action_partial_operation_candidates
+            && let Some(violation) = check_typed_action_partial_operations(
+                solver, model, &states, &choices, &instances, step,
             )
             .await?
         {
@@ -490,17 +668,7 @@ async fn verify_bounded_config<S: SmtSolver>(
         if instances.is_empty() {
             break;
         }
-        let next = symbolic_state(solver, model, step + 1)?;
-        let choice = solver.constant(&format!("__choice@{step}"), &fsl_solver::Sort::Int)?;
-        let lower = solver.ge(&choice, &solver.int_value(0))?;
-        let upper = solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?;
-        solver.assert(&lower)?;
-        solver.assert(&upper)?;
-        let transition =
-            transition_constraint(solver, model, &instances, &states[step], &next, &choice)?;
-        solver.assert(&transition)?;
-        states.push(next);
-        choices.push(choice);
+        unroll_step(solver, model, &instances, &mut states, &mut choices, step)?;
     }
     if result.leadsto_violation.is_none() {
         let unrolled_depth = states.len() - 1;
@@ -887,6 +1055,112 @@ async fn check_state_properties<S: SmtSolver>(
     Ok(None)
 }
 
+/// The search's own action check, unchanged since before #1240: only an
+/// instance with a typed partial-operation candidate (guard, body, or
+/// `ensures`) is asked, and only when some action has one. It keeps the
+/// search's query sequence, and so its evidence, the one it always was; the
+/// definedness of every instance is asked afterwards by
+/// [`check_action_definedness`].
+#[allow(clippy::too_many_arguments)]
+async fn check_typed_action_partial_operations<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+) -> Result<Option<BmcViolation>, VerifyError> {
+    for instance in instances {
+        let action = &model.actions[instance.action_index];
+        let guard_evaluation =
+            action_guard_definedness(solver, model, action, &states[step], &instance.params)?;
+        let body_status = action_statements_evaluation_status(
+            solver,
+            model,
+            action,
+            &states[step],
+            &guard_evaluation.bindings,
+        )?;
+        let mut ensures_have_partial_operation = false;
+        for ensure in &action.ensures {
+            ensures_have_partial_operation |= evaluation_status(
+                solver,
+                model,
+                ensure,
+                &states[step],
+                &guard_evaluation.bindings,
+                Some(&states[step]),
+            )?
+            .has_partial_operation;
+        }
+        if !guard_evaluation.has_partial_operation
+            && !body_status.has_partial_operation
+            && !ensures_have_partial_operation
+        {
+            continue;
+        }
+        let guard_failure = guard_evaluation.first_partial;
+        solver.set_query_context("partial_op", &action.name);
+        if probe(solver, &guard_failure).await? {
+            return Ok(Some(
+                make_action_partial_operation_violation(
+                    solver,
+                    model,
+                    action,
+                    instance,
+                    &guard_failure,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        let guard_undefined = solver.not(&guard_evaluation.defined)?;
+        if probe(solver, &guard_undefined).await? {
+            return Err(VerifyError::new(format!(
+                "action '{}' guard evaluation has a non-partial failure",
+                action.name
+            )));
+        }
+
+        let body_failure =
+            solver.and(&[guard_evaluation.enabled.clone(), body_status.first_partial])?;
+        if probe(solver, &body_failure).await? {
+            return Ok(Some(
+                make_action_partial_operation_violation(
+                    solver,
+                    model,
+                    action,
+                    instance,
+                    &body_failure,
+                    states,
+                    choices,
+                    instances,
+                    step,
+                )
+                .await?,
+            ));
+        }
+        let body_undefined = solver.and(&[
+            guard_evaluation.enabled.clone(),
+            solver.not(&body_status.fully_defined)?,
+        ])?;
+        if probe(solver, &body_undefined).await? {
+            return Err(VerifyError::new(format!(
+                "action '{}' body evaluation has a non-partial failure",
+                action.name
+            )));
+        }
+    }
+    Ok(None)
+}
+
+/// Every action instance's guard and enabled-body definedness at `step`
+/// (#1240), for the definedness pass ([`check_action_definedness`]): the
+/// typed `partial_op` probes plus the non-partial failures (checked i64
+/// overflow, a finite `Map` key outside its domain), in declaration order.
 #[allow(clippy::too_many_arguments)]
 async fn check_action_partial_operations<S: SmtSolver>(
     solver: &mut S,

@@ -12,11 +12,13 @@ produced (`action '<name>' guard evaluation has a non-partial failure`, or
 earlier action now precedes a later action's `partial_op` in the same step, as
 in the explicit engine. Specs without such a failure keep their verdicts: none
 of the 552 corpus specs changed verdict, exit code, or message under `bmc`,
-`induction`, or `explicit`. Witness values (deadlock, reachable, and CTI
-traces) may differ because the solver answers additional queries, and
-`cost.properties` gains a `{"kind":"partial_op","name":"actions"}` row that
-answers the all-defined case once per step, so per-action `partial_op` check
-counts can drop (`docs/design/DESIGN-verification-cost.md`). The row also
+`induction`, or `explicit`. The check runs as a second pass on a reset solver
+after the search has produced its evidence, so witness values (deadlock,
+reachable, and CTI traces) are the ones the search produced before, natively
+and in the browser Worker alike. `cost.properties` gains a
+`{"kind":"partial_op","name":"actions"}` row that answers the all-defined case
+once per step, and the per-action `partial_op` rows also count that pass's
+typed probes (`docs/design/DESIGN-verification-cost.md`). The row also
 counts the range-lemma queries that keep this check fast: each `Int` state
 leaf's bound at a step is kept only when the solver proves it entailed, and is
 conjoined only to the action definedness queries, whose answers it cannot
