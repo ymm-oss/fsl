@@ -18,6 +18,7 @@ use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
+use fslc_rust::verification_output::UnenabledStep;
 use serde_json::{Map, Value, json};
 
 mod approval;
@@ -6191,22 +6192,42 @@ fn requirement_trace_scenarios_from_source(
             action
                 .params
                 .iter()
-                .zip(arguments)
-                .map(|(param, value)| (param.name().to_owned(), fslc_rust::fsl_value_json(&value)))
+                .zip(&arguments)
+                .map(|(param, value)| (param.name().to_owned(), fslc_rust::fsl_value_json(value)))
                 .collect(),
         );
-        let (action_name, rejected_by) = if let Some(instance) = instance {
+        if let Some(instance) = instance {
+            // `validate_requirement_trace_source` rejects an enabled final
+            // step whether it is accepted or stops with a violation (#1213),
+            // so an enabled final step here means the two walks disagree.
             let result = monitor.step(&instance).map_err(|error| error.to_string())?;
-            let violation = result.violation.ok_or_else(|| {
-                format!(
+            return Err(match result.violation {
+                Some(violation) => format!(
+                    "forbidden '{}' final step violated {} '{}' after validation",
+                    case.id,
+                    violation.kind,
+                    display(&violation.name),
+                ),
+                None => format!(
                     "forbidden '{}' final step was accepted after validation",
                     case.id
-                )
-            })?;
-            (display(&instance.action), violation.kind)
-        } else {
-            (final_step.name.clone(), "requires_failed".to_owned())
-        };
+                ),
+            });
+        }
+        let action_name = final_step.name.clone();
+        let rejected_by = fslc_rust::verification_output::requirement_unenabled_step(
+            &monitor,
+            final_step,
+            &arguments,
+            &contract.scope_types,
+        )?
+        .rejected_by()
+        .ok_or_else(|| {
+            format!(
+                "forbidden '{}' final step is not a rejection after validation",
+                case.id
+            )
+        })?;
         scenarios.push(json!({
             "name":format!("forbidden_{}",case.id),
             "kind":"forbidden",
@@ -15621,25 +15642,62 @@ fn compare_diff_invariants(old: &KernelModel, new: &KernelModel) -> Vec<Value> {
     }
 }
 
+/// The OLD step's arguments, and for a not-enabled OLD final step how OLD
+/// rejected it.
 fn old_forbidden_arguments(
     monitor: &mut fsl_runtime::Monitor,
     step: &fsl_core::RequirementsTraceStep,
     is_final: bool,
-) -> Result<Vec<FslValue>, String> {
+    scope_types: &std::collections::BTreeSet<String>,
+) -> Result<(Vec<FslValue>, Option<UnenabledStep>), String> {
     let (arguments, instance) = requirement_step_match(monitor, step)?;
     let Some(instance) = instance else {
-        return if is_final {
-            Ok(arguments)
-        } else {
-            Err("OLD forbidden setup was not enabled".to_owned())
-        };
+        if !is_final {
+            return Err("OLD forbidden setup was not enabled".to_owned());
+        }
+        let unenabled = fslc_rust::verification_output::requirement_unenabled_step(
+            monitor,
+            step,
+            &arguments,
+            scope_types,
+        )?;
+        // A step that names no callable action, or one outside the verify
+        // scope the comparison uses (#1229), is no OLD rejection, under the
+        // same rule `validate_requirement_trace_source` applies.
+        if let Some(message) = unenabled.non_rejection_message(step) {
+            return Err(format!("OLD {message}"));
+        }
+        return Ok((arguments, Some(unenabled)));
     };
     let stepped = monitor.step(&instance).map_err(|error| error.to_string())?;
+    // #1213: an enabled OLD final step does not satisfy the forbidden even
+    // when it stops with a violation, so there is no OLD rejection to relax.
     match (is_final, stepped.violation.is_some()) {
-        (false, false) | (true, true) => Ok(arguments),
+        (false, false) => Ok((arguments, None)),
         (false, true) => Err("OLD forbidden setup was rejected".to_owned()),
         (true, false) => Err("OLD forbidden final step was accepted".to_owned()),
+        (true, true) => {
+            Err("OLD forbidden final step violated instead of being rejected".to_owned())
+        }
     }
+}
+
+/// Whether `monitor` rejects the step as `bad_call`, outside a declared type;
+/// never when the verify scope types are unknown (`None`).
+fn rejects_as_bad_call(
+    monitor: &fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+    arguments: &[FslValue],
+    scope_types: Option<&std::collections::BTreeSet<String>>,
+) -> bool {
+    scope_types.is_some_and(|scope_types| {
+        fslc_rust::verification_output::requirement_unenabled_step(
+            monitor,
+            step,
+            arguments,
+            scope_types,
+        ) == Ok(UnenabledStep::BadCall)
+    })
 }
 
 fn forbidden_unknown(
@@ -15661,22 +15719,13 @@ fn forbidden_unknown(
 
 fn forbidden_case_finding(
     case: &fsl_core::RequirementsTraceCase,
-    old: &KernelModel,
-    new: &KernelModel,
+    (old, old_scope_types): (&KernelModel, &std::collections::BTreeSet<String>),
+    (new, new_scope_types): (&KernelModel, Option<&std::collections::BTreeSet<String>>),
 ) -> Option<Value> {
-    let mut old_monitor = match fsl_runtime::Monitor::new(old.clone()) {
-        Ok(monitor) => monitor,
-        Err(error) => {
-            return Some(forbidden_unknown(
-                &case.id,
-                "forbidden_replay_failed",
-                None,
-                &error.to_string(),
-            ));
-        }
-    };
-    let mut monitor = match fsl_runtime::Monitor::new(new.clone()) {
-        Ok(monitor) => monitor,
+    let monitors = fsl_runtime::Monitor::new(old.clone())
+        .and_then(|old| Ok((old, fsl_runtime::Monitor::new(new.clone())?)));
+    let (mut old_monitor, mut monitor) = match monitors {
+        Ok(monitors) => monitors,
         Err(error) => {
             return Some(forbidden_unknown(
                 &case.id,
@@ -15691,21 +15740,29 @@ fn forbidden_case_finding(
     })];
     for (index, step) in case.steps.iter().enumerate() {
         let is_final = index + 1 == case.steps.len();
-        let arguments = match old_forbidden_arguments(&mut old_monitor, step, is_final) {
-            Ok(arguments) => arguments,
-            Err(error) => {
-                return Some(forbidden_unknown(
-                    &case.id,
-                    "forbidden_replay_failed",
-                    Some((index, step)),
-                    &error,
-                ));
-            }
-        };
+        let (arguments, old_unenabled) =
+            match old_forbidden_arguments(&mut old_monitor, step, is_final, old_scope_types) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    return Some(forbidden_unknown(
+                        &case.id,
+                        "forbidden_replay_failed",
+                        Some((index, step)),
+                        &error,
+                    ));
+                }
+            };
         let instance = match fslc_rust::verification_output::requirement_step_match_values(
             &monitor, step, &arguments,
         ) {
             Ok(instance) => instance,
+            // The rejection is preserved even though NEW cannot relate the step.
+            Err(_)
+                if old_unenabled == Some(UnenabledStep::BadCall)
+                    && rejects_as_bad_call(&monitor, step, &arguments, new_scope_types) =>
+            {
+                return None;
+            }
             Err(error) => {
                 let reason = match &error {
                     fslc_rust::verification_output::RequirementStepRelationError::Unrelatable(
@@ -15735,8 +15792,15 @@ fn forbidden_case_finding(
                 ));
             }
         };
-        if stepped.violation.is_some() {
-            return None;
+        if let Some(violation) = &stepped.violation {
+            return Some(forbidden_violation_finding(
+                case,
+                (index, step),
+                is_final,
+                violation,
+                accepted_trace,
+                &monitor,
+            ));
         }
         accepted_trace.push(json!({
             "step":index+1,"state":fslc_rust::state_json(&monitor.state),
@@ -15746,20 +15810,58 @@ fn forbidden_case_finding(
                 )).collect::<Map<_,_>>()},
         }));
     }
-    Some(json!({
-        "kind":"forbidden_relaxed","id":case.id,
-        "witness":{
-            "trace_type":"counterexample","trace":accepted_trace,
-            "accepted_step":case.steps.last().map(|step|step.name.clone()),
-            "state":fslc_rust::state_json(&monitor.state),
-        },
-    }))
+    Some(forbidden_relaxed(case, accepted_trace, &monitor, None))
+}
+
+/// The finding for a NEW step that is enabled and then stops with a violation.
+fn forbidden_violation_finding(
+    case: &fsl_core::RequirementsTraceCase,
+    step: (usize, &fsl_core::RequirementsTraceStep),
+    is_final: bool,
+    violation: &fsl_runtime::Violation,
+    accepted_trace: Vec<Value>,
+    monitor: &fsl_runtime::Monitor,
+) -> Value {
+    if !is_final {
+        // NEW never reaches the final step, so it neither preserves nor
+        // relaxes the OLD rejection.
+        return forbidden_unknown(
+            &case.id,
+            "forbidden_replay_failed",
+            Some(step),
+            &format!(
+                "NEW forbidden setup violated {} '{}'",
+                violation.kind,
+                display(&violation.name)
+            ),
+        );
+    }
+    // #1213: NEW enables the final step the OLD guard rejected; that it then
+    // stops with a violation is not a rejection.
+    let violation = json!({"kind":violation.kind,"name":display(&violation.name)});
+    forbidden_relaxed(case, accepted_trace, monitor, Some(violation))
+}
+
+fn forbidden_relaxed(
+    case: &fsl_core::RequirementsTraceCase,
+    trace: Vec<Value>,
+    monitor: &fsl_runtime::Monitor,
+    violation: Option<Value>,
+) -> Value {
+    let mut witness = json!({
+        "trace_type":"counterexample","trace":Value::Array(trace),
+        "accepted_step":case.steps.last().map(|step|step.name.clone()),
+        "state":fslc_rust::state_json(&monitor.state),
+    });
+    if let Some(violation) = violation {
+        witness["violation"] = violation;
+    }
+    json!({"kind":"forbidden_relaxed","id":case.id,"witness":witness})
 }
 
 fn forbidden_diff_findings(
-    old_source: &str,
-    old: &KernelModel,
-    new: &KernelModel,
+    (old_source, old): (&str, &KernelModel),
+    (new_source, new): (&str, &KernelModel),
 ) -> Result<Vec<Value>, String> {
     let Some(contract) =
         fsl_core::requirements_trace_contract(old_source).map_err(|error| error.to_string())?
@@ -15774,10 +15876,20 @@ fn forbidden_diff_findings(
             ));
         }
     }
+    // `None` when NEW's entity / number types are not in its source (#1229):
+    // no NEW `bad_call` can then be told from a step outside a verify scope.
+    let new_scope_types =
+        fsl_core::verify_scope_type_names(new_source).map_err(|error| error.to_string())?;
     Ok(contract
         .forbidden
         .iter()
-        .filter_map(|case| forbidden_case_finding(case, old, new))
+        .filter_map(|case| {
+            forbidden_case_finding(
+                case,
+                (old, &contract.scope_types),
+                (new, new_scope_types.as_ref()),
+            )
+        })
         .collect())
 }
 
@@ -16033,7 +16145,7 @@ fn run_diff(
         }
     }
     findings.extend(compare_diff_invariants(&old_model, &new_model));
-    match forbidden_diff_findings(&old_source, &old_model, &new_model) {
+    match forbidden_diff_findings((&old_source, &old_model), (&new_source, &new_model)) {
         Ok(forbidden_findings) => findings.extend(forbidden_findings),
         Err(error) => return (error_output("type", &error), 2),
     }
