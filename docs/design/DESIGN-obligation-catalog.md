@@ -125,29 +125,29 @@ key-domain miss. The P1-c fold must keep that order.
   branches join (the hull of two ranges, or one type). Every other form --
   arithmetic, `abs`, `size`, `add`, `push` -- counts, even where its value
   happens to fit.
-- A name's type holds every value the concrete evaluators can bind to it.
-  The symbolic evaluator is the exception: it binds an `is some(v)` pattern
-  even when the option is absent, and nothing constrains an absent option's
-  payload (the type bound and the state equalities cover a present value
-  only), so on that path bmc lets `v` take any value. With `p: Option<K>`
-  set to `none`, explicit proves `p is some(exact) or m[exact] >= 0` and bmc
-  reports it undefined, and bmc reports `p is some(exact) or exact >= 0`
-  violated at a state explicit accepts. The catalog follows the concrete
-  evaluators; that disagreement is an engine defect outside P1-a. Action
-  parameters come first, then each `let` in clause order; a binder variable
-  is typed inside its `where` filter and body, and a binder over a collection
-  takes the item type of a bounded collection. An `is some(v)` pattern never
-  rebinds a parameter, `let` or binder (`or_insert` in both evaluators), but
-  once it matches it can bind `v` for what is evaluated after it in the same
-  context (an action's guard, body and `ensures` are one; each property
-  expression is one, and a `leadsTo` trigger and goal are evaluated from
-  separate copies of the binder bindings), whether or not the path there
-  required the match. The catalog also lets a pattern inside a binder's scope
-  reach the rest of the context, which the evaluators do not: an
-  over-approximation. So outside a parameter, `let` or binder, `v`
-  is typed as the join of every payload of its patterns in the context and its
-  base meaning (a state variable, constant or enum member); without a join it
-  is untyped, and every index through an untyped name counts.
+- A name's type holds every value the concrete evaluators can bind to it. The
+  symbolic evaluator is the exception: it binds an `is some(v)` pattern even
+  when the option is absent, and nothing constrains an absent option's payload
+  (the type bound and the state equalities cover a present value only), so on
+  that path bmc lets `v` take any value. With `p: Option<K>` set to `none`,
+  explicit proves `p is some(exact) or m[exact] >= 0` and bmc reports it
+  undefined, and bmc reports `p is some(exact) or exact >= 0` violated at a
+  state explicit accepts. The catalog follows the concrete evaluators; that
+  disagreement is an engine defect outside P1-a (#1259). Action parameters
+  come first, then each `let` in clause order; a binder variable is typed
+  inside its `where` filter and body, and a binder over a collection takes the
+  item type of a bounded collection. An `is some(v)` pattern never rebinds a
+  parameter, `let` or binder (`or_insert` in both evaluators), but once it
+  matches it can bind `v` for what is evaluated after it in the same context
+  (an action's guard, body and `ensures` are one; each property expression is
+  one, and a `leadsTo` trigger and goal are evaluated from separate copies of
+  the binder bindings), whether or not the path there required the match. The
+  catalog also lets a pattern inside a binder's scope reach the rest of the
+  context, which the evaluators do not: an over-approximation. So outside a
+  parameter, `let` or binder, `v` is typed as the join of every payload of its
+  patterns in the context and its base meaning (a state variable, constant or
+  enum member); without a join it is untyped, and every index through an
+  untyped name counts.
 - `Holds@TypeBound(v)` is vacuous only for `Int`, `Bool` and `Option`s of
   them, which the type-bound check (`value_conforms` in `fsl-runtime`) accepts
   whatever they hold. Every other type keeps a live row, including the two
@@ -225,7 +225,8 @@ predicate, each recursion of the walk and each value-typing rule fails at
 least one T2 test, and so does typing a form narrower than its declaration
 (a range parameter by its low end, a `Map` element by its key, `head`/`at`
 by the `Seq`'s positions, a field by the struct's first field, an `old`
-index as in domain, a non-literal range binder from its bounds' types).
+index as in domain, a range binder with literal bounds by its low end, a
+non-literal range binder by its low end or from its bounds' types).
 `cargo mutants --no-config --package fsl-core --file
 fsl-core/src/obligation.rs` (run from `rust/`) must leave no surviving
 mutant; it mutates operators and bodies but deletes no call, which is why the
