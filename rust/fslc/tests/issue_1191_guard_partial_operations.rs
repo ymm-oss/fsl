@@ -509,3 +509,78 @@ fn action_cover_traces_skip_a_partial_guard_instead_of_erroring() {
         "peek is first covered after push: {covers:?}"
     );
 }
+
+const REFINE_IMPL: &str = r"
+spec Impl {
+  type Small = 0..3
+  state { x: Small, n: Small }
+  init { x = 0  n = 0 }
+  action a() {
+    requires 2 / x == 0
+    n = 1
+  }
+}
+";
+
+const REFINE_ABS: &str = r"
+spec Abs {
+  type Small = 0..3
+  state { n: Small }
+  init { n = 0 }
+  action b() {
+    n = 1
+  }
+}
+";
+
+const REFINE_MAP: &str = r"
+refinement ImplRefinesAbs {
+  impl Impl
+  abs Abs
+  map n = n
+  action a() -> b()
+}
+";
+
+/// `fslc refine` explores the impl for self-violations before checking the
+/// refinement (`first_self_violation`). A partial operation reached in an impl
+/// action's `requires` is the impl's own `partial_op`, reported as `violated`
+/// with the impl trace — not a raw `error` that aborts the search.
+#[test]
+fn refine_reports_an_impl_guard_partial_op_as_a_self_violation() {
+    let implementation = Fixture::new("refine-impl", REFINE_IMPL);
+    let abstraction = Fixture::new("refine-abs", REFINE_ABS);
+    let mapping = Fixture::new("refine-map", REFINE_MAP);
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "refine",
+            implementation.text(),
+            abstraction.text(),
+            mapping.text(),
+            "--depth",
+            "2",
+        ])
+        .output()
+        .expect("run native CLI");
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "invalid JSON: {error}; stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    assert_eq!(output.status.code(), Some(1), "{value:#}");
+    assert_eq!(value["result"], "violated", "{value:#}");
+    assert_eq!(value["violation_kind"], "partial_op", "{value:#}");
+    assert_eq!(value["invariant"], "_partial_a", "{value:#}");
+    assert_eq!(value["violated_at_step"], 1, "{value:#}");
+    let trace = value["impl_trace"].as_array().expect("impl_trace");
+    assert_eq!(trace.len(), 2, "{value:#}");
+    assert_eq!(trace[1]["action"]["name"], "a", "{value:#}");
+    assert_eq!(trace[1]["changes"], serde_json::json!({}), "{value:#}");
+    assert!(
+        value["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("property of the impl spec itself")),
+        "{value:#}"
+    );
+}
