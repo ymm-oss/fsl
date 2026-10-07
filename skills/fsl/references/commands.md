@@ -125,7 +125,7 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report
@@ -778,6 +778,17 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   fidelity failure. Never `refines`, never folded into `refinement_failed`.
   `fslc diff` surfaces the same condition as an `impl_violated` finding and
   fails its gate unconditionally (not `--forbid`-gated).
+- **correspondence budget**: the correspondence check after that precondition
+  visits at most 50,000 distinct impl states (no CLI flag; the same budget as
+  an inline `implements` seam). Reaching it before deciding within `--depth`
+  is `result:"unknown_budget"` (exit 1) with `states_explored` and `hint` —
+  never `refines`. Lower `--depth` or narrow both specs' `verify {}` domains.
+  A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
+  refine layer fails with `result:"unknown_budget"`, and a governance
+  preservation reports `unknown_budget`. Such a run used to report `refines`
+  (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
+  and `fslc mutate` do not read this cutoff yet (`diff` reports
+  `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
 - **action-correspondence argument partial_op (#512)**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action
