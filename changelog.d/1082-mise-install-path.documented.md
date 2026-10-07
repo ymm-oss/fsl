@@ -1,1 +1,0 @@
-Documented (#1082): the README now shows how to install `fslc` and `fslc-lsp` with mise, including the `[tool_alias]` pair one repository needs and the anchored `matching_regex` that keeps `fslc` from selecting the `fslc-lsp` asset.
