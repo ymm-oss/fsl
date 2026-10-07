@@ -2077,8 +2077,8 @@ mod tests {
   invariant Ok { x >= 0 }
 }
 ";
-        let kernel =
-            parse_kernel_source(source, &FsResolver::new(std::path::Path::new("."))).expect("parse");
+        let kernel = parse_kernel_source(source, &FsResolver::new(std::path::Path::new(".")))
+            .expect("parse");
         let model = build_model(kernel).expect("build model");
         let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
         let initial = symbolic_state(&solver, &model, 0).expect("initial state");
@@ -2089,9 +2089,14 @@ mod tests {
 
         let sites = init_failure_sites(&solver, &model, &initial).expect("sites");
         assert!(!sites.is_empty(), "the full site list names the division");
-        let error = block_on(first_init_failure(&mut solver, &model, &initial, Vec::new()))
-            .expect("asked")
-            .expect("undefined");
+        let error = block_on(first_init_failure(
+            &mut solver,
+            &model,
+            &initial,
+            Vec::new(),
+        ))
+        .expect("asked")
+        .expect("undefined");
         assert_eq!(error.message, "init evaluation is undefined");
     }
 }
