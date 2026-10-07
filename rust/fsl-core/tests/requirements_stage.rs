@@ -6,7 +6,7 @@
 use fsl_core::{
     FsResolver, KernelExpr, PublicKernelVersion, RequirementsTraceExpectation, build_model,
     parse_kernel_source, parse_kernel_source_with_file, public_kernel_contract_for_version,
-    requirements_trace_contract,
+    requirements_trace_contract, verify_scope_type_names,
 };
 
 fn checked(source: &str) -> fsl_core::KernelModel {
@@ -403,4 +403,71 @@ verify { instances Claim = 1 }
 
     assert_eq!(error.message, "stage expects exactly one argument");
     assert_eq!(error.line, 8);
+}
+
+/// #1229: the types whose domain is a verify scope are every `entity` /
+/// `number` and every business / requirements `process`; a declared range
+/// type is not one. A document whose entity types are not all in its own
+/// source has none to offer (`None`), so a caller cannot read an out-of-scope
+/// argument there as outside a declared type.
+#[test]
+fn verify_scope_type_names_lists_entity_number_and_process_types() {
+    let names = |items: &[&str]| {
+        Some(
+            items
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect::<std::collections::BTreeSet<_>>(),
+        )
+    };
+    let requirements = r#"requirements R {
+  entity Case
+  number Qty
+  type Amount = 0..3
+  process Claim {
+    stages Draft, Done
+    initial Draft
+    transition finish Draft -> Done by User
+  }
+  forbidden FB-1 "x" {
+    finish(5)
+    expect rejected
+  }
+}
+verify { instances Case = 2  instances Claim = 2  values Qty = 0..3 }
+"#;
+    assert_eq!(
+        verify_scope_type_names(requirements).expect("requirements"),
+        names(&["Case", "Claim", "Qty"])
+    );
+    assert_eq!(
+        requirements_trace_contract(requirements)
+            .expect("trace contract")
+            .expect("requirements contract")
+            .scope_types,
+        names(&["Case", "Claim", "Qty"]).expect("names")
+    );
+    let spec = "spec S {\n  entity Case\n  number Qty\n  type Amount = 0..3\n  state { n: Amount }\n  init { n = 0 }\n}\n";
+    assert_eq!(
+        verify_scope_type_names(spec).expect("spec"),
+        names(&["Case", "Qty"])
+    );
+    let business = r#"business B {
+  actor Agent
+  entity Item
+  process Ticket {
+    stages Open, Done
+    initial Open
+    transition finish Open -> Done by Agent
+  }
+}
+"#;
+    assert_eq!(
+        verify_scope_type_names(business).expect("business"),
+        names(&["Item", "Ticket"])
+    );
+    let compose = "compose Sys {\n  use Comp as c from \"comp.fsl\"\n  state { n: 0..3 }\n  init { n = 0 }\n}\n";
+    assert_eq!(verify_scope_type_names(compose).expect("compose"), None);
+    let domain = "domain D {\n  type Status = Draft | Done\n  aggregate Order {\n    state {\n      status: Status = Draft;\n    }\n    command Finish {}\n  }\n}\n";
+    assert_eq!(verify_scope_type_names(domain).expect("domain"), None);
 }

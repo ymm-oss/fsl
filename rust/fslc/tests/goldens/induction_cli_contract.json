@@ -64,6 +64,12 @@
             "name": "OneEntry"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "reachable",
@@ -198,6 +204,12 @@
             "name": "SeenYellow"
           },
           {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "reachable",
@@ -319,6 +331,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "NeverAboveCap"
+          },
+          {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 5,
@@ -468,6 +486,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "OpenAtTop"
+          },
+          {
+            "checks": 14,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 6,
@@ -651,7 +675,13 @@
             "name": "QueuedInActive"
           },
           {
-            "checks": 22,
+            "checks": 60,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 32,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "complete"
@@ -796,6 +826,12 @@
             "name": "XNonNegative"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 5,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -824,7 +860,7 @@
           "check_elapsed_s": "<number>",
           "checks": "<number>",
           "conflicts": "<number>",
-          "decisions": "<null>",
+          "decisions": "<number>",
           "memory_mb": "<number>",
           "propagations": "<number>"
         }
@@ -911,6 +947,12 @@
             "name": "XNonNegative"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 5,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -939,7 +981,7 @@
           "check_elapsed_s": "<number>",
           "checks": "<number>",
           "conflicts": "<number>",
-          "decisions": "<null>",
+          "decisions": "<number>",
           "memory_mb": "<number>",
           "propagations": "<number>"
         }
@@ -1034,6 +1076,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "XRange"
+          },
+          {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 6,
@@ -1162,6 +1210,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "XRange"
+          },
+          {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 6,
@@ -1297,6 +1351,12 @@
             "name": "XRange"
           },
           {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -1429,6 +1489,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "Responds"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 3,
@@ -1574,6 +1640,12 @@
           {
             "checks": 2,
             "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
             "kind": "type_bound",
             "name": "_bounds_level"
           },
@@ -1712,6 +1784,12 @@
           {
             "checks": 2,
             "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
             "kind": "type_bound",
             "name": "_bounds_gate"
           },
@@ -1846,19 +1924,25 @@
             "name": "Finishes"
           },
           {
-            "checks": 34,
+            "checks": 16,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpEven"
           },
           {
-            "checks": 34,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpOdd"
           },
           {
-            "checks": 34,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "rotate"
@@ -2036,6 +2120,12 @@
             "name": "NonNeg"
           },
           {
+            "checks": 16,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 9,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -2190,6 +2280,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "NoNegativeStock"
+          },
+          {
+            "checks": 24,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 5,

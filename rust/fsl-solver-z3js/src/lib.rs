@@ -358,6 +358,12 @@ impl SmtSolver for Z3JsSolver {
         Ok(())
     }
 
+    fn reset(&mut self) -> SolverResult<()> {
+        js_reset();
+        self.stack_depth = 0;
+        Ok(())
+    }
+
     fn assert(&mut self, term: &Self::Term) -> SolverResult<()> {
         expect(term, Sort::Bool)?;
         js_assert(term.handle);

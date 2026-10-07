@@ -403,8 +403,10 @@ impl 側だけの carried number(例: business の抽象には存在しない `A
 されます。宣言した境界の外の参照(したがって何も変えない上書きや無関係な上書き)や、
 宣言どおりの世界でも起きる `expect` のエラー(ゼロ除算)は、上書きなしと同じ
 ハードエラーのままです。forbidden シナリオの*最後の* step が、上書きが引数を
-取り除いたためだけに「拒否」された場合は guard を何も確かめていないので、充足とは
-数えず `forbidden_skipped` として報告します。この3条件は frozen Python 参照実装より
+取り除いたためだけに上書き後の範囲の外にある場合は guard を何も確かめていないので、
+充足とは数えず `forbidden_skipped` として報告します。宣言した範囲の外にある最後の
+step は、上書きなしと同じ `kind:"forbidden"` エラーです(#1229)。ただし上書きが範囲を広げて
+その値を含める場合は guard を評価します。この3条件は frozen Python 参照実装より
 厳しく、Python は範囲外の参照をすべてスキップし、範囲外の参照を含む `expect` の
 エラーをすべて免除し、範囲外の最後の step を拒否として数えます。これにより、spec の acceptance シナリオが
 元の `verify { instances Case = N }` 境界向けに書かれていても、`--instances Case=1
@@ -1037,7 +1039,22 @@ sweep の各セルは `--instances`/`--values` 付きで走るので、セルが
 両方向に実行します: NEW→OLD の失敗は `behavior_added`、OLD→NEW の失敗は
 `behavior_removed` です。ユーザー invariant の連言の間の含意を別途検査し
 (`invariant_weakened` / `invariant_strengthened`)、OLD の `forbidden` シナリオを
-NEW に対して replay します(`forbidden_relaxed`)。方向性のある失敗は反例の
+NEW に対して replay します(`forbidden_relaxed`)。NEW の最後のステップがガードで
+無効なら OLD の拒否は保たれ、両側が range / enum のパラメータ型の外の `bad_call` として
+拒否する最後のステップも保たれます。各側はそれぞれ自分の `entity` / `number` の型で
+判定されます。#1229 から、verify スコープの外にある OLD の最後のステップは `unknown` /
+`forbidden_replay_failed`(OLD のガードが拒否していない)、NEW のスコープだけが外す OLD の
+`bad_call` は `unknown` / `forbidden_step_unrelatable` です(#1229 より前はどちらも
+`forbidden_step_unrelatable` でした)。compose の NEW や、`entity` / `number` の型が
+ソースにない他のダイアレクトの NEW は、OLD の `bad_call` を保ちません。#1229 より前は、
+そのステップを `bad_call` として拒否する compose の NEW が保っていたので、そうした
+forbidden は今は `--forbid unknown` に落ちます。どの action も arity も指さない OLD の最後のステップは
+`unknown` / `forbidden_replay_failed` です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
+ステップは `forbidden_relaxed`、違反する OLD の最後のステップや NEW のセットアップの
+ステップは `unknown` / `forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
+ステップも保たれたと報告されます。
+[`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md) の "Forbidden replay"
+を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
 不一致は、`--mapping` がその方向を提供しない限り `unknown` です。任意のマッピング
 が自動で反転されることはありません。
@@ -1123,7 +1140,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
-| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または inline `implements Abs from "file" { }` seam の対応探索が固定の内部状態予算を超えた(`check`/`verify`、CLI フラグ無し) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。inline `implements` seam の場合: domain を縮めるか、結合検査ではなく `fslc refine`/`fslc verify` で層を分けて検証する |
+| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` と `fslc mutate` はまだこの打ち切りを読まない(`diff` は `no_semantic_change`/exit 0 を報告し、`mutate` はその mutant を survived と数える) |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
@@ -1599,6 +1616,20 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 ません。`fslc diff` は同じ条件を `impl_violated` の finding として表面化させ、
 gate を無条件に(`--forbid` の対象ではなく)失敗させます。自己矛盾した側がある
 比較そのものが信頼できないためです。
+
+その後の対応検査がたどる impl の相異なる状態は、固定の上限(50,000。CLI フラグ
+無し — inline `implements` seam と同じ内部予算、§13)までです。`--depth` の範囲で
+判定がつく前にこの上限に達すると、`refine` は `result: "unknown_budget"`(exit 1)に
+`states_explored` と `hint` を付けて報告し、`refines` とは報告しません: たどって
+いない到達可能状態に不一致が残っているかもしれないためです。`--depth` を下げるか、
+両方の spec の `verify {}` の domain(`instances`/`values`)を縮めてください。chain
+検査はその link で止まり(`failed_link.kind` は `null`)、`fslc chain` の refine 層は
+`result: "unknown_budget"` で失敗し、governance の `preservation` は `result` に
+`unknown_budget` を報告します。これは判定の変更です: 対応検査が上限に達する
+refinement は、以前は `refines`(exit 0)を報告していました。上記の自己一貫性の
+precondition には、この上限はありません。`fslc diff` と `fslc mutate` はまだこの
+打ち切りを読みません: `fslc diff` は `no_semantic_change`(exit 0)を報告し、
+`fslc mutate` はその mutant を survived と数えます。
 
 `init` がどの経路でも一度も代入しない状態変数(例えば、代入されていない `Bool`
 を読む `init if`)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
@@ -2431,7 +2462,9 @@ governance EnterpriseReturnControls {
 `fslc check governance.fsl` は、参照されるすべてのコントロール、business ファイル、
 policy/goal、preservation ファイルを検証します。preservation ブロックはさらに、
 宣言された refinement を深さ 8 で実行し、結果を `governance.preservations` の下で
-報告します。
+報告します: `refines`、`refinement_failed`、`violated`(`after` の spec がそれ自身の
+意味論を破る、§10)、`unknown_budget`(対応検査が状態の上限に達した、§10)のいずれか
+です。ブラウザの Worker も同じ値を報告します。
 
 ### 13.4 非機能要件(NFR)の書き方
 
@@ -2887,9 +2920,67 @@ DESIGN-*.md があります)。
 
 - **`forbidden`(否定の受け入れ基準)** — requirements ダイアレクトの構成物です。
   「拒否されるべき操作列」を書くと、check 時に、最後のステップが拒否される
-  (not-enabled または違反)ことが replay 検証されます。受理されてしまった場合は
+  (ガードが拒むか、引数が宣言された型の外にあるために not-enabled である)ことが
+  replay 検証されます。受理されてしまった場合は
   `kind:"forbidden"` です(制約不足 = ガードの欠落の検出。安全性の invariant は
-  これについて沈黙します)。`acceptance`(must-allow)の双対です。
+  これについて沈黙します)。**#1213 から(破壊的変更)**、最後のステップが
+  enabled で、実行時の違反(`invariant` / `trans` / `ensures` / `type_bound` / `partial_op`)で
+  止まる場合も `violation` 付きの `kind:"forbidden"` です。違反は拒否ではありません。
+  以前の版はこれを充足として数えていました。移行するには、その呼び出しを拒否する
+  `requires` を書き足します。opt-out はありません。この検査は BMC や induction より前に
+  走るので、そうした spec の `verify` は、`--depth` やエンジンによらず、このエラー
+  (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
+  深さが違反に届けば `violated`(exit 1)、届かなければ `verified`(exit 0)、
+  `--engine induction` ではその判定です。この検査を走らせる他のコマンドも exit 2 で
+  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力せず、`html` と
+  `ledger` はレポートを書き出します)。ただし次の 3 つは exit 2 に
+  なりません。`explain` は exit 0 のままで witness はありません(既知の欠落 #1242:
+  `explain` は gate のエラーを捨て、`html` の witness 欄も同じです)。
+  `approval create --kind ledger` は exit 0 で、エラーを載せた ledger を記録します。
+  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
+  `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
+  #1243 で扱います)。以前に作った ledger の記録の `approval check` は `drifted`
+  (exit 0)です。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  出力の実測は
+  [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
+  scenario の `rejected_by`(testgen が assert します)は、
+  ガードによる拒否なら `requires_failed`、パラメータの宣言された範囲型や enum の
+  外の引数なら `bad_call` です(実装はデコードの境界でそれを拒否すべきです)。
+  **#1229 から(破壊的変更)**、`entity`(`verify { instances }`。`process` もこれで
+  範囲が決まります)や `number`(`verify { values }`)のパラメータの検証の範囲の外の
+  引数は拒否ではありません。`instances Case = 3` の下で最後のステップ `accept(7)` は
+  ガードを一度も評価せず、そうした上限を持たない実装はその呼び出しを受け付ける可能性が
+  あります。これは `out_of_scope_argument`(`{parameter, value, type, scope}`)付きの
+  `kind:"forbidden"` エラーです。移行するには、範囲を広げてその値を含めるか、引数を
+  範囲の内側に直してガードを試すようにします。`--instances` / `--values` の上書きだけが
+  その引数を範囲から外した場合は、代わりに `forbidden_skipped`(評価していない)として
+  報告されます。最後のステップがどの action も、その arity の variant も指さない場合は
+  拒否ではなく、`message` 付きの `kind:"forbidden"` エラーです。どちらも破壊的変更です。
+  以前は、そのステップで forbidden が充足していました(action を指さないステップは
+  4.8.1 まで、検証の範囲の外のステップは #1212 の前は `requires_failed`、それ以降は
+  `bad_call` として)。そのため `check` は通り、ほかのコマンドが何を報告するかは仕様の
+  残りの部分で決まっていました。`verify`、`sweep`、`chain`、`mutate`、`html`、`ledger` は
+  検証が通れば exit 0、通らなければ exit 1 で、`scenarios`、`testgen`、
+  `counterexample export`、`approval create` は exit 2 になることもありました。
+  今は `check`、`verify`(どのエンジンでも)、`sweep`、`chain`、`scenarios`、`testgen`、
+  `mutate` の baseline、`counterexample export`、`html`、`ledger`、
+  `approval create --kind scenarios` / `html` が exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant を報告しません。`html`、`ledger`、
+  `approval create --kind html` の stdout は生成結果(`result: "generated"`)で、エラーは
+  レポートの中に載ります(`html` と `ledger` はレポートを書き出します)。`chain` はエラーを
+  `[requirements]` 層の `detail` に載せ、それ以外はエラー(`error` / `kind: "forbidden"`)を
+  出力します。以前に作った `scenarios` / `html` の記録の `approval check` は
+  exit 2 です。exit 2 にならないのは次の 3 つです。`explain` は exit 0 のままで、witness は
+  ありません(既知の欠落 #1242: `explain` は gate のエラーを捨て、`html` の witness 欄も
+  同じです)。`approval create --kind ledger` は exit 0 で、エラーを載せた ledger を
+  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
+  その ledger が実時間の `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる
+  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の `approval check` は
+  `drifted`(exit 0)です。
+  `fslc diff` はどちらのステップでも forbidden の判定を変えるので、
+  `--forbid unknown` の exit が変わることがあります。各コマンドの変更前と変更後の実測は
+  [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
+  `acceptance`(must-allow)の双対です。
   → [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md)
 - **Vacuity 検査(`--vacuity`)** — verified/proved のパスの上で、
   `never_enabled_action`(検査した深さ内で action の enabled な instance がない。

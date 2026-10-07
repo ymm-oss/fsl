@@ -277,8 +277,22 @@ async fn governance_output(
                         .map_err(|failure| {
                             governance_error(failure.to_string(), preservation.span)
                         })?;
-                if checked.failure.is_some() {
-                    return Ok(json!("refinement_failed"));
+                // The same verdicts, in the same order, native governance
+                // reads off `run_refine`'s `result`: `unknown_budget` for a
+                // walk cut off by its state budget, `violated` for an impl
+                // that breaks its own semantics, and no progress stage for
+                // either.
+                match checked.verdict() {
+                    fsl_runtime::RefinementVerdict::BudgetExhausted { .. } => {
+                        return Ok(json!("unknown_budget"));
+                    }
+                    fsl_runtime::RefinementVerdict::ImplViolated { .. } => {
+                        return Ok(json!("violated"));
+                    }
+                    fsl_runtime::RefinementVerdict::Failed(_) => {
+                        return Ok(json!("refinement_failed"));
+                    }
+                    fsl_runtime::RefinementVerdict::Refines => {}
                 }
                 if !mapping.progress.is_empty() {
                     let mut solver = fsl_solver_z3js::Z3JsSolver::new();
@@ -295,11 +309,7 @@ async fn governance_output(
                         return Ok(json!("refinement_failed"));
                     }
                 }
-                Ok(json!(if checked.failure.is_some() {
-                    "refinement_failed"
-                } else {
-                    "refines"
-                }))
+                Ok(json!("refines"))
             }
         },
     )
@@ -1431,6 +1441,117 @@ mod tests {
         );
     }
 
+    /// A forbidden wallet whose last step is `final_step`, refused by a guard
+    /// when it is `withdraw(60)` after `withdraw(10)`.
+    fn forbidden_wallet_request(cmd: &str, final_step: &str) -> Request {
+        Request {
+            cmd: cmd.to_owned(),
+            source: format!(
+                "requirements Wallet {{\n  type Amount = 0..100\n  state {{ balance: 0..100 }}\n  init {{ balance = 50 }}\n  requirement REQ-1 \"withdraw\" {{\n    action withdraw(amount: Amount) {{ requires amount <= balance  balance = balance - amount }}\n  }}\n  forbidden FB-1 \"overdraft\" {{\n    withdraw(10)\n    {final_step}\n    expect rejected\n  }}\n}}"
+            ),
+            source_file: "wallet.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        }
+    }
+
+    /// #1212: the Worker stops on a forbidden last step that names no action
+    /// with the native error, not a vacuously satisfied rejection.
+    #[test]
+    fn worker_reports_an_unknown_forbidden_final_action_like_native() {
+        for command in ["check", "verify"] {
+            let request = forbidden_wallet_request(command, "withdrew(60)");
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden unknown action",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["message"], "unknown action 'withdrew' in forbidden",
+                "{command}: {worker:#}"
+            );
+        }
+        // Control: a guard refusal satisfies the forbidden.
+        let worker = block_on(check(
+            &forbidden_wallet_request("check", "withdraw(60)"),
+            TEST_SOLVER_VERSION,
+        ));
+        assert_eq!(worker["result"], "ok", "{worker:#}");
+    }
+
+    /// #1213: without the guard the last step is enabled and breaks the
+    /// `balance` bound; the Worker reports the native violation error.
+    #[test]
+    fn worker_reports_a_violating_forbidden_final_step_like_native() {
+        for command in ["check", "verify"] {
+            let mut request = forbidden_wallet_request(command, "withdraw(60)");
+            request.source = request.source.replace("requires amount <= balance  ", "");
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden violating final step",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["violation"]["kind"], "type_bound",
+                "{command}: {worker:#}"
+            );
+            assert_eq!(worker["step_results"], json!([]), "{command}: {worker:#}");
+            assert!(
+                worker.get("accepted_step").is_none(),
+                "{command}: {worker:#}"
+            );
+        }
+    }
+
+    /// #1229: a last step outside the `entity` verify scope evaluated no
+    /// guard; the Worker reports the native error, not a `bad_call` rejection.
+    #[test]
+    fn worker_reports_an_out_of_scope_forbidden_final_step_like_native() {
+        let source = |final_step: &str| {
+            format!(
+                "requirements Respond {{\n  entity Case\n  enum St {{ Waiting, Accepted, Responded }}\n  state {{ cases: Map<Case, St> }}\n  init {{ forall c: Case {{ cases[c] = Waiting }} }}\n  requirement REQ-1 \"respond\" {{\n    action respond(c: Case) {{ requires cases[c] == Accepted  cases[c] = Responded }}\n  }}\n  forbidden FB-1 \"cannot respond before accepting\" {{\n    {final_step}\n    expect rejected\n  }}\n}}\nverify {{ instances Case = 3 }}"
+            )
+        };
+        let request = |command: &str, final_step: &str| Request {
+            cmd: command.to_owned(),
+            source: source(final_step),
+            source_file: "respond.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+        };
+        for command in ["check", "verify"] {
+            let request = request(command, "respond(7)");
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden final step outside the verify scope",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["out_of_scope_argument"],
+                json!({"parameter": "c", "value": 7, "type": "Case", "scope": [0, 2]}),
+                "{command}: {worker:#}"
+            );
+        }
+        // Control: a guard refusal inside the scope satisfies the forbidden.
+        let worker = block_on(check(&request("check", "respond(2)"), TEST_SOLVER_VERSION));
+        assert_eq!(worker["result"], "ok", "{worker:#}");
+    }
+
     /// Parity control for #1008 (mutation: the Worker gains a selection
     /// option that skips the trace replay the way native `--instances` does).
     /// A request carrying the native selection keys is still a full run: it
@@ -1531,6 +1652,89 @@ mod tests {
         };
 
         assert_worker_governance_error_matches_native(&request, "missing governance dependency");
+    }
+
+    /// The governance request `rust/fslc/tests/refine_budget_unknown.rs`
+    /// runs through native `fslc check`, built from the same spec sources, so the
+    /// Worker's preservation `result` can be compared with native's value.
+    fn governance_request(after: &str, after_source: &str) -> Request {
+        let wide_abs = "spec WideMid {\n  type MV = 0..5\n  state { seq: Seq<MV, 6> }\n  \
+             init { seq = Seq {} }\n  action push(v: MV) {\n    requires seq.size() < 6\n    \
+             seq = seq.push(v)\n  }\n}\n";
+        let small_abs = "spec SmallAbs { type AQty = 0..3 state { n: AQty } init { n = 0 } \
+             action bump() { requires n < 3  n = n + 1 } }\n";
+        let (abs_name, abs_file, abs_source) = if after == "WideImpl" {
+            ("WideMid", "mid.fsl", wide_abs)
+        } else {
+            ("SmallAbs", "small_abs.fsl", small_abs)
+        };
+        Request {
+            cmd: "check".to_owned(),
+            source: format!(
+                "governance WideControls {{\n  control CTRL-WIDE \"The sequence is preserved\"\n\n  \
+                 preservation WidePreserved {{\n    before {abs_name} from \"{abs_file}\"\n    \
+                 after {after} from \"after.fsl\"\n    preserve CTRL-WIDE\n    \
+                 checked_by refinement \"map.fsl\"\n  }}\n}}\n"
+            ),
+            source_file: "governance.fsl".to_owned(),
+            files: BTreeMap::from([
+                (abs_file.to_owned(), abs_source.to_owned()),
+                ("after.fsl".to_owned(), after_source.to_owned()),
+                (
+                    "map.fsl".to_owned(),
+                    format!("refinement M {{ impl {after} abs {abs_name} maps auto }}\n"),
+                ),
+            ]),
+            options: Options::default(),
+        }
+    }
+
+    fn worker_preservation_result(request: &Request) -> Value {
+        let worker = block_on(check(request, TEST_SOLVER_VERSION));
+        worker["governance"]["preservations"][0]["result"].clone()
+    }
+
+    /// A correspondence walk cut off by its state budget (55,987 reachable
+    /// states at depth 8) is `unknown_budget`, as native reports -- not
+    /// `refines`.
+    #[test]
+    fn governance_reports_unknown_budget_for_a_cut_off_preservation() {
+        let request = governance_request(
+            "WideImpl",
+            "spec WideImpl {\n  type IV = 0..5\n  state { seq: Seq<IV, 6> }\n  \
+             init { seq = Seq {} }\n  action push(v: IV) {\n    requires seq.size() < 6\n    \
+             seq = seq.push(v)\n  }\n}\n",
+        );
+
+        assert_eq!(
+            worker_preservation_result(&request),
+            json!("unknown_budget")
+        );
+    }
+
+    /// An `after` spec that breaks its own type bound is `violated`, as native
+    /// reports -- the Worker used to read only `failure` and say `refines`.
+    #[test]
+    fn governance_reports_violated_for_a_self_violating_after_spec() {
+        let request = governance_request(
+            "SmallBroken",
+            "spec SmallBroken { type IQty = 0..3 state { n: IQty } \
+             init { n = 0 } action bump() { n = n + 1 } }\n",
+        );
+
+        assert_eq!(worker_preservation_result(&request), json!("violated"));
+    }
+
+    /// Control: a small, correct preservation still `refines`.
+    #[test]
+    fn governance_still_refines_a_small_preservation() {
+        let request = governance_request(
+            "SmallImpl",
+            "spec SmallImpl { type IQty = 0..3 state { n: IQty } init { n = 0 } \
+             action bump() { requires n < 3  n = n + 1 } }\n",
+        );
+
+        assert_eq!(worker_preservation_result(&request), json!("refines"));
     }
 
     /// The native `check`/`verify` rejection of an init that writes `m` from
