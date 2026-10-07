@@ -4,7 +4,9 @@ built from the `use` alias and the action name, so `use X as a__b` with action
 `c` is `a__b.c` (it was `a.b__c`, and some outputs printed the internal
 `a__b__c`), matching the frozen Python reference. Every command that names a
 component action uses it: verify on every engine (traces, `action_coverage`,
-`action_profile`, `cost.properties[].name`, vacuity warnings, induction CTIs),
+`action_profile`, `cost.properties[].name`, vacuity warnings, induction CTIs,
+and the BMC `semantics` error `action 'bank.settle' body evaluation has a
+non-partial failure`, likewise for `guard` and `ensures`; it printed `bank__settle`),
 sweep, scenarios, explain, testgen, conformance, mutate, refine, diff, html,
 ledger, analyze, the `untagged` warnings of `check --strict-tags`, and
 `fslc replay`, including names built from the action such

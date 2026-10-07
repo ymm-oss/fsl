@@ -1713,3 +1713,73 @@ fn non_compose_separator_names_are_ordered_by_the_printed_name() {
         ["step.a", "step2"]
     );
 }
+
+/// A component whose `inc` body overflows checked i64 and whose `read` guard
+/// reads a `Map` outside its key domain; the unassigned `junk` makes `init`
+/// nondeterministic, so only BMC's action definedness pass (#1240) reports it.
+const UNDEFINED: &str = "spec Undef {\n  type K = 0..1\n  type V = 0..1\n  type I = 0..5\n  state { junk: Bool, x: Int, m: Map<K, V>, i: I }\n  init {\n    x = 0\n    forall k: K { m[k] = 0 }\n    i = 0\n  }\n  action step() {\n    requires i < 5\n    i = i + 1\n  }\n  action read() {\n    requires m[i] == 0\n    x = 0\n  }\n  action inc() {\n    x = x + 4611686018427387904\n  }\n  invariant Small { i <= 5 }\n}\n";
+
+/// Detector: the definedness error of BMC (and the induction base case) named
+/// the internal `a__b__read` / `a__b__inc` for a compose component action,
+/// after the merge of #1240 brought that error to actions without a partial
+/// operation. Control: a non-compose action `foo__inc` keeps its exact name.
+#[test]
+fn bmc_definedness_error_names_the_component_action_structurally() {
+    let dir = scratch_dir("bmc-definedness");
+    let only_read = UNDEFINED.replace(
+        "  action inc() {\n    x = x + 4611686018427387904\n  }\n",
+        "",
+    );
+    std::fs::write(dir.join("undef.fsl"), &only_read).expect("write component");
+    let only_inc = UNDEFINED.replace(
+        "  action read() {\n    requires m[i] == 0\n    x = 0\n  }\n",
+        "",
+    );
+    std::fs::write(dir.join("inc.fsl"), &only_inc).expect("write component");
+    std::fs::write(
+        dir.join("guard.fsl"),
+        "compose Guard {\n  use Undef as a__b from \"undef.fsl\"\n}\n",
+    )
+    .expect("write compose");
+    std::fs::write(
+        dir.join("body.fsl"),
+        "compose Body {\n  use Undef as a__b from \"inc.fsl\"\n}\n",
+    )
+    .expect("write compose");
+    std::fs::write(
+        dir.join("plain.fsl"),
+        only_inc.replace("action inc()", "action foo__inc()"),
+    )
+    .expect("write spec");
+    let cases = [
+        (
+            "guard.fsl",
+            "action 'a__b.read' guard evaluation has a non-partial failure",
+        ),
+        (
+            "body.fsl",
+            "action 'a__b.inc' body evaluation has a non-partial failure",
+        ),
+        (
+            "plain.fsl",
+            "action 'foo__inc' body evaluation has a non-partial failure",
+        ),
+    ];
+    for (file, message) in cases {
+        for engine in ["bmc", "induction"] {
+            let output = fslc(&[
+                "verify",
+                &path_arg(&dir, file),
+                "--engine",
+                engine,
+                "--depth",
+                "3",
+                "--no-cache",
+            ]);
+            let value = json_of(&output);
+            assert_eq!(output.status.code(), Some(2), "{file} {engine}: {value:#}");
+            assert_eq!(value["kind"], "semantics", "{file} {engine}: {value:#}");
+            assert_eq!(value["message"], message, "{file} {engine}: {value:#}");
+        }
+    }
+}

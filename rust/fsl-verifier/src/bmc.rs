@@ -1027,7 +1027,7 @@ async fn check_state_properties<S: SmtSolver>(
             if probe(solver, &undefined).await? {
                 return Err(VerifyError::new(format!(
                     "action '{}' ensures evaluation has a non-partial failure",
-                    action.name
+                    model.action_key(&action.name)
                 )));
             }
             let value = eval(
@@ -1135,7 +1135,7 @@ async fn check_typed_action_partial_operations<S: SmtSolver>(
         if probe(solver, &guard_undefined).await? {
             return Err(VerifyError::new(format!(
                 "action '{}' guard evaluation has a non-partial failure",
-                action.name
+                model.action_key(&action.name)
             )));
         }
 
@@ -1164,7 +1164,7 @@ async fn check_typed_action_partial_operations<S: SmtSolver>(
         if probe(solver, &body_undefined).await? {
             return Err(VerifyError::new(format!(
                 "action '{}' body evaluation has a non-partial failure",
-                action.name
+                model.action_key(&action.name)
             )));
         }
     }
@@ -1255,7 +1255,7 @@ async fn check_action_partial_operations<S: SmtSolver>(
         {
             return Err(VerifyError::new(format!(
                 "action '{}' guard evaluation has a non-partial failure",
-                action.name
+                model.action_key(&action.name)
             )));
         }
 
@@ -1282,7 +1282,7 @@ async fn check_action_partial_operations<S: SmtSolver>(
         {
             return Err(VerifyError::new(format!(
                 "action '{}' body evaluation has a non-partial failure",
-                action.name
+                model.action_key(&action.name)
             )));
         }
     }
