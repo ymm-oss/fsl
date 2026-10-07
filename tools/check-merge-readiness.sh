@@ -18,7 +18,7 @@
 # as SKIP, listed separately, and the lane still exits non-zero -- a skip is
 # not a pass. In CI skipping is not offered at all: the missing tool is a hard
 # failure, because a CI image that quietly loses a tool and still goes green is
-# exactly the false-green class docs/DESIGN-ci.md exists to prevent.
+# exactly the false-green class docs/design/DESIGN-ci.md exists to prevent.
 
 set -euo pipefail
 
@@ -206,11 +206,11 @@ check_automation() {
   # library, so run them directly without adding pytest to the fail-fast lane.
   step python3 -c 'from tests.test_codex_environment import test_semantic_findings_cannot_disappear_between_agents_and_checkpoint as codex_contract; from tests.test_claude_environment import test_semantic_findings_cannot_disappear_between_agents_and_checkpoint as claude_contract; codex_contract(); claude_contract()'
   # Accepting/rejecting controls for the agent-configuration-exemption
-  # classifier that ci.yml's heavy jobs now run in-job (docs/DESIGN-ci.md).
+  # classifier that ci.yml's heavy jobs now run in-job (docs/design/DESIGN-ci.md).
   step ./tools/check-product-gate-scope.sh selftest
   # Accepting/rejecting controls for the shard-completeness guard the sharded
   # `rust workspace` and `semantic mutation` aggregators depend on
-  # (docs/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
+  # (docs/design/DESIGN-ci.md, "Sharded pre-merge Linux evidence").
   step ./tools/check-shard-union.sh selftest
   # Stable logical shard artifacts deliberately admit a compatible mixed-
   # attempt cohort after a partial rerun. Calibrate the provenance/checksum/
@@ -224,15 +224,15 @@ check_automation() {
   # evidence; it is not part of the Rust-native product gate.
   step --needs-module pytest python3 -m pytest tests/test_coupled_change_meta.py -v
   # Accepting/rejecting controls for the ruleset drift audit's compareRuleset/
-  # validateContract classifier (docs/DESIGN-ci.md, "Ruleset drift audit").
+  # validateContract classifier (docs/design/DESIGN-ci.md, "Ruleset drift audit").
   step --needs node node --test .github/scripts/audit-ruleset-drift.test.mjs
   # Accepting/rejecting controls for the Actions cache budget audit, including
   # the rejecting fixture for `ci.yml`'s `save-if` guard: a pull-request-scoped
   # cache for one of its shared keys must fail the audit, so removing that guard
-  # cannot pass silently (docs/DESIGN-ci.md, "Actions cache budget").
+  # cannot pass silently (docs/design/DESIGN-ci.md, "Actions cache budget").
   step --needs node node --test .github/scripts/audit-cache-budget.test.mjs
   # Accepting/rejecting controls for all six changelog-fragment fail-closed
-  # controls (docs/DESIGN-changelog-fragments.md): nonconforming fragment
+  # controls (docs/design/DESIGN-changelog-fragments.md): nonconforming fragment
   # name, duplicate (id, category), nondeterministic/nonconforming order,
   # unaggregated-at-release plus direct-edit-forbidden, and aggregation
   # conservation. Pure, no BASE_SHA/HEAD_SHA needed here -- the real
@@ -243,7 +243,7 @@ check_automation() {
   step python3 tools/check-design-citation-headings.py selftest
   step python3 tools/check-design-citation-headings.py check
   # Markdown link targets and heading anchors, repository-wide
-  # (docs/DESIGN-ci.md, "Link-target resolution"). No network, no build: the
+  # (docs/design/DESIGN-ci.md, "Link-target resolution"). No network, no build: the
   # live audit reads 214 documents in about 0.1s. The pytest controls
   # reproduce issue #1127's measured table, including the two rows a
   # configured mystmd got wrong.

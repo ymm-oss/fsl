@@ -58,7 +58,7 @@ check_rust_checks() {
 readonly NEXTEST_VERSION="0.9.143"
 
 # Duration-aware pinning file for `rust-tests` (issue #720 Finding 1;
-# docs/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning" -- the sibling
+# docs/design/DESIGN-ci.md, "Duration-aware `rust-tests` shard pinning" -- the sibling
 # section of "Sharded pre-merge Linux evidence", not a part of it). `--partition
 # count:K/N` balances by test *count*, not wall clock: five binaries hold
 # ~77% of this suite's sequential time while most of the other ~170 finish
@@ -254,7 +254,7 @@ check_boundaries() {
 # Implementation fault operators (#537 C5): would the suite notice if the
 # verifier started lying? Deliberately kept out of `check_rust` — it patches a
 # scratch checkout and rebuilds `fslc` there once per operator, and
-# `docs/DESIGN-conformance-harness.md` puts that rebuild cost in the product
+# `docs/design/DESIGN-conformance-harness.md` puts that rebuild cost in the product
 # gate rather than in the phase every pull request runs.
 check_fault_operators() {
   ./tools/run-fault-operators.sh
@@ -319,6 +319,9 @@ check_wasm() {
   # The exit-code classifier below is only meaningful while 124/65/1 stay
   # distinct; pin it before the browser run can report through it.
   npm --prefix rust/fsl-wasm run test:outcome
+  # The browser run reads each spec's imports through this scanner; pin its
+  # comment and unterminated-string handling first (#1056).
+  npm --prefix rust/fsl-wasm run test:imports
   local status
   if npm --prefix rust/fsl-wasm run test:browser; then
     status=0

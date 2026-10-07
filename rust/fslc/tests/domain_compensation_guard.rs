@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #713: saga compensation must guard on BOTH the trigger event flag and the
-//! `after_event` flag (`docs/DESIGN-domain.md:72` — "saga compensation ->
+//! `after_event` flag (`docs/design/DESIGN-domain.md:72` — "saga compensation ->
 //! kernel action guarded by trigger/after event flags"). Before this fix,
 //! both lowering paths (`lower_saga_actions` in `domain_lowering.rs` and
 //! `render_saga_actions` in `domain.rs`) only required the trigger flag, so a
@@ -206,7 +206,7 @@ fn run_cli(args: &[&str]) -> (i32, Value) {
 /// warnings must now include the typed never-enabled warning naming the
 /// compensation action -- because under one-hot `event_*` flags, a
 /// trigger != `after_event` compensation is structurally disabled by the dual
-/// guard (accepted interim state, `docs/DESIGN-saga-history.md:60-62`).
+/// guard (accepted interim state, `docs/design/DESIGN-saga-history.md:60-62`).
 /// Reverting the fix removes this warning.
 #[test]
 fn order_fulfillment_saga_verify_surfaces_never_enabled_compensation_warning() {

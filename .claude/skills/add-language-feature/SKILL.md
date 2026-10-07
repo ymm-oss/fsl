@@ -17,7 +17,7 @@ typed Kernel behavior, evaluator semantics, CLI/report behavior, or public Kerne
 - `rust/fsl-tools` or `rust/fslc`: report/command/envelope behavior when applicable.
 - `rust/fsl-wasm`: only when Worker-visible behavior or shared envelopes require it.
 - Focused positive, negative, and boundary regression evidence.
-- `docs/LANGUAGE.md`, `docs/LANGUAGE.ja.md`, `skills/fsl/references/`, relevant `docs/DESIGN-*.md`,
+- `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md`, `skills/fsl/references/`, relevant `docs/design/DESIGN-*.md`,
   docs map, and a new `changelog.d/<id>-<slug>.<category>.md` fragment (see `changelog.d/README.md`)
   -- not a direct `CHANGELOG.md` edit.
 - A new declaration, binder, or reference form: `rust/fsl-lsp/src/index.rs` and a targeted role/scope

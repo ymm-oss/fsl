@@ -6,7 +6,7 @@
 generated output (tools/build_site_reference.py), not hand-authored — the same
 "commit the generated artifact, diff it in review" discipline as
 test_corpus_snapshot.py. This test regenerates into memory and compares against the
-committed files so a change to docs/LANGUAGE.md or the native CLI contract that forgot to
+committed files so a change to docs/manual/LANGUAGE.md or the native CLI contract that forgot to
 regenerate the site fails loudly instead of silently shipping a stale reference page.
 
 Regenerate after an intended change to LANGUAGE.md or the native CLI contract with::
@@ -36,23 +36,6 @@ def _load_tool():
     return mod
 
 
-def test_argparse_help_normalization_is_python_version_independent():
-    mod = _load_tool()
-    older = """usage: tool [-h] [--profile PROFILE]
-            -o OUTPUT file {check,verify}
-
-optional arguments:
-  -o OUTPUT, --output OUTPUT  destination
-"""
-    newer = """usage: tool [-h] [--profile PROFILE] -o OUTPUT file {check,verify} ...
-
-options:
-  -o, --output OUTPUT  destination
-"""
-
-    assert mod._normalize_argparse_help(older) == mod._normalize_argparse_help(newer)
-
-
 def _rejoin_language_md(lead: str, sections: list[tuple[str, str]]) -> str:
     """Rebuild a LANGUAGE.md-shaped text from split_language_md() output.
 
@@ -78,14 +61,14 @@ def test_language_reference_accepts_aligned_real_files():
 
 def test_language_reference_rejects_reordered_ja_sections(tmp_path, monkeypatch):
     """Rejecting control for issue #741: swapping two '## ' sections in
-    docs/LANGUAGE.ja.md leaves the section *count* unchanged but breaks positional
-    heading correspondence with docs/LANGUAGE.md. The generator must reject this
+    docs/manual/LANGUAGE.ja.md leaves the section *count* unchanged but breaks positional
+    heading correspondence with docs/manual/LANGUAGE.md. The generator must reject this
     instead of silently pairing each Japanese section body with the wrong English
     anchor/blurb. The swapped variant is a tmp_path fixture built from the real
-    LANGUAGE.ja.md at test time — the committed docs/LANGUAGE.ja.md is never touched.
+    LANGUAGE.ja.md at test time — the committed docs/manual/LANGUAGE.ja.md is never touched.
     """
     mod = _load_tool()
-    ja_text = (REPO_ROOT / "docs" / "LANGUAGE.ja.md").read_text(encoding="utf-8")
+    ja_text = (REPO_ROOT / "docs" / "manual" / "LANGUAGE.ja.md").read_text(encoding="utf-8")
     sections = mod.split_language_md(ja_text)
     lead = ja_text.split("\n## ", 1)[0]
 
@@ -111,18 +94,18 @@ def test_language_reference_rejects_reordered_ja_sections(tmp_path, monkeypatch)
 def test_language_reference_rejects_duplicate_en_section_numbers(tmp_path, monkeypatch):
     """Rejecting control for the section-number-uniqueness precondition added
     alongside issue #741's heading-correspondence check: that check only detects a
-    docs/LANGUAGE.ja.md reorder if docs/LANGUAGE.md's numeric section prefixes are
+    docs/manual/LANGUAGE.ja.md reorder if docs/manual/LANGUAGE.md's numeric section prefixes are
     themselves unique. If two English sections shared a number, a matching swap on
     the ja side would be prefix-equal at every position and slip through
     undetected — so uniqueness must be an enforced precondition, not an unstated
     assumption. The duplicate-numbered variant is a tmp_path fixture built from the
-    real LANGUAGE.md at test time — the committed docs/LANGUAGE.md is never
+    real LANGUAGE.md at test time — the committed docs/manual/LANGUAGE.md is never
     touched. SECTION_BLURBS is patched only to add an entry for the one renamed
     heading, so the unrelated "unknown SECTION_BLURBS entry" check does not
     preempt the check under test.
     """
     mod = _load_tool()
-    en_text = (REPO_ROOT / "docs" / "LANGUAGE.md").read_text(encoding="utf-8")
+    en_text = (REPO_ROOT / "docs" / "manual" / "LANGUAGE.md").read_text(encoding="utf-8")
     sections = mod.split_language_md(en_text)
     lead = en_text.split("\n## ", 1)[0]
 
@@ -156,7 +139,7 @@ def test_generated_reference_pages_are_fresh(page_id):
         committed = (OUT_DIR / f"{page_id}.{lang}.html").read_text(encoding="utf-8")
         if page_id == "language":
             tree = mod.render_language_tree(lang)
-            source_note = "docs/LANGUAGE.ja.md" if lang == "ja" else "docs/LANGUAGE.md"
+            source_note = "docs/manual/LANGUAGE.ja.md" if lang == "ja" else "docs/manual/LANGUAGE.md"
         else:
             tree = mod.render_cli_tree()
             source_note = "rust/fslc/cli-contract.json"

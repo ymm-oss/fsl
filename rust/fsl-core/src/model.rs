@@ -106,7 +106,7 @@ pub struct ActionDef {
     /// Set by compose expansion for a synchronized action. Its `requires` are
     /// inherited copies from several components, so per-clause redundancy
     /// diagnostics must not treat a duplicated component guard as removable
-    /// (`docs/DESIGN-vacuity.md` §2).
+    /// (`docs/design/DESIGN-vacuity.md` §2).
     pub sync: bool,
     pub meta: Option<MetaTag>,
     pub annotations: Annotations,
@@ -468,7 +468,7 @@ pub struct ModelError {
     /// Deliberately not read by [`fmt::Display`]: the rendered message already
     /// embeds the origin's location where one exists, and duplicating it here
     /// would change every existing message. The CLI reports this as the `loc`
-    /// that `docs/DESIGN-v1.md` §7.2 guarantees (issue 555).
+    /// that `docs/design/DESIGN-v1.md` §7.2 guarantees (issue 555).
     pub span: Option<Span>,
     /// Whether this is a name-resolution failure. See
     /// [`crate::CoreError::name_resolution`] (issue 565).

@@ -30,12 +30,13 @@
       <button class="btn op-expand" type="button">すべて展開</button>
       <button class="btn op-collapse" type="button">すべて折りたたむ</button>
     </div>
-    <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— docs/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary><div class="tree-body"><p>The authoritative native CLI maps every JSON <code>result</code> to a process exit code through <code>rust/fslc/src/outcome.rs</code> <code>exit_status()</code>, which implements the table in <code>docs/LANGUAGE.md</code>:</p><pre>Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
+    <details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">— docs/manual/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary><div class="tree-body"><p>The authoritative native CLI maps every JSON <code>result</code> to a process exit code through <code>rust/fslc/src/outcome.rs</code> <code>exit_status()</code>, which implements the table in <code>docs/manual/LANGUAGE.md</code>:</p><pre>Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
+indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
 result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
@@ -44,12 +45,12 @@ happens where the verification envelope is produced, so it is not confined to `c
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
 same exit from the folded verification envelope, and `sweep` reports `sweep_failed` for a true
-failure or `sweep_inconclusive` when every cell is depth-limited. The same
+failure or `sweep_inconclusive` when some scope has only depth-limited cells. The same
 `2` mapping is fail-closed for `chain`&#x27;s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
-`docs/DESIGN-layers.md` §7) and for `ledger --impl-log`&#x27;s replay input (a
+`docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`&#x27;s replay input (a
 replay error is not implementation-log evidence and must not be rendered as
-an empty ledger row — `docs/DESIGN-ledger.md`).</pre><p>Verdict-bearing commands print one JSON object to stdout with <code>{"fsl":"1.0", ...}</code>, and the exit code is derived from its <code>result</code>. Commands that emit a generated artifact write that artifact to stdout <em>under some flag combinations</em> instead — <code>fslc fmt PATH</code> prints formatted source, while <code>fslc fmt --check</code> returns a <code>format_check</code> envelope, and <code>document</code>, <code>db</code>, and <code>domain</code> subcommands print generated content or return an envelope depending on whether an output path is given. The rule is per command and per flag, so read a command's own <code>--help</code> before parsing its stdout as JSON. Native CLI and browser Worker <code>check</code>/<code>verify</code> envelopes also include <code>versions.verifier</code>, <code>versions.core</code>, and <code>versions.solver</code> (see <code>docs/LANGUAGE.md</code> §14). The machine-readable schema is <code>schemas/fslc/envelope.v1.schema.json</code>. The frozen Python compatibility reference under <code>src/fslc/</code> mirrors a subset for parity tests only — it is not the distribution surface.</p></div></details><div class="disclosure-tree"><details><summary>fslc ai <span class="tree-blurb">— 7 subcommands</span></summary><div class="tree-body"><pre>usage: fslc ai [-h] {check,replay,eval,regress,compare,drift,compat}
+an empty ledger row — `docs/design/DESIGN-ledger.md`).</pre><p>Verdict-bearing commands print one JSON object to stdout with <code>{"fsl":"1.0", ...}</code>, and the exit code is derived from its <code>result</code>. Commands that emit a generated artifact write that artifact to stdout <em>under some flag combinations</em> instead — <code>fslc fmt PATH</code> prints formatted source, while <code>fslc fmt --check</code> returns a <code>format_check</code> envelope, and <code>document</code>, <code>db</code>, and <code>domain</code> subcommands print generated content or return an envelope depending on whether an output path is given. The rule is per command and per flag, so read a command's own <code>--help</code> before parsing its stdout as JSON. Native CLI and browser Worker <code>check</code>/<code>verify</code> envelopes also include <code>versions.verifier</code>, <code>versions.core</code>, and <code>versions.solver</code> (see <code>docs/manual/LANGUAGE.md</code> §14). The machine-readable schema is <code>schemas/fslc/envelope.v1.schema.json</code>. The frozen Python compatibility reference under <code>src/fslc/</code> mirrors a subset for parity tests only — it is not the distribution surface.</p></div></details><div class="disclosure-tree"><details><summary>fslc ai <span class="tree-blurb">— 7 subcommands</span></summary><div class="tree-body"><pre>usage: fslc ai [-h] {check,replay,eval,regress,compare,drift,compat}
 
 positional arguments:
   {check,replay,eval,regress,compare,drift,compat}
@@ -248,7 +249,7 @@ options:
   -h, --help     show this help message and exit
   --depth DEPTH
 </pre></div></details></div></div></details>
-<details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [path]
+<details><summary>fslc chain</summary><div class="tree-body"><pre>usage: fslc chain [-h] [--keep-going] [--jobs JOBS] [path]
 
 positional arguments:
   path
@@ -256,6 +257,8 @@ positional arguments:
 options:
   -h, --help    show this help message and exit
   --keep-going
+  --jobs JOBS   run up to JOBS independent layers concurrently (default 1);
+                the report and exit code do not depend on JOBS
 </pre></div></details>
 <details><summary>fslc check</summary><div class="tree-body"><pre>usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file
 
@@ -642,7 +645,8 @@ positional arguments:
 
 options:
   -h, --help     show this help message and exit
-  --depth DEPTH
+  --depth DEPTH  max depth; a correspondence search that reaches the fixed
+                 state budget returns unknown_budget
 </pre></div></details>
 <details><summary>fslc replay</summary><div class="tree-body"><pre>usage: fslc replay [-h] (--trace TRACE | --from-log FROM_LOG) [--mapping MAPPING] file
 

@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use fsl_core::recursion;
 use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::eval;
+use crate::eval::{eval, evaluation_status, property_evaluation_status};
 use crate::liveness::{leadsto_bindings, leadsto_condition};
 use crate::trace::project_trace;
-use crate::transition::{ActionInstance, action_instances, transition_constraint};
+use crate::transition::{
+    ActionInstance, action_guard_definedness, action_has_partial_operation_candidate,
+    action_instances, action_statements_evaluation_status, transition_constraint,
+};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, i64_index, int_term, symbolic_state_with_suffix,
 };
@@ -166,14 +170,59 @@ fn attributed_property_condition<S: SmtSolver>(
 }
 
 /// Prove kernel invariants and transitions by k-induction after a successful
-/// bounded base case.
+/// bounded base case, then discharge the definedness obligation (#1196).
+///
+/// The k-induction premises (the invariant/transition chain over `ind*`
+/// states) live in a solver scope that is popped before the definedness
+/// obligation and before any later engine (ranked `leadsTo`) reuses the
+/// solver: an unsatisfiable chain must not make those queries vacuous.
 ///
 /// # Errors
 ///
 /// Returns [`VerifyError`] for unsupported symbolic expressions or solver
 /// failures.
-#[allow(clippy::too_many_lines)]
 pub async fn prove_induction<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    k_ind: usize,
+) -> Result<InductionResult, VerifyError> {
+    let result = prove_induction_invariants(model, solver, k_ind).await?;
+    if result.cti.is_some() {
+        return Ok(result);
+    }
+    let instances = action_instances(solver, model)?;
+    let cti = step_obligation_cti(solver, model, &instances).await?;
+    Ok(InductionResult {
+        k_used: result.k_used,
+        cti,
+    })
+}
+
+/// k-induction over invariants and transition properties only, without the
+/// definedness obligation. `fslc`'s `--lemma` adjudication uses this: a
+/// lemma's own truth does not depend on the definedness of the actions, and
+/// asking that definedness under the lemma alone (the user invariants are
+/// removed from the candidate model) would reject lemmas whose actions are
+/// protected by another invariant. A used lemma enters the target run as an
+/// auxiliary invariant, where [`prove_induction`] checks definedness.
+///
+/// # Errors
+///
+/// Returns [`VerifyError`] for unsupported symbolic expressions or solver
+/// failures.
+pub async fn prove_induction_invariants<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    k_ind: usize,
+) -> Result<InductionResult, VerifyError> {
+    solver.push();
+    let result = prove_induction_scoped(model, solver, k_ind).await;
+    solver.pop(1)?;
+    result
+}
+
+#[allow(clippy::too_many_lines)]
+async fn prove_induction_scoped<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
     k_ind: usize,
@@ -284,6 +333,406 @@ pub async fn prove_induction<S: SmtSolver>(
     })
 }
 
+/// Probe one partial-operation condition; on `sat`, project the witness
+/// trace over `states[..=upto]` before the scope is popped.
+async fn partial_witness<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    condition: &S::Term,
+    states: &[SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    upto: usize,
+) -> Result<Option<Vec<fsl_core::TraceStep>>, VerifyError> {
+    solver.push();
+    if let Err(error) = solver.assert(condition) {
+        solver.pop(1)?;
+        return Err(error.into());
+    }
+    let outcome = match solver.check().await {
+        Ok(SatResult::Sat) => {
+            project_trace(solver, model, states, choices, instances, upto).map(Some)
+        }
+        Ok(SatResult::Unsat) => Ok(None),
+        Ok(SatResult::Unknown) => Err(VerifyError::new("solver returned unknown in induction")),
+        Err(error) => Err(error.into()),
+    };
+    solver.pop(1)?;
+    outcome
+}
+
+fn partial_cti(name: String, k: usize, trace: Vec<fsl_core::TraceStep>) -> InductionCti {
+    InductionCti {
+        kind: violation_kind::PARTIAL_OP.to_owned(),
+        name,
+        k,
+        trace,
+    }
+}
+
+/// Append the attempted (rolled-back) action step to a one-state witness,
+/// mirroring BMC's `make_action_partial_operation_violation`.
+fn with_attempted_action<T>(
+    mut trace: Vec<fsl_core::TraceStep>,
+    instance: &ActionInstance<T>,
+) -> Vec<fsl_core::TraceStep> {
+    if let Some(last) = trace.last().cloned() {
+        trace.push(fsl_core::TraceStep {
+            step: last.step + 1,
+            state: last.state,
+            action: Some(fsl_core::TraceAction {
+                name: instance.action.clone(),
+                params: instance.concrete_params.clone(),
+            }),
+            changes: BTreeMap::new(),
+        });
+    }
+    trace
+}
+
+/// Definedness obligation of the induction step (#1196).
+///
+/// The step case evaluates guards, bodies, and properties with the
+/// totalizing symbolic evaluator, so on its own it never sees the
+/// `partial_op` failures that BMC and the explicit engine report when a
+/// reachable state reaches one of LANGUAGE.md §6's six partial operations.
+/// After every invariant and transition property is proved, this asks, for
+/// a free state `s` (and a free successor `s'`) under the proved invariants
+/// only — never under `init` — whether any of the per-step partial-operation
+/// checks BMC performs (`bmc::check_state_properties` /
+/// `bmc::check_action_partial_operations`) can fire:
+///
+/// - `Inv(s) ∧ first_partial(P, s)` for every invariant and every `leadsTo`
+///   trigger/goal (property context: division is total, sequence access is
+///   not — the same `property_evaluation_status` BMC uses);
+/// - `Inv(s) ∧ first_partial(guards_a, s)` for every action instance;
+/// - `Inv(s) ∧ enabled_a(s) ∧ first_partial(body_a, s)`;
+/// - `Inv(s) ∧ T(s, s') ∧ Inv(s') ∧ Trans(s, s') ∧ first_partial(Q, s, s')`
+///   for every `transition` property and every reached `ensures`;
+/// - `Inv(s) ∧ T(s, s') ∧ Inv(s') ∧ Trans(s, s') ∧ reached(E) ∧ defined(E) ∧
+///   ¬E` for every `ensures` E (#1217), returned as an `unknown_cti` of kind
+///   [`violation_kind::ENSURES`]. `reached` is BMC's: the instance is the
+///   selected one, its guards are enabled, its body is defined, and every
+///   earlier `ensures` of the action is defined and true.
+///
+/// Every reachable state satisfies the proved invariants, and every real
+/// step is a step of the totalized `T` (a defined path evaluates
+/// identically), so `unsat` for all of them shows no reachable state or step
+/// reaches a partial operation. A `sat` answer is returned as an
+/// `unknown_cti` of kind [`violation_kind::PARTIAL_OP`]: the witness
+/// satisfies the invariants but may be unreachable, exactly like an
+/// invariant CTI. The checks short-circuit on the same `and`/`or`/`=>`/`if`
+/// and guard-order reachability as BMC (`evaluation_status`), so a guard such
+/// as `d != 0 and x / d < 100` stays defined.
+#[allow(clippy::too_many_lines)]
+async fn step_obligation_cti<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    instances: &[ActionInstance<S::Term>],
+) -> Result<Option<InductionCti>, VerifyError> {
+    let has_action_candidates = model
+        .actions
+        .iter()
+        .any(action_has_partial_operation_candidate);
+    let has_property_candidates = model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .any(|property| fsl_core::expression_has_partial_operation_candidate(&property.expr))
+        || model.leadstos.iter().any(|property| {
+            fsl_core::expression_has_partial_operation_candidate(&property.before)
+                || fsl_core::expression_has_partial_operation_candidate(&property.after)
+        });
+    let has_ensures = model
+        .actions
+        .iter()
+        .any(|action| !action.ensures.is_empty());
+    if !has_action_candidates && !has_property_candidates && !has_ensures {
+        // Nothing can be undefined and no ensures is declared: declare no
+        // terms and issue no queries, so the solver session later engines
+        // share is untouched.
+        return Ok(None);
+    }
+    let properties = properties(model);
+    let def_states = vec![
+        symbolic_state_with_suffix(solver, model, "def0")?,
+        symbolic_state_with_suffix(solver, model, "def1")?,
+    ];
+    let choice = solver.constant("__def_choice@0", &fsl_solver::Sort::Int)?;
+    let choices = vec![choice.clone()];
+
+    solver.push();
+    let result = async {
+        for property in &properties {
+            let assumption = property_condition(solver, model, *property, &def_states[0], None)?;
+            solver.assert(&assumption)?;
+        }
+
+        // State-level property definedness.
+        for property in &model.invariants {
+            let status = property_evaluation_status(
+                solver,
+                model,
+                &property.expr,
+                &def_states[0],
+                &Bindings::new(),
+                None,
+            )?;
+            if !status.has_partial_operation {
+                continue;
+            }
+            solver.set_query_context("partial_op", &property.name);
+            if let Some(trace) = partial_witness(
+                solver,
+                model,
+                &status.first_partial,
+                &def_states,
+                &choices,
+                instances,
+                0,
+            )
+            .await?
+            {
+                return Ok(Some(partial_cti(
+                    format!("_partial_property_{}", property.name),
+                    0,
+                    trace,
+                )));
+            }
+        }
+        for property in &model.leadstos {
+            for binding in leadsto_bindings(solver, model, property)? {
+                for expression in [&property.before, &property.after] {
+                    let status = property_evaluation_status(
+                        solver,
+                        model,
+                        expression,
+                        &def_states[0],
+                        &binding.symbolic,
+                        None,
+                    )?;
+                    if !status.has_partial_operation {
+                        continue;
+                    }
+                    solver.set_query_context("partial_op", &property.name);
+                    if let Some(trace) = partial_witness(
+                        solver,
+                        model,
+                        &status.first_partial,
+                        &def_states,
+                        &choices,
+                        instances,
+                        0,
+                    )
+                    .await?
+                    {
+                        return Ok(Some(partial_cti(
+                            format!("_partial_property_{}", property.name),
+                            0,
+                            trace,
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Action guard and body definedness in the pre-state.
+        if has_action_candidates {
+            for instance in instances {
+                let action = &model.actions[instance.action_index];
+                let guard = action_guard_definedness(
+                    solver,
+                    model,
+                    action,
+                    &def_states[0],
+                    &instance.params,
+                )?;
+                let body = action_statements_evaluation_status(
+                    solver,
+                    model,
+                    action,
+                    &def_states[0],
+                    &guard.bindings,
+                )?;
+                if !guard.has_partial_operation && !body.has_partial_operation {
+                    continue;
+                }
+                solver.set_query_context("partial_op", &action.name);
+                let body_failure = solver.and(&[guard.enabled.clone(), body.first_partial])?;
+                for failure in [guard.first_partial, body_failure] {
+                    if let Some(trace) = partial_witness(
+                        solver,
+                        model,
+                        &failure,
+                        &def_states,
+                        &choices,
+                        instances,
+                        0,
+                    )
+                    .await?
+                    {
+                        return Ok(Some(partial_cti(
+                            format!("_partial_{}", action.name),
+                            1,
+                            with_attempted_action(trace, instance),
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Two-state obligations: transition-property definedness, and
+        // reached-ensures definedness and truth (#1217).
+        let mut transition_statuses = Vec::new();
+        for property in &model.transitions {
+            let status = property_evaluation_status(
+                solver,
+                model,
+                &property.expr,
+                &def_states[1],
+                &Bindings::new(),
+                Some(&def_states[0]),
+            )?;
+            if status.has_partial_operation {
+                transition_statuses.push((property.name.clone(), status.first_partial));
+            }
+        }
+        if transition_statuses.is_empty() && !has_ensures {
+            return Ok(None);
+        }
+        solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
+        solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
+        solver.assert(&transition_constraint(
+            solver,
+            model,
+            instances,
+            &def_states[0],
+            &def_states[1],
+            &choice,
+        )?)?;
+        for property in &properties {
+            let assumption = property_condition(solver, model, *property, &def_states[1], None)?;
+            solver.assert(&assumption)?;
+        }
+        for transition in &model.transitions {
+            let value = eval(
+                solver,
+                model,
+                &transition.expr,
+                &def_states[1],
+                &mut Bindings::new(),
+                Some(&def_states[0]),
+            )?;
+            solver.assert(bool_term(&value)?)?;
+        }
+        for (name, first_partial) in transition_statuses {
+            solver.set_query_context("partial_op", &name);
+            if let Some(trace) = partial_witness(
+                solver,
+                model,
+                &first_partial,
+                &def_states,
+                &choices,
+                instances,
+                1,
+            )
+            .await?
+            {
+                return Ok(Some(partial_cti(
+                    format!("_partial_property_{name}"),
+                    1,
+                    trace,
+                )));
+            }
+        }
+        if !has_ensures {
+            return Ok(None);
+        }
+        for (instance_index, instance) in instances.iter().enumerate() {
+            let action = &model.actions[instance.action_index];
+            if action.ensures.is_empty() {
+                continue;
+            }
+            let guard =
+                action_guard_definedness(solver, model, action, &def_states[0], &instance.params)?;
+            let mut bindings = guard.bindings;
+            let body = action_statements_evaluation_status(
+                solver,
+                model,
+                action,
+                &def_states[0],
+                &bindings,
+            )?;
+            let selected = solver.equal(&choice, &solver.int_value(i64_index(instance_index)?))?;
+            let mut reached = solver.and(&[selected, guard.enabled, body.fully_defined])?;
+            for ensure in &action.ensures {
+                let status = evaluation_status(
+                    solver,
+                    model,
+                    ensure,
+                    &def_states[1],
+                    &bindings,
+                    Some(&def_states[0]),
+                )?;
+                if status.has_partial_operation {
+                    solver.set_query_context("partial_op", &action.name);
+                    let partial = solver.and(&[reached.clone(), status.first_partial])?;
+                    if let Some(trace) = partial_witness(
+                        solver,
+                        model,
+                        &partial,
+                        &def_states,
+                        &choices,
+                        instances,
+                        1,
+                    )
+                    .await?
+                    {
+                        return Ok(Some(partial_cti(
+                            format!("_partial_{}", action.name),
+                            1,
+                            trace,
+                        )));
+                    }
+                }
+                let value = eval(
+                    solver,
+                    model,
+                    ensure,
+                    &def_states[1],
+                    &mut bindings,
+                    Some(&def_states[0]),
+                )?;
+                // #1217: a reached, defined ensures must hold, exactly as
+                // `bmc::check_state_properties` asks per step.
+                solver.set_query_context("ensures", &action.name);
+                let failure = solver.and(&[
+                    reached.clone(),
+                    status.fully_defined.clone(),
+                    solver.not(bool_term(&value)?)?,
+                ])?;
+                if let Some(trace) =
+                    partial_witness(solver, model, &failure, &def_states, &choices, instances, 1)
+                        .await?
+                {
+                    return Ok(Some(InductionCti {
+                        kind: violation_kind::ENSURES.to_owned(),
+                        name: action.name.clone(),
+                        k: 1,
+                        trace,
+                    }));
+                }
+                reached =
+                    solver.and(&[reached, status.fully_defined, bool_term(&value)?.clone()])?;
+            }
+        }
+        Ok(None)
+    }
+    .await;
+    solver.pop(1)?;
+    result
+}
+
 fn model_int<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<i64, VerifyError> {
     match solver.model_eval(term)? {
         Some(ModelValue::Int(value)) => Ok(value),
@@ -319,12 +768,24 @@ const HELPFUL_PROGRESS_HINT: &str = "helpful marks which action instance is resp
 /// over those values), matching the frozen Python reference's
 /// `_helpful_arg_value`.
 ///
+/// Recurses on itself through `Neg` and both `Binary` operands, so it is its own
+/// cycle entry for `recursion::guard` (#1164). Crash-witnessed by `verify
+/// --engine induction` on a `helpful step(c + 0 + ... + 0)` argument: 4000
+/// terms on a debug aarch64 build, 20000 on release.
+///
 /// # Errors
 ///
 /// Returns [`VerifyError`] when the expression references anything other than
 /// a bound leadsTo binder or a constant, or does not fold to an integer,
 /// Boolean, or enum-member value.
 fn eval_state_independent(
+    expr: &KernelExpr,
+    binder_env: &BTreeMap<String, FslValue>,
+) -> Result<FslValue, VerifyError> {
+    recursion::guard(|| eval_state_independent_inner(expr, binder_env))
+}
+
+fn eval_state_independent_inner(
     expr: &KernelExpr,
     binder_env: &BTreeMap<String, FslValue>,
 ) -> Result<FslValue, VerifyError> {
@@ -435,10 +896,74 @@ fn helpful_witnesses<S: SmtSolver>(
 ///
 /// Returns [`VerifyError`] for unsupported measures, symbolic expressions, or
 /// solver failures.
-#[allow(clippy::too_many_lines)]
 pub async fn prove_ranked_leadstos<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
+) -> Result<RankedLeadstoResult, VerifyError> {
+    prove_ranked_leadstos_assuming(model, solver, None).await
+}
+
+/// The positions in `model.leadstos` of the ranked `leadsTo` properties whose
+/// bounded fair-lasso search a BMC run may skip (#1149), because the ranking
+/// obligations of [`prove_ranked_leadstos`] hold for them over every state
+/// that satisfies exactly the properties that same BMC run checks at every
+/// unrolled step.
+///
+/// Properties are identified by position, never by name: `check` accepts two
+/// `leadsTo` blocks with the same name, and a name key would let one block's
+/// ranking proof withdraw the other block's search.
+///
+/// `checked_bounds` must be the implicit type-bound selection the BMC run
+/// uses (`None` = every `_bounds_*`); a bound the run does not check is not
+/// assumed here, because an unrolled state may violate it. The ranking stops
+/// at its first failing property, so only the properties proved before it
+/// are returned. Any ranking error (unsupported measure, solver `unknown` --
+/// including a solver timeout -- or fail-closed filters) returns the empty
+/// set: the fast path never reports anything itself, it only withdraws probes
+/// whose answer it has already shown to be `unsat`. See
+/// `docs/design/DESIGN-induction.md` §2.5.
+pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> BTreeSet<usize> {
+    let ranked = model
+        .leadstos
+        .iter()
+        .enumerate()
+        .filter(|(_, property)| property.decreases.is_some())
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if ranked.is_empty() {
+        return BTreeSet::new();
+    }
+    let Ok(result) = prove_ranked_leadstos_assuming(model, solver, checked_bounds).await else {
+        return BTreeSet::new();
+    };
+    // The ranking walks `model.leadstos` in order, skips the unranked ones,
+    // and pushes one proof per ranked property until its first failure, so
+    // its proofs are the ranked properties' prefix, position for position.
+    // The length and by-name check below therefore cannot fail by
+    // construction (names may repeat, but position i's proof carries
+    // position i's name); it exists only so that a future reordering of that
+    // loop discharges nothing instead of the wrong property.
+    if result.proofs.len() > ranked.len()
+        || result
+            .proofs
+            .iter()
+            .zip(&ranked)
+            .any(|(proof, &index)| proof.name != model.leadstos[index].name)
+    {
+        return BTreeSet::new();
+    }
+    ranked.into_iter().take(result.proofs.len()).collect()
+}
+
+#[allow(clippy::too_many_lines)]
+async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<RankedLeadstoResult, VerifyError> {
     let instances = action_instances(solver, model)?;
     let state0 = symbolic_state_with_suffix(solver, model, "rank0")?;
@@ -449,6 +974,11 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
     // pending states in which nothing is enabled (#1189).
     let deadlock_state = symbolic_state_with_suffix(solver, model, "rank_deadlock")?;
     for property in properties(model) {
+        if let (Property::Bound(_), Some(selected)) = (property, checked_bounds)
+            && !selected.contains(&property.name(model))
+        {
+            continue;
+        }
         solver.assert(&property_condition(solver, model, property, &state0, None)?)?;
         solver.assert(&property_condition(
             solver,
@@ -951,4 +1481,37 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
         proofs,
         failure: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #1164: `eval_state_independent` recursed without the stack guard.
+    ///
+    /// Tested here rather than through `fslc` because the CLI cannot open this
+    /// window reliably: on a debug aarch64 build the unguarded walk aborts a
+    /// `helpful step(c + 0 + ... + 0)` argument between 3800 and 3900 terms,
+    /// while the derived `Clone` of the parsed tree (#1186) aborts at 4500, so a
+    /// CLI witness would sit within a few hundred terms of both. Built directly,
+    /// the tree can be far deeper than either. It is leaked rather than dropped
+    /// because the derived `Drop` recurses as deeply as the derived `Clone`.
+    #[test]
+    fn a_deep_helpful_argument_folds_instead_of_overflowing_the_stack() {
+        const TERMS: i64 = 100_000;
+        let mut expr = KernelExpr::Var("c".to_owned());
+        for _ in 0..TERMS {
+            expr = KernelExpr::Binary {
+                op: "+".to_owned(),
+                left: Box::new(expr),
+                right: Box::new(KernelExpr::Num(1)),
+            };
+        }
+        let expr = Box::leak(Box::new(expr));
+        let binder_env = BTreeMap::from([("c".to_owned(), FslValue::Int(0))]);
+
+        let value = eval_state_independent(expr, &binder_env).expect("folds");
+
+        assert_eq!(value, FslValue::Int(TERMS));
+    }
 }

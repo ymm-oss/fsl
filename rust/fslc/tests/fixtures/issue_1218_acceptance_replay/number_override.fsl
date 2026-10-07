@@ -1,0 +1,19 @@
+// Port of NUMBER_OVERRIDE_SRC: a number argument outside a `--values` shrink.
+requirements NumOverrideDemo {
+  number Amount
+  entity Claim
+  process Claim with amount: Amount {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Employee with a: Amount when a >= 0 set amount = a
+      covers REQ-1 "submit"
+  }
+  acceptance AC-1 "submit with an amount outside the shrunken range" {
+    submit(0, 2)
+    expect Claim 0 in Submitted
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}

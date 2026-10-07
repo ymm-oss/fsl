@@ -3,7 +3,7 @@
 
 //! Metamorphic relations R1-R7 (#537 C6 slice 1, issue #648), each with a
 //! positive test and a negative control. Every positive expectation cites
-//! the `docs/LANGUAGE.md` contract sentence it is licensed by (never
+//! the `docs/manual/LANGUAGE.md` contract sentence it is licensed by (never
 //! transcribed from observed CLI output); R5's boundary expectation is
 //! declared structurally (domain bound coincides with the invariant bound
 //! by construction) before the mutation that breaks it runs.
@@ -488,7 +488,7 @@ fn r5_domain_size_boundary_verdict_change_matches_the_declared_structural_expect
 // LANGUAGE.md S3:557-570: `/`/`%` are total in property context (`a/0==0`,
 // `a%0==0`) but still reported `partial_op` when read unguarded in an
 // action's requires/body/ensures through every public verifier entry point,
-// including bare `fsl_verifier::verify_bounded`. `docs/LANGUAGE.md` S6's
+// including bare `fsl_verifier::verify_bounded`. `docs/manual/LANGUAGE.md` S6's
 // "Partial operations" row scopes the *checked* class to action context; it
 // makes no totalization promise for `head`/`pop`/`at`/index the way S3
 // explicitly does for `/`/`%`, so this suite exercises the six named

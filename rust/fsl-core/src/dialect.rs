@@ -157,6 +157,8 @@ pub struct RequirementsTraceCase {
 pub struct RequirementsTraceContract {
     pub acceptance: Vec<RequirementsTraceCase>,
     pub forbidden: Vec<RequirementsTraceCase>,
+    /// The source's [`verify_scope_type_names`].
+    pub scope_types: BTreeSet<String>,
 }
 
 fn qualified(name: &str) -> QualifiedName {
@@ -1484,7 +1486,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
 /// item loop, so a `control` declaration was parsed, accepted and discarded
 /// along with every `satisfies` that named it. `check` then answered `ok` for
 /// a policy pointing at a control that did not exist --- the same shape as the
-/// transition clauses issue #1109 closed --- while `docs/DESIGN-dialects.md`
+/// transition clauses issue #1109 closed --- while `docs/design/DESIGN-dialects.md`
 /// §3.2 already promised both checks and `src/fslc/dialects.py` already
 /// implemented them. This closes that port gap: an unknown reference is a
 /// located error, and a declared-but-unsatisfied control is an
@@ -2691,8 +2693,8 @@ pub fn lower_domain(domain: &fsl_syntax::DomainSpec) -> Result<KernelSpec, CoreE
 }
 
 /// The five documented `ai_component` `check hard { rule <Name>; }` rules
-/// (`docs/DESIGN-ai-hard.md` "Static Rules"). Naming any other rule is a
-/// check-time error (`docs/LANGUAGE.md` §13.6).
+/// (`docs/design/DESIGN-ai-hard.md` "Static Rules"). Naming any other rule is a
+/// check-time error (`docs/manual/LANGUAGE.md` §13.6).
 const AI_HARD_RULES: [&str; 5] = [
     "tool_authority",
     "human_approval_required",
@@ -2795,7 +2797,7 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
 }
 
 /// Validate and resolve `check hard { rule ...; }`, defaulting to all five
-/// rules when the block is omitted (`docs/LANGUAGE.md` §13.6).
+/// rules when the block is omitted (`docs/manual/LANGUAGE.md` §13.6).
 ///
 /// # Errors
 ///
@@ -3206,6 +3208,7 @@ pub fn requirements_trace_contract(
         .map(|process| process.process)
         .collect::<Vec<_>>();
     let stage_resolver = StageResolver::new(&stage_processes);
+    let scope_types = requirements_scope_type_names(&requirements);
     let mut acceptance = Vec::new();
     let mut forbidden = Vec::new();
     let mut acceptance_ids = BTreeSet::new();
@@ -3288,12 +3291,71 @@ pub fn requirements_trace_contract(
     Ok(Some(RequirementsTraceContract {
         acceptance,
         forbidden,
+        scope_types,
     }))
+}
+
+/// The type names whose finite domain is the `verify { instances / values }`
+/// scope rather than a declared type: every `entity` and `number`, and every
+/// business / requirements `process` (lowered as an entity). An implementation
+/// has no such bound, so a value outside the scope is not outside the type
+/// (#1229).
+///
+/// `None` for a document whose entity / number types are not all declared in
+/// its own source: a compose takes them from its components, and the other
+/// dialects generate them while lowering.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the source cannot be parsed.
+pub fn verify_scope_type_names(source: &str) -> Result<Option<BTreeSet<String>>, CoreError> {
+    Ok(match fsl_syntax::parse_surface_document(source)? {
+        SurfaceDocument::Spec(spec) => Some(
+            spec.items
+                .iter()
+                .filter_map(|item| match item {
+                    SpecItem::Entity(name, _) | SpecItem::Number(name, _) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        SurfaceDocument::Business(business) => Some(
+            business
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    BusinessItem::Entity(name, _) => Some(name.clone()),
+                    BusinessItem::Process { name, .. } => Some(name.name().to_owned()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        SurfaceDocument::Requirements(requirements) => {
+            Some(requirements_scope_type_names(&requirements))
+        }
+        _ => None,
+    })
+}
+
+fn requirements_scope_type_names(requirements: &SurfaceRequirements) -> BTreeSet<String> {
+    requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Common(SpecItem::Entity(name, _) | SpecItem::Number(name, _)) => {
+                Some(name.clone())
+            }
+            RequirementsItem::Process(BusinessItem::Process { name, .. }) => {
+                Some(name.name().to_owned())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Every requirement-block ID a requirements-layer source declares (`requirement
 /// REQ-ID "text" { ... }`), whether or not the block has any children to formalize
-/// it. `docs/DESIGN-strict-tags.md` section 2 requires this collection for
+/// it. `docs/design/DESIGN-strict-tags.md` section 2 requires this collection for
 /// `Declared` independently of `Referenced`, because an empty block reaches no
 /// annotation and would otherwise never surface as "declared but forgotten to
 /// formalize."

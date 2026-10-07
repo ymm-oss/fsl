@@ -14,7 +14,7 @@
             $a->observe();
             $this->adapter = $a;
         } catch (\Throwable $e) {
-            $this->markTestSkipped('Adapter not wired: ' . $e->getMessage());
+__UNWIRED_SETUP__
         }
     }
 

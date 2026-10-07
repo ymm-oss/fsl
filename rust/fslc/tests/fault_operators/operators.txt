@@ -1,5 +1,5 @@
 # Implementation fault operators (#537 C5).
-# Read `docs/DESIGN-conformance-harness.md` "Implementation fault operators"
+# Read `docs/design/DESIGN-conformance-harness.md` "Implementation fault operators"
 # before adding a row. Run with `tools/run-fault-operators.sh`.
 #
 # Adding an operator is two data edits and no code:

@@ -68,6 +68,25 @@ impl Z3Solver {
     ///
     /// Returns an error when the loaded Z3 library is not version 4.16.0.
     pub fn new() -> SolverResult<Self> {
+        Self::configured(None)
+    }
+
+    /// [`Self::new`], except that every `check` gives up after `milliseconds`
+    /// of wall-clock time and answers [`SatResult::Unknown`].
+    ///
+    /// For optional evidence only (the #1149 ranking pre-pass), whose caller
+    /// treats `Unknown` as "no shortcut" and falls back to a complete search:
+    /// a wall-clock limit makes the answer depend on machine load, so a
+    /// verdict must never rest on it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the loaded Z3 library is not version 4.16.0.
+    pub fn with_timeout_ms(milliseconds: u32) -> SolverResult<Self> {
+        Self::configured(Some(milliseconds))
+    }
+
+    fn configured(timeout_ms: Option<u32>) -> SolverResult<Self> {
         let version = version().to_owned();
         let required_prefix = format!("Z3 {REQUIRED_Z3_VERSION}.");
         if !version.starts_with(&required_prefix) {
@@ -79,6 +98,9 @@ impl Z3Solver {
         let mut params = Params::new();
         params.set_u32("random_seed", RANDOM_SEED);
         params.set_u32("smt.random_seed", RANDOM_SEED);
+        if let Some(timeout_ms) = timeout_ms {
+            params.set_u32("timeout", timeout_ms);
+        }
         solver.set_params(&params);
         Ok(Self {
             solver,
@@ -445,6 +467,12 @@ impl SmtSolver for Z3Solver {
         Ok(())
     }
 
+    fn reset(&mut self) -> SolverResult<()> {
+        self.solver.reset();
+        self.stack_depth = 0;
+        Ok(())
+    }
+
     fn assert(&mut self, term: &Self::Term) -> SolverResult<()> {
         self.solver.assert(expect_bool(term)?);
         Ok(())
@@ -607,6 +635,24 @@ mod tests {
             SatResult::Unsat
         );
         assert_eq!(solver.unsat_core()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn reset_drops_assertions_and_scopes_but_keeps_terms() -> SolverResult<()> {
+        let mut solver = Z3Solver::new()?;
+        let x = solver.constant("reset_x", &Sort::Int)?;
+        let one = solver.int_value(1);
+        solver.assert(&solver.equal(&x, &one)?)?;
+        solver.push();
+        solver.assert(&solver.equal(&x, &solver.int_value(2))?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Unsat);
+
+        solver.reset()?;
+        assert!(solver.pop(1).is_err(), "reset must clear the scope stack");
+        solver.assert(&solver.equal(&x, &solver.int_value(2))?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+        assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(2)));
         Ok(())
     }
 }

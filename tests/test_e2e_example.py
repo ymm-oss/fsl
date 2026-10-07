@@ -81,7 +81,7 @@ def test_e2e_readme_commands_and_break_demo_are_current():
         "./.venv/bin/python -m fslc scenarios examples/e2e/2_requirements.fsl",
         "./.venv/bin/python -m fslc verify examples/e2e/3_design.fsl --engine induction",
         "./.venv/bin/python -m fslc refine examples/e2e/3_design.fsl examples/e2e/2_requirements.fsl examples/e2e/3_refines_2.fsl --depth 8",
-        "./.venv/bin/python -m fslc testgen examples/e2e/3_design.fsl -o examples/e2e/impl/test_conformance.py",
+        "fslc testgen examples/e2e/3_design.fsl -o examples/e2e/impl/test_conformance.py",
         "(cd examples/e2e/impl && ../../../.venv/bin/python -m pytest -q)",
         "./.venv/bin/python -m pytest tests/ -q",
     ]

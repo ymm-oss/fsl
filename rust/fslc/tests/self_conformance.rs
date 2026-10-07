@@ -759,7 +759,7 @@ enum FoldClass {
 
 /// Independent fold registry. Registered result literals are transcribed
 /// from `rust/fslc/src/outcome.rs:128-282` (66 result literals); sibling-field
-/// semantics are documented at `docs/LANGUAGE.md:1043-1070`. This function
+/// semantics are documented at `docs/manual/LANGUAGE.md:1043-1070`. This function
 /// deliberately does not call the production classifier.
 #[allow(clippy::too_many_lines)]
 fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
@@ -894,7 +894,7 @@ fn fold_action(output: &Value) -> Result<Value, String> {
     })
 }
 
-/// Exact compound result/exit pairs follow `docs/LANGUAGE.md:1043-1070` and
+/// Exact compound result/exit pairs follow `docs/manual/LANGUAGE.md:1043-1070` and
 /// the command contracts at `main.rs:3491-3698` (`run_sweep`), `:4127-4159`
 /// (`run_project_chain`'s result/exit decision), and `:14444-14557`
 /// (`run_analyze_batch`).
@@ -909,7 +909,7 @@ fn finalize_action(command: CompoundCommand, top: &RawCliOutput) -> Result<Value
         | (CompoundCommand::Chain, "verified", 0)
         | (CompoundCommand::AnalyzeBatch, "analyzed", 0) => "finalize_pass",
         (CompoundCommand::Sweep, "sweep_failed" | "sweep_inconclusive", 1)
-        | (CompoundCommand::Chain, "violated", 1)
+        | (CompoundCommand::Chain, "violated" | "indeterminate", 1)
         | (CompoundCommand::Chain | CompoundCommand::AnalyzeBatch, "error", 2) => "finalize_fail",
         _ => {
             return Err(format!(
@@ -990,7 +990,21 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
         vacuity.output
     );
 
-    let mutation = run_cli(&strings(&["mutate", FOLD_SPEC, "--depth", "8"]));
+    assert_fold_mutation_evidence();
+}
+
+/// Mutation evidence for the fold self-spec's finalize guards.
+fn assert_fold_mutation_evidence() {
+    // The external mutants drop one disjunct each from finalize_fail's guard
+    // (#1089); the built-in catalog only removes or negates whole guards.
+    let mutation = run_cli(&strings(&[
+        "mutate",
+        FOLD_SPEC,
+        "--depth",
+        "8",
+        "--from",
+        "rust/fslc/tests/fixtures/fslc_fold_finalize_fail_disjuncts.jsonl",
+    ]));
     assert_eq!(
         (mutation.output["result"].as_str(), mutation.exit_code),
         (Some("mutated"), 0)
@@ -1007,40 +1021,69 @@ fn fold_spec_has_native_proof_vacuity_and_mutation_evidence() {
         "fold mutation kill rate is too weak: {}",
         mutation.output
     );
+    // (target, killing property, what a surviving mutant would let through).
+    // The third guard (`requires scope_success or not scope_inconclusive`) is
+    // the all-inconclusive-cannot-pass fix, the same reward-test hole #1080's
+    // review flagged for the all-failure case; the fourth (`requires not
+    // unsettled_seen`) is #1089's per-scope rule, without which a success in
+    // one sweep scope could absorb another scope's inconclusive cells.
+    let guards = [
+        (
+            "finalize_pass requires #2",
+            "FailureIsSticky",
+            "failure-sticky",
+        ),
+        (
+            "finalize_pass requires #3",
+            "FinalizeAgreesWithFolded",
+            "inconclusive-cannot-pass",
+        ),
+        (
+            "finalize_pass requires #4",
+            "FinalizeAgreesWithFolded",
+            "unsettled-scope-cannot-pass",
+        ),
+    ];
+    let mutants = mutation.output["mutants"]
+        .as_array()
+        .expect("mutation rows");
+    // Dropping either new finalize_fail disjunct only disables failing, so no
+    // safety property can see it; each is pinned by a reachable fail witness
+    // that no other disjunct can enable.
+    for (id, killed_by) in [
+        (
+            "finalize_fail_drop_unsettled_seen",
+            "ReachFailOnClosedUnsettledScope",
+        ),
+        (
+            "finalize_fail_drop_open_unsettled_scope",
+            "ReachFailOnOpenUnsettledScope",
+        ),
+    ] {
+        assert!(
+            mutants.iter().any(|mutant| {
+                mutant["id"] == id
+                    && mutant["source"] == "external"
+                    && mutant["status"] == "killed"
+                    && mutant["killed_by"] == killed_by
+            }),
+            "external mutant {id} was not killed by {killed_by}: {}",
+            mutation.output
+        );
+    }
     for operator in ["requires_remove", "requires_negate"] {
-        assert!(
-            mutation.output["mutants"]
-                .as_array()
-                .expect("mutation rows")
-                .iter()
-                .any(|mutant| {
+        for (target, killed_by, guard) in guards {
+            assert!(
+                mutants.iter().any(|mutant| {
                     mutant["op"] == operator
-                        && mutant["target"] == "finalize_pass requires #2"
+                        && mutant["target"] == target
                         && mutant["status"] == "killed"
-                        && mutant["killed_by"] == "FailureIsSticky"
+                        && mutant["killed_by"] == killed_by
                 }),
-            "{operator} of the failure-sticky finalize guard survived: {}",
-            mutation.output
-        );
-        // finalize_pass's third guard (`requires success_seen or not
-        // inconclusive_seen`) is the all-inconclusive-cannot-pass fix; a
-        // surviving mutant here means an all-inconclusive fold could
-        // wrongly finalize pass, the same reward-test hole #1080's review
-        // flagged for the all-failure case.
-        assert!(
-            mutation.output["mutants"]
-                .as_array()
-                .expect("mutation rows")
-                .iter()
-                .any(|mutant| {
-                    mutant["op"] == operator
-                        && mutant["target"] == "finalize_pass requires #3"
-                        && mutant["status"] == "killed"
-                        && mutant["killed_by"] == "FinalizeAgreesWithFolded"
-                }),
-            "{operator} of the inconclusive-cannot-pass finalize guard survived: {}",
-            mutation.output
-        );
+                "{operator} of the {guard} finalize guard survived: {}",
+                mutation.output
+            );
+        }
     }
 }
 
@@ -1080,6 +1123,40 @@ fn fold_classifier_is_fail_closed() {
     }
 }
 
+/// Sweep's fold trace: every cell's verdict, with `fold_scope_boundary`
+/// between consecutive cells whose `--instances`/`--values` scope differs.
+/// Depth cells of one scope share a scope (#1089); `run_sweep` emits a scope's
+/// depth cells contiguously, which this adapter checks rather than assumes.
+fn sweep_fold_trace(top: &RawCliOutput) -> Result<Vec<Value>, String> {
+    let results = top.output["sweep"]["results"]
+        .as_array()
+        .ok_or_else(|| format!("sweep results missing: {}", top.output))?;
+    let mut trace = Vec::new();
+    let mut closed_scopes = Vec::new();
+    let mut open_scope: Option<Value> = None;
+    for entry in results {
+        let scope = json!({
+            "instances": entry["scope"]["instances"],
+            "values": entry["scope"]["values"],
+        });
+        if open_scope.as_ref() != Some(&scope) {
+            if closed_scopes.contains(&scope) {
+                return Err(format!(
+                    "sweep scope {scope} is not contiguous: {}",
+                    top.output
+                ));
+            }
+            if let Some(previous) = open_scope.replace(scope) {
+                closed_scopes.push(previous);
+                trace.push(json!({"action":"fold_scope_boundary"}));
+            }
+        }
+        trace.push(fold_action(&entry["verification"])?);
+    }
+    trace.push(finalize_action(CompoundCommand::Sweep, top)?);
+    Ok(trace)
+}
+
 #[test]
 fn sweep_subverdicts_conform_to_the_fold_model() {
     let cart_v1 = run_cli(&strings(&["sweep", "specs/cart_v1.fsl"]));
@@ -1088,14 +1165,7 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "{}",
         cart_v1.output
     );
-    let cart_v1_items = cart_v1.output["sweep"]["results"]
-        .as_array()
-        .expect("cart_v1 sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
-    let cart_v1_trace =
-        fold_trace(CompoundCommand::Sweep, &cart_v1_items, &cart_v1).expect("map cart_v1 sweep");
+    let cart_v1_trace = sweep_fold_trace(&cart_v1).expect("map cart_v1 sweep");
     assert_conformant(FOLD_SPEC, &cart_v1_trace, "cart_v1 sweep fold");
 
     let passed = run_cli(&strings(&[
@@ -1104,14 +1174,7 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "--depth",
         "0..3",
     ]));
-    let passed_items = passed.output["sweep"]["results"]
-        .as_array()
-        .expect("clean sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
-    let passed_trace =
-        fold_trace(CompoundCommand::Sweep, &passed_items, &passed).expect("map clean sweep");
+    let passed_trace = sweep_fold_trace(&passed).expect("map clean sweep");
     assert_conformant(FOLD_SPEC, &passed_trace, "clean sweep fold");
 
     let failed = run_cli(&strings(&[
@@ -1121,21 +1184,16 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "0..3",
     ]));
     assert_eq!(failed.output["result"], "sweep_failed", "{}", failed.output);
-    let failed_items = failed.output["sweep"]["results"]
-        .as_array()
-        .expect("failed sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
     assert!(
-        failed_items
+        failed.output["sweep"]["results"]
+            .as_array()
+            .expect("failed sweep results")
             .iter()
-            .any(|item| fold_result_class(item) == Ok(FoldClass::Failure)),
+            .any(|entry| fold_result_class(&entry["verification"]) == Ok(FoldClass::Failure)),
         "failed sweep must expose a failure item: {}",
         failed.output
     );
-    let failed_trace =
-        fold_trace(CompoundCommand::Sweep, &failed_items, &failed).expect("map failed sweep");
+    let failed_trace = sweep_fold_trace(&failed).expect("map failed sweep");
     assert_conformant(FOLD_SPEC, &failed_trace, "failed sweep fold");
     assert_nonconformant(
         FOLD_SPEC,
@@ -1149,19 +1207,54 @@ fn sweep_subverdicts_conform_to_the_fold_model() {
         "{}",
         inconclusive.output
     );
-    let inconclusive_items = inconclusive.output["sweep"]["results"]
-        .as_array()
-        .expect("inconclusive sweep results")
-        .iter()
-        .map(|entry| entry["verification"].clone())
-        .collect::<Vec<_>>();
-    let inconclusive_trace = fold_trace(CompoundCommand::Sweep, &inconclusive_items, &inconclusive)
-        .expect("map inconclusive sweep");
+    let inconclusive_trace = sweep_fold_trace(&inconclusive).expect("map inconclusive sweep");
     assert_conformant(FOLD_SPEC, &inconclusive_trace, "inconclusive sweep fold");
     assert_nonconformant(
         FOLD_SPEC,
         &rejected_finalize_pass(&inconclusive_trace),
         "all-inconclusive sweep cannot finalize pass",
+    );
+
+    // #1089: depth-limited values scopes followed by successful ones. The
+    // real `sweep_inconclusive` replays conformantly only because the scope
+    // boundaries keep the later successes from settling the earlier scopes.
+    let unsettled = run_cli(&strings(&[
+        "sweep",
+        "rust/fslc/tests/fixtures/sweep_values_scope_inconclusive.fsl",
+        "--values",
+        "Amount=1..5",
+        "--depth",
+        "3..3",
+    ]));
+    assert_eq!(
+        (unsettled.output["result"].as_str(), unsettled.exit_code),
+        (Some("sweep_inconclusive"), 1),
+        "{}",
+        unsettled.output
+    );
+    let unsettled_trace = sweep_fold_trace(&unsettled).expect("map unsettled-scope sweep");
+    assert!(
+        unsettled_trace.contains(&json!({"action":"fold_sub_success"}))
+            && unsettled_trace.contains(&json!({"action":"fold_scope_boundary"})),
+        "unsettled-scope sweep must fold a success and a scope boundary: {unsettled_trace:?}"
+    );
+    assert_conformant(FOLD_SPEC, &unsettled_trace, "unsettled-scope sweep fold");
+    assert_nonconformant(
+        FOLD_SPEC,
+        &rejected_finalize_pass(&unsettled_trace),
+        "a success in another scope cannot settle an inconclusive scope",
+    );
+    // Control: without the boundaries the same cells form one settled scope,
+    // so the model rejects the real `sweep_inconclusive` verdict.
+    let flat_trace = unsettled_trace
+        .iter()
+        .filter(|action| **action != json!({"action":"fold_scope_boundary"}))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_nonconformant(
+        FOLD_SPEC,
+        &flat_trace,
+        "scope boundaries are what make the unsettled verdict conformant",
     );
 }
 
@@ -1208,6 +1301,44 @@ fn copy_chain_fixtures(destination: &Path) {
     }
 }
 
+/// The `[impl]` command-layer arm of [`chain_layer_fold_class`]. Exit-0
+/// outcomes other than `passed` (#1200) must carry the producer's `reason`.
+fn command_layer_fold_class(
+    layer: &Value,
+    status: &str,
+    result: &str,
+    exit_code: i64,
+    detail: &Value,
+) -> Result<FoldClass, String> {
+    // A rejected `[impl]` table (unknown key, empty `report`, both `report`
+    // and `evidence`) never runs its command (#1200).
+    if detail.get("returncode").is_none() {
+        return match (status, result, exit_code, detail["result"].as_str()) {
+            ("failed", "error", 2, Some("error")) if detail["kind"] == "parse" => {
+                Ok(FoldClass::Failure)
+            }
+            _ => Err(format!("contradictory command chain layer: {layer}")),
+        };
+    }
+    let return_code = detail
+        .get("returncode")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("command layer missing returncode: {layer}"))?;
+    match (status, result, exit_code, detail["result"].as_str()) {
+        ("passed", "passed", 0, Some("passed")) if return_code == 0 => Ok(FoldClass::Success),
+        ("failed", "failed", 1, Some("failed")) if return_code != 0 => Ok(FoldClass::Failure),
+        // #1200: exit 0, but the report records a failing test case, or
+        // nothing shows that any test executed.
+        ("failed", "failed", 1, Some("failed"))
+        | ("failed", "indeterminate", 1, Some("indeterminate"))
+            if return_code == 0 && detail["reason"].is_string() =>
+        {
+            Ok(FoldClass::Failure)
+        }
+        _ => Err(format!("contradictory command chain layer: {layer}")),
+    }
+}
+
 /// Independent adapter for `main.rs:3746-3765::chain_layer_passes` and the
 /// layer envelopes produced at `main.rs:3883-4107`. It deliberately does not
 /// call that function or the production outcome classifier.
@@ -1244,15 +1375,7 @@ fn chain_layer_fold_class(layer: &Value) -> Result<FoldClass, String> {
         .get("detail")
         .ok_or_else(|| format!("non-skipped chain layer missing detail: {layer}"))?;
     if kind == "command" {
-        let return_code = detail
-            .get("returncode")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| format!("command layer missing returncode: {layer}"))?;
-        return match (status, result, exit_code, detail["result"].as_str()) {
-            ("passed", "passed", 0, Some("passed")) if return_code == 0 => Ok(FoldClass::Success),
-            ("failed", "failed", 1, Some("failed")) if return_code != 0 => Ok(FoldClass::Failure),
-            _ => Err(format!("contradictory command chain layer: {layer}")),
-        };
+        return command_layer_fold_class(layer, status, result, exit_code, detail);
     }
     if !matches!(kind, "verify" | "check" | "refine") {
         return Err(format!(
@@ -1362,6 +1485,22 @@ fn chain_layer_adapter_is_fail_closed() {
         );
     }
 
+    // #1200: `failed` with exit 0 needs the report's reason, and
+    // `indeterminate` is only an exit-0 outcome.
+    for contradictory in [
+        json!({"layer":"impl","kind":"command","status":"failed","result":"failed","exit_code":1,
+               "detail":{"result":"failed","returncode":0}}),
+        json!({"layer":"impl","kind":"command","status":"failed","result":"indeterminate","exit_code":1,
+               "detail":{"result":"indeterminate","returncode":2,"reason":"x"}}),
+        json!({"layer":"impl","kind":"command","status":"passed","result":"indeterminate","exit_code":0,
+               "detail":{"result":"indeterminate","returncode":0,"reason":"x"}}),
+    ] {
+        assert!(
+            chain_layer_fold_class(&contradictory).is_err(),
+            "contradictory command layer must fail closed: {contradictory}"
+        );
+    }
+
     let mut missing_kind = valid;
     missing_kind
         .as_object_mut()
@@ -1457,6 +1596,98 @@ fn chain_layer_verdicts_conform_to_the_fold_model() {
         &command_failed_trace,
         "command-failed chain fold",
     );
+}
+
+#[test]
+fn chain_impl_evidence_verdicts_conform_to_the_fold_model() {
+    let directory = scratch_dir("chain-impl-evidence");
+    copy_chain_fixtures(&directory);
+
+    // #1200: the same exit-0 command without `evidence = "exit_code"` (and
+    // without a `report`) is `indeterminate`, a failure the chain cannot
+    // finalize as a pass.
+    let manifest = fs::read_to_string(directory.join("fsl-project.toml"))
+        .expect("read portable clean manifest");
+    assert!(
+        manifest.contains("evidence = \"exit_code\"\n"),
+        "{manifest}"
+    );
+    fs::write(
+        directory.join("fsl-project-no-evidence.toml"),
+        manifest.replace("evidence = \"exit_code\"\n", ""),
+    )
+    .expect("write no-evidence manifest");
+    let indeterminate = run_cli_at(
+        &directory,
+        &strings(&["chain", "fsl-project-no-evidence.toml"]),
+    );
+    assert_eq!(
+        indeterminate.output["result"], "indeterminate",
+        "{}",
+        indeterminate.output
+    );
+    assert_eq!(indeterminate.exit_code, 1, "{}", indeterminate.output);
+    let indeterminate_items = indeterminate.output["layers"]
+        .as_array()
+        .expect("indeterminate chain layers")
+        .clone();
+    assert!(
+        indeterminate_items
+            .iter()
+            .any(|item| item["result"] == "indeterminate"
+                && item["detail"]["returncode"] == 0
+                && chain_layer_fold_class(item) == Ok(FoldClass::Failure)),
+        "an exit-0 command without evidence must fold as failure: {}",
+        indeterminate.output
+    );
+    let indeterminate_trace =
+        chain_fold_trace(&indeterminate_items, &indeterminate).expect("map indeterminate chain");
+    assert_conformant(FOLD_SPEC, &indeterminate_trace, "indeterminate chain fold");
+    assert_nonconformant(
+        FOLD_SPEC,
+        &rejected_finalize_pass(&indeterminate_trace),
+        "indeterminate chain cannot finalize pass",
+    );
+
+    // #1200: exit 0 while the named report records a failing test case.
+    #[cfg(unix)]
+    {
+        fs::write(
+            directory.join("failing-junit.xml"),
+            "<testsuite tests=\"1\"><testcase name=\"a\"><failure message=\"boom\"/></testcase></testsuite>",
+        )
+        .expect("write failing junit fixture");
+        fs::write(
+            directory.join("fsl-project-report-fails.toml"),
+            "[impl]\ncommand = \"cp failing-junit.xml report.xml\"\nreport = \"report.xml\"\n",
+        )
+        .expect("write report-fails manifest");
+        let report_failed = run_cli_at(
+            &directory,
+            &strings(&["chain", "fsl-project-report-fails.toml"]),
+        );
+        assert_eq!(
+            report_failed.output["result"], "violated",
+            "{}",
+            report_failed.output
+        );
+        let report_failed_items = report_failed.output["layers"]
+            .as_array()
+            .expect("report-failed chain layers")
+            .clone();
+        assert!(
+            report_failed_items
+                .iter()
+                .any(|item| item["result"] == "failed"
+                    && item["detail"]["returncode"] == 0
+                    && chain_layer_fold_class(item) == Ok(FoldClass::Failure)),
+            "an exit-0 command whose report fails must fold as failure: {}",
+            report_failed.output
+        );
+        let report_failed_trace = chain_fold_trace(&report_failed_items, &report_failed)
+            .expect("map report-failed chain");
+        assert_conformant(FOLD_SPEC, &report_failed_trace, "report-failed chain fold");
+    }
 }
 
 #[test]

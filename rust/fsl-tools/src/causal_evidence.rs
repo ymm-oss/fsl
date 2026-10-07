@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! External-evidence ingestion for the review-only causal profile
-//! (issue #322, `docs/DESIGN-causal.md` §1 Evidence Plane).
+//! (issue #322, `docs/design/DESIGN-causal.md` §1 Evidence Plane).
 //!
 //! FSL validates artifact schema, references, scope, period, digests, and
 //! lifecycle chains, and aggregates a deterministic per-claim

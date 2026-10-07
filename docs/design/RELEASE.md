@@ -1,0 +1,318 @@
+# Release procedure
+
+This document is the authoritative execution procedure for FSL releases. The
+internal `.claude/skills/release/SKILL.md` defines the wider branch lifecycle;
+change both in the same pull request when either contract changes.
+
+The release path is:
+
+```text
+short-lived branch -> main -> production -> vX.Y.Z
+```
+
+FSL is distributed by the tag-driven GitHub Release workflow only. Do not
+publish the frozen Python compatibility reference to PyPI or the Rust crates to
+crates.io.
+
+The `production` branch and its required `production-policy` check must already
+be adopted before promotion. When the latest released baseline predates that
+workflow, follow the internal release skill's one-time reviewed bootstrap; a
+`pull_request_target` workflow cannot validate its own first installation when
+it is absent from the base branch.
+
+## Supported native targets
+
+Each target ships both `fslc` and `fslc-lsp`, with a SHA-256 file for each
+binary.
+
+| Target | Runner | Binary suffix |
+|---|---|---|
+| macOS arm64 (Apple Silicon, macOS 14+) | `macos-15` | `macos-arm64` |
+| Linux x64 | `ubuntu-24.04` | `linux-x64` |
+| Linux arm64 | `ubuntu-24.04-arm` | `linux-arm64` |
+| Windows x64 | `windows-latest` | `windows-x64.exe` |
+
+Intel macOS (`macos-x64`) is not supported. Releases also contain the
+checksummed Agent Skill bundle, VS Code extension, and Public Kernel contract
+bundles produced by `.github/workflows/release.yml`.
+`install.sh` resolves the latest published tag once and uses that same tag for
+the skill bundle and both native binaries. It installs only those payloads into
+the user's data directory; it does not clone the repository. The v3.0.0
+compatibility path extracts only the skills from that exact tag's source archive
+because the first native release predates the checksummed skill bundle.
+
+Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
+runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
+It also rejects a dynamic dependency on `libz3`.
+
+## 1. Prepare the release commit on main
+
+1. Start from a clean, current `main`. Fetch `origin` and confirm local `HEAD`
+   equals `origin/main`.
+2. Review the `CHANGELOG.md` `[Unreleased]` section together with every fragment
+   under `changelog.d/` and confirm, across both, that every notable change
+   since the previous tag is described. Step 7 aggregates the two into one
+   version section; nothing here should be missing from either source.
+3. Choose `X.Y.Z` using SemVer. Confirm that local and remote tag `vX.Y.Z` and
+   the corresponding GitHub Release do not exist.
+
+   This project has consistently shipped Conventional-Commit breaking changes (`type(scope)!:`)
+   in **minor** releases, not major: `fix(domain)!` (2026-08-08) shipped in v4.3.0,
+   `fix(domain)!`/`fix(syntax)!` (2026-07-29/30) in v4.2.0, and several `!` commits
+   (2026-07-25..27) in v4.1.0. A CLI exit-code or envelope change is therefore a minor
+   bump here unless the release also removes a documented command or contract surface.
+   **Record the reason in the release pull request when a release contains any `!` commit**,
+   so the choice is not re-derived from git log each time.
+4. On a short-lived branch from `main`, change
+   `[workspace.package].version` in `rust/Cargo.toml`. Regenerate
+   `rust/Cargo.lock` with Cargo, then prove the lockfile and CLI version agree:
+
+   ```bash
+   cargo check --manifest-path rust/Cargo.toml --workspace
+   cargo check --manifest-path rust/Cargo.toml --workspace --locked
+   test "$(cargo run --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -- --version)" = "fslc X.Y.Z"
+   ```
+
+   Do not hand-edit `rust/Cargo.lock`. Do not bump `pyproject.toml` for a native
+   GitHub Release; the Python package is a frozen, unpublished compatibility
+   reference.
+5. Bump the VS Code extension to the same version, so the release unit stays
+   atomic. Let npm write both files rather than hand-editing the lockfile:
+
+   ```bash
+   ( cd editors/vscode && npm version X.Y.Z --no-git-tag-version )
+   ```
+
+   `native_release_unit_is_atomic_pinned_and_platform_closed` asserts
+   `editors/vscode/package.json`'s version equals the workspace version, so
+   skipping this fails the product gate rather than shipping a mismatched
+   extension.
+6. Regenerate the domain characterization baseline, which embeds the CLI
+   version in every recorded envelope:
+
+   ```bash
+   UPDATE_DOMAIN_CHARACTERIZATION=1 \
+     cargo test --manifest-path rust/Cargo.toml -p fslc-rust \
+     --test domain_expression_characterization --locked
+   ```
+
+   Review the diff and require it to contain version strings only. A generated
+   snapshot is regenerated, never hand-edited; any other change in that diff is
+   a contract change that does not belong in a release commit.
+
+   Regenerate the induction contract golden for the same reason — it records each
+   envelope's `versions` block:
+
+   ```bash
+   UPDATE_INDUCTION_CLI_CONTRACT=1 \
+     cargo test --manifest-path rust/Cargo.toml -p fslc-rust \
+     --test induction_cli_contract --locked
+   ```
+
+   Apply the same review rule: version strings only. Skipping this fails the complete
+   product gate, not merge-readiness — observed on the v4.4.1 candidate, where
+   `induction_cli_contract` compared 4.4.0 against 4.4.1.
+
+   **Steps 4–6 above touch `rust/Cargo.toml`, `rust/Cargo.lock`, the domain characterization
+   baseline, the induction contract golden, `editors/vscode/package.json`, and
+   `editors/vscode/package-lock.json`.** The first four are product surfaces under `tools/aggregate_changelog.sh`'s `is_product_surface_path`,
+   and are exactly what `is_release_bump_path` names — the fixed set the merge-readiness
+   `check-pr` gate exempts from needing a fragment once this diff's `CHANGELOG.md` edit is a
+   validated release move (H1/F3; review, #737, comments 2026-08-07 third round and 2026-08-08
+   fourth round; `docs/design/DESIGN-changelog-fragments.md`, control 1). The two `editors/vscode/`
+   manifests are not product surfaces, so control 1 never asks about them and they are
+   deliberately absent from `is_release_bump_path`. Add an exact path to `is_release_bump_path`,
+   in the same pull request, whenever either side of that filter moves: a release-commit step
+   that starts touching a different or additional product-surface path, or an
+   `is_product_surface_path` that widens to cover a path releases already touch
+   (`editors/vscode/*` is the live candidate). Otherwise every subsequent release commit will
+   fail its own `changelog-fragment-missing` at merge time.
+7. Run the aggregator, which moves the current `[Unreleased]` body under
+   `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
+   sorted by the declared category/id order, verifies conservation (every
+   fragment's content reaches the section, byte for byte), and deletes the
+   consumed fragments in the same step, leaving `[Unreleased]` and
+   `changelog.d/` both empty:
+
+   ```bash
+   ./tools/aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD
+   ```
+
+   Update the link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and
+   `[X.Y.Z]` compares the previous tag with `vX.Y.Z`. Review the produced
+   `## [X.Y.Z]` section before committing; this is the point of the "Extract
+   release notes" content, and the last chance to fix a wording issue
+   directly in the version section (never in `[Unreleased]`, which control 4
+   in `docs/design/DESIGN-changelog-fragments.md` protects even at this step, except
+   for exactly this move).
+
+   **A version-only release with an empty `changelog.d/` is legitimate** (decided in review,
+   #737, comment 2026-08-07, second round): the command above succeeds on an empty
+   `changelog.d/` (holding only `README.md`), and the merge-readiness `check-pr` gate does not
+   require a deleted fragment either — only that this diff's `CHANGELOG.md` edit is a
+   structurally validated release move. Both paths agree on this; neither hard-fails a
+   product-only version bump for lacking a fragment that was never needed. If `[Unreleased]`
+   was also already empty, the produced `## [X.Y.Z]` section will have no bullets at all —
+   expected for that shape, not a defect to work around.
+8. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
+   the GitHub Release body, **unless** step 7's zero-fragment case applies and `[Unreleased]`
+   was already empty, in which case the section legitimately has no bullets; state the release's
+   actual reason (e.g. a dependency or version-only bump) in the release commit message and the
+   promotion pull request instead of fabricating a placeholder bullet.
+9. Run the complete product gate:
+
+   ```bash
+   ./tools/check-native-integration.sh
+   ```
+
+10. Commit `chore(release): vX.Y.Z`, open a pull request to `main`, and merge it
+   only after required checks pass. Record the exact merged `main` SHA as the
+   release candidate.
+
+## 2. Prove and promote the candidate
+
+1. Dispatch `.github/workflows/release.yml` on the recorded candidate. A
+   `workflow_dispatch` run builds and smoke-tests every artifact but cannot
+   attach files to a GitHub Release, even when the selected ref is a tag.
+2. Verify the completed run's `head_sha` equals the recorded candidate SHA and
+   all four native targets, the Agent Skill bundle, VS Code extension, and both
+   Kernel bundles pass. Do not reuse evidence from a moving branch after its SHA
+   changes.
+3. Create a branch fixed at the recorded candidate SHA, then open the
+   release-promotion pull request from that branch to `production` — never from
+   moving `main`. Name the branch `release/vX.Y` (for example, `release/v4.5`
+   for version `4.5.0`) so the required `production source policy` check accepts
+   it:
+
+   ```bash
+   git branch release/vX.Y CANDIDATE_SHA
+   git push origin release/vX.Y
+   ```
+
+   State the candidate SHA, version, changes, residual risk, gate results, and
+   dry-run URL in the pull request. This branch is required even when `main` is
+   currently at `CANDIDATE_SHA`: while promotion CI and review run, `main` can
+   advance, making its green result evidence for a tree nobody approved. The
+   pinned branch keeps the pull request head and its CI evidence bound to the
+   approved candidate.
+4. Before merging, verify that the promotion pull request's source branch still
+   carries the recorded candidate tree and still pins the recorded candidate SHA
+   as either its HEAD or its HEAD's first parent:
+
+   ```bash
+   git fetch origin "refs/heads/release/vX.Y:refs/remotes/origin/release/vX.Y"
+   test "$(git rev-parse origin/release/vX.Y^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
+   test "$(git rev-parse origin/release/vX.Y)" = "CANDIDATE_SHA" \
+     || test "$(git rev-parse origin/release/vX.Y^1)" = "CANDIDATE_SHA"
+   ```
+
+   A promotion branch created directly at `CANDIDATE_SHA` satisfies both checks
+   via the first disjunct. When `production` still carries a revert that must not
+   reintroduce omitted content, prepare the branch with a sanctioned `-s ours
+   --no-ff` merge of `production` into `release/vX.Y` before opening the pull
+   request: the merge commit's first parent remains the candidate while the tree
+   stays candidate identical, satisfying the second disjunct.
+
+   Merge without squashing away promoted history. Then verify the resulting
+   `production` tree matches the approved candidate tree and record the new
+   `production` HEAD:
+
+   ```bash
+   git fetch origin "refs/heads/production:refs/remotes/origin/production"
+   test "$(git rev-parse origin/production^{tree})" = "$(git rev-parse CANDIDATE_SHA^{tree})"
+   git rev-parse origin/production
+   ```
+
+   Never tag `main`.
+
+The preceding promotion rule is canonical here; the release skill's `Promote
+main to production` procedure refers to these steps so there is one source of
+truth for the pinned-head and tree-identity requirements.
+
+## 3. Revalidate and tag production
+
+1. On the exact `production` HEAD, verify `rust/Cargo.toml`, `rust/Cargo.lock`,
+   the changelog section, and `fslc --version` all identify `X.Y.Z`.
+2. Rerun `./tools/check-native-integration.sh` and dispatch the manual release
+   workflow from `production`. Require the run's `head_sha` to equal the
+   recorded production HEAD and every job to pass; pre-promotion evidence is
+   not valid for a distinct production merge commit.
+3. Regenerate a temporary notes file from the complete `X.Y.Z` section in the
+   exact production HEAD's `CHANGELOG.md`, excluding its version heading. Review
+   it, show it to the user, and stop if it is empty; do not reuse a file derived
+   from the pre-promotion candidate.
+4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
+   and that pushing the tag uploads a draft, verifies its remote inventory, signs
+   the two packslip bundles, uploads them, verifies the inventory again, then
+   makes the GitHub Release, notes, and packslips public. Obtain one
+   explicit confirmation for that complete publication immediately before
+   running:
+
+   ```bash
+   git tag -a vX.Y.Z PRODUCTION_SHA -m "vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+5. Watch the tag-triggered workflow to completion. The workflow rejects any
+   native binary whose `fslc --version` differs from the tag.
+
+## 4. Verify the release
+
+1. Confirm the published body is non-empty and matches the `X.Y.Z` changelog
+   section.
+2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
+   four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
+   the Agent Skill bundle/checksum pair, VS Code extension, both Kernel
+   bundle/checksum pairs, and both packslip bundles
+   (`packslip.fslc.sigstore.json` and `packslip.fslc-lsp.sigstore.json`) are
+   present.
+3. Download the current machine's supported binary and checksum, verify the
+   checksum, and run `fslc --version`. It must print `fslc X.Y.Z`.
+4. Install the release through mise and confirm the skills arrive with it. The
+   packslip is what mise reads, and nothing before this point consumes one.
+   Install both commands so each of the two bundles is read once.
+
+   ```bash
+   cd "$(mktemp -d)"
+   mise use "packslip:github.com/ymm-oss/fsl/fslc@X.Y.Z"
+   mise use "packslip:github.com/ymm-oss/fsl/fslc-lsp@X.Y.Z"
+   mise skills ls
+   mise which fslc-lsp
+   ```
+
+   Run it in a throwaway directory. `mise use` writes a `mise.toml` where it
+   runs, and this step is a check rather than an install.
+
+   `skills ls` must name every directory under `skills/`, and `mise which
+   fslc-lsp` must resolve to the language server mise installed. A packslip
+   the workflow signed but mise rejects is a release defect, not a local one.
+5. Report the promotion pull request, production SHA, tag SHA, release URL,
+   workflow runs, non-empty notes, asset inventory, checksum, version smoke
+   test, and the skills mise listed.
+
+## Failure handling
+
+- Classify the evidence first under the internal
+  `.claude/skills/release/SKILL.md` skill's `Classify a failed gate before
+  retrying` section.
+  For a failure classified there as transient, use `gh run rerun RUN_ID --failed`.
+  Do not retag merely to retry the same commit.
+- Use `workflow_dispatch` for build diagnosis. It is the only dry-run path and
+  never attaches Release assets.
+- Never force-move, delete, or reuse a pushed release tag. If the tagged commit
+  or artifacts are wrong, fix the defect upstream, promote it, and cut a new
+  patch version.
+- The tag workflow uploads notes and all assets to a non-public draft, verifies
+  the remote inventory, and only then makes the Release public. If any publish
+  step fails, leave the draft non-public until the defect is fixed upstream.
+  Do not report completion.
+- The tag workflow publishes in three jobs. `publish` uploads the draft, `sign`
+  signs and checks the packslips without touching the release, and `release`
+  uploads them with `--clobber`, checks the complete inventory and the bundle
+  digests, and makes the Release public. Each job can be rerun on its own after
+  a transient failure, and a bundle an earlier attempt left on the draft does
+  not block the rerun: `publish` leaves the two bundle names out of its
+  inventory check, `sign` signs them again, and `release` replaces them with
+  `--clobber` before it checks their digests.
+- Follow the internal release skill's `release/vX.Y` stabilization and hotfix
+  procedures when `main` cannot be promoted as a whole.

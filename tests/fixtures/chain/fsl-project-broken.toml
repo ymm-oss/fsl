@@ -13,3 +13,5 @@ mapping = "design_refines_requirements.fsl"
 
 [impl]
 command = "python -c \"print('impl ok')\""
+# The command is a smoke check, not a test suite: opt into exit-code evidence.
+evidence = "exit_code"

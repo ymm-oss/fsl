@@ -32,9 +32,9 @@ const WORKER_PARITY: Citation = Citation {
     path: "rust/fsl-wasm/test-browser.mjs",
     anchor: "const envelopeDifferences = differences(",
 };
-const WORKER_AGENT_EXCLUSION: Citation = Citation {
+const WORKER_AGENT_PARITY: Citation = Citation {
     path: "rust/fsl-wasm/test-browser.mjs",
-    anchor: "function assertAgentWorkerProbeFailsClosed(probe, envelope) {",
+    anchor: "const agentParityCase = \"examples/ai/recursive_support_agent.fsl\";",
 };
 const WORKER_REFINEMENT_CONTROL: Citation = Citation {
     path: "rust/fsl-wasm/test-browser.mjs",
@@ -69,8 +69,8 @@ fn cli_claim(row: &'static str) -> Claim {
 
 fn worker_claim(row: &'static str) -> Claim {
     match row {
-        "agent" => Claim::UnsupportedFailClosed {
-            by: WORKER_AGENT_EXCLUSION,
+        "agent" => Claim::Exercised {
+            by: WORKER_AGENT_PARITY,
         },
         "refinement" => Claim::UnsupportedFailClosed {
             by: WORKER_REFINEMENT_CONTROL,

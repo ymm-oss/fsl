@@ -3,15 +3,17 @@
 name: cache budget audit wiring
 
 # This is configuration-conformance evidence for cache-budget-audit.yml, not
-# product verification in docs/DESIGN-ci.md's Rust/WASM/native-Z3 sense. It
+# product verification in docs/design/DESIGN-ci.md's Rust/WASM/native-Z3 sense. It
 # remains an unfiltered corroborating check for pull requests outside
 # merge-readiness.yml's main-branch scope; merge readiness now supplies the
 # required blocking property for main-bound changes (see issue #845).
 #
-# The install step defers to pyproject.toml's unpinned dev extra, just as
-# site-reference-freshness.yml does for pytest and markdown.  That declaration
-# is the dependency authority: installing the whole extra prevents a
-# hand-maintained package list from silently becoming stale.
+# The install step names only what this job imports: pytest and PyYAML (the
+# validator, .github/scripts/validate-cache-budget-audit-workflow.py, and its
+# test). Neither imports the frozen Python `fslc` package, lark, or z3-solver,
+# so installing the whole package is unnecessary (#1176). The specifiers mirror
+# pyproject.toml's dev extra; a new import fails with ModuleNotFoundError
+# rather than passing silently.
 #
 # This context remains non-required. Its pytest control is intentionally
 # duplicated in merge readiness, where the live parser-backed audit makes a
@@ -41,7 +43,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install the workflow validator's test dependencies
-        run: pip install ".[dev]"
+        run: pip install "pytest>=7" "PyYAML>=6"
 
       - name: Calibrate cache budget audit workflow wiring
         run: python3 -m pytest tests/test_cache_budget_audit_workflow.py -v

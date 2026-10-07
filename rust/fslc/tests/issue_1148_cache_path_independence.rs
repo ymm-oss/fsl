@@ -3,7 +3,7 @@
 
 //! Regression coverage for issue #1148: the `verify` cache key embedded the
 //! checked spec's canonicalised absolute path, contradicting
-//! `docs/DESIGN-incremental-verify.md`, which states that entries embed no
+//! `docs/design/DESIGN-incremental-verify.md`, which states that entries embed no
 //! absolute paths and are safe across projects and worktrees. The same bytes at a second location were
 //! a complete miss.
 //!

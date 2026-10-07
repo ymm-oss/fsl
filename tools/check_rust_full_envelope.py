@@ -3,7 +3,7 @@
 
 """Compare Python and Rust CLI envelopes with a narrow reviewed allowlist.
 
-Disposition (docs/RUST-PORTING.md F8): deletion deferred. This is the only
+Disposition (docs/design/RUST-PORTING.md F8): deletion deferred. This is the only
 harness that compares the frozen Python envelope against the native one for
 the *full* ``check``/``verify`` envelope (``leadsto_parity`` and
 ``dialect_parity`` separately do the same kind of comparison, narrowed to

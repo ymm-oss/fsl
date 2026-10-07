@@ -14,7 +14,7 @@ Specs can be written in **three layered dialects — consulting (business) / req
 chained via refinement so that requirement IDs propagate transparently across all diagnostics.
 Non-functional requirements are also supported, down to SLAs (discrete time).
 
-For the language specification, semantics, and output JSON see [`docs/LANGUAGE.md`](docs/LANGUAGE.md);
+For the language specification, semantics, and output JSON see [`docs/manual/LANGUAGE.md`](docs/manual/LANGUAGE.md);
 for a map of all the documentation see [`docs/README.md`](docs/README.md).
 
 > **A note on this repository's two implementations.** The native Rust workspace under
@@ -25,16 +25,16 @@ for a map of all the documentation see [`docs/README.md`](docs/README.md).
 
 ## Install
 
-Most people should use **the install script** — it sets up `fslc`, `fslc-lsp`, and the
-Claude Code Agent Skills together, and is the only route that also gets you skill
-integration. Use one of the other two routes only if it specifically fits you:
+Pick the route that fits you.
 
-- Just want the `fslc` binary, nothing else (no PATH setup, no skills)? [Download a single
-  executable](#download-a-single-executable-instead).
-- Building `fslc` yourself, or need the frozen Python reference for compatibility work?
-  [Developer setup](#developer-setup-building-from-source).
+| Route | Use it when | What you get |
+| --- | --- | --- |
+| [mise](#with-mise) | You already manage your tools with mise | Both commands, and skills that follow the version each project pins |
+| [The install script](#the-install-script) | You want the commands put on your PATH for you | Both commands, and the skills for your whole machine |
+| [A single executable](#download-a-single-executable-instead) | You want the binary and nothing else | `fslc` alone. No PATH setup, no skills |
+| [Developer setup](#developer-setup-building-from-source) | You are building `fslc`, or need the frozen Python reference | A source build |
 
-### The install script (recommended)
+### The install script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ymm-oss/fsl/main/install.sh | bash
@@ -62,11 +62,19 @@ differs from the latest Release tag. It also migrates recognized command links t
 at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fslc
 2.7-era layout). Use `--no-skill` to skip creating the Claude Code skill links.
 
+> [!NOTE]
+> A skill link another tool placed is reported and left alone. `mise skills sync --global`
+> writes the same directory, so the two would otherwise contend for it. Nothing else
+> writes there unless you ask for it: mise links into the project by default.
+
 Uninstall:
 
 ```bash
 rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery ~/.claude/skills/fsl-from-code ~/.claude/skills/fsl-requirements-document
 ```
+
+A mise installation is removed with `mise uninstall` instead. Its skill links are removed
+by `mise skills sync` once the tool is gone, or by turning on `skills.prune`.
 
 See the [Releases](https://github.com/ymm-oss/fsl/releases) page for the current version. Official releases contain checksummed native binaries,
 the VSCode extension, and Kernel bundles; every release after v3.0.0 also contains a
@@ -78,8 +86,93 @@ is not published to PyPI. The Rust workspace crates are not published to crates.
 Publishing either surface requires an explicit manifest, workflow, and documentation
 change.
 
-Maintainers cut releases using the documented [`docs/RELEASE.md`](docs/RELEASE.md)
+Maintainers cut releases using the documented [`docs/design/RELEASE.md`](docs/design/RELEASE.md)
 procedure and the internal [`release` Agent Skill](.claude/skills/release/SKILL.md).
+
+### With mise
+
+[mise](https://mise.jdx.dev/) installs both commands straight from the GitHub releases.
+Which backend you use depends on the release.
+
+| Release | Backend | Agent Skills |
+| --- | --- | --- |
+| Every release carrying a signed packslip | `packslip:` | Fetched with the tool, and linked by `mise skills sync` |
+| Every release, including those with no packslip | `github:` | Not placed. Use the install script for those |
+
+#### The packslip backend
+
+Put this in your `mise.toml`, then run `mise install`:
+
+```toml
+[tools]
+"packslip:github.com/ymm-oss/fsl/fslc" = "latest"
+"packslip:github.com/ymm-oss/fsl/fslc-lsp" = "latest"
+```
+
+> [!IMPORTANT]
+> Releases made before packslip support carry no packslip, so pin a version only once
+> the release you want carries one.
+> mise says so rather than guessing:
+>
+> ```console
+> $ mise install
+> failed: github.com/ymm-oss/fsl has no release 4.6.0 carrying packslip.fslc.sigstore.json;
+> mise installs from a packslip and does not guess at release assets
+> ```
+
+Each release carries a manifest signed with the release workflow's own identity. On the
+first install, mise accepts a signature from any workflow in this repository and
+remembers which workflow made it. It then refuses a later release signed by a different
+workflow. It checks the selected file's digest and size before unpacking it.
+
+Each command names its own project, so nothing has to match asset names by hand.
+
+The skills come with the tool. Link them where your agent reads them:
+
+```bash
+mise skills ls
+mise skills sync
+```
+
+`sync` writes symbolic links into the directory `skills.dir` names, which is
+`.claude/skills` under the project root. `mise skills sync --global` uses the same path
+under your home directory instead. Set `skills.auto_sync = true` to run it after every
+`mise install` and `mise use`.
+
+> [!NOTE]
+> `sync` links only what mise fetched, and it records those links in
+> `.mise-skills.json` beside them. A skill you wrote by hand, or a link another tool
+> placed, is reported as skipped and left alone. Keep the links it makes out of version
+> control and let each developer run `sync` on their own machine.
+
+#### The github backend
+
+You need mise 2026.6.4 or later, the first release with the `matching_regex` option.
+
+```toml
+[tool_alias]
+fslc     = "github:ymm-oss/fsl"
+fslc-lsp = "github:ymm-oss/fsl"
+
+[tools]
+fslc     = { version = "latest", matching_regex = "^fslc-(macos|linux|windows)" }
+fslc-lsp = { version = "latest", matching_regex = "^fslc-lsp-" }
+```
+
+To make installs reproducible, replace `latest` with a release version. Give `fslc` and
+`fslc-lsp` the same version.
+
+mise checks each download against the release checksum before installing.
+
+One repository publishes both commands, so each command needs its own alias under
+`[tool_alias]`. Two `[tools]` entries naming the same backend resolve to one install
+directory, and the second entry becomes a no-op.
+
+> [!WARNING]
+> `matching = "fslc-"` does not select `fslc`. The test is a case-sensitive substring, so
+> it also matches `fslc-lsp-macos-arm64`. Use the anchored `matching_regex` shown above.
+
+This route installs the two commands only. It does not place the Agent Skills.
 
 ### Download a single executable instead
 
@@ -172,12 +265,12 @@ fslc testgen   specs/cart_v1.fsl -o test_cart_v1.py       # pytest conformance-t
 fslc testgen   specs/cart_v1.fsl --target vitest -o cart_v1.test.js
 fslc replay    specs/cart_v1.fsl --trace events.json      # conformance check of a captured full-state
                                                             # trace; events.json is a trace you capture or
-                                                            # build yourself (schema: docs/DESIGN-replay-trace.md)
+                                                            # build yourself (schema: docs/design/DESIGN-replay-trace.md)
 fslc replay    specs/cart_v1.fsl --from-log events.jsonl --mapping log_mapping.fsl
                                                             # conformance check of a production event log,
                                                             # mapped into the spec's actions/state by a
                                                             # refinement-syntax mapping file you author
-                                                            # (see docs/DESIGN-log-replay.md)
+                                                            # (see docs/design/DESIGN-log-replay.md)
 ```
 
 `testgen --target` also accepts `swift`, `kotlin`, `dart`, and `phpunit`.
@@ -195,7 +288,7 @@ fslc verify specs/order_system.fsl --depth 8     # compose: synchronized composi
 project manifest (a small TOML file naming each layer's spec, its refinement mapping, and
 an optional implementation-conformance command) that you write for your own project —
 there is no shared example manifest at the repository root, since a manifest is inherently
-project-specific. `docs/DESIGN-*.md` and the `fsl-delivery` skill describe the manifest
+project-specific. `docs/design/DESIGN-*.md` and the `fsl-delivery` skill describe the manifest
 shape; running it looks like:
 
 ```bash
@@ -247,7 +340,7 @@ fslc kernel specs/cart_v1.fsl              # normalized public Kernel JSON (sche
 
 Since the Rust crates are not published, **the supported programmatic surface is the
 CLI's JSON envelope and this Public Kernel contract**, not a library import. See
-[`docs/DESIGN-kernel-contract.md`](docs/DESIGN-kernel-contract.md).
+[`docs/design/DESIGN-kernel-contract.md`](docs/design/DESIGN-kernel-contract.md).
 
 ### Editor integration
 
@@ -296,12 +389,21 @@ discovery, the canonical copies live under [`skills/`](skills/) at the repositor
 - [`skills/fsl-from-code/SKILL.md`](skills/fsl-from-code/SKILL.md) — reverse-engineer a design-layer spec from existing source code
 - [`skills/fsl-requirements-document/SKILL.md`](skills/fsl-requirements-document/SKILL.md) — generate and re-verify a human-readable requirements document from a checked spec
 
-The install script above links every skill above into `~/.claude/skills/`. They are also
-checked into this repository's own `.claude/skills/` and `.agents/skills/` as symlinks to
-`skills/*`. To use any of them in another project, copy the relevant `skills/fsl*`
-directories into that project's `.claude/skills/` or into `~/.claude/skills/`, or point the
-`gh` skill extension at `skills/` as the distribution source. See [`skills/README.md`](skills/README.md) for
-details.
+Two routes place these skills for you.
+
+| Route | Where | How it stays current |
+| --- | --- | --- |
+| `mise skills sync` | The project's `.claude/skills`, or your home directory with `--global` | Each link points into the version that project pins. Run `sync` again after a version change |
+| The install script | `~/.claude/skills` | Each link points through `current`, which an upgrade repoints once |
+
+Both place symbolic links into a versioned payload, so neither leaves a copy that can
+drift from the `fslc` that reads it.
+
+They are also checked into this repository's own `.claude/skills/` and `.agents/skills/`
+as symlinks to `skills/*`. To use any of them somewhere neither route reaches, copy the
+relevant `skills/fsl*` directories into that project's `.claude/skills/`, or point the
+`gh` skill extension at `skills/` as the distribution source. See
+[`skills/README.md`](skills/README.md) for details.
 
 ## Repository layout
 

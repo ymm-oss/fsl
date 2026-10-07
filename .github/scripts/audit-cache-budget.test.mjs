@@ -120,7 +120,7 @@ function healthyListing() {
   // restored `No cache found.` (a fully cold start, so it never touched the
   // mutants lane's scratch/evidence paths at all) and still saved this exact
   // 2,919,716,751-byte entry, showing that prediction was wrong; see
-  // docs/DESIGN-ci.md, "Actions cache budget", for the full account. No
+  // docs/design/DESIGN-ci.md, "Actions cache budget", for the full account. No
   // `fsl-logic` entry: that job is restore-only against `rust-workspace`
   // (same section) and a healthy state after that change has no dedicated
   // `fsl-logic` key at all.
@@ -274,7 +274,7 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
 // above, current hash suffixes) plus `rust-native-z3` holding two
 // generations on each platform at once. The Darwin pair's root cause was
 // independently confirmed by comparing both runs' own `Swatinem/rust-cache`
-// restore logs (docs/DESIGN-ci.md, "Generation coexistence (issue #926,
+// restore logs (docs/design/DESIGN-ci.md, "Generation coexistence (issue #926,
 // measured 2026-09-04)"); the Windows_NT pair is real `gh cache list` data
 // showing the same two-generation shape, but its own CI logs were not
 // separately diffed, so this fixture does not claim the identical mechanism
@@ -356,7 +356,7 @@ test("accepting: deleting the superseded generation genuinely reduces physical u
   // a stale generation now *does* change the judged total, because it
   // genuinely shrinks what physically sits in the account -- the same
   // arithmetic GitHub's own eviction performs. This is not a reward for
-  // manual deletion (docs/DESIGN-ci.md still records why manual deletion is
+  // manual deletion (docs/design/DESIGN-ci.md still records why manual deletion is
   // not the recommended response, per the issue's own main-cache-absent
   // regression), only proof the audit no longer manufactures a discrepancy
   // between what it judges and what physically exists.

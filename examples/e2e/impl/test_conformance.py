@@ -78,7 +78,7 @@ def _assert_partial_expected(observed, expected):
 def test_scenario_cover_submit_small(adapter):
     'Scenario: cover_submit_small'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_small', {'c': 0, 'a': 1})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignAutoReview', 'amount': 1}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -86,7 +86,7 @@ def test_scenario_cover_submit_small(adapter):
 def test_scenario_cover_submit_large(adapter):
     'Scenario: cover_submit_large'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_large', {'c': 0, 'a': 2})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignManagerReview', 'amount': 2}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -94,7 +94,7 @@ def test_scenario_cover_submit_large(adapter):
 def test_scenario_cover_auto_approve(adapter):
     'Scenario: cover_auto_approve'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_small', {'c': 0, 'a': 1})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignAutoReview', 'amount': 1}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -104,7 +104,7 @@ def test_scenario_cover_auto_approve(adapter):
 def test_scenario_cover_mgr_approve(adapter):
     'Scenario: cover_mgr_approve'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_large', {'c': 0, 'a': 3})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignManagerReview', 'amount': 3}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -114,7 +114,7 @@ def test_scenario_cover_mgr_approve(adapter):
 def test_scenario_cover_mgr_reject(adapter):
     'Scenario: cover_mgr_reject'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_large', {'c': 0, 'a': 3})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignManagerReview', 'amount': 3}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -124,7 +124,7 @@ def test_scenario_cover_mgr_reject(adapter):
 def test_scenario_cover_pay_submit(adapter):
     'Scenario: cover_pay_submit'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_large', {'c': 0, 'a': 3})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignManagerReview', 'amount': 3}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -136,7 +136,7 @@ def test_scenario_cover_pay_submit(adapter):
 def test_scenario_cover_pay_confirm(adapter):
     'Scenario: cover_pay_confirm'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_small', {'c': 0, 'a': 1})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignAutoReview', 'amount': 1}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -150,7 +150,7 @@ def test_scenario_cover_pay_confirm(adapter):
 def test_scenario_cover_outbox_send(adapter):
     'Scenario: cover_outbox_send'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_large', {'c': 0, 'a': 3})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignManagerReview', 'amount': 3}, '1': {'st': 'DesignDraft', 'amount': 0}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -164,7 +164,7 @@ def test_scenario_cover_outbox_send(adapter):
 def test_scenario_deadlock_terminal(adapter):
     'Scenario: deadlock_terminal'
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     adapter.reset()
     adapter.step('submit_large', {'c': 1, 'a': 2})
     _assert_partial_expected(adapter.observe(), {'design': {'0': {'st': 'DesignDraft', 'amount': 0}, '1': {'st': 'DesignManagerReview', 'amount': 2}, '2': {'st': 'DesignDraft', 'amount': 0}}, 'paid_count': 0, 'outbox': []})
@@ -181,7 +181,7 @@ def test_scenario_deadlock_terminal(adapter):
 
 def test_random_walk_conformance(adapter):
     if not _adapter_ready(adapter):
-        pytest.skip('Adapter not implemented')
+        pytest.fail('adapter not wired: a NotImplementedError reached the wired Adapter', pytrace=False)
     mon = Monitor(SPEC_PATH)
     mon.reset()
     adapter.reset()

@@ -72,8 +72,29 @@ module-addition-style extension is `compose`, not refinement (synchronize/compos
 without editing the existing files, and write the cross-cutting invariant in the
 composite layer).
 
-Lens — LSP: the content of the refine check (do not strengthen preconditions, do not
-weaken postconditions, preserve invariants) is the definition of LSP itself.
+Lens — LSP: refine checks **trace inclusion** — every step of the detail layer must
+be explained by an abstract step (or a stutter) whose guard holds and whose mapped
+effect equals the abstract action's effect, and the mapped state must keep the
+abstract invariants. Abstract postconditions therefore carry over **once the abstract
+spec is verified on its own** (refine does not re-check abstract `ensures`). That is
+only **half** of LSP. Refinement deliberately permits the detail layer to
+**strengthen a guard** (refuse in more states than the abstract contract does):
+`specs/bank_impl.fsl` withdraws only against cleared funds, a stronger guard than the
+abstract one, and refine succeeds. A caller that relies on the abstract precondition
+can then be refused, which LSP forbids ("do not strengthen preconditions"). refine
+does not report this. To see it, check enabledness separately:
+- A `never_enabled_action` warning from `fslc verify` on the detail spec (no instance
+  of the action enabled within `--depth`) catches only the extreme case where the
+  guard became unsatisfiable. It is a warning (exit 0); `fslc verify --vacuity error`
+  turns it into a failing gate.
+- For a before/after change where both specs share state and action names,
+  `fslc diff old.fsl new.fsl` reports guard strengthening as `behavior_removed`, and
+  `--forbid behavior_removed` makes it a gate. With differing names diff returns
+  `unknown`.
+- Otherwise a partially strengthened guard needs the enabledness-preservation check
+  tracked in ymm-oss/fsl#1232, or an explicit review of each detail guard against its
+  abstract counterpart.
+
 SRP/ISP: these act as discipline for splitting a spec per concern and composing,
 but **they are not checked** (fslc says nothing even if you violate them).
 
@@ -91,12 +112,12 @@ the abstract contract, mapping, or detail guards to obtain a green result.
 
 | Check result | Design meaning | Report in principle vocabulary |
 |---|---|---|
-| refine succeeds | This proposal can substitute/extend without breaking the contract | LSP satisfied. OCP's "open to extension" holds |
-| `abs_requires_failed` | The detail layer bypasses an abstract-layer guard (a control shortcut, effectively strengthening a precondition) | LSP violation = not substitutable. `impl_trace` is the forbidden procedure |
-| `abs_state_mismatch` | Observable behavior diverges from the contract | LSP violation (a postcondition-equivalent deviation). Also suspect a misreading of the mapping |
+| refine succeeds | Every detail behavior is allowed by the contract (trace inclusion): each step's mapped effect equals an abstract action's effect and abstract invariants hold through the map (abstract `ensures` carry over only if the abstract spec is verified on its own) | The safety half of LSP holds; OCP's "extension without breaking the contract" holds for safety. **Not** proof of substitutability: refine allows guard strengthening (the detail layer may refuse where the contract accepts). Before reporting "substitutable", compare the detail guards with the abstract guards (see the LSP lens above) |
+| `abs_requires_failed` | The detail layer fires a step where the abstract guard is false (bypasses a guard / a control shortcut — the detail is *more permissive* than the contract) | Contract violation = not substitutable: the detail does something the contract forbids. `impl_trace` is the forbidden procedure |
+| `abs_state_mismatch` | Observable behavior diverges from the contract: the detail init maps outside the abstract initial states, a step's mapped effect differs from the abstract action's effect, or an abstract invariant breaks through the map | Contract violation = not substitutable. Also suspect a misreading of the mapping |
 | `stutter_changed_abs` | An operation claimed to be "internal detail" causes an externally visible change | A break of encapsulation. The stutter declaration is a lie |
 | `map_partial_op` | An action-correspondence argument expression is undefined for a reachable instance (e.g. a divisor that can be zero) | Not a substitutability failure — the mapping itself is broken for this instance. Fix the correspondence expression, not the implementation's behavior |
-| coverage `false` | An action that can never fire = a dead extension point / dead procedure | Equivalent to YAGNI / dead code. Read `blocking_requires` |
+| `action_coverage: false` / `never_enabled_action` (from `fslc verify` on each spec, not refine) | No instance of the action is enabled within `--depth` = a dead extension point / dead procedure (bounded: not a proof that it can never fire) | Equivalent to YAGNI / dead code. Read `blocking_requires`. In a detail spec it is also the only mechanical sign of a guard strengthened away entirely (LSP lens) |
 | `unknown_cti` | The contract is true but requires an implicit premise | Discovery of an implicit design premise. If it is a domain truth, make it explicit as an auxiliary invariant |
 
 **Non-vacuity audit (do not take green at face value)**: even
@@ -119,8 +140,9 @@ turns vacuously true. For high-risk contracts:
 
 Do not mix the three categories in the report:
 
-1. **What was proved** — contract conformance (LSP/OCP-equivalent). Attach the
-   command and result
+1. **What was proved** — contract conformance (trace inclusion: the safety half of
+   LSP/OCP). Attach the command and result. Do not report "substitutable" from refine
+   alone — state separately whether guard strengthening was reviewed
 2. **Counterexamples** — translate the trace into design language and present it
    ("skip X and Y holds"). If there is a `requirement: {id, text}`, reconcile it with
    the requirement's intent
@@ -145,8 +167,8 @@ code diverges from it — make this distinction explicit in the report.
 
 | Principle | How FSL handles it | Strength |
 |---|---|---|
-| LSP (Liskov substitution) | The content of `fslc refine`'s check itself | Provable |
-| OCP (open/closed) | abstract spec unedited + extend with detail spec / compose → conformance check with refine | Provable |
+| LSP (Liskov substitution) | `fslc refine` checks trace inclusion (postconditions, invariants, safety). Precondition weakening / no new refusals is **not** checked — refine permits guard strengthening; `never_enabled_action` catches only fully dead actions (enabledness preservation: ymm-oss/fsl#1232) | Partial (safety half checked; precondition half by review) |
+| OCP (open/closed) | abstract spec unedited + extend with detail spec / compose → conformance check with refine | Partial (same limit as LSP: an extension that refuses more still refines) |
 | Design by Contract (DbC) | requires / ensures / invariant are the language core | Native |
 | DIP (dependency inversion) | The layer chain (business ⊒ requirements ⊒ design ⊒ implementation) where detail conforms to abstract | Embodied structurally |
 | SRP / ISP | concern splitting via compose + visibility control with `internal` | Supported as discipline (not checkable) |
@@ -165,11 +187,14 @@ code diverges from it — make this distinction explicit in the report.
   `analyze` finding; the finding's `formal_status` is normally
   `not_a_violation`.
 - **Variant matrix**: when there are multiple variants, push the refine of all
-  variants × the abstract contract (a mechanical check that "all variants are
-  substitutable"). Only for high-risk contracts.
+  variants × the abstract contract (a mechanical check that every variant stays
+  within the contract; guard strengthening still needs the LSP-lens review). Only
+  for high-risk contracts.
 - **Repurposing for change review**: refining with the pre-change spec as abs and the
   post-change spec as impl turns it into a check of "does this change preserve the old
-  contract?" (a confirmation of behavioral compatibility).
+  contract?" — the safety half only: a change that refuses more still refines. Pair
+  it with `fslc diff old.fsl new.fsl --forbid behavior_removed` when the two specs
+  share state and action names (see the LSP lens).
 - **Up to proved**: pushing through to induction rather than stopping at verified
   (bounded) is especially valuable in the abstract layer, where the contract should
   be stable for the long term.

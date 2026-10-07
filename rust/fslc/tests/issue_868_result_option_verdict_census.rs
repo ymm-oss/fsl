@@ -232,8 +232,22 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
+        373,
+        "check_action_definedness",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
         498,
         "check_state_properties",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1065,
+        "check_typed_action_partial_operations",
         ResultOption
     ),
     entry!(
@@ -262,6 +276,20 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-verifier/src/bmc.rs",
         1362,
         "check_leadstos",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/induction.rs",
+        432,
+        "step_obligation_cti",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/induction.rs",
+        346,
+        "partial_witness",
         ResultOption
     ),
     entry!(
@@ -297,6 +325,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-core/src/dialect.rs",
         3165,
         "governance_contract",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/dialect.rs",
+        3311,
+        "verify_scope_type_names",
         ResultOption
     ),
     entry!(
@@ -367,6 +402,20 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fslc/src/verification_output.rs",
         579,
         "validate_requirement_trace_source",
+        ResultTupleOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        781,
+        "validate_requirement_trace_contract",
+        ResultTupleOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        992,
+        "validate_requirement_trace_source_scoped",
         ResultTupleOption
     ),
     entry!(
@@ -479,6 +528,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-wasm/src/lib.rs",
         223,
         "governance_output",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-wasm/src/lib.rs",
+        314,
+        "implements_output",
         ResultOption
     ),
     // `Ok(None)` means "this guard is not a parameter-vs-literal comparison",
@@ -598,6 +654,7 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 246, "not"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 248, "or"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 284, "pop"),
+    unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 287, "reset"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 270, "select"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 271, "store"),
     unresolved_ordinary!("rust/fsl-solver/src/lib.rs", 260, "sub"),
@@ -612,6 +669,9 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
         "option_guard_states"
     ),
     unresolved_ordinary!("rust/fsl-tools/src/typestate.rs", 659, "or_guard_states"),
+    // `ChainStepResults` is `Vec<Option<(Value, bool)>>`: one report slot per
+    // planned chain step (`None` = never ran), not a fallible optional verdict.
+    unresolved_ordinary!("rust/fslc/src/main.rs", 4207, "run_chain_steps"),
     unresolved_ordinary!(
         "rust/fslc/src/verification.rs",
         2192,
@@ -690,50 +750,101 @@ fn rust_sources() -> Vec<PathBuf> {
     paths
 }
 
-fn raw_string_end(bytes: &[u8], start: usize) -> Option<(usize, usize)> {
-    let mut cursor = start + 1;
+fn is_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn is_identifier_continue(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// End (exclusive) of a `"…"` or `'…'` literal whose opening quote is at
+/// `open`, honoring backslash escapes. An unterminated literal ends the source.
+fn quoted_end(bytes: &[u8], open: usize) -> usize {
+    let quote = bytes[open];
+    let mut cursor = open + 1;
+    while let Some(&byte) = bytes.get(cursor) {
+        cursor += 1;
+        if byte == b'\\' {
+            cursor += 1;
+        } else if byte == quote {
+            break;
+        }
+    }
+    cursor.min(bytes.len())
+}
+
+/// End (exclusive) of a raw string body `#*"…"#*` starting at `start` (just
+/// after the `r`/`br`/`cr` prefix), or `None` when no raw string starts there.
+fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut cursor = start;
     while bytes.get(cursor) == Some(&b'#') {
         cursor += 1;
     }
     if bytes.get(cursor) != Some(&b'"') {
         return None;
     }
-    Some((cursor + 1, cursor - start - 1))
+    let hashes = cursor - start;
+    cursor += 1;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'"'
+            && bytes
+                .get(cursor + 1..cursor + 1 + hashes)
+                .is_some_and(|closing| closing.iter().all(|byte| *byte == b'#'))
+        {
+            return Some(cursor + 1 + hashes);
+        }
+        cursor += 1;
+    }
+    Some(bytes.len())
 }
 
-fn skip_quoted(bytes: &[u8], cursor: &mut usize, line: &mut usize, quote: u8) {
-    *cursor += 1;
-    while let Some(&byte) = bytes.get(*cursor) {
-        *cursor += 1;
-        if byte == b'\\' {
-            *cursor += 1;
-        } else if byte == b'\n' {
-            *line += 1;
-        } else if byte == quote {
-            break;
-        }
+/// End (exclusive) of a char literal opened by the `'` at `open`, or `None`
+/// when that `'` starts a lifetime or label instead (`'a`, `'static`, `'_`).
+fn char_literal_end(source: &str, open: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    if bytes.get(open + 1)? == &b'\\' {
+        return Some(quoted_end(bytes, open));
+    }
+    let width = source[open + 1..].chars().next()?.len_utf8();
+    (bytes.get(open + 1 + width) == Some(&b'\'')).then_some(open + 2 + width)
+}
+
+/// End (exclusive) of the literal introduced by the identifier-like prefix
+/// `source[start..prefix_end]` (`b'…'`, `b"…"`, `c"…"`, `r#"…"#`, `br"…"`,
+/// `cr#"…"#`), or `None` when the prefix is an ordinary identifier.
+fn prefixed_literal_end(bytes: &[u8], start: usize, prefix_end: usize) -> Option<usize> {
+    let next = *bytes.get(prefix_end)?;
+    match (&bytes[start..prefix_end], next) {
+        (b"b", b'\'') | (b"b" | b"c", b'"') => Some(quoted_end(bytes, prefix_end)),
+        (b"r" | b"br" | b"cr", b'"' | b'#') => raw_string_end(bytes, prefix_end),
+        _ => None,
     }
 }
 
+/// A token stream for the census: identifiers (including raw identifiers and
+/// lifetimes/labels) and single punctuation bytes. Comments and every literal
+/// form that can contain a quote (strings, raw/byte/C strings, char and byte
+/// literals) are skipped whole, so a quote inside one never flips string state.
 fn tokenize(source: &str) -> Vec<Token> {
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut cursor = 0;
     let mut line = 1;
     while let Some(&byte) = bytes.get(cursor) {
+        let start = cursor;
+        let mut skipped = None;
         if byte.is_ascii_whitespace() {
-            if byte == b'\n' {
-                line += 1;
-            }
             cursor += 1;
+            skipped = Some(cursor);
         } else if bytes.get(cursor..cursor + 2) == Some(b"//") {
-            cursor += 2;
             while bytes
                 .get(cursor)
                 .is_some_and(|candidate| *candidate != b'\n')
             {
                 cursor += 1;
             }
+            skipped = Some(cursor);
         } else if bytes.get(cursor..cursor + 2) == Some(b"/*") {
             let mut depth = 1;
             cursor += 2;
@@ -747,52 +858,71 @@ fn tokenize(source: &str) -> Vec<Token> {
                         depth -= 1;
                         cursor += 2;
                     }
-                    _ => {
-                        if bytes[cursor] == b'\n' {
-                            line += 1;
-                        }
-                        cursor += 1;
-                    }
+                    _ => cursor += 1,
                 }
             }
+            skipped = Some(cursor.min(bytes.len()));
         } else if byte == b'"' {
-            skip_quoted(bytes, &mut cursor, &mut line, byte);
-        } else if let Some(raw_start) = (byte == b'r').then_some(cursor).or_else(|| {
-            (byte == b'b' && bytes.get(cursor + 1) == Some(&b'r')).then_some(cursor + 1)
-        }) && let Some((content, hashes)) = raw_string_end(bytes, raw_start)
-        {
-            cursor = content;
-            loop {
-                if bytes.get(cursor) == Some(&b'"')
-                    && bytes.get(cursor + 1..cursor + 1 + hashes) == Some(&vec![b'#'; hashes])
-                {
-                    cursor += hashes + 1;
-                    break;
-                }
-                if bytes.get(cursor) == Some(&b'\n') {
-                    line += 1;
-                }
+            skipped = Some(quoted_end(bytes, cursor));
+        } else if byte == b'\'' {
+            if let Some(end) = char_literal_end(source, cursor) {
+                skipped = Some(end);
+            } else {
                 cursor += 1;
+                while bytes
+                    .get(cursor)
+                    .is_some_and(|candidate| is_identifier_continue(*candidate))
+                {
+                    cursor += 1;
+                }
+                tokens.push(Token {
+                    text: source[start..cursor].to_owned(),
+                    line,
+                });
             }
-        } else if byte.is_ascii_alphabetic() || byte == b'_' {
-            let start = cursor;
+        } else if is_identifier_start(byte) {
             cursor += 1;
             while bytes
                 .get(cursor)
-                .is_some_and(|candidate| candidate.is_ascii_alphanumeric() || *candidate == b'_')
+                .is_some_and(|candidate| is_identifier_continue(*candidate))
             {
                 cursor += 1;
             }
-            tokens.push(Token {
-                text: source[start..cursor].to_owned(),
-                line,
-            });
+            if let Some(end) = prefixed_literal_end(bytes, start, cursor) {
+                skipped = Some(end);
+            } else {
+                if &bytes[start..cursor] == b"r"
+                    && bytes.get(cursor) == Some(&b'#')
+                    && bytes
+                        .get(cursor + 1)
+                        .is_some_and(|candidate| is_identifier_start(*candidate))
+                {
+                    cursor += 2;
+                    while bytes
+                        .get(cursor)
+                        .is_some_and(|candidate| is_identifier_continue(*candidate))
+                    {
+                        cursor += 1;
+                    }
+                }
+                tokens.push(Token {
+                    text: source[start..cursor].to_owned(),
+                    line,
+                });
+            }
         } else {
             tokens.push(Token {
                 text: char::from(byte).to_string(),
                 line,
             });
             cursor += 1;
+        }
+        if let Some(end) = skipped {
+            line += bytes[start..end]
+                .split(|candidate| *candidate == b'\n')
+                .count()
+                - 1;
+            cursor = end;
         }
     }
     tokens
@@ -1191,7 +1321,8 @@ fn can_resolve_verdict_call(
         "requirements_implements_output"
         | "governance_output"
         | "governance_output_async"
-        | "validate_requirement_trace_source" => {
+        | "validate_requirement_trace_source"
+        | "validate_requirement_trace_source_scoped" => {
             qualified_verification_output_call(tokens, function)
         }
         _ => false,
@@ -1611,5 +1742,117 @@ fn normalized_windows_consumer_path_detects_a_discarded_verdict() {
             function: "synthetic_probe".to_owned(),
             kind: ConsumerFindingKind::DiscardedStatement,
         }]
+    );
+}
+
+fn token_texts(source: &str) -> Vec<String> {
+    tokenize(source)
+        .into_iter()
+        .map(|token| token.text)
+        .collect()
+}
+
+#[test]
+fn tokenizer_skips_char_literals_without_flipping_string_state() {
+    for literal in [
+        r"'x'",
+        r"'é'",
+        r#"'"'"#,
+        r"'\''",
+        r"'\\'",
+        r"'\n'",
+        r"'\u{1F600}'",
+        r"'\x7f'",
+    ] {
+        let source = format!("before {literal} after \"tail\" end");
+        assert_eq!(
+            token_texts(&source),
+            ["before", "after", "end"],
+            "char literal {literal} must be one skipped literal"
+        );
+    }
+}
+
+#[test]
+fn tokenizer_keeps_lifetimes_and_labels_distinct_from_char_literals() {
+    assert_eq!(
+        token_texts("fn f<'a, '_>(x: &'a str) -> &'static str { x == '\"' }"),
+        [
+            "fn", "f", "<", "'a", ",", "'_", ">", "(", "x", ":", "&", "'a", "str", ")", "-", ">",
+            "&", "'static", "str", "{", "x", "=", "=", "}",
+        ]
+    );
+    assert_eq!(
+        token_texts("'outer: loop { break 'outer; } 'b'"),
+        ["'outer", ":", "loop", "{", "break", "'outer", ";", "}"]
+    );
+}
+
+#[test]
+fn tokenizer_skips_raw_byte_and_c_string_literals() {
+    for literal in [
+        r#"r"\""#,
+        r##"r#"" "#"##,
+        r###"r##"a "# b"##"###,
+        r#"b"\"""#,
+        r#"b'"'"#,
+        r"b'\''",
+        r##"br#"""#"##,
+        r#"br"\""#,
+        r#"c"\"""#,
+        r##"cr#"""#"##,
+    ] {
+        let source = format!("before {literal} after");
+        assert_eq!(
+            token_texts(&source),
+            ["before", "after"],
+            "literal {literal} must be one skipped literal"
+        );
+    }
+    assert_eq!(token_texts("r#type x"), ["r#type", "x"]);
+}
+
+#[test]
+fn tokenizer_skips_comments_containing_quotes() {
+    assert_eq!(
+        token_texts("// it's a \"quote\n/* ' \" /* nested ' */ \" */ x '\"' y"),
+        ["x", "y"]
+    );
+}
+
+#[test]
+fn tokenizer_counts_lines_through_escaped_newlines_and_raw_strings() {
+    let source = "\"one \\\n two\"\nr#\"three\nfour\"#\nafter";
+    assert_eq!(
+        tokenize(source),
+        [Token {
+            text: "after".to_owned(),
+            line: 5,
+        }]
+    );
+}
+
+#[test]
+fn tokenizer_terminates_on_unterminated_literals() {
+    for source in ["r#\"open", "\"open", "'\\", "b'\\", "/* open"] {
+        assert_eq!(token_texts(source), Vec::<String>::new(), "{source:?}");
+    }
+}
+
+#[test]
+fn signature_after_a_double_quote_char_literal_is_discovered() {
+    let source = "fn quoted(raw: &str) -> bool { raw.starts_with('\"') }\n\
+                  type Steps = Vec<Option<u8>>;\n\
+                  fn steps() -> Steps { Vec::new() }\n\
+                  fn verdict() -> Result<Option<u8>, ()> { Ok(None) }\n";
+    assert_eq!(
+        discover_signatures("fixture.rs", source)
+            .into_iter()
+            .map(|signature| (signature.function, signature.shape, signature.line))
+            .collect::<Vec<_>>(),
+        [
+            ("steps".to_owned(), Shape::Unresolved, 3),
+            ("verdict".to_owned(), Shape::Direct, 4),
+        ]
     );
 }

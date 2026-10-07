@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Built for #1089 (`sweep_contract.rs`). `Case` desugars to `0..N-1`, so each
+// `bump` adds at most `(N - 1) + hi(Amount)`. With the default `Amount = 0..0`
+// and `--depth 2..2`, `Big` (`x >= 4`) is witnessed only when `Case` has 3
+// instances; the 1- and 2-instance scopes are `reachable_failed` with only
+// `classification:"insufficient_depth"`. With `--instances Case=2..3
+// --values Amount=1..2`, every instances+values scope witnesses `Big`.
+spec SweepInstancesScopeInconclusive {
+  entity Case
+  number Amount
+  type X = 0..20
+  state { x: X }
+  init { x = 0 }
+  action bump(c: Case, a: Amount) { x = x + c + a }
+  reachable Big { x >= 4 }
+}
+verify {
+  instances Case = 1
+  values Amount = 0..0
+}

@@ -74,10 +74,12 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    true failing scope under `sweep.minimal_counterexample`. For specs that
    declare an entity or number, optionally extend the sweep with
    `--instances <Entity>=1..3` and/or `--values <Number>=…` (replace the
-   placeholders with declared names). A grid
-   with only `insufficient_depth` reachability observations is
-   `sweep_inconclusive`/exit 1 (and has a null minimal counterexample); a grid
-   with a determinate success and no true failure is `sweep_passed`/exit 0.
+   placeholders with declared names). Depth-limited
+   (`insufficient_depth`) reachability cells are settled per
+   `--instances`/`--values` scope: with no true failure, the grid is
+   `sweep_passed`/exit 0 only when every such scope has a determinate success
+   at some depth; otherwise it is `sweep_inconclusive`/exit 1 (null minimal
+   counterexample) and `sweep.inconclusive_scopes` names the unsettled scopes.
 
 ## 7. CLI and JSON essentials
 
@@ -105,6 +107,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--lemma "<expr>"]...                 # induction only; independently adjudicated
                # Inline `implements`: `refines` keeps the ordinary top-level result/exit;
                # `refinement_failed` or `impl_violated` becomes the top-level result with exit 1.
+               # --property/--exclude-property/--from-state skip it: implements.result
+               # "not_evaluated" + reason, result/exit unchanged (never a pass).
 fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
@@ -116,18 +120,19 @@ fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <repr
                                                 # reproducer.v1 artifact from a safety-invariant violation
 fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                 # production JSONL -> mapped action/state -> Monitor
-fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit)
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit); unwired tests FAIL unless --allow-unwired (skip; rejected for kotlin)
 fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection of conformance vectors
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report
 fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
                                                   # materialize both full revision trees; omit spec for changed .fsl batch
-fslc chain [fsl-project.toml] [--keep-going]     # manifest-driven business -> req -> design -> impl table + JSON
+fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
+                                                # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
 fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
@@ -158,7 +163,7 @@ fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / e
 fslc domain analyze <f>                                      # aggregate/effect ownership summary
 fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
 fslc domain generate <f> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
-fslc domain testgen <f> [--target vitest] [-o out]           # adapter/conformance scaffold
+fslc domain testgen <f> [--target vitest] [--allow-unwired] [-o out]  # adapter/conformance scaffold
 fslc domain replay <f> --logs events.jsonl                  # runtime command/event/effect evidence
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
 fslc db observe <f> --trace events.json                 # runtime observation evidence
@@ -200,7 +205,7 @@ there), `initial` is trusted as the concrete starting point directly instead
 of failing `initial_state_mismatch` against an arbitrary default value for
 that variable. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
-replay input. See `docs/DESIGN-replay-trace.md`.
+replay input. See `docs/design/DESIGN-replay-trace.md`.
 
 Schema 1.2 opts into solver-free bounded-liveness replay. Every
 `leadsTo P ~> within K Q` is observed at tick 0 and after each action/stutter;
@@ -219,8 +224,8 @@ means every dialect is source-complete. Requirement relations remain separate
 from origin targets. Use `fslc conformance` with the same major and the matching
 `schemas/fslc/kernel/conformance.v{1,2}.schema.json` to test an independent runtime.
 The compatibility policy and field contract are in
-`docs/DESIGN-kernel-contract.md`; v2 provenance is in
-`docs/DESIGN-kernel-origin-v2.md`.
+`docs/design/DESIGN-kernel-contract.md`; v2 provenance is in
+`docs/design/DESIGN-kernel-origin-v2.md`.
 
 For an induction `unknown_cti`, first try `--engine explicit` — if exploration
 closes it returns `proved` with **no lemmas at all** (the invariant being
@@ -309,8 +314,34 @@ between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
 scenarios against NEW. Its stable finding kinds are `behavior_added`,
 `behavior_removed`, `invariant_weakened`, `invariant_strengthened`,
 `forbidden_relaxed`, `scope_changed`, and `unknown`; an empty report uses
-`no_semantic_change`. A changed `verify` scope is explicit and comparison uses
-NEW's shared entity/number bounds. Findings exit 0 because the command is an
+`no_semantic_change`. In the forbidden replay (`docs/design/DESIGN-semantic-diff.md`,
+"Forbidden replay") a NEW final step that its guard disables preserves the OLD
+rejection, and so does a final step that OLD and NEW both reject as `bad_call`
+outside a range or enum parameter type. Each side is classified with its own `entity` /
+`number` types: since #1229 an OLD final step outside its verify scope
+(including the NEW scope OLD is replayed under) is `unknown` /
+`forbidden_replay_failed`, since no OLD guard rejected it, and an OLD `bad_call`
+that only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`
+(before #1229 both were `forbidden_step_unrelatable`). A compose NEW, or a NEW
+of another dialect whose `entity` / `number` types are not in its source, never
+preserves an OLD `bad_call` (`unknown` / `forbidden_step_unrelatable`); before
+#1229 a compose NEW that rejected the step as `bad_call` preserved it, so such a
+forbidden now fails `--forbid unknown`. An OLD final step that names no action, or no
+variant of that arity, is `unknown` / `forbidden_replay_failed`. Before #1212 a
+both-side range `bad_call` was `unknown`, so that forbidden failed `--forbid
+unknown` and no longer does, and an OLD unknown action was preserved (the
+measured cases already exited 1 on the `unknown` that NEW's added action or
+changed arity produces; see
+`docs/design/DESIGN-forbidden.md` §2.1). Known gap (#1239): a NEW
+*setup* step that its guard disables is also reported as preserved, although NEW
+never runs the final step. Since #1213 a NEW final step that is enabled and then
+stops with a runtime violation is `forbidden_relaxed` too (its witness carries
+`violation`): a violation is not a rejection. An OLD final step or a NEW setup
+step that violates is `unknown` / `forbidden_replay_failed`; before #1213 all
+three were preserved, so that forbidden now fails `--forbid forbidden_relaxed`
+(NEW final violation) or `--forbid unknown` (the other two), where it failed
+neither. A changed
+`verify` scope is explicit and comparison uses NEW's shared entity/number bounds. Findings exit 0 because the command is an
 analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
 verdict is bounded by `--depth`, and a mapping only resolves the direction
 declared in its `impl`/`abs` fields (it is never inverted).
@@ -353,7 +384,7 @@ opts a run out entirely. Cache writes are atomic, so running `fslc verify` on
 many files as concurrent processes (e.g. `xargs -P`, a CI job matrix) is safe —
 concurrent runs at worst duplicate solving, never corrupt the cache. When
 verifying a whole project's specs, prefer process-level parallelism over a
-sequential per-file loop. See `docs/DESIGN-incremental-verify.md`.
+sequential per-file loop. See `docs/design/DESIGN-incremental-verify.md`.
 
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
@@ -380,7 +411,7 @@ exact executable Kernel requirement targets to `@fsl.trace` implementation
 locations. Treat missing, orphan, and target-mismatch findings as review signals,
 not proof. `origin_assurance` describes Public Kernel provenance
 (`source_backed|generated_from_source|generated_only|unknown`), never formal
-verification strength. See `docs/DESIGN-code-audit.md`.
+verification strength. See `docs/design/DESIGN-code-audit.md`.
 `--profile ai-review` emits AI-readable review findings such as
 `disconnected_requirement`, `unanchored_property`, `progressless_cycle`,
 `unwritten_state`, `unread_state`, `unguarded_action`, and
@@ -435,7 +466,7 @@ a `requirement.id` nested inside a `findings`/`checks` array item — or a
 spec-level（仕様全体）finding when it fails with no attribution at all; it
 never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
-verdict). See `docs/DESIGN-ledger.md`.
+verdict). See `docs/design/DESIGN-ledger.md`.
 
 Digest-bound approvals (issue #190) are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
@@ -448,7 +479,7 @@ renderer changes. A drifted row carries the complete baseline digest and an
 `approval diff` command, which compares the approved commit to the current
 working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy. See
-`docs/DESIGN-approval.md`.
+`docs/design/DESIGN-approval.md`.
 
 Every requirement id in the ledger (and every property row in `fslc html`)
 carries an **assurance class** (issue #171): `proved(induction)` (k-induction,
@@ -464,15 +495,34 @@ is required for a requirement to ever show `proved`; `--evidence
 <result.json>` folds a saved fsl-ai/fsl-db/fsl-domain `formal_result:"not_run"`
 producer's output (tagged via a top-level `requirements: [...]` list) into the
 per-requirement classification. Class is method coverage, not verdict — a
-`violated` BMC run is still `bounded`. See `docs/DESIGN-assurance-classes.md`.
+`violated` BMC run is still `bounded`. See `docs/design/DESIGN-assurance-classes.md`.
 
 `chain` reads `fsl-project.toml` by default. Each `[business]`,
 `[requirements]`, and `[design]` table has `file = "..."`; adding `depth = K`
 runs `verify`, while omitting `depth` runs `check`. A layer with
 `refine_against = "requirements"` must also set `mapping = "..."`. `[impl]`
-runs its shell `command` from the manifest directory. JSON is stdout; the
+runs its shell `command` from the manifest directory and must name its
+evidence; its only keys are `command`, `report`, `evidence` (any other key,
+e.g. a typo `reprot`, is a `kind:"parse"` error at exit 2 naming the key).
+`report = "<JUnit XML file or directory>"` (written by the command, e.g.
+`pytest --junitxml=r.xml`, `vitest run --reporter=junit --outputFile=r.xml`,
+`phpunit --log-junit r.xml`, Gradle `--rerun-tasks` + `build/test-results/test`;
+SwiftPM 6 writes Swift Testing results to `r-swift-testing.xml` when XCTest also
+runs): exit 0 is `passed` only with ≥ 1 executed test and no
+`<failure>`/`<error>`; 0 executed (none collected, or all skipped) or a
+missing/unchanged/non-JUnit report is `result:"indeterminate"` (layer
+exit_code 1, top-level `indeterminate`, exit 1), counts in `detail.tests`.
+`evidence = "exit_code"` (for a non-test command) decides by exit status but
+marks `detail.evidence: "exit_code_only"` and adds a top-level `warnings[]`
+entry `impl_exit_code_only` — never report that as implementation evidence for
+a generated suite. With neither key an exit-0 run is `indeterminate`. JSON is
+stdout; the
 consolidated table is stderr. Without `--keep-going`, execution stops after the
-first failed layer and later layers are marked `skipped`. The manifest reader
+first failed layer and later layers are marked `skipped`. `--jobs N` (default 1)
+runs up to N `spec`/refine layers at once, each with its own solver; `[impl]`
+still runs last. The output, table, and exit code do not depend on N (only
+elapsed times and the per-process `memory_mb` can differ), so raise it for
+cold or CI runs, but memory multiplies with workers. The manifest reader
 is fail-closed: an unrecognized top-level section name, zero recognized
 sections (including an empty file), or a present-but-unparseable `depth` /
 `refine_depth` value (e.g. one followed by an inline comment) is a `kind:
@@ -529,7 +579,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same
-  property, exclusion wins.
+  property, exclusion wins. A check these options skip is not dropped from the
+  envelope: an inline `implements` is reported as
+  `implements: {abs, result: "not_evaluated", reason, reasons}` with `reason`
+  `property_selection` (`--property`), `property_exclusion`
+  (`--exclude-property`), or `from_state` (`--from-state`); `reasons` lists all
+  that apply. The top-level result and exit stay those of the selected
+  properties, so `not_evaluated` is never a pass — gate the seam on an
+  unfiltered `check`/`verify` or `fslc chain`. A spec without `implements` has
+  no key.
 - `verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
   override the matching `entity`/`number` bound from a `verify { ... }` block
   without editing the spec — the CLI equivalent of hand-shrinking the model
@@ -543,9 +601,22 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   (a hardcoded id/number outside the overridden bounds, in a step argument or
   inside its `expect`) is skipped per-scenario instead of hard-erroring the
   whole `verify`, with a `warnings` entry (`kind: "acceptance_skipped"` /
-  `"forbidden_skipped"`) naming it; other scenarios still replay normally.
+  `"forbidden_skipped"`, plus `reference` naming the out-of-range argument or
+  index) naming it; other scenarios still replay normally.
   Without an override, or for a failure unrelated to bounds, the scenario
-  still hard-errors as before. When the spec has an inline `implements`, the
+  still hard-errors as before (exit 2) — also when the override equals the
+  declared range, and in every `sweep` cell, so a failing in-range scenario
+  never yields `verified` / `sweep_passed`. Only a reference the override
+  removed (inside the declared bounds, outside the overridden ones) is
+  excused; one outside the declared bounds keeps the unscoped error, and a
+  forbidden final step outside the overridden scope only because its argument
+  was removed is reported as `forbidden_skipped`, not satisfied (one outside the
+  declared scope is the unscoped `kind: "forbidden"` error, #1229, unless the
+  override widens the scope to include it, in which case the guard is
+  evaluated). When any scenario was skipped,
+  the envelope also carries `requirement_traces: {result: "not_evaluated",
+  reason: "bounds_override", skipped: [{kind, id, reference}, ...]}`; the key
+  is absent when every scenario was replayed. When the spec has an inline `implements`, the
   override also propagates into the abstract spec (restricted to the
   entity/number names the abstract declares) so refinement is checked at the
   same world size on both sides — otherwise a shrunken impl vs a full-size
@@ -557,21 +628,35 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   its first scope under `sweep.minimal_counterexample`. A `reachable_failed`
   cell is inconclusive only when its nonempty `unreached` array contains only
   `classification:"insufficient_depth"`: it remains in the results but is not
-  a counterexample. With no true failure, a determinate success yields
-  `sweep_passed`/exit 0; all-inconclusive yields `sweep_inconclusive`/exit 1
-  with a null minimal counterexample and retained per-cell results. Missing,
+  a counterexample. Such cells are settled per `--instances`/`--values` scope
+  (one combination across the whole depth range): a determinate success at
+  any depth of the same scope settles it, but a success in another scope never
+  does. With no true failure, a grid whose every scope is settled yields
+  `sweep_passed`/exit 0; otherwise it yields `sweep_inconclusive`/exit 1 with
+  a null minimal counterexample and retained per-cell results, and
+  `sweep.inconclusive_scopes` lists each all-inconclusive `{instances,
+  values}` scope (`[]` when there is none). Missing,
   unknown, or mixed classifications, including `over_constrained`, fail closed as
   `sweep_failed`. For `--values NAME=LO..HI`, it fixes `LO` and expands
   `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
   a missing file) is returned verbatim — exit code and `kind` unchanged.
+  Cells always carry `--instances`/`--values`, so a check a cell skips
+  (`requirement_traces` for an out-of-scope acceptance/forbidden scenario, `implements` under
+  `--property`) is surfaced, not hidden behind the grid verdict: the cell's
+  `summary` row gets `"<section>": "not_evaluated"` and
+  `sweep.not_evaluated: {sections, reasons}` is the union over cells (absent
+  when nothing was skipped). `sweep_passed` says nothing about those sections —
+  check them on an unscoped run.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
   counterfactual trace that breaks it under requires/assignment/fair removal.
   `skeleton.spec_kind` names the source dialect (`kernel`/`requirements`/…);
   `skeleton.auto_checks` lists both `type_bound` and one `partial_op` entry
-  per syntactic `pop`/`head`/`at`/`/`/`%` site. A `branches { when P { … }
+  per `pop`/`head`/`at`/`Seq` index/`/`/`%` site in an action, including
+  quantifier and aggregate binders and assignment targets — the same set the
+  verifier checks as `_partial_<action>`. A `branches { when P { … }
   maps Q }` action and a generated SLA `tick`/`_deadline_*` declaration each
   carry an `origin` (`generated:true`, plus a `branch` lowering step naming
   the guard/correspondence for the former) so `name` still resolves to the
@@ -632,7 +717,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   total `elapsed_s`, solver check statistics, and deterministic per-property
   check counts/times. Native/Worker keys and nullability match; Z3 counters are
   maximum observed snapshots. Explicit verification emits zero/null solver
-  statistics in the same shape. See `docs/DESIGN-verification-cost.md`.
+  statistics in the same shape. See `docs/design/DESIGN-verification-cost.md`.
   Bounded `verified` may include a saturation `hint` when the depth-K frontier
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),
@@ -693,6 +778,17 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   fidelity failure. Never `refines`, never folded into `refinement_failed`.
   `fslc diff` surfaces the same condition as an `impl_violated` finding and
   fails its gate unconditionally (not `--forbid`-gated).
+- **correspondence budget**: the correspondence check after that precondition
+  visits at most 50,000 distinct impl states (no CLI flag; the same budget as
+  an inline `implements` seam). Reaching it before deciding within `--depth`
+  is `result:"unknown_budget"` (exit 1) with `states_explored` and `hint` —
+  never `refines`. Lower `--depth` or narrow both specs' `verify {}` domains.
+  A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
+  refine layer fails with `result:"unknown_budget"`, and a governance
+  preservation reports `unknown_budget`. Such a run used to report `refines`
+  (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
+  and `fslc mutate` do not read this cutoff yet (`diff` reports
+  `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
 - **action-correspondence argument partial_op (#512)**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action
@@ -716,6 +812,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `refines` if it matches a different valid abs branch. A variable init
   assigns on only some paths (not on any) keeps the prior single-value
   behavior.
+- Definedness failure (#1196): `unknown_cti` / `violation_kind:"partial_op"` with
+  `invariant` = `_partial_<action>` (guard, body, or reached `ensures`; also
+  `last_action`) or `_partial_property_<name>` (invariant, `leadsTo`, `trans`).
+  The CTI start satisfies every proved invariant and reaches a partial operation;
+  guard it with a short-circuit `and`/`=>`/`or`/`if`, or exclude an unreachable
+  start with an auxiliary invariant. Never `proved` while such a state exists.
+- Ensures failure (#1217): `unknown_cti` / `violation_kind:"ensures"` with
+  `invariant` = the action name and `last_action`; a two-state CTI between
+  invariant states whose last step falsifies the reached `ensures`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with
   `rank_failure` (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`; with `helpful`, also `progress_action_not_fair`,
@@ -742,9 +847,12 @@ Practical strategy:
   spec (see §7) — the file keeps its normal verify-block size for everything
   else. If the spec has `acceptance`/`forbidden` scenarios hardcoding ids from
   the original (larger) world, they are not a blocker: under an active
-  override, a scenario that no longer fits is skipped with a `warnings` entry
-  rather than hard-erroring the run (see §7), so `--instances Case=1
-  --property <Liveness>` stays usable without editing those scenarios too.
+  override a scenario whose id/number falls outside the shrunken scope is
+  skipped with an `acceptance_skipped` / `forbidden_skipped` warning (and
+  listed under `requirement_traces.skipped`), while in-range scenarios still
+  replay and still fail hard, so `--instances Case=1 --property <Liveness>`
+  stays usable without editing those scenarios — the skipped ones are checked
+  on the unscoped run.
 - Verify **safety separately on the full-size model** at the depth you need.
 - Use `--property <leadsToName>` to run a single liveness property in isolation
   while iterating (see §7), so a slow `leadsTo` does not gate the safety checks.

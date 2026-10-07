@@ -3,13 +3,13 @@
 name: cache budget audit
 
 # Configuration-conformance automation, not product verification in
-# docs/DESIGN-ci.md's sense (rust workspace / WASM / native Z3 / semantic
+# docs/design/DESIGN-ci.md's sense (rust workspace / WASM / native Z3 / semantic
 # mutation / FSL Logic Test). It checks the live Actions cache state against the
 # budget contract, because that state silently degraded once: two concurrent
 # pull requests filled the repository's 10 GiB allowance with ref-scoped caches,
 # evicted `main`'s, and every run afterwards built cold -- measured +8 to +16 min
 # per shard, with each cold run saving a fresh ref-scoped copy and evicting more.
-# See docs/DESIGN-ci.md, "Actions cache budget", and issue #747.
+# See docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
 #
 # Unlike the ruleset audit this needs no PAT: the cache endpoints are readable
 # with the workflow's own GITHUB_TOKEN and `actions: read`.

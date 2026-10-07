@@ -35,12 +35,24 @@ fn scratch_dir(name: &str) -> PathBuf {
 }
 
 fn generated_content(spec: &str, depth: &str, target: &str, stem: &str) -> String {
+    generated_content_with(spec, depth, target, stem, &[])
+}
+
+fn generated_content_with(
+    spec: &str,
+    depth: &str,
+    target: &str,
+    stem: &str,
+    extra: &[&str],
+) -> String {
     let root = root();
     let directory = root.join("rust/target/testgen-contract");
     std::fs::create_dir_all(&directory).expect("create testgen output directory");
     let output_path = directory.join(format!("{stem}-{target}.out"));
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(["testgen", spec, "--depth", depth, "--target", target, "-o"])
+        .args(["testgen", spec, "--depth", depth, "--target", target])
+        .args(extra)
+        .arg("-o")
         .arg(&output_path)
         .current_dir(root)
         .output()
@@ -60,32 +72,117 @@ fn generated_digest(spec: &str, depth: &str, target: &str, stem: &str) -> String
     )
 }
 
+/// The six `specs/cart_v1.fsl --depth 3` scaffolds as every target emitted
+/// them before issue #1200, when an unwired adapter skipped every test.
+/// `--allow-unwired` must still reproduce them byte for byte, so a project
+/// that opts back into the skip gets exactly the file it had. Kotlin is absent
+/// because `--allow-unwired` rejects it (no runtime skip in kotlin.test).
+const PRE_1200_SKIPPING_GOLDENS: [(&str, &str); 5] = [
+    (
+        "pytest",
+        "8b4187523682e08090072c56177fb888cddc842ea023963261e858589add7f1c",
+    ),
+    (
+        "vitest",
+        "ccd23beba0a6fc8960f8d4b83075efe69e531e305b1e424644a2e3408e4109d9",
+    ),
+    (
+        "swift",
+        "4811e2f029636e27096f37b081a907d0e38fdab9f61c198da5def2d59a5fee71",
+    ),
+    (
+        "dart",
+        "c534f3d052103941937bbed6cb1943655033a1d37c49cc260d62fa096a71c06e",
+    ),
+    (
+        "phpunit",
+        "f5140ed71045fba394d1db93d017593de66089987a78fbfcb59ce71741350eb4",
+    ),
+];
+
 #[test]
-fn all_six_public_kernel_targets_match_the_pre_migration_goldens() {
+fn allow_unwired_reproduces_the_pre_1200_skipping_scaffolds() {
+    for (target, digest) in PRE_1200_SKIPPING_GOLDENS {
+        let content = generated_content_with(
+            "specs/cart_v1.fsl",
+            "3",
+            target,
+            "cart-allow-unwired",
+            &["--allow-unwired"],
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(content.as_bytes())),
+            digest,
+            "{target} --allow-unwired output changed"
+        );
+    }
+}
+
+/// Issue #1200: kotlin.test has no portable runtime skip, so an unwired
+/// Kotlin test could only return early and pass. `--allow-unwired` therefore
+/// refuses the target instead of generating that silent green.
+#[test]
+fn allow_unwired_rejects_kotlin_and_unwired_kotlin_fails() {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "testgen",
+            "specs/cart_v1.fsl",
+            "--depth",
+            "3",
+            "--target",
+            "kotlin",
+            "--allow-unwired",
+        ])
+        .current_dir(root())
+        .output()
+        .expect("run native testgen");
+    assert_eq!(output.status.code(), Some(2));
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("error envelope");
+    assert_eq!(envelope["result"], "error", "{envelope:#}");
+    assert!(
+        envelope["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not available for --target kotlin")),
+        "{envelope:#}"
+    );
+    let content = generated_content("specs/cart_v1.fsl", "3", "kotlin", "cart-unwired");
+    assert!(!content.contains("?: return"), "{content}");
+    assert_eq!(
+        content
+            .matches("val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)")
+            .count(),
+        4,
+        "three scenarios and the random walk must each fail when unwired:\n{content}"
+    );
+}
+
+#[test]
+fn all_six_public_kernel_targets_match_the_failing_by_default_goldens() {
     let expected = [
         (
             "pytest",
-            "8b4187523682e08090072c56177fb888cddc842ea023963261e858589add7f1c",
+            "89454a73cbcc05d24fdbde88e30e97299c5eac7ac7098a06a62dc8d4a35076fb",
         ),
         (
             "vitest",
-            "ccd23beba0a6fc8960f8d4b83075efe69e531e305b1e424644a2e3408e4109d9",
+            "805c1659c48f50a3206c7c452a5113b5737780275c90297b4edb4c11ff997b96",
         ),
         (
             "swift",
-            "4811e2f029636e27096f37b081a907d0e38fdab9f61c198da5def2d59a5fee71",
+            "69b6c6e728e6165b4130ab4635562d7931b705b8156325b62c5db163d0da9c92",
         ),
         (
             "kotlin",
-            "d5e271917aadc4e19ddaf4825fa18b8a1ee90e7bab94cf1954cee9077da09a65",
+            "7786f1afbbcd9b4523e1be5fa25abf1068aacc7df9940ef4f30ede8f92aa3f81",
         ),
         (
             "dart",
-            "c534f3d052103941937bbed6cb1943655033a1d37c49cc260d62fa096a71c06e",
+            "a23ffda2fbb99e906c1f0afb3ef6758941c8200a119538bdef14063107b95e9d",
         ),
         (
             "phpunit",
-            "f5140ed71045fba394d1db93d017593de66089987a78fbfcb59ce71741350eb4",
+            "c3c38c14bbae0aa96c3336c4e0bf9020720b6ca1ed69cdd27626fe5d774188cf",
         ),
     ];
     for (target, digest) in expected {
@@ -135,11 +232,11 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
     for (target, digest) in [
         (
             "pytest",
-            "870aa7f2aea4e759990e9d52acd9e55e4b133957a8b2fa3e730900d49704547c",
+            "53b29b07dbfd872fd5fe0f705a64ba26e46b3baac3c0a876adc38d2ae6be0da8",
         ),
         (
             "vitest",
-            "08142b2a05359c7d1697e28cf8dfc95701d859bc0ab5cfed33e7ed8f3d6d9587",
+            "8dab1494cf7c91530416fb02ff9c9a63063bb1b0c948dffbfe0a5bc99fb8fd01",
         ),
     ] {
         assert_eq!(
@@ -180,7 +277,7 @@ fn pytest_target_emits_the_forbidden_rejection_assertion() {
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(content.as_bytes())),
-        "da26cf763e96508472a0fcda8c2b4d7c69652d478794c772bd2053389e1b2e51",
+        "6990e0ad3329c88b8981a203139224c39e52a8f1676094cc8fe0759ba79a7f05",
         "small_forbidden_guarded_cancel.fsl pytest output changed"
     );
 }

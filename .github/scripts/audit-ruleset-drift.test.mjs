@@ -592,7 +592,7 @@ test("issue body states the two legitimate exits and never includes token materi
   });
   const body = client.issues[0].body;
   assert.match(body, /revert the live ruleset/i);
-  assert.match(body, /docs\/DESIGN-ci\.md/);
+  assert.match(body, /docs\/design\/DESIGN-ci\.md/);
   assert.doesNotMatch(body, /ghp_|gho_|github_pat_/);
   assert.doesNotMatch(body, /::error|::warning/); // GitHub Actions log annotation syntax
 });

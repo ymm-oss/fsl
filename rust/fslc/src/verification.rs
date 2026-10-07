@@ -505,6 +505,46 @@ fn suggested_invariants(
         .collect()
 }
 
+/// `last_action` for an induction CTI whose failure is in an action context
+/// — a `partial_op` named `_partial_<action>` (#1196) or an `ensures`
+/// (#1217) — shaped like BMC's.
+fn insert_action_cti_last_action(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    cti: &fsl_verifier::InductionCti,
+) {
+    let action_context = cti.kind == fsl_verifier::violation_kind::ENSURES
+        || cti
+            .name
+            .strip_prefix("_partial_")
+            .is_some_and(|rest| !rest.starts_with("property_"));
+    let Some(action) = action_context
+        .then(|| cti.trace.last())
+        .flatten()
+        .and_then(|step| step.action.as_ref())
+    else {
+        return;
+    };
+    let definition = model
+        .actions
+        .iter()
+        .find(|definition| definition.name == action.name);
+    let params = action
+        .params
+        .iter()
+        .map(|(name, value)| (name.clone(), ::fslc_rust::fsl_value_json(value)))
+        .collect::<Map<_, _>>();
+    output.insert(
+        "last_action".to_owned(),
+        origin_aware_action_json(
+            model,
+            &action.name,
+            &params,
+            definition.map_or(Value::Null, |definition| definition.span.python_loc()),
+        ),
+    );
+}
+
 fn render_induction_cti(
     model: &KernelModel,
     cti: &fsl_verifier::InductionCti,
@@ -515,16 +555,30 @@ fn render_induction_cti(
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("unknown_cti"));
+    let partial = cti.kind == fsl_verifier::violation_kind::PARTIAL_OP;
+    let ensures = cti.kind == fsl_verifier::violation_kind::ENSURES;
     let property_kind = if cti.kind == "trans" {
         "trans"
     } else {
         "invariant"
     };
-    let name = origin_aware_property_name(&mut output, model, property_kind, &cti.name);
+    let name = if partial || ensures {
+        // `_partial_<action>` / `_partial_property_<name>`: the same synthetic
+        // names BMC's `partial_op` violations carry (#1196).
+        display(&cti.name)
+    } else {
+        origin_aware_property_name(&mut output, model, property_kind, &cti.name)
+    };
     if cti.kind == "trans" {
         output.insert("trans".to_owned(), json!(name));
     }
+    if partial || ensures {
+        output.insert("violation_kind".to_owned(), json!(cti.kind));
+    }
     output.insert("invariant".to_owned(), json!(name));
+    if partial || ensures {
+        insert_action_cti_last_action(&mut output, model, cti);
+    }
     output.insert("k".to_owned(), json!(cti.k));
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert("completeness".to_owned(), json!("bounded"));
@@ -536,7 +590,13 @@ fn render_induction_cti(
             "violated_at": cti.k,
         }),
     );
-    let mut hint = "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned();
+    let mut hint = if ensures {
+        "this step starts and ends in states that satisfy every proved invariant, but the action's ensures is false after it (BMC reports the same step as violated ensures if it is reachable); fix the action body or the ensures, or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
+    } else if partial {
+        "this state satisfies every proved invariant but reaches a partial operation (division or remainder by zero, or head/pop/at/index outside a sequence) that BMC and the explicit engine report as partial_op; guard the operation (e.g. requires d != 0 and x / d < 100), or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
+    } else {
+        "this state sequence satisfies all invariants but leads to a violation; the start state may be unreachable — add an auxiliary invariant that excludes it, then re-run".to_owned()
+    };
     if cti.kind == "invariant" {
         let suggestions = suggested_invariants(model, &cti.trace);
         if !suggestions.is_empty() {
@@ -825,13 +885,13 @@ fn insert_helpful_rank_failure_json(
     }
 }
 
-/// Prove the solver-dependent vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// Prove the solver-dependent vacuity lanes (`docs/design/DESIGN-vacuity.md` §2 lanes
 /// 3–6) for a run decided by the solver-free explicit-state engine.
 ///
 /// The lanes describe the model, not the exploration, so `--engine explicit`
 /// must surface the same vacuity kinds `--engine bmc` does; letting the engine
 /// choice change which kinds `--vacuity error` can see would be exactly the
-/// exit-code divergence `docs/DESIGN-rust-port.md` forbids. A solver or
+/// exit-code divergence `docs/design/DESIGN-rust-port.md` forbids. A solver or
 /// semantics failure is surfaced, never swallowed.
 type ExplicitSolverFindings = (
     Vec<fsl_verifier::VacuityFinding>,
@@ -1114,27 +1174,76 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
     })
 }
 
+/// Per-check wall-clock limit for the #1149 ranking pre-pass. A check that
+/// runs out answers `unknown`, which discharges nothing: the BMC run then does
+/// the full search it always did, so the limit bounds the pre-pass's cost
+/// without ever deciding a verdict.
+const RANKING_PREPASS_CHECK_TIMEOUT_MS: u32 = 5_000;
+
+/// Run the #1149 ranking pre-pass for a BMC run, on its own thread.
+///
+/// The ranking must not share a Z3 context with the BMC session: the native
+/// backend's `Solver::new()` uses the thread's default context, and terms
+/// created there -- even in a separate `Solver` -- measurably change which
+/// model Z3 returns for the BMC session's later witness queries (observed on
+/// `helpful` specs whose ranking fails and whose lasso witness then differed).
+/// A fresh thread gets a fresh default context, so the BMC session sees
+/// exactly the query history it has without the pre-pass.
+///
+/// The pre-pass is optional evidence: a thread that cannot be spawned, a
+/// solver that cannot be created, a timeout, or a panic inside the ranking
+/// all discharge nothing, and the run proceeds exactly as without it. (A
+/// panic's message is still printed to stderr by the default hook.)
+fn ranked_lasso_discharges(
+    model: &KernelModel,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+) -> (
+    std::collections::BTreeSet<usize>,
+    Option<fsl_solver::VerificationStatistics>,
+) {
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .stack_size(super::STACK_SIZE)
+            .name("fslc-ranking".to_owned())
+            .spawn_scoped(scope, || {
+                let Ok(mut solver) =
+                    fsl_solver_z3::Z3Solver::with_timeout_ms(RANKING_PREPASS_CHECK_TIMEOUT_MS)
+                else {
+                    return (std::collections::BTreeSet::new(), None);
+                };
+                let discharged = block_on_native(fsl_verifier::ranked_leadsto_lasso_discharges(
+                    model,
+                    &mut solver,
+                    checked_bounds,
+                ));
+                (discharged, Some(fsl_solver::SmtSolver::statistics(&solver)))
+            });
+        worker
+            .ok()
+            .and_then(|worker| worker.join().ok())
+            .unwrap_or_else(|| (std::collections::BTreeSet::new(), None))
+    })
+}
+
 fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedBmc, CommandResult> {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
     };
-    let verification = if let Some(initial_state) = request.initial_state {
-        block_on_native(fsl_verifier::verify_bounded_from_state(
-            &prepared.model,
-            &mut solver,
-            request.depth,
-            prepared.checked_bounds.as_ref(),
-            initial_state,
-        ))
-    } else {
-        block_on_native(fsl_verifier::verify_bounded_selected(
-            &prepared.model,
-            &mut solver,
-            request.depth,
-            prepared.checked_bounds.as_ref(),
-        ))
-    };
+    // A ranked `leadsTo` whose ranking obligations hold needs no bounded
+    // fair-lasso search: the ranking already shows that search is `unsat`
+    // (#1149). It only withdraws probes; the verdict, completeness, and every
+    // witness stay those of the full search.
+    let (lasso_discharged, ranking_statistics) =
+        ranked_lasso_discharges(&prepared.model, prepared.checked_bounds.as_ref());
+    let verification = block_on_native(fsl_verifier::verify_bounded_discharging(
+        &prepared.model,
+        &mut solver,
+        request.depth,
+        prepared.checked_bounds.as_ref(),
+        request.initial_state,
+        &lasso_discharged,
+    ));
     let mut result = match verification {
         Ok(result) => result,
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
@@ -1151,6 +1260,13 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     // underdetermined witness projections, which are byte-compared across the
     // native and browser backends.
     let mut statistics = fsl_solver::SmtSolver::statistics(&solver);
+    // A pre-pass that asked nothing (no ranked `leadsTo`) leaves `cost` as it
+    // was without it.
+    if let Some(ranking_statistics) = &ranking_statistics
+        && ranking_statistics.solver.checks > 0
+    {
+        statistics.merge(ranking_statistics);
+    }
     let needs_reachable_diagnosis =
         result.violation.is_none() && result.reachables.values().any(Option::is_none);
     if needs_reachable_diagnosis {
@@ -1268,7 +1384,9 @@ fn adjudicate_lemma(
             });
         }
     };
-    match block_on_native(fsl_verifier::prove_induction(
+    // Lemma truth only: the definedness obligation is asked in the target
+    // run, where the user invariants are in scope (#1196).
+    match block_on_native(fsl_verifier::prove_induction_invariants(
         &candidate,
         &mut solver,
         k_ind,
@@ -1600,7 +1718,7 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
 /// walked) and too broad (an unrelated sibling `.fsl` file was).
 ///
 /// The key embeds no absolute path (issue #1148, and
-/// `docs/DESIGN-incremental-verify.md` §3): the entry spec is identified by
+/// `docs/design/DESIGN-incremental-verify.md` §3): the entry spec is identified by
 /// its bytes, each dependency by its path relative to the entry spec's
 /// directory plus its bytes, and the `--requirements` file by its bytes. The
 /// entry spec's own path is deliberately not an input: no verdict-class
@@ -1738,6 +1856,32 @@ fn verified_cross_depth_output(
     .then_some(output)
 }
 
+/// A temporary-file name no other writer uses. The entry is written there and
+/// then renamed into place, so a reader sees either no entry or a whole one.
+/// The process id alone is not enough since `chain --jobs` (issue #1151):
+/// two worker threads of one process storing the same key or the same
+/// cross-depth pointer would write through one temporary file, and a rename
+/// could publish their interleaved bytes. The per-process sequence number
+/// keeps every writer's temporary file its own.
+fn cache_temporary_name(stem: &str) -> String {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(".{stem}.{}.{sequence}.tmp", std::process::id())
+}
+
+/// Writes `bytes` to `temporary` and renames it onto `destination`. The cache
+/// is best-effort, so a failure is not reported, but the temporary file is
+/// removed: its name is unique per writer, so a leftover would never be
+/// overwritten by a later store.
+fn publish_cache_file(temporary: &Path, destination: &Path, bytes: Option<Vec<u8>>) {
+    let published = bytes.is_some_and(|bytes| {
+        std::fs::write(temporary, bytes).is_ok() && std::fs::rename(temporary, destination).is_ok()
+    });
+    if !published {
+        let _ = std::fs::remove_file(temporary);
+    }
+}
+
 fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if !valid_cache_key(key) || !valid_cache_key(xdepth) {
         return;
@@ -1759,7 +1903,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
     if std::fs::create_dir_all(parent).is_err() {
         return;
     }
-    let temporary = parent.join(format!(".{}.{}.tmp", key, std::process::id()));
+    let temporary = parent.join(cache_temporary_name(key));
     let explicit = output.get("engine").and_then(Value::as_str) == Some("explicit");
     let entry = json!({
         "schema": "fslc-rust-cache.v2",
@@ -1773,13 +1917,7 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         },
         "output": output,
     });
-    if serde_json::to_vec(&entry)
-        .ok()
-        .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-        .is_some()
-    {
-        let _ = std::fs::rename(&temporary, path);
-    }
+    publish_cache_file(&temporary, &path, serde_json::to_vec(&entry).ok());
     if output.get("result").and_then(Value::as_str) == Some("violated")
         && let Some(step) = output.get("violated_at_step").and_then(Value::as_u64)
         && let Some(root) = cache_root()
@@ -1787,19 +1925,15 @@ fn verify_cache_store(key: &str, xdepth: &str, output: &Value) {
         let directory = root.join("verify/v3/xdepth");
         if std::fs::create_dir_all(&directory).is_ok() {
             let pointer = directory.join(format!("{xdepth}.json"));
-            let temporary = directory.join(format!(".{xdepth}.{}.tmp", std::process::id()));
-            if serde_json::to_vec(&json!({
+            let temporary = directory.join(cache_temporary_name(xdepth));
+            let bytes = serde_json::to_vec(&json!({
                 "schema": "fslc-rust-cache-pointer.v2",
                 "xdepth": xdepth,
                 "entry_key": key,
                 "violated_at_step": step,
             }))
-            .ok()
-            .and_then(|bytes| std::fs::write(&temporary, bytes).ok())
-            .is_some()
-            {
-                let _ = std::fs::rename(temporary, pointer);
-            }
+            .ok();
+            publish_cache_file(&temporary, &pointer, bytes);
         }
     }
 }
@@ -1809,11 +1943,19 @@ struct PreparedCliVerification {
     is_agent_document: bool,
     model: Result<KernelModel, SpecLoadError>,
     initial_state: Option<std::collections::BTreeMap<String, FslValue>>,
+    /// Requirements scenarios a bounds-overridden run skipped because they
+    /// reference a value outside the overridden scope (#1218); every other
+    /// scenario was replayed. Always empty without `--instances`/`--values`.
+    requirement_trace_skips: Vec<fslc_rust::verification_output::SkippedRequirementTrace>,
     /// Compose-lowering warnings (e.g. `fair_not_inherited`), computed while
     /// lowering the surface document, before `build_model` drops the per-
     /// component information (like constituent `fair` markers) that produced
     /// them. `model`/`fsl_runtime::verification_warnings` cannot recover them.
     compose_warnings: Vec<Value>,
+    /// The `requirement_traces` section of a run that skipped some of the
+    /// spec's `acceptance`/`forbidden` scenarios as out of the overridden
+    /// scope (#1008, #1218); `None` when every scenario was replayed.
+    requirement_traces_not_evaluated: Option<Value>,
 }
 
 pub(super) fn run_verify_cli(
@@ -1828,17 +1970,50 @@ pub(super) fn run_verify_cli(
     run_verify_cli_from_source(path, cache_identity_path, &source, options)
 }
 
-/// Whether this run selects a subset of the model, and therefore does not
-/// evaluate the inline `implements` seam.
+/// Why this run does not evaluate the inline `implements` seam, in a fixed
+/// order; empty when it does.
 ///
-/// This is the whole population of seam suppressors: `docs/LANGUAGE.md` names
-/// these three options and nothing else, and both call sites read it from here
-/// so the list cannot drift in one of them. #1008 is open against the semantics
-/// of these three, so a change there has to land in one place.
-fn seam_is_suppressed(options: &CliVerifyOptions, prepared: &PreparedCliVerification) -> bool {
-    options.property.is_some()
-        || !options.exclude_properties.is_empty()
-        || prepared.initial_state.is_some()
+/// This is the whole population of seam suppressors: `docs/manual/LANGUAGE.md`
+/// names these three options and nothing else, and every call site reads it
+/// from here so the list cannot drift in one of them. The decision for each
+/// (`docs/design/DESIGN-refinement.md`, #1008) is *suppress with a reason*: the
+/// envelope keeps `implements` as `{"result":"not_evaluated","reason":...}`
+/// rather than dropping the key, and the verdict is not changed.
+fn seam_suppression_reasons(
+    options: &CliVerifyOptions,
+    prepared: &PreparedCliVerification,
+) -> Vec<&'static str> {
+    use fslc_rust::verification_output::{
+        NOT_EVALUATED_FROM_STATE, NOT_EVALUATED_PROPERTY_EXCLUSION,
+        NOT_EVALUATED_PROPERTY_SELECTION,
+    };
+    let mut reasons = Vec::new();
+    if options.property.is_some() {
+        reasons.push(NOT_EVALUATED_PROPERTY_SELECTION);
+    }
+    if !options.exclude_properties.is_empty() {
+        reasons.push(NOT_EVALUATED_PROPERTY_EXCLUSION);
+    }
+    if prepared.initial_state.is_some() {
+        reasons.push(NOT_EVALUATED_FROM_STATE);
+    }
+    reasons
+}
+
+/// The `implements` section a suppressed run reports in place of a verdict
+/// (#1008), or `None` when the spec declares no inline `implements` — so a
+/// consumer can tell "nothing declared" (key absent) from "declared but not
+/// evaluated" (this section).
+fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Option<Value> {
+    if reasons.is_empty() {
+        return None;
+    }
+    let abs = fslc_rust::verification_output::requirements_implements_name(source)?;
+    let mut fields = Map::new();
+    fields.insert("abs".to_owned(), json!(abs));
+    Some(fslc_rust::verification_output::not_evaluated_section(
+        reasons, fields,
+    ))
 }
 
 /// A `FileResolver` decorator that records every dependency it actually
@@ -1939,8 +2114,15 @@ pub(super) fn run_verify_cli_from_source(
         // inline `implements` seam has to be evaluated and folded here as well.
         // Without this, `verify --engine induction --lemma ...` is another way
         // to pass a broken seam with exit 0 (#1002), and the suppressor list in
-        // `docs/LANGUAGE.md` would be missing an entry.
-        if !seam_is_suppressed(options, &prepared)
+        // `docs/manual/LANGUAGE.md` would be missing an entry.
+        let suppression = seam_suppression_reasons(options, &prepared);
+        if let Some(section) = suppressed_implements_section(source, &suppression) {
+            fslc_rust::verification_output::attach_not_evaluated(
+                &mut output,
+                "implements",
+                section,
+            );
+        } else if suppression.is_empty()
             && let Ok(model) = &prepared.model
         {
             match implements_result_from_source_with_bounds(
@@ -1974,7 +2156,8 @@ pub(super) fn run_verify_cli_from_source(
     // `execute_cli_verification` instead of being recomputed there, so
     // "is the seam active" stays a single fact rather than two copies of the
     // same check that could drift.
-    let selection_filtered = seam_is_suppressed(options, &prepared);
+    let suppression = seam_suppression_reasons(options, &prepared);
+    let selection_filtered = !suppression.is_empty();
     let implements_contract = if selection_filtered {
         None
     } else {
@@ -2021,6 +2204,7 @@ pub(super) fn run_verify_cli_from_source(
         &prepared,
         selection_filtered,
         implements_contract,
+        suppressed_implements_section(source, &suppression),
     );
     let (output, status) = finalize_cli_verification(
         path,
@@ -2071,6 +2255,31 @@ fn prepare_cli_verification_from_source(
     } else {
         None
     };
+    // #1218: `--instances`/`--values` replays the scenarios against the
+    // overridden model too. Only a scenario that references a value the
+    // override removed from scope, and that holds in the declared world, is
+    // skipped (with a warning); any other failure is the same hard error an
+    // unscoped run reports.
+    let requirement_trace_skips = match &snapshot_model {
+        Ok(model) if has_scope => {
+            // The declared (un-overridden) model decides whether the override
+            // is what put a reference out of scope. Loaded without the
+            // recorder: the scoped path never resolves through it either, so
+            // the cache key's dependency domain is unchanged.
+            let declared = load_model_from_source(path, source).ok();
+            match fslc_rust::verification_output::validate_requirement_trace_source_scoped(
+                &envelope(),
+                source,
+                model,
+                declared.as_ref(),
+            ) {
+                Ok((Some(failure), _)) => return Err((failure, 2)),
+                Ok((None, skipped)) => skipped,
+                Err(error) => return Err((semantic_error_output(&error), 2)),
+            }
+        }
+        _ => Vec::new(),
+    };
     if !has_scope && let Ok(model) = &snapshot_model {
         match validate_requirement_traces_from_source(path, source, model) {
             Ok((Some(failure), _)) => return Err((failure, 2)),
@@ -2078,6 +2287,11 @@ fn prepare_cli_verification_from_source(
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }
+    // A scenario skipped as out of the overridden scope was not evaluated,
+    // and the envelope says so instead of reading as if it had passed
+    // (#1008); the replayed ones already passed above (#1218).
+    let requirement_traces_not_evaluated =
+        requirement_traces_not_evaluated_section(&requirement_trace_skips);
     // `--instances`/`--values` scope overrides go through
     // `parse_kernel_source_with_bounds` (`load_model_scoped`), a separate
     // lowering entrypoint that does not apply to compose documents, so
@@ -2101,7 +2315,9 @@ fn prepare_cli_verification_from_source(
         is_agent_document,
         model: snapshot_model,
         initial_state,
+        requirement_trace_skips,
         compose_warnings,
+        requirement_traces_not_evaluated,
     })
 }
 
@@ -2349,6 +2565,7 @@ fn execute_cli_verification(
     prepared: &PreparedCliVerification,
     selection_filtered: bool,
     implements_contract: Option<fsl_core::ImplementsContract>,
+    suppressed_implements: Option<Value>,
 ) -> CommandResult {
     if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
         return (
@@ -2429,15 +2646,21 @@ fn execute_cli_verification(
         }),
         Err(error) => return (error_output("usage", &error), 2),
     };
-    if !selection_filtered
-        && let Some(code) = decorate_default_cli_verification(
-            &mut output,
-            source,
-            model,
-            implements,
-            &prepared.compose_warnings,
-        )
-    {
+    // A selected run (#1008) keeps the `implements` key with the reason it
+    // was not evaluated instead of dropping it, and still gets the same
+    // warning finalization and compose-lowering warnings as a full run: those
+    // were computed regardless of the selection, and dropping them hid a
+    // `fair_not_inherited` warning behind `--property`.
+    if let Some(section) = suppressed_implements {
+        fslc_rust::verification_output::attach_not_evaluated(&mut output, "implements", section);
+    }
+    if let Some(code) = decorate_default_cli_verification(
+        &mut output,
+        source,
+        model,
+        implements,
+        &prepared.compose_warnings,
+    ) {
         return (output, code);
     }
     (output, status)
@@ -2472,6 +2695,22 @@ fn decorate_default_cli_verification(
     implements_exit
 }
 
+/// `Case=1, Amount=0..1`: the overrides a skip warning names (#1218).
+fn describe_scope_overrides(scope: &ScopeBounds) -> String {
+    scope
+        .instances
+        .iter()
+        .map(|(name, count)| format!("{name}={count}"))
+        .chain(
+            scope
+                .values
+                .iter()
+                .map(|(name, (lo, hi))| format!("{name}={lo}..{hi}")),
+        )
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn finalize_cli_verification(
     path: &Path,
     options: &CliVerifyOptions,
@@ -2480,6 +2719,23 @@ fn finalize_cli_verification(
     mut output: Value,
     mut status: i32,
 ) -> CommandResult {
+    if !prepared.requirement_trace_skips.is_empty()
+        && output.get("result").and_then(Value::as_str) != Some("error")
+        && let Some(envelope) = output.as_object_mut()
+    {
+        let scope = describe_scope_overrides(&options.scope);
+        if let Value::Array(warnings) = envelope
+            .entry("warnings")
+            .or_insert_with(|| Value::Array(Vec::new()))
+        {
+            warnings.extend(
+                prepared
+                    .requirement_trace_skips
+                    .iter()
+                    .map(|skip| skip.warning(&scope)),
+            );
+        }
+    }
     if prepared.has_scope
         && output.get("result").and_then(Value::as_str) != Some("error")
         && let Some(envelope) = output.as_object_mut()
@@ -2492,6 +2748,13 @@ fn finalize_cli_verification(
                     name.clone(), json!([lo, hi])
                 )).collect::<Map<_, _>>(),
             }),
+        );
+    }
+    if let Some(section) = &prepared.requirement_traces_not_evaluated {
+        fslc_rust::verification_output::attach_not_evaluated(
+            &mut output,
+            "requirement_traces",
+            section.clone(),
         );
     }
     add_snapshot_metadata(&mut output, options);
@@ -2532,6 +2795,36 @@ fn finalize_cli_verification(
         verify_cache_store(key, xdepth, &output);
     }
     (output, status)
+}
+
+/// The `requirement_traces` section for a bounds-overridden run that skipped
+/// scenarios referencing a value outside the overridden scope (#1218), or
+/// `None` when it skipped none — every declared scenario was then replayed
+/// and passed, since an in-scope failure is a hard error before this point.
+///
+/// The reason stays `bounds_override`: the override is what put the skipped
+/// scenarios out of scope. `skipped` lists each one with its out-of-scope
+/// reference, the same entries the `*_skipped` warnings carry.
+fn requirement_traces_not_evaluated_section(
+    skips: &[fslc_rust::verification_output::SkippedRequirementTrace],
+) -> Option<Value> {
+    if skips.is_empty() {
+        return None;
+    }
+    let mut fields = Map::new();
+    fields.insert(
+        "skipped".to_owned(),
+        Value::Array(
+            skips
+                .iter()
+                .map(fslc_rust::verification_output::SkippedRequirementTrace::entry)
+                .collect(),
+        ),
+    );
+    Some(fslc_rust::verification_output::not_evaluated_section(
+        &[fslc_rust::verification_output::NOT_EVALUATED_BOUNDS_OVERRIDE],
+        fields,
+    ))
 }
 
 fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {

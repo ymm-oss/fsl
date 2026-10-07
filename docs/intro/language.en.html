@@ -4,13 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>FSL Language Reference — generated from LANGUAGE.md</title>
-<meta name="description" content="The exhaustive FSL language reference, generated from docs/LANGUAGE.md." />
+<meta name="description" content="The exhaustive FSL language reference, generated from docs/manual/LANGUAGE.md." />
 <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body class="docs-page" data-page="language">
 <!-- GENERATED — do not edit by hand. Regenerate with:
      python tools/build_site_reference.py
-     Source: docs/LANGUAGE.md -->
+     Source: docs/manual/LANGUAGE.md -->
 <div class="progress"></div>
 
 <header class="topbar" data-nav></header>
@@ -25,7 +25,7 @@
     <p class="kicker mono reveal">Generated Reference</p>
     <span class="badge ref reveal">Generated from LANGUAGE.md</span>
     <h1 class="reveal" style="margin-top:14px">Language Reference</h1>
-    <p class="lead narrow reveal">Generated from <code>docs/LANGUAGE.md</code>, reproduced verbatim — this is the canonical source, not a copy that can drift from it.</p>
+    <p class="lead narrow reveal">Generated from <code>docs/manual/LANGUAGE.md</code>, reproduced verbatim — this is the canonical source, not a copy that can drift from it.</p>
     <div class="tree-controls reveal">
       <button class="btn op-expand" type="button">Expand all</button>
       <button class="btn op-collapse" type="button">Collapse all</button>
@@ -110,7 +110,7 @@ per-declaration tags, it is <strong>metadata only</strong> — never verified �
 <code>fslc explain</code> / <code>fslc html</code> as a classification badge next to the spec name (JSON:
 <code>skeleton.spec_kind = {id, text}</code>). Use it to record what kind of thing the whole
 spec is (e.g. <code>ui</code> for a screen-flow spec that models only the behavioral slice);
-it carries no kernel semantics and desugars to nothing. See <code>docs/DESIGN-ui.md</code>.
+it carries no kernel semantics and desugars to nothing. See <code>docs/design/DESIGN-ui.md</code>.
 Internally this legacy badge is adapted to the shared typed <code>Kind</code> annotation;
 the source grammar remains unchanged. See <code>DESIGN-annotations.md</code>.</p>
 <p>Any layer — including a kernel <code>spec</code> — may declare identity/number sorts whose
@@ -139,7 +139,7 @@ verify {
 <p><code>entity</code>/<code>number</code> desugar to <code>type &lt;Name&gt; = lo..hi</code> before verification, so they
 are exactly equivalent to writing the bounded type directly — the difference is
 only readability (a design spec reads as documentation instead of asserting a
-domain size that is really a model bound). See <code>docs/DESIGN-spec-domains.md</code>.</p>
+domain size that is really a model bound). See <code>docs/design/DESIGN-spec-domains.md</code>.</p>
 <p>The database compatibility dialect is another frontend over the same kernel:</p>
 <pre><code class="language-fsl">dbsystem &lt;Name&gt; {
   database &lt;db&gt; {
@@ -207,7 +207,7 @@ checks are dialect-level compatibility checks. Feature flags are finite declared
 variants inside an environment and add <code>DB-ASSUME-FINITE-FLAG-STATE</code>; they do
 not prove rollout percentages. Generic <code>requires</code> / <code>provides</code> capabilities
 cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
-other artifact profiles in the same snapshot model. See <code>docs/DESIGN-db.md</code>.</p>
+other artifact profiles in the same snapshot model. See <code>docs/design/DESIGN-db.md</code>.</p>
 <p>Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):</p>
 <pre><code class="language-fsl">domain &lt;Name&gt; {
@@ -394,8 +394,8 @@ topology remain authoritative in the companion because Public Kernel v1 does
 not encode them. All five target outputs are locked to pre-migration goldens,
 and the valid domain corpus is generated for every target.
 It does not prove real gateway behavior, wall-clock timeouts, queue delivery, or
-production exactly-once semantics. See <code>docs/DESIGN-domain.md</code> and
-<code>docs/DESIGN-effect.md</code>.</p>
+production exactly-once semantics. See <code>docs/design/DESIGN-domain.md</code> and
+<code>docs/design/DESIGN-effect.md</code>.</p>
 <p><code>fslc verify</code> can override a <code>verify</code> block's <code>instances</code>/<code>values</code> bounds from
 the command line, without editing the spec:</p>
 <pre><code class="language-bash">fslc verify spec.fsl --instances Case=1 --property EventuallyLeavesInProgress
@@ -418,8 +418,9 @@ carried number (e.g. <code>Amount</code>, absent from a business abstract) appli
 impl only.</p>
 <p><code>fslc verify</code> still evaluates inline <code>implements</code> when only <code>--instances</code> /
 <code>--values</code> scope overrides are present. <code>--property</code>, <code>--exclude-property</code>, and
-<code>--from-state</code> continue to omit the <code>implements</code> field without recording a reason;
-that behavior is not treated as safe and remains an open contract decision.</p>
+<code>--from-state</code> do not evaluate it; the envelope then keeps the key as
+<code>implements: {"abs": ..., "result": "not_evaluated", "reason": ..., "reasons": [...]}</code>
+instead of omitting it (see "Checks a selected run does not evaluate" in §7).</p>
 <p><code>acceptance</code>/<code>forbidden</code> scenarios often hardcode ids/numbers from the spec's
 original world (<code>accept(2)</code>), which can fall outside a shrunken override
 (<code>--instances Case=1</code>). When overrides are active, a scenario whose replay
@@ -427,11 +428,38 @@ fails <em>purely</em> because it references a value outside the overridden bound
 (an out-of-range action argument, or an out-of-range index inside its
 <code>expect</code>) is downgraded per-scenario from a hard error to a skip, reported in
 the envelope's <code>warnings</code> (<code>{"kind": "acceptance_skipped"/"forbidden_skipped",
-"id": ..., "message": ...}</code>); the rest of the scenarios still run. Without
+"id": ..., "reference": ..., "message": ...}</code>, where <code>reference</code> names the
+out-of-range argument or index); the rest of the scenarios still run. Without
 overrides — or for any other failure (a false <code>expect</code>, an unmet <code>requires</code>)
-— behavior is unchanged: hard error. This is what makes <code>--instances Case=1
+— behavior is unchanged: hard error (exit 2, <code>trace_type: "acceptance"</code> /
+<code>"forbidden"</code>), including when the override equals the declared range. Every
+<code>fslc sweep</code> cell runs with overrides, so the same rule applies per cell: a
+failing in-range scenario makes the sweep return that error rather than
+<code>sweep_passed</code>. A reference counts as out of range only when the override
+removed it — it is inside the spec's declared bounds but outside the overridden
+ones — and an <code>expect</code> error is excused only when the same <code>expect</code> evaluates
+in the declared world; a reference outside the declared bounds (so a no-op or
+unrelated override) or an <code>expect</code> error the declared world shares (a division
+by zero) stays the unscoped hard error. A forbidden scenario whose <em>final</em> step
+is outside the overridden scope only because the override removed its argument
+tested no guard, so it is reported as <code>forbidden_skipped</code> rather than counted as
+satisfied; a final step outside the declared scope is the unscoped
+<code>kind:"forbidden"</code> error (#1229), unless the override widens the scope to
+include it, in which case the guard is evaluated. These
+three conditions are stricter than the frozen Python reference, which skips any
+out-of-range reference, excuses any <code>expect</code> error that mentions one, and counts
+an out-of-range final step as a rejection. This is what makes <code>--instances Case=1
 --property &lt;Liveness&gt;</code> usable even when the spec's acceptance scenarios were
 written against the original <code>verify { instances Case = N }</code> bound.</p>
+<p><strong>Envelope (#1008, #1218).</strong> When a scoped run skips any scenario this way,
+the envelope also keeps <code>requirement_traces: {"result": "not_evaluated",
+"reason": "bounds_override", "reasons": [...], "skipped": [{"kind", "id",
+"reference"}, ...]}</code> (§7, "Checks a selected run does not evaluate"); the key
+is absent when every scenario was replayed. The native CLI implements the rule
+above as stated; the frozen Python reference
+(<code>tests/test_acceptance_override_skip.py</code>) agrees on its six cases and differs
+only where noted above. In <code>fslc sweep</code>, <code>sweep.not_evaluated.skipped</code> lists
+the <code>{kind, id}</code> of every scenario any cell skipped.</p>
 <p><code>fair</code> is a weak-fairness annotation: if that action instance remains
 continuously enabled, the assumption is that it will eventually be executed.
 Fairness applies to a whole action instance. To model fairness only under a
@@ -629,7 +657,7 @@ literals, but it must not read any state root or another initializer. Indexed,
 field, conditional-statement, quantified, relational, and bulk initialization
 remain in <code>init</code>. Assigning the same root both inline and in <code>init</code> is a semantic
 error that reports both source locations. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a>.</p>
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-initialization.md"><code>DESIGN-initialization.md</code></a>.</p>
 <p><strong>Types legal as state variables</strong> (anything else is rejected by <code>check</code> as a type error):
 scalar | nested <code>Option&lt;scalar&gt;</code> | struct (scalar / nested <code>Option&lt;scalar&gt;</code> fields)
 | <code>Map&lt;bounded scalar, scalar | nested Option&lt;scalar&gt; | struct&gt;</code>
@@ -678,7 +706,7 @@ may call earlier or later definitions but cannot be directly or mutually
 recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
 variable capture instead of inventing internal binder names. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
 <ul>
 <li>Arithmetic: <code>+ - * / %</code>, unary <code>-</code>, <code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (since <code>a//b</code> would turn everything after <code>//</code> into a comment, write division
@@ -920,7 +948,7 @@ fslc scenarios &lt;file.fsl|file.md&gt; [--depth K]     # generate integration-t
 fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace conformance (§12)
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
-fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [-o out]  # implementation-conformance test scaffold (§12)
+fslc testgen   &lt;file.fsl&gt; [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o out]  # implementation-conformance test scaffold (§12)
 fslc testplan  &lt;file.fsl&gt; [--depth K]             # closed test-plan.v1 vector selection (§12)
 fslc refine    &lt;impl&gt; &lt;abs&gt; &lt;mapping&gt; [--depth K]# fidelity check of a detailed spec (§10)
 fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
@@ -928,7 +956,8 @@ fslc diff      &lt;old&gt; &lt;new&gt; [--depth K] [--mapping map.fsl]
                                                  # bounded semantic change analysis
 fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
-fslc chain     [fsl-project.toml] [--keep-going] # manifest-driven cross-layer report (§10)
+fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
+                                                 # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl]             # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -959,7 +988,7 @@ fslc domain check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # Functi
 fslc domain analyze &lt;file.fsl&gt;                                  # aggregate/effect ownership summary
 fslc domain expand &lt;file.fsl&gt; [-o out.fsl]                      # generated kernel FSL
 fslc domain generate &lt;file.fsl&gt; --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
-fslc domain testgen &lt;file.fsl&gt; [--target vitest] [-o out]       # domain adapter/conformance scaffold
+fslc domain testgen &lt;file.fsl&gt; [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay &lt;file.fsl&gt; --logs events.jsonl              # domain runtime replay evidence
 fslc db check  &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
 fslc db observe &lt;file.fsl&gt; --trace events.json                  # runtime observation evidence
@@ -973,7 +1002,7 @@ handles legacy domain enums/operators, declaration string metadata, colon
 quantifiers, unambiguous local inline action mappings, and implicit defaults.
 It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;</code> remains an
 invalid token and is therefore reported with an <code>and</code> suggestion but is never
-machine-applied. See <code>docs/DESIGN-migration.md</code> for atomicity and bulk-update
+machine-applied. See <code>docs/design/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
 <p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
 to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
@@ -991,9 +1020,9 @@ Public Kernel v1 explicitly rejects <code>compose</code> export because current 
 does not retain truthful per-component filenames; direct and other lowered
 dialects remain supported.
 Compatibility rules, schemas, fixtures, and Rust API entry points are specified
-in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>. Public Kernel v2 is
+in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-kernel-contract.md"><code>DESIGN-kernel-contract.md</code></a>. Public Kernel v2 is
 opt-in and specified by
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a>; it replaces the lossy
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-kernel-origin-v2.md"><code>DESIGN-kernel-origin-v2.md</code></a>; it replaces the lossy
 v1 origin object with target references into a queryable provenance graph. Its
 <code>completeness</code> field must be checked before relying on source coverage.</p>
 <p><code>verify --from-state state.json</code> replaces the declared <code>init</code> for one bounded
@@ -1035,6 +1064,45 @@ it removes named invariants, <code>trans</code>, <code>leadsTo</code>, and <code
 from the run and from checked-property outputs (<code>invariants_checked</code>,
 <code>transitions_checked</code>, <code>leads_to</code>, and <code>reachables</code>). When <code>--property</code> and
 <code>--exclude-property</code> name the same property, exclusion wins.</p>
+<p><strong>Checks a selected run does not evaluate (#1008).</strong> Not executing a check is
+never evidence that it holds. When a <code>verify</code> option makes the run skip a
+declared check, the envelope keeps that check's key with
+<code>result: "not_evaluated"</code> and the cause instead of omitting it. The top-level
+<code>result</code> and the exit code are unchanged and speak only for what was checked.
+The complete list:</p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Present when the spec declares</th>
+<th><code>reason</code> (option)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>implements</code></td>
+<td>an inline <code>implements</code></td>
+<td><code>property_selection</code> (<code>--property</code>), <code>property_exclusion</code> (<code>--exclude-property</code>), <code>from_state</code> (<code>--from-state</code>)</td>
+</tr>
+<tr>
+<td><code>requirement_traces</code></td>
+<td><code>acceptance</code> / <code>forbidden</code> scenarios, one of which <code>--instances</code> / <code>--values</code> put out of scope</td>
+<td><code>bounds_override</code> (<code>--instances</code> / <code>--values</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><code>reasons</code> lists every cause that applies, in the table's order, and <code>reason</code>
+repeats the first. <code>implements</code> also carries <code>abs</code>; <code>requirement_traces</code> carries
+<code>skipped</code>, one <code>{kind, id, reference}</code> entry per skipped scenario (the scenarios it
+does not list were replayed and passed). A spec that declares no such
+check keeps the key absent, so a consumer can tell "nothing declared" from
+"declared but not evaluated". <code>not_evaluated</code> is never a pass: a consumer that
+accepts only <code>implements.result == "refines"</code> rejects it, and the seam is gated
+on an unfiltered <code>check</code>/<code>verify</code> or on <code>fslc chain</code>. No other option suppresses
+either check; an option that starts to must be added to this table. Warnings are
+not a selected check: a selected run reports the same compose-lowering warnings
+(<code>fair_not_inherited</code>) and the same <code>no_user_invariants</code> suppression as a full
+run.</p>
 <p><code>verify --engine induction --lemma "EXPR"</code> accepts repeatable auxiliary
 invariant candidates for an <code>unknown_cti</code> repair loop. Each expression is first
 proved independently against the original init/actions and implicit type
@@ -1063,18 +1131,53 @@ instead of folding it into <code>sweep_passed</code>, <code>sweep_inconclusive</
 <code>sweep_failed</code>.</p>
 <p>A <code>reachable_failed</code> cell is inconclusive only when its nonempty <code>unreached</code>
 array contains only <code>classification:"insufficient_depth"</code>. Such a cell remains
-in <code>sweep.results</code> but is not a counterexample: a grid with at least one
-determinate success and no true failure returns <code>sweep_passed</code>/exit 0; a grid
-containing only inconclusive cells returns <code>sweep_inconclusive</code>/exit 1 with
-<code>minimal_counterexample:null</code>. Missing, unknown, or mixed classifications,
-including <code>over_constrained</code>, are true failures and return <code>sweep_failed</code>/exit
-1.</p>
+in <code>sweep.results</code> but is not a counterexample. Inconclusive cells are settled
+per scope: a scope is one <code>--instances</code>/<code>--values</code> combination across the whole
+<code>--depth</code> range, and it is settled when any of its cells is a determinate
+success. A larger depth answers what a smaller depth left open; a different
+instance count or value range does not, so a success in one scope never settles
+another. With no true failure, a grid whose every scope is settled returns
+<code>sweep_passed</code>/exit 0; otherwise it returns <code>sweep_inconclusive</code>/exit 1 with
+<code>minimal_counterexample:null</code>. <code>sweep.inconclusive_scopes</code> lists every scope
+(<code>{instances, values}</code>) whose cells are all inconclusive, under any sweep
+result, and is <code>[]</code> when there is none. Missing, unknown, or mixed
+classifications, including <code>over_constrained</code>, are true failures and return
+<code>sweep_failed</code>/exit 1.</p>
+<p>Every sweep cell runs with <code>--instances</code>/<code>--values</code>, so a cell can report a
+declared check as <code>not_evaluated</code> (§7, "Checks a selected run does not
+evaluate"): <code>requirement_traces</code> when the cell's scope puts an
+<code>acceptance</code>/<code>forbidden</code> scenario out of range (§4; an in-range failing scenario
+is an error the sweep returns), and <code>implements</code> under <code>--property</code>. The grid verdict does not
+change, but the skip is not hidden behind it: each such cell's <code>summary</code> row
+carries the section name with the value <code>"not_evaluated"</code>, and
+<code>sweep.not_evaluated: {"sections": [...], "reasons": [...]}</code> is the union over
+all cells (sections sorted, reasons in first-seen order). The key is absent when
+no cell skipped anything. A <code>sweep_passed</code> grid with <code>sweep.not_evaluated</code>
+therefore says nothing about those sections; check them on an unscoped
+<code>check</code>/<code>verify</code>.</p>
 <p><code>diff</code> compares state-machine meaning instead of source text. It runs bounded
 refinement in both directions: NEW→OLD failure is <code>behavior_added</code>, while
 OLD→NEW failure is <code>behavior_removed</code>. It separately checks implication between
 the conjunctions of user invariants (<code>invariant_weakened</code> /
 <code>invariant_strengthened</code>) and replays OLD <code>forbidden</code> scenarios against NEW
-(<code>forbidden_relaxed</code>). Directional failures include counterexample witnesses.
+(<code>forbidden_relaxed</code>). A NEW final step that its guard disables preserves the
+OLD rejection, and so does a final step both sides reject as <code>bad_call</code> outside
+a range or enum parameter type. Each side is classified with its own <code>entity</code> /
+<code>number</code> types: since #1229 an OLD final step outside its verify scope is
+<code>unknown</code> / <code>forbidden_replay_failed</code> (no OLD guard rejected it), and an OLD
+<code>bad_call</code> that only NEW's scope excludes is <code>unknown</code> /
+<code>forbidden_step_unrelatable</code> (before #1229 both were
+<code>forbidden_step_unrelatable</code>). A compose NEW, or a NEW of another dialect whose
+<code>entity</code> / <code>number</code> types are not in its source, never preserves an OLD
+<code>bad_call</code>; before #1229 a compose NEW that rejected the step as <code>bad_call</code>
+did, so such a forbidden now fails <code>--forbid unknown</code>. An OLD final step naming no action or arity is
+<code>unknown</code> / <code>forbidden_replay_failed</code>. Since #1213 a NEW final step that is
+enabled and then stops with a runtime violation is <code>forbidden_relaxed</code>, and an
+OLD final step or a NEW setup step that violates is <code>unknown</code> /
+<code>forbidden_replay_failed</code> (known gap #1239: a guard-disabled NEW setup step is
+also reported as preserved; see
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a>, "Forbidden
+replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
 are <code>unknown</code> unless <code>--mapping</code> supplies that direction. An arbitrary mapping
 is never inverted automatically.</p>
@@ -1105,7 +1208,7 @@ all match; otherwise it returns <code>drifted</code> with <code>spec_changed</co
 <code>rendering_changed</code>, and/or <code>renderer_changed</code>. <code>ledger --approval</code> adds the
 same status per requirement and includes the full baseline digest. <code>approval
 diff</code> materializes the approved commit and invokes the ordinary bounded semantic
-diff against the current working file. See <code>docs/DESIGN-approval.md</code>.</p>
+diff against the current working file. See <code>docs/design/DESIGN-approval.md</code>.</p>
 <p>Without <code>--signing-key</code>, <code>approval create</code> emits the unchanged unsigned
 <code>fslc.approval.v1</code> record. With an Ed25519 PKCS#8 PEM signing key it emits
 <code>fslc.approval.v2</code>; every check, diff, or ledger use of that record requires the
@@ -1113,13 +1216,14 @@ matching SPKI PEM <code>--trust-key</code>. The v2 detached signature covers the
 canonical record, and a cryptographic mismatch is <code>signature-invalid</code> rather
 than an approval. Trust-key possession authenticates a signer but authorization
 remains an organizational policy. The exact canonicalization and key formats
-are specified in <code>docs/DESIGN-approval.md</code>.</p>
+are specified in <code>docs/design/DESIGN-approval.md</code>.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
 mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
-refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch,
+refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
+indeterminate (<code>chain</code> when its <code>[impl]</code> layer has no evidence that a test executed),
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
@@ -1128,17 +1232,17 @@ happens where the verification envelope is produced, so it is not confined to <c
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
 same exit from the folded verification envelope, and <code>sweep</code> reports <code>sweep_failed</code> for a true
-failure or <code>sweep_inconclusive</code> when every cell is depth-limited. The same
+failure or <code>sweep_inconclusive</code> when some scope has only depth-limited cells. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
-<code>docs/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
+<code>docs/design/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
 replay error is not implementation-log evidence and must not be rendered as
-an empty ledger row — <code>docs/DESIGN-ledger.md</code>).</p>
+an empty ledger row — <code>docs/design/DESIGN-ledger.md</code>).</p>
 <p><code>approval_check</code> and <code>approval_diff</code> are absent from this table because their
 exit code is not a function of <code>result</code>. <code>fslc approval check</code> reports the same
 <code>approval_check</code> for every outcome and carries the verdict in <code>status</code>: <code>0</code> for
 <code>approved</code> and for <code>drifted</code>, <code>1</code> for <code>signature-invalid</code>. Drift exits 0 because
-it is analysis output, as <code>diff</code> findings are (§12); <code>docs/DESIGN-approval.md</code>
+it is analysis output, as <code>diff</code> findings are (§12); <code>docs/design/DESIGN-approval.md</code>
 records why, and why <code>fslc document check</code>'s <code>document_drifted</code> differs. Gate on
 <code>status</code>, not on the exit code.</p>
 <h3 id="kinds-of-result">Kinds of result</h3>
@@ -1173,13 +1277,13 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 </tr>
 <tr>
 <td><code>sweep_passed</code></td>
-<td>A sweep grid has no true failure and at least one determinate success; depth-limited observations remain in <code>sweep.results</code></td>
+<td>A sweep grid has no true failure and every <code>--instances</code>/<code>--values</code> scope has a determinate success at some depth; depth-limited observations remain in <code>sweep.results</code></td>
 <td>Inspect the recorded grid; this is not an unbounded proof</td>
 </tr>
 <tr>
 <td><code>sweep_inconclusive</code></td>
-<td>Every sweep cell is <code>reachable_failed</code> with only <code>insufficient_depth</code> classifications; <code>minimal_counterexample</code> is null</td>
-<td>Raise <code>--depth</code> or adjust the sweep bounds, then rerun</td>
+<td>No true failure, but at least one <code>--instances</code>/<code>--values</code> scope has only <code>reachable_failed</code> cells with only <code>insufficient_depth</code> classifications; those scopes are listed in <code>sweep.inconclusive_scopes</code> and <code>minimal_counterexample</code> is null</td>
+<td>Raise <code>--depth</code> for the listed scopes or adjust the sweep bounds, then rerun</td>
 </tr>
 <tr>
 <td><code>sweep_failed</code></td>
@@ -1192,9 +1296,19 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 <td><strong>Read the CTI and add an auxiliary invariant</strong> (§8), or try <code>--engine explicit</code> (closure proves without lemmas)</td>
 </tr>
 <tr>
+<td><code>unknown_cti</code> / <code>partial_op</code></td>
+<td>A state satisfying every proved invariant reaches a partial operation (§6) in a guard, body, property, or reached <code>ensures</code></td>
+<td>Guard the operation with a short-circuit <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code>, or add an auxiliary invariant that excludes the state if it is unreachable</td>
+</tr>
+<tr>
+<td><code>unknown_cti</code> / <code>ensures</code></td>
+<td>An action's reached <code>ensures</code> is false on a step between states that satisfy every proved invariant</td>
+<td>Fix the body or the <code>ensures</code>; if the start state is unreachable, add an auxiliary invariant that excludes it</td>
+</tr>
+<tr>
 <td><code>unknown_budget</code></td>
-<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or an inline <code>implements Abs from "file" { }</code> seam's correspondence search exceeded its fixed internal state budget (<code>check</code>/<code>verify</code>, no CLI flag)</td>
-<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For an inline <code>implements</code> seam: narrow the domain, or verify the layers separately with <code>fslc refine</code>/<code>fslc verify</code> instead of the combined check</td>
+<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline <code>implements Abs from "file" { }</code> seam (<code>check</code>/<code>verify</code>), <code>fslc refine</code> (single or chain), a <code>fslc chain</code> refine layer, or a governance <code>preservation</code> (§10, §13)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> and <code>fslc mutate</code> do not read this cutoff yet (<code>diff</code> reports <code>no_semantic_change</code> / exit 0, <code>mutate</code> counts the mutant as survived)</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1213,7 +1327,7 @@ actually decided it; a fallback additionally carries
 so a caller can tell a bounded bmc verdict from an unbounded explicit one
 without re-deriving it. <code>auto</code> never changes the default engine (still
 <code>bmc</code>) and is Rust-only, like <code>explicit</code> itself. See
-<code>docs/DESIGN-explicit-engine.md</code> §6a.</p>
+<code>docs/design/DESIGN-explicit-engine.md</code> §6a.</p>
 <p><code>violation_kind</code>: <code>invariant</code> | <code>trans</code> | <code>ensures</code> | <code>type_bound</code> | <code>partial_op</code> | <code>deadlock</code> | <code>leadsTo</code>.</p>
 <p>A <code>violated</code> result with <code>violation_kind</code> <code>invariant</code>/<code>type_bound</code> additionally
 carries <strong>blame assignment</strong> (issue #170), localizing the counterexample
@@ -1253,7 +1367,7 @@ Native and browser Workers use the same keys and nullability. Z3 counters are
 the maximum snapshot observed across constituent checks rather than a sum of
 possibly cumulative snapshots; timing values are nondeterministic. The explicit
 engine uses the same shape with zero solver checks and null Z3 statistics. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-verification-cost.md"><code>DESIGN-verification-cost.md</code></a>. BMC <code>verified</code> is
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-verification-cost.md"><code>DESIGN-verification-cost.md</code></a>. BMC <code>verified</code> is
 explicitly bounded; when the final
 depth first witnesses a reachable/vacuity/coverage fact during normal
 exploration, <code>verified</code> also includes a <code>hint</code> that the state space is not
@@ -1619,6 +1733,20 @@ and abs, not a defect in the impl alone). <code>fslc diff</code> surfaces the sa
 condition as an <code>impl_violated</code> finding and fails its gate unconditionally
 (not subject to <code>--forbid</code>), since a self-violating side makes the
 comparison itself untrustworthy.</p>
+<p>The correspondence check that follows visits at most a fixed number of
+distinct impl states (50,000; no CLI flag — the same internal budget an inline
+<code>implements</code> seam uses, §13). When it reaches that budget before deciding
+within <code>--depth</code>, <code>refine</code> reports <code>result: "unknown_budget"</code> (exit 1) with
+<code>states_explored</code> and a <code>hint</code>, never <code>refines</code>: the unvisited part of the
+reachable set may still hold a mismatch. Lower <code>--depth</code>, or narrow the
+<code>verify {}</code> domains (<code>instances</code>/<code>values</code>) of both specs. A chain check stops
+at that link (<code>failed_link.kind</code> is <code>null</code>), a <code>fslc chain</code> refine layer fails
+with <code>result: "unknown_budget"</code>, and a governance <code>preservation</code> reports
+<code>unknown_budget</code> as its <code>result</code>. This changed verdicts: a refinement whose
+correspondence check reaches the budget used to report <code>refines</code> (exit 0).
+The self-consistency precondition above has no such budget. <code>fslc diff</code> and
+<code>fslc mutate</code> do not read this cutoff yet: <code>fslc diff</code> still reports
+<code>no_semantic_change</code> (exit 0) and <code>fslc mutate</code> counts the mutant as survived.</p>
 <p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
 unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
 full type domain, not a value silently defaulted — <code>refine</code> checks it that
@@ -1665,7 +1793,7 @@ because a direct endpoint success does not establish the middle layer's
 contract. For example, Low may stop after one step while Mid permits a second
 step that Top forbids, so direct Low→Top succeeds while Mid→Top and the chain
 fail. The chain requires every adjacent contract to hold
-(<code>docs/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>). For
+(<code>docs/design/DESIGN-refinement.md</code> §7, example <code>examples/refinement_chain</code>). For
 manifest-driven <code>fslc chain</code>, links may use different <code>refine_depth</code> values;
 the minimum link depth is the conservative end-to-end bound.
 Only the case where an argument expression reads the state of an intermediate
@@ -1812,7 +1940,7 @@ implementation because refinement is forward simulation, not backward replay of
 every abstract positive trace. <strong>Example:</strong> <code>examples/refinement_chain/top.fsl</code>
 lets <code>finish</code> from initial <code>TOpen</code>; <code>mid.fsl</code> requires <code>MOpen → MReview</code> first —
 a <code>ChainTop</code> positive <code>finish</code> trace must not be used as a <code>ChainMid</code>
-implementation test. See <code>docs/DESIGN-layers.md</code> (refinement chain → design-layer
+implementation test. See <code>docs/design/DESIGN-layers.md</code> (refinement chain → design-layer
 testgen/replay; requirements <code>acceptance</code> → that layer's scenarios/testgen).</p>
 <p><code>testgen</code> separates a language-independent scenario-collection core (<code>scenarios</code>)
 from per-target emitters, so the same scenarios render to multiple harnesses. In
@@ -1852,32 +1980,56 @@ v1 rejects <code>leadsTo</code>, refinement documents, induction/CTI, nondetermi
   <code>@Test</code>, <code>#expect</code>; <strong>not XCTest</strong>). Same baked-walk design as Vitest. Dynamic
   state is <code>[String: Any]</code> with a bundled deep-equality/partial-match helper; an
   Option <code>None</code> bakes as the self-contained <code>FSLNull.instance</code> sentinel (no
-  Foundation). Until <code>makeAdapter()</code> is wired every test is disabled via
-  <code>@Test(.enabled(if:))</code>. Output defaults to <code>&lt;SpecName&gt;ConformanceTests.swift</code>.</li>
+  Foundation). Until <code>makeAdapter()</code> is wired every test fails (its
+  <code>FSLNotWired</code> error says "adapter not wired"); with <code>--allow-unwired</code> every test
+  is disabled via <code>@Test(.enabled(if:))</code> instead. Output defaults to
+  <code>&lt;SpecName&gt;ConformanceTests.swift</code>.</li>
 <li><code>--target kotlin</code>: emits a self-contained kotlin.test file (multiplatform; the
   JVM delegates to JUnit). Same baked-walk design. Dynamic state is
   <code>Map&lt;String, Any?&gt;</code>, where Kotlin's structural <code>==</code> is deep on <code>List</code>/<code>Map</code> and
   distinguishes <code>Int</code> from <code>Double</code>, so the partial-match helper is a plain
-  recursion. kotlin.test has no portable runtime skip, so until <code>makeAdapter()</code>
-  is wired (it returns <code>null</code>) each test returns early. Output defaults to
+  recursion. Until <code>makeAdapter()</code> is wired (it returns <code>null</code>) each test fails
+  with <code>fail(ADAPTER_NOT_WIRED)</code>. kotlin.test has no portable runtime skip, so
+  <code>--allow-unwired</code> is rejected for this target (exit 2) rather than generating
+  tests that return early and pass. Output defaults to
   <code>&lt;SpecName&gt;ConformanceTest.kt</code>.</li>
 <li><code>--target dart</code>: emits a self-contained <code>package:test</code> file (also runs under
   <code>flutter test</code>). Same baked-walk design. Dynamic state is <code>Map&lt;String, dynamic&gt;</code>;
   Dart's <code>==</code> is reference-based on collections, so the bundled <code>assertPartial</code>
   recurses by the expected keys and compares leaves/sequences with the <code>equals</code>
   matcher (re-exported by <code>package:test</code>, so the only dependency is <code>package:test</code>).
-  A top-level probe sets <code>skip:</code> on each <code>test()</code> until <code>makeAdapter()</code> is wired.
-  Output defaults to <code>&lt;spec_name&gt;_conformance_test.dart</code> (snake_case, the
+  Until <code>makeAdapter()</code> is wired every test fails with its "adapter not wired"
+  <code>UnimplementedError</code>; with <code>--allow-unwired</code> a top-level probe sets <code>skip:</code> on
+  each <code>test()</code> instead. Output defaults to <code>&lt;spec_name&gt;_conformance_test.dart</code> (snake_case, the
   <code>_test.dart</code> suffix the runner expects).</li>
 <li><code>--target phpunit</code>: emits a self-contained PHPUnit file (PHP 8.1+ / PHPUnit 10+,
   <code>declare(strict_types=1)</code>). Same baked-walk design. Dynamic state is an
   associative <code>array</code>; leaves are compared with <code>assertSame</code> (<code>===</code>), which keeps
   <code>int</code>/<code>float</code>, <code>bool</code> and <code>null</code> from coercing (PHP's loose <code>==</code> would conflate
   <code>0 == "0"</code> etc.). <code>assertPartial</code> recurses by the expected keys (maps match
-  order-independently; list-shaped values also pin length). <code>setUp()</code> skips every
-  test until <code>makeAdapter()</code> is wired. Output defaults to
+  order-independently; list-shaped values also pin length). Until <code>makeAdapter()</code>
+  is wired <code>setUp()</code> fails every test ("adapter not wired"); with
+  <code>--allow-unwired</code> it marks them skipped instead. Output defaults to
   <code>&lt;SpecName&gt;ConformanceTest.php</code> (PSR-4 class = file name).</li>
 </ul>
+<p><strong>Unwired adapters fail (issue #1200, breaking).</strong> Until the generated adapter
+is wired, every generated test of every target <strong>fails</strong> with a message that
+starts <code>adapter not wired</code>: a suite that never calls the implementation is not
+evidence that it conforms, so it must not turn a runner green. To get the
+earlier skip-until-wired scaffold, generate with <code>--allow-unwired</code>; the output
+is then byte-identical to the pre-#1200 scaffold (pytest <code>pytest.skip</code>, Vitest
+<code>test.skip</code>, Swift <code>.enabled(if:)</code>, Dart <code>skip:</code>, PHPUnit <code>markTestSkipped</code>).
+The choice is made at generation time so it is visible in the generated file.
+Kotlin rejects <code>--allow-unwired</code>. A green run of an <code>--allow-unwired</code> suite
+whose tests were all skipped still proves nothing. <code>fslc chain</code>'s <code>[impl]</code>
+table therefore names its evidence: <code>report = "&lt;JUnit XML file or directory&gt;"</code>
+written by the command (exit 0 passes only with at least one executed test and
+no failing one), or <code>evidence = "exit_code"</code> for a command that is not a test
+suite (decided by the exit status, flagged <code>detail.evidence: "exit_code_only"</code>
+and in top-level <code>warnings[]</code>). With neither, an exit-0 run is <code>indeterminate</code>
+(exit 1); an unknown <code>[impl]</code> key is a parse error (exit 2). Breaking for
+manifests written before #1200: add <code>report</code> or <code>evidence = "exit_code"</code>
+(<code>docs/design/DESIGN-layers.md</code> §7).</p>
 <pre><code class="language-python">from fslc import Monitor
 
 mon = Monitor(&quot;specs/cart_v1.fsl&quot;)
@@ -1886,7 +2038,8 @@ r = mon.step(&quot;add_to_cart&quot;, {&quot;u&quot;: 0, &quot;i&quot;: 0})   # 
 </code></pre>
 <pre><code class="language-bash">fslc replay specs/cart_v1.fsl --trace events.json   # conformant / nonconformant
 fslc replay specs/cart_v1.fsl --from-log production.jsonl --mapping log_mapping.fsl
-fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict
+fslc testgen specs/cart_v1.fsl -o test_cart_v1.py            # pytest (default); partial reachability warnings unless --strict; unwired tests fail
+fslc testgen specs/cart_v1.fsl --allow-unwired -o test_cart_v1.py  # opt-in: unwired tests skip instead (not for kotlin)
 fslc testgen specs/cart_v1.fsl --target vitest -o cart.test.ts  # self-contained Vitest (TypeScript) scaffold
 fslc testgen specs/cart_v1.fsl --target swift -o CartConformanceTests.swift  # self-contained Swift Testing scaffold
 fslc testgen specs/cart_v1.fsl --target kotlin -o CartConformanceTest.kt  # self-contained kotlin.test scaffold
@@ -1923,7 +2076,7 @@ leaf mismatch evidence. Invariants apply to observation points and atomic
 Monitor successors, not to unreported implementation intermediates. Bare arrays
 and <code>{events:[...]}</code> remain the explicit
 unversioned action-only adapter. Testgen and verifier trace JSON are not replay
-input. See <code>docs/DESIGN-replay-trace.md</code>.</p>
+input. See <code>docs/design/DESIGN-replay-trace.md</code>.</p>
 <p>Trace schema 1.2 additionally checks every <code>leadsTo P ~&gt; within K Q</code> at the
 initial state and each action/stutter observation. The deadline <code>p + K</code> is
 inclusive: <code>Q</code> there succeeds, while absence of <code>Q</code> fails with bounded-liveness
@@ -1958,13 +2111,13 @@ spec in <code>DESIGN-dialects.md</code>. There is a single kernel (§1–12 of t
 and the per-layer dialects are a front-end that expands into the AST. The layers
 are connected by refinement: <strong>business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay)</strong>.</p>
-<p><code>fslc document generate</code>/<code>claims</code> (see <code>docs/DESIGN-document-requirement-claim-ir.md</code>)
+<p><code>fslc document generate</code>/<code>claims</code> (see <code>docs/design/DESIGN-document-requirement-claim-ir.md</code>)
 projects only the <code>spec</code> and <code>requirements</code> dialects into its Requirement Claim
 IR today. Every other dialect described in this section — <code>business</code>,
 <code>dbsystem</code>, <code>ai_component</code>, and the rest — is rejected fail-closed with a coded
 error (<code>FSL-DOC-DIALECT-UNSUPPORTED</code>) rather than producing a partial document.
 <code>--view business</code>/<code>--view design</code> are reserved, not yet implemented, flag
-values — see <code>docs/DESIGN-document-dialect-adapters.md</code> for the activation
+values — see <code>docs/design/DESIGN-document-dialect-adapters.md</code> for the activation
 contract a future cross-layer view must satisfy.</p>
 <h3 id="131-declaration-tags-traceability-common-to-all-layers">13.1 Declaration tags (traceability common to all layers)</h3>
 <p>The canonical relationship syntax is a typed annotation immediately before the
@@ -2226,20 +2379,22 @@ verify {
   <code>--vacuity error</code>, which replaces the whole envelope with its own <code>error</code> result and does not
   carry <code>implements</code> over.
   <code>fslc chain</code> applies the same gate to the layer and exits 1
-  (<code>docs/DESIGN-design-family.md</code> states the same rule for orchestrators); a caller no longer
+  (<code>docs/design/DESIGN-design-family.md</code> states the same rule for orchestrators); a caller no longer
   needs a second gate of its own for the inline seam. An empty body
   (<code>implements X from "..." { }</code>) auto-generates identity refinement when process/action/stage
   names match. Inline refinement is <strong>not</strong> evaluated when <code>verify</code> is scoped with
-  <code>--property</code>, <code>--exclude-property</code>, or <code>--from-state</code>; the envelope omits <code>implements</code>
-  on those runs. <strong>A scoped run therefore cannot gate the seam</strong>: with <code>implements</code> absent,
-  <code>result</code> and the exit code speak only for the selected properties, so a broken seam passes
-  such a run. Gate on an unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code>. Whether those three
-  options should project the refinement or record why they skipped it is undecided
-  (<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Inside the <code>implements { }</code> block you write
+  <code>--property</code>, <code>--exclude-property</code>, or <code>--from-state</code>; the envelope then reports
+  <code>implements: {"result": "not_evaluated", "reason": ...}</code> instead of omitting the key
+  (§7, "Checks a selected run does not evaluate"). <strong>A selected run therefore cannot gate
+  the seam</strong>: <code>result</code> and the exit code speak only for the selected properties, so a broken
+  seam still passes such a run, but the envelope says the seam was not checked. Gate on an
+  unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code>. The decision for these three options is
+  suppress-with-reason (<code>docs/design/DESIGN-refinement.md</code>,
+  <a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Inside the <code>implements { }</code> block you write
   state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code>, the same
   correspondence syntax as a separate refinement file's <code>refinement_action</code>
-  (<code>docs/DESIGN-refinement.md</code> §1), including an arity change between the impl
+  (<code>docs/design/DESIGN-refinement.md</code> §1), including an arity change between the impl
   and abs action. Action↔action correspondence can also still be written as the
   <code>maps &lt;abs_act&gt;(...)</code> clause on the requirement-level action; <code>maps auto</code>
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
@@ -2398,7 +2553,10 @@ for a control that was never written.</p>
 </code></pre>
 <p><code>fslc check governance.fsl</code> validates all referenced controls, business files,
 policies/goals, and preservation files. Preservation blocks also run the declared
-refinement at depth 8 and report results under <code>governance.preservations</code>.</p>
+refinement at depth 8 and report results under <code>governance.preservations</code>:
+<code>refines</code>, <code>refinement_failed</code>, <code>violated</code> (the <code>after</code> spec breaks its own
+semantics, §10), or <code>unknown_budget</code> (the correspondence check reached its
+state budget, §10). The browser Worker reports the same values.</p>
 <h3 id="134-how-to-write-non-functional-requirements-nfrs">13.4 How to write non-functional requirements (NFRs)</h3>
 <p>The majority of NFRs can be written with the same machinery as functional
 requirements (details and demonstration in <code>DESIGN-nfr.md</code>):</p>
@@ -2465,7 +2623,7 @@ requirement NFR-1 &quot;complete within 4 ticks of acceptance&quot; {
   abstract image for those steps and fails <code>fslc refine</code> with
   <code>abs_requires_failed</code> — the same non-propagation as liveness. Verify a timed
   property at the clock-owning layer, or keep the upper contract time-less and put
-  the clock in the design kernel (<code>tick → stutter</code>). See <code>docs/DESIGN-nfr.md</code> §6
+  the clock in the design kernel (<code>tick → stutter</code>). See <code>docs/design/DESIGN-nfr.md</code> §6
   and <code>examples/nfr/sla_worker_design.fsl</code>.</li>
 <li><strong>⚠ The vacuous-SLA trap</strong>: making an action that can always be enabled urgent
   freezes time, and any K satisfies the deadline vacuously (even <code>&lt;= 0</code> is
@@ -2803,7 +2961,7 @@ have no distinct check yet. <code>contract { hard { rule &lt;Name&gt;; } }</code
 and listed per agent, but — unlike <code>ai_component</code>'s <code>check hard { }</code> — its
 rule names are not validated against a known set and are not yet
 cross-checked against anything; treat it as forward-declared metadata.</p>
-<p>Design details: <code>docs/DESIGN-ai-hard.md</code>.</p>
+<p>Design details: <code>docs/design/DESIGN-ai-hard.md</code>.</p>
 <h3 id="137-what-is-not-handled-the-boundary-of-the-layers">13.7 What is not handled (the boundary of the layers)</h3>
 <p>The majority of non-functional requirements (permissions, audit, capacity,
 reliability behavior, discrete-time SLA) can be handled (§13.4). What remains
@@ -2833,10 +2991,74 @@ DESIGN-*.md).</p>
 <ul>
 <li><strong><code>forbidden</code> (negative acceptance criteria)</strong> — a requirements-dialect
   construct. Write an "operation sequence that should be rejected," and at check
-  time it is replay-verified that the last step is rejected (not-enabled or a
-  violation). If it is accepted, <code>kind:"forbidden"</code> (detection of
+  time it is replay-verified that the last step is rejected, i.e. not enabled
+  because a guard refuses it or its argument is outside the declared type.
+  If it is accepted, <code>kind:"forbidden"</code> (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
-  about). The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
+  about). <strong>Since #1213 (breaking)</strong> a last step that is enabled and then
+  stops with a runtime violation (<code>invariant</code> / <code>trans</code> / <code>ensures</code> /
+  <code>type_bound</code> / <code>partial_op</code>) is also <code>kind:"forbidden"</code>, with a <code>violation</code> field: a
+  violation is not a rejection. Earlier versions counted it as satisfied; to
+  migrate, add the <code>requires</code> that rejects the call. There is no opt-out.
+  Because this check runs before BMC and induction, <code>verify</code> on such a spec now
+  ends with this error (exit 2) at any <code>--depth</code> and engine, where earlier
+  versions reported whatever the engine reached: with BMC, <code>violated</code> (exit 1)
+  when the depth reached the violation, <code>verified</code> (exit 0) when it did not;
+  with <code>--engine induction</code>, its own verdict. Every other command that runs this
+  check exits 2 too (<code>scenarios</code> and <code>testgen</code> with no scenario and no test
+  file; <code>html</code> and <code>ledger</code> still write their report), except three:
+  <code>explain</code> still exits 0 with no witnesses (known gap #1242: <code>explain</code>
+  discards the gate's error, and so does the witnesses section of <code>html</code>);
+  <code>approval create --kind ledger</code> exits 0 with a record of the ledger, which
+  lists the error — where the depth reached the violation it used to exit 2
+  only because that ledger embeds wall-clock <code>elapsed_s</code> (whether a ledger
+  whose forbidden gate fails may be approved is tracked by #1243); and
+  <code>approval check</code> of a ledger record created before reports <code>drifted</code>
+  (exit 0). <code>fslc diff</code> reports the violation (below).
+  The measured before/after of each command, exit status and output, is in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
+  The scenario's <code>rejected_by</code> (asserted by testgen) is
+  <code>requires_failed</code> for a guard refusal and <code>bad_call</code> for an argument outside
+  the declared range or enum type of its parameter (an implementation must
+  reject it at its decoding boundary). <strong>Since #1229 (breaking)</strong> an argument
+  outside the verification scope of an <code>entity</code> (<code>verify { instances }</code>, which
+  also bounds a <code>process</code>) or <code>number</code> (<code>verify { values }</code>) parameter is not a
+  rejection: under <code>instances Case = 3</code>, a last step <code>accept(7)</code> evaluates no
+  guard, and an implementation, which has no such bound, may accept that call.
+  It is a <code>kind:"forbidden"</code> error with <code>out_of_scope_argument</code> (<code>{parameter,
+  value, type, scope}</code>). To migrate, widen the scope to include the value, or
+  move the argument inside the scope so the guard is tested. Under a
+  <code>--instances</code> / <code>--values</code> override that alone removed the argument, the
+  forbidden is reported as <code>forbidden_skipped</code> (not evaluated) instead. A last
+  step naming no action, or no variant of that arity, is a <code>kind:"forbidden"</code>
+  error with a <code>message</code>, not a rejection. Both are breaking changes: such a
+  step used to satisfy the forbidden (one naming no callable action through
+  4.8.1, one outside the verification scope as <code>requires_failed</code> before #1212
+  and <code>bad_call</code> since), so <code>check</code> passed, and what the other commands
+  reported depended on the rest of the spec: <code>verify</code>, <code>sweep</code>, <code>chain</code>,
+  <code>mutate</code>, <code>html</code>, and <code>ledger</code> exited 0 when it verified and 1 when it did
+  not, while <code>scenarios</code>, <code>testgen</code>, <code>counterexample export</code>, and <code>approval
+  create</code> could also exit 2. Now <code>check</code>, <code>verify</code> (every engine), <code>sweep</code>,
+  <code>chain</code>, <code>scenarios</code>, <code>testgen</code>, the <code>mutate</code> baseline, <code>counterexample
+  export</code>, <code>html</code>, <code>ledger</code>, and <code>approval create --kind scenarios</code> / <code>html</code>
+  exit 2 and report no verdict, counterexample, scenario, test, or mutant for
+  the rest of the spec. <code>html</code>, <code>ledger</code>, and <code>approval create --kind html</code>
+  print the generated result (<code>result: "generated"</code>) with the error inside
+  the report (<code>html</code> and <code>ledger</code> still write their report); <code>chain</code> reports
+  it as the <code>[requirements]</code> layer's <code>detail</code>; the others print the error
+  (<code>error</code> / <code>kind: "forbidden"</code>). <code>approval check</code> of a <code>scenarios</code> or <code>html</code> record created
+  before exits 2. Three do not exit 2: <code>explain</code> still exits 0, with no
+  witnesses (known gap #1242: <code>explain</code> discards the gate's error, and so
+  does the witnesses section of <code>html</code>); <code>approval create --kind ledger</code>
+  exits 0 with a record of the ledger, which lists the error — on a spec
+  whose rest has a violation it used to exit 2 only because that ledger
+  embeds wall-clock <code>elapsed_s</code> (whether a ledger whose forbidden gate fails
+  may be approved is tracked by #1243); and <code>approval check</code> of a ledger record
+  created before reports <code>drifted</code> (exit 0). <code>fslc diff</code> changes forbidden
+  verdicts for both steps, which can change a <code>--forbid unknown</code> exit. The
+  before/after of every command, measured, is in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
+  The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity check (<code>--vacuity</code>)</strong> — on the verified/proved path, warns about
   <code>never_enabled_action</code> (an action has no enabled instance through the checked
   depth; bounded evidence, not a permanent-dead proof), <code>vacuous_implication</code>
@@ -2848,7 +3070,7 @@ DESIGN-*.md).</p>
   because urgency freezes time), <code>vacuous_deadline</code> (a generated deadline
   whose age is proven to remain zero across every transition), and
   <code>vacuity_probe_truncated</code>†. <code>error</code> exits 2. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 </ul>
 <p>† <code>vacuity_probe_truncated</code>: the <code>vacuous_implication</code>/<code>vacuous_leadsto</code>
   reachability probe shares one budgeted concrete BFS across every
@@ -2861,7 +3083,7 @@ DESIGN-*.md).</p>
   decided. Selected by <code>--vacuity</code> exactly like the other seven kinds.
 - <strong><code>--strict-tags</code></strong> — warns on success results about untagged declarations
   (fabrication candidates) and unreferenced requirements (omission candidates,
-  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
+  including empty requirement blocks). Existence-level matching. → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-strict-tags.md"><code>DESIGN-strict-tags.md</code></a>
 - <strong><code>fslc mutate</code></strong> — mechanically mutates the spec and measures whether each
   mutant is killed by the existing net of checks. The score is <strong>bounded
   mutant-set sensitivity</strong>: <code>kill_rate = killed / (killed + survived)</code> over a
@@ -2892,14 +3114,14 @@ DESIGN-*.md).</p>
   <code>killers</code> arrays and <code>by_obligation</code> sole/shared counts keyed by oracle display
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
-  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
+  → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
   counterfactuals ("without this rule, this procedure could break it") + witness
   narration. Moves human review from reading logical formulas to adjudicating
   concrete examples. JSON mode remains available without <code>--readable</code>. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
   returns the Typed Semantic Graph of requirements, actions, state, properties,
   and scenarios. Graph projections return connected components, SCCs,
@@ -2936,7 +3158,7 @@ DESIGN-*.md).</p>
   no acknowledgement fields. A bounded-witness-backed <code>unconstrained_effect</code> suppresses the same state's
   structural <code>unread_state</code>; semantic action witnesses similarly suppress a
   duplicate <code>unguarded_action</code>. Absence is not proof of determinism beyond the
-  bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
+  bound. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-underspecification.md"><code>DESIGN-underspecification.md</code></a>.
   Exact identifier checks additionally emit <code>tag_stale_reference</code> when a
   code-shaped tag token no longer exists and <code>tag_formula_disjoint</code> when a tag
   names a current state/constant absent from that declaration's formal
@@ -2946,13 +3168,13 @@ DESIGN-*.md).</p>
   These findings carry <code>formal_status: "not_a_violation"</code>; a structural cycle or
   disconnected component is not a proof failure. Versioned schemas for the TSG,
   graph projections, and findings are published under <code>schemas/fslc/analysis/</code>. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-analysis.md"><code>DESIGN-analysis.md</code></a>
 - <strong><code>fslc html</code></strong> — a self-contained HTML report over the same explain/verify
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
   raw JSON. It is meant for PRs, design reviews, and non-specialist project
   review without requiring the reader to run the CLI. →
-  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under <code>skills/</code>, with
 the shared language reference in <code>skills/fsl/SKILL.md</code>. A maintained worked example
@@ -2976,7 +3198,7 @@ The native Rust command performs this judgment from the versioned public Kernel
 JSON v1 contract, not private parser/model structures, and fails closed on an
 unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
 compatible with the frozen reference output.
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
 <details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. The causal profile (review-only causal hypothesis graphs)<span class="tree-blurb"> — Review-only causal hypothesis graphs — never proved/verified.</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> is a standalone sidecar document (its own <code>.fsl</code> file,
 never part of a kernel spec) that structures long-horizon causal hypotheses:
 interventions, mediators, outcomes, contexts, time lags, persistence, delayed
@@ -3068,7 +3290,7 @@ The legacy field name <code>supports</code> is rejected. Versioned
 schemas live under <code>schemas/fslc/causal/</code>; the browser Worker does not expose
 causal commands. Working models live in
 <a href="https://github.com/ymm-oss/fsl/tree/main/examples/causal"><code>examples/causal/</code></a>.
-→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
+→ <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-causal.md"><code>DESIGN-causal.md</code></a></p></div></details></div>
   </div>
 </section>
 

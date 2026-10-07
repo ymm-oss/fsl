@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! One definition of the success and failure classes over the CLI's `result`
-//! vocabulary (issue #537 C2, `docs/DESIGN-rust-component-internals.md`
+//! vocabulary (issue #537 C2, `docs/design/DESIGN-rust-component-internals.md`
 //! "Outcome classification").
 //!
 //! The Verdict Conservation Law is that a failure-class `result` must not exit
@@ -22,7 +22,7 @@
 //!   `finding_count`, and `diff`'s `gate.passed`, shared by its single-file
 //!   and batch forms). A `&str`
 //!   signature would force a second classifier beside this one, which is the
-//!   defect being removed. `docs/LANGUAGE.md`'s exit-code table says the same
+//!   defect being removed. `docs/manual/LANGUAGE.md`'s exit-code table says the same
 //!   thing from the outside: `approval_check`/`approval_diff` are absent from
 //!   it "because their exit code is not a function of `result`".
 //! - **It is flat, not per-family.** The class does not collide even where
@@ -71,8 +71,8 @@ impl OutcomeClass {
 ///
 /// The shared [`OutcomeClass`] remains binary: an inconclusive reachability
 /// observation is still a failing `verify` verdict. Only a sweep grid needs to
-/// distinguish it from a counterexample so later, determinate cells can settle
-/// the aggregate result.
+/// distinguish it from a counterexample so a determinate cell of the same
+/// `--instances`/`--values` scope can settle it (#1089).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[must_use]
 pub enum SweepCellClass {
@@ -254,6 +254,9 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "impl_violated"
         | "sweep_failed"
         | "sweep_inconclusive"
+        // `chain` when its `[impl]` report records no executed test (#1200):
+        // a run that never called the implementation is not a pass.
+        | "indeterminate"
         // Dialect-level failures.
         | "observed_mismatch"
         | "replay_nonconformant"
@@ -596,7 +599,7 @@ pub fn project_kernel(kernel: Value) -> Value {
     Value::Object(projected)
 }
 
-/// `docs/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
+/// `docs/manual/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
 /// function over [`outcome_class`].
 ///
 /// Classification decides whether exit zero is *allowed*; it does not by

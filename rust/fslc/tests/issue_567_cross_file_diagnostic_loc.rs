@@ -4,7 +4,7 @@
 //! `use ... from` component reported the *parent* document's path with the
 //! *component's* line and column, so `loc` pointed at whatever happened to sit
 //! at that position in the parent — for the compose error-gallery fixture, a
-//! comment line. `docs/DESIGN-v1.md` G2 requires the output JSON alone to say
+//! comment line. `docs/design/DESIGN-v1.md` G2 requires the output JSON alone to say
 //! where the problem is, and a location in the wrong file is worse than none.
 //!
 //! `loc` is `{line, column}` with no `file`, so it can only ever mean "a

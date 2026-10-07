@@ -642,7 +642,7 @@ fn general_conditionals_cross_cli_verification_and_replay_paths() {
 #[test]
 fn conditional_type_diagnostics_point_to_the_invalid_child_expression() {
     // Issue 555 moved the location out of the message text into the `loc`
-    // field `docs/DESIGN-v1.md` §7.2 guarantees, so the same position is now
+    // field `docs/design/DESIGN-v1.md` §7.2 guarantees, so the same position is now
     // asserted structurally and exactly instead of as a message suffix.
     for (fixture, line, column) in [
         (
@@ -1056,7 +1056,7 @@ fn strict_tag_traceability_counts_init_block_and_trace_case_annotations() {
 }
 
 /// #1020 case A: `fslc check --strict-tags` (no `--requirements`) must report an
-/// empty requirement block as `unreferenced_requirement`. `docs/DESIGN-strict-tags.md`
+/// empty requirement block as `unreferenced_requirement`. `docs/design/DESIGN-strict-tags.md`
 /// section 2 calls the auto-collection of requirement-block IDs into `Declared`
 /// "essential" for catching exactly this "declared but forgotten to formalize" case.
 #[test]

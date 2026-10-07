@@ -2,12 +2,12 @@
 # Copyright 2026 Ryoichi Izumita
 """Generate the two site "generated reference" pages from their canonical sources.
 
-    docs/intro/language.{ja,en}.html  <-  docs/LANGUAGE.md
+    docs/intro/language.{ja,en}.html  <-  docs/manual/LANGUAGE.md
     docs/intro/cli.{ja,en}.html       <-  rust/fslc/cli-contract.json (native CLI)
 
-Design contract (see docs/DESIGN-docs-site.md D3/D4/D5/D7): the ja page body is rendered
-from docs/LANGUAGE.ja.md, a second canonical source kept section-aligned 1:1 with
-docs/LANGUAGE.md (same count and order of "## " sections; see D7 for why this replaced
+Design contract (see docs/design/DESIGN-docs-site.md D3/D4/D5/D7): the ja page body is rendered
+from docs/manual/LANGUAGE.ja.md, a second canonical source kept section-aligned 1:1 with
+docs/manual/LANGUAGE.md (same count and order of "## " sections; see D7 for why this replaced
 the earlier "no translation" stance). Section anchors (`id=`) and blurb lookups always key
 off the English heading text so cross-page links and SECTION_BLURBS stay stable regardless
 of language. The ja page also adds a Japanese lead paragraph and a Japanese one-line
@@ -29,21 +29,17 @@ LANGUAGE.md or the fslc CLI surface:
 from __future__ import annotations
 
 import html
+import posixpath
 import re
-import sys
 from pathlib import Path
 
 import markdown
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-LANGUAGE_MD = REPO_ROOT / "docs" / "LANGUAGE.md"
-LANGUAGE_MD_JA = REPO_ROOT / "docs" / "LANGUAGE.ja.md"
+LANGUAGE_MD = REPO_ROOT / "docs" / "manual" / "LANGUAGE.md"
+LANGUAGE_MD_JA = REPO_ROOT / "docs" / "manual" / "LANGUAGE.ja.md"
 CLI_CONTRACT_JSON = REPO_ROOT / "rust" / "fslc" / "cli-contract.json"
 OUT_DIR = REPO_ROOT / "docs" / "intro"
-
-sys.path.insert(0, str(REPO_ROOT / "src"))
-
-from fslc.cli_help import normalize_argparse_help as _normalize_argparse_help  # noqa: E402
 
 GENERATED_BANNER = (
     "<!-- GENERATED — do not edit by hand. Regenerate with:\n"
@@ -169,16 +165,23 @@ def _section_number(heading: str) -> str | None:
 
 GITHUB_BLOB = "https://github.com/ymm-oss/fsl/blob/main/docs/"
 
-# LANGUAGE.md links to sibling docs/ files with bare relative hrefs
-# ("DESIGN-forbidden.md"), which is correct from docs/LANGUAGE.md itself but
+# LANGUAGE.md links to other docs/ files with relative hrefs ("../design/DESIGN-forbidden.md"),
+# which are correct from docs/manual/LANGUAGE.md itself but
 # wrong once embedded in docs/intro/language.*.html — and .md files render as
 # plain text on GitHub Pages anyway (docs/.nojekyll). Rewrite them to GitHub
-# blob URLs so they work from wherever this generated page is read.
-_RELATIVE_MD_LINK = re.compile(r'href="([A-Za-z0-9_.-]+\.md)"')
+# blob URLs so they work from wherever this generated page is read.  The href is
+# resolved against the directory of the source (docs/manual/), then made
+# relative to docs/ for GITHUB_BLOB.
+_RELATIVE_MD_LINK = re.compile(r'href="((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\.md)"')
+_LINK_SOURCE_DIR = "manual"
 
 
 def _rewrite_relative_md_links(html_text: str) -> str:
-    return _RELATIVE_MD_LINK.sub(lambda m: f'href="{GITHUB_BLOB}{m.group(1)}"', html_text)
+    def blob(m: "re.Match[str]") -> str:
+        target = posixpath.normpath(posixpath.join(_LINK_SOURCE_DIR, m.group(1)))
+        return f'href="{GITHUB_BLOB}{target}"'
+
+    return _RELATIVE_MD_LINK.sub(blob, html_text)
 
 
 def render_language_tree(lang: str) -> str:
@@ -187,7 +190,7 @@ def render_language_tree(lang: str) -> str:
     unknown = [h for h, _ in en_sections if h not in SECTION_BLURBS]
     if unknown:
         raise SystemExit(
-            "build_site_reference: docs/LANGUAGE.md has section(s) with no entry in "
+            "build_site_reference: docs/manual/LANGUAGE.md has section(s) with no entry in "
             f"SECTION_BLURBS: {unknown!r}. Add a ja/en one-line description to "
             "tools/build_site_reference.py:SECTION_BLURBS before regenerating "
             "(this is the connective-tissue check for the 'a language feature moves "
@@ -199,18 +202,18 @@ def render_language_tree(lang: str) -> str:
         render_sections = split_language_md(ja_text)
         if len(render_sections) != len(en_sections):
             raise SystemExit(
-                "build_site_reference: docs/LANGUAGE.ja.md has "
-                f"{len(render_sections)} '## ' section(s) but docs/LANGUAGE.md has "
+                "build_site_reference: docs/manual/LANGUAGE.ja.md has "
+                f"{len(render_sections)} '## ' section(s) but docs/manual/LANGUAGE.md has "
                 f"{len(en_sections)}. The two files must stay section-aligned 1:1 "
-                "(same count, same order) — reconcile docs/LANGUAGE.ja.md with the "
-                "current docs/LANGUAGE.md before regenerating (see docs/DESIGN-docs-site.md D7)."
+                "(same count, same order) — reconcile docs/manual/LANGUAGE.ja.md with the "
+                "current docs/manual/LANGUAGE.md before regenerating (see docs/design/DESIGN-docs-site.md D7)."
             )
 
         # The per-position correspondence check below only detects a reorder if
-        # docs/LANGUAGE.md's numeric section prefixes are unique — two English
+        # docs/manual/LANGUAGE.md's numeric section prefixes are unique — two English
         # sections sharing a number would make a matching ja-side swap
         # prefix-equal at every position and slip through undetected. Assert the
-        # precondition instead of silently relying on it (docs/DESIGN-docs-site.md
+        # precondition instead of silently relying on it (docs/design/DESIGN-docs-site.md
         # D7's "unique section numbers" addendum).
         numbers_to_headings: dict[str, list[str]] = {}
         for en_heading, _ in en_sections:
@@ -221,12 +224,12 @@ def render_language_tree(lang: str) -> str:
         if duplicates:
             number, headings = sorted(duplicates.items())[0]
             raise SystemExit(
-                "build_site_reference: docs/LANGUAGE.md has more than one '## ' "
+                "build_site_reference: docs/manual/LANGUAGE.md has more than one '## ' "
                 f"section numbered {number!r}: {headings!r}. The positional "
-                "heading-correspondence check assumes docs/LANGUAGE.md's section "
-                "numbers are unique in order to detect a docs/LANGUAGE.ja.md reorder "
-                "— renumber the duplicate section(s) in docs/LANGUAGE.md before "
-                "regenerating (see docs/DESIGN-docs-site.md D7)."
+                "heading-correspondence check assumes docs/manual/LANGUAGE.md's section "
+                "numbers are unique in order to detect a docs/manual/LANGUAGE.ja.md reorder "
+                "— renumber the duplicate section(s) in docs/manual/LANGUAGE.md before "
+                "regenerating (see docs/design/DESIGN-docs-site.md D7)."
             )
 
         for position, ((en_heading, _), (ja_heading, _)) in enumerate(
@@ -236,12 +239,12 @@ def render_language_tree(lang: str) -> str:
             ja_number = _section_number(ja_heading)
             if en_number != ja_number:
                 raise SystemExit(
-                    "build_site_reference: docs/LANGUAGE.ja.md section "
+                    "build_site_reference: docs/manual/LANGUAGE.ja.md section "
                     f"#{position} ({ja_heading!r}) does not correspond to "
-                    f"docs/LANGUAGE.md section #{position} ({en_heading!r}). The two files "
+                    f"docs/manual/LANGUAGE.md section #{position} ({en_heading!r}). The two files "
                     "must stay section-aligned 1:1 (same count, same order) — reconcile "
-                    "docs/LANGUAGE.ja.md with the current docs/LANGUAGE.md before "
-                    "regenerating (see docs/DESIGN-docs-site.md D7)."
+                    "docs/manual/LANGUAGE.ja.md with the current docs/manual/LANGUAGE.md before "
+                    "regenerating (see docs/design/DESIGN-docs-site.md D7)."
                 )
     else:
         render_sections = en_sections
@@ -279,7 +282,7 @@ def _extract_exit_codes_paragraph() -> str:
     if not match:
         raise SystemExit(
             "build_site_reference: could not locate the Exit codes paragraph in "
-            "docs/LANGUAGE.md — reconcile LANGUAGE.md before regenerating."
+            "docs/manual/LANGUAGE.md — reconcile LANGUAGE.md before regenerating."
         )
     return match.group(1).strip()
 
@@ -323,12 +326,12 @@ def render_cli_tree() -> str:
     exit_codes = html.escape(_extract_exit_codes_paragraph())
     contract_block = (
         '<details open><summary>Exit codes &amp; JSON envelope <span class="tree-blurb">'
-        "— docs/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary>"
+        "— docs/manual/LANGUAGE.md + rust/fslc/src/outcome.rs::exit_status()</span></summary>"
         '<div class="tree-body">'
         "<p>The authoritative native CLI maps every JSON <code>result</code> to a process "
         "exit code through <code>rust/fslc/src/outcome.rs</code> "
         "<code>exit_status()</code>, which implements the table in "
-        "<code>docs/LANGUAGE.md</code>:</p>"
+        "<code>docs/manual/LANGUAGE.md</code>:</p>"
         f"<pre>{exit_codes}</pre>"
         "<p>Verdict-bearing commands print one JSON object to stdout with "
         '<code>{"fsl":"1.0", ...}</code>, and the exit code is derived from its '
@@ -342,7 +345,7 @@ def render_cli_tree() -> str:
         "<code>--help</code> before parsing its stdout as JSON. Native CLI and browser Worker "
         "<code>check</code>/<code>verify</code> envelopes also include "
         "<code>versions.verifier</code>, <code>versions.core</code>, and "
-        "<code>versions.solver</code> (see <code>docs/LANGUAGE.md</code> §14). "
+        "<code>versions.solver</code> (see <code>docs/manual/LANGUAGE.md</code> §14). "
         "The machine-readable schema is "
         "<code>schemas/fslc/envelope.v1.schema.json</code>. "
         "The frozen Python compatibility reference under <code>src/fslc/</code> "
@@ -361,12 +364,12 @@ PAGE_STRINGS = {
     "language": {
         "ja": {
             "title": "FSL 言語リファレンス — LANGUAGE.ja.md から生成",
-            "description": "docs/LANGUAGE.ja.md から生成される、FSLの網羅的な言語リファレンス(日本語版)。",
+            "description": "docs/manual/LANGUAGE.ja.md から生成される、FSLの網羅的な言語リファレンス(日本語版)。",
             "kicker": "Generated Reference",
             "h1": "言語リファレンス",
             "lead": (
-                "これは <code>docs/LANGUAGE.ja.md</code> からの生成物です。"
-                "<code>docs/LANGUAGE.md</code>(英語)と節単位で1対1対応する第二の正典として"
+                "これは <code>docs/manual/LANGUAGE.ja.md</code> からの生成物です。"
+                "<code>docs/manual/LANGUAGE.md</code>(英語)と節単位で1対1対応する第二の正典として"
                 "保守されています。FSLの予約語・コマンド名・診断コード・JSON出力などは"
                 "そのまま英語で表記しています。"
             ),
@@ -377,11 +380,11 @@ PAGE_STRINGS = {
         },
         "en": {
             "title": "FSL Language Reference — generated from LANGUAGE.md",
-            "description": "The exhaustive FSL language reference, generated from docs/LANGUAGE.md.",
+            "description": "The exhaustive FSL language reference, generated from docs/manual/LANGUAGE.md.",
             "kicker": "Generated Reference",
             "h1": "Language Reference",
             "lead": (
-                "Generated from <code>docs/LANGUAGE.md</code>, reproduced verbatim — this is the "
+                "Generated from <code>docs/manual/LANGUAGE.md</code>, reproduced verbatim — this is the "
                 "canonical source, not a copy that can drift from it."
             ),
             "badge": "Generated from LANGUAGE.md",
@@ -484,7 +487,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for lang in ("ja", "en"):
         tree = render_language_tree(lang)
-        source_note = "docs/LANGUAGE.ja.md" if lang == "ja" else "docs/LANGUAGE.md"
+        source_note = "docs/manual/LANGUAGE.ja.md" if lang == "ja" else "docs/manual/LANGUAGE.md"
         (OUT_DIR / f"language.{lang}.html").write_text(
             page_shell("language", lang, tree, source_note), encoding="utf-8"
         )

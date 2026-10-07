@@ -2,7 +2,7 @@
 
 //! Regression coverage for issue #474: native `fslc check`/`verify` never
 //! emitted the documented `fair_not_inherited` compose warning
-//! (`docs/LANGUAGE.md`, `docs/DESIGN-compose.md`) because
+//! (`docs/manual/LANGUAGE.md`, `docs/design/DESIGN-compose.md`) because
 //! `rust/fsl-core/src/compose.rs` had no warnings channel at all -- a
 //! synchronized action's constituent `fair` markers were silently discarded
 //! during lowering (`sync_action`, formerly `resolve_alias_action`) with

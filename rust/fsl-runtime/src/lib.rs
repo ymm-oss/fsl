@@ -6,13 +6,14 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
+use fsl_core::recursion;
 use fsl_core::{
     ActionCorrespondenceTarget, ActionDef, ActionGuard, FslValue as Value,
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
-    Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef, display_name,
-    insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
-    state_summary, static_leadsto_bindings,
+    PartialOperation, Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
+    display_name, insert_requirement_metadata, internal_origin_json, model_warnings,
+    origin_display_name, state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
@@ -63,6 +64,10 @@ pub struct RuntimeError {
     pub message: String,
     /// Authored construct responsible for this runtime diagnostic, when one exists.
     pub span: Option<Span>,
+    /// Set exactly when evaluation failed inside a partial operation, which the
+    /// engines report as `partial_op` rather than as a raw runtime error
+    /// (issue #1166: this used to be recovered by matching `message`).
+    pub partial_operation: Option<PartialOperation>,
 }
 
 impl fmt::Display for RuntimeError {
@@ -73,11 +78,16 @@ impl fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
+/// A `ModelError` is never a partial-operation failure. Its "division by
+/// zero"/"remainder by zero" come from constant folding while the model is built
+/// (`check` rejects them), not from evaluating an action, so the conversion
+/// deliberately sets `partial_operation: None` even though the messages match.
 impl From<ModelError> for RuntimeError {
     fn from(error: ModelError) -> Self {
         Self {
             message: error.message,
             span: error.span,
+            partial_operation: None,
         }
     }
 }
@@ -92,8 +102,27 @@ impl From<ModelError> for RuntimeError {
 ///
 /// Returns [`RuntimeError`] for unknown names, type mismatches, invalid
 /// indexing/method calls, partial operations, or checked integer overflow.
-#[allow(clippy::too_many_lines)]
+///
+/// This is also the cycle entry for this crate's stack guard
+/// (`recursion::guard`, #1164): `eval_binary`, `eval_method`,
+/// `eval_relation_unary`, and the binder helpers all re-enter `eval` for their
+/// operands. Depth follows the spec's structure, and every engine reaches it:
+/// bmc and induction through `find_boundary_violation`'s concrete monitor,
+/// explicit through `current_violation_selected`. Crash-witnessed by a
+/// left-nested `x + x + ... + x` invariant, which (unlike an `if` chain that
+/// stops at its first true arm) forces evaluation of every level.
 pub fn eval(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Value, RuntimeError> {
+    recursion::guard(|| eval_inner(expr, state, bindings, model, old_state))
+}
+
+#[allow(clippy::too_many_lines)]
+fn eval_inner(
     expr: &Expr,
     state: &State,
     bindings: &mut Bindings,
@@ -165,9 +194,9 @@ pub fn eval(
                     .cloned()
                     .ok_or_else(|| runtime_error("map index outside finite key domain")),
                 Value::Seq(values) => values
-                    .get(as_usize(index, "sequence index out of range")?)
+                    .get(partial_index(index, PartialOperation::Index)?)
                     .cloned()
-                    .ok_or_else(|| runtime_error("sequence index out of range")),
+                    .ok_or_else(|| partial_operation_error(PartialOperation::Index)),
                 _ => Err(runtime_error("indexing requires a map or sequence")),
             }
         }
@@ -439,7 +468,7 @@ fn eval_method(
             }
             ("pop", []) => {
                 if sequence.is_empty() {
-                    Err(runtime_error("pop() on empty sequence"))
+                    Err(partial_operation_error(PartialOperation::Pop))
                 } else {
                     sequence.remove(0);
                     Ok(Value::Seq(sequence))
@@ -448,11 +477,11 @@ fn eval_method(
             ("head", []) => sequence
                 .first()
                 .cloned()
-                .ok_or_else(|| runtime_error("head() on empty sequence")),
+                .ok_or_else(|| partial_operation_error(PartialOperation::Head)),
             ("at", [index]) => sequence
-                .get(as_usize(index.clone(), "at() index out of range")?)
+                .get(partial_index(index.clone(), PartialOperation::At)?)
                 .cloned()
-                .ok_or_else(|| runtime_error("at() index out of range")),
+                .ok_or_else(|| partial_operation_error(PartialOperation::At)),
             ("size", []) => Ok(Value::Int(i64_len(sequence.len())?)),
             _ => Err(runtime_error(format!("invalid Seq method '{name}'"))),
         },
@@ -521,7 +550,7 @@ fn eval_binary(
                 if TOTAL_DIVISION.with(std::cell::Cell::get) {
                     Ok(Value::Int(0))
                 } else {
-                    Err(runtime_error("division by zero"))
+                    Err(partial_operation_error(PartialOperation::Divide))
                 }
             } else {
                 Ok(Value::Int(left.div_euclid(right)))
@@ -534,7 +563,7 @@ fn eval_binary(
                 if TOTAL_DIVISION.with(std::cell::Cell::get) {
                     Ok(Value::Int(0))
                 } else {
-                    Err(runtime_error("remainder by zero"))
+                    Err(partial_operation_error(PartialOperation::Remainder))
                 }
             } else {
                 Ok(Value::Int(left.rem_euclid(right)))
@@ -615,7 +644,7 @@ fn relation_reachable(
     };
     // Non-reflexive: `reachable(r, a, a)` is true only via a real path of
     // one or more edges back to `a`, never a free zero-hop `a == a` step
-    // (`docs/LANGUAGE.md`'s relation section; matches the frozen Python
+    // (`docs/manual/LANGUAGE.md`'s relation section; matches the frozen Python
     // reference's `_relation_reachable` in `src/fslc/runtime.py`, and this
     // crate's own symbolic evaluator). The frontier starts at `source`'s
     // *direct successors*, not `source` itself, so an empty or acyclic
@@ -739,8 +768,10 @@ fn as_int(value: Value) -> Result<i64, RuntimeError> {
     }
 }
 
-fn as_usize(value: Value, message: &str) -> Result<usize, RuntimeError> {
-    usize::try_from(as_int(value)?).map_err(|_| runtime_error(message))
+/// A `Seq` position for `operation`; a negative index is that operation's own
+/// out-of-range failure.
+fn partial_index(value: Value, operation: PartialOperation) -> Result<usize, RuntimeError> {
+    usize::try_from(as_int(value)?).map_err(|_| partial_operation_error(operation))
 }
 
 fn i64_len(value: usize) -> Result<i64, RuntimeError> {
@@ -751,6 +782,24 @@ fn runtime_error(message: impl Into<String>) -> RuntimeError {
     RuntimeError {
         message: message.into(),
         span: None,
+        partial_operation: None,
+    }
+}
+
+/// The failure of one partial operation. The messages are the ones these
+/// failures have always carried; classification reads `partial_operation`.
+fn partial_operation_error(operation: PartialOperation) -> RuntimeError {
+    let message = match operation {
+        PartialOperation::Head => "head() on empty sequence",
+        PartialOperation::Pop => "pop() on empty sequence",
+        PartialOperation::At => "at() index out of range",
+        PartialOperation::Index => "sequence index out of range",
+        PartialOperation::Divide => "division by zero",
+        PartialOperation::Remainder => "remainder by zero",
+    };
+    RuntimeError {
+        partial_operation: Some(operation),
+        ..runtime_error(message)
     }
 }
 
@@ -758,6 +807,7 @@ fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
     RuntimeError {
         message: message.into(),
         span: Some(span),
+        partial_operation: None,
     }
 }
 
@@ -888,7 +938,7 @@ impl Monitor {
     ///
     /// Returns [`RuntimeError`] when init does not deterministically assign
     /// every state variable (component-wise; see
-    /// `docs/DESIGN-bridge.md` "Determinism of init") or sequential init
+    /// `docs/design/DESIGN-bridge.md` "Determinism of init") or sequential init
     /// execution fails. A model whose init leaves some state free is
     /// admissible to `verify`/BMC, which explores every admissible value —
     /// concrete execution has no such freedom to explore, so construction
@@ -961,7 +1011,7 @@ impl Monitor {
             Ok(None) => {
                 return Ok(self.failed_step(action_name, params, "requires_failed", None));
             }
-            Err(error) if is_partial_operation_error(&error.message) => {
+            Err(error) if is_partial_operation_error(&error) => {
                 return Ok(self.failed_step(action_name, params, "partial_op", None));
             }
             Err(error) => return Err(error),
@@ -1045,7 +1095,7 @@ impl Monitor {
                 &mut bindings,
                 &self.model,
             ) {
-                if is_partial_operation_error(&error.message) {
+                if is_partial_operation_error(&error) {
                     self.step += 1;
                     return Ok(StepResult {
                         action: enabled.action.clone(),
@@ -1073,7 +1123,7 @@ impl Monitor {
             checked_bounds,
         ) {
             Ok(violation) => violation,
-            Err(error) if is_partial_operation_error(&error.message) => {
+            Err(error) if is_partial_operation_error(&error) => {
                 return Ok(StepResult {
                     action: enabled.action.clone(),
                     params: enabled.params.clone(),
@@ -1101,7 +1151,7 @@ impl Monitor {
             let evaluated = eval(ensure, &next, &mut bindings, &self.model, Some(&old_state));
             let value = match evaluated {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
@@ -1312,16 +1362,8 @@ impl BoundedLivenessMonitor {
     }
 }
 
-fn is_partial_operation_error(message: &str) -> bool {
-    matches!(
-        message,
-        "pop() on empty sequence"
-            | "head() on empty sequence"
-            | "at() index out of range"
-            | "sequence index out of range"
-            | "division by zero"
-            | "remainder by zero"
-    )
+fn is_partial_operation_error(error: &RuntimeError) -> bool {
+    error.partial_operation.is_some()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1394,6 +1436,48 @@ pub struct RefinementCheck {
     /// early, so neither `refines` nor a decided `failure`/`impl_violation`
     /// would be true -- reporting either would be a false result.
     pub budget_exhausted: Option<usize>,
+}
+
+/// The one decided reading of a [`RefinementCheck`]: every caller that turns
+/// a check into a verdict matches on this instead of reading the three
+/// outcome fields itself, so a caller cannot forget one of them. Before this
+/// existed, only inline `implements` read `budget_exhausted`; `fslc refine`,
+/// `fslc chain` and the governance preservation check reported a walk cut
+/// off by [`IMPLEMENTS_SEARCH_BUDGET`] as `refines`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[must_use]
+pub enum RefinementVerdict<'a> {
+    /// The correspondence walk hit its state budget before deciding within
+    /// `depth`: neither `refines` nor a failure is known.
+    BudgetExhausted { states_explored: usize },
+    /// The implementation violates its own semantics within `depth`.
+    ImplViolated {
+        violation: &'a Violation,
+        trace: &'a [TraceStep],
+    },
+    /// An implementation transition does not correspond to the abstraction.
+    Failed(&'a RefinementFailure),
+    /// Every implementation transition within `depth` corresponds.
+    Refines,
+}
+
+impl RefinementCheck {
+    /// Read this check as exactly one verdict. `check_refinement_with_budget`
+    /// sets at most one of `budget_exhausted`, `impl_violation` and
+    /// `failure`; the order here only fixes which one wins should that ever
+    /// stop holding, and it puts the undecided outcome first so a decided
+    /// verdict is never read off an incomplete walk.
+    pub fn verdict(&self) -> RefinementVerdict<'_> {
+        if let Some(states_explored) = self.budget_exhausted {
+            RefinementVerdict::BudgetExhausted { states_explored }
+        } else if let Some((violation, trace)) = &self.impl_violation {
+            RefinementVerdict::ImplViolated { violation, trace }
+        } else if let Some(failure) = &self.failure {
+            RefinementVerdict::Failed(failure)
+        } else {
+            RefinementVerdict::Refines
+        }
+    }
 }
 
 /// Bounded-search budget for [`check_refinement`]'s correspondence walk
@@ -1955,14 +2039,14 @@ pub fn check_refinement_with_budget(
                         // is already excluded above) hit an undefined
                         // operation for this reachable impl instance, e.g. a
                         // `/`/`%` divisor that is zero only through the
-                        // mapping's argument expression. `docs/DESIGN-divmod.md`
+                        // mapping's argument expression. `docs/design/DESIGN-divmod.md`
                         // §2.2's action-context partial_op check applies here
                         // by the same G5 rationale (constructing an abstract
                         // action call is action context, not the read-only
                         // "mapping expression" §2.3 exempts): this must be a
                         // located refinement finding, not an unclassified
                         // internal error that the CLI defaults to `kind:"type"`.
-                        Err(error) if is_partial_operation_error(&error.message) => {
+                        Err(error) if is_partial_operation_error(&error) => {
                             let child_trace = refinement_child_trace(
                                 state,
                                 &parents,
@@ -2136,7 +2220,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         if enabled.is_empty() {
             let terminal = match terminal_holds(&scratch) {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     let violation = Violation {
                         kind: "partial_op".to_owned(),
                         name: "_partial_property_terminal".to_owned(),
@@ -2217,7 +2301,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
 /// budget (e.g. 100,000) was measured and rejected: it left materially less
 /// headroom before an unoptimized debug build's peak RSS reached the same
 /// order of magnitude as the original failure. See
-/// `docs/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
+/// `docs/design/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget" for
 /// the full measurement.
 ///
 /// The value is bracketed from both sides by measurement, not chosen by feel:
@@ -2594,7 +2678,7 @@ fn exists_wrap(binders: &[Binder], expr: Expr) -> Expr {
 }
 
 /// The existentially-closed antecedent of each user invariant shaped
-/// `forall* P => Q` (`docs/DESIGN-vacuity.md` lane 2), paired with the
+/// `forall* P => Q` (`docs/design/DESIGN-vacuity.md` lane 2), paired with the
 /// index of the source invariant in `model.invariants`. An invariant
 /// without that shape (after peeling leading `forall`s) contributes no
 /// candidate, so the index travels with the expression rather than being
@@ -2635,7 +2719,7 @@ pub fn vacuous_implication_candidates(model: &KernelModel) -> Vec<(usize, Expr)>
 }
 
 /// The existentially-closed trigger of each `leadsTo` property
-/// (`docs/DESIGN-vacuity.md` lane 3), one per `model.leadstos` entry in
+/// (`docs/design/DESIGN-vacuity.md` lane 3), one per `model.leadstos` entry in
 /// declaration order.
 #[must_use]
 pub fn vacuous_leadsto_candidates(model: &KernelModel) -> Vec<Expr> {
@@ -2680,7 +2764,7 @@ fn vacuity_reachability_warning(
 /// budgeted BFS (issue #729) over every antecedent/trigger candidate
 /// (`CONCRETE_PROBE_BUDGET`, the same constant/calibration
 /// `find_boundary_violation` uses), and stay solver-independent.
-/// `solver_vacuity` carries the already-rendered `docs/DESIGN-vacuity.md`
+/// `solver_vacuity` carries the already-rendered `docs/design/DESIGN-vacuity.md`
 /// §2 lanes 4–7 that only `fsl-verifier` can decide; passing them in keeps
 /// the documented warning order (model → vacuity → deadlock → action
 /// coverage) owned by one function without giving `fsl-runtime` a solver
@@ -2736,7 +2820,7 @@ pub fn verification_warnings(
         // same condition that already fails the surrounding BMC/explicit
         // run before vacuity warnings are ever rendered, so this path is
         // not reachable on any spec that reaches `verification_warnings` in
-        // the first place. See `docs/DESIGN-vacuity.md`.
+        // the first place. See `docs/design/DESIGN-vacuity.md`.
         let probe_results =
             expression_reachability(model, &probe_expressions, depth, CONCRETE_PROBE_BUDGET)
                 .unwrap_or_default();
@@ -2956,8 +3040,7 @@ fn replay_trace_with_initial(
                 monitor.step(instance)?
             }
             Err(error)
-                if expected_step + 1 == trace.len()
-                    && is_partial_operation_error(&error.message) =>
+                if expected_step + 1 == trace.len() && is_partial_operation_error(&error) =>
             {
                 let attempted = monitor.attempt(&action.name, &action.params)?;
                 if attempted
@@ -3342,7 +3425,7 @@ fn record_reachables(
                 None,
             ) {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
                         name: format!("_partial_property_{}", property.name),
@@ -3412,7 +3495,7 @@ fn check_state_selected_inner(
         let mut bindings = Bindings::new();
         let value = match eval(&property.expr, state, &mut bindings, model, old_state) {
             Ok(value) => value,
-            Err(error) if is_partial_operation_error(&error.message) => {
+            Err(error) if is_partial_operation_error(&error) => {
                 return Ok(Some(Violation {
                     kind: "partial_op".to_owned(),
                     name: format!("_partial_property_{}", property.name),
@@ -3434,7 +3517,7 @@ fn check_state_selected_inner(
             let mut bindings = Bindings::new();
             let value = match eval(&property.expr, state, &mut bindings, model, Some(old_state)) {
                 Ok(value) => value,
-                Err(error) if is_partial_operation_error(&error.message) => {
+                Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
                         name: format!("_partial_property_{}", property.name),
@@ -3682,8 +3765,12 @@ fn assign(
                     }
                     values.insert(index, value);
                 }
+                // Unreachable on a checked model: `check` rejects a `Seq`
+                // indexed target. Kept with its pre-#1166 classification (a
+                // negative index was `partial_op` by message, a too-large one
+                // was not) so this change does not alter it.
                 Value::Seq(values) => {
-                    let index = as_usize(index, "sequence index out of range")?;
+                    let index = partial_index(index, PartialOperation::Index)?;
                     let slot = values
                         .get_mut(index)
                         .ok_or_else(|| runtime_error("sequence assignment index out of range"))?;

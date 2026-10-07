@@ -16,7 +16,7 @@ from typing import Iterable
 
 SCOPES = (".github", "tools", "rust", "docs", "skills")
 EXCLUDED_PATHS = {Path("CHANGELOG.md")}
-DESIGN_PATH = r"`?(docs/DESIGN-[A-Za-z0-9._-]+\.md)`?"
+DESIGN_PATH = r"`?(docs/design/DESIGN-[A-Za-z0-9._-]+\.md)`?"
 QUOTED_TITLE = r'["“]([^"”\n]+)["”]'
 CITATION_PATTERNS = (
     re.compile(

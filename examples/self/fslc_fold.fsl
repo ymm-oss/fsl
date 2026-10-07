@@ -14,16 +14,33 @@
 // batch legitimately does), but an all-inconclusive fold may not, matching
 // `sweep_inconclusive` rather than `sweep_passed`.
 //
+// Inconclusive items are settled per scope (#1089): `fold_scope_boundary`
+// closes the current scope, and a closed scope that folded an inconclusive
+// item but no success stays unsettled for the rest of the fold, so a success
+// in a later scope cannot absorb it. Sweep emits the boundary between
+// `--instances`/`--values` scopes (depth cells of one scope share it); chain
+// and analyze batch never emit it, so for them the whole fold is one scope
+// and the rules above are unchanged.
+//
 // probe: removing `requires not any_failure_seen` from finalize_pass yields
 //        violated/FailureIsSticky after fold_sub_failure; finalize_pass.
 // probe: narrowing finalize_fail's `requires any_failure_seen or not
 //        success_seen` back to `requires any_failure_seen` yields
 //        violated/FinalizeAgreesWithFolded at depth 1 (finalize_fail with no
 //        prior fold at all).
-// probe: dropping finalize_pass's `requires success_seen or not
-//        inconclusive_seen` yields violated/FinalizeAgreesWithFolded after
+// probe: dropping finalize_pass's `requires scope_success or not
+//        scope_inconclusive` yields violated/FinalizeAgreesWithFolded after
 //        fold_sub_inconclusive; finalize_pass (an all-inconclusive fold
 //        wrongly finalizing pass).
+// probe: dropping finalize_fail's `or unsettled_seen` disjunct yields
+//        reachable_failed/ReachFailOnClosedUnsettledScope; dropping its
+//        `or (scope_inconclusive and not scope_success)` disjunct yields
+//        reachable_failed/ReachFailOnOpenUnsettledScope (both pinned as
+//        external mutants in self_conformance.rs).
+// probe: dropping finalize_pass's `requires not unsettled_seen` yields
+//        violated/FinalizeAgreesWithFolded after fold_sub_inconclusive;
+//        fold_scope_boundary; fold_sub_success; finalize_pass (#1089: a
+//        success in one scope absorbing another scope's inconclusive cells).
 spec FslcFold {
   enum FoldStatus { Folding, FinalizedPass, FinalizedFail }
 
@@ -33,7 +50,11 @@ spec FslcFold {
     success_seen: Bool,     // ghost: a legitimate non-skipped success was folded
     skipped_epoch: Bool,    // ghost: toggled only by fold_skipped
     inconclusive_epoch: Bool, // ghost: toggled only by fold_sub_inconclusive
-    inconclusive_seen: Bool // ghost: at least one folded item was inconclusive
+    inconclusive_seen: Bool, // ghost: at least one folded item was inconclusive
+    scope_success: Bool,     // the open scope folded a legitimate success
+    scope_inconclusive: Bool, // the open scope folded an inconclusive item
+    unsettled_seen: Bool,    // a closed scope folded inconclusive but no success
+    scope_epoch: Bool        // ghost: toggled only by fold_scope_boundary
   }
 
   init {
@@ -43,11 +64,16 @@ spec FslcFold {
     skipped_epoch = false
     inconclusive_epoch = false
     inconclusive_seen = false
+    scope_success = false
+    scope_inconclusive = false
+    unsettled_seen = false
+    scope_epoch = false
   }
 
   action fold_sub_success() {
     requires status == Folding
     success_seen = true
+    scope_success = true
   }
 
   action fold_sub_failure() {
@@ -64,18 +90,29 @@ spec FslcFold {
     requires status == Folding
     inconclusive_epoch = not inconclusive_epoch
     inconclusive_seen = true
+    scope_inconclusive = true
+  }
+
+  action fold_scope_boundary() {
+    requires status == Folding
+    unsettled_seen = unsettled_seen or (scope_inconclusive and not scope_success)
+    scope_success = false
+    scope_inconclusive = false
+    scope_epoch = not scope_epoch
   }
 
   action finalize_pass() {
     requires status == Folding
     requires not any_failure_seen
-    requires success_seen or not inconclusive_seen
+    requires scope_success or not scope_inconclusive
+    requires not unsettled_seen
     status = FinalizedPass
   }
 
   action finalize_fail() {
     requires status == Folding
-    requires any_failure_seen or not success_seen
+    requires any_failure_seen or not success_seen or unsettled_seen
+      or (scope_inconclusive and not scope_success)
     status = FinalizedFail
   }
 
@@ -88,8 +125,28 @@ spec FslcFold {
   }
 
   invariant FinalizeAgreesWithFolded {
-    (status == FinalizedPass => (not any_failure_seen and (success_seen or not inconclusive_seen)))
-      and (status == FinalizedFail => (any_failure_seen or not success_seen))
+    (status == FinalizedPass =>
+      (not any_failure_seen and not unsettled_seen
+        and (scope_success or not scope_inconclusive)))
+      and (status == FinalizedFail =>
+        (any_failure_seen or not success_seen or unsettled_seen
+          or (scope_inconclusive and not scope_success)))
+  }
+
+  invariant ScopeFlagsFollowFoldedItems {
+    (scope_success => success_seen)
+      and (scope_inconclusive => inconclusive_seen)
+      and (unsettled_seen => inconclusive_seen)
+  }
+
+  trans ScopeBoundaryOpensAnEmptyScope {
+    scope_epoch != old(scope_epoch) =>
+      (not scope_success and not scope_inconclusive
+        and status == old(status) and any_failure_seen == old(any_failure_seen))
+  }
+
+  trans UnsettledScopeNeverClears {
+    old(unsettled_seen) => unsettled_seen
   }
 
   trans SkippedIsNeitherPassNorFail {
@@ -120,6 +177,26 @@ spec FslcFold {
 
   reachable ReachSuccessAfterInconclusivePath {
     status == FinalizedPass and success_seen and inconclusive_seen
+  }
+
+  reachable ReachScopeBoundaryPath {
+    status == Folding and scope_epoch and not any_failure_seen
+  }
+
+  // #1089: finalizing fail must stay enabled for an unsettled scope even
+  // after a success and with no failure. Each witness below is reachable only
+  // through one disjunct of finalize_fail's guard, so dropping that disjunct
+  // makes the witness unreachable instead of merely deadlocking the fold.
+  // Closed scope: the open scope is settled, only `unsettled_seen` enables it.
+  reachable ReachFailOnClosedUnsettledScope {
+    status == FinalizedFail and not any_failure_seen and success_seen
+      and unsettled_seen and scope_success
+  }
+
+  // Open scope: nothing closed is unsettled, only the open scope enables it.
+  reachable ReachFailOnOpenUnsettledScope {
+    status == FinalizedFail and not any_failure_seen and success_seen
+      and not unsettled_seen and scope_inconclusive and not scope_success
   }
 
   terminal { status == FinalizedPass or status == FinalizedFail }

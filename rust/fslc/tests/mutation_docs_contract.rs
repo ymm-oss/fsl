@@ -38,8 +38,8 @@ fn normalized(relative: &str) -> String {
 #[test]
 fn kill_rate_definition_is_stated_in_mutation_docs() {
     for relative in [
-        "docs/DESIGN-mutate.md",
-        "docs/LANGUAGE.md",
+        "docs/design/DESIGN-mutate.md",
+        "docs/manual/LANGUAGE.md",
         "skills/fsl/references/commands.md",
     ] {
         let text = normalized(relative);
@@ -56,8 +56,8 @@ fn kill_rate_definition_is_stated_in_mutation_docs() {
 #[test]
 fn mutation_score_is_framed_as_bounded_sensitivity() {
     for relative in [
-        "docs/DESIGN-mutate.md",
-        "docs/LANGUAGE.md",
+        "docs/design/DESIGN-mutate.md",
+        "docs/manual/LANGUAGE.md",
         "skills/fsl/references/commands.md",
     ] {
         let text = normalized(relative);
@@ -77,9 +77,9 @@ fn mutation_score_is_framed_as_bounded_sensitivity() {
 #[test]
 fn stronger_survivor_claim_does_not_return() {
     for relative in [
-        "docs/DESIGN-mutate.md",
-        "docs/LANGUAGE.md",
-        "docs/LANGUAGE.ja.md",
+        "docs/design/DESIGN-mutate.md",
+        "docs/manual/LANGUAGE.md",
+        "docs/manual/LANGUAGE.ja.md",
         "skills/fsl/references/commands.md",
         "README.md",
     ] {

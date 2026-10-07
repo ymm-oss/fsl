@@ -187,9 +187,9 @@ fn rhs_binder_use_blocks_machine_hint() {
 
 #[test]
 fn docs_distinguish_proven_duplicate_from_conservative_rejection() {
-    let english =
-        std::fs::read_to_string(format!("{REPO_ROOT}/docs/LANGUAGE.md")).expect("read LANGUAGE.md");
-    let japanese = std::fs::read_to_string(format!("{REPO_ROOT}/docs/LANGUAGE.ja.md"))
+    let english = std::fs::read_to_string(format!("{REPO_ROOT}/docs/manual/LANGUAGE.md"))
+        .expect("read LANGUAGE.md");
+    let japanese = std::fs::read_to_string(format!("{REPO_ROOT}/docs/manual/LANGUAGE.ja.md"))
         .expect("read LANGUAGE.ja.md");
     let syntax = std::fs::read_to_string(format!("{REPO_ROOT}/skills/fsl/references/syntax.md"))
         .expect("read skills/fsl/references/syntax.md");

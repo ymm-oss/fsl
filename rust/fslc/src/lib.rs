@@ -5,8 +5,13 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use fsl_core::{FslValue, KernelModel, ParamDef};
 use serde_json::{Value, json};
 
+// The one ordered list of `check`'s validity stages (issue #1163). The Worker
+// calls it too, so it is not behind `native-cli`; its specialized-document and
+// Agent stages are why `fsl-tools` is an unconditional dependency.
+pub mod check_stages;
 pub mod coverage;
 pub mod frontend_output;
+pub mod junit_report;
 // The single owner of "does this command accept literate Markdown input"
 // (issue #665). Declared on the library side for the same reason `outcome`
 // is: integration tests under `tests/` link the library, not the binary, and

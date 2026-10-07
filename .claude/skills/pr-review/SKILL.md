@@ -25,12 +25,12 @@ Lenses that apply to every phase:
 
 ## Phase 0 — Reconstruct the contract
 
-1. Read the PR (`gh pr view`, `gh pr diff`), the linked issue, and any `docs/DESIGN-*.md` the
+1. Read the PR (`gh pr view`, `gh pr diff`), the linked issue, and any `docs/design/DESIGN-*.md` the
    change touches or should have touched.
 2. Restate, from the issue and repository evidence only: the requested outcome, the affected
    authority surface, the invariants at risk, and the verification the change needs.
 3. Note which CI lanes actually ran. `merge readiness` is a bounded fail-fast lane
-   (`docs/DESIGN-ci.md`), not product verification — record what remains unverified.
+   (`docs/design/DESIGN-ci.md`), not product verification — record what remains unverified.
 
 ## Phase 1 — Contract alignment
 

@@ -5,14 +5,14 @@ refinement.
 
 - `sla_worker.fsl`: requirements-dialect fixture using `time`, `urgent`, `age`,
   and `deadline`; `fslc` expands the discrete-time bookkeeping from §3 of
-  `docs/DESIGN-nfr.md`. Its generated `tick` updates age counters only.
+  `docs/design/DESIGN-nfr.md`. Its generated `tick` updates age counters only.
 - `sla_worker_kernel.fsl`: hand-written kernel spike with explicit `Age`, `age`,
   `tick`, urgency guards, and the SLA invariant — and a **finer clock**: its
   `tick` also consumes a `busy` service-time counter (service takes 2 ticks).
 - `sla_worker_design.fsl` + `sla_worker_refines.fsl`: a design layer that
   **refines** `sla_worker.fsl`, plus the mapping.
 - `support_sla.fsl`: a second requirements-dialect SLA fixture (the non-vacuous
-  deadline-urgency pattern specified in `docs/DESIGN-nfr.md`).
+  deadline-urgency pattern specified in `docs/design/DESIGN-nfr.md`).
 - `bounded_response.fsl`: a solver-free replay fixture with one bounded and one
   unbounded `leadsTo`; `bounded_response.within.v1.json` responds at the
   inclusive deadline and `bounded_response.overdue.v1.json` misses it through
@@ -53,7 +53,7 @@ fslc refine examples/nfr/sla_worker_kernel.fsl examples/nfr/sla_worker.fsl <mapp
 
 A discrete-time SLA is a safety property of the clock that declares it, and a
 refinement preserves it only across a **shared clock** — the same reason
-liveness does not propagate across refinement (`docs/DESIGN-layers.md` §6). Two
+liveness does not propagate across refinement (`docs/design/DESIGN-layers.md` §6). Two
 working patterns:
 
 1. **Clock at the upper layer, design shares it** — `sla_worker_design.fsl`

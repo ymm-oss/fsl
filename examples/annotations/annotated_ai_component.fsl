@@ -5,7 +5,7 @@
 // Demonstrates `@requirement(id, text?)` attached directly to a tool,
 // an authority block and its individual rule lines, a fallback block
 // and one of its `when` items, and a hard check block and one of its
-// individual rule lines. See docs/DESIGN-annotations.md's "domain/db/ai
+// individual rule lines. See docs/design/DESIGN-annotations.md's "domain/db/ai
 // nested declaration syntax" section for the `AiAuthority`/`AiHardCheck`
 // restructuring into `AiAuthorityRule`/`AiCheckRule { name, annotations,
 // loc }` and the unchanged `kernel_ast_v1()` JSON shape.

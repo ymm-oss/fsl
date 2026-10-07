@@ -275,7 +275,7 @@ fn glossary_section_lists_every_accepted_label_sorted_by_target() {
 #[test]
 fn composite_lvalue_code_span_is_never_rewritten_by_a_state_label() {
     // v1 does not substitute a label inside rendered expression text (see
-    // docs/DESIGN-document-glossary.md) — `state:scr` must never touch the
+    // docs/design/DESIGN-document-glossary.md) — `state:scr` must never touch the
     // `scr[c].st == CancelForm`-shaped code spans inside claim bodies.
     let glossary = fsl_tools::parse_glossary(EXAMPLE_GLOSSARY).expect("parse");
     let markdown = render_cancel_system(Locale::Ja, Some(&glossary));

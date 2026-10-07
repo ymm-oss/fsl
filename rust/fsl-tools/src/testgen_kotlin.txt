@@ -4,8 +4,9 @@
 // Source: __SOURCE__
 //
 // Wire `makeAdapter()` to your implementation. Until it is wired it returns null
-// and every test returns early (kotlin.test has no portable runtime skip), so the
-// suite passes trivially rather than failing — mirroring the other targets.
+// and every test FAILS with "adapter not wired" (issue #1200): a suite that never
+// calls the implementation is not evidence that it conforms. kotlin.test has no
+// portable runtime skip, so `fslc testgen --allow-unwired` rejects this target.
 //
 // The random-walk trace below was baked at generation time by the FSL Monitor
 // (the spec's concrete interpreter) under a fixed seed, so these tests need no
@@ -15,6 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 data class StepResult(val ok: Boolean, val kind: String? = null)
 
@@ -35,6 +37,8 @@ interface Adapter {
 
 // Wire your implementation here. Return your adapter instead of null.
 fun makeAdapter(): Adapter? = null
+
+const val ADAPTER_NOT_WIRED: String = __NOT_WIRED_MESSAGE__
 
 // Assert only the fields the spec mentions; recurse into nested (Map/struct)
 // shapes. Kotlin's `==` is deep on List/Map and discriminates Int from Double, so

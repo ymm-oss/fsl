@@ -272,7 +272,7 @@ def render_ledger(file, spec, verification, scenarios_result, replay_result=None
         "- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / "
         "`bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / "
         "`statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。"
-        "詳細は `docs/DESIGN-assurance-classes.md`。"
+        "詳細は `docs/design/DESIGN-assurance-classes.md`。"
     )
     L.append("- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。")
     if replay_result is not None:

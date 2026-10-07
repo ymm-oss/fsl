@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Core `Claim`/`Citation`/`Axis` types for the C3 Semantic Assurance Matrix
-//! (issue #537 C3, `docs/DESIGN-assurance-matrix.md`).
+//! (issue #537 C3, `docs/design/DESIGN-assurance-matrix.md`).
 //!
 //! A `Citation` is a machine-rechecked pointer: `path` + `anchor`. For
 //! zero-argument function anchors (`fn name()`), `recheck()` requires an
@@ -155,7 +155,7 @@ impl Citation {
 }
 
 /// One assurance-matrix cell's evidence class, matching
-/// `docs/DESIGN-assurance-matrix.md`'s cell vocabulary. Every variant
+/// `docs/design/DESIGN-assurance-matrix.md`'s cell vocabulary. Every variant
 /// carries exactly one [`Citation`] -- there is no variant without one,
 /// so a cell can never be "claimed" without something to recheck.
 ///
@@ -164,7 +164,7 @@ impl Citation {
 /// their cells are honestly a rejecting-control or fail-closed-unsupported
 /// case rather than `Exercised`/`NotApplicable`, and forcing one to avoid a
 /// dead-code warning would misclassify a real cell. Both variants are part
-/// of the accepted `docs/DESIGN-assurance-matrix.md` cell vocabulary for
+/// of the accepted `docs/design/DESIGN-assurance-matrix.md` cell vocabulary for
 /// later slices (e.g. an `expr`/`types` axis construct a given engine
 /// explicitly refuses).
 #[allow(dead_code)]
@@ -208,7 +208,7 @@ impl Claim {
 
 /// One semantic-surface axis of the assurance matrix: a set of rows, a set
 /// of *declared* columns (the axis's own required scope -- see the
-/// `docs/DESIGN-assurance-matrix.md` "Cell vocabulary"), and the
+/// `docs/design/DESIGN-assurance-matrix.md` "Cell vocabulary"), and the
 /// `Claim` for every `(row, column)` pair the axis declares as required.
 pub struct Axis {
     pub name: &'static str,

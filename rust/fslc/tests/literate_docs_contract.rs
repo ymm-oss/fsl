@@ -9,8 +9,8 @@
 //! hand-written copies of the same 19+3 names stay in sync with the
 //! registry and with each other.
 //!
-//! Before this test the enumeration in `docs/LANGUAGE.md`,
-//! `docs/LANGUAGE.ja.md`, and `skills/fsl/references/commands.md` was accurate but
+//! Before this test the enumeration in `docs/manual/LANGUAGE.md`,
+//! `docs/manual/LANGUAGE.ja.md`, and `skills/fsl/references/commands.md` was accurate but
 //! *ungated*: registering a 20th `Unsupported` command in
 //! `rust/fslc/src/literate_access.rs` would leave all three documents
 //! silently stale, with nothing to fail. This is the gate.
@@ -44,8 +44,8 @@ fn read(path: impl AsRef<Path>) -> String {
 }
 
 /// Normalize a checkout's line endings to `\n` before anchor matching. On a
-/// Windows checkout under `core.autocrlf`, `docs/LANGUAGE.md`,
-/// `docs/LANGUAGE.ja.md`, and `skills/fsl/references/commands.md` are read back with
+/// Windows checkout under `core.autocrlf`, `docs/manual/LANGUAGE.md`,
+/// `docs/manual/LANGUAGE.ja.md`, and `skills/fsl/references/commands.md` are read back with
 /// `\r\n`, so a multi-line anchor such as `"is not supported.\n\n"` never
 /// matches and `between()` panics with a missing-anchor error instead of
 /// comparing documented commands against the registry.
@@ -169,13 +169,13 @@ struct DocAnchors {
 
 const DOCS: &[DocAnchors] = &[
     DocAnchors {
-        relative: "docs/LANGUAGE.md",
+        relative: "docs/manual/LANGUAGE.md",
         supported_start: "is not supported.\n\n",
         supported_end: "are the only commands that extract fences",
         unsupported_anchor: "Most other commands that read a spec path ",
     },
     DocAnchors {
-        relative: "docs/LANGUAGE.ja.md",
+        relative: "docs/manual/LANGUAGE.ja.md",
         supported_start: "サポートされません。\n\n",
         supported_end: "の 3 コマンドだけです",
         unsupported_anchor: "仕様パスを読み取る他のほとんどのコマンド",
@@ -250,7 +250,7 @@ fn command_names_expands_the_document_subcommand_chain() {
 }
 
 /// The regression pinned to the anchor that actually broke: on Windows CI,
-/// `between()`'s search for `docs/LANGUAGE.md`'s `"is not supported.\n\n"`
+/// `between()`'s search for `docs/manual/LANGUAGE.md`'s `"is not supported.\n\n"`
 /// anchor failed against a `\r\n`-normalized checkout. Mirrors
 /// `implementation_mutation_manifest.rs`'s
 /// `multiline_anchor_matching_is_line_ending_independent`.
@@ -303,7 +303,7 @@ impl Drop for Fixture {
 }
 
 /// The composed guard the helper-level test above cannot provide: write a
-/// CRLF copy of the real `docs/LANGUAGE.md` to a temp file, read it back
+/// CRLF copy of the real `docs/manual/LANGUAGE.md` to a temp file, read it back
 /// through the same `read()` entrypoint as every documentation contract, and
 /// confirm `between()` finds the anchor and returns the same slice as the LF
 /// original. Deleting the `normalize_line_endings` call inside `read()` makes
@@ -312,7 +312,7 @@ impl Drop for Fixture {
 /// than the normalization function called directly.
 #[test]
 fn crlf_checkout_of_a_real_doc_reaches_the_anchor_matcher_normalized() {
-    let lf_original = read("docs/LANGUAGE.md");
+    let lf_original = read("docs/manual/LANGUAGE.md");
     let crlf_source = lf_original.replace('\n', "\r\n");
     assert!(
         crlf_source.contains("\r\n"),

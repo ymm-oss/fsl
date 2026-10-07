@@ -667,11 +667,11 @@
     reference: {
       en: {
         audience: "You need authoritative lookup while writing or reviewing specs — semantics, command flags, diagnostics, or vocabulary — without mistaking compatibility snapshots for the product surface.",
-        contract: "Four sources, in authority order: (1) generated <code>docs/LANGUAGE.md</code> language reference, (2) generated <code>rust/fslc/cli-contract.json</code> native CLI map, (3) hand-authored exit/result interpretation, (4) frozen Python under <code>src/fslc/</code> labeled compatibility-only.",
+        contract: "Four sources, in authority order: (1) generated <code>docs/manual/LANGUAGE.md</code> language reference, (2) generated <code>rust/fslc/cli-contract.json</code> native CLI map, (3) hand-authored exit/result interpretation, (4) frozen Python under <code>src/fslc/</code> labeled compatibility-only.",
         evidence: "Read <code>result</code> + exit code together. <code>errors</code> indexes violation shapes; generated <code>cli</code> cites <code>outcome.rs</code>. Do not treat frozen Python argparse as current command authority.",
         next: "Pick the canonical page for your question, then return to guides or examples to apply it.",
         pillars: [
-          { marker: "language-md", stem: "language", label: "Language semantics", blurb: "Generated from <code>docs/LANGUAGE.md</code> — canonical meaning of constructs and verifier behavior." },
+          { marker: "language-md", stem: "language", label: "Language semantics", blurb: "Generated from <code>docs/manual/LANGUAGE.md</code> — canonical meaning of constructs and verifier behavior." },
           { marker: "cli-contract", stem: "cli", label: "Native CLI surface", blurb: "Generated from <code>rust/fslc/cli-contract.json</code> — every native <code>fslc</code> subcommand and flag." },
           { marker: "exit-interpret", stem: "errors", label: "Results & exit codes", blurb: "How to read <code>result</code>/<code>kind</code>/exit codes from native JSON output." },
           { marker: "frozen-compat", stem: null, label: "Frozen Python (parity only)", blurb: "<code>src/fslc/</code> mirrors a compatibility subset for tests — not the distribution or site CLI authority." },
@@ -679,11 +679,11 @@
       },
       ja: {
         audience: "仕様を書く・レビューするときに、意味論・コマンドフラグ・診断・用語の正典を参照したい段階です。互換スナップショットを製品面と混同しないでください。",
-        contract: "権威の順序は4つ：(1) 生成 <code>docs/LANGUAGE.md</code> 言語リファレンス、(2) 生成 <code>rust/fslc/cli-contract.json</code> ネイティブ CLI、(3) 手書きの終了コード/結果の読み方、(4) <code>src/fslc/</code> の凍結 Python（互換のみと明記）。",
+        contract: "権威の順序は4つ：(1) 生成 <code>docs/manual/LANGUAGE.md</code> 言語リファレンス、(2) 生成 <code>rust/fslc/cli-contract.json</code> ネイティブ CLI、(3) 手書きの終了コード/結果の読み方、(4) <code>src/fslc/</code> の凍結 Python（互換のみと明記）。",
         evidence: "<code>result</code> と終了コードをセットで読みます。<code>errors</code> が違反形状を索引し、生成 <code>cli</code> は <code>outcome.rs</code> を引用します。凍結 Python の argparse を現行 CLI 権威と見なしません。",
         next: "問いに対応する正典ページを選び、ガイドや実例に戻って適用してください。",
         pillars: [
-          { marker: "language-md", stem: "language", label: "言語意味論", blurb: "<code>docs/LANGUAGE.md</code> から生成 — 構文と検証器の正典。" },
+          { marker: "language-md", stem: "language", label: "言語意味論", blurb: "<code>docs/manual/LANGUAGE.md</code> から生成 — 構文と検証器の正典。" },
           { marker: "cli-contract", stem: "cli", label: "ネイティブ CLI", blurb: "<code>rust/fslc/cli-contract.json</code> から生成 — 全ネイティブ <code>fslc</code> サブコマンド。" },
           { marker: "exit-interpret", stem: "errors", label: "結果と終了コード", blurb: "ネイティブ JSON の <code>result</code>/<code>kind</code>/終了コードの読み方。" },
           { marker: "frozen-compat", stem: null, label: "凍結 Python（parity のみ）", blurb: "<code>src/fslc/</code> はテスト用互換サブセット — 配布面でもサイト CLI 権威でもありません。" },
@@ -818,7 +818,7 @@
     // "back to category" affordance — see DESIGN-docs-site.md D2).
     const crumb = $("nav.breadcrumb[data-nav]");
     if (crumb) {
-      // docs/DESIGN-docs-site.md requires <nav aria-label="Breadcrumb">; the static
+      // docs/design/DESIGN-docs-site.md requires <nav aria-label="Breadcrumb">; the static
       // hosts ship unlabeled, so the accessible name is set here or nowhere.
       crumb.setAttribute("aria-label", lang === "ja" ? "パンくずリスト" : "Breadcrumb");
       if (chapter) {

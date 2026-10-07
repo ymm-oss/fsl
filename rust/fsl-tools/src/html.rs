@@ -595,7 +595,7 @@ fn assurance(verification: &Value) -> String {
 }
 
 /// The html property `kind` to the ledger's element group
-/// (`docs/DESIGN-assurance-classes.md` defines "Assurance column per property row
+/// (`docs/design/DESIGN-assurance-classes.md` defines "Assurance column per property row
 /// via `classify_element` (kind->group: invariant->invariants,
 /// leadsTo->leadstos, reachable->reachables, trans->transitions)").
 fn property_group(kind: &str) -> Option<&'static str> {
@@ -631,7 +631,7 @@ fn property_deadline(property: &Value) -> Option<&Value> {
 }
 
 fn properties_section(properties: &[Value], checks: &[Value], verification: &Value) -> String {
-    // Conditional column: `docs/DESIGN-html-report.md` puts the Deadline column
+    // Conditional column: `docs/design/DESIGN-html-report.md` puts the Deadline column
     // in the table only when at least one property declares a deadline, under
     // the same rule that forbids `none` filler cells for absent requirement
     // captions. Rendering it always with empty cells would violate the spec it
@@ -1277,7 +1277,29 @@ pub fn render_html_report(
 
 #[cfg(test)]
 mod tests {
-    use super::status_class;
+    use super::{status_class, status_section};
+    use serde_json::json;
+
+    /// #1008: a selected `verify` reports `implements.result:"not_evaluated"`.
+    /// The report must show that value verbatim and must never classify it as
+    /// a pass (mutation: add `not_evaluated` to the `"ok"` arm, or render the
+    /// nested seam from the top-level `result`).
+    #[test]
+    fn a_not_evaluated_seam_never_renders_as_satisfied() {
+        assert_ne!(status_class("not_evaluated"), "ok");
+        let html = status_section(&json!({
+            "result": "verified",
+            "implements": {
+                "abs": "Abs",
+                "result": "not_evaluated",
+                "reason": "property_selection",
+                "reasons": ["property_selection"],
+            },
+        }));
+        assert!(html.contains("not_evaluated"), "{html}");
+        assert!(html.contains("property_selection"), "{html}");
+        assert!(!html.contains("refines"), "{html}");
+    }
 
     /// Both inline-`implements` failure verdicts reach the top-level `result`
     /// since #1002, and `html` renders that value through `status_class`

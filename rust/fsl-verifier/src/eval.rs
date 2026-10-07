@@ -421,101 +421,6 @@ const PROPERTY_EVALUATION: EvaluationPolicy = EvaluationPolicy {
     total_division: true,
 };
 
-pub(crate) fn expression_has_partial_operation_candidate(expr: &Expr) -> bool {
-    match expr {
-        Expr::Index(_, _) => true,
-        Expr::Method {
-            receiver,
-            name,
-            args,
-        } => {
-            matches!(name.as_str(), "head" | "pop" | "at")
-                || expression_has_partial_operation_candidate(receiver)
-                || args.iter().any(expression_has_partial_operation_candidate)
-        }
-        Expr::Binary { op, left, right } => {
-            matches!(op.as_str(), "/" | "%")
-                || expression_has_partial_operation_candidate(left)
-                || expression_has_partial_operation_candidate(right)
-        }
-        Expr::Some(inner)
-        | Expr::Neg(inner)
-        | Expr::Not(inner)
-        | Expr::Field(inner, _)
-        | Expr::Stage { entity: inner, .. }
-        | Expr::UnaryNamed { expr: inner, .. }
-        | Expr::Is { expr: inner, .. } => expression_has_partial_operation_candidate(inner),
-        Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
-            items.iter().any(expression_has_partial_operation_candidate)
-        }
-        Expr::Struct { fields, .. } => fields
-            .iter()
-            .any(|(_, value)| expression_has_partial_operation_candidate(value)),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            expression_has_partial_operation_candidate(condition)
-                || expression_has_partial_operation_candidate(then_expr)
-                || expression_has_partial_operation_candidate(else_expr)
-        }
-        Expr::Quantified { binder, body, .. } => {
-            binder_has_partial_operation_candidate(binder)
-                || expression_has_partial_operation_candidate(body)
-        }
-        Expr::Aggregate { binder, value, .. } => {
-            binder_has_partial_operation_candidate(binder)
-                || value
-                    .as_deref()
-                    .is_some_and(expression_has_partial_operation_candidate)
-        }
-        Expr::BinaryNamed { left, right, .. } => {
-            expression_has_partial_operation_candidate(left)
-                || expression_has_partial_operation_candidate(right)
-        }
-        Expr::TernaryNamed {
-            first,
-            second,
-            third,
-            ..
-        } => {
-            expression_has_partial_operation_candidate(first)
-                || expression_has_partial_operation_candidate(second)
-                || expression_has_partial_operation_candidate(third)
-        }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => false,
-    }
-}
-
-pub(crate) fn binder_has_partial_operation_candidate(binder: &Binder) -> bool {
-    match binder {
-        Binder::Typed { where_expr, .. } => where_expr
-            .as_deref()
-            .is_some_and(expression_has_partial_operation_candidate),
-        Binder::Range {
-            lo, hi, where_expr, ..
-        } => {
-            expression_has_partial_operation_candidate(lo)
-                || expression_has_partial_operation_candidate(hi)
-                || where_expr
-                    .as_deref()
-                    .is_some_and(expression_has_partial_operation_candidate)
-        }
-        Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => {
-            expression_has_partial_operation_candidate(collection)
-                || where_expr
-                    .as_deref()
-                    .is_some_and(expression_has_partial_operation_candidate)
-        }
-    }
-}
-
 fn safe_status<S: SmtSolver>(solver: &S) -> EvaluationStatus<S::Term> {
     EvaluationStatus {
         fully_defined: solver.bool_value(true),
@@ -588,8 +493,35 @@ pub(crate) fn property_evaluation_status<S: SmtSolver>(
     )
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// Definedness analysis of one kernel expression, and a second cycle entry
+/// for this module's stack guard (#1164): every arm below, and the
+/// `ordered_evaluation_status_refs` / binder helpers, re-enter here for their
+/// operands. It walks the same user-controlled tree as [`eval`] but is not
+/// dominated by it -- `eval`'s guard runs inside the calls this function makes,
+/// not around its own recursion -- so it needs its own guard.
+///
+/// Crash-witnessed by `verify` (bmc and induction) on a right-nested `if`
+/// chain inside an `invariant`: unguarded, a debug aarch64 build survives
+/// N=300 and aborts at N=320, and at N=500 all ~320 frames on the stack are
+/// this function (~25 KiB per level), reached through
+/// `property_evaluation_status` from `bmc::check_state_properties`.
+#[allow(clippy::too_many_arguments)]
 fn evaluation_status_with_policy<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    policy: EvaluationPolicy,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    recursion::guard(|| {
+        evaluation_status_with_policy_inner(solver, model, expr, state, bindings, old_state, policy)
+    })
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn evaluation_status_with_policy_inner<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,

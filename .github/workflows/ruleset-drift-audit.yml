@@ -2,13 +2,13 @@
 
 name: ruleset drift audit
 
-# Configuration-conformance automation, not product verification in docs/DESIGN-ci.md's sense
+# Configuration-conformance automation, not product verification in docs/design/DESIGN-ci.md's sense
 # (rust workspace / WASM / native Z3 / semantic mutation / FSL Logic Test). It compares the live
 # `main safety and CI` GitHub ruleset (id 19090811) against the checked-in
 # .github/ruleset-contract.json, because that ruleset drifted silently once -- the accepted
 # design required the Linux evidence to be *required* contexts while the live ruleset required
 # only `merge readiness` (issue #707) -- and without an audit it can drift again the same way.
-# See docs/DESIGN-ci.md, "Ruleset drift audit".
+# See docs/design/DESIGN-ci.md, "Ruleset drift audit".
 #
 # Why RULESET_AUDIT_TOKEN exists: ruleset read endpoints are public for this repository, but
 # GitHub returns `bypass_actors` only to a caller with write access to the ruleset, and the

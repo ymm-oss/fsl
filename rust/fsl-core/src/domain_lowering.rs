@@ -2084,7 +2084,7 @@ impl<'a> Resolver<'a> {
     /// Apply the declared `evolve` for each event a saga step/timeout/compensation
     /// action emits, pairing with `event_assignments`: an action that raises
     /// `event_<E>` for an occurring event must apply E's declared evolve in the
-    /// same action (docs/DESIGN-domain.md's saga step pairing invariant).
+    /// same action (docs/design/DESIGN-domain.md's saga step pairing invariant).
     fn saga_emit_evolve(
         &self,
         loc: DomainLoc,

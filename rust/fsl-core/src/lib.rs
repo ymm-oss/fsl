@@ -37,6 +37,7 @@ mod domain_lowering;
 mod expr_text;
 mod model;
 mod origin;
+mod partial_operation;
 mod public_kernel;
 mod refinement;
 mod reserved;
@@ -59,7 +60,7 @@ pub use dialect::{
     RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
     lower_governance, lower_requirements, requirements_declared_ids, requirements_has_implements,
-    requirements_trace_contract, validate_ai_component,
+    requirements_trace_contract, validate_ai_component, verify_scope_type_names,
 };
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
@@ -74,6 +75,11 @@ pub use origin::{
     TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,
     action_statement_target, action_target, init_statement_target, property_target, state_target,
     type_target,
+};
+pub use partial_operation::{
+    ActionPartialOperation, PartialOperation, PartialOperationClause, action_partial_operations,
+    binder_has_partial_operation_candidate, expression_has_partial_operation_candidate,
+    lvalue_has_partial_operation_candidate,
 };
 pub use public_kernel::{
     KERNEL_SCHEMA_ID, KERNEL_SCHEMA_VERSION, KERNEL_V1_SCHEMA_ID, KERNEL_V1_SCHEMA_VERSION,
@@ -104,7 +110,7 @@ pub struct CoreError {
     /// Whether this is a name-resolution failure — a declaration that is
     /// duplicated, missing, or shadowed.
     ///
-    /// `docs/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
+    /// `docs/design/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
     /// member covers exactly these. Carrying the classification on the error
     /// keeps it out of message-string matching, which cannot survive a message
     /// edit (issue 565, the direction issue 484 established).
@@ -687,17 +693,30 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             symmetric: false,
         });
     }
-    if let Some((name, (_, span))) = instances.into_iter().next() {
-        return Err(core_error(
-            format!("verify instances for undeclared entity '{name}'"),
-            span,
-        ));
-    }
-    if let Some((name, (_, _, span))) = values.into_iter().next() {
-        return Err(core_error(
-            format!("verify values for undeclared number '{name}'"),
-            span,
-        ));
+    // Whatever is left names no declaration. Report the first such bound in
+    // source order, not in `HashMap` order, so the message and location are
+    // deterministic and point at the first offending line (#1165).
+    for item in &spec.items {
+        let SpecItem::VerifyBounds { items, .. } = item else {
+            continue;
+        };
+        for bound in items {
+            match bound {
+                VerifyItem::Instances(name, _, span) if instances.contains_key(name) => {
+                    return Err(core_error(
+                        format!("verify instances for undeclared entity '{name}'"),
+                        *span,
+                    ));
+                }
+                VerifyItem::Values(name, _, _, span) if values.contains_key(name) => {
+                    return Err(core_error(
+                        format!("verify values for undeclared number '{name}'"),
+                        *span,
+                    ));
+                }
+                _ => {}
+            }
+        }
     }
     types.extend(spec.items.into_iter().filter(|item| {
         !matches!(

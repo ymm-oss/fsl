@@ -466,7 +466,7 @@ fn compare_case(
     // Every gallery `error` result is a spec-level error (parse / type /
     // name / semantics / vacuous / vacuous_implication / acceptance /
     // forbidden), never an internal one, so `error_status` is always 2 --
-    // `docs/LANGUAGE.md`'s exit-code table's own boundary between the two.
+    // `docs/manual/LANGUAGE.md`'s exit-code table's own boundary between the two.
     let expected_exit =
         fslc_rust::outcome::exit_status(&serde_json::json!({"result": expected_result}), 2);
     if exit_status != expected_exit {

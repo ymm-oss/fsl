@@ -7,7 +7,7 @@
 - The working tree and verified repository artifacts are current state; conversation history is not.
 - The native Rust workspace is authoritative. Treat `src/fslc/` as a frozen compatibility/LSP
   surface unless the requested outcome explicitly crosses that boundary.
-- Accepted decisions live in `docs/DESIGN-*.md`. Current task state lives in
+- Accepted decisions live in `docs/design/DESIGN-*.md`. Current task state lives in
   `.claude/work/active.md` when that local file exists.
 - Do not treat proposals, plans, auto memory, or an earlier session's claims as implemented behavior.
 

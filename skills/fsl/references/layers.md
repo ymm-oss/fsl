@@ -25,7 +25,11 @@ route authoring through the role skills.
 3. **Gate the whole chain at once** with `fslc chain fsl-project.toml`: it runs
    business → requirements → design → impl from a manifest and returns a per-layer
    table (a failed layer stops the chain unless `--keep-going`). This is the connected
-   analogue of single-spec `verify`.
+   analogue of single-spec `verify`. `[impl]` must name its evidence: a JUnit
+   `report` when its command runs a test suite (an all-skipped or empty run is
+   then `indeterminate`, not `passed`), or `evidence = "exit_code"` for a non-test
+   command (flagged `exit_code_only` with a warning). With neither, exit 0 is
+   `indeterminate`; an unknown `[impl]` key is a parse error (`commands.md`).
 4. **Read counterexamples by seam.** A `refinement_failed` / `implements.violation`
    names the seam that broke; repair in line with the contract — never weaken the
    upper layer just to make the lower one pass (that hollows out the very traceability
@@ -93,9 +97,10 @@ the relevant role skill directs it.
   then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
   accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
-  verifies at check time that the last step is rejected (not-enabled or a
-  violation) — if accepted, `kind: "forbidden"`. Carried fields (`f: T`) accept
-  `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
+  verifies at check time that the last step is rejected (not enabled; neither a
+  runtime violation, since #1213, nor an argument outside the `entity` / `number`
+  verify scope, since #1229, counts) — otherwise `kind: "forbidden"`.
+  Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
   required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
   `branches`, and explicit `maps` only for hard cases such as multi-entity
   behavior, conservation rules, SLA/time, or history that needs kernel state.
@@ -142,8 +147,8 @@ written as legacy strings, `@...` syntax, or a mix of both on one declaration.
 Explicit `covers` and requirement-block annotations retain their own spans;
 `undecided` is reserved and cannot be an explicit requirement ID.
 Multiple-relation JSON outputs use `requirements` and preserve singular fields
-as lexical compatibility projections. See `docs/DESIGN-undecided.md`,
-`docs/DESIGN-annotations.md`, and `docs/DESIGN-dialect-dispatch.md`. This syntax and its
+as lexical compatibility projections. See `docs/design/DESIGN-undecided.md`,
+`docs/design/DESIGN-annotations.md`, and `docs/design/DESIGN-dialect-dispatch.md`. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
 
@@ -327,14 +332,20 @@ verify {
   requirements spec breaks its own bounds/invariants, so no refinement verdict
   was reached) / `unknown_budget` (the correspondence search hit its fixed
   internal state-count budget before deciding, with `implements.states_explored`
-  — narrow the domain, or verify the layers separately with `fslc refine`/
-  `fslc verify`; there is no CLI flag to raise this budget), plus `violation`
+  — narrow the domain, or verify each layer separately with `fslc verify`;
+  `fslc refine` shares the same budget and reports `unknown_budget` too;
+  there is no CLI flag to raise this budget), plus `violation`
   on the two failing (not budget-exhausted) values. A failing seam makes the
   command exit 1 with the same top-level `result`
   (`refinement_failed`/`impl_violated`/`unknown_budget`). Read
   `implements.violation` for seam-specific evidence. Gate on
   `implements.result == "refines"`, or use `fslc chain`, which applies exactly
-  that gate to the layer and exits 1.
+  that gate to the layer and exits 1. `verify --property` / `--exclude-property`
+  / `--from-state` do not evaluate the seam: the envelope then reports
+  `implements: {abs, result: "not_evaluated", reason, reasons}` (`reason` one of
+  `property_selection` / `property_exclusion` / `from_state`) with the top-level
+  result and exit unchanged, so such a run never gates the seam —
+  `not_evaluated` is not `refines`. A spec without `implements` has no key.
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
@@ -343,13 +354,39 @@ verify {
   == `answer(0, 1)`); an undefined name is a check-time error.
 - `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
-  **the last step is rejected** (not-enabled, or an
-  invariant/type_bound/partial_op/ensures violation). If accepted,
+  **the last step is rejected**, i.e. not enabled. If accepted,
   `kind: "forbidden"` (detection of under-constraint = a missing guard that a safety
-  invariant stays silent about); if the premise is not enabled,
+  invariant stays silent about). Since #1213 an enabled last step that stops
+  with an invariant/trans/ensures/type_bound/partial_op violation is also
+  `kind: "forbidden"` (with `violation`): a violation is not a rejection, so write
+  the `requires` that rejects the call; every command that runs this check then
+  exits 2, except `explain` (exit 0, no witnesses; known gap #1242), `approval
+  create --kind ledger` (exit 0, records a ledger that lists the error; #1243),
+  and `approval check` of a ledger record (`drifted`, exit 0)
+  (`docs/design/DESIGN-forbidden.md` §2.1). If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
-  `rejected_by` — anything other than `requires_failed` means the spec itself is a
-  verify violation).
+  `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
+  outside the parameter's declared range or enum type). Since #1229 a last step
+  whose argument is outside the `verify { instances / values }` scope of an
+  `entity` / `number` parameter (a `process` counts as an `entity`), such as
+  `accept(7)` under `instances Case = 3`, is not a rejection: no guard was
+  evaluated and an implementation may accept it. It is a `kind: "forbidden"`
+  error with `out_of_scope_argument` — widen the scope or move the argument
+  inside it. Under a `--instances` / `--values` override that alone removed the
+  argument, the forbidden is `forbidden_skipped` instead. Breaking: such a step
+  used to satisfy the forbidden (as `requires_failed` before #1212, `bad_call`
+  since), so `check` passed. A last
+  step naming no action or no variant of that arity is a `kind: "forbidden"`
+  error with a `message`, not a rejection (breaking after 4.8.1: `check` used to
+  pass, and what the other commands reported depended on the rest of the spec).
+  On either step every command that runs this check now exits 2 with no
+  verdict, scenario, or test, except `explain`, which exits 0 with no
+  witnesses (known gap #1242), `approval create --kind ledger`, which exits 0
+  and records a ledger that lists the error (#1243), and `approval check` of a
+  ledger record, which reports `drifted` (exit 0). `fslc diff` replays the
+  forbidden too but reports a finding whose exit status follows `--forbid`, and
+  an override that alone removed the argument gives `forbidden_skipped` as
+  above, with the exit status of the rest of the spec (0 when it verifies) — `docs/design/DESIGN-forbidden.md` §2.1.
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use

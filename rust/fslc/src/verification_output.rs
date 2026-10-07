@@ -147,7 +147,7 @@ pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
 
 /// Render a model-construction error using the public semantic classification.
 ///
-/// `docs/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
+/// `docs/design/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
 /// `semantics` and fixes `kind` as a closed set including `name`. This is the
 /// single dispatch point for that whole half of the set, so both the location
 /// (issue 555) and the classification (issue 565) travel with the diagnostic
@@ -257,7 +257,7 @@ pub fn render_governance_error(
 /// The classification for a typed diagnostic, preferring the class the frontend
 /// determined over matching on the message text.
 ///
-/// `docs/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
+/// `docs/design/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
 /// pattern can identify: `duplicate state variable 'x'`,
 /// `duplicate enum member 'B'` and `undefined predicate 'p'` share no prefix or
 /// suffix, and a classifier keyed on message text silently reclassifies a
@@ -377,25 +377,25 @@ pub fn check_requirements_implements(
                 message: error.to_string(),
                 span: None,
             })?;
-    Ok(Some(
-        if let Some(states_explored) = checked.budget_exhausted {
+    Ok(Some(match checked.verdict() {
+        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
             // The correspondence walk hit `IMPLEMENTS_SEARCH_BUDGET` states
             // (issue #1041) before deciding `refines`/`refinement_failed`/
             // `impl_violated` within `depth`: reporting any of those would be a
             // false result, since the unvisited rest of the reachable set was
-            // never actually explored. Checked first, ahead of
-            // `impl_violation`/`failure`, because those fields are only
-            // meaningful on a walk that actually reached a decision --
-            // `check_refinement_with_budget` never sets more than one of the
-            // three outcomes.
+            // never actually explored. `RefinementCheck::verdict` reads this
+            // ahead of `impl_violation`/`failure`, because those fields are
+            // only meaningful on a walk that actually reached a decision.
             json!({
                 "abs": contract.abstraction.name,
                 "result": "unknown_budget",
                 "states_explored": states_explored,
                 "hint": "inline implements correspondence search reached its state budget; \
-                         narrow the domain, or verify the layers separately with `fslc refine`/`fslc verify`",
+                         narrow the verify {} domains of both layers, or verify each layer separately \
+                         with `fslc verify` (`fslc refine` shares the same budget)",
             })
-        } else if let Some((violation, _)) = checked.impl_violation {
+        }
+        fsl_runtime::RefinementVerdict::ImplViolated { violation, .. } => {
             // The impl itself violates its own type bounds/invariants (#466):
             // a property of the refinement input, not a refinement fidelity
             // verdict, so it must not be reported `refines`.
@@ -404,16 +404,16 @@ pub fn check_requirements_implements(
                 "result": "impl_violated",
                 "violation": {"result": "violated", "kind": violation.kind},
             })
-        } else if let Some(failure) = checked.failure {
-            json!({
-                "abs": contract.abstraction.name,
-                "result": "refinement_failed",
-                "violation": {"result": "refinement_failed", "kind": failure.kind},
-            })
-        } else {
+        }
+        fsl_runtime::RefinementVerdict::Failed(failure) => json!({
+            "abs": contract.abstraction.name,
+            "result": "refinement_failed",
+            "violation": {"result": "refinement_failed", "kind": failure.kind},
+        }),
+        fsl_runtime::RefinementVerdict::Refines => {
             json!({"abs": contract.abstraction.name, "result": "refines"})
-        },
-    ))
+        }
+    }))
 }
 
 /// Attach inline `implements` metadata and, when the command envelope is still
@@ -478,6 +478,87 @@ pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -
             Some(3)
         }
     }
+}
+
+/// `result` of an envelope section a run did not evaluate (issue #1008).
+///
+/// Not executing a check is never evidence that it holds, so a run that skips
+/// a declared check keeps the section's key and says why instead of dropping
+/// it. The value deliberately lives under the same `result` key every
+/// evaluated `implements` verdict uses (`refines`, `refinement_failed`, ...):
+/// a consumer that accepts only `refines` therefore rejects it without knowing
+/// this value exists.
+pub const NOT_EVALUATED: &str = "not_evaluated";
+
+/// `reason` for `verify --property`.
+pub const NOT_EVALUATED_PROPERTY_SELECTION: &str = "property_selection";
+/// `reason` for `verify --exclude-property`.
+pub const NOT_EVALUATED_PROPERTY_EXCLUSION: &str = "property_exclusion";
+/// `reason` for `verify --from-state`.
+pub const NOT_EVALUATED_FROM_STATE: &str = "from_state";
+/// `reason` for `verify --instances` / `--values`: a requirements scenario
+/// that references a value outside the overridden scope was skipped (#1218).
+pub const NOT_EVALUATED_BOUNDS_OVERRIDE: &str = "bounds_override";
+
+/// The abstraction name of a requirements document's inline `implements`, or
+/// `None` when it declares none. Reads only the root source: it is the same
+/// predicate `fsl_core::requirements_implements_with_bounds` starts from, but
+/// never reads the abstraction's file, so a run that does not evaluate the
+/// seam does not add that file to its cache-key dependency domain (#1023).
+#[must_use]
+pub fn requirements_implements_name(source: &str) -> Option<String> {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document(source)
+    else {
+        return None;
+    };
+    requirements.items.iter().find_map(|item| match item {
+        fsl_syntax::RequirementsItem::Implements { name, .. } => Some(name.clone()),
+        _ => None,
+    })
+}
+
+/// Build a `not_evaluated` section (issue #1008). `reasons` is every cause, in
+/// the caller's fixed order; `reason` repeats the first one so a consumer that
+/// reads a single value still gets one. `fields` carries section-specific
+/// identification (for example the abstraction name).
+///
+/// # Panics
+///
+/// Panics when `reasons` is empty: a section without a cause is a caller bug.
+#[must_use]
+pub fn not_evaluated_section(reasons: &[&str], fields: Map<String, Value>) -> Value {
+    assert!(
+        !reasons.is_empty(),
+        "a not_evaluated section needs a reason"
+    );
+    let mut section = fields;
+    section.insert("result".to_owned(), json!(NOT_EVALUATED));
+    section.insert("reason".to_owned(), json!(reasons[0]));
+    section.insert("reasons".to_owned(), json!(reasons));
+    Value::Object(section)
+}
+
+/// Attach a `not_evaluated` section under `key` (issue #1008).
+///
+/// Unlike [`attach_requirements_implements`] this never touches the top-level
+/// `result` or the exit status: the section records what this run did *not*
+/// check, and the verdict keeps speaking only for what it did. An `error`
+/// envelope carries no section, matching every other nested verdict. The
+/// later steps that turn a success envelope into an `error` one
+/// (`--vacuity error`, `--strict-tags`, the cache-divergence check) each build
+/// a fresh envelope rather than rewriting `result` in place, so a section
+/// attached here never survives onto an `error` envelope either; the
+/// `--vacuity error` case is pinned by
+/// `issue_1008_not_evaluated::vacuity_error_envelope_drops_the_section`.
+pub fn attach_not_evaluated(envelope: &mut Value, key: &str, section: Value) {
+    let Value::Object(map) = envelope else {
+        return;
+    };
+    if map.get("result").and_then(Value::as_str) == Some("error") {
+        return;
+    }
+    map.insert(key.to_owned(), section);
 }
 
 /// Render governance relationships while delegating preservation verification
@@ -650,6 +731,200 @@ fn requirement_actions_by_name<'a>(
         .collect()
 }
 
+/// Whether `value` lies in `parameter`'s checked value domain: the declared
+/// type for a range or enum, the verify scope for an `entity` / `number`.
+fn argument_in_checked_domain(
+    monitor: &fsl_runtime::Monitor,
+    parameter: &ParamDef,
+    value: &FslValue,
+) -> Result<bool, String> {
+    Ok(match parameter {
+        ParamDef::Typed { ty, .. } => monitor
+            .model
+            .domain_values(ty)
+            .map_err(|error| error.to_string())?
+            .contains(value),
+        ParamDef::Range { lo, hi, .. } => matches!(
+            value,
+            FslValue::Int(value) if lo <= value && value <= hi
+        ),
+    })
+}
+
+/// Whether every argument lies in the checked value domain of `action`'s
+/// parameter.
+fn arguments_in_checked_domain(
+    monitor: &fsl_runtime::Monitor,
+    action: &ActionDef,
+    arguments: &[FslValue],
+) -> Result<bool, String> {
+    for (parameter, value) in action.params.iter().zip(arguments) {
+        if !argument_in_checked_domain(monitor, parameter, value)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Why a requirements trace step matched no enabled instance.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UnenabledStep {
+    /// A call with every argument in its parameter domain that a `requires`
+    /// guard refused.
+    RequiresFailed,
+    /// A call outside the declared parameter type of every same-named action
+    /// (DESIGN-bridge.md 1.2 `bad_call`): no guard was evaluated, and an
+    /// implementation must reject it at its decoding boundary.
+    BadCall,
+    /// A call that some same-named action types, but whose argument lies
+    /// outside the `verify { instances / values }` scope of an `entity` /
+    /// `number` parameter. No guard was evaluated and an implementation,
+    /// which has no such bound, may accept it, so it is not a rejection
+    /// (#1229).
+    OutsideVerifyScope {
+        parameter: String,
+        value: FslValue,
+        type_name: String,
+        scope: (i64, i64),
+    },
+    /// The step names no action.
+    UnknownAction,
+    /// The step names an action, but no variant of that arity.
+    ArityMismatch,
+}
+
+impl UnenabledStep {
+    /// The Monitor outcome kind a rejected forbidden step carries as
+    /// `rejected_by`, or `None` when the step is not a rejection.
+    #[must_use]
+    pub fn rejected_by(&self) -> Option<&'static str> {
+        match self {
+            Self::RequiresFailed => Some("requires_failed"),
+            Self::BadCall => Some("bad_call"),
+            Self::OutsideVerifyScope { .. } | Self::UnknownAction | Self::ArityMismatch => None,
+        }
+    }
+
+    /// The authoring diagnostic for a final step that is not a rejection.
+    #[must_use]
+    pub fn non_rejection_message(&self, step: &fsl_core::RequirementsTraceStep) -> Option<String> {
+        match self {
+            Self::UnknownAction => Some(format!("unknown action '{}' in forbidden", step.name)),
+            Self::ArityMismatch => Some(format!(
+                "arity mismatch for action '{}' in forbidden",
+                step.name
+            )),
+            Self::OutsideVerifyScope {
+                parameter,
+                value,
+                type_name,
+                scope: (lo, hi),
+            } => Some(format!(
+                "argument {} for '{parameter}' of '{}' is outside the verify scope of '{type_name}' ({lo}..{hi}) in forbidden, so no guard was evaluated",
+                fsl_value_json(value),
+                step.name
+            )),
+            Self::RequiresFailed | Self::BadCall => None,
+        }
+    }
+}
+
+enum DomainFit<'a> {
+    Inside,
+    /// Every argument outside its parameter domain is an integer outside an
+    /// `entity` / `number` scope; the first such parameter, its type, and the
+    /// value.
+    OutsideScope(&'a ParamDef, &'a str, &'a FslValue),
+    OutsideType,
+}
+
+fn arguments_domain_fit<'a>(
+    monitor: &fsl_runtime::Monitor,
+    action: &'a ActionDef,
+    arguments: &'a [FslValue],
+    scope_types: &BTreeSet<String>,
+) -> Result<DomainFit<'a>, String> {
+    let mut outside_scope = None;
+    for (parameter, value) in action.params.iter().zip(arguments) {
+        if argument_in_checked_domain(monitor, parameter, value)? {
+            continue;
+        }
+        match (parameter, value) {
+            (
+                ParamDef::Typed {
+                    ty: TypeRef::Named(type_name),
+                    ..
+                },
+                FslValue::Int(_),
+            ) if scope_types.contains(type_name) => {
+                outside_scope.get_or_insert((parameter, type_name.as_str(), value));
+            }
+            _ => return Ok(DomainFit::OutsideType),
+        }
+    }
+    Ok(match outside_scope {
+        Some((parameter, type_name, value)) => DomainFit::OutsideScope(parameter, type_name, value),
+        None => DomainFit::Inside,
+    })
+}
+
+/// Classify a requirements trace step that no enabled instance matched.
+///
+/// Issue #1212: the forbidden scenario labelled every not-enabled final step
+/// `requires_failed`, so a call outside the parameter domain became a
+/// generated test asserting a guard refusal. `bad_call` is reported only when
+/// every action of that name and arity has an argument outside its declared
+/// type. `scope_types` names the types whose domain is a verify scope
+/// ([`fsl_core::verify_scope_type_names`]); a call that only leaves such a
+/// scope is [`UnenabledStep::OutsideVerifyScope`] (#1229).
+///
+/// # Errors
+///
+/// Returns a diagnostic when a parameter domain cannot be enumerated.
+pub fn requirement_unenabled_step(
+    monitor: &fsl_runtime::Monitor,
+    step: &fsl_core::RequirementsTraceStep,
+    arguments: &[FslValue],
+    scope_types: &BTreeSet<String>,
+) -> Result<UnenabledStep, String> {
+    let named = requirement_actions_by_name(monitor, step);
+    if named.is_empty() {
+        return Ok(UnenabledStep::UnknownAction);
+    }
+    let mut arity_matched = false;
+    let mut outside_scope = None;
+    for action in named
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+    {
+        arity_matched = true;
+        match arguments_domain_fit(monitor, action, arguments, scope_types)? {
+            DomainFit::Inside => return Ok(UnenabledStep::RequiresFailed),
+            DomainFit::OutsideScope(parameter, type_name, value) => {
+                outside_scope.get_or_insert((parameter, type_name, value));
+            }
+            DomainFit::OutsideType => {}
+        }
+    }
+    if let Some((parameter, type_name, value)) = outside_scope {
+        let scope = match monitor.model.types.get(type_name) {
+            Some(TypeDef::Domain { lo, hi, .. }) => (*lo, *hi),
+            _ => return Err(format!("verify scope type '{type_name}' has no domain")),
+        };
+        return Ok(UnenabledStep::OutsideVerifyScope {
+            parameter: parameter.name().to_owned(),
+            value: value.clone(),
+            type_name: type_name.to_owned(),
+            scope,
+        });
+    }
+    Ok(if arity_matched {
+        UnenabledStep::BadCall
+    } else {
+        UnenabledStep::ArityMismatch
+    })
+}
+
 /// Resolve a requirements trace step using arguments evaluated in its source model.
 ///
 /// # Errors
@@ -682,25 +957,8 @@ pub fn requirement_step_match_values(
     let matching_actions = matching_actions
         .into_iter()
         .filter_map(|action| {
-            let belongs = action.params.iter().zip(arguments.iter()).try_fold(
-                true,
-                |belongs, (parameter, value)| {
-                    let in_domain = match parameter {
-                        ParamDef::Typed { ty, .. } => monitor
-                            .model
-                            .domain_values(ty)
-                            .map_err(|error| {
-                                RequirementStepRelationError::Replay(error.to_string())
-                            })?
-                            .contains(value),
-                        ParamDef::Range { lo, hi, .. } => matches!(
-                            value,
-                            FslValue::Int(value) if lo <= value && value <= hi
-                        ),
-                    };
-                    Ok::<_, RequirementStepRelationError>(belongs && in_domain)
-                },
-            );
+            let belongs = arguments_in_checked_domain(monitor, action, arguments)
+                .map_err(RequirementStepRelationError::Replay);
             match belongs {
                 Ok(true) => Some(Ok(action)),
                 Ok(false) => None,
@@ -764,7 +1022,6 @@ fn requirement_failure_base(
 ///
 /// Panics only if a requirements contract bypasses parser validation and carries
 /// an acceptance case without its required expectation.
-#[allow(clippy::too_many_lines)]
 pub fn validate_requirement_trace_source(
     envelope: &Map<String, Value>,
     source: &str,
@@ -775,6 +1032,15 @@ pub fn validate_requirement_trace_source(
     else {
         return Ok((None, false));
     };
+    validate_requirement_trace_contract(envelope, &contract, model)
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_requirement_trace_contract(
+    envelope: &Map<String, Value>,
+    contract: &fsl_core::RequirementsTraceContract,
+    model: &KernelModel,
+) -> Result<(Option<Value>, bool), String> {
     let has_contract = !contract.acceptance.is_empty() || !contract.forbidden.is_empty();
     for case in &contract.acceptance {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
@@ -810,21 +1076,7 @@ pub fn validate_requirement_trace_source(
             .expectation
             .as_ref()
             .expect("acceptance contract always has an expectation");
-        let expression = match expectation {
-            fsl_core::RequirementsTraceExpectation::Expr(expression) => expression.clone(),
-            fsl_core::RequirementsTraceExpectation::Stage {
-                entity,
-                instance,
-                stage,
-            } => KernelExpr::Binary {
-                op: "==".to_owned(),
-                left: Box::new(KernelExpr::Index(
-                    Box::new(KernelExpr::Var(format!("{}_stage", entity.to_lowercase()))),
-                    Box::new(KernelExpr::Num(*instance)),
-                )),
-                right: Box::new(KernelExpr::Var(stage.clone())),
-            },
-        };
+        let expression = requirement_expectation_expr(expectation);
         let value = fsl_runtime::eval(
             &expression,
             &monitor.state,
@@ -856,11 +1108,61 @@ pub fn validate_requirement_trace_source(
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         let mut accepted_trace = Vec::new();
         for (index, step) in case.steps.iter().enumerate() {
+            // A guard that cannot be evaluated here must stay an error, never
+            // a not-enabled rejection that satisfies the forbidden (#1191).
             let (arguments, instance) = requirement_step_match(&monitor, step)?;
             let is_final = index + 1 == case.steps.len();
             let Some(instance) = instance else {
                 if is_final {
-                    break;
+                    let unenabled = requirement_unenabled_step(
+                        &monitor,
+                        step,
+                        &arguments,
+                        &contract.scope_types,
+                    )?;
+                    let Some(message) = unenabled.non_rejection_message(step) else {
+                        break;
+                    };
+                    // A final step that names no callable action is not a
+                    // rejection: satisfying `expect rejected` with it would
+                    // make a typo vacuously pass (frozen-Python parity). Nor
+                    // is one outside the verify scope: no guard decided it
+                    // (#1229).
+                    let mut output = requirement_failure_base(envelope, "forbidden", case);
+                    if let UnenabledStep::OutsideVerifyScope {
+                        parameter,
+                        value,
+                        type_name,
+                        scope: (lo, hi),
+                    } = &unenabled
+                    {
+                        output.insert(
+                            "out_of_scope_argument".to_owned(),
+                            json!({
+                                "parameter": parameter,
+                                "value": fsl_value_json(value),
+                                "type": type_name,
+                                "scope": [lo, hi],
+                            }),
+                        );
+                        output.insert(
+                            "hint".to_owned(),
+                            json!(format!(
+                                "a forbidden case is satisfied only when a guard rejects the last step, or its argument is outside the declared parameter type (bad_call). '{type_name}' is bounded by the verify scope, not by its type, so an implementation may accept this call and no guard was tested. Widen the scope in verify {{ instances / values }} to include {}, or change the step to a value inside {lo}..{hi}.",
+                                fsl_value_json(value),
+                            )),
+                        );
+                    }
+                    output.insert("failed_step".to_owned(), json!(index));
+                    output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                    output.insert("step_results".to_owned(), json!([]));
+                    output.insert(
+                        "loc".to_owned(),
+                        json!({"line": step.line, "column": step.column}),
+                    );
+                    output.insert("message".to_owned(), json!(message));
+                    output.insert("trace_type".to_owned(), json!("forbidden"));
+                    return Ok((Some(Value::Object(output)), has_contract));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));
@@ -885,9 +1187,42 @@ pub fn validate_requirement_trace_source(
                     .collect(),
             );
             let result = monitor.step(&instance).map_err(|error| error.to_string())?;
-            if result.violation.is_some() {
+            if let Some(violation) = &result.violation {
                 if is_final {
-                    break;
+                    // Issue #1213: an enabled final step that stops with a
+                    // runtime violation was not rejected — its guard admits
+                    // the call. Counting it as satisfying `expect rejected`
+                    // would let a reachable spec bug stand in for the
+                    // missing guard, so the strict default fails closed.
+                    let mut output = requirement_failure_base(envelope, "forbidden", case);
+                    output.insert("failed_step".to_owned(), json!(index));
+                    output.insert("step".to_owned(), requirement_step_json(step, &arguments));
+                    output.insert("step_results".to_owned(), json!([]));
+                    output.insert(
+                        "violation".to_owned(),
+                        json!({
+                            "kind": violation.kind,
+                            "name": display_name(&violation.name),
+                            "action": display_name(&instance.action),
+                            "params": params,
+                        }),
+                    );
+                    output.insert("accepted_trace".to_owned(), Value::Array(accepted_trace));
+                    output.insert("state".to_owned(), state_json(&monitor.state));
+                    output.insert(
+                        "loc".to_owned(),
+                        json!({"line": step.line, "column": step.column}),
+                    );
+                    output.insert(
+                        "hint".to_owned(),
+                        json!(format!(
+                            "the last step was enabled and stopped with a runtime violation ({} '{}'), which is not a rejection: a forbidden case is satisfied only when the last step is not enabled (requires_failed / bad_call). If this call must be rejected, add a requires that rejects it. If the call should be allowed, the forbidden is wrong: fix the violation the step reaches and revise or remove the forbidden.",
+                            violation.kind,
+                            display_name(&violation.name),
+                        )),
+                    );
+                    output.insert("trace_type".to_owned(), json!("forbidden"));
+                    return Ok((Some(Value::Object(output)), has_contract));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));
@@ -924,6 +1259,378 @@ pub fn validate_requirement_trace_source(
         }
     }
     Ok((None, has_contract))
+}
+
+fn requirement_expectation_expr(
+    expectation: &fsl_core::RequirementsTraceExpectation,
+) -> KernelExpr {
+    match expectation {
+        fsl_core::RequirementsTraceExpectation::Expr(expression) => expression.clone(),
+        fsl_core::RequirementsTraceExpectation::Stage {
+            entity,
+            instance,
+            stage,
+        } => KernelExpr::Binary {
+            op: "==".to_owned(),
+            left: Box::new(KernelExpr::Index(
+                Box::new(KernelExpr::Var(format!("{}_stage", entity.to_lowercase()))),
+                Box::new(KernelExpr::Num(*instance)),
+            )),
+            right: Box::new(KernelExpr::Var(stage.clone())),
+        },
+    }
+}
+
+/// A requirements scenario that a bounds-overridden run did not replay
+/// because it references a value outside the overridden scope (#1218).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkippedRequirementTrace {
+    /// `"acceptance"` or `"forbidden"`.
+    pub kind: &'static str,
+    pub id: String,
+    /// The out-of-scope reference, in source terms (for example
+    /// `accept(2): argument 2 for 'c' is outside its domain`).
+    pub reference: String,
+}
+
+impl SkippedRequirementTrace {
+    /// `{kind, id, reference}`: this skip as a `requirement_traces.skipped`
+    /// entry (#1008, #1218).
+    #[must_use]
+    pub fn entry(&self) -> Value {
+        json!({
+            "kind": self.kind,
+            "id": self.id,
+            "reference": self.reference,
+        })
+    }
+
+    /// The `warnings` entry for this skip. `scope` describes the overrides
+    /// (`Case=1, Amount=0..1`); the message keeps the frozen Python
+    /// reference's wording and appends the reference that is out of scope.
+    #[must_use]
+    pub fn warning(&self, scope: &str) -> Value {
+        json!({
+            "kind": format!("{}_skipped", self.kind),
+            "id": self.id,
+            "reference": self.reference,
+            "message": format!(
+                "{} '{}' skipped: references values outside overridden bounds ({scope}): {}",
+                self.kind, self.id, self.reference
+            ),
+        })
+    }
+}
+
+/// Replay the requirements `acceptance`/`forbidden` scenarios under
+/// `--instances`/`--values` overrides (#1218, the frozen Python reference's
+/// per-scenario skip from #89).
+///
+/// Every scenario is replayed against the overridden `model`. A reference is
+/// *out of scope* only when the override removed it: it lies outside the
+/// overridden domain but inside the `declared` (un-overridden) one. A scenario
+/// is skipped and returned when
+///
+/// - its replay fails at an acceptance step or a forbidden setup step whose
+///   argument is out of scope;
+/// - its acceptance `expect` fails to evaluate on an out-of-scope map index,
+///   while the same `expect` evaluates in the declared world; or
+/// - its forbidden final step has an out-of-scope argument: that step is
+///   outside the overridden verify scope, which tested no guard (#1229).
+///   One outside the declared scope too is the unscoped hard error.
+///
+/// Any other failure (a false `expect`, an unmet `requires`, an accepted
+/// forbidden step, a reference outside the declared domain too, an `expect`
+/// error the declared world shares) is the same hard failure an unscoped run
+/// reports, in the same scenario order. Without a `declared` model nothing is
+/// attributed to the override, so every failure is hard (fail closed).
+///
+/// # Errors
+///
+/// Returns a diagnostic when the trace contract cannot be parsed or a
+/// scenario cannot be executed for a reason other than an out-of-scope
+/// reference.
+pub fn validate_requirement_trace_source_scoped(
+    envelope: &Map<String, Value>,
+    source: &str,
+    model: &KernelModel,
+    declared: Option<&KernelModel>,
+) -> Result<(Option<Value>, Vec<SkippedRequirementTrace>), String> {
+    let Some(contract) =
+        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    else {
+        return Ok((None, Vec::new()));
+    };
+    let mut skipped = Vec::new();
+    let cases = contract
+        .acceptance
+        .iter()
+        .map(|case| ("acceptance", case))
+        .chain(contract.forbidden.iter().map(|case| ("forbidden", case)));
+    for (kind, case) in cases {
+        let single = fsl_core::RequirementsTraceContract {
+            acceptance: if kind == "acceptance" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            forbidden: if kind == "forbidden" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            scope_types: contract.scope_types.clone(),
+        };
+        let outcome = validate_requirement_trace_contract(envelope, &single, model);
+        // Without the declared model nothing can be attributed to the
+        // override, so every failure stays hard (fail closed).
+        let Some(declared) = declared else {
+            if matches!(outcome, Ok((None, _))) {
+                continue;
+            }
+            let (failure, _) = outcome?;
+            return Ok((failure, skipped));
+        };
+        let reference = if matches!(outcome, Ok((None, _))) {
+            continue;
+        } else if let Some(reference) =
+            out_of_scope_reference(envelope, &single, model, declared, kind, case)
+        {
+            reference
+        } else {
+            let (failure, _) = outcome?;
+            return Ok((failure, skipped));
+        };
+        skipped.push(SkippedRequirementTrace {
+            kind,
+            id: case.id.clone(),
+            reference,
+        });
+    }
+    Ok((None, skipped))
+}
+
+/// The first reference of a failing scenario that the override removed: it
+/// lies outside `model`'s (overridden) scope but inside the `declared` one.
+/// Replays the scenario up to the first step that is not enabled, and for a
+/// forbidden scenario through its final step; `None` when the failure has
+/// another cause.
+fn out_of_scope_reference(
+    envelope: &Map<String, Value>,
+    single: &fsl_core::RequirementsTraceContract,
+    model: &KernelModel,
+    declared: &KernelModel,
+    kind: &str,
+    case: &fsl_core::RequirementsTraceCase,
+) -> Option<String> {
+    let mut monitor = fsl_runtime::Monitor::new(model.clone()).ok()?;
+    let setup = if kind == "forbidden" {
+        case.steps.len().saturating_sub(1)
+    } else {
+        case.steps.len()
+    };
+    for step in &case.steps[..setup] {
+        let (arguments, instance) = requirement_step_match(&monitor, step).ok()?;
+        if let Some(reference) = out_of_domain_argument(model, declared, step, &arguments) {
+            return Some(reference);
+        }
+        let result = monitor.step(&instance?).ok()?;
+        if result.violation.is_some() {
+            return None;
+        }
+    }
+    if kind != "acceptance" {
+        // A final step whose argument the override removed is outside the
+        // overridden verify scope, which is the failure; one the declared
+        // scope excludes too is not the override's doing.
+        let last = case.steps.last()?;
+        let (arguments, _) = requirement_step_match(&monitor, last).ok()?;
+        return out_of_domain_argument(model, declared, last, &arguments);
+    }
+    // Only an `expect` that fails to *evaluate* can be excused: one that
+    // evaluates to `false` is a genuine failure even if a branch it never
+    // reached indexes out of scope.
+    let expression = requirement_expectation_expr(case.expectation.as_ref()?);
+    fsl_runtime::eval(
+        &expression,
+        &monitor.state,
+        &mut std::collections::BTreeMap::new(),
+        &monitor.model,
+        None,
+    )
+    .err()?;
+    let reference = out_of_domain_index(model, &monitor.state, &expression)?;
+    // The error must be the override's doing: the same scenario's `expect`
+    // has to *evaluate* in the declared world (to `true` or `false`). An
+    // error there too (a division by zero, an index never in scope) is the
+    // unscoped run's hard error, not an out-of-scope reference.
+    if !expectation_evaluates(envelope, single, declared) {
+        return None;
+    }
+    Some(format!("expect indexes {reference} outside its key domain"))
+}
+
+/// Whether replaying `single` (one acceptance scenario) in `model` reaches
+/// and evaluates its `expect` without an evaluation error.
+fn expectation_evaluates(
+    envelope: &Map<String, Value>,
+    single: &fsl_core::RequirementsTraceContract,
+    model: &KernelModel,
+) -> bool {
+    let Some(case) = single.acceptance.first() else {
+        return false;
+    };
+    match validate_requirement_trace_contract(envelope, single, model) {
+        Ok((None, _)) => true,
+        Ok((Some(failure), _)) => {
+            failure.get("expect").is_some()
+                && failure.get("failed_step") == Some(&json!(case.steps.len()))
+        }
+        Err(_) => false,
+    }
+}
+
+/// Describe the argument of `step` that no same-named action of the
+/// overridden `model` admits but some same-named action of the `declared`
+/// model does — a reference the override removed. `None` when `model` admits
+/// the arguments, or when `declared` does not either (the reference was never
+/// in scope, so a skip would turn the unscoped hard error into a pass).
+fn out_of_domain_argument(
+    model: &KernelModel,
+    declared: &KernelModel,
+    step: &fsl_core::RequirementsTraceStep,
+    arguments: &[FslValue],
+) -> Option<String> {
+    let declared_monitor = fsl_runtime::Monitor::new(declared.clone()).ok()?;
+    let declared_admits = requirement_actions_by_name(&declared_monitor, step)
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+        .any(|action| {
+            action
+                .params
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, value)| parameter_admits(declared, parameter, value))
+        });
+    if !declared_admits {
+        return None;
+    }
+    let monitor = fsl_runtime::Monitor::new(model.clone()).ok()?;
+    let actions = requirement_actions_by_name(&monitor, step)
+        .into_iter()
+        .filter(|action| action.params.len() == arguments.len())
+        .collect::<Vec<_>>();
+    let mut first_outside = None;
+    for action in actions {
+        let outside = action
+            .params
+            .iter()
+            .zip(arguments)
+            .find(|(parameter, value)| !parameter_admits(model, parameter, value));
+        match outside {
+            None => return None,
+            Some((parameter, value)) => {
+                first_outside.get_or_insert((parameter.name().to_owned(), value.clone()));
+            }
+        }
+    }
+    let (name, value) = first_outside?;
+    let rendered = arguments
+        .iter()
+        .map(|argument| fsl_value_json(argument).to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "{}({rendered}): argument {} for '{name}' is outside its domain",
+        step.name,
+        fsl_value_json(&value)
+    ))
+}
+
+fn parameter_admits(model: &KernelModel, parameter: &ParamDef, value: &FslValue) -> bool {
+    match parameter {
+        // A domain that cannot be enumerated is not evidence of an
+        // out-of-scope reference; treat it as admitting the value so the
+        // failure stays a hard one.
+        ParamDef::Typed { ty, .. } => model
+            .domain_values(ty)
+            .map_or(true, |values| values.contains(value)),
+        ParamDef::Range { lo, hi, .. } => {
+            matches!(value, FslValue::Int(value) if lo <= value && value <= hi)
+        }
+    }
+}
+
+/// The first `map[key]` in `expression` whose key, evaluated in `state`, is
+/// not in the map's finite key domain. Sub-expressions under a binder are not
+/// inspected: their indices depend on the bound variable.
+fn out_of_domain_index(
+    model: &KernelModel,
+    state: &fsl_runtime::State,
+    expression: &KernelExpr,
+) -> Option<String> {
+    fsl_core::recursion::guard(|| {
+        let children: Vec<&KernelExpr> = match expression {
+            KernelExpr::Index(base, index) => {
+                let evaluate = |expression: &KernelExpr| {
+                    fsl_runtime::eval(
+                        expression,
+                        state,
+                        &mut std::collections::BTreeMap::new(),
+                        model,
+                        None,
+                    )
+                    .ok()
+                };
+                if let (Some(FslValue::Map(entries)), Some(key)) = (evaluate(base), evaluate(index))
+                    && !entries.contains_key(&key)
+                {
+                    return Some(fsl_core::source_expr_text(model, expression));
+                }
+                vec![base, index]
+            }
+            KernelExpr::Some(inner)
+            | KernelExpr::Field(inner, _)
+            | KernelExpr::Neg(inner)
+            | KernelExpr::Not(inner)
+            | KernelExpr::Is { expr: inner, .. }
+            | KernelExpr::UnaryNamed { expr: inner, .. } => vec![inner],
+            KernelExpr::Set(items)
+            | KernelExpr::Seq(items)
+            | KernelExpr::Call { args: items, .. } => items.iter().collect(),
+            KernelExpr::Struct { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
+            KernelExpr::Method { receiver, args, .. } => {
+                std::iter::once(&**receiver).chain(args.iter()).collect()
+            }
+            KernelExpr::Binary { left, right, .. }
+            | KernelExpr::BinaryNamed { left, right, .. } => {
+                vec![left, right]
+            }
+            KernelExpr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => vec![condition, then_expr, else_expr],
+            KernelExpr::TernaryNamed {
+                first,
+                second,
+                third,
+                ..
+            } => vec![first, second, third],
+            KernelExpr::Stage { entity, .. } => vec![entity],
+            KernelExpr::Num(_)
+            | KernelExpr::Bool(_)
+            | KernelExpr::None
+            | KernelExpr::Var(_)
+            | KernelExpr::EnumMember { .. }
+            | KernelExpr::Quantified { .. }
+            | KernelExpr::Aggregate { .. } => Vec::new(),
+        };
+        children
+            .into_iter()
+            .find_map(|child| out_of_domain_index(model, state, child))
+    })
 }
 
 /// Replay every symbolic witness through the solver-independent Monitor.
@@ -2063,7 +2770,7 @@ fn shared_warnings(
     )
 }
 
-/// Render the solver-decided vacuity lanes (`docs/DESIGN-vacuity.md` §2 lanes
+/// Render the solver-decided vacuity lanes (`docs/design/DESIGN-vacuity.md` §2 lanes
 /// 4–7) that `fsl-verifier` proved for this model.
 ///
 /// None of the messages mention `--depth`: unlike the two reachability lanes,

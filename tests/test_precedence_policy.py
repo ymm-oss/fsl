@@ -7,7 +7,7 @@
 desugars to a synthesized, invisible history flag (``Map<Entity, Bool>``) plus
 a kernel invariant — the same "business already synthesizes state" pattern
 the stage enum/map/init/fair-actions synthesis already uses (see
-``docs/DESIGN-precedence-policy.md``). Two policies over the same
+``docs/design/DESIGN-precedence-policy.md``). Two policies over the same
 (process, waypoint-set) share one history map (dedup).
 
 #85 additionally synthesizes a stabilizing auxiliary invariant, `<PolicyId>_stability`,

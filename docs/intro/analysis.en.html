@@ -20,7 +20,7 @@
     <p class="kicker reveal">Structural observation</p>
     <h1 class="reveal">Use <code>fslc analyze</code> to create a review entry point</h1>
     <p class="lead reveal"><code>fslc analyze</code> turns an FSL spec into a review map: which requirements, actions, state variables, and properties are connected. Use it before or after verification to find impact scope, weakly anchored declarations, and traceability gaps quickly.</p>
-    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-analysis.md">DESIGN-analysis.md</a>. A deeper, team-facing practical guide exists as <a href="https://github.com/ymm-oss/fsl/blob/main/docs/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a> — currently Japanese-only.</p>
+    <p class="reveal dim" style="margin-top:18px">Implementation details live in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-analysis.md">DESIGN-analysis.md</a>. A deeper, team-facing practical guide exists as <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/GUIDE-analyze.ja.md">GUIDE-analyze.ja.md</a> — currently Japanese-only.</p>
   </div>
 </section>
 
@@ -170,7 +170,7 @@ fslc analyze spec.fsl --projection action_state_graph --format mermaid</code></p
       </div>
     </div>
     <div class="callout reveal" style="margin-top:24px">
-      <p style="margin:0">The cycle finding does not inspect English keywords in names. The underspecification findings are bounded review evidence, not proof of determinism: absence means only “not witnessed within depth 4.” An exact match with an <code>undecided:</code> declaration adds <code>acknowledged:true</code> and <code>acknowledged_by</code>; unmatched findings have no acknowledgement fields and remain unresolved. The tag records intentional deferral and is not a verification condition. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/DESIGN-undecided.md">DESIGN-undecided.md</a>.</p>
+      <p style="margin:0">The cycle finding does not inspect English keywords in names. The underspecification findings are bounded review evidence, not proof of determinism: absence means only “not witnessed within depth 4.” An exact match with an <code>undecided:</code> declaration adds <code>acknowledged:true</code> and <code>acknowledged_by</code>; unmatched findings have no acknowledgement fields and remain unresolved. The tag records intentional deferral and is not a verification condition. See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-undecided.md">DESIGN-undecided.md</a>.</p>
     </div>
   </div>
 </section>

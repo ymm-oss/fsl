@@ -115,7 +115,7 @@ def test_ledger_risk_table_has_assurance_column():
     md = _ledger(NFR / "support_sla.fsl", depth=8)
     assert "保証クラス" in md
     assert "bounded(BMC depth 8)" in md
-    assert "docs/DESIGN-assurance-classes.md" in md
+    assert "docs/design/DESIGN-assurance-classes.md" in md
 
 
 def test_ledger_induction_engine_shows_proved(tmp_path):

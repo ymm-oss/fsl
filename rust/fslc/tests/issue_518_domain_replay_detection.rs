@@ -4,7 +4,7 @@
 //! Negative controls for #518: `fslc domain replay` must actually drive a
 //! Monitor over the lowered domain/effect model instead of only tracking a
 //! `(effect, correlation_id)` bookkeeping set. Each of the four detection
-//! categories `docs/DESIGN-domain.md`/`docs/DESIGN-effect.md` promise must
+//! categories `docs/design/DESIGN-domain.md`/`docs/design/DESIGN-effect.md` promise must
 //! independently produce `result:"nonconformant"`/exit 1 with the
 //! documented finding `kind` — proving detection, not just a new field
 //! existing (the class of thing #468 already established: "the detector

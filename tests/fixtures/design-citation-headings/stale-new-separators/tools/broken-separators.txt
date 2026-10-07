@@ -1,2 +1,2 @@
-See docs/DESIGN-ci.md: "Colon heading removed".
-See docs/DESIGN-ci.md section "Section-word heading removed".
+See docs/design/DESIGN-ci.md: "Colon heading removed".
+See docs/design/DESIGN-ci.md section "Section-word heading removed".

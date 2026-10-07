@@ -325,7 +325,7 @@ const DIVMAP_ABS: &str = "spec DivMapAbs { state { q: 0..10 } init { q = 0 } \
 /// `kind:"map_partial_op"` finding. Before the fix, the divisor's own
 /// `eval()` call inside `check_refinement`'s action-correspondence handling
 /// was not wrapped in `with_total_division` (correctly so: this is action
-/// context per `docs/DESIGN-divmod.md` §2.2, not the read-only "mapping
+/// context per `docs/design/DESIGN-divmod.md` §2.2, not the read-only "mapping
 /// expression" §2.3 exempts) but its `RuntimeError` was propagated raw via
 /// `?` instead of being classified, so it surfaced as an unclassified
 /// internal error the CLI stamps `kind:"type"` -- neither of the two

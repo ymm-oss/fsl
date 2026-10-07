@@ -3,7 +3,7 @@
 
 """Regression coverage for `decreases sum(...)` (#91).
 
-`docs/LANGUAGE.md` and `skills/fsl/references/syntax.md` wrongly claimed no `sum()`
+`docs/manual/LANGUAGE.md` and `skills/fsl/references/syntax.md` wrongly claimed no `sum()`
 aggregate is usable in a ranking `decreases` measure, steering readers to
 hand-written sums (`decreases level[0] + level[1]`) that only scale to
 domains small enough to enumerate by hand. The kernel's bounded
@@ -139,7 +139,7 @@ def test_sum_where_aggregate_verified_under_bmc(tmp_path):
 
 
 def test_per_entity_measure_still_fails_under_interleaving(tmp_path):
-    # Contrast regression (kept honest by docs/LANGUAGE.md): a per-entity
+    # Contrast regression (kept honest by docs/manual/LANGUAGE.md): a per-entity
     # measure is a different, still-broken idiom from the sum measure above.
     spec = _write(tmp_path, KERNEL_SUM_PER_ENTITY_SRC, "sum_kernel_per_entity.fsl")
     out = run_verify(str(spec), 1, "warn", engine="induction", k_ind=1)

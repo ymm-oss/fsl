@@ -3,8 +3,7 @@
 // Auto-generated FSL conformance tests (Swift Testing).
 // Source: __SOURCE__
 //
-// Wire `makeAdapter()` to your implementation. Until it is wired every test is
-// skipped (the `.enabled(if:)` trait checks the adapter and disables the test).
+__UNWIRED_HEADER__
 //
 // The random-walk trace below was baked at generation time by the FSL Monitor
 // (the spec's concrete interpreter) under a fixed seed, so these tests need no
@@ -22,7 +21,7 @@ struct FSLNull: Equatable {
     static let instance = FSLNull()
 }
 
-enum FSLNotWired: Error { case notWired }
+__NOT_WIRED_ERROR__
 
 /// Connect your implementation to the spec actions/state.
 ///  - reset(): put the implementation in the same initial state as spec `init`
@@ -37,7 +36,7 @@ protocol Adapter {
     func observe() -> [String: Any]
 }
 
-// Wire your implementation here. Throwing leaves the suite skipped (not failed).
+__MAKE_ADAPTER_NOTE__
 func makeAdapter() throws -> any Adapter {
     throw FSLNotWired.notWired
 }

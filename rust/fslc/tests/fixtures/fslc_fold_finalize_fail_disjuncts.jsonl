@@ -1,0 +1,2 @@
+{"id":"finalize_fail_drop_unsettled_seen","replace":{"target":"requires any_failure_seen or not success_seen or unsettled_seen\n      or (scope_inconclusive and not scope_success)","replacement":"requires any_failure_seen or not success_seen\n      or (scope_inconclusive and not scope_success)"}}
+{"id":"finalize_fail_drop_open_unsettled_scope","replace":{"target":"requires any_failure_seen or not success_seen or unsettled_seen\n      or (scope_inconclusive and not scope_success)","replacement":"requires any_failure_seen or not success_seen or unsettled_seen"}}

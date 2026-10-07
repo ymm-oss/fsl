@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! C3 Semantic Assurance Matrix aggregator (issue #537 C3 slice 1,
-//! `docs/DESIGN-assurance-matrix.md`).
+//! `docs/design/DESIGN-assurance-matrix.md`).
 //!
 //! No central hand-written table: each semantic-surface module under
 //! `tests/assurance/` owns its own rows (derived from an existing registry

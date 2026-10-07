@@ -4,7 +4,7 @@
 //! Negative controls for #464: `sweep` must never fold a spec error into the
 //! `sweep_passed`/exit-0 verdict. A one-character typo in `--instances`, a
 //! parse error, or a missing file are not "no counterexample in this grid" —
-//! they are documented exit-2 spec errors (`docs/LANGUAGE.md` exit-code
+//! they are documented exit-2 spec errors (`docs/manual/LANGUAGE.md` exit-code
 //! table) that a caller gating on exit code or `result` must be able to
 //! distinguish from a genuinely clean sweep.
 
@@ -43,7 +43,7 @@ fn fixture(name: &str) -> String {
 /// `sweep_passed`/exit 0 (a one-character typo silently turned a red gate
 /// green); the spec declares no entity/number bounds at all, so any
 /// `--instances` name is a documented exit-2 error
-/// (`docs/LANGUAGE.md` §"NAME with no matching entity/number declaration").
+/// (`docs/manual/LANGUAGE.md` §"NAME with no matching entity/number declaration").
 #[test]
 fn sweep_does_not_mask_a_typo_d_instances_name_as_sweep_passed() {
     let path = fixture("sweep_violating.fsl");
@@ -127,6 +127,7 @@ fn sweep_cart_v1_passes_after_insufficient_depth_cells() {
     assert_eq!(status, 0, "swept: {swept:#}");
     assert_eq!(swept["result"], "sweep_passed");
     assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(swept["sweep"]["inconclusive_scopes"], serde_json::json!([]));
 }
 
 #[test]
@@ -137,6 +138,11 @@ fn sweep_all_insufficient_depth_cells_are_inconclusive() {
     assert!(swept["sweep"]["minimal_counterexample"].is_null());
     assert!(swept["sweep"]["results"].is_array());
     assert!(swept["sweep"]["ranges"].is_object());
+    // Without --instances/--values the grid is one scope (#1089).
+    assert_eq!(
+        swept["sweep"]["inconclusive_scopes"],
+        serde_json::json!([{"instances": {}, "values": {}}])
+    );
 }
 
 #[test]
@@ -215,4 +221,246 @@ fn sweep_skips_inconclusive_cell_when_selecting_true_failure_scope() {
         selected > first_inconclusive,
         "minimal (index {selected}) must skip the earlier inconclusive cell (index {first_inconclusive}): {swept:#}"
     );
+}
+
+/// Per-cell `(values, depth, result)` rows, for readable assertions.
+fn cells(swept: &serde_json::Value) -> Vec<(serde_json::Value, u64, String)> {
+    swept["sweep"]["results"]
+        .as_array()
+        .expect("sweep.results")
+        .iter()
+        .map(|entry| {
+            (
+                entry["scope"]["values"].clone(),
+                entry["scope"]["depth"].as_u64().expect("cell depth"),
+                entry["summary"]["result"]
+                    .as_str()
+                    .expect("cell result")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn amount_scope(lo: i64, hi: i64) -> serde_json::Value {
+    serde_json::json!({"instances": {}, "values": {"Amount": [lo, hi]}})
+}
+
+/// #1089: a determinate success in one `--values` scope does not answer the
+/// question a depth-limited cell left open in another scope. Before the fix
+/// this grid returned `sweep_passed`/exit 0 although `Big` was never
+/// witnessed for `Amount` 1..1, 1..2 or 1..3.
+#[test]
+fn sweep_success_in_one_values_scope_does_not_settle_another() {
+    let path = fixture("sweep_values_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--values", "Amount=1..5", "--depth", "3..3"]);
+    let observed = cells(&swept);
+    let results = observed
+        .iter()
+        .map(|(_, _, result)| result.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        [
+            "reachable_failed",
+            "reachable_failed",
+            "reachable_failed",
+            "verified",
+            "verified"
+        ],
+        "grid shape: {swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_inconclusive", "{swept:#}");
+    assert_eq!(status, 1, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(
+        swept["sweep"]["inconclusive_scopes"],
+        serde_json::json!([amount_scope(1, 1), amount_scope(1, 2), amount_scope(1, 3)]),
+        "{swept:#}"
+    );
+}
+
+/// #1089 keeps #1080's depth-axis rule: within one values scope a success at
+/// a larger depth still settles the depth-limited smaller depth.
+#[test]
+fn sweep_larger_depth_still_settles_the_same_values_scope() {
+    let path = fixture("sweep_values_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--values", "Amount=3..5", "--depth", "3..4"]);
+    let observed = cells(&swept);
+    assert_eq!(
+        observed[0],
+        (
+            serde_json::json!({"Amount": [3, 3]}),
+            3,
+            "reachable_failed".to_owned()
+        ),
+        "{swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_passed", "{swept:#}");
+    assert_eq!(status, 0, "{swept:#}");
+    assert_eq!(swept["sweep"]["inconclusive_scopes"], serde_json::json!([]));
+}
+
+/// Every values scope has a determinate success: the grid passes and reports
+/// no inconclusive scope.
+#[test]
+fn sweep_all_values_scopes_successful_passes() {
+    let path = fixture("sweep_values_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--values", "Amount=4..5", "--depth", "3..3"]);
+    assert!(
+        cells(&swept)
+            .iter()
+            .all(|(_, _, result)| result == "verified"),
+        "{swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_passed", "{swept:#}");
+    assert_eq!(status, 0, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(swept["sweep"]["inconclusive_scopes"], serde_json::json!([]));
+}
+
+/// Every values scope is depth-limited only: `sweep_inconclusive` and every
+/// scope is reported.
+#[test]
+fn sweep_all_values_scopes_inconclusive_reports_every_scope() {
+    let path = fixture("sweep_values_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--values", "Amount=1..3", "--depth", "3..3"]);
+    assert!(
+        cells(&swept)
+            .iter()
+            .all(|(_, _, result)| result == "reachable_failed"),
+        "{swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_inconclusive", "{swept:#}");
+    assert_eq!(status, 1, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(
+        swept["sweep"]["inconclusive_scopes"],
+        serde_json::json!([amount_scope(1, 1), amount_scope(1, 2), amount_scope(1, 3)]),
+        "{swept:#}"
+    );
+}
+
+/// A true failure dominates inconclusive values scopes: `sweep_failed` with
+/// the violating scope as the minimal counterexample, while the inconclusive
+/// scopes are still reported.
+#[test]
+fn sweep_violation_dominates_inconclusive_values_scopes() {
+    let path = fixture("sweep_values_scope_violation.fsl");
+    let (swept, status) = run_cli(&["sweep", &path, "--values", "Amount=1..3", "--depth", "3..3"]);
+    let results = cells(&swept)
+        .into_iter()
+        .map(|(_, _, result)| result)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        ["reachable_failed", "reachable_failed", "violated"],
+        "{swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_failed", "{swept:#}");
+    assert_eq!(status, 1, "{swept:#}");
+    assert_eq!(
+        swept["sweep"]["minimal_counterexample"]["scope"]["values"],
+        serde_json::json!({"Amount": [1, 3]}),
+        "{swept:#}"
+    );
+    assert_eq!(
+        swept["sweep"]["inconclusive_scopes"],
+        serde_json::json!([amount_scope(1, 1), amount_scope(1, 2)]),
+        "{swept:#}"
+    );
+}
+
+/// #1089 on the `--instances` axis alone: the 3-instance success does not
+/// settle the 1- and 2-instance scopes. Before the fix this grid returned
+/// `sweep_passed`/exit 0.
+#[test]
+fn sweep_success_in_one_instances_scope_does_not_settle_another() {
+    let path = fixture("sweep_instances_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&[
+        "sweep",
+        &path,
+        "--instances",
+        "Case=1..3",
+        "--depth",
+        "2..2",
+    ]);
+    let results = swept["sweep"]["results"]
+        .as_array()
+        .expect("sweep.results")
+        .iter()
+        .map(|entry| {
+            (
+                entry["scope"]["instances"].clone(),
+                entry["summary"]["result"].clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results,
+        [
+            (
+                serde_json::json!({"Case": 1}),
+                serde_json::json!("reachable_failed")
+            ),
+            (
+                serde_json::json!({"Case": 2}),
+                serde_json::json!("reachable_failed")
+            ),
+            (
+                serde_json::json!({"Case": 3}),
+                serde_json::json!("verified")
+            ),
+        ],
+        "grid shape: {swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_inconclusive", "{swept:#}");
+    assert_eq!(status, 1, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(
+        swept["sweep"]["inconclusive_scopes"],
+        serde_json::json!([
+            {"instances": {"Case": 1}, "values": {}},
+            {"instances": {"Case": 2}, "values": {}},
+        ]),
+        "{swept:#}"
+    );
+}
+
+/// `--instances` and `--values` together: every combined scope has a
+/// determinate success, so the grid passes with no inconclusive scope.
+#[test]
+fn sweep_all_instances_and_values_scopes_successful_passes() {
+    let path = fixture("sweep_instances_scope_inconclusive.fsl");
+    let (swept, status) = run_cli(&[
+        "sweep",
+        &path,
+        "--instances",
+        "Case=2..3",
+        "--values",
+        "Amount=1..2",
+        "--depth",
+        "2..2",
+    ]);
+    let scopes = swept["sweep"]["results"]
+        .as_array()
+        .expect("sweep.results")
+        .iter()
+        .map(|entry| {
+            assert_eq!(entry["summary"]["result"], "verified", "{swept:#}");
+            (
+                entry["scope"]["instances"].clone(),
+                entry["scope"]["values"].clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        scopes.len(),
+        4,
+        "2 instance counts x 2 value ranges: {swept:#}"
+    );
+    assert_eq!(swept["result"], "sweep_passed", "{swept:#}");
+    assert_eq!(status, 0, "{swept:#}");
+    assert!(swept["sweep"]["minimal_counterexample"].is_null());
+    assert_eq!(swept["sweep"]["inconclusive_scopes"], serde_json::json!([]));
 }

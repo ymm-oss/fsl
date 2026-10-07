@@ -1,0 +1,17 @@
+// #1008: a selected run whose envelope `--vacuity error` later replaces with
+// an `error` envelope. The `not_evaluated` section must not survive onto it.
+requirements CountedReq {
+  implements CountedFlow from "abs.fsl" { maps auto }
+
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() maps bump() {
+    n = 0
+  }
+  invariant Small { n <= 3 }
+  invariant Hollow { n > 5 => n == 0 }
+}
+verify {
+  values Limit = 0..3
+}

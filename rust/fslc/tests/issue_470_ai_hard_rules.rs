@@ -13,8 +13,8 @@
 //!
 //! Native now lowers the documented `Tool` enum / `human_approved` /
 //! `tool_executed` / `tool_suggested` / `fallback_required` state and
-//! generated actions/invariants (`docs/LANGUAGE.md` §13.6,
-//! `docs/DESIGN-ai-hard.md`), validates `check hard { rule ... }` against
+//! generated actions/invariants (`docs/manual/LANGUAGE.md` §13.6,
+//! `docs/design/DESIGN-ai-hard.md`), validates `check hard { rule ... }` against
 //! the five documented rule names, and `fsl_tools::check_ai`/`replay_ai`
 //! implement all five hard rules instead of only a narrowed
 //! `human_approval_required`.

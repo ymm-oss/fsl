@@ -13,6 +13,7 @@ import "./build.mjs";
 import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
 import { classifyOutcome, ParityViolationError, ProbeTimeoutError } from "./browser-outcome.mjs";
+import { specImports } from "./spec-imports.mjs";
 
 async function main() {
   assertNormalizerContract();
@@ -115,16 +116,12 @@ const candidates = [
 // a coincidence, which is what let the 28 retired refinement entries go
 // stale silently.
 const unsupportedReasons = {
-  agent:
-    "native `check` runs the lenient fsl-ai agent analysis (result \"ok\", dialect fsl-ai-agent.v0); "
-    + "the Worker has no agent path at all and stops at the kernel lowering gate",
   causal:
-    "standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md); native answers with the "
+    "standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md); native answers with the "
     + "causal envelope (`causal_model_checked`, no `versions` block) which the shared parity normalizer "
     + "cannot validate, so there is no comparable pair to build",
 };
 const unsupportedDocuments = new Map(Object.entries({
-  "examples/ai/recursive_support_agent.fsl": "agent",
   "examples/causal/incident_response.fsl": "causal",
   "examples/causal/marketing_funnel.fsl": "causal",
   "examples/causal/subscription_retention.fsl": "causal",
@@ -140,7 +137,7 @@ for (const path of candidates) {
     const ast = JSON.parse(classified.stdout);
     documentType = Array.isArray(ast) ? ast[0] : ast.$type?.toLowerCase();
   } else {
-    // Standalone causal models bypass dialect dispatch (docs/DESIGN-causal.md);
+    // Standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md);
     // detect them by their first significant declaration keyword.
     const stripped = (await readFile(path, "utf8"))
       .split("\n")
@@ -148,7 +145,7 @@ for (const path of candidates) {
       .find((line) => line.length > 0);
     if (stripped !== undefined && /^causal\s/.test(stripped)) documentType = "causal";
   }
-  if (["agent", "causal"].includes(documentType)) {
+  if (documentType === "causal") {
     if (unsupportedDocuments.get(repositoryPath) !== documentType) {
       throw new Error(`unreviewed unsupported ${documentType} document: ${repositoryPath}`);
     }
@@ -193,8 +190,8 @@ for (const path of candidates) {
   }
   const source = await readFile(path, "utf8");
   const files = {};
-  for (const match of source.matchAll(/\b(?:from|refinement)\s+"([^"]+)"/g)) {
-    files[match[1]] = await readFile(resolve(dirname(path), match[1]), "utf8");
+  for (const imported of specImports(source, repositoryPath)) {
+    files[imported] = await readFile(resolve(dirname(path), imported), "utf8");
   }
   for (const cmd of ["check", "verify"]) {
     parityCases.push({
@@ -231,13 +228,23 @@ const retiredRefinementCase = "specs/cart_refines.fsl";
 if (!parityCases.some((testCase) => testCase.path === retiredRefinementCase)) {
   throw new Error(`${retiredRefinementCase} must remain in the parity corpus`);
 }
+// #1163: the Worker's `check` now runs the shared `check_stages`, including
+// the lenient Agent analysis native `check` runs, and its `verify` rejects an
+// Agent document the way native `verify` does. The corpus's one Agent
+// document is therefore a compared parity case (check and verify), not a
+// Worker-only exclusion probe; a silent re-exclusion fails here.
+const agentParityCase = "examples/ai/recursive_support_agent.fsl";
+if (!parityCases.some((testCase) => testCase.path === agentParityCase)) {
+  throw new Error(`${agentParityCase} must remain in the parity corpus`);
+}
 // The only corpus input whose kernel-stage failure
 // (`fsl_core::parse_kernel_source_with_file`) keeps its own located message
 // instead of the generic substituted "spec has no state block" that
 // refinement documents get (`kernel_load_error` in spec_load.rs) -- while its
 // own top level parses. Every other located kernel-stage failure under
-// specs/+examples/ is an agent or causal document this harness still excludes
-// as unsupported (refinement is now compared directly, #577), so without this
+// specs/+examples/ is a causal document this harness still excludes as
+// unsupported (refinement is now compared directly, #577; the Agent document
+// never reaches the kernel stage, #1163), so without this
 // case the Worker could classify a located kernel-stage message differently
 // from native and no parity run would notice (issue #556).
 const kernelStageCase = "examples/gallery/errors/semantics_compose_component_parse_failure.fsl";
@@ -503,8 +510,7 @@ for (let index = 0; index < parityCases.length; index += 1) {
 // #568: an exclusion that is no longer needed must fail, not stay green. Each
 // excluded document is probed on the Worker; the recorded premise is that the
 // Worker cannot analyze it. `check` on a document the Worker has no verb for
-// stops at the kernel lowering gate (refinement/agent) or fails the surface
-// parse (causal) -- either way it never produces an analysis. The day the
+// fails the surface parse (causal) -- it never produces an analysis. The day the
 // Worker gains the verb, `result` stops being `"error"` and this fails,
 // naming the entry to remove.
 //
@@ -516,19 +522,9 @@ for (let index = 0; index < parityCases.length; index += 1) {
 // comparison needed. See the comment on that earlier assertion for why it
 // would be unsound to skip.
 const staleExclusions = [];
-function assertAgentWorkerProbeFailsClosed(probe, envelope) {
-  if (probe.documentType === "agent" && envelope?.result !== "error") {
-    throw new ParityViolationError(
-      `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for the agent `
-      + "document, so the agent fail-closed assurance cell and unsupportedDocuments entry are stale.",
-      "",
-    );
-  }
-}
 for (let index = 0; index < exclusionProbes.length; index += 1) {
   const probe = exclusionProbes[index];
   const envelope = browser.parityEnvelopes[parityCases.length + index];
-  assertAgentWorkerProbeFailsClosed(probe, envelope);
   if (envelope?.result !== "error") {
     staleExclusions.push(
       `${probe.path}: the Worker now returns ${JSON.stringify(envelope?.result)} for this `

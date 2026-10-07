@@ -1,0 +1,20 @@
+// #1218 review: `pay(7)` is outside the *declared* `Amount = 0..3`, so the
+// unscoped run rejects AC-1. An override that does not remove 7 from scope
+// (a no-op `--values Amount=0..3`, or one on another name) must not excuse it.
+requirements ArgumentOutsideDeclared {
+  number Amount
+  number Other
+  state { total: Int }
+  init { total = 0 }
+  requirement REQ-1 "pay" {
+    action pay(a: Amount) { total = total + a }
+  }
+  acceptance AC-1 "pay seven" {
+    pay(7)
+    expect total == 7
+  }
+}
+verify {
+  values Amount = 0..3
+  values Other = 0..3
+}

@@ -27,12 +27,12 @@ pub use agreement::{
 };
 pub use bmc::{
     BmcResult, BmcViolation, LeadsToViolation, ReachableBlocker, ReachableDiagnosis,
-    ReachableWitness, diagnose_reachables, verify_bounded, verify_bounded_from_state,
-    verify_bounded_selected,
+    ReachableWitness, diagnose_reachables, verify_bounded, verify_bounded_discharging,
+    verify_bounded_from_state, verify_bounded_selected,
 };
 pub use induction::{
     InductionCti, InductionResult, RankFailure, RankProof, RankedLeadstoResult, prove_induction,
-    prove_ranked_leadstos,
+    prove_induction_invariants, prove_ranked_leadstos, ranked_leadsto_lasso_discharges,
 };
 pub use refinement::{ProgressCheck, check_refinement_progress};
 pub use vacuity::{VacuityFinding, model_vacuity_findings};

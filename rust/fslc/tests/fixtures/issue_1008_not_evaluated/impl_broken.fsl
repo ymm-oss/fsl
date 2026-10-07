@@ -1,0 +1,24 @@
+// #1008: an inline `implements` whose seam is broken (`bump` maps to the
+// abstract `bump`, which keeps `n = 0`, while the impl sets `n = 1`). A full
+// `verify` folds `refinement_failed`; a selected run must report the seam as
+// `not_evaluated` rather than drop the key.
+requirements CountedReq {
+  implements CountedFlow from "abs.fsl" { maps auto }
+
+  number Limit
+  state { n: Limit }
+  init { n = 0 }
+  action bump() maps bump() {
+    n = 1
+  }
+  invariant Small { n <= 3 }
+  invariant Tiny { n <= 2 }
+
+  acceptance AC-1 "bump sets one" {
+    bump()
+    expect n == 1
+  }
+}
+verify {
+  values Limit = 0..3
+}

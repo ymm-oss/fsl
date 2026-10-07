@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! Typed `CausalModel` construction and well-formedness validation for the
-//! review-only causal profile (`docs/DESIGN-causal.md`, issue #321).
+//! review-only causal profile (`docs/design/DESIGN-causal.md`, issue #321).
 //!
 //! The model is an authority surface separate from `KernelModel`: causal
 //! claims are hypotheses about the real world and never lower into kernel
@@ -90,7 +90,7 @@ impl Polarity {
         }
     }
 
-    /// Sign product with `unknown` absorption (`docs/DESIGN-causal.md` §6).
+    /// Sign product with `unknown` absorption (`docs/design/DESIGN-causal.md` §6).
     #[must_use]
     pub fn product(self, other: Self) -> Self {
         match (self, other) {
