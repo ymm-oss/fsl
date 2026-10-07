@@ -157,13 +157,15 @@ fn binder_may_fail(binder: &Binder) -> bool {
 fn expression_may_fail(expr: &Expr) -> bool {
     recursion::guard(|| match expr {
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => false,
-        Expr::Neg(_) | Expr::Index(_, _) | Expr::Method { .. } => true,
-        Expr::UnaryNamed { name, .. } if name == "abs" => true,
-        Expr::Binary { op, .. } if matches!(op.as_str(), "/" | "%" | "+" | "-" | "*") => true,
-        Expr::Aggregate {
+        Expr::Neg(_)
+        | Expr::Index(_, _)
+        | Expr::Method { .. }
+        | Expr::Aggregate {
             kind: AggregateKind::Sum,
             ..
         } => true,
+        Expr::UnaryNamed { name, .. } if name == "abs" => true,
+        Expr::Binary { op, .. } if matches!(op.as_str(), "/" | "%" | "+" | "-" | "*") => true,
         Expr::Some(inner)
         | Expr::Not(inner)
         | Expr::Field(inner, _)
