@@ -243,6 +243,63 @@ fn undefined_init_is_a_located_semantics_error_under_bmc_and_induction() {
     }
 }
 
+/// `InitDivNd` with a search that stops early: an action `partial_op` at
+/// step 0 (`tick` divides by `d = 0`), or an invariant violated by the
+/// initial state itself (no step's action checks are reached). The undefined
+/// init is asked first in the definedness pass and supersedes either verdict.
+const INIT_DIV_ACTION_DIV_ND: &str = r"spec InitDivActionDivNd {
+  type Small = 0..3
+  state {
+    d: Small,
+    x: Int,
+    junk: Bool
+  }
+  init {
+    d = 0
+    x = 6 / d
+  }
+  action tick() {
+    requires d < 3
+    x = 6 / d
+    d = d + 1
+  }
+  invariant Ok { d >= 0 }
+}
+";
+
+const INIT_DIV_INVARIANT_ND: &str = r"spec InitDivInvariantNd {
+  type Small = 0..3
+  state {
+    d: Small,
+    x: Int,
+    junk: Bool
+  }
+  init {
+    d = 0
+    x = 6 / d
+  }
+  action tick() {
+    requires d < 3
+    d = d + 1
+  }
+  invariant Positive { d > 0 }
+}
+";
+
+#[test]
+fn undefined_init_supersedes_a_search_that_stops_early() {
+    for (name, source) in [
+        ("init-div-action-div-nd", INIT_DIV_ACTION_DIV_ND),
+        ("init-div-invariant-nd", INIT_DIV_INVARIANT_ND),
+    ] {
+        let fixture = Fixture::new(name, source);
+        for engine in SYMBOLIC_ENGINES {
+            let (output, status) = verify(&fixture, engine);
+            assert_semantics_error(&output, status, "division by zero in init at 10:5");
+        }
+    }
+}
+
 /// The explicit engine already stopped on these inits; its envelope is the
 /// reference the symbolic messages name.
 #[test]
