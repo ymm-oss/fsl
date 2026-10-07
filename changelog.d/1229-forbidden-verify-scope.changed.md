@@ -8,7 +8,7 @@ admits 9). It used to count as satisfied, with `rejected_by:
 "requires_failed"`, so the generated test asserted a rejection no guard made. It is now a `kind: "forbidden"` error
 (exit 2) with `failed_step`, `step`, `step_results: []`, `message`,
 `out_of_scope_argument` (`{parameter, value, type, scope}`), a `loc` at that
-step, and a hint. An argument outside a declared range or enum type stays a
+step, and a hint. An argument outside a declared range or enum type is a
 satisfied `bad_call` (#1212), and a guard refusal inside the scope stays
 `requires_failed`. Under `--instances` / `--values`, a forbidden whose
 final-step argument only the override removed stays `forbidden_skipped` /
