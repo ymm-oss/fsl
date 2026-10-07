@@ -813,6 +813,15 @@ variable.
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |
 | leadsTo | A P ~> Q violation via a missed `within` deadline, a lasso up to depth K, or deadlock stagnation (deadline misses and stagnation are detected as soon as `--depth` reaches the deadline/stalling step, and at every larger depth after that, not only when it lands exactly on that step) | `violated` / `leadsTo` / `bindings` + trace |
 
+- `init` is evaluated with the action-context rules. A `/`/`%` by zero, a
+  partial `Seq` operation, a finite `Map` key outside its domain (read or
+  assignment target), or checked i64 overflow that init evaluation reaches
+  (an operation on the unreached side of an init `if`, conditional, or
+  `and`/`or`/`=>` is not reached) is a semantics error, exit 2, under every
+  engine. It is not a `partial_op` violation, because there is no step before
+  the initial state. `bmc` and `induction` (whose base case is `bmc`) name the
+  failure and the init statement, e.g. `division by zero in init at 9:5`,
+  also when init is nondeterministic (#1258).
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.
 - **Intended terminal states** (states where stopping is correct, such as

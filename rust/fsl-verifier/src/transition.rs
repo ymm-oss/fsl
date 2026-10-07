@@ -415,6 +415,17 @@ fn lvalue_evaluation_status<S: SmtSolver>(
     }
 }
 
+/// Whether evaluating `init` against `state` is defined (#1258): the same
+/// action-context `evaluation_status` the action checks use, over the init
+/// statements, reading `state` exactly as [`init_constraints`] does.
+pub(crate) fn init_evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    state: &SymbolicState<S::Term>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    statements_evaluation_status(solver, model, &model.init, state, &mut Bindings::new())
+}
+
 pub(crate) fn init_constraints<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,

@@ -782,6 +782,14 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 | trans | 2 状態の述語が到達可能なすべての遷移で成立するか | `violated` / `trans` / `trans` + トレース |
 | leadsTo | `within` 締め切りの超過、深さ K までの lasso、デッドロックによる停滞を通じた P ~> Q 違反(締め切りの超過と停滞は、`--depth` が締め切り/停滞のステップに達した時点で、またそれ以降のすべてのより大きな深さで検出されます。ちょうどそのステップに一致したときだけではありません) | `violated` / `leadsTo` / `bindings` + トレース |
 
+- `init` は action 文脈の規則で評価されます。init の評価が到達する `/`/`%` の
+  ゼロ除算、`Seq` の部分演算、有限キー域の外にある `Map` のキー(読み出しと代入
+  先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
+  (exit 2)です(init の `if`・条件式・`and`/`or`/`=>` の到達しない側の演算は
+  到達しません)。初期状態より前のステップが無いため、`partial_op` 違反には
+  なりません。`bmc` と `induction`(base case が `bmc`)は、init が非決定的な
+  場合も含め、失敗と init の文を名指しします(例: `division by zero in init at
+  9:5`)(#1258)。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。

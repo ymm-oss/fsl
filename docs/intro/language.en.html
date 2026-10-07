@@ -893,6 +893,15 @@ variable.</p></div></details>
 </tbody>
 </table>
 <ul>
+<li><code>init</code> is evaluated with the action-context rules. A <code>/</code>/<code>%</code> by zero, a
+  partial <code>Seq</code> operation, a finite <code>Map</code> key outside its domain (read or
+  assignment target), or checked i64 overflow that init evaluation reaches
+  (an operation on the unreached side of an init <code>if</code>, conditional, or
+  <code>and</code>/<code>or</code>/<code>=&gt;</code> is not reached) is a semantics error, exit 2, under every
+  engine. It is not a <code>partial_op</code> violation, because there is no step before
+  the initial state. <code>bmc</code> and <code>induction</code> (whose base case is <code>bmc</code>) name the
+  failure and the init statement, e.g. <code>division by zero in init at 9:5</code>,
+  also when init is nondeterministic (#1258).</li>
 <li>A deadlock warning includes which state you got stuck in (e.g. <code>deadlock reachable at
   step 1 (state: status=ToolFault, ...)</code>). The full trace is also in the JSON <code>deadlock.trace</code>.</li>
 <li><strong>Intended terminal states</strong> (states where stopping is correct, such as
