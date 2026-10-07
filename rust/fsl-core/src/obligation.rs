@@ -220,7 +220,7 @@ pub struct Catalog {
 #[must_use]
 pub fn catalog(model: &KernelModel) -> Catalog {
     let mut rows = Rows::default();
-    push_init(&mut rows);
+    push_init(&mut rows, model);
     push_state(&mut rows, model);
     push_invariants(&mut rows, model);
     push_transitions(&mut rows, model);
@@ -283,8 +283,25 @@ impl Rows {
     }
 }
 
-fn push_init(rows: &mut Rows) {
+/// The `init` block owes the same three definedness rows as an action body:
+/// its statements are evaluated in action context (`/` and `%` are partial),
+/// and a failure is a `semantics` error rather than a rollback (#1258).
+fn push_init(rows: &mut Rows, model: &KernelModel) {
     rows.holds(ObligationKind::InitSatisfiable, &Site::Init);
+    let found = settle(model, |outer| {
+        let mut found = Found::default();
+        for statement in &model.init {
+            outer.statement(statement, &mut found);
+        }
+        vec![found]
+    })
+    .pop()
+    .expect("the walk yields one entry");
+    let partial = model
+        .init
+        .iter()
+        .any(statement_has_partial_operation_candidate);
+    rows.definedness(&Site::Init, partial, &found);
 }
 
 fn push_state(rows: &mut Rows, model: &KernelModel) {

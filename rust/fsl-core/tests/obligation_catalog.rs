@@ -3,8 +3,9 @@
 
 //! T2 of `docs/design/DESIGN-obligation-catalog.md` (#1202): the minimum
 //! obligation catalog of each rule family, pinned as an exact multiset per
-//! fixture. The fixtures are the reproducers of #1189, #1192, #1196, #1217
-//! and #1221, and the false-vacuity reproducers of the first P1-a review.
+//! fixture. The fixtures are the reproducers of #1189, #1192, #1196, #1217,
+//! #1221 and #1258, and the false-vacuity reproducers of the first P1-a
+//! review.
 //! `candidates_reach_the_row_from_every_operand_position` puts one live
 //! candidate in each operand position the vacuity walk recurses through.
 
@@ -101,6 +102,9 @@ fn issue_1196_guard_division_is_a_definedness_obligation() {
         &model(PARTIAL_GUARD),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(x#0) [v]",
             "Holds@TypeBound(d#1) [v]",
             "Holds@Invariant(NonNeg)",
@@ -140,6 +144,9 @@ fn issue_1217_ensures_owes_a_truth_obligation() {
         &model(ENSURES_HOLE),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(x#0)",
             "Holds@Invariant(Range)",
             "PartialDefined@Invariant(Range) [v]",
@@ -178,6 +185,9 @@ fn issue_1189_ranked_leadsto_owes_no_deadlock_without_helpful() {
         &model(DEADLOCK_RANK),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(x#0)",
             "Responds@LeadsTo(Drain)",
             "PartialDefined@Trigger(Drain) [v]",
@@ -229,6 +239,9 @@ fn issue_1192_same_named_properties_are_distinct_rows() {
         &dup,
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(x#0)",
             "Holds@TypeBound(y#1)",
             "Responds@LeadsTo(L)",
@@ -324,6 +337,9 @@ fn helpful_adds_fairness_and_stickiness_rows() {
         &model(MIN_HELPFUL),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(level#0)",
             "Holds@Invariant(NonNeg)",
             "PartialDefined@Invariant(NonNeg)",
@@ -373,6 +389,9 @@ fn issue_1221_out_of_domain_map_read_is_a_key_obligation() {
         &model(MAP_OUT_OF_DOMAIN),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(m#0)",
             "Holds@TypeBound(i#1) [v]",
             "Holds@TypeBound(y#2)",
@@ -448,6 +467,9 @@ spec KeyDomains {
 
 const KEY_DOMAINS_ROWS: &[&str] = &[
     "InitSatisfiable@Init",
+    "PartialDefined@Init",
+    "NoOverflow@Init [v]",
+    "KeyInDomain@Init [v]",
     "Holds@TypeBound(m#0)",
     "Holds@TypeBound(w#1)",
     "Holds@TypeBound(paint#2)",
@@ -618,6 +640,9 @@ fn false_vacuity_reproducers_are_live() {
         &model(FALSE_VACUITY),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(m#0)",
             "Holds@TypeBound(n#1)",
             "Holds@TypeBound(s#2)",
@@ -774,6 +799,9 @@ fn key_rows_bound_only_typed_index_forms() {
     };
     let mut expected = [
         "InitSatisfiable@Init",
+        "PartialDefined@Init",
+        "NoOverflow@Init [v]",
+        "KeyInDomain@Init [v]",
         "Holds@TypeBound(m#0)",
         "Holds@TypeBound(mk#1)",
         "Holds@TypeBound(paint#2)",
@@ -856,6 +884,9 @@ spec WideIndexes {
 fn key_rows_stay_live_for_indexes_wider_than_the_key() {
     let mut expected = [
         "InitSatisfiable@Init",
+        "PartialDefined@Init",
+        "NoOverflow@Init [v]",
+        "KeyInDomain@Init [v]",
         "Holds@TypeBound(m#0)",
         "Holds@TypeBound(n#1)",
         "Holds@TypeBound(qw#2)",
@@ -932,6 +963,9 @@ fn pattern_types_join_across_the_context() {
         &model(PATTERN_JOINS),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(m#0)",
             "Holds@TypeBound(pp#1)",
             "Holds@TypeBound(o2#2)",
@@ -999,6 +1033,9 @@ fn unlowered_forms_reach_their_operands() {
         &model,
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(m#0)",
             "Holds@TypeBound(high#1)",
             "Holds@Invariant(Called)",
@@ -1054,6 +1091,9 @@ fn overflow_rows_and_deadline() {
         &model(ARITH),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(x#0)",
             "PartialDefined@Guard(up) [v]",
             "NoOverflow@Guard(up) [v]",
@@ -1136,6 +1176,9 @@ fn non_ranked_families_generate_their_rows() {
         &model(FAMILIES),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(q#0)",
             "Holds@TypeBound(n#1)",
             "Holds@TypeBound(d#2)",
@@ -1316,6 +1359,9 @@ verify { instances Claim = 2  values Amount = 0..2 }
 
 const SCOPED_ROWS: &[&str] = &[
     "InitSatisfiable@Init",
+    "PartialDefined@Init",
+    "NoOverflow@Init [v]",
+    "KeyInDomain@Init [v]",
     "Holds@TypeBound(amount#0)",
     "Holds@Invariant(NonNeg)",
     "PartialDefined@Invariant(NonNeg)",
@@ -1368,6 +1414,9 @@ fn a_scope_override_can_make_a_key_row_live() {
         &model(SCOPE_FLIP),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(seen#0)",
             "Holds@TypeBound(a#1)",
             "PartialDefined@Guard(bump) [v]",
@@ -1395,6 +1444,9 @@ fn a_scope_override_can_make_a_key_row_live() {
         &build_model(kernel).expect("override builds"),
         &[
             "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init [v]",
             "Holds@TypeBound(seen#0)",
             "Holds@TypeBound(a#1)",
             "PartialDefined@Guard(bump) [v]",
@@ -1563,6 +1615,111 @@ fn candidates_reach_the_row_from_every_operand_position() {
     assert_eq!(live("x + 1", ObligationKind::NoOverflow), every);
     assert_eq!(live("0", ObligationKind::KeyInDomain), BTreeSet::new());
     assert_eq!(live("0", ObligationKind::NoOverflow), sites(|own| own));
+}
+
+/// #1258: `InitDiv` and `InitMapRead`, where `fslc verify --engine explicit`
+/// fails the `init` with `division by zero` and `map index outside finite key
+/// domain` while bmc and induction ask nothing. `init` is evaluated in action
+/// context, so its `/` is a partial operation and an overflow candidate, and
+/// `m[i]` (`i: 0..5`, `K = 0..3`) can miss the key domain. `InitOvf` is the
+/// overflow-only control: a `*` without a partial operation or an index.
+const INIT_DIV: &str = r"
+spec InitDiv {
+  type Small = 0..3
+  state { d: Small, x: Int }
+  init { d = 0  x = 6 / d }
+  action tick() { requires d < 3  d = d + 1 }
+  invariant Ok { x >= 0 }
+}
+";
+
+const INIT_MAP_READ: &str = r"
+spec InitMapRead {
+  type K = 0..3
+  type I = 0..5
+  state { m: Map<K, Int>, i: I, x: Int }
+  init { forall k: K { m[k] = 1 }  i = 5  x = m[i] }
+  action tick() { requires i > 0  i = i - 1 }
+  invariant Ok { x >= 1 }
+}
+";
+
+const INIT_OVF: &str = r"
+spec InitOvf {
+  type Small = 0..3
+  state { d: Small, x: Int }
+  init { d = 0  x = 4611686018427387904 * (d + 2) }
+  action tick() { requires d < 3  d = d + 1 }
+  invariant Ok { x >= 0 }
+}
+";
+
+/// The rows `InitDiv` and `InitOvf` share outside `init`.
+const INIT_SMALL_ROWS: &[&str] = &[
+    "InitSatisfiable@Init",
+    "Holds@TypeBound(d#0)",
+    "Holds@TypeBound(x#1) [v]",
+    "Holds@Invariant(Ok)",
+    "PartialDefined@Invariant(Ok) [v]",
+    "NoOverflow@Invariant(Ok) [v]",
+    "KeyInDomain@Invariant(Ok) [v]",
+    "PartialDefined@Guard(tick) [v]",
+    "NoOverflow@Guard(tick) [v]",
+    "KeyInDomain@Guard(tick) [v]",
+    "PartialDefined@Body(tick) [v]",
+    "NoOverflow@Body(tick)",
+    "KeyInDomain@Body(tick) [v]",
+    "NoDeadlock@Model",
+];
+
+#[test]
+fn issue_1258_init_owes_definedness_rows() {
+    let with = |init: &[&'static str]| {
+        INIT_SMALL_ROWS
+            .iter()
+            .chain(init)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    assert_catalog(
+        &model(INIT_DIV),
+        &with(&[
+            "PartialDefined@Init",
+            "NoOverflow@Init",
+            "KeyInDomain@Init [v]",
+        ]),
+    );
+    assert_catalog(
+        &model(INIT_OVF),
+        &with(&[
+            "PartialDefined@Init [v]",
+            "NoOverflow@Init",
+            "KeyInDomain@Init [v]",
+        ]),
+    );
+    assert_catalog(
+        &model(INIT_MAP_READ),
+        &[
+            "InitSatisfiable@Init",
+            "PartialDefined@Init",
+            "NoOverflow@Init [v]",
+            "KeyInDomain@Init",
+            "Holds@TypeBound(m#0)",
+            "Holds@TypeBound(i#1)",
+            "Holds@TypeBound(x#2) [v]",
+            "Holds@Invariant(Ok)",
+            "PartialDefined@Invariant(Ok) [v]",
+            "NoOverflow@Invariant(Ok) [v]",
+            "KeyInDomain@Invariant(Ok) [v]",
+            "PartialDefined@Guard(tick) [v]",
+            "NoOverflow@Guard(tick) [v]",
+            "KeyInDomain@Guard(tick) [v]",
+            "PartialDefined@Body(tick) [v]",
+            "NoOverflow@Body(tick)",
+            "KeyInDomain@Body(tick) [v]",
+            "NoDeadlock@Model",
+        ],
+    );
 }
 
 /// Every kind and every site variant is exercised by some fixture above, so

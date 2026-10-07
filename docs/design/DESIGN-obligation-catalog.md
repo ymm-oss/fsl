@@ -58,7 +58,7 @@ index outside the finite key domain).
 
 | Family | Rows |
 |---|---|
-| `init` | `InitSatisfiable@Init` |
+| `init` | `InitSatisfiable@Init`; definedness of `Init` |
 | state variable `v` | `Holds@TypeBound(v)` |
 | `invariant` | `Holds`, definedness |
 | `trans`, `unless`, `until` safety | `Holds@Trans`, definedness |
@@ -164,10 +164,10 @@ key-domain miss. The P1-c fold must keep that order.
 - A row carries no `claim`, `group` or `catalog_version` field; they are
   derived from the kind and the site variant, since the kind alone does not
   decide the claim. `PartialDefined` is a required row of its property's
-  claim (#1196 reports `_partial_<name>` per property), except at a `Measure`.
-  `NoOverflow`, `KeyInDomain` and the three `Measure` definedness rows belong
-  to a separate model-definedness claim, so an unrelated overflow does not
-  weaken an invariant's claim.
+  claim (#1196 reports `_partial_<name>` per property), except at a `Measure`
+  or `Init`. `NoOverflow`, `KeyInDomain` and the three definedness rows of a
+  `Measure` and of `Init` belong to a separate model-definedness claim, so an
+  unrelated overflow does not weaken an invariant's claim.
 - An invariant owes one `Holds@Invariant` row, not a base row and a step row
   (#1202 names both for `--engine induction`). Base and step are how one
   engine discharges that row; the catalog lists what the model owes, and how
@@ -175,7 +175,12 @@ key-domain miss. The P1-c fold must keep that order.
 - `TotalDefined` is split into `NoOverflow` and `KeyInDomain` because engines
   support them differently: `--engine induction` asks neither today, and #1221
   is the key-domain half.
-- `init` definedness has no row in P1-a.
+- `init` owes the three definedness rows at `Init`, generated as for an action
+  body: its statements are evaluated in action context, so `/` and `%` are
+  partial operations. bmc and induction ask none of them today, while
+  `--engine explicit` fails the `init` with a `semantics` error (#1258); the
+  rows exist so the ledger does not read `init` definedness as owed by no one.
+  The Public Kernel keeps `partial_operations` to actions.
 
 ## Verification
 
@@ -185,7 +190,7 @@ an exact multiset and checks that ids are unique; `catalog` also
 up in `ObligationKind::ALL` at compile time keeps `ALL` complete (a kind
 missing from it fails `cargo check`). The fixtures are:
 
-- the reproducers of #1189, #1192, #1196, #1217 and #1221, the `helpful`
+- the reproducers of #1189, #1192, #1196, #1217, #1221 and #1258, the `helpful`
   fixture of #473, and a fixture with every non-ranked family;
 - controls for each overflow and key-domain case, and one site per bounded
   index form against the forms left unbounded;
