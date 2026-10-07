@@ -367,23 +367,21 @@ async fn verify_bounded_session<S: SmtSolver>(
     let limit = progress.definedness_limit(depth);
     match check_definedness(model, solver, checked_bounds, initial_state, limit).await? {
         Some(Undefined::Init(error)) => return Err(error),
-        Some(Undefined::Action(step)) => {
-            // A `partial_op` the definedness pass reports is one the search's
-            // own typed probes report at the same step and stop on: both ask
-            // the same questions of the same unrolling, in the same instance
-            // order.
+        // A `partial_op` the definedness pass reports is one the search's own
+        // typed probes report at the same step and stop on: both ask the same
+        // questions of the same unrolling, in the same instance order.
+        Some(Undefined::Action(step))
             if progress
                 != (SearchProgress {
                     step,
                     actions_checked: true,
-                })
-            {
-                return Err(VerifyError::new(format!(
-                    "action definedness pass disagrees with the bounded search at step {step}"
-                )));
-            }
+                }) =>
+        {
+            return Err(VerifyError::new(format!(
+                "action definedness pass disagrees with the bounded search at step {step}"
+            )));
         }
-        None => {}
+        Some(Undefined::Action(_)) | None => {}
     }
     searched
 }
