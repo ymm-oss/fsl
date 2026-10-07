@@ -789,7 +789,9 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
   到達しません)。初期状態より前のステップが無いため、`partial_op` 違反には
   なりません。`bmc` と `induction`(base case が `bmc`)は、init が非決定的な
   場合も含め、失敗と init の文を名指しします(例: `division by zero in init at
-  9:5`)(#1258)。
+  9:5`)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
+  とき、`bmc` と `induction` は step 0 の型境界を仮定して init を問うため、
+  その step 0 の `type_bound` 違反(exit 1)を報告します。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。

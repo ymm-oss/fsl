@@ -113,7 +113,11 @@ Init definedness is a verifier obligation instead: every engine (explicit,
 `bmc`, `induction`) reports an init that some initial state cannot evaluate as
 a `semantics` error with exit code 2, and the symbolic engines locate it at the
 failing init statement (e.g. `division by zero in init at 9:5`; #1258). The
-schema is unchanged. Publishing init failure conditions, should a Kernel
+one exception is an init that also assigns a value outside a state variable's
+type: `bmc` and `induction` assume the step-0 type bounds when they ask the
+init question, so they report the search's step-0 `type_bound` violation
+(exit 1) instead, while the explicit engine reports the init failure (exit 2).
+The schema is unchanged. Publishing init failure conditions, should a Kernel
 consumer need them, would add a field with its own `state_effect_on_failure`
 value and so a minor schema version.
 
