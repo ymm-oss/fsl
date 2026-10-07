@@ -243,6 +243,154 @@ fn undefined_init_is_a_located_semantics_error_under_bmc_and_induction() {
     }
 }
 
+/// An init failure inside a binder expression (#1258 m1). The binder is one
+/// failure site; its message pins that the site, not the generic fallback,
+/// names the failure, so the verdict and the message both depend on the
+/// `Quantified` arm of the site enumeration.
+const INIT_QUANT_ND: &str = r"spec InitQuant {
+  type Small = 0..3
+  state {
+    d: Small,
+    ok: Bool,
+    junk: Bool
+  }
+  init {
+    d = 0
+    ok = forall i in 0..3 { 6 / i > 0 }
+  }
+  action tick() {
+    requires d < 3
+    d = d + 1
+  }
+  invariant Ok { d >= 0 }
+}
+";
+
+#[test]
+fn an_undefined_binder_expression_in_init_is_a_located_semantics_error() {
+    let fixture = Fixture::new("quant-nd", INIT_QUANT_ND);
+    for engine in SYMBOLIC_ENGINES {
+        let (output, status) = verify(&fixture, engine);
+        assert_semantics_error(&output, status, "undefined evaluation in init at 10:5");
+    }
+}
+
+/// Evaluation order of the failure sites (#1258 m3), the explicit engine's:
+/// an `or` evaluates its left side first, so a division by zero there fails
+/// even though the right side would be true; and in `m[d + 5] + 6 / d` the
+/// left operand's map read fails before the right operand's division.
+const INIT_OR_LEFT: &str = r"spec InitOrLeft {
+  type Small = 0..3
+  state {
+    d: Small,
+    ok: Bool,
+    junk: Bool
+  }
+  init {
+    d = 0
+    ok = 6 / d > 1 or d == 0
+  }
+  action tick() {
+    requires d < 3
+    d = d + 1
+  }
+  invariant Ok { ok }
+}
+";
+
+const INIT_AND_ORDER: &str = r"spec InitAndOrder {
+  type K = 0..3
+  type Small = 0..5
+  state {
+    m: Map<K, Int>,
+    d: Small,
+    x: Int
+  }
+  init {
+    forall k: K { m[k] = 1 }
+    d = 0
+    x = m[d + 5] + 6 / d
+  }
+  action tick() {
+    requires d < 3
+    d = d + 1
+  }
+  invariant Ok { d >= 0 }
+}
+";
+
+#[test]
+fn init_failure_sites_follow_the_evaluation_order() {
+    let cases = [
+        ("or-left", INIT_OR_LEFT, "division by zero in init at 10:5"),
+        (
+            "and-order",
+            INIT_AND_ORDER,
+            "map index outside finite key domain in init at 12:5",
+        ),
+    ];
+    for (name, source, message) in cases {
+        let fixture = Fixture::new(name, source);
+        for engine in SYMBOLIC_ENGINES {
+            let (output, status) = verify(&fixture, engine);
+            assert_semantics_error(&output, status, message);
+        }
+    }
+    let fixture = Fixture::new("explicit-and-order", INIT_AND_ORDER);
+    let (output, status) = verify(&fixture, "explicit");
+    assert_semantics_error(&output, status, "map index outside finite key domain");
+}
+
+/// The short-circuit direction of the failure sites (#1258 m3): `d = 0`
+/// decides each guard, so its `6 / d` side is never evaluated and the failure
+/// the explicit engine reports is the map read after it. A site reached on
+/// the wrong side would name the division instead.
+fn short_circuit_spec(guarded: &str) -> String {
+    format!(
+        "spec InitShortCircuitOrder {{
+  type K = 0..3
+  type Small = 0..5
+  state {{
+    m: Map<K, Int>,
+    d: Small,
+    ok: Bool
+  }}
+  init {{
+    forall k: K {{ m[k] = 1 }}
+    d = 0
+    ok = ({guarded}) and m[d + 5] > 0
+  }}
+  action tick() {{
+    requires d < 3
+    d = d + 1
+  }}
+  invariant Ok {{ d >= 0 }}
+}}
+"
+    )
+}
+
+#[test]
+fn a_short_circuited_side_names_no_init_failure() {
+    for (name, guarded) in [
+        ("or-decided", "d == 0 or 6 / d > 1"),
+        ("and-decided", "not (d != 0 and 6 / d > 1)"),
+        ("implies-decided", "d != 0 => 6 / d > 1"),
+    ] {
+        let fixture = Fixture::new(name, &short_circuit_spec(guarded));
+        for engine in SYMBOLIC_ENGINES {
+            let (output, status) = verify(&fixture, engine);
+            assert_semantics_error(
+                &output,
+                status,
+                "map index outside finite key domain in init at 12:5",
+            );
+        }
+        let (output, status) = verify(&fixture, "explicit");
+        assert_semantics_error(&output, status, "map index outside finite key domain");
+    }
+}
+
 /// `InitDivNd` with a search that stops early: an action `partial_op` at
 /// step 0 (`tick` divides by `d = 0`), or an invariant violated by the
 /// initial state itself (no step's action checks are reached). The undefined
