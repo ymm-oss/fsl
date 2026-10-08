@@ -21,18 +21,19 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The 27 public type names this change annotates: #858's enumeration minus
+/// The 28 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
-/// curated table missed. Each must carry `#[must_use]` on the TYPE, because on
+/// curated table missed, and `RefinementVerdict` (#1245). Each must carry `#[must_use]` on the TYPE, because on
 /// the function it is redundant against `Result` and closes nothing.
-const ANNOTATED: [&str; 27] = [
+const ANNOTATED: [&str; 28] = [
     // fsl-runtime
     "Violation",
     "StepResult",
     "ReachableWitness",
     "BfsResult",
     "RefinementCheck",
+    "RefinementVerdict",
     "BoundaryProbe",
     "BoundedLivenessViolation",
     "ExplicitViolation",
@@ -61,10 +62,10 @@ const ANNOTATED: [&str; 27] = [
     "OutcomeClass",
 ];
 
-/// `ANNOTATED` holds 27 distinct names but 28 declarations: `ReachableWitness`
+/// `ANNOTATED` holds 28 distinct names but 29 declarations: `ReachableWitness`
 /// is declared once in `fsl-runtime` and once in `fsl-verifier`, and both must
 /// carry the attribute.
-const ANNOTATED_DECLARATIONS: usize = 28;
+const ANNOTATED_DECLARATIONS: usize = 29;
 
 /// Types deliberately left un-annotated, each with the reason. A type moved
 /// off this list must gain the attribute; a type added to it must state why.
@@ -100,9 +101,9 @@ fn read_source(path: &Path) -> String {
 
 /// What the rule below actually matches today. #858 reports 33 types from a
 /// hand-curated table; this rule -- #858's, extended with the `*Violation`
-/// suffix -- selects 16, all of which are in `ANNOTATED`. Both numbers are pinned so
+/// suffix -- selects 17, all of which are in `ANNOTATED`. Both numbers are pinned so
 /// neither the curated decision nor the detector can drift unnoticed.
-const DISCOVERED: [&str; 16] = [
+const DISCOVERED: [&str; 17] = [
     "BfsResult",
     "BmcResult",
     "BmcViolation",
@@ -115,6 +116,7 @@ const DISCOVERED: [&str; 16] = [
     "LeadsToViolation",
     "ProgressCheck",
     "RankedLeadstoResult",
+    "RefinementVerdict",
     "SatResult",
     "StepResult",
     "VacuityFinding",
@@ -262,8 +264,9 @@ fn the_reviewed_annotation_decision_is_intact() {
         let mut annotated_somewhere = false;
         let mut declared_somewhere = false;
         for text in &sources {
-            for keyword in ["struct", "enum"] {
-                let needle = format!("\npub {keyword} {name} ");
+            // `<` also matches a generic declaration (`RefinementVerdict<'a>`).
+            for (keyword, after) in [("struct", ' '), ("enum", ' '), ("enum", '<')] {
+                let needle = format!("\npub {keyword} {name}{after}");
                 let mut cursor = 0;
                 while let Some(offset) = text[cursor..].find(&needle) {
                     let at = cursor + offset;

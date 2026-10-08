@@ -125,7 +125,7 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed
+fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report
@@ -314,8 +314,34 @@ between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
 scenarios against NEW. Its stable finding kinds are `behavior_added`,
 `behavior_removed`, `invariant_weakened`, `invariant_strengthened`,
 `forbidden_relaxed`, `scope_changed`, and `unknown`; an empty report uses
-`no_semantic_change`. A changed `verify` scope is explicit and comparison uses
-NEW's shared entity/number bounds. Findings exit 0 because the command is an
+`no_semantic_change`. In the forbidden replay (`docs/design/DESIGN-semantic-diff.md`,
+"Forbidden replay") a NEW final step that its guard disables preserves the OLD
+rejection, and so does a final step that OLD and NEW both reject as `bad_call`
+outside a range or enum parameter type. Each side is classified with its own `entity` /
+`number` types: since #1229 an OLD final step outside its verify scope
+(including the NEW scope OLD is replayed under) is `unknown` /
+`forbidden_replay_failed`, since no OLD guard rejected it, and an OLD `bad_call`
+that only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`
+(before #1229 both were `forbidden_step_unrelatable`). A compose NEW, or a NEW
+of another dialect whose `entity` / `number` types are not in its source, never
+preserves an OLD `bad_call` (`unknown` / `forbidden_step_unrelatable`); before
+#1229 a compose NEW that rejected the step as `bad_call` preserved it, so such a
+forbidden now fails `--forbid unknown`. An OLD final step that names no action, or no
+variant of that arity, is `unknown` / `forbidden_replay_failed`. Before #1212 a
+both-side range `bad_call` was `unknown`, so that forbidden failed `--forbid
+unknown` and no longer does, and an OLD unknown action was preserved (the
+measured cases already exited 1 on the `unknown` that NEW's added action or
+changed arity produces; see
+`docs/design/DESIGN-forbidden.md` §2.1). Known gap (#1239): a NEW
+*setup* step that its guard disables is also reported as preserved, although NEW
+never runs the final step. Since #1213 a NEW final step that is enabled and then
+stops with a runtime violation is `forbidden_relaxed` too (its witness carries
+`violation`): a violation is not a rejection. An OLD final step or a NEW setup
+step that violates is `unknown` / `forbidden_replay_failed`; before #1213 all
+three were preserved, so that forbidden now fails `--forbid forbidden_relaxed`
+(NEW final violation) or `--forbid unknown` (the other two), where it failed
+neither. A changed
+`verify` scope is explicit and comparison uses NEW's shared entity/number bounds. Findings exit 0 because the command is an
 analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
 verdict is bounded by `--depth`, and a mapping only resolves the direction
 declared in its `impl`/`abs` fields (it is never inverted).
@@ -588,8 +614,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   never yields `verified` / `sweep_passed`. Only a reference the override
   removed (inside the declared bounds, outside the overridden ones) is
   excused; one outside the declared bounds keeps the unscoped error, and a
-  forbidden final step "rejected" only because its argument was removed is
-  reported as `forbidden_skipped`, not satisfied. When any scenario was skipped,
+  forbidden final step outside the overridden scope only because its argument
+  was removed is reported as `forbidden_skipped`, not satisfied (one outside the
+  declared scope is the unscoped `kind: "forbidden"` error, #1229, unless the
+  override widens the scope to include it, in which case the guard is
+  evaluated). When any scenario was skipped,
   the envelope also carries `requirement_traces: {result: "not_evaluated",
   reason: "bounds_override", skipped: [{kind, id, reference}, ...]}`; the key
   is absent when every scenario was replayed. When the spec has an inline `implements`, the
@@ -754,6 +783,17 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   fidelity failure. Never `refines`, never folded into `refinement_failed`.
   `fslc diff` surfaces the same condition as an `impl_violated` finding and
   fails its gate unconditionally (not `--forbid`-gated).
+- **correspondence budget**: the correspondence check after that precondition
+  visits at most 50,000 distinct impl states (no CLI flag; the same budget as
+  an inline `implements` seam). Reaching it before deciding within `--depth`
+  is `result:"unknown_budget"` (exit 1) with `states_explored` and `hint` —
+  never `refines`. Lower `--depth` or narrow both specs' `verify {}` domains.
+  A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
+  refine layer fails with `result:"unknown_budget"`, and a governance
+  preservation reports `unknown_budget`. Such a run used to report `refines`
+  (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
+  and `fslc mutate` do not read this cutoff yet (`diff` reports
+  `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
 - **action-correspondence argument partial_op (#512)**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action

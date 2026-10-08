@@ -304,7 +304,26 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             trace_type: trace_type.to_owned(),
             name: name.to_owned(),
             summary: if trace_type == "forbidden" {
-                "禁止フローが仕様上許容されている（accepted_trace あり）".to_owned()
+                match forbidden_failure(verification) {
+                    ForbiddenFailure::Accepted => {
+                        "禁止フローが仕様上許容されている（accepted_trace あり）".to_owned()
+                    }
+                    ForbiddenFailure::Violation(kind, name) => format!(
+                        "禁止フローの最後の step が実行可能で、実行時違反（{kind} '{name}'）で止まった（拒否ではない）"
+                    ),
+                    ForbiddenFailure::Unresolved(message) => {
+                        format!("禁止フローの最後の step が呼び出せる action を指していない（{message}）")
+                    }
+                    ForbiddenFailure::OutsideScope(message) => format!(
+                        "禁止フローの最後の step の引数が検証の範囲の外にあり、ガードを試していない（拒否ではない。{message}）"
+                    ),
+                    ForbiddenFailure::Setup(step) => {
+                        format!("禁止フローの前提 step {step} が実行できない（trace が壊れている）")
+                    }
+                    ForbiddenFailure::Other => {
+                        "禁止フローの検査がエラーで止まった（付録の生 JSON を参照）".to_owned()
+                    }
+                }
             } else {
                 format!(
                     "受入シナリオが不成立（step {}）",
@@ -389,6 +408,44 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
     findings
 }
 
+/// What a `trace_type: "forbidden"` error reports. Only `Accepted` carries an
+/// accepted final step; no other shape is evidence of a missing guard.
+enum ForbiddenFailure<'a> {
+    Accepted,
+    /// The final step is enabled and stops with a runtime violation (#1213).
+    Violation(&'a str, &'a str),
+    /// The final step names no action, or no variant of that arity.
+    Unresolved(&'a str),
+    /// An argument of the final step is outside an `entity` / `number`
+    /// verify scope, so no guard decided it (#1229).
+    OutsideScope(&'a str),
+    /// A setup step is not enabled or not ok (`forbidden_setup`).
+    Setup(String),
+    Other,
+}
+
+fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
+    match raw.get("kind").and_then(Value::as_str) {
+        Some("forbidden_setup") => ForbiddenFailure::Setup(
+            raw.get("failed_step")
+                .map_or_else(|| "null".to_owned(), Value::to_string),
+        ),
+        Some("forbidden") if raw.get("violation").is_some() => ForbiddenFailure::Violation(
+            raw["violation"]["kind"].as_str().unwrap_or(""),
+            raw["violation"]["name"].as_str().unwrap_or(""),
+        ),
+        Some("forbidden") if raw.get("accepted_step").is_some() => ForbiddenFailure::Accepted,
+        Some("forbidden") if raw.get("out_of_scope_argument").is_some() => {
+            ForbiddenFailure::OutsideScope(raw.get("message").and_then(Value::as_str).unwrap_or(""))
+        }
+        Some("forbidden") => raw
+            .get("message")
+            .and_then(Value::as_str)
+            .map_or(ForbiddenFailure::Other, ForbiddenFailure::Unresolved),
+        _ => ForbiddenFailure::Other,
+    }
+}
+
 fn escape(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
 }
@@ -399,10 +456,32 @@ fn translate(finding: &Finding) -> String {
             "業務経路『{}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。",
             finding.name
         ),
-        "forbidden" => format!(
-            "禁止フロー『{}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。",
-            finding.name
-        ),
+        "forbidden" => match forbidden_failure(&finding.raw) {
+            ForbiddenFailure::Accepted => format!(
+                "禁止フロー『{}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。",
+                finding.name
+            ),
+            ForbiddenFailure::Violation(..) => format!(
+                "禁止フロー『{}』の最後の操作をガードが拒否せず、実行すると実行時違反になる。拒否すべきならガードを追加し、許容すべきなら違反を直して禁止フローを見直す。",
+                finding.name
+            ),
+            ForbiddenFailure::Unresolved(_) => format!(
+                "禁止フロー『{}』の最後の手順が仕様の action を指しておらず、禁止を判定できない。action 名か引数の数を直す。",
+                finding.name
+            ),
+            ForbiddenFailure::OutsideScope(_) => format!(
+                "禁止フロー『{}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。",
+                finding.name
+            ),
+            ForbiddenFailure::Setup(_) => format!(
+                "禁止フロー『{}』の前提手順が実行できず、禁止の判定に至っていない。前提手順を直す。",
+                finding.name
+            ),
+            ForbiddenFailure::Other => format!(
+                "禁止フロー『{}』の検査がエラーで止まった。付録の生 JSON を確認する。",
+                finding.name
+            ),
+        },
         "acceptance" => format!(
             "受入シナリオ『{}』が成立しない。仕様か受入条件のどちらが正かを責任者が確定する。",
             finding.name
@@ -442,7 +521,16 @@ fn next_action(finding: &Finding) -> String {
     finding.next_action.clone().unwrap_or_else(|| {
         match finding.trace_type.as_str() {
             "reachable" => "受入条件に到達 trace を追加 / ガードを緩める",
-            "forbidden" => "ガードを追加 / 責任者がリスク受容",
+            "forbidden" => match forbidden_failure(&finding.raw) {
+                ForbiddenFailure::Accepted => "ガードを追加 / 責任者がリスク受容",
+                ForbiddenFailure::Violation(..) => "ガードを追加 / 違反を直して禁止フローを見直す",
+                ForbiddenFailure::Unresolved(_) => "禁止フローの step の action 名・引数を修正",
+                ForbiddenFailure::OutsideScope(_) => {
+                    "検証の範囲を広げる / step の引数を範囲内に直す"
+                }
+                ForbiddenFailure::Setup(_) => "禁止フローの前提手順を修正",
+                ForbiddenFailure::Other => "付録の生 JSON を確認",
+            },
             "acceptance" => "仕様 or 受入条件を修正",
             "sla" => "urgent 前提 or 期限値を見直し",
             "refinement" => "mapping / ガードを修正",

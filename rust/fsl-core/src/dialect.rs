@@ -157,6 +157,8 @@ pub struct RequirementsTraceCase {
 pub struct RequirementsTraceContract {
     pub acceptance: Vec<RequirementsTraceCase>,
     pub forbidden: Vec<RequirementsTraceCase>,
+    /// The source's [`verify_scope_type_names`].
+    pub scope_types: BTreeSet<String>,
 }
 
 fn qualified(name: &str) -> QualifiedName {
@@ -3206,6 +3208,7 @@ pub fn requirements_trace_contract(
         .map(|process| process.process)
         .collect::<Vec<_>>();
     let stage_resolver = StageResolver::new(&stage_processes);
+    let scope_types = requirements_scope_type_names(&requirements);
     let mut acceptance = Vec::new();
     let mut forbidden = Vec::new();
     let mut acceptance_ids = BTreeSet::new();
@@ -3288,7 +3291,66 @@ pub fn requirements_trace_contract(
     Ok(Some(RequirementsTraceContract {
         acceptance,
         forbidden,
+        scope_types,
     }))
+}
+
+/// The type names whose finite domain is the `verify { instances / values }`
+/// scope rather than a declared type: every `entity` and `number`, and every
+/// business / requirements `process` (lowered as an entity). An implementation
+/// has no such bound, so a value outside the scope is not outside the type
+/// (#1229).
+///
+/// `None` for a document whose entity / number types are not all declared in
+/// its own source: a compose takes them from its components, and the other
+/// dialects generate them while lowering.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the source cannot be parsed.
+pub fn verify_scope_type_names(source: &str) -> Result<Option<BTreeSet<String>>, CoreError> {
+    Ok(match fsl_syntax::parse_surface_document(source)? {
+        SurfaceDocument::Spec(spec) => Some(
+            spec.items
+                .iter()
+                .filter_map(|item| match item {
+                    SpecItem::Entity(name, _) | SpecItem::Number(name, _) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        SurfaceDocument::Business(business) => Some(
+            business
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    BusinessItem::Entity(name, _) => Some(name.clone()),
+                    BusinessItem::Process { name, .. } => Some(name.name().to_owned()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        SurfaceDocument::Requirements(requirements) => {
+            Some(requirements_scope_type_names(&requirements))
+        }
+        _ => None,
+    })
+}
+
+fn requirements_scope_type_names(requirements: &SurfaceRequirements) -> BTreeSet<String> {
+    requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Common(SpecItem::Entity(name, _) | SpecItem::Number(name, _)) => {
+                Some(name.clone())
+            }
+            RequirementsItem::Process(BusinessItem::Process { name, .. }) => {
+                Some(name.name().to_owned())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Every requirement-block ID a requirements-layer source declares (`requirement
