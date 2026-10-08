@@ -1519,28 +1519,33 @@ pub struct RefinementFailure {
     pub impl_trace: Vec<TraceStep>,
 }
 
+/// The result of [`check_refinement`]. Every field is private (issue #1262):
+/// the outcome is read only through [`RefinementCheck::verdict`], so a
+/// consumer cannot read `failure`/`impl_violation` and silently fall through
+/// to `refines` on a walk the state budget cut off. Before this, `fslc diff`
+/// and the `fslc mutate` implements oracle did exactly that.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct RefinementCheck {
-    pub implementation: String,
-    pub abstraction: String,
-    pub depth: usize,
-    pub action_map: BTreeMap<String, String>,
-    pub abs_has_ensures: bool,
-    pub failure: Option<RefinementFailure>,
+    implementation: String,
+    abstraction: String,
+    depth: usize,
+    action_map: BTreeMap<String, String>,
+    abs_has_ensures: bool,
+    failure: Option<RefinementFailure>,
     /// Set instead of `failure` when the implementation violates its own
     /// semantics (a type bound, invariant, `trans`, `ensures`, or
     /// `partial_op`) within `depth`, independent of the refinement mapping.
     /// This is a property of the refinement *input* (the impl spec is
     /// broken on its own), not a refinement fidelity verdict, so it must
     /// never be reported as `refines` or folded into `refinement_failed`.
-    pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
+    impl_violation: Option<(Violation, Vec<TraceStep>)>,
     /// Set to the walk's `visited.len()` at the cutoff when the
     /// correspondence walk hit its state-count budget before exhausting the
     /// reachable set within `depth` (issue #1041): the search stopped
     /// early, so neither `refines` nor a decided `failure`/`impl_violation`
     /// would be true -- reporting either would be a false result.
-    pub budget_exhausted: Option<usize>,
+    budget_exhausted: Option<usize>,
 }
 
 /// The one decided reading of a [`RefinementCheck`]: every caller that turns
@@ -1567,12 +1572,60 @@ pub enum RefinementVerdict<'a> {
 }
 
 impl RefinementCheck {
+    /// The implementation spec's name.
+    #[must_use]
+    pub fn implementation(&self) -> &str {
+        &self.implementation
+    }
+
+    /// The abstraction spec's name.
+    #[must_use]
+    pub fn abstraction(&self) -> &str {
+        &self.abstraction
+    }
+
+    /// The depth the check was asked to cover. Not a claim that it was
+    /// covered: a [`RefinementVerdict::BudgetExhausted`] walk stopped short.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    /// Implementation action name to its mapped abstract action (or
+    /// `stutter`). Empty when the implementation violated its own semantics
+    /// before the mapping was read.
+    #[must_use]
+    pub fn action_map(&self) -> &BTreeMap<String, String> {
+        &self.action_map
+    }
+
+    /// Whether any abstract action declares `ensures`.
+    #[must_use]
+    pub fn abs_has_ensures(&self) -> bool {
+        self.abs_has_ensures
+    }
+
     /// Read this check as exactly one verdict. `check_refinement_with_budget`
     /// sets at most one of `budget_exhausted`, `impl_violation` and
     /// `failure`; the order here only fixes which one wins should that ever
     /// stop holding, and it puts the undecided outcome first so a decided
     /// verdict is never read off an incomplete walk.
+    ///
+    /// Debug builds also assert that at most one outcome field is set, so
+    /// every caller (and every test) that reads a verdict re-checks that
+    /// `check_refinement_with_budget` never reports two outcomes at once.
     pub fn verdict(&self) -> RefinementVerdict<'_> {
+        debug_assert!(
+            usize::from(self.budget_exhausted.is_some())
+                + usize::from(self.impl_violation.is_some())
+                + usize::from(self.failure.is_some())
+                <= 1,
+            "check_refinement set more than one outcome: {self:?}"
+        );
+        self.precedence_verdict()
+    }
+
+    fn precedence_verdict(&self) -> RefinementVerdict<'_> {
         if let Some(states_explored) = self.budget_exhausted {
             RefinementVerdict::BudgetExhausted { states_explored }
         } else if let Some((violation, trace)) = &self.impl_violation {
@@ -4058,4 +4111,85 @@ pub fn value_conforms(
         (Value::Some(value), TypeRef::Option(inner)) => value_conforms(value, inner, model)?,
         _ => false,
     })
+}
+
+/// The precedence [`RefinementCheck::verdict`] fixes when more than one
+/// outcome field is set. `check_refinement_with_budget` never produces such a
+/// check, and the fields are private (#1262), so this can only be built here.
+/// The end-to-end readings are covered by `tests/refinement_verdict.rs`.
+#[cfg(test)]
+mod refinement_verdict_precedence {
+    use super::{BTreeMap, RefinementCheck, RefinementFailure, RefinementVerdict, Violation};
+
+    fn check(
+        failure: Option<RefinementFailure>,
+        impl_violation: Option<Violation>,
+        budget_exhausted: Option<usize>,
+    ) -> RefinementCheck {
+        RefinementCheck {
+            implementation: "Impl".to_owned(),
+            abstraction: "Abs".to_owned(),
+            depth: 6,
+            action_map: BTreeMap::new(),
+            abs_has_ensures: false,
+            failure,
+            impl_violation: impl_violation.map(|violation| (violation, Vec::new())),
+            budget_exhausted,
+        }
+    }
+
+    fn failure() -> RefinementFailure {
+        RefinementFailure {
+            kind: "stutter_changed_abs".to_owned(),
+            at: None,
+            step: 4,
+            impl_action: None,
+            alpha_before: None,
+            alpha_after_expected: None,
+            alpha_after_actual: None,
+            impl_trace: Vec::new(),
+        }
+    }
+
+    fn violation() -> Violation {
+        Violation {
+            kind: "type_bound".to_owned(),
+            name: "n".to_owned(),
+            step: 1,
+        }
+    }
+
+    /// `verdict()` itself refuses a check with two outcomes in debug builds.
+    #[test]
+    #[should_panic(expected = "more than one outcome")]
+    fn verdict_rejects_two_outcome_fields_in_debug_builds() {
+        let _ = check(Some(failure()), None, Some(7)).verdict();
+    }
+
+    #[test]
+    fn no_outcome_field_reads_as_refines() {
+        assert_eq!(
+            check(None, None, None).verdict(),
+            RefinementVerdict::Refines
+        );
+    }
+
+    /// The undecided cutoff first, so a decided verdict is never read off an
+    /// incomplete walk; then the impl's own violation; then the mismatch.
+    #[test]
+    fn the_cutoff_wins_over_every_decided_field() {
+        let expected_failure = failure();
+        assert_eq!(
+            check(Some(failure()), Some(violation()), Some(7)).precedence_verdict(),
+            RefinementVerdict::BudgetExhausted { states_explored: 7 }
+        );
+        assert!(matches!(
+            check(Some(failure()), Some(violation()), None).precedence_verdict(),
+            RefinementVerdict::ImplViolated { violation, .. } if violation.kind == "type_bound"
+        ));
+        assert_eq!(
+            check(Some(failure()), None, None).verdict(),
+            RefinementVerdict::Failed(&expected_failure)
+        );
+    }
 }
