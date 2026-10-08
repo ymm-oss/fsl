@@ -199,6 +199,25 @@ pub fn action_partial_operations<'a>(
     sites
 }
 
+/// Whether `statement` -- binder parts, `where` and body included -- contains a
+/// partial operation, classified like [`action_partial_operations`] (an index
+/// read counts only on a `Seq`, an uninferable one counts). `env` is the
+/// statement's enclosing scope; a name it cannot type keeps a read, so the
+/// answer errs toward `true`.
+pub(crate) fn statement_has_partial_operation(
+    statement: &Statement,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> bool {
+    let mut scope = Typed {
+        env: env.clone(),
+        model,
+    };
+    let mut sites = Vec::new();
+    collect_statement(statement, &mut scope, &mut sites);
+    !sites.is_empty()
+}
+
 fn collect<'a, S: Scope>(
     clause: &'a Expr,
     span: Span,

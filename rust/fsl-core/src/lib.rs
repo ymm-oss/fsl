@@ -1966,7 +1966,7 @@ fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
     });
 }
 
-fn substitute_binder<S: std::hash::BuildHasher>(
+pub(crate) fn substitute_binder<S: std::hash::BuildHasher>(
     binder: Binder,
     replacements: &HashMap<String, Expr, S>,
     indexed: &IndexedReplacements,

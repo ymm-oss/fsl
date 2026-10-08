@@ -956,9 +956,9 @@ pub struct PartialInventoryModel {
 /// and what the Public Kernel is expected to list for it.
 ///
 /// `explain` lists one site per authored occurrence. The Public Kernel instead
-/// expands a quantifier or aggregate into one term per finite candidate
-/// (`finite_binder_candidates`), so one authored site becomes
-/// `kernel_authored` entries. A collection binder over a `Seq` also
+/// expands a quantifier, an aggregate or a statement-level `forall` into one
+/// term per finite candidate (`finite_binder_candidates`), so one authored
+/// site becomes `kernel_authored` entries. A collection binder over a `Seq` also
 /// synthesizes one `collection.at(i)` read per candidate; the Kernel lists
 /// those `at`s too (`kernel_binder_reads`), each with a failure condition
 /// guarded by the candidate's own `i < collection.size()` membership, so they
@@ -971,9 +971,6 @@ pub struct PartialInventoryPlacement {
     pub template: &'static str,
     pub kernel_authored: usize,
     pub kernel_binder_reads: usize,
-    /// Why the Public Kernel omits this placement's site, if it does. Live: the
-    /// test requires the Kernel to list nothing here, so a fix must delete it.
-    pub kernel_exclusion: Option<&'static str>,
 }
 
 const fn placement(
@@ -987,13 +984,12 @@ const fn placement(
         template,
         kernel_authored,
         kernel_binder_reads,
-        kernel_exclusion: None,
     }
 }
 
 /// Every placement is in action context and outside `requires`/`let`, so the
 /// failure is a `partial_op` verdict. `K` has three values and `s` capacity 2.
-pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 9] = [
+pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 13] = [
     placement("plain", "y = OP", 1, 0),
     placement(
         "quantifier_body",
@@ -1019,19 +1015,34 @@ pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 9] = [
     placement("aggregate_value", "y = sum(k in 0..0 of OP)", 1, 0),
     placement("ensures", "y = 1\n    ensures OP == 0", 1, 0),
     placement("assignment_target", "m[OP] = 1", 1, 0),
-    PartialInventoryPlacement {
-        kernel_exclusion: Some(
-            "the Public Kernel does not walk a statement-level forall binder, and walking \
-             its body already fails closed ('cannot type identifier') because the binder is \
-             not in scope; follow-up to #1166",
-        ),
-        ..placement(
-            "forall_statement_where",
-            "forall k: K where OP == k { m[k] = 1 }",
-            0,
-            0,
-        )
-    },
+    // A statement-level `forall` is expanded like a quantifier: one entry per
+    // candidate, guarded by its membership and `where` (#1190).
+    placement(
+        "forall_statement_where",
+        "forall k: K where OP == k { m[k] = 1 }",
+        3,
+        0,
+    ),
+    placement(
+        "forall_statement_range_where",
+        "forall k in 0..2 where OP == k { m[k] = 1 }",
+        3,
+        0,
+    ),
+    placement("forall_statement_body", "forall k: K { m[k] = OP }", 3, 0),
+    // `where` excludes `k == 0`; its entry is still listed, guarded false.
+    placement(
+        "forall_statement_body_where",
+        "forall k: K where k > 0 { m[k] = OP }",
+        3,
+        0,
+    ),
+    placement(
+        "forall_statement_body_binder",
+        "forall k: K { m[k] = if k >= 0 then OP else 0 }",
+        3,
+        0,
+    ),
 ];
 
 /// The expression that fails for each partial operation in the initial state

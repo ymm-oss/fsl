@@ -122,9 +122,14 @@ declaration with no registered `OriginChain`:
   several entries, and a `Seq` collection binder adds one synthesized
   `collection.at(i)` read per candidate whose failure condition is guarded by
   that candidate's own `i < collection.size()` membership and so cannot fire;
-  the test counts both explicitly and proves the guard structurally. The Public
-  Kernel still omits a statement-level `forall` binder's site, a live exclusion
-  recorded in that test.
+  the test counts both explicitly and proves the guard structurally. A
+  statement-level `forall` is expanded the same way (#1190): one entry per
+  candidate for its binder's `where` and for every partial operation in its
+  body, with the binder replaced by the candidate and the failure condition
+  guarded by the candidate's membership and `where`. Before #1190 the Kernel
+  skipped the binder and walked the body with the binder out of scope, so a
+  body operation that read the binder failed `fslc kernel` with "cannot type
+  identifier"; the test's exclusion row for that placement is gone.
 - **Branch lowering and generated declarations carried no provenance.**
   `branches { when P { … } maps Q }` in a `requirements` action lowers to one
   physical Kernel action per branch, named `name__bN` (issue #528); the SLA
