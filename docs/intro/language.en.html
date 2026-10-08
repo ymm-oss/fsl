@@ -441,8 +441,11 @@ ones — and an <code>expect</code> error is excused only when the same <code>ex
 in the declared world; a reference outside the declared bounds (so a no-op or
 unrelated override) or an <code>expect</code> error the declared world shares (a division
 by zero) stays the unscoped hard error. A forbidden scenario whose <em>final</em> step
-is "rejected" only because the override removed its argument tested no guard,
-so it is reported as <code>forbidden_skipped</code> rather than counted as satisfied. These
+is outside the overridden scope only because the override removed its argument
+tested no guard, so it is reported as <code>forbidden_skipped</code> rather than counted as
+satisfied; a final step outside the declared scope is the unscoped
+<code>kind:"forbidden"</code> error (#1229), unless the override widens the scope to
+include it, in which case the guard is evaluated. These
 three conditions are stricter than the frozen Python reference, which skips any
 out-of-range reference, excuses any <code>expect</code> error that mentions one, and counts
 an out-of-range final step as a rejection. This is what makes <code>--instances Case=1
@@ -1157,7 +1160,24 @@ refinement in both directions: NEW→OLD failure is <code>behavior_added</code>,
 OLD→NEW failure is <code>behavior_removed</code>. It separately checks implication between
 the conjunctions of user invariants (<code>invariant_weakened</code> /
 <code>invariant_strengthened</code>) and replays OLD <code>forbidden</code> scenarios against NEW
-(<code>forbidden_relaxed</code>). Directional failures include counterexample witnesses.
+(<code>forbidden_relaxed</code>). A NEW final step that its guard disables preserves the
+OLD rejection, and so does a final step both sides reject as <code>bad_call</code> outside
+a range or enum parameter type. Each side is classified with its own <code>entity</code> /
+<code>number</code> types: since #1229 an OLD final step outside its verify scope is
+<code>unknown</code> / <code>forbidden_replay_failed</code> (no OLD guard rejected it), and an OLD
+<code>bad_call</code> that only NEW's scope excludes is <code>unknown</code> /
+<code>forbidden_step_unrelatable</code> (before #1229 both were
+<code>forbidden_step_unrelatable</code>). A compose NEW, or a NEW of another dialect whose
+<code>entity</code> / <code>number</code> types are not in its source, never preserves an OLD
+<code>bad_call</code>; before #1229 a compose NEW that rejected the step as <code>bad_call</code>
+did, so such a forbidden now fails <code>--forbid unknown</code>. An OLD final step naming no action or arity is
+<code>unknown</code> / <code>forbidden_replay_failed</code>. Since #1213 a NEW final step that is
+enabled and then stops with a runtime violation is <code>forbidden_relaxed</code>, and an
+OLD final step or a NEW setup step that violates is <code>unknown</code> /
+<code>forbidden_replay_failed</code> (known gap #1239: a guard-disabled NEW setup step is
+also reported as preserved; see
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a>, "Forbidden
+replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
 are <code>unknown</code> unless <code>--mapping</code> supplies that direction. An arbitrary mapping
 is never inverted automatically.</p>
@@ -1287,8 +1307,8 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 </tr>
 <tr>
 <td><code>unknown_budget</code></td>
-<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or an inline <code>implements Abs from "file" { }</code> seam's correspondence search exceeded its fixed internal state budget (<code>check</code>/<code>verify</code>, no CLI flag)</td>
-<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For an inline <code>implements</code> seam: narrow the domain, or verify the layers separately with <code>fslc refine</code>/<code>fslc verify</code> instead of the combined check</td>
+<td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline <code>implements Abs from "file" { }</code> seam (<code>check</code>/<code>verify</code>), <code>fslc refine</code> (single or chain), a <code>fslc chain</code> refine layer, or a governance <code>preservation</code> (§10, §13)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> and <code>fslc mutate</code> do not read this cutoff yet (<code>diff</code> reports <code>no_semantic_change</code> / exit 0, <code>mutate</code> counts the mutant as survived)</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1713,6 +1733,20 @@ and abs, not a defect in the impl alone). <code>fslc diff</code> surfaces the sa
 condition as an <code>impl_violated</code> finding and fails its gate unconditionally
 (not subject to <code>--forbid</code>), since a self-violating side makes the
 comparison itself untrustworthy.</p>
+<p>The correspondence check that follows visits at most a fixed number of
+distinct impl states (50,000; no CLI flag — the same internal budget an inline
+<code>implements</code> seam uses, §13). When it reaches that budget before deciding
+within <code>--depth</code>, <code>refine</code> reports <code>result: "unknown_budget"</code> (exit 1) with
+<code>states_explored</code> and a <code>hint</code>, never <code>refines</code>: the unvisited part of the
+reachable set may still hold a mismatch. Lower <code>--depth</code>, or narrow the
+<code>verify {}</code> domains (<code>instances</code>/<code>values</code>) of both specs. A chain check stops
+at that link (<code>failed_link.kind</code> is <code>null</code>), a <code>fslc chain</code> refine layer fails
+with <code>result: "unknown_budget"</code>, and a governance <code>preservation</code> reports
+<code>unknown_budget</code> as its <code>result</code>. This changed verdicts: a refinement whose
+correspondence check reaches the budget used to report <code>refines</code> (exit 0).
+The self-consistency precondition above has no such budget. <code>fslc diff</code> and
+<code>fslc mutate</code> do not read this cutoff yet: <code>fslc diff</code> still reports
+<code>no_semantic_change</code> (exit 0) and <code>fslc mutate</code> counts the mutant as survived.</p>
 <p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
 unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
 full type domain, not a value silently defaulted — <code>refine</code> checks it that
@@ -2519,7 +2553,10 @@ for a control that was never written.</p>
 </code></pre>
 <p><code>fslc check governance.fsl</code> validates all referenced controls, business files,
 policies/goals, and preservation files. Preservation blocks also run the declared
-refinement at depth 8 and report results under <code>governance.preservations</code>.</p>
+refinement at depth 8 and report results under <code>governance.preservations</code>:
+<code>refines</code>, <code>refinement_failed</code>, <code>violated</code> (the <code>after</code> spec breaks its own
+semantics, §10), or <code>unknown_budget</code> (the correspondence check reached its
+state budget, §10). The browser Worker reports the same values.</p>
 <h3 id="134-how-to-write-non-functional-requirements-nfrs">13.4 How to write non-functional requirements (NFRs)</h3>
 <p>The majority of NFRs can be written with the same machinery as functional
 requirements (details and demonstration in <code>DESIGN-nfr.md</code>):</p>
@@ -2954,10 +2991,74 @@ DESIGN-*.md).</p>
 <ul>
 <li><strong><code>forbidden</code> (negative acceptance criteria)</strong> — a requirements-dialect
   construct. Write an "operation sequence that should be rejected," and at check
-  time it is replay-verified that the last step is rejected (not-enabled or a
-  violation). If it is accepted, <code>kind:"forbidden"</code> (detection of
+  time it is replay-verified that the last step is rejected, i.e. not enabled
+  because a guard refuses it or its argument is outside the declared type.
+  If it is accepted, <code>kind:"forbidden"</code> (detection of
   under-constraint = a missing guard, which a safety invariant stays silent
-  about). The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
+  about). <strong>Since #1213 (breaking)</strong> a last step that is enabled and then
+  stops with a runtime violation (<code>invariant</code> / <code>trans</code> / <code>ensures</code> /
+  <code>type_bound</code> / <code>partial_op</code>) is also <code>kind:"forbidden"</code>, with a <code>violation</code> field: a
+  violation is not a rejection. Earlier versions counted it as satisfied; to
+  migrate, add the <code>requires</code> that rejects the call. There is no opt-out.
+  Because this check runs before BMC and induction, <code>verify</code> on such a spec now
+  ends with this error (exit 2) at any <code>--depth</code> and engine, where earlier
+  versions reported whatever the engine reached: with BMC, <code>violated</code> (exit 1)
+  when the depth reached the violation, <code>verified</code> (exit 0) when it did not;
+  with <code>--engine induction</code>, its own verdict. Every other command that runs this
+  check exits 2 too (<code>scenarios</code> and <code>testgen</code> with no scenario and no test
+  file; <code>html</code> and <code>ledger</code> still write their report), except three:
+  <code>explain</code> still exits 0 with no witnesses (known gap #1242: <code>explain</code>
+  discards the gate's error, and so does the witnesses section of <code>html</code>);
+  <code>approval create --kind ledger</code> exits 0 with a record of the ledger, which
+  lists the error — where the depth reached the violation it used to exit 2
+  only because that ledger embeds wall-clock <code>elapsed_s</code> (whether a ledger
+  whose forbidden gate fails may be approved is tracked by #1243); and
+  <code>approval check</code> of a ledger record created before reports <code>drifted</code>
+  (exit 0). <code>fslc diff</code> reports the violation (below).
+  The measured before/after of each command, exit status and output, is in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
+  The scenario's <code>rejected_by</code> (asserted by testgen) is
+  <code>requires_failed</code> for a guard refusal and <code>bad_call</code> for an argument outside
+  the declared range or enum type of its parameter (an implementation must
+  reject it at its decoding boundary). <strong>Since #1229 (breaking)</strong> an argument
+  outside the verification scope of an <code>entity</code> (<code>verify { instances }</code>, which
+  also bounds a <code>process</code>) or <code>number</code> (<code>verify { values }</code>) parameter is not a
+  rejection: under <code>instances Case = 3</code>, a last step <code>accept(7)</code> evaluates no
+  guard, and an implementation, which has no such bound, may accept that call.
+  It is a <code>kind:"forbidden"</code> error with <code>out_of_scope_argument</code> (<code>{parameter,
+  value, type, scope}</code>). To migrate, widen the scope to include the value, or
+  move the argument inside the scope so the guard is tested. Under a
+  <code>--instances</code> / <code>--values</code> override that alone removed the argument, the
+  forbidden is reported as <code>forbidden_skipped</code> (not evaluated) instead. A last
+  step naming no action, or no variant of that arity, is a <code>kind:"forbidden"</code>
+  error with a <code>message</code>, not a rejection. Both are breaking changes: such a
+  step used to satisfy the forbidden (one naming no callable action through
+  4.8.1, one outside the verification scope as <code>requires_failed</code> before #1212
+  and <code>bad_call</code> since), so <code>check</code> passed, and what the other commands
+  reported depended on the rest of the spec: <code>verify</code>, <code>sweep</code>, <code>chain</code>,
+  <code>mutate</code>, <code>html</code>, and <code>ledger</code> exited 0 when it verified and 1 when it did
+  not, while <code>scenarios</code>, <code>testgen</code>, <code>counterexample export</code>, and <code>approval
+  create</code> could also exit 2. Now <code>check</code>, <code>verify</code> (every engine), <code>sweep</code>,
+  <code>chain</code>, <code>scenarios</code>, <code>testgen</code>, the <code>mutate</code> baseline, <code>counterexample
+  export</code>, <code>html</code>, <code>ledger</code>, and <code>approval create --kind scenarios</code> / <code>html</code>
+  exit 2 and report no verdict, counterexample, scenario, test, or mutant for
+  the rest of the spec. <code>html</code>, <code>ledger</code>, and <code>approval create --kind html</code>
+  print the generated result (<code>result: "generated"</code>) with the error inside
+  the report (<code>html</code> and <code>ledger</code> still write their report); <code>chain</code> reports
+  it as the <code>[requirements]</code> layer's <code>detail</code>; the others print the error
+  (<code>error</code> / <code>kind: "forbidden"</code>). <code>approval check</code> of a <code>scenarios</code> or <code>html</code> record created
+  before exits 2. Three do not exit 2: <code>explain</code> still exits 0, with no
+  witnesses (known gap #1242: <code>explain</code> discards the gate's error, and so
+  does the witnesses section of <code>html</code>); <code>approval create --kind ledger</code>
+  exits 0 with a record of the ledger, which lists the error — on a spec
+  whose rest has a violation it used to exit 2 only because that ledger
+  embeds wall-clock <code>elapsed_s</code> (whether a ledger whose forbidden gate fails
+  may be approved is tracked by #1243); and <code>approval check</code> of a ledger record
+  created before reports <code>drifted</code> (exit 0). <code>fslc diff</code> changes forbidden
+  verdicts for both steps, which can change a <code>--forbid unknown</code> exit. The
+  before/after of every command, measured, is in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
+  The dual of <code>acceptance</code> (must-allow). → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a></li>
 <li><strong>Vacuity check (<code>--vacuity</code>)</strong> — on the verified/proved path, warns about
   <code>never_enabled_action</code> (an action has no enabled instance through the checked
   depth; bounded evidence, not a permanent-dead proof), <code>vacuous_implication</code>

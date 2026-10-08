@@ -467,6 +467,12 @@ impl SmtSolver for Z3Solver {
         Ok(())
     }
 
+    fn reset(&mut self) -> SolverResult<()> {
+        self.solver.reset();
+        self.stack_depth = 0;
+        Ok(())
+    }
+
     fn assert(&mut self, term: &Self::Term) -> SolverResult<()> {
         self.solver.assert(expect_bool(term)?);
         Ok(())
@@ -629,6 +635,24 @@ mod tests {
             SatResult::Unsat
         );
         assert_eq!(solver.unsat_core()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn reset_drops_assertions_and_scopes_but_keeps_terms() -> SolverResult<()> {
+        let mut solver = Z3Solver::new()?;
+        let x = solver.constant("reset_x", &Sort::Int)?;
+        let one = solver.int_value(1);
+        solver.assert(&solver.equal(&x, &one)?)?;
+        solver.push();
+        solver.assert(&solver.equal(&x, &solver.int_value(2))?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Unsat);
+
+        solver.reset()?;
+        assert!(solver.pop(1).is_err(), "reset must clear the scope stack");
+        solver.assert(&solver.equal(&x, &solver.int_value(2))?)?;
+        assert_eq!(block_on_ready(solver.check())?, SatResult::Sat);
+        assert_eq!(solver.model_eval(&x)?, Some(ModelValue::Int(2)));
         Ok(())
     }
 }

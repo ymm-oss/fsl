@@ -164,6 +164,10 @@ impl SmtSolver for FirstCheckFault {
         self.inner.pop(levels)
     }
 
+    fn reset(&mut self) -> SolverResult<()> {
+        self.inner.reset()
+    }
+
     fn assert(&mut self, term: &Self::Term) -> SolverResult<()> {
         self.inner.assert(term)
     }
