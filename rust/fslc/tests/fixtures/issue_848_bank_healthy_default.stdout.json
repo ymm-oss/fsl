@@ -49,7 +49,7 @@
       },
       "target": "init assignment",
       "status": "killed",
-      "killed_by": "NonNegative",
+      "killed_by": "build_spec",
       "requirement": null,
       "source": "builtin"
     },

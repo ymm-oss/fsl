@@ -69,7 +69,15 @@ array alongside its existing state-exploration fields.
 The current kinds are `init`, `type_bound`, `invariant`, `trans`, `ensures`,
 `reachable`, `action_coverage`, `deadlock`, `leadsTo`, and `leadsTo_rank`.
 Names are stable Kernel property or action identifiers; `initial_state` and
-`deadlock` name their structural checks. Witness reconstruction remains charged
+`deadlock` name their structural checks. BMC's per-step definedness check over
+every action instance's guard and enabled body is charged to `partial_op` /
+`actions` (#1240), together with the range-lemma queries that serve it (an
+`Int` state leaf's bound, kept only when the solver proves it entailed); only
+when it is satisfiable are the per-instance queries asked, charged to
+`partial_op` / `<action>`. That check runs as a second pass on the reset
+solver, after the search has produced every witness, so the `partial_op` /
+`<action>` rows also count that pass's typed probes alongside the search's
+own. Witness reconstruction remains charged
 to the property whose satisfiability query produced it.
 
 The JSON Lines event stream is outside this contract. Cached verdicts retain

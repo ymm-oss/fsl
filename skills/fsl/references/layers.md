@@ -97,9 +97,10 @@ the relevant role skill directs it.
   then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
   accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
-  verifies at check time that the last step is rejected (not-enabled or a
-  violation) — if accepted, `kind: "forbidden"`. Carried fields (`f: T`) accept
-  `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
+  verifies at check time that the last step is rejected (not enabled; neither a
+  runtime violation, since #1213, nor an argument outside the `entity` / `number`
+  verify scope, since #1229, counts) — otherwise `kind: "forbidden"`.
+  Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
   required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
   `branches`, and explicit `maps` only for hard cases such as multi-entity
   behavior, conservation rules, SLA/time, or history that needs kernel state.
@@ -331,8 +332,9 @@ verify {
   requirements spec breaks its own bounds/invariants, so no refinement verdict
   was reached) / `unknown_budget` (the correspondence search hit its fixed
   internal state-count budget before deciding, with `implements.states_explored`
-  — narrow the domain, or verify the layers separately with `fslc refine`/
-  `fslc verify`; there is no CLI flag to raise this budget), plus `violation`
+  — narrow the domain, or verify each layer separately with `fslc verify`;
+  `fslc refine` shares the same budget and reports `unknown_budget` too;
+  there is no CLI flag to raise this budget), plus `violation`
   on the two failing (not budget-exhausted) values. A failing seam makes the
   command exit 1 with the same top-level `result`
   (`refinement_failed`/`impl_violated`/`unknown_budget`). Read
@@ -352,13 +354,39 @@ verify {
   == `answer(0, 1)`); an undefined name is a check-time error.
 - `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
-  **the last step is rejected** (not-enabled, or an
-  invariant/type_bound/partial_op/ensures violation). If accepted,
+  **the last step is rejected**, i.e. not enabled. If accepted,
   `kind: "forbidden"` (detection of under-constraint = a missing guard that a safety
-  invariant stays silent about); if the premise is not enabled,
+  invariant stays silent about). Since #1213 an enabled last step that stops
+  with an invariant/trans/ensures/type_bound/partial_op violation is also
+  `kind: "forbidden"` (with `violation`): a violation is not a rejection, so write
+  the `requires` that rejects the call; every command that runs this check then
+  exits 2, except `explain` (exit 0, no witnesses; known gap #1242), `approval
+  create --kind ledger` (exit 0, records a ledger that lists the error; #1243),
+  and `approval check` of a ledger record (`drifted`, exit 0)
+  (`docs/design/DESIGN-forbidden.md` §2.1). If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
-  `rejected_by` — anything other than `requires_failed` means the spec itself is a
-  verify violation).
+  `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
+  outside the parameter's declared range or enum type). Since #1229 a last step
+  whose argument is outside the `verify { instances / values }` scope of an
+  `entity` / `number` parameter (a `process` counts as an `entity`), such as
+  `accept(7)` under `instances Case = 3`, is not a rejection: no guard was
+  evaluated and an implementation may accept it. It is a `kind: "forbidden"`
+  error with `out_of_scope_argument` — widen the scope or move the argument
+  inside it. Under a `--instances` / `--values` override that alone removed the
+  argument, the forbidden is `forbidden_skipped` instead. Breaking: such a step
+  used to satisfy the forbidden (as `requires_failed` before #1212, `bad_call`
+  since), so `check` passed. A last
+  step naming no action or no variant of that arity is a `kind: "forbidden"`
+  error with a `message`, not a rejection (breaking after 4.8.1: `check` used to
+  pass, and what the other commands reported depended on the rest of the spec).
+  On either step every command that runs this check now exits 2 with no
+  verdict, scenario, or test, except `explain`, which exits 0 with no
+  witnesses (known gap #1242), `approval create --kind ledger`, which exits 0
+  and records a ledger that lists the error (#1243), and `approval check` of a
+  ledger record, which reports `drifted` (exit 0). `fslc diff` replays the
+  forbidden too but reports a finding whose exit status follows `--forbid`, and
+  an override that alone removed the argument gives `forbidden_skipped` as
+  above, with the exit status of the rest of the spec (0 when it verifies) — `docs/design/DESIGN-forbidden.md` §2.1.
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use
