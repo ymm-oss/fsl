@@ -11217,37 +11217,58 @@ fn apply_requirement_mutation_oracle(
     Ok(())
 }
 
+/// What the implements oracle decided beyond what it wrote into `outcome`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+enum ImplementsOracle {
+    /// `outcome` holds the decision: no contract, already killed, refines, or
+    /// killed by `refinement`.
+    Decided,
+    /// The correspondence walk was cut off by
+    /// `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET` before deciding (issue #1262).
+    /// `outcome` stays clean, but the caller must report the mutant as
+    /// `inconclusive`, never `survived` (that would claim the spec failed to
+    /// detect a mutant it was never fully checked against) nor `killed` (that
+    /// would inflate `kill_rate`, the #1251 failure mode).
+    Inconclusive { states_explored: usize },
+}
+
+impl ImplementsOracle {
+    fn inconclusive_detail(self) -> Option<Value> {
+        match self {
+            Self::Decided => None,
+            Self::Inconclusive { states_explored } => {
+                Some(inconclusive_budget_detail(states_explored))
+            }
+        }
+    }
+}
+
 /// The implements oracle (`requirements ... { implements Abs ... }`).
-/// Returns `Ok(Some(states_explored))` when the correspondence walk was cut
-/// off by `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET` before deciding (issue
-/// #1262): `outcome` stays clean, but the caller must report the mutant as
-/// `inconclusive`, never `survived` (that would claim the spec failed to
-/// detect a mutant it was never fully checked against) nor `killed` (that
-/// would inflate `kill_rate`, the #1251 failure mode).
 fn apply_implements_mutation_oracle(
     source: &str,
     base: &Path,
     model: &KernelModel,
     depth: usize,
     outcome: &mut MutationOracle,
-) -> Result<Option<usize>, String> {
+) -> Result<ImplementsOracle, String> {
     if !outcome.clean {
-        return Ok(None);
+        return Ok(ImplementsOracle::Decided);
     }
     let resolver = fsl_core::FsResolver::new(base);
     let Some(contract) = fsl_core::requirements_implements(source, &resolver, model)
         .map_err(|error| error.to_string())?
     else {
-        return Ok(None);
+        return Ok(ImplementsOracle::Decided);
     };
     let checked =
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
             .map_err(|error| error.to_string())?;
     let killer_requirements = match checked.verdict() {
         fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
-            return Ok(Some(states_explored));
+            return Ok(ImplementsOracle::Inconclusive { states_explored });
         }
-        fsl_runtime::RefinementVerdict::Refines => return Ok(None),
+        fsl_runtime::RefinementVerdict::Refines => return Ok(ImplementsOracle::Decided),
         // The mutant violates its own type bounds/invariants — a property of
         // the mutated impl spec, not a refinement fidelity failure, but a
         // real, detectable difference (#466): it must not be reported clean.
@@ -11269,7 +11290,7 @@ fn apply_implements_mutation_oracle(
         killed_by: Some("refinement".to_owned()),
         killer_requirements,
     };
-    Ok(None)
+    Ok(ImplementsOracle::Decided)
 }
 
 /// The `inconclusive` detail of a mutant whose implements check was cut off
@@ -12037,7 +12058,7 @@ fn run_mutate(
                     depth,
                     &mut outcome,
                 ) {
-                    Ok(cutoff) => inconclusive = cutoff.map(inconclusive_budget_detail),
+                    Ok(oracle) => inconclusive = oracle.inconclusive_detail(),
                     Err(_) => {
                         outcome = MutationOracle {
                             clean: false,
@@ -12201,7 +12222,7 @@ fn run_mutate(
                 }
             };
             let mut outcome = mutation_oracle_for_model(mutated_model.clone(), depth);
-            let cutoff = match apply_requirement_mutation_oracle(
+            let oracle = match apply_requirement_mutation_oracle(
                 mutated_source,
                 &mutated_model,
                 &mut outcome,
@@ -12215,7 +12236,7 @@ fn run_mutate(
                     &mut outcome,
                 )
             }) {
-                Ok(cutoff) => cutoff,
+                Ok(oracle) => oracle,
                 Err(error) => {
                     public_mutants.push(external_mutant_public(
                         &candidate,
@@ -12226,13 +12247,10 @@ fn run_mutate(
                     continue;
                 }
             };
-            if let Some(states_explored) = cutoff.filter(|_| outcome.clean) {
+            if let Some(detail) = oracle.inconclusive_detail().filter(|_| outcome.clean) {
                 let mut public = external_mutant_public(&candidate, "inconclusive", None, None);
                 if let Value::Object(public) = &mut public {
-                    public.insert(
-                        "inconclusive".to_owned(),
-                        inconclusive_budget_detail(states_explored),
-                    );
+                    public.insert("inconclusive".to_owned(), detail);
                 }
                 public_mutants.push(public);
             } else if outcome.clean {
