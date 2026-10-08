@@ -541,7 +541,8 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   whether it is killed by BMC/acceptance/forbidden/refinement. exit is 0 unless an
   opt-in gate is requested: `--fail-on-survivors` / `--min-kill-rate R` (`R` in
   `[0, 1]`) add `gate{..., violations, passed}` and exit 1 when `passed` is
-  false. Zero judged mutants fails either flag (`no_judged_mutants`); the
+  false. Zero judged mutants fails either flag (`no_judged_mutants`), and so
+  does any mutant the oracle could not judge (`oracle_errors`); the
   threshold compares the published four-decimal `summary.kill_rate` with `>=`;
   mutants dropped by `--max-mutants` are recorded as `gate.dropped`, not failed.
   `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
@@ -564,8 +565,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `mutated_spec` source (`spec` alias accepted) or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
   same oracle; malformed JSON/instructions and parse/name/type/construction
-  errors are `invalid` rather than killed. `summary.kill_rate` and
-  `summary.by_source` exclude invalid records from their denominator, and each
+  errors are `invalid` rather than killed (a built-in mutant that does not
+  build is `invalid` too). A mutant the oracle could not judge (Z3
+  unavailable, solver `unknown`/backend failure, or an
+  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  `error{stage, message}`, never killed, and counted in `summary.errored`.
+  `summary.kill_rate` and `summary.by_source` exclude invalid and error
+  records from their denominator, and each
   mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
   to the built-in catalog (`0` gives an external-only run).
   `mutate` also accepts `domain` documents: it mutates the same rendered

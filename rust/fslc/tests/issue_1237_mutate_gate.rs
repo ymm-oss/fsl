@@ -112,6 +112,7 @@ fn fail_on_survivors_exits_one_when_a_mutant_survives() {
             "min_kill_rate": null,
             "judged": 4,
             "survived": 1,
+            "errored": 0,
             "kill_rate": 0.75,
             "violations": ["survivors"],
             "passed": false,

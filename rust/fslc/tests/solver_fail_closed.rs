@@ -230,6 +230,8 @@ fn bmc_rejects_unknown_initial_solver_result() {
     let error = block_on(fsl_verifier::verify_bounded(&model(), &mut solver, 1))
         .expect_err("unknown must not become a clean BMC result");
     assert!(error.to_string().contains("unknown"));
+    // #1251: `fslc mutate` must be able to tell this apart from a finding.
+    assert!(error.is_solver_failure(), "{error}");
 }
 
 #[test]
@@ -238,6 +240,28 @@ fn bmc_rejects_backend_failure() {
     let error = block_on(fsl_verifier::verify_bounded(&model(), &mut solver, 1))
         .expect_err("backend failure must not become a clean BMC result");
     assert!(error.to_string().contains("injected backend failure"));
+    assert!(error.is_solver_failure(), "{error}");
+}
+
+/// #1251 control: a semantic BMC error (an action body undefined in a
+/// reachable state) is a finding about the model, not a solver failure, so
+/// `fslc mutate` keeps counting it as the `build_spec` kill.
+#[test]
+fn bmc_semantic_error_is_not_a_solver_failure() {
+    let source = r"
+spec UnboundedInitDefinedness {
+  type Amount = 0..3
+  state { balance: Int }
+  init { }
+  action deposit(a: Amount) { requires a > 0 balance = balance + a }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse fixture");
+    let model = build_model(kernel).expect("build fixture");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 4))
+        .expect_err("an undefined action body is a BMC error");
+    assert!(!error.is_solver_failure(), "{error}");
 }
 
 #[test]

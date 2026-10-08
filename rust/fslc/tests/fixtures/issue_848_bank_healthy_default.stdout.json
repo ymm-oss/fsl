@@ -227,6 +227,7 @@
     "killed": 6,
     "survived": 13,
     "invalid": 0,
+    "errored": 0,
     "kill_rate": 0.3158,
     "by_source": {
       "builtin": {
@@ -234,6 +235,7 @@
         "killed": 6,
         "survived": 13,
         "invalid": 0,
+        "errored": 0,
         "kill_rate": 0.3158
       },
       "external": {
@@ -241,6 +243,7 @@
         "killed": 0,
         "survived": 0,
         "invalid": 0,
+        "errored": 0,
         "kill_rate": null
       }
     }

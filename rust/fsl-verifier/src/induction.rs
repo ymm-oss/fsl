@@ -278,7 +278,7 @@ async fn prove_induction_scoped<S: SmtSolver>(
                 }
                 SatResult::Unknown => {
                     solver.pop(1)?;
-                    return Err(VerifyError::new("solver returned unknown in induction"));
+                    return Err(VerifyError::solver("solver returned unknown in induction"));
                 }
             }
             solver.pop(1)?;
@@ -315,7 +315,7 @@ async fn prove_induction_scoped<S: SmtSolver>(
                     SatResult::Unsat => solver.pop(1)?,
                     SatResult::Unknown => {
                         solver.pop(1)?;
-                        return Err(VerifyError::new("solver returned unknown in induction"));
+                        return Err(VerifyError::solver("solver returned unknown in induction"));
                     }
                 }
             }
@@ -354,7 +354,7 @@ async fn partial_witness<S: SmtSolver>(
             project_trace(solver, model, states, choices, instances, upto).map(Some)
         }
         Ok(SatResult::Unsat) => Ok(None),
-        Ok(SatResult::Unknown) => Err(VerifyError::new("solver returned unknown in induction")),
+        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown in induction")),
         Err(error) => Err(error.into()),
     };
     solver.pop(1)?;
@@ -1050,7 +1050,9 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 SatResult::Unsat => solver.pop(1)?,
                 SatResult::Unknown => {
                     solver.pop(1)?;
-                    return Err(VerifyError::new("solver returned unknown in ranking proof"));
+                    return Err(VerifyError::solver(
+                        "solver returned unknown in ranking proof",
+                    ));
                 }
             }
 
@@ -1099,7 +1101,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         SatResult::Unsat => solver.pop(1)?,
                         SatResult::Unknown => {
                             solver.pop(1)?;
-                            return Err(VerifyError::new(
+                            return Err(VerifyError::solver(
                                 "solver returned unknown in ranking proof",
                             ));
                         }
@@ -1209,7 +1211,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         SatResult::Unsat => solver.pop(1)?,
                         SatResult::Unknown => {
                             solver.pop(1)?;
-                            return Err(VerifyError::new(
+                            return Err(VerifyError::solver(
                                 "solver returned unknown in ranking proof",
                             ));
                         }
@@ -1325,7 +1327,9 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 SatResult::Unsat => solver.pop(1)?,
                 SatResult::Unknown => {
                     solver.pop(1)?;
-                    return Err(VerifyError::new("solver returned unknown in ranking proof"));
+                    return Err(VerifyError::solver(
+                        "solver returned unknown in ranking proof",
+                    ));
                 }
             }
 
@@ -1374,7 +1378,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         SatResult::Unsat => solver.pop(1)?,
                         SatResult::Unknown => {
                             solver.pop(1)?;
-                            return Err(VerifyError::new(
+                            return Err(VerifyError::solver(
                                 "solver returned unknown in ranking proof",
                             ));
                         }
@@ -1463,7 +1467,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         SatResult::Unsat => solver.pop(1)?,
                         SatResult::Unknown => {
                             solver.pop(1)?;
-                            return Err(VerifyError::new(
+                            return Err(VerifyError::solver(
                                 "solver returned unknown in ranking proof",
                             ));
                         }

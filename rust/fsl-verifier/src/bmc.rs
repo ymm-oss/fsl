@@ -521,7 +521,7 @@ async fn verify_bounded_config<S: SmtSolver>(
     match solver.check().await? {
         SatResult::Sat => {}
         SatResult::Unsat => return Err(VerifyError::new("init constraints are unsatisfiable")),
-        SatResult::Unknown => return Err(VerifyError::new("solver returned unknown for init")),
+        SatResult::Unknown => return Err(VerifyError::solver("solver returned unknown for init")),
     }
 
     let mut result = BmcResult {
@@ -1463,7 +1463,7 @@ async fn build_witness<S: SmtSolver>(
     let projected = match checked {
         Ok(SatResult::Sat) => project_trace(solver, model, states, choices, instances, upto),
         Ok(SatResult::Unsat) => Err(VerifyError::new("witness condition became unsatisfiable")),
-        Ok(SatResult::Unknown) => Err(VerifyError::new("solver returned unknown for witness")),
+        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown for witness")),
         Err(error) => Err(error.into()),
     };
     let popped = solver.pop(1);
@@ -1943,6 +1943,6 @@ async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool
     match result {
         SatResult::Sat => Ok(true),
         SatResult::Unsat => Ok(false),
-        SatResult::Unknown => Err(VerifyError::new("solver returned unknown")),
+        SatResult::Unknown => Err(VerifyError::solver("solver returned unknown")),
     }
 }

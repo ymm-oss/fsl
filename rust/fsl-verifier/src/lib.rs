@@ -41,6 +41,7 @@ pub use value::{Bindings, SymbolicState, SymbolicValue};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifyError {
     pub message: String,
+    solver_failure: bool,
 }
 
 impl VerifyError {
@@ -48,7 +49,28 @@ impl VerifyError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            solver_failure: false,
         }
+    }
+
+    /// An error meaning the solver could not decide the query at all: it
+    /// answered `unknown`, the backend failed, or its model could not be read
+    /// back. Unlike a semantic error (an undefined action body, inconsistent
+    /// init, an ill-typed value), it says nothing about the model, so callers
+    /// that turn errors into verdicts (e.g. `fslc mutate`) must not count it as
+    /// a finding (#1251).
+    #[must_use]
+    pub fn solver(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            solver_failure: true,
+        }
+    }
+
+    /// Whether this error is a solver failure (see [`VerifyError::solver`]).
+    #[must_use]
+    pub const fn is_solver_failure(&self) -> bool {
+        self.solver_failure
     }
 }
 
@@ -62,7 +84,7 @@ impl Error for VerifyError {}
 
 impl From<SolverError> for VerifyError {
     fn from(error: SolverError) -> Self {
-        Self::new(error.message())
+        Self::solver(error.message())
     }
 }
 

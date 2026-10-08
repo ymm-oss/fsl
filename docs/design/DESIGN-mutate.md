@@ -137,16 +137,40 @@ forbidden + refinement oracle as a built-in mutant.
 Each built-in mutant = mutated AST → `build_spec`; each valid external mutant =
 mutated source → `parse_src` → `build_spec`. Both then run **`verify` (BMC,
 depth K) + acceptance/forbidden
-replay + implements refine**. If any of these returns violated/reachable_failed/error/
-refinement_failed, or build_spec raises FslError → **killed** (killer recorded). All clean →
-**SURVIVED**. Induction is not used (`unknown_cti` makes the kill decision ambiguous and slow).
+replay + implements refine**. If any of these returns violated/reachable_failed/
+refinement_failed, or BMC rejects the mutant with a semantic error (for example an action
+body that is undefined in a reachable state, reported as `killed_by:"build_spec"`) →
+**killed** (killer recorded). All clean → **SURVIVED**. Induction is not used (`unknown_cti`
+makes the kill decision ambiguous and slow).
 **Baseline gate**: if the pre-mutation spec is not verified, refuse (in a buggy spec every
 mutant is killed trivially, which is meaningless).
 
-For external mutants only, parse/name/type/semantic construction failures are
-intercepted before the kill oracle and classified `invalid`. Built-in behavior
-is unchanged for compatibility: its AST catalog is compiler-owned, so a
-build-time failure remains a killed mutation.
+Parse/name/type/semantic construction failures are intercepted before the kill
+oracle and classified `invalid`, for built-in and external mutants alike
+(#1251). A built-in mutant that does not lower/build used to be a `build_spec`
+kill on the grounds that the AST catalog is compiler-owned; but a mutant that
+never reached the oracle says nothing about the spec's constraint strength, so
+counting it as killed inflated `kill_rate`. It now carries
+`invalid:{kind:"semantics",message}` like an external one.
+
+**Oracle errors (#1251).** The oracle is three-valued: clean, killed, or
+*error* — it could not judge the mutant. An error is: Z3 could not be created
+(`error.stage:"solver"`, previously the `internal` kill); BMC failed because the
+solver answered `unknown`, the backend failed, or its model could not be read
+back (`stage:"bmc"`; the verifier marks these with
+`VerifyError::is_solver_failure`, distinguishing them from the semantic errors
+above, which stay kills); or the acceptance/forbidden oracle or the implements
+oracle returned an error (`stage:"requirements"` / `"implements"`, previously
+the error string itself or `refinement` as the killer for built-ins and
+`invalid` for externals). Such a mutant is published with `status:"error"`,
+`killed_by:null`, and `error:{stage,message}`; it is never killed, never
+`invalid`, excluded from both sides of `kill_rate`, counted in
+`summary.errored` (and per source), and fails any requested gate. The rule is
+the same for both sources: a failure before the mutant builds is `invalid`, a
+failure after it builds is `error`. The init-assignment `_bounds_<state>`
+re-attribution applies only to judged (clean/killed) outcomes, so it cannot
+hide an error. Without a gate the run still exits 0, and a note states how many
+mutants could not be judged.
 
 ## 4. `--by-requirement` (requirement stress report) — the reverse definition
 
@@ -179,9 +203,10 @@ fabricated (no empty `killers` arrays on the default path).
 
 ```json
 {"result":"mutated","spec":"…","depth":8,"baseline":"verified",
- "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"kill_rate":0.75,
+ "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"errored":E,"kill_rate":0.75,
             "by_source":{"builtin":{...},"external":{...}}},
- "mutants":[{"op","loc","target","status","killed_by","requirement","source"}],
+ "mutants":[{"op","loc","target","status","killed_by","requirement","source",
+             "invalid"?,"error"?}],
  "by_requirement":{"REQ-7":{"kills":0,"warning":"empty_formalization"}},
  "notes":["mutant cap 200 reached: 37 dropped"]}
 ```
@@ -215,8 +240,8 @@ the envelope and exit code are byte-for-byte what they were. With one or both,
 
 ```json
 {"gate":{"fail_on_survivors":true,"min_kill_rate":0.8,"judged":19,"survived":13,
- "kill_rate":0.3158,"dropped":0,"violations":["survivors","kill_rate_below_min"],
- "passed":false}}
+ "errored":0,"kill_rate":0.3158,"dropped":0,
+ "violations":["survivors","kill_rate_below_min"],"passed":false}}
 ```
 
 `gate.passed` decides the exit code (0 when true, 1 when false), exactly as
@@ -228,6 +253,9 @@ reproduced from the JSON alone:
 - Zero judged mutants fails either flag with the single violation
   `no_judged_mutants` (for example `--max-mutants 0` with no `--from`): a run
   that adjudicated nothing is not evidence that nothing survives.
+- Any oracle error (`errored = summary.errored > 0`, #1251) adds
+  `oracle_errors` under either flag, whatever the other counts: the gate fails
+  closed on mutants nobody adjudicated instead of passing on them.
 - `--fail-on-survivors` adds `survivors` when `survived > 0`. Survivors dead at
   baseline count; there is no equivalent-mutant exclusion yet.
 - `--min-kill-rate R` adds `kill_rate_below_min` unless the published,

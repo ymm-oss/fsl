@@ -3115,7 +3115,12 @@ DESIGN-*.md).
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are `invalid`, never
   killed, and are excluded from combined/per-source kill-rate denominators
-  (they measure external generator quality, not spec strength).
+  (they measure external generator quality, not spec strength); a built-in
+  mutant that does not build is `invalid` the same way. A mutant the oracle
+  could not judge (Z3 unavailable, solver `unknown`/backend failure, or an
+  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  `error{stage, message}`: never killed, excluded from `kill_rate`, counted in
+  `summary.errored`, and it fails any requested gate (`oracle_errors`).
   Every entry carries `source:"builtin"|"external"`; `--max-mutants` caps only
   the built-in catalog, so `--max-mutants 0 --from ...` runs external-only.
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
@@ -3129,10 +3134,11 @@ DESIGN-*.md).
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
   `--fail-on-survivors` and `--min-kill-rate R` (opt-in, `R` in `[0, 1]`) add a
-  `gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
-  violations, passed}` object; `result` stays `mutated` and `gate.passed` decides
-  the exit code (1 when false). Zero judged mutants fails either flag
-  (`no_judged_mutants`); `--min-kill-rate` compares the published four-decimal
+  `gate{fail_on_survivors, min_kill_rate, judged, survived, errored, kill_rate,
+  dropped, violations, passed}` object; `result` stays `mutated` and
+  `gate.passed` decides the exit code (1 when false). Zero judged mutants fails
+  either flag (`no_judged_mutants`), and so does any oracle error
+  (`oracle_errors`); `--min-kill-rate` compares the published four-decimal
   `summary.kill_rate` with `>=`; built-in mutants dropped by `--max-mutants` are
   recorded in `gate.dropped` and do not fail the gate. Without either flag the
   output and exit code are unchanged.

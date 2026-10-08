@@ -1016,9 +1016,11 @@ pub(crate) fn project_value<S: SmtSolver>(
         SymbolicValue::Seq { slots, len, .. } => {
             let len = project_int(solver, len)?;
             let len = usize::try_from(len)
-                .map_err(|_| VerifyError::new("model sequence length is negative"))?;
+                .map_err(|_| VerifyError::solver("model sequence length is negative"))?;
             if len > slots.len() {
-                return Err(VerifyError::new("model sequence length exceeds capacity"));
+                return Err(VerifyError::solver(
+                    "model sequence length exceeds capacity",
+                ));
             }
             Ok(FslValue::Seq(
                 slots[..len]
@@ -1076,19 +1078,19 @@ fn project_scalar<S: SmtSolver>(
 fn project_bool<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<bool, VerifyError> {
     match solver.model_eval(term)? {
         Some(ModelValue::Bool(value)) => Ok(value),
-        Some(ModelValue::Int(_)) => Err(VerifyError::new(
+        Some(ModelValue::Int(_)) => Err(VerifyError::solver(
             "solver projected integer for Boolean term",
         )),
-        None => Err(VerifyError::new("Boolean model value is unavailable")),
+        None => Err(VerifyError::solver("Boolean model value is unavailable")),
     }
 }
 
 fn project_int<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<i64, VerifyError> {
     match solver.model_eval(term)? {
         Some(ModelValue::Int(value)) => Ok(value),
-        Some(ModelValue::Bool(_)) => Err(VerifyError::new(
+        Some(ModelValue::Bool(_)) => Err(VerifyError::solver(
             "solver projected Boolean for integer term",
         )),
-        None => Err(VerifyError::new("integer model value is unavailable")),
+        None => Err(VerifyError::solver("integer model value is unavailable")),
     }
 }
