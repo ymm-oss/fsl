@@ -3114,7 +3114,12 @@ DESIGN-*.md).</p>
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are <code>invalid</code>, never
   killed, and are excluded from combined/per-source kill-rate denominators
-  (they measure external generator quality, not spec strength).
+  (they measure external generator quality, not spec strength); a built-in
+  mutant that does not build is <code>invalid</code> the same way. A mutant the oracle
+  could not judge (Z3 unavailable, solver <code>unknown</code>/backend failure, or an
+  acceptance/forbidden/implements oracle error) is <code>status:"error"</code> with
+  <code>error{stage, message}</code>: never killed, excluded from <code>kill_rate</code>, counted in
+  <code>summary.errored</code>, and it fails any requested gate (<code>oracle_errors</code>).
   Every entry carries <code>source:"builtin"|"external"</code>; <code>--max-mutants</code> caps only
   the built-in catalog, so <code>--max-mutants 0 --from ...</code> runs external-only.
   <code>--by-requirement</code> flags "a requirement that kills no behavior mutant" as an
@@ -3128,10 +3133,11 @@ DESIGN-*.md).</p>
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
   <code>--fail-on-survivors</code> and <code>--min-kill-rate R</code> (opt-in, <code>R</code> in <code>[0, 1]</code>) add a
-  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
-  violations, passed}</code> object; <code>result</code> stays <code>mutated</code> and <code>gate.passed</code> decides
-  the exit code (1 when false). Zero judged mutants fails either flag
-  (<code>no_judged_mutants</code>); <code>--min-kill-rate</code> compares the published four-decimal
+  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, errored, kill_rate,
+  dropped, violations, passed}</code> object; <code>result</code> stays <code>mutated</code> and
+  <code>gate.passed</code> decides the exit code (1 when false). Zero judged mutants fails
+  either flag (<code>no_judged_mutants</code>), and so does any oracle error
+  (<code>oracle_errors</code>); <code>--min-kill-rate</code> compares the published four-decimal
   <code>summary.kill_rate</code> with <code>&gt;=</code>; built-in mutants dropped by <code>--max-mutants</code> are
   recorded in <code>gate.dropped</code> and do not fail the gate. Without either flag the
   output and exit code are unchanged.

@@ -3025,7 +3025,12 @@ DESIGN-*.md があります)。</p>
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは <code>invalid</code> で、決して killed にはならず、
   combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
-  なく、外部ジェネレーターの品質を測ります)。
+  なく、外部ジェネレーターの品質を測ります)。構築できない組み込みミュータントも
+  同じく <code>invalid</code> です。オラクルが判定できなかったミュータント(Z3 を作れない、
+  solver の <code>unknown</code>/backend の失敗、acceptance/forbidden/implements オラクルの
+  エラー)は <code>status:"error"</code> と <code>error{stage, message}</code> になり、決して killed には
+  ならず、<code>kill_rate</code> から除外され、<code>summary.errored</code> に数えられ、要求された
+  gate を不合格にします(<code>oracle_errors</code>)。
   すべてのエントリは <code>source:"builtin"|"external"</code> を運びます。<code>--max-mutants</code> は
   組み込みのカタログだけを上限にするので、<code>--max-mutants 0 --from ...</code> は外部のみ
   を実行します。
@@ -3039,10 +3044,11 @@ DESIGN-*.md があります)。</p>
   <code>by_obligation</code> の sole/shared 集計を追加します。既定出力は変わらず、これらの
   カウントは観測された下界であり、完全性や正しさの尺度ではありません。
   <code>--fail-on-survivors</code> と <code>--min-kill-rate R</code>(opt-in、<code>R</code> は <code>[0, 1]</code>)は
-  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
-  violations, passed}</code> を追加します。<code>result</code> は <code>mutated</code> のままで、
+  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, errored, kill_rate,
+  dropped, violations, passed}</code> を追加します。<code>result</code> は <code>mutated</code> のままで、
   <code>gate.passed</code> が exit code を決めます(false なら 1)。判定済みミュータントが
-  0 件ならどちらのフラグでも不合格(<code>no_judged_mutants</code>)、<code>--min-kill-rate</code> は
+  0 件ならどちらのフラグでも不合格(<code>no_judged_mutants</code>)、オラクルのエラーが
+  1 件でもあればどちらのフラグでも不合格(<code>oracle_errors</code>)、<code>--min-kill-rate</code> は
   公開される 4 桁丸めの <code>summary.kill_rate</code> と <code>&gt;=</code> で比べ、<code>--max-mutants</code> で
   落ちた組み込みミュータントは <code>gate.dropped</code> に記録するだけで不合格にしません。
   どちらのフラグも無ければ出力と exit code は変わりません。→
