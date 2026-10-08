@@ -16042,8 +16042,30 @@ fn run_diff(
             .map(|(name, value)| (name.clone(), *value))
             .collect(),
     };
+    // The scoped loader now rejects, as an override, a `verify` bound that
+    // names no declared `entity`/`number` in a business/requirements document
+    // (#1226): load with only the names it accepts, and keep reporting the
+    // full `applied_to_old` scope as before. Such a bound is not inert: the
+    // old document's own `values X = a..b` for a raw `type X = lo..hi` still
+    // sets the default initial value of a process field typed `X`
+    // (`lower_requirements`). Forwarding it as an override used to rewrite
+    // that bound to the resolved `lo..hi` and shift the field's initial value
+    // in the re-scoped old model; dropping it keeps the old document's bound.
     let old_model = if scope_changed {
-        match load_model_scoped(old, &overrides) {
+        let loadable = match fsl_core::retain_dialect_scope_overrides(
+            &old_source,
+            &overrides.instances,
+            &overrides.values,
+        ) {
+            Ok((instances, values)) => ScopeBounds { instances, values },
+            Err(error) => {
+                return (
+                    spec_load_error_output(&kernel_load_error(&old_source, &error)),
+                    2,
+                );
+            }
+        };
+        match load_model_scoped(old, &loadable) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         }

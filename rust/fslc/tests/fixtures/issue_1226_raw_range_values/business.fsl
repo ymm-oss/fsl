@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #1226: the business dialect bounds only `entity` names; it has no `number`.
+business RawRangeOverrideBusiness {
+  actor Reviewer
+  entity Change
+
+  process Change {
+    stages Draft, Applied
+    initial Draft
+    transition apply Draft -> Applied by Reviewer
+  }
+}
+
+verify {
+  instances Change = 2
+}
