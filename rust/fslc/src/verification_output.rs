@@ -1681,6 +1681,43 @@ fn statement_location(statements: &[fsl_core::KernelStatement]) -> Value {
     })
 }
 
+/// The location of an action `partial_op` reached in a guard: the Public
+/// Kernel `partial_operations` span of that guard's site (the `requires`
+/// clause, or the action for a `let`), so every engine reports the one
+/// position the contract names (#1191). `None` when the trace's last step is
+/// not a guard failure, which leaves a body `partial_op` to the caller.
+fn guard_partial_location(
+    model: &KernelModel,
+    definition: &fsl_core::ActionDef,
+    trace: &[fsl_core::TraceStep],
+) -> Option<Value> {
+    let [.., before, last] = trace else {
+        return None;
+    };
+    let action = last.action.as_ref()?;
+    let index = fsl_runtime::guard_partial_operation(
+        model,
+        &definition.name,
+        &action.params,
+        &before.state,
+    )?;
+    let clause = match definition.guards.get(index)? {
+        fsl_core::ActionGuard::Requires(expression) | fsl_core::ActionGuard::Let(_, expression) => {
+            expression
+        }
+    };
+    fsl_core::action_partial_operations(model, definition)
+        .into_iter()
+        .find(|site| {
+            matches!(
+                site.clause,
+                fsl_core::PartialOperationClause::Expr(expression)
+                    if std::ptr::eq(expression, clause)
+            )
+        })
+        .map(|site| site.span.python_loc())
+}
+
 /// Render the concrete Monitor's first partial-operation or type-bound failure.
 #[must_use]
 #[allow(clippy::too_many_lines)]
@@ -1759,39 +1796,50 @@ pub fn render_boundary_output(
     if let Some(property) = partial_leadsto {
         insert_requirement_metadata(&mut output, &property.annotations, property.meta.as_ref());
     }
+    let guard_location = (violation.kind == "partial_op"
+        && partial_property.is_none()
+        && partial_leadsto.is_none()
+        && !partial_terminal)
+        .then(|| definition.and_then(|action| guard_partial_location(model, action, trace)))
+        .flatten();
     output.insert(
         "loc".to_owned(),
-        origin
-            .and_then(|origin| origin.primary.as_ref())
-            .and_then(|site| site.span)
-            .map_or_else(
-                || {
-                    if violation.kind == "partial_op" {
-                        partial_property.map_or_else(
-                            || {
-                                partial_leadsto.map_or_else(
-                                    || {
-                                        if partial_terminal {
-                                            model
-                                                .terminal_span
-                                                .map_or(Value::Null, fsl_syntax::Span::python_loc)
-                                        } else {
-                                            definition.map_or(Value::Null, |action| {
-                                                statement_location(&action.statements)
-                                            })
-                                        }
-                                    },
-                                    |property| property.span.python_loc(),
-                                )
-                            },
-                            |(_, property)| property.span.python_loc(),
-                        )
-                    } else {
-                        Value::Null
-                    }
-                },
-                fsl_syntax::Span::python_loc,
-            ),
+        if let Some(location) = guard_location {
+            location
+        } else {
+            origin
+                .and_then(|origin| origin.primary.as_ref())
+                .and_then(|site| site.span)
+                .map_or_else(
+                    || {
+                        if violation.kind == "partial_op" {
+                            partial_property.map_or_else(
+                                || {
+                                    partial_leadsto.map_or_else(
+                                        || {
+                                            if partial_terminal {
+                                                model.terminal_span.map_or(
+                                                    Value::Null,
+                                                    fsl_syntax::Span::python_loc,
+                                                )
+                                            } else {
+                                                definition.map_or(Value::Null, |action| {
+                                                    statement_location(&action.statements)
+                                                })
+                                            }
+                                        },
+                                        |property| property.span.python_loc(),
+                                    )
+                                },
+                                |(_, property)| property.span.python_loc(),
+                            )
+                        } else {
+                            Value::Null
+                        }
+                    },
+                    fsl_syntax::Span::python_loc,
+                )
+        },
     );
     if violation.kind == "partial_op" {
         output.insert(

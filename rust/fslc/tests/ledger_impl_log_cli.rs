@@ -15,11 +15,12 @@
 //! `replay_trace.fsl`'s `partial(i: Id)` action is deliberately left
 //! unguarded at `i == 0` -- `replay_trace_contract.rs` replays it there on
 //! purpose to exercise the concrete Monitor's `partial_op` violation kind.
-//! The same unguarded division makes `fslc verify` legitimately classify
-//! this spec `result:"error"`/exit 2 (`kind:"semantics"`, "division by
-//! zero"), which issue #592 now correctly propagates to `fslc ledger`'s own
-//! exit code even though the ledger content still renders in full. That is
-//! why the `*_still_generates` tests below assert exit 2, not exit 0.
+//! The same unguarded division in a `requires` makes `fslc verify` report
+//! `result:"violated"`/exit 1 (`violation_kind:"partial_op"`; it was a raw
+//! `kind:"semantics"` error at exit 2 before issue #1191), which issue #592
+//! propagates to `fslc ledger`'s own exit code even though the ledger content
+//! still renders in full. That is why the `*_still_generates` tests below
+//! assert exit 1, not exit 0.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -170,12 +171,13 @@ fn ledger_impl_log_conformant_trace_still_generates() {
     let out = dir.join("ledger.md");
     let output = ledger_with_impl_log(&fixture("replay_trace.valid.v1.json"), &out);
 
-    // Exit 2, not 0: `replay_trace.fsl` itself carries a genuine `verify`
-    // error (see the module doc), and issue #592 makes `ledger` report that
-    // rather than hide it -- but the ledger content still generates in full.
+    // Exit 1, not 0: `replay_trace.fsl` itself carries a genuine `verify`
+    // violation (see the module doc), and issue #592 makes `ledger` report
+    // that rather than hide it -- but the ledger content still generates in
+    // full.
     assert_eq!(
         output.status.code(),
-        Some(2),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -192,12 +194,12 @@ fn ledger_impl_log_nonconformant_trace_still_generates() {
     let out = dir.join("ledger.md");
     let output = ledger_with_impl_log(&fixture("replay_trace.state-mismatch.v1.json"), &out);
 
-    // Same exit 2 as the conformant case above, for the same reason (the
-    // spec's own `verify` baseline errors, independent of the impl-log
+    // Same exit 1 as the conformant case above, for the same reason (the
+    // spec's own `verify` baseline is violated, independent of the impl-log
     // trace's conformance) -- the nonconformant row still renders.
     assert_eq!(
         output.status.code(),
-        Some(2),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
