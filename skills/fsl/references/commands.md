@@ -203,7 +203,11 @@ state divergence is exit 1 with leaf mismatches. `initial` is checked against
 `init` leaves any state variable free (BMC explores every admissible value
 there), `initial` is trusted as the concrete starting point directly instead
 of failing `initial_state_mismatch` against an arbitrary default value for
-that variable. Bare arrays/`{events}` are the
+that variable. A compose spec's component action is written `alias.action`
+(the name testgen, conformance, and the Monitor emit); the older
+`alias__action` is still accepted for the same action, and replay output,
+including `state_mismatch.action`, always uses `alias.action`. Sync actions and
+non-compose actions match their exact name only. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/design/DESIGN-replay-trace.md`.
 
@@ -402,7 +406,9 @@ refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
 node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
-reports); `--focus` accepts either a node's raw id or its displayed name.
+reports); `--focus` accepts either a node's raw id or its displayed name. A
+compose component action and its clauses use the action's public name in both
+id and label (`action:a__b.c`, `guard:a__b.c:0`, label `a__b.c`).
 `action_dependency_graph`'s `enables`/`conflicts_with` edges carry every
 shared read/write state bridge for the action pair in `states` (plural);
 `state` (singular) is only the first one, kept for backward compatibility.

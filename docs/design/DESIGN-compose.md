@@ -87,6 +87,42 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
 6. Display metadata: a physical variable `alias__x` is displayed in JSON as `alias.x`
    (a display-name map in logical_state_values. Traces, witnesses, CTIs, scenarios, and
    the Monitor state all follow).
+7. Component action names (#1234): lowering records, for every surviving
+   component action, its `(alias, name)` pair keyed by the physical name, and for
+   component state variables and properties only the physical name (so that
+   `cost.properties` can tell a component declaration from a glue one). The
+   physical name `alias__name` is not injective (`a__b` + `c` and `a` + `b__c`
+   both give `a__b__c`; the two cannot coexist because the physical names would be
+   duplicate actions), so the public action name `alias.name` is built from this
+   pair and never parsed back out of the physical name: `use X as a__b` with
+   action `c` is `a__b.c`, as in the frozen Python reference. A name derived from
+   an action (`_requires_failed_<action>`, `_partial_op_<action>`,
+   `_partial_<action>`, an `ensures` violation) is rebuilt from the action that
+   produced it, so the alias boundary comes from the same pair. Every output of
+   `verify` (all engines, including `action_coverage`, `action_profile`,
+   `cost.properties`, vacuity warnings, and induction CTIs), `sweep`,
+   `scenarios`, `explain`, `testgen`, `conformance`, `replay` (including
+   `--from-log`), `refine`, `diff`, `mutate`, `html`, `ledger`, `analyze`, and
+   the `untagged` warnings of `check --strict-tags` publishes this name. `analyze` graph IDs carry it too
+   (`action:alias.name`, `guard:alias.name:<i>`, `effect:alias.name:<i>`,
+   `ensures:alias.name:<i>`), as do the nodes' `name` fields, `--export
+   tag-review` names, `undecided:` records (`declaration`/`node`), and the
+   project `traceability_graph` (`action_map:`/`stutter_map:` IDs and
+   `maps_action` endpoints such as `design:action:alias.name`). Every graph and
+   finding builds an action's node ID through one function (`action_node_id`),
+   so an edge never ends at an ID no node declares. The frozen Python reference
+   keeps `action:alias__name` in these IDs; this is an intended difference
+   (decision 4 of #1234 makes the key `.` as well). Keyed lists are ordered by
+   the name they print, sorted with the same function that renders the key, so
+   a glue action `z__a` (printed `z.a`) sorts before `z.b`. A v1
+   replay trace resolves a component action through the same table, accepting
+   `alias.name` and the pre-#1234 `alias__name`; sync and glue actions keep exact
+   physical-name matching. Public Kernel export (`kernel`, `typestate`) and the
+   RCIR document projection reject compose, so they print no component names.
+   State-key, state-graph-ID, and property display still uses the string rule
+   above, so with a `__` alias a state variable is shown as `a.b__n` while Python
+   shows `a__b.n`; this is a known, unresolved difference from the Python
+   reference.
 
 Static checks (check stage, `kind: "type"`):
 - missing use file / spec-name mismatch / duplicate alias

@@ -131,6 +131,8 @@ fn testgen_source_name(source_path: &Path) -> Result<String, String> {
 }
 
 /// Normalized, target-independent input consumed by every test generator.
+///
+/// State and action names are public, as the scenarios and trace walk print them.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TestgenInput {
     spec_name: String,
@@ -455,11 +457,7 @@ fn build_input(
     scenarios: &Value,
     walk: &Value,
 ) -> Result<TestgenInput, String> {
-    let public_state_names = state_order
-        .iter()
-        .map(|name| display_name(name))
-        .collect::<Vec<_>>();
-    let state_names = public_state_names
+    let state_names = state_order
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
@@ -523,7 +521,10 @@ pub fn public_kernel_testgen_input(
         })
         .collect::<Result<Vec<_>, String>>()?;
     state.sort_by_key(|(order, _)| *order);
-    let mut state_order = state.into_iter().map(|(_, name)| name).collect::<Vec<_>>();
+    let mut state_order = state
+        .into_iter()
+        .map(|(_, name)| display_name(&name))
+        .collect::<Vec<_>>();
     if let Some(initial) = walk.get("initial").and_then(Value::as_object)
         && !initial.is_empty()
     {
@@ -563,6 +564,9 @@ pub fn public_kernel_testgen_input(
 ///
 /// The caller supplies checked names and declaration order only; emitters still
 /// consume the same normalized input and never receive a private model or AST.
+/// State and action names are public, as the scenarios and trace walk print
+/// them (`alias.name`), and are used verbatim: only the model knows a
+/// component's alias boundary. `state_order` is the declaration order.
 ///
 /// # Errors
 ///
@@ -582,10 +586,7 @@ pub fn compose_testgen_input(
         state_order,
         actions
             .into_iter()
-            .map(|(name, params)| TestgenAction {
-                name: display_name(&name),
-                params,
-            })
+            .map(|(name, params)| TestgenAction { name, params })
             .collect(),
         scenarios,
         walk,
@@ -764,11 +765,7 @@ def _assert_rejected(result, expected_kind):
         assert result.get('kind') == expected_kind
 "#
     );
-    let state_order = input
-        .state_order
-        .iter()
-        .map(|name| display_name(name))
-        .collect::<Vec<_>>();
+    let state_order = &input.state_order;
     let mut seen = BTreeMap::new();
     for (scenario_index, scenario) in input.scenarios.iter().enumerate() {
         let name = scenario["name"].as_str().unwrap_or("scenario");
@@ -804,7 +801,7 @@ def _assert_rejected(result, expected_kind):
             let _ = writeln!(
                 text,
                 "    _assert_partial_expected(adapter.observe(), {})",
-                python_literal(&expected, &state_order)
+                python_literal(&expected, state_order)
             );
         }
         if scenario["kind"].as_str() == Some("forbidden") && scenario["forbidden_step"].is_object()

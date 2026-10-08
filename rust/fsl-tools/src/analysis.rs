@@ -352,6 +352,14 @@ fn display(name: &str) -> String {
     fsl_core::display_name(name)
 }
 
+/// TSG node ID of an action, `action:<key>`: every graph, review finding, and
+/// acknowledgement that refers to an action node builds the ID here, so a
+/// compose component action is `action:alias.action` everywhere.
+#[must_use]
+pub fn action_node_id(model: &KernelModel, name: &str) -> String {
+    format!("action:{}", model.action_key(name))
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn node(id: String, kind: &str, name: Option<String>, loc: Option<Value>) -> Map<String, Value> {
     let mut result = Map::new();
@@ -695,10 +703,8 @@ pub fn conservation_review_findings(model: &KernelModel) -> Vec<Value> {
         return Vec::new();
     }
     let mut excluded = BTreeSet::new();
-    let mut actions = model.actions.iter().collect::<Vec<_>>();
-    actions.sort_by_key(|action| &action.name);
     let mut rows = Vec::new();
-    for action in actions {
+    for action in &model.actions {
         let mut deltas = BTreeMap::new();
         scan_counter_statements(
             &action.statements,
@@ -708,8 +714,9 @@ pub fn conservation_review_findings(model: &KernelModel) -> Vec<Value> {
             &mut deltas,
             &mut excluded,
         );
-        rows.push((format!("action:{}", action.name), deltas));
+        rows.push((action_node_id(model, &action.name), deltas));
     }
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
     let eligible = counters
         .iter()
         .filter(|counter| {
@@ -978,14 +985,16 @@ impl<'a> Builder<'a> {
             }
         }
         for action in &self.model.actions {
-            let name = &action.name;
-            let action_id = format!("action:{name}");
+            let name = &self.model.action_key(&action.name);
+            let label = self.model.action_display_name(&action.name);
+            let action_id = action_node_id(self.model, &action.name);
             let mut value = node(
                 action_id.clone(),
                 "action",
                 Some(name.clone()),
                 Some(action.span.python_loc()),
             );
+            value.insert("label".to_owned(), json!(label));
             value.insert("fair".to_owned(), json!(action.fair));
             value.insert("sync".to_owned(), json!(false));
             add_requirement_metadata(&mut value, &action.annotations, action.meta.as_ref());
@@ -1004,7 +1013,7 @@ impl<'a> Builder<'a> {
                 );
                 value.insert(
                     "label".to_owned(),
-                    json!(format!("{} requires {index}", display(name))),
+                    json!(format!("{label} requires {index}")),
                 );
                 value.insert("expr".to_owned(), requirement.kernel_ast_v1());
                 value.insert("action".to_owned(), json!(action_id));
@@ -1025,10 +1034,7 @@ impl<'a> Builder<'a> {
                     Some(format!("{name}:{index}")),
                     Some(loc),
                 );
-                value.insert(
-                    "label".to_owned(),
-                    json!(format!("{} effect {index}", display(name))),
-                );
+                value.insert("label".to_owned(), json!(format!("{label} effect {index}")));
                 value.insert("expr".to_owned(), expr.kernel_ast_v1());
                 value.insert("action".to_owned(), json!(action_id));
                 value.insert("target".to_owned(), json!(root));
@@ -1049,7 +1055,7 @@ impl<'a> Builder<'a> {
                 );
                 value.insert(
                     "label".to_owned(),
-                    json!(format!("{} ensures {index}", display(name))),
+                    json!(format!("{label} ensures {index}")),
                 );
                 value.insert("expr".to_owned(), ensures.kernel_ast_v1());
                 value.insert("action".to_owned(), json!(action_id));
@@ -1122,10 +1128,15 @@ impl<'a> Builder<'a> {
         // review signal — rather than vanishing from the graph entirely.
         let mut requirement_targets = BTreeMap::<String, Vec<String>>::new();
         for (target, links) in self.model.requirement_targets() {
-            let graph_target = target
-                .strip_prefix("property:")
-                .unwrap_or(&target)
-                .to_owned();
+            let graph_target = target.strip_prefix("action:").map_or_else(
+                || {
+                    target
+                        .strip_prefix("property:")
+                        .unwrap_or(&target)
+                        .to_owned()
+                },
+                |action| action_node_id(self.model, action),
+            );
             let has_node = self.nodes.contains_key(&graph_target);
             for link in links {
                 let targets = requirement_targets.entry(link.id).or_default();

@@ -2,7 +2,7 @@
 
 //! Backend-neutral JSON rendering for bounded verification results.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::future::Future;
 
@@ -726,7 +726,7 @@ fn requirement_actions_by_name<'a>(
         .filter(|action| {
             action.name == step.name
                 || action.name.starts_with(&branch_prefix)
-                || display_name(&action.name) == step.name
+                || monitor.model.action_display_name(&action.name) == step.name
         })
         .collect()
 }
@@ -1236,7 +1236,7 @@ fn validate_requirement_trace_contract(
                 return Ok((Some(Value::Object(output)), has_contract));
             }
             accepted_trace.push(json!({
-                "action": display_name(&instance.action),
+                "action": model.action_display_name(&instance.action),
                 "params": params,
             }));
             if is_final {
@@ -1775,19 +1775,18 @@ pub fn render_boundary_output(
             .or_else(|| action.and_then(|action| model.action_origin(&action.name))),
         _ => action.and_then(|action| model.action_origin(&action.name)),
     };
+    let public_name = model
+        .action_scoped_display_name(&violation.name, action.map(|action| action.name.as_str()));
     output.insert(
         "invariant".to_owned(),
         json!(
             origin
                 .and_then(origin_display_name)
-                .map_or_else(|| display_name(&violation.name), str::to_owned)
+                .map_or_else(|| public_name.clone(), str::to_owned)
         ),
     );
     if let Some(origin) = origin {
-        output.insert(
-            "generated_name".to_owned(),
-            json!(display_name(&violation.name)),
-        );
+        output.insert("generated_name".to_owned(), json!(public_name));
         output.insert("origin".to_owned(), internal_origin_json(origin));
     }
     if let Some((_, property)) = partial_property {
@@ -1884,7 +1883,7 @@ pub fn render_boundary_output(
             let mut value = json!({
                 "name": action_origin
                     .and_then(origin_display_name)
-                    .map_or_else(|| display_name(&action.name), str::to_owned),
+                    .map_or_else(|| model.action_display_name(&action.name), str::to_owned),
                 "params": action.params.iter().map(|(name, value)| (
                     name.clone(), fsl_value_json(value)
                 )).collect::<Map<_, _>>(),
@@ -1895,7 +1894,7 @@ pub fn render_boundary_output(
             {
                 value.insert(
                     "generated_name".to_owned(),
-                    json!(display_name(&action.name)),
+                    json!(model.action_display_name(&action.name)),
                 );
                 value.insert("origin".to_owned(), internal_origin_json(origin));
             }
@@ -1911,7 +1910,7 @@ pub fn render_boundary_output(
         }
     }
     output.insert("trace".to_owned(), rendered_trace);
-    finish(&mut output, violation.step, options);
+    finish(&mut output, model, violation.step, options);
     if violation.kind == "partial_op" {
         output.insert(
             "faithfulness_class".to_owned(),
@@ -2012,7 +2011,7 @@ pub fn render_explicit_output(
         } else {
             render_violation(envelope, model, violation, &options)
         };
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return Ok((output, status));
     }
 
@@ -2029,7 +2028,7 @@ pub fn render_explicit_output(
         };
         let (mut output, status) =
             render_deadlock_failure(envelope, model, &compatible, step, &options);
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return Ok((output, status));
     }
 
@@ -2071,7 +2070,7 @@ pub fn render_explicit_output(
         if result.closure {
             mark_reachables_definitively_unreachable(&mut output);
         }
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return Ok((output, status));
     }
 
@@ -2175,11 +2174,10 @@ fn render_explicit_budget(
     );
     output.insert(
         "cost".to_owned(),
-        serde_json::to_value(statistics.with_elapsed(elapsed_s))
-            .expect("verification cost serializes"),
+        cost_json(model, statistics.with_elapsed(elapsed_s)),
     );
     let mut value = Value::Object(output);
-    add_explicit_metadata(&mut value, result);
+    add_explicit_metadata(&mut value, model, result);
     (value, 1)
 }
 
@@ -2205,7 +2203,7 @@ fn render_explicit_success(
             skip_vacuity_probe,
         };
         let (mut output, status) = render_success(output, model, compatible, &options);
-        add_explicit_metadata(&mut output, result);
+        add_explicit_metadata(&mut output, model, result);
         return (output, status);
     }
 
@@ -2238,15 +2236,18 @@ fn render_explicit_success(
     );
     output.insert(
         "cost".to_owned(),
-        serde_json::to_value(statistics.with_elapsed(elapsed_s))
-            .expect("verification cost serializes"),
+        cost_json(model, statistics.with_elapsed(elapsed_s)),
     );
     let mut value = Value::Object(output);
-    add_explicit_metadata(&mut value, result);
+    add_explicit_metadata(&mut value, model, result);
     (value, 0)
 }
 
-fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResult) {
+fn add_explicit_metadata(
+    output: &mut Value,
+    model: &KernelModel,
+    result: &fsl_runtime::ExplicitResult,
+) {
     let Some(output) = output.as_object_mut() else {
         return;
     };
@@ -2261,20 +2262,21 @@ fn add_explicit_metadata(output: &mut Value, result: &fsl_runtime::ExplicitResul
     output.insert(
         "action_profile".to_owned(),
         Value::Object(
-            result
-                .action_profile
-                .iter()
-                .map(|(name, stats)| {
-                    (
-                        display_name(name),
-                        json!({
-                            "enabled": stats.enabled,
-                            "fired": stats.fired,
-                            "no_op": stats.no_op,
-                        }),
-                    )
-                })
-                .collect(),
+            sorted_by_published(&result.action_profile, |name| {
+                model.action_display_name(name)
+            })
+            .into_iter()
+            .map(|(name, _, stats)| {
+                (
+                    name,
+                    json!({
+                        "enabled": stats.enabled,
+                        "fired": stats.fired,
+                        "no_op": stats.no_op,
+                    }),
+                )
+            })
+            .collect(),
         ),
     );
 }
@@ -2330,18 +2332,17 @@ fn render_violation(
         )
     };
     let origin = model.property_origin(property_kind, &violation.name);
+    let public_name =
+        model.action_scoped_display_name(&violation.name, violation.last_action.as_deref());
     let rendered_name = origin
         .and_then(origin_display_name)
-        .map_or_else(|| display_name(&violation.name), str::to_owned);
+        .map_or_else(|| public_name.clone(), str::to_owned);
     if violation.kind == "trans" {
         output.insert("trans".to_owned(), json!(rendered_name));
     }
     output.insert("invariant".to_owned(), json!(rendered_name));
     if let Some(origin) = origin {
-        output.insert(
-            "generated_name".to_owned(),
-            json!(display_name(&violation.name)),
-        );
+        output.insert("generated_name".to_owned(), json!(public_name));
         output.insert("origin".to_owned(), internal_origin_json(origin));
     }
     if let Some(property) = property {
@@ -2385,7 +2386,7 @@ fn render_violation(
                 let mut rendered = json!({
                     "name": origin
                         .and_then(origin_display_name)
-                        .map_or_else(|| display_name(&action.name), str::to_owned),
+                        .map_or_else(|| model.action_display_name(&action.name), str::to_owned),
                     "params": action.params.iter().map(|(name, value)| (
                         name.clone(), fsl_value_json(value)
                     )).collect::<Map<_, _>>(),
@@ -2396,7 +2397,7 @@ fn render_violation(
                 {
                     rendered.insert(
                         "generated_name".to_owned(),
-                        json!(display_name(&action.name)),
+                        json!(model.action_display_name(&action.name)),
                     );
                     rendered.insert("origin".to_owned(), internal_origin_json(origin));
                 }
@@ -2412,7 +2413,7 @@ fn render_violation(
         }
     }
     output.insert("trace".to_owned(), trace);
-    finish(&mut output, violation.step, options);
+    finish(&mut output, model, violation.step, options);
     output.insert(
         "trace_type".to_owned(),
         json!(if violation.name.starts_with("_deadline_") {
@@ -2527,7 +2528,7 @@ fn render_reachable_failure(
             "add a single-shot reachable for the action / raise --depth"
         }),
     );
-    finish(&mut output, options.depth, options);
+    finish(&mut output, model, options.depth, options);
     output.insert("trace_type".to_owned(), json!("reachable"));
     (Value::Object(output), 1)
 }
@@ -2568,11 +2569,11 @@ fn render_deadlock_failure(
             "last_action".to_owned(),
             trace.last().and_then(|entry| entry.action.as_ref()).map_or(
                 Value::Null,
-                |action| json!({"name": display_name(&action.name)}),
+                |action| json!({"name": model.action_display_name(&action.name)}),
             ),
         );
     }
-    finish(&mut output, step, options);
+    finish(&mut output, model, step, options);
     output.insert("trace_type".to_owned(), json!("deadlock"));
     (Value::Object(output), 1)
 }
@@ -2624,7 +2625,7 @@ fn render_leadsto_failure(
     output.insert("stutter".to_owned(), json!(details.stutter));
     output.insert("trace".to_owned(), trace_json(model, &violation.trace));
     output.insert("hint".to_owned(), json!(details.hint));
-    finish(&mut output, options.depth, options);
+    finish(&mut output, model, options.depth, options);
     output.insert("trace_type".to_owned(), json!("leadsTo"));
     (Value::Object(output), 1)
 }
@@ -2681,17 +2682,21 @@ fn render_success(
             )),
         );
     }
-    finish(&mut output, options.depth, options);
+    finish(&mut output, model, options.depth, options);
     (Value::Object(output), 0)
 }
 
-fn finish(output: &mut Map<String, Value>, checked: usize, options: &BmcOutputOptions<'_>) {
+fn finish(
+    output: &mut Map<String, Value>,
+    model: &KernelModel,
+    checked: usize,
+    options: &BmcOutputOptions<'_>,
+) {
     output.insert("checked_to_depth".to_owned(), json!(checked));
     output.insert("completeness".to_owned(), json!("bounded"));
     output.insert(
         "cost".to_owned(),
-        serde_json::to_value(options.statistics.with_elapsed(options.elapsed_s))
-            .expect("verification cost serializes"),
+        cost_json(model, options.statistics.with_elapsed(options.elapsed_s)),
     );
 }
 
@@ -2726,13 +2731,12 @@ fn add_common(
     output.insert(
         "reachables".to_owned(),
         Value::Object(
-            result
-                .reachables
-                .iter()
-                .filter_map(|(name, witness)| {
+            sorted_by_published(&result.reachables, display_name)
+                .into_iter()
+                .filter_map(|(name, _, witness)| {
                     witness.as_ref().map(|witness| {
                         (
-                            display_name(name),
+                            name,
                             json!({
                                 "witnessed_at_step": witness.step,
                                 "witness": trace_json(model, &witness.trace),
@@ -2746,12 +2750,11 @@ fn add_common(
     output.insert(
         "action_coverage".to_owned(),
         Value::Object(
-            result
-                .action_coverage
-                .iter()
-                .map(|(name, covered)| {
+            sorted_by_published(&result.action_coverage, |name| model.action_display_name(name))
+                .into_iter()
+                .map(|(published, name, covered)| {
                     (
-                        display_name(name),
+                        published,
                         if *covered {
                             json!(true)
                         } else {
@@ -2833,7 +2836,7 @@ fn solver_vacuity_warnings(model: &KernelModel, result: &BmcResult) -> Vec<Value
 }
 
 fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
-    let label = display_name(finding.name());
+    let label = model.action_display_name(finding.name());
     let (message, hint) = match finding {
         VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
             let names = frozen_vars
@@ -2967,8 +2970,26 @@ fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
         .filter_map(|step| step.detail.as_ref())
         .flat_map(|detail| detail.split(','))
         .filter(|name| !name.is_empty())
-        .map(display_name)
+        .map(|name| model.action_display_name(name))
         .collect()
+}
+
+/// Entries of a map keyed by internal Kernel name, each with the name
+/// `publish` gives it, ordered by that published name: alias `acct2` sorts its
+/// internal `acct2__go` before `acct__go`, but its published `acct2.go` after
+/// `acct.go`. The caller prints the returned name, so the order is the order of
+/// the printed keys.
+#[must_use]
+pub fn sorted_by_published<V>(
+    entries: &BTreeMap<String, V>,
+    publish: impl Fn(&str) -> String,
+) -> Vec<(String, &String, &V)> {
+    let mut entries = entries
+        .iter()
+        .map(|(name, value)| (publish(name), name, value))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| (&left.0, left.1).cmp(&(&right.0, right.1)));
+    entries
 }
 
 fn invariant_names_selected(
@@ -3110,6 +3131,42 @@ fn violation_blame_json(
         entry.insert("violating_bindings".to_owned(), violating_bindings);
     }
     json!({"conjuncts": [conjunct]})
+}
+
+/// Serialize solver cost, publishing compose component names the way every
+/// other field of the envelope does.
+///
+/// # Panics
+///
+/// Never in practice: `VerificationCost` holds only strings and numbers.
+#[must_use]
+pub fn cost_json(model: &KernelModel, cost: fsl_solver::VerificationCost<'_>) -> Value {
+    let mut value = serde_json::to_value(cost).expect("verification cost serializes");
+    for property in value
+        .get_mut("properties")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(public) = property["name"]
+            .as_str()
+            .and_then(|name| model.compose_public_name(name))
+        {
+            property["name"] = json!(public);
+        }
+    }
+    // The solver orders properties by internal `(kind, name)`; the published
+    // order is by the published name (`acct.Inv` before `acct2.Inv`, whose
+    // internal names sort the other way).
+    if let Some(properties) = value.get_mut("properties").and_then(Value::as_array_mut) {
+        properties.sort_by_cached_key(|property| {
+            (
+                property["kind"].as_str().unwrap_or_default().to_owned(),
+                property["name"].as_str().unwrap_or_default().to_owned(),
+            )
+        });
+    }
+    value
 }
 
 fn origin_aware_property_name(

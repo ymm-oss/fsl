@@ -45,6 +45,7 @@ time, or replace production-log refinement mappings.
 The root and each event are closed objects. `initial` is the complete logical
 state at tick 0. Every event is exactly one logical transition: ticks are the
 canonical sequence `1..N`, `action` is either an exact Public Kernel action name
+(for a compose spec, see "Compose component action names" below)
 or the v1.1 stutter value `null`, and `state` is the complete resulting logical
 state. Action parameters are exact; stutter requires the empty object `{}`.
 State values use the ordinary Monitor/Public Kernel representation: enum member
@@ -70,6 +71,24 @@ layer as specified in [`DESIGN-kernel-contract.md`](DESIGN-kernel-contract.md).
 `timestamp` is optional, non-empty, opaque producer metadata. Replay ignores it;
 it has no ordering, deadline, or formal-time meaning. Consumers use `tick` for
 the logical transition order, including stutter steps.
+
+## Compose component action names
+
+Public Kernel rejects compose, but `fslc replay` accepts a compose spec. A
+component action has one canonical public name, `alias.action`, built from the
+`use` alias and the component's action name (#1234). testgen, conformance, the
+Monitor, and replay output — including `state_mismatch.action` — all use it, so
+`use X as a__b` with action `c` is `a__b.c`. A v1 trace may name a component
+action as `alias.action` or as the pre-#1234 `alias__action`. Both are looked up
+in the checked model's table of component actions, built from the alias and
+action pairs that compose lowering recorded; neither spelling is rewritten
+into the other. A spelling that matched more than one action would be an input
+error (exit 2) rather than a choice. A checked model cannot reach that case,
+because the two structures sharing an `alias__action` spelling would be
+duplicate actions. Sync and glue actions, and every action of a non-compose
+spec, match only their exact Kernel name (`foo__bar` is not also `foo.bar`).
+An `internal` component action is absent from the model and is rejected under
+either spelling.
 
 ## Observation-point correspondence
 
@@ -165,7 +184,9 @@ contains exactly the single `events` key, and that key's value is an array. They
 retain current action/display name matching and do not claim snapshot evidence.
 Migration consists of adding the v1 root, recording complete init, numbering
 events, and recording every complete post-state. No heuristic conversion or
-fallback is performed.
+fallback is performed. Accepting `alias__action` for a compose component action
+(above) is not such a conversion: it is another spelling of the same action,
+looked up in the model's structural table, never a string rewrite or a guess.
 
 `testgen-trace.v1` is a fixed-seed generated-test oracle with `steps[].expected`;
 verifier counterexample trace JSON carries source locations and changes. Neither

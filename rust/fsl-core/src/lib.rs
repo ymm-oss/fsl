@@ -47,7 +47,8 @@ mod trace_json;
 mod typecheck;
 
 pub use compose::{
-    FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
+    ComposeName, FileResolver, FsResolver, lower_compose, parse_kernel_source,
+    parse_kernel_source_with_file,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
@@ -225,6 +226,7 @@ pub struct KernelSpec {
     /// them (per-component `fair` markers) does not survive expansion.
     /// `check`/`verify` merge these with [`model_warnings`].
     diagnostics: Vec<Value>,
+    compose_names: compose::ComposeNames,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -251,6 +253,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
+        compose_names: compose::ComposeNames::default(),
     })
 }
 
@@ -724,6 +727,7 @@ fn lower_direct_spec_with_origins(
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
+        compose_names: compose::ComposeNames::default(),
     })
 }
 
