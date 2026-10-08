@@ -101,7 +101,11 @@ indexed assignment target's index expression is listed like any other operand.
 A quantifier, an aggregate and a statement-level `forall` are expanded into one
 entry per finite candidate, with the binder replaced by the candidate and the
 failure condition guarded by the candidate's membership and `where`, so no
-failure condition names a bound variable (#1190). A statement-level `forall`
+failure condition names a bound variable (#1190). An operation in a branch of
+an expression or statement-level `if` is guarded by the branch's condition,
+negated for `else`, and nested `if`s and `forall`s stack their guards, so a
+failure condition holds only on a path that evaluates the operation (#1260).
+A statement-level `forall`
 with no partial operation in its binder, `where` or body is not expanded, so its
 range need not have constant bounds. Every classified failure
 above rolls back the whole step: the Monitor returns the input state and leaves
