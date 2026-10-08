@@ -177,9 +177,11 @@ key-domain miss. The P1-c fold must keep that order.
   is the key-domain half.
 - `init` owes the three definedness rows at `Init`, generated as for an action
   body: its statements are evaluated in action context, so `/` and `%` are
-  partial operations. bmc and induction ask none of them today, while
-  `--engine explicit` fails the `init` with a `semantics` error (#1258); the
-  rows exist so the ledger does not read `init` definedness as owed by no one.
+  partial operations. Every engine reports an `init` that reaches a failing
+  operation as a `semantics` error (#1258): `--engine explicit` fails the
+  `init`, and bmc and induction ask one `init`/`definedness` question when
+  `init` contains an operation that can fail. The rows exist so the ledger
+  does not read `init` definedness as owed by no one.
   The Public Kernel keeps `partial_operations` to actions.
 
 ## Verification

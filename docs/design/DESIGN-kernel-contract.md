@@ -133,6 +133,23 @@ by re-evaluating the guards on the trace's last pre-state
 (`fsl_runtime::guard_partial_operation`). A body `partial_op` keeps its
 existing location.
 
+`partial_operations` is an action-context list only. An `init` statement's
+partial operations (and its other failure sites, such as a `Map` key outside
+the finite key domain or a checked integer overflow) are not published in the
+Public Kernel: an init failure is neither a rollback nor a `partial_op`
+violation, because there is no prior state to return to and no step to blame.
+Init definedness is a verifier obligation instead: every engine (explicit,
+`bmc`, `induction`) reports an init that some initial state cannot evaluate as
+a `semantics` error with exit code 2, and the symbolic engines locate it at the
+failing init statement (e.g. `division by zero in init at 9:5`; #1258). The
+one exception is an init that also assigns a value outside a state variable's
+type: `bmc` and `induction` assume the step-0 type bounds when they ask the
+init question, so they report the search's step-0 `type_bound` violation
+(exit 1) instead, while the explicit engine reports the init failure (exit 2).
+The schema is unchanged. Publishing init failure conditions, should a Kernel
+consumer need them, would add a field with its own `state_effect_on_failure`
+value and so a minor schema version.
+
 ## Concrete boundary pre-pass budget
 
 Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free

@@ -923,7 +923,7 @@ pub(crate) fn index_accessible<S: SmtSolver>(
     }
 }
 
-fn method_definedness<S: SmtSolver>(
+pub(crate) fn method_definedness<S: SmtSolver>(
     solver: &S,
     name: &str,
     receiver: &SymbolicValue<S::Term>,
@@ -1104,7 +1104,10 @@ fn aggregate_evaluation_status<S: SmtSolver>(
     })
 }
 
-fn i64_term_is_in_range<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<S::Term, VerifyError> {
+pub(crate) fn i64_term_is_in_range<S: SmtSolver>(
+    solver: &S,
+    term: &S::Term,
+) -> Result<S::Term, VerifyError> {
     Ok(solver.and(&[
         solver.ge(term, &solver.int_value(i64::MIN))?,
         solver.le(term, &solver.int_value(i64::MAX))?,
