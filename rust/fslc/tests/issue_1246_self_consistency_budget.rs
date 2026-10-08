@@ -153,10 +153,7 @@ fn check_reports_unknown_budget_for_an_inline_implements_pre_pass_cutoff() {
 
     let (value, status) = fslc(&dir, &["check", "req.fsl"]);
 
-    assert_eq!(
-        value["implements"]["result"], "unknown_budget",
-        "{value:#}"
-    );
+    assert_eq!(value["implements"]["result"], "unknown_budget", "{value:#}");
     assert_eq!(value["implements"]["states_explored"], BUDGET, "{value:#}");
     assert_eq!(value["result"], "unknown_budget", "{value:#}");
     assert_eq!(status, 1, "{value:#}");
