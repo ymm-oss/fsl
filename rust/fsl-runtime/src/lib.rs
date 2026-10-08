@@ -1535,11 +1535,12 @@ pub struct RefinementCheck {
     /// broken on its own), not a refinement fidelity verdict, so it must
     /// never be reported as `refines` or folded into `refinement_failed`.
     pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
-    /// Set to the walk's `visited.len()` at the cutoff when the
-    /// correspondence walk hit its state-count budget before exhausting the
-    /// reachable set within `depth` (issue #1041): the search stopped
-    /// early, so neither `refines` nor a decided `failure`/`impl_violation`
-    /// would be true -- reporting either would be a false result.
+    /// Set to the cut-off search's `visited.len()` when either the
+    /// self-consistency pre-pass (issue #1246) or the correspondence walk
+    /// (issue #1041) hit the state-count budget before exhausting the
+    /// reachable set within `depth`: the search stopped early, so neither
+    /// `refines` nor a decided `failure`/`impl_violation` would be true --
+    /// reporting either would be a false result.
     pub budget_exhausted: Option<usize>,
 }
 
@@ -1552,8 +1553,9 @@ pub struct RefinementCheck {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum RefinementVerdict<'a> {
-    /// The correspondence walk hit its state budget before deciding within
-    /// `depth`: neither `refines` nor a failure is known.
+    /// The self-consistency pre-pass or the correspondence walk hit its
+    /// state budget before deciding within `depth`: neither `refines` nor a
+    /// failure is known.
     BudgetExhausted { states_explored: usize },
     /// The implementation violates its own semantics within `depth`.
     ImplViolated {
@@ -1586,7 +1588,8 @@ impl RefinementCheck {
 }
 
 /// Bounded-search budget for [`check_refinement`]'s correspondence walk
-/// (issue #1041). Unlike [`find_boundary_violation`]'s `budget` parameter,
+/// (issue #1041) and for its self-consistency pre-pass, which walks the same
+/// reachable set first (issue #1246). Unlike [`find_boundary_violation`]'s `budget` parameter,
 /// this one has no CLI-facing knob (`fslc check` stays a flag-free fast
 /// check; `fslc verify` does not reuse `--explicit-budget` here either,
 /// because that flag governs a different search and one knob covering two
@@ -1910,10 +1913,21 @@ pub fn check_refinement_with_budget(
     // (issue #493), not one arbitrarily materialized default, so this
     // precondition cannot miss a self-violation reachable only from a
     // non-default initial branch either.
+    //
+    // The pre-pass walks the same reachable set the correspondence walk
+    // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
+    // every reachable state before the walk's own cutoff could apply. A
+    // pre-pass cut off before finding a self-violation has decided nothing,
+    // so it reports `budget_exhausted` -- never `refines` and never a walk
+    // started on an impl whose own consistency was not established.
     let impl_initial_states = concrete_initial_states(implementation)?;
-    if let Some((violation, trace)) =
-        first_self_violation(implementation, &impl_initial_states, depth)?
-    {
+    let (impl_violation, budget_exhausted) =
+        match first_self_violation(implementation, &impl_initial_states, depth, budget)? {
+            SelfConsistency::Consistent => (None, None),
+            SelfConsistency::Violated(violation, trace) => (Some((violation, trace)), None),
+            SelfConsistency::BudgetExhausted { states_explored } => (None, Some(states_explored)),
+        };
+    if impl_violation.is_some() || budget_exhausted.is_some() {
         return Ok(RefinementCheck {
             implementation: implementation.name.clone(),
             abstraction: abstraction.name.clone(),
@@ -1921,8 +1935,8 @@ pub fn check_refinement_with_budget(
             action_map: BTreeMap::new(),
             abs_has_ensures: false,
             failure: None,
-            impl_violation: Some((violation, trace)),
-            budget_exhausted: None,
+            impl_violation,
+            budget_exhausted,
         });
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
@@ -2526,6 +2540,18 @@ pub fn find_boundary_violation(
     })
 }
 
+/// The outcome of [`first_self_violation`]'s bounded self-consistency
+/// pre-pass (issue #1246).
+enum SelfConsistency {
+    /// The whole reachable set within `depth` is free of self-violations.
+    Consistent,
+    /// The first self-violation found, with its trace.
+    Violated(Violation, Vec<TraceStep>),
+    /// The pre-pass reached `budget` visited states before either finding a
+    /// self-violation or exhausting the reachable set within `depth`.
+    BudgetExhausted { states_explored: usize },
+}
+
 /// Find the first violation of ANY kind (type bound, user invariant, `trans`,
 /// `ensures`, or `partial_op`) the model has against its own semantics,
 /// concretely, within `depth` — i.e. whether the model is internally
@@ -2545,6 +2571,11 @@ pub fn find_boundary_violation(
 /// including a violation already present in the initial state (init can
 /// itself violate an invariant or type bound before any action runs).
 ///
+/// `budget` bounds `visited.len()` exactly as the correspondence walk's
+/// budget does (issue #1246): checked right after a new insert, so the
+/// pre-pass never holds more than `budget` visited states. A violation found
+/// before the cutoff is still reported; one beyond it is not searched for.
+///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when concrete evaluation or execution fails.
@@ -2552,7 +2583,8 @@ fn first_self_violation(
     model: &KernelModel,
     initial_states: &[State],
     depth: usize,
-) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    budget: usize,
+) -> Result<SelfConsistency, RuntimeError> {
     // Queue nodes carry `State` only; a scratch `Monitor` is re-pointed at
     // each popped state instead of cloning the whole model per node, and the
     // trace is reconstructed from parent links only when a violation is
@@ -2572,11 +2604,23 @@ fn first_self_violation(
         scratch.state = state.clone();
         scratch.step = 0;
         if let Some(violation) = scratch.current_violation()? {
-            return Ok(Some((violation, trace::reconstruct_trace(state, &parents))));
+            return Ok(SelfConsistency::Violated(
+                violation,
+                trace::reconstruct_trace(state, &parents),
+            ));
         }
         if visited.insert(state.clone()) {
             queue.push_back((state.clone(), 0_usize));
         }
+    }
+    // After the root loop, not inside it: every initial state is already
+    // materialized in `initial_states`, so checking each one for an
+    // immediate violation costs no extra memory, and a cutoff here must not
+    // skip a later root's init violation.
+    if visited.len() >= budget {
+        return Ok(SelfConsistency::BudgetExhausted {
+            states_explored: visited.len(),
+        });
     }
     while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
@@ -2592,7 +2636,7 @@ fn first_self_violation(
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = trace::reconstruct_trace(&state, &parents);
                 found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
-                return Ok(Some((violation, found_trace)));
+                return Ok(SelfConsistency::Violated(violation, found_trace));
             }
             let child_state = scratch.state.clone();
             if visited.insert(child_state.clone()) {
@@ -2606,11 +2650,16 @@ fn first_self_violation(
                         },
                     },
                 );
+                if visited.len() >= budget {
+                    return Ok(SelfConsistency::BudgetExhausted {
+                        states_explored: visited.len(),
+                    });
+                }
                 queue.push_back((child_state, step + 1));
             }
         }
     }
-    Ok(None)
+    Ok(SelfConsistency::Consistent)
 }
 
 /// The outcome of a budgeted vacuity-reachability probe for one

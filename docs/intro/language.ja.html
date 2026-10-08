@@ -1689,7 +1689,12 @@ gate を無条件に(<code>--forbid</code> の対象ではなく)失敗させま
 <code>result: "unknown_budget"</code> で失敗し、governance の <code>preservation</code> は <code>result</code> に
 <code>unknown_budget</code> を報告します。これは判定の変更です: 対応検査が上限に達する
 refinement は、以前は <code>refines</code>(exit 0)を報告していました。上記の自己一貫性の
-precondition には、この上限はありません。<code>fslc diff</code> と <code>fslc mutate</code> はまだこの
+precondition は同じ到達可能状態を先にたどり、同じ上限で止まって同じ <code>unknown_budget</code>
+を報告します: たどり着かなかった自己違反は探さず、対応検査も実行しません。そのため
+<code>--depth</code> の範囲の到達可能状態が上限に達する impl は、対応検査なら早い段で不一致を
+見つけられた場合でも <code>unknown_budget</code> になります。この上限が入る前は、そうした実行は
+precondition でメモリを使い切るか、収まった場合は判定のついた結果を報告していました。
+<code>fslc diff</code> と <code>fslc mutate</code> はまだこの
 打ち切りを読みません: <code>fslc diff</code> は <code>no_semantic_change</code>(exit 0)を報告し、
 <code>fslc mutate</code> はその mutant を survived と数えます。</p>
 <p><code>init</code> がどの経路でも一度も代入しない状態変数(例えば、代入されていない <code>Bool</code>

@@ -797,7 +797,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
   refine layer fails with `result:"unknown_budget"`, and a governance
   preservation reports `unknown_budget`. Such a run used to report `refines`
-  (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
+  (exit 0). The self-consistency precondition walks the same reachable set
+  first and stops at the same budget with the same `unknown_budget` report,
+  so an impl whose reachable set within `--depth` reaches the budget is
+  `unknown_budget` even if a mismatch lies early. `fslc diff`
   and `fslc mutate` do not read this cutoff yet (`diff` reports
   `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
 - **action-correspondence argument partial_op (#512)**: an
