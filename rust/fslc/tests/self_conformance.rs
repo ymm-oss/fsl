@@ -805,6 +805,16 @@ fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
             Some(false) => Ok(FoldClass::Failure),
             None => Err(format!("semantic_diff_batch missing gate.passed: {output}")),
         },
+        // Issue #1237: no `gate` is the default success; an explicit gate
+        // decides through `gate.passed`.
+        "mutated" => match output.get("gate") {
+            None => Ok(FoldClass::Success),
+            Some(gate) => match gate.get("passed").and_then(Value::as_bool) {
+                Some(true) => Ok(FoldClass::Success),
+                Some(false) => Ok(FoldClass::Failure),
+                None => Err(format!("mutated gate missing boolean passed: {output}")),
+            },
+        },
         "skipped" => Ok(FoldClass::Skipped),
         "ok"
         | "verified"
@@ -822,7 +832,6 @@ fn fold_result_class(output: &Value) -> Result<FoldClass, String> {
         | "kernel"
         | "typestate"
         | "scenarios"
-        | "mutated"
         | "migrated"
         | "compared"
         | "compat_profile_generated"
