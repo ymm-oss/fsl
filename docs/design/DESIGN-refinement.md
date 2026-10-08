@@ -825,3 +825,25 @@ at all (`grep -n "budget\|visited"` finds nothing there), per `CLAUDE.md`'s
 frozen-Python-moves-only-for-an-explicit-compatibility-decision rule.
 Aligning Python is the same kind of follow-up compatibility task as above,
 not decided here.
+
+#### Every consumer reads the budget cutoff (issue #1245)
+
+The budget above sits inside `check_refinement`, so it cuts off every caller's
+walk, but at first only the inline `implements` seam read
+`RefinementCheck::budget_exhausted`. `fslc refine` (single and chain), the
+`fslc chain` refine layer and the governance preservation check (native and
+Worker) reported a cut-off walk as `refines` / exit 0 — a false green: a
+stutter mismatch first reachable at step 8 was `refinement_failed` at a small
+domain and `refines` once the domain grew past the budget.
+`RefinementCheck::verdict()` is now the one reading of the three outcome
+fields (`budget_exhausted` first, then `impl_violation`, then `failure`), and
+those consumers match on it. `fslc refine` reports `unknown_budget` / exit 1
+with `states_explored`, the inline seam's vocabulary; a chain stops at that
+link; a governance preservation reports `unknown_budget`. The Worker
+governance path also stopped reporting a self-violating `after` spec as
+`refines` and now reports `violated`, as native does. `fslc diff`'s direction
+check and `fslc mutate`'s implements oracle still read the outcome fields
+themselves; their outputs have no `unknown_budget` value yet, so how they
+report the cutoff is a separate decision. The impl self-consistency
+precondition (`first_self_violation`) has no budget and no way to report a
+cutoff (#1246).
