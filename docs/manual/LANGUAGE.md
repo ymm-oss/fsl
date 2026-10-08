@@ -894,7 +894,8 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
 fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
-               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
+               [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
+                                                 # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
@@ -1155,7 +1156,8 @@ remains an organizational policy. The exact canonicalization and key formats
 are specified in `docs/design/DESIGN-approval.md`.
 
 Exit codes: `0` = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+mutated (unless its explicit gate fails) / explained / analyzed /
+semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
@@ -1862,6 +1864,17 @@ compose OrderSystem {
 - An ordinary `action` (without `=`) can also be written (a glue action).
 - JSON display: the physical name `alias__x` is output as `alias.x` (state keys,
   action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
+  A component action's public name is built from its alias and its action name,
+  so `use X as a__b` with action `c` is `a__b.c`. Every command that names a
+  component action — verify, sweep, scenarios, explain, testgen, conformance,
+  mutate, refine, diff, html, ledger, analyze (including graph IDs such as
+  `action:a__b.c`), `check --strict-tags` warnings, and `replay` output including `state_mismatch.action` — uses
+  this `alias.action` form, including in names derived from the action such as
+  `_requires_failed_a__b.c`. State keys keep the rule above, so the state `n` of
+  `use X as a__b` is shown as `a.b__n` (the frozen Python reference shows
+  `a__b.n`). A v1 `replay` trace may write a component action as `alias.action` or as
+  the older `alias__action`; both name the same action (see
+  `docs/design/DESIGN-replay-trace.md`).
 
 ```bash
 fslc check  specs/order_system.fsl
@@ -3127,6 +3140,14 @@ DESIGN-*.md).
   `killers` arrays and `by_obligation` sole/shared counts keyed by oracle display
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
+  `--fail-on-survivors` and `--min-kill-rate R` (opt-in, `R` in `[0, 1]`) add a
+  `gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}` object; `result` stays `mutated` and `gate.passed` decides
+  the exit code (1 when false). Zero judged mutants fails either flag
+  (`no_judged_mutants`); `--min-kill-rate` compares the published four-decimal
+  `summary.kill_rate` with `>=`; built-in mutants dropped by `--max-mutants` are
+  recorded in `gate.dropped` and do not fail the gate. Without either flag the
+  output and exit code are unchanged.
   → [`DESIGN-mutate.md`](../design/DESIGN-mutate.md)
 - **`fslc explain --readable`** — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,

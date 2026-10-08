@@ -986,13 +986,21 @@ fn extend_path_condition(path: Option<&Expr>, condition: &Expr, negated: bool) -
     })
 }
 
+/// `replacements` maps every enclosing statement-level `forall` binder to the
+/// candidate being expanded, and `path_condition` is that expansion's
+/// membership-and-`where` guard, so every listed failure condition is closed
+/// and fires only for a candidate the `forall` actually visits (#1190).
+#[allow(clippy::too_many_arguments)]
 fn statement_partial(
     statement: &Statement,
     env: &TypeEnv,
     model: &KernelModel,
     path: &str,
+    replacements: &HashMap<String, Expr>,
+    path_condition: Option<&Expr>,
     output: &mut Vec<Value>,
 ) -> Result<(), PublicKernelError> {
+    let closed = |expr: &Expr| crate::substitute_expr(expr.clone(), replacements);
     match statement {
         Statement::Assign {
             target,
@@ -1005,13 +1013,29 @@ fn statement_partial(
                 match target {
                     LValue::Var(_) => break,
                     LValue::Index(_, index) => {
-                        walk_partial(index, env, model, path, *span, None, output)?;
+                        walk_partial(
+                            &closed(index),
+                            env,
+                            model,
+                            path,
+                            *span,
+                            path_condition,
+                            output,
+                        )?;
                         break;
                     }
                     LValue::Field(base, _) => target = base,
                 }
             }
-            walk_partial(value, env, model, path, *span, None, output)?;
+            walk_partial(
+                &closed(value),
+                env,
+                model,
+                path,
+                *span,
+                path_condition,
+                output,
+            )?;
         }
         Statement::If {
             condition,
@@ -1019,18 +1043,61 @@ fn statement_partial(
             else_statements,
             span,
         } => {
-            walk_partial(condition, env, model, path, *span, None, output)?;
+            walk_partial(
+                &closed(condition),
+                env,
+                model,
+                path,
+                *span,
+                path_condition,
+                output,
+            )?;
             for item in then_statements.iter().chain(else_statements) {
-                statement_partial(item, env, model, path, output)?;
+                statement_partial(item, env, model, path, replacements, path_condition, output)?;
             }
         }
         Statement::ForAll {
-            statements, span, ..
+            binder,
+            statements,
+            span,
         } => {
-            for item in statements {
-                statement_partial(item, env, model, path, output)?;
+            // Expanded exactly like a quantifier (`walk_quantified_partial`):
+            // one term per finite candidate, the binder's range/collection and
+            // `where` walked under the enclosing guard, the body under the
+            // candidate's own membership-and-`where` guard.
+            //
+            // A `forall` with nothing to list is not expanded at all, so its
+            // range need not be statically finite: `forall k in 0..x { m[k] =
+            // 1 }` lists nothing, as before #1190. With a partial operation, a
+            // non-constant range fails closed like a quantifier's.
+            if !crate::partial_operation::statement_has_partial_operation(statement, env, model) {
+                return Ok(());
             }
-            let _ = span;
+            let binder = crate::substitute_binder(
+                binder.clone(),
+                replacements,
+                &crate::IndexedReplacements::new(),
+            );
+            let (name, candidates, filter) = finite_binder_candidates(&binder, env, model)?;
+            for (candidate, membership) in candidates {
+                let selected = HashMap::from([(name.clone(), candidate.clone())]);
+                let effective = aggregate_condition(membership, filter.as_ref(), &selected);
+                walk_partial(&effective, env, model, path, *span, path_condition, output)?;
+                let body_condition = extend_path_condition(path_condition, &effective, false);
+                let mut inner = replacements.clone();
+                inner.insert(name.clone(), candidate);
+                for item in statements {
+                    statement_partial(
+                        item,
+                        env,
+                        model,
+                        path,
+                        &inner,
+                        Some(&body_condition),
+                        output,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
@@ -1535,6 +1602,8 @@ pub fn public_kernel_contract(
                     &local,
                     model,
                     source_path,
+                    &HashMap::new(),
+                    None,
                     &mut partial,
                 )?;
             }

@@ -97,12 +97,41 @@ Partial operations (`head`, `pop`, `at`, sequence indexing, division, and
 remainder) are listed with a typed failure condition. The set is defined once as
 `fsl_core::PartialOperation` and shared by the Public Kernel, the verifier, the
 runtime (`RuntimeError::partial_operation`) and `fslc explain` (#1166); an
-indexed assignment target's index expression is listed like any other operand. Every classified failure
+indexed assignment target's index expression is listed like any other operand.
+A quantifier, an aggregate and a statement-level `forall` are expanded into one
+entry per finite candidate, with the binder replaced by the candidate and the
+failure condition guarded by the candidate's membership and `where`, so no
+failure condition names a bound variable (#1190). A statement-level `forall`
+with no partial operation in its binder, `where` or body is not expanded, so its
+range need not have constant bounds. Every classified failure
 above rolls back the whole step: the Monitor returns the input state and leaves
 its internal state unchanged. For diagnostics, `attempted_state` is absent for
 guard/body failures and is the exact uncommitted candidate for any later
 `type_bound`, `partial_op`, `invariant`, `trans`, or `ensures` failure. This
 rollback rule is shared by the schema and executable vectors.
+
+A guard (`let` or `requires`) that reaches a partial operation is that action's
+`partial_op` (`_partial_<action>`) in every engine, exactly like a body partial
+operation (#1191). The solver-free walks — explicit-state `verify`, Monitor
+BFS, the concrete boundary pre-pass below, refinement's self-violation walk,
+and the concrete cover/response/reachability walks — enumerate instances with
+`Monitor::candidates`, which returns such an instance as
+`ActionCandidate::GuardPartial` instead of aborting the whole walk with the raw
+evaluation error; `Monitor::step_candidate` turns it into the `partial_op`
+step (state unchanged, no `attempted_state`), the same evidence the symbolic
+engine's witness carries. Walks that only follow successful steps skip it like
+any other violating step. Such an instance is not *disabled* — its guard did
+not evaluate to `false` — so it keeps its state from being a deadlock and does
+not count toward action coverage. `Monitor::enabled` keeps returning the raw
+error for callers that need every guard to evaluate.
+
+The `verify` envelope's `loc` for a guard `partial_op` is the span the Public
+Kernel's `partial_operations` gives that guard's site — the `requires` clause,
+or the action itself for a `let`, which carries no span of its own — in every
+engine, also for an action without a body. The renderer finds the failing guard
+by re-evaluating the guards on the trace's last pre-state
+(`fsl_runtime::guard_partial_operation`). A body `partial_op` keeps its
+existing location.
 
 `partial_operations` is an action-context list only. An `init` statement's
 partial operations (and its other failure sites, such as a `Map` key outside

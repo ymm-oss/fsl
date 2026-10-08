@@ -36,6 +36,7 @@ mod domain;
 mod domain_lowering;
 mod expr_text;
 mod model;
+pub mod obligation;
 mod origin;
 mod partial_operation;
 mod public_kernel;
@@ -46,7 +47,8 @@ mod trace_json;
 mod typecheck;
 
 pub use compose::{
-    FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
+    ComposeName, FileResolver, FsResolver, lower_compose, parse_kernel_source,
+    parse_kernel_source_with_file,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
@@ -77,7 +79,8 @@ pub use origin::{
     type_target,
 };
 pub use partial_operation::{
-    ActionPartialOperation, PartialOperation, PartialOperationClause, action_partial_operations,
+    ActionPartialOperation, PartialOperation, PartialOperationClause,
+    action_has_partial_operation_candidate, action_partial_operations,
     binder_has_partial_operation_candidate, expression_has_partial_operation_candidate,
     lvalue_has_partial_operation_candidate,
 };
@@ -223,6 +226,7 @@ pub struct KernelSpec {
     /// them (per-component `fair` markers) does not survive expansion.
     /// `check`/`verify` merge these with [`model_warnings`].
     diagnostics: Vec<Value>,
+    compose_names: compose::ComposeNames,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -249,6 +253,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
+        compose_names: compose::ComposeNames::default(),
     })
 }
 
@@ -330,6 +335,42 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
     Ok(kernel)
 }
 
+/// Reject a `--instances` / `--values` override that names no `entity` /
+/// `number` the document declares (#1226).
+///
+/// `update_bounds` below only rewrites a bound the `verify` block already
+/// carries, so an override for any other name (a typo, or the name of a raw
+/// `type X = lo..hi` range) would otherwise be dropped without a word while
+/// the run still echoes it under `bounds_overrides`.
+fn validate_scope_override_names(
+    entities: &std::collections::BTreeSet<&str>,
+    numbers: &std::collections::BTreeSet<&str>,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<(), CoreError> {
+    let error = |message| CoreError {
+        message,
+        line: 1,
+        column: 1,
+        origin: None,
+        name_resolution: false,
+    };
+    if let Some(name) = instances
+        .keys()
+        .find(|name| !entities.contains(name.as_str()))
+    {
+        return Err(error(format!(
+            "verify instances references undeclared entity '{name}'"
+        )));
+    }
+    if let Some(name) = values.keys().find(|name| !numbers.contains(name.as_str())) {
+        return Err(error(format!(
+            "verify values references undeclared number '{name}'"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_direct_scope_overrides(
     spec: &SurfaceSpec,
     instances: &std::collections::BTreeMap<String, i64>,
@@ -351,32 +392,112 @@ fn validate_direct_scope_overrides(
             _ => None,
         })
         .collect::<std::collections::BTreeSet<_>>();
-    let error = |message| CoreError {
-        message,
-        line: 1,
-        column: 1,
-        origin: None,
-        name_resolution: false,
-    };
     if (!instances.is_empty() || !values.is_empty()) && entities.is_empty() && numbers.is_empty() {
-        return Err(error(
-            "--instances/--values only apply to specs with entity/number declarations; this spec declares neither".to_owned(),
-        ));
+        return Err(CoreError {
+            message: "--instances/--values only apply to specs with entity/number declarations; this spec declares neither".to_owned(),
+            line: 1,
+            column: 1,
+            origin: None,
+            name_resolution: false,
+        });
     }
-    if let Some(name) = instances
-        .keys()
-        .find(|name| !entities.contains(name.as_str()))
-    {
-        return Err(error(format!(
-            "verify instances references undeclared entity '{name}'"
-        )));
+    validate_scope_override_names(&entities, &numbers, instances, values)
+}
+
+/// The names a `--instances` / `--values` override may bound in a
+/// `business` / `requirements` document (#1226), as `(entities, numbers)`.
+///
+/// The business dialect has no `number`: its bound names are the declared
+/// `entity` names (`lower_business` requires every process to have one). The
+/// requirements dialect bounds `entity` names, `number` names, and the name of
+/// every `process` (which `lower_requirements` adds as an entity when no
+/// `entity` of that name is declared). Other documents yield `None`.
+fn dialect_scope_override_names(
+    document: &SurfaceDocument,
+) -> Option<(
+    std::collections::BTreeSet<&str>,
+    std::collections::BTreeSet<&str>,
+)> {
+    let mut entities = std::collections::BTreeSet::new();
+    let mut numbers = std::collections::BTreeSet::new();
+    match document {
+        SurfaceDocument::Business(business) => {
+            for item in &business.items {
+                if let BusinessItem::Entity(name, _) = item {
+                    entities.insert(name.as_str());
+                }
+            }
+        }
+        SurfaceDocument::Requirements(requirements) => {
+            for item in &requirements.items {
+                match item {
+                    RequirementsItem::Common(SpecItem::Entity(name, _)) => {
+                        entities.insert(name.as_str());
+                    }
+                    RequirementsItem::Common(SpecItem::Number(name, _)) => {
+                        numbers.insert(name.as_str());
+                    }
+                    RequirementsItem::Process(BusinessItem::Process { name, .. }) => {
+                        entities.insert(name.name());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => return None,
     }
-    if let Some(name) = values.keys().find(|name| !numbers.contains(name.as_str())) {
-        return Err(error(format!(
-            "verify values references undeclared number '{name}'"
-        )));
+    Some((entities, numbers))
+}
+
+fn validate_dialect_scope_overrides(
+    document: &SurfaceDocument,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<(), CoreError> {
+    match dialect_scope_override_names(document) {
+        Some((entities, numbers)) => {
+            validate_scope_override_names(&entities, &numbers, instances, values)
+        }
+        None => Ok(()),
     }
-    Ok(())
+}
+
+/// Restrict scope overrides to the names a `business` / `requirements`
+/// document lets [`parse_kernel_source_with_bounds`] override (#1226).
+///
+/// For an internal caller that derives overrides from a document's own
+/// `verify` block (`fslc diff`). A bound naming no declared `entity` /
+/// `number` is dropped from the overrides only; it is not inert in the
+/// document itself — a `verify` `values X = a..b` for a raw `type X = lo..hi`
+/// sets the default initial value of a requirements process field typed `X`
+/// (`lower_requirements`), and the document's own bound keeps doing so when
+/// the override is dropped. Any other document's overrides are returned
+/// unchanged.
+///
+/// # Errors
+///
+/// Returns [`CoreError`] when the source fails to parse.
+pub fn retain_dialect_scope_overrides(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+) -> Result<(InstanceOverrides, ValueOverrides), CoreError> {
+    let parsed = parse_document(SourceFile::new(source))?;
+    let Some((entities, numbers)) = dialect_scope_override_names(&parsed.surface) else {
+        return Ok((instances.clone(), values.clone()));
+    };
+    Ok((
+        instances
+            .iter()
+            .filter(|(name, _)| entities.contains(name.as_str()))
+            .map(|(name, value)| (name.clone(), *value))
+            .collect(),
+        values
+            .iter()
+            .filter(|(name, _)| numbers.contains(name.as_str()))
+            .map(|(name, value)| (name.clone(), *value))
+            .collect(),
+    ))
 }
 
 fn collect_spec_entity_number_names(
@@ -548,6 +669,7 @@ pub fn parse_kernel_source_with_bounds(
     }
 
     let parsed = parse_document(SourceFile::new(source))?;
+    validate_dialect_scope_overrides(&parsed.surface, instances, values)?;
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {
             validate_direct_scope_overrides(&spec, instances, values)?;
@@ -605,6 +727,7 @@ fn lower_direct_spec_with_origins(
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
+        compose_names: compose::ComposeNames::default(),
     })
 }
 
@@ -1966,7 +2089,7 @@ fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
     });
 }
 
-fn substitute_binder<S: std::hash::BuildHasher>(
+pub(crate) fn substitute_binder<S: std::hash::BuildHasher>(
     binder: Binder,
     replacements: &HashMap<String, Expr, S>,
     indexed: &IndexedReplacements,

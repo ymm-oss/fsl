@@ -818,6 +818,42 @@ pub struct EnabledAction {
     bindings: Bindings,
 }
 
+/// One bounded action instance whose guards do not evaluate to `false`.
+///
+/// Guards (`let` and `requires`) are evaluated in source order, and a guard
+/// that reaches a partial operation is that action's `partial_op` outcome,
+/// exactly like a partial operation reached in its body
+/// (`docs/design/DESIGN-kernel-contract.md`, Monitor order). A concrete
+/// walk that classifies body outcomes must classify this one too instead of
+/// aborting on the raw evaluation error (#1191).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ActionCandidate {
+    /// Every guard holds; the instance can step.
+    Enabled(EnabledAction),
+    /// A guard reaches a partial operation. Stepping it yields the action's
+    /// `partial_op` violation and leaves the state unchanged.
+    GuardPartial(EnabledAction),
+}
+
+impl ActionCandidate {
+    /// The action name and parameters of this instance.
+    #[must_use]
+    pub fn instance(&self) -> &EnabledAction {
+        match self {
+            Self::Enabled(instance) | Self::GuardPartial(instance) => instance,
+        }
+    }
+
+    /// The instance, when every guard holds.
+    #[must_use]
+    pub fn enabled(&self) -> Option<&EnabledAction> {
+        match self {
+            Self::Enabled(instance) => Some(instance),
+            Self::GuardPartial(_) => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct Violation {
@@ -985,6 +1021,75 @@ impl Monitor {
             }
         }
         Ok(enabled)
+    }
+
+    /// Enumerate every bounded action instance whose guards do not evaluate
+    /// to `false`, in [`Monitor::enabled`]'s order: the enabled ones, and the
+    /// ones whose guards reach a partial operation (#1191).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when parameter domains cannot be enumerated
+    /// or a guard fails for a reason other than a partial operation.
+    pub fn candidates(&self) -> Result<Vec<ActionCandidate>, RuntimeError> {
+        let mut candidates = Vec::new();
+        for action in &self.model.actions {
+            for params in action_parameter_bindings(action, &self.model)? {
+                match evaluate_action_guards(action, &params, &self.state, &self.model) {
+                    Ok(Some(bindings)) => {
+                        candidates.push(ActionCandidate::Enabled(EnabledAction {
+                            action: action.name.clone(),
+                            params,
+                            bindings,
+                        }));
+                    }
+                    Ok(None) => {}
+                    Err(error) if is_partial_operation_error(&error) => {
+                        candidates.push(ActionCandidate::GuardPartial(EnabledAction {
+                            action: action.name.clone(),
+                            bindings: params.clone(),
+                            params,
+                        }));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        Ok(candidates)
+    }
+
+    /// Step one [`Monitor::candidates`] instance while checking an optional
+    /// selection of implicit state-bound properties (see
+    /// [`Monitor::step_selected`]). A [`ActionCandidate::GuardPartial`]
+    /// instance yields its action's `partial_op` violation with the state
+    /// unchanged and no attempted state, the outcome a body partial
+    /// operation has.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] as [`Monitor::step_selected`] does.
+    pub fn step_candidate(
+        &mut self,
+        candidate: &ActionCandidate,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<StepResult, RuntimeError> {
+        match candidate {
+            ActionCandidate::Enabled(instance) => self.step_selected(instance, checked_bounds),
+            ActionCandidate::GuardPartial(instance) => {
+                self.step += 1;
+                Ok(StepResult {
+                    action: instance.action.clone(),
+                    params: instance.params.clone(),
+                    state: self.state.clone(),
+                    attempted_state: None,
+                    violation: Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: format!("_partial_{}", instance.action),
+                        step: self.step,
+                    }),
+                })
+            }
+        }
     }
 
     /// Evaluate and execute one bounded action call, including disabled and
@@ -1965,24 +2070,26 @@ pub fn check_refinement_with_budget(
         for (state_index, state) in layer.iter().enumerate() {
             scratch.state = state.clone();
             scratch.step = step;
-            for enabled in scratch.enabled()? {
+            for candidate in scratch.candidates()? {
+                let enabled = candidate.instance();
                 let action_index = implementation
                     .actions
                     .iter()
                     .position(|action| action.name == enabled.action)
                     .unwrap_or(usize::MAX);
-                candidates.push((action_index, enabled.params.clone(), state_index, enabled));
+                candidates.push((action_index, enabled.params.clone(), state_index, candidate));
             }
         }
         candidates.sort_by(|left, right| {
             (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
         });
-        for (_, _, state_index, enabled) in candidates {
+        for (_, _, state_index, candidate) in candidates {
             let state = &layer[state_index];
             let alpha_before = &alphas[state_index];
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&enabled)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
+            let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
                 // already proved the impl has no self-violation within
@@ -2005,7 +2112,7 @@ pub fn check_refinement_with_budget(
                 ActionCorrespondenceTarget::Stutter => {
                     if alpha_before != &alpha_after {
                         let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
                             Some("step"),
@@ -2051,7 +2158,7 @@ pub fn check_refinement_with_budget(
                                 state,
                                 &parents,
                                 step + 1,
-                                &enabled,
+                                enabled,
                                 &stepped,
                             );
                             check.failure = Some(refinement_failure(
@@ -2087,7 +2194,7 @@ pub fn check_refinement_with_budget(
                         refinement_action_instance(&abs_monitor, abs_action, expected_params)?
                     else {
                         let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_requires_failed",
                             Some("step"),
@@ -2103,7 +2210,7 @@ pub fn check_refinement_with_budget(
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
                     if expected_state != alpha_after {
                         let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_state_mismatch",
                             Some("step"),
@@ -2125,7 +2232,7 @@ pub fn check_refinement_with_budget(
                     "abs_state_mismatch"
                 };
                 let child_trace =
-                    refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                 check.failure = Some(refinement_failure(
                     kind,
                     Some("step"),
@@ -2216,8 +2323,11 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         result.states_explored += 1;
         scratch.state = state.clone();
         scratch.step = step;
-        let enabled = scratch.enabled()?;
-        if enabled.is_empty() {
+        // An instance whose guard reaches a partial operation is not
+        // disabled: it is that action's `partial_op` (#1191), so it keeps the
+        // state from being a deadlock and is stepped below like any other.
+        let candidates = scratch.candidates()?;
+        if candidates.is_empty() {
             let terminal = match terminal_holds(&scratch) {
                 Ok(value) => value,
                 Err(error) if is_partial_operation_error(&error) => {
@@ -2241,16 +2351,16 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
             }
         }
-        for instance in &enabled {
+        for instance in candidates.iter().filter_map(ActionCandidate::enabled) {
             result.action_coverage.insert(instance.action.clone(), true);
         }
         if step >= depth {
             continue;
         }
-        for instance in &enabled {
+        for candidate in &candidates {
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(instance)?;
+            let stepped = scratch.step_candidate(candidate, None)?;
             if let Some(violation) = stepped.violation {
                 if result
                     .violation
@@ -2369,19 +2479,15 @@ pub fn find_boundary_violation(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&instance)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
             if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
                     let mut found_trace = trace::reconstruct_trace(&state, &parents);
-                    found_trace.push(trace_step_from_result(
-                        step + 1,
-                        &state,
-                        &instance,
-                        &stepped,
-                    ));
+                    found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
                     return Ok(BoundaryProbe {
                         finding: Some((violation, found_trace)),
                         exhausted: false,
@@ -2478,18 +2584,14 @@ fn first_self_violation(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&instance)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = trace::reconstruct_trace(&state, &parents);
-                found_trace.push(trace_step_from_result(
-                    step + 1,
-                    &state,
-                    &instance,
-                    &stepped,
-                ));
+                found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
                 return Ok(Some((violation, found_trace)));
             }
             let child_state = scratch.state.clone();
@@ -2638,10 +2740,10 @@ pub fn expression_reachability(
         if step >= depth {
             continue;
         }
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&instance)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
             if stepped.violation.is_some() {
                 continue;
             }
@@ -2918,7 +3020,7 @@ pub fn never_enabled_action_warning(
     let origin = model.action_origin(&action.name);
     let name = origin
         .and_then(origin_display_name)
-        .map_or_else(|| display_name(&action.name), str::to_owned);
+        .map_or_else(|| model.action_display_name(&action.name), str::to_owned);
     // Keep this public diagnostic aligned with all other action JSON: a
     // source-backed lowered action reports the authored primary location,
     // while a kernel action retains its own declaration span. Zero spans are
@@ -2943,7 +3045,7 @@ pub fn never_enabled_action_warning(
         if let Some(origin) = origin {
             entry.insert(
                 "generated_name".to_owned(),
-                json!(display_name(&action.name)),
+                json!(model.action_display_name(&action.name)),
             );
             entry.insert("origin".to_owned(), internal_origin_json(origin));
         }
@@ -3024,39 +3126,25 @@ fn replay_trace_with_initial(
             .as_ref()
             .ok_or_else(|| runtime_error(format!("trace step {expected_step} has no action")))?;
         let before = monitor.state.clone();
-        let stepped = match monitor.enabled() {
-            Ok(enabled) => {
-                let instance = enabled
-                    .iter()
-                    .find(|instance| {
-                        instance.action == action.name && instance.params == action.params
-                    })
-                    .ok_or_else(|| {
-                        runtime_error(format!(
-                            "trace action '{}' is not enabled at step {expected_step}",
-                            action.name
-                        ))
-                    })?;
-                monitor.step(instance)?
-            }
-            Err(error)
-                if expected_step + 1 == trace.len() && is_partial_operation_error(&error) =>
-            {
-                let attempted = monitor.attempt(&action.name, &action.params)?;
-                if attempted
-                    .violation
-                    .as_ref()
-                    .is_none_or(|violation| violation.kind != "partial_op")
-                {
-                    return Err(runtime_error(format!(
-                        "trace action '{}' does not reproduce a partial operation at step {expected_step}",
-                        action.name
-                    )));
-                }
-                attempted
-            }
-            Err(error) => return Err(error),
-        };
+        // Only the trace's own instance matters: another instance whose guard
+        // reaches a partial operation does not make this step unreplayable
+        // (#1191). The trace's instance may itself be a guard `partial_op`
+        // only as the trace's final, failing step.
+        let candidates = monitor.candidates()?;
+        let candidate = candidates
+            .iter()
+            .find(|candidate| {
+                let instance = candidate.instance();
+                instance.action == action.name && instance.params == action.params
+            })
+            .filter(|candidate| candidate.enabled().is_some() || expected_step + 1 == trace.len())
+            .ok_or_else(|| {
+                runtime_error(format!(
+                    "trace action '{}' is not enabled at step {expected_step}",
+                    action.name
+                ))
+            })?;
+        let stepped = monitor.step_candidate(candidate, None)?;
         let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
         if observed_state != &entry.state {
             return Err(runtime_error(format!(
@@ -3117,16 +3205,17 @@ pub fn action_cover_traces(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        let enabled = scratch.enabled()?;
-        for instance in enabled {
+        let candidates = scratch.candidates()?;
+        for candidate in candidates {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let result = scratch.step(&instance)?;
+            let result = scratch.step_candidate(&candidate, None)?;
             if result.violation.is_none() {
                 let child_state = result.state.clone();
                 if !covered.contains_key(&instance.action) {
                     let mut witness = trace::reconstruct_trace(&state, &parents);
-                    witness.push(trace_step_from_result(step + 1, &state, &instance, &result));
+                    witness.push(trace_step_from_result(step + 1, &state, instance, &result));
                     covered.insert(instance.action.clone(), witness);
                 }
                 if visited.insert(child_state.clone()) {
@@ -3253,15 +3342,16 @@ pub fn leadsto_response_traces(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let result = scratch.step(&instance)?;
+            let result = scratch.step_candidate(&candidate, None)?;
             if result.violation.is_some() {
                 continue;
             }
             let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(step + 1, &state, &instance, &result));
+            child_trace.push(trace_step_from_result(step + 1, &state, instance, &result));
             queue.push(result.state.clone(), child_trace, step + 1);
         }
     }
@@ -3599,22 +3689,60 @@ fn evaluate_action_guards(
     state: &State,
     model: &KernelModel,
 ) -> Result<Option<Bindings>, RuntimeError> {
-    validate_action_parameters(action, params, model)?;
+    evaluate_action_guards_at(action, params, state, model).map_err(|(_, error)| error)
+}
+
+/// [`evaluate_action_guards`], also naming the index in `action.guards` of
+/// the guard whose evaluation failed (`None` when the parameters themselves
+/// were rejected).
+fn evaluate_action_guards_at(
+    action: &ActionDef,
+    params: &Bindings,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Option<Bindings>, (Option<usize>, RuntimeError)> {
+    validate_action_parameters(action, params, model).map_err(|error| (None, error))?;
     let mut bindings = params.clone();
-    for guard in &action.guards {
+    for (index, guard) in action.guards.iter().enumerate() {
+        let failed = |error| (Some(index), error);
         match guard {
             ActionGuard::Let(name, expression) => {
-                let value = eval(expression, state, &mut bindings, model, None)?;
+                let value = eval(expression, state, &mut bindings, model, None).map_err(failed)?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expression) => {
-                if !as_bool(eval(expression, state, &mut bindings, model, None)?)? {
+                let value = eval(expression, state, &mut bindings, model, None)
+                    .and_then(as_bool)
+                    .map_err(failed)?;
+                if !value {
                     return Ok(None);
                 }
             }
         }
     }
     Ok(Some(bindings))
+}
+
+/// The guard (an index into `action.guards`, in source order) whose
+/// evaluation reaches a partial operation when `action` is attempted with
+/// `params` in `state`, or `None` when every guard evaluates -- to `true` or
+/// to `false` -- or fails for another reason.
+///
+/// This is the guard a [`ActionCandidate::GuardPartial`] instance failed in,
+/// so a renderer can locate that `partial_op` at the guard's own Public
+/// Kernel `partial_operations` site instead of the action body (#1191).
+#[must_use]
+pub fn guard_partial_operation(
+    model: &KernelModel,
+    action: &str,
+    params: &Bindings,
+    state: &State,
+) -> Option<usize> {
+    let definition = model.actions.iter().find(|item| item.name == action)?;
+    match evaluate_action_guards_at(definition, params, state, model) {
+        Err((Some(index), error)) if is_partial_operation_error(&error) => Some(index),
+        _ => None,
+    }
 }
 
 /// Execute one `init` statement, threading `written` — the concrete value

@@ -514,8 +514,9 @@ fn impact(tsg: &Value, focus: &str) -> Result<(Vec<Value>, Vec<Value>), String> 
         .flatten()
         .filter_map(|n| n["id"].as_str().map(str::to_owned))
         .collect::<Vec<_>>();
-    // Node ids keep their raw, guaranteed-unique internal form (a db-dialect
-    // id embeds the `QqDbSepqQ` separator sentinel), but `--focus` also
+    // Node ids keep their raw, guaranteed-unique form (a db-dialect id embeds
+    // the `QqDbSepqQ` separator sentinel; a compose component action's id
+    // embeds its `alias.action` name, unique because an alias has no `.`), but `--focus` also
     // accepts the canonical *displayed* form `verify`/`fsl_core::display_name`
     // report for the same target, so a caller who only has the display name
     // (e.g. copied from a `verify` violation) does not have to know the

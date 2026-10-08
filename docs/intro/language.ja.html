@@ -939,7 +939,8 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
-               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
+               [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
+                                                 # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
@@ -1184,7 +1185,8 @@ spec を省略すると、変更されたすべての <code>.fsl</code> パス�
 所持は署名者を認証しますが、認可は依然として組織のポリシーの問題です。正確な正準化
 と鍵のフォーマットは <code>docs/design/DESIGN-approval.md</code> で規定されています。</p>
 <p>Exit code: <code>0</code> = verified / proved / scenarios/testgen の生成 / conformant / refines /
-mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗しない限り) /
+mutated(明示的なゲートが失敗しない限り) / explained / analyzed /
+semantic_diff(明示的なゲートが失敗しない限り) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
@@ -1836,7 +1838,18 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — その action をインターリービングから除外します。</li>
 <li>(<code>=</code> のない)通常の <code>action</code> も書けます(グルー action)。</li>
 <li>JSON の表示: 物理名 <code>alias__x</code> は <code>alias.x</code> として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。</li>
+  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
+  コンポーネントの action の公開名は alias と action 名から作るので、
+  <code>use X as a__b</code> の action <code>c</code> は <code>a__b.c</code> です。コンポーネントの action を名指す
+  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
+  mutate、refine、diff、html、ledger、analyze(<code>action:a__b.c</code> のようなグラフの ID を
+  含む)、<code>check --strict-tags</code> の警告、<code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を
+  使います。<code>_requires_failed_a__b.c</code> のように action から作る名前も同じです。
+  状態のキーは上の規則のままなので、<code>use X as a__b</code> の状態 <code>n</code> は <code>a.b__n</code> と
+  表示されます(凍結した Python 参照実装では <code>a__b.n</code>)。
+  v1 の <code>replay</code> トレースでは、コンポーネントの action を <code>alias.action</code> と書いても
+  旧来の <code>alias__action</code> と書いてもかまいません。どちらも同じ action を指します
+  (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。</li>
 </ul>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8
@@ -3034,7 +3047,15 @@ DESIGN-*.md があります)。</p>
   ではなく、trace case ID は宣言種別ごとに一意です。<code>--oracle-attribution</code>
   (opt-in) はミュータントごとの <code>killers</code> 配列と、oracle 表示名をキーにした
   <code>by_obligation</code> の sole/shared 集計を追加します。既定出力は変わらず、これらの
-  カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
+  カウントは観測された下界であり、完全性や正しさの尺度ではありません。
+  <code>--fail-on-survivors</code> と <code>--min-kill-rate R</code>(opt-in、<code>R</code> は <code>[0, 1]</code>)は
+  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}</code> を追加します。<code>result</code> は <code>mutated</code> のままで、
+  <code>gate.passed</code> が exit code を決めます(false なら 1)。判定済みミュータントが
+  0 件ならどちらのフラグでも不合格(<code>no_judged_mutants</code>)、<code>--min-kill-rate</code> は
+  公開される 4 桁丸めの <code>summary.kill_rate</code> と <code>&gt;=</code> で比べ、<code>--max-mutants</code> で
+  落ちた組み込みミュータントは <code>gate.dropped</code> に記録するだけで不合格にしません。
+  どちらのフラグも無ければ出力と exit code は変わりません。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement

@@ -230,6 +230,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
+        Ordinary,
+        "rust/fsl-runtime/src/lib.rs",
+        3656,
+        "evaluate_action_guards_at",
+        ResultOption
+    ),
+    entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
         421,
@@ -346,6 +353,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-core/src/dialect.rs",
         3311,
         "verify_scope_type_names",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/model.rs",
+        419,
+        "resolve_replay_action",
         ResultOption
     ),
     entry!(

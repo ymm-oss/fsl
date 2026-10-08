@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 
 use fsl_core::{
     ActionDef, ActionGuard, FslValue, KernelLValue as LValue, KernelModel,
-    KernelStatement as Statement, ParamDef, TypeRef, binder_has_partial_operation_candidate,
-    expression_has_partial_operation_candidate, lvalue_has_partial_operation_candidate,
+    KernelStatement as Statement, ParamDef, TypeRef,
 };
 use fsl_solver::SmtSolver;
 
@@ -40,49 +39,7 @@ pub(crate) struct ActionGuardDefinedness<T> {
     pub bindings: Bindings<T>,
 }
 
-pub(crate) fn action_has_partial_operation_candidate(action: &ActionDef) -> bool {
-    action.guards.iter().any(|guard| match guard {
-        ActionGuard::Let(_, expr) | ActionGuard::Requires(expr) => {
-            expression_has_partial_operation_candidate(expr)
-        }
-    }) || action
-        .statements
-        .iter()
-        .any(statement_has_partial_operation_candidate)
-        || action
-            .ensures
-            .iter()
-            .any(expression_has_partial_operation_candidate)
-}
-
-fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
-    match statement {
-        Statement::Assign { target, value, .. } => {
-            expression_has_partial_operation_candidate(value)
-                || lvalue_has_partial_operation_candidate(target)
-        }
-        Statement::If {
-            condition,
-            then_statements,
-            else_statements,
-            ..
-        } => {
-            expression_has_partial_operation_candidate(condition)
-                || then_statements
-                    .iter()
-                    .chain(else_statements)
-                    .any(statement_has_partial_operation_candidate)
-        }
-        Statement::ForAll {
-            binder, statements, ..
-        } => {
-            binder_has_partial_operation_candidate(binder)
-                || statements
-                    .iter()
-                    .any(statement_has_partial_operation_candidate)
-        }
-    }
-}
+pub(crate) use fsl_core::action_has_partial_operation_candidate;
 
 pub(crate) fn action_instances<S: SmtSolver>(
     solver: &S,

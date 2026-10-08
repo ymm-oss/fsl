@@ -544,11 +544,8 @@ fn partial_inventory_sweep_agrees_across_explain_kernel_verifier_and_runtime() {
         let observed = observe_inventory(&model.id, &model.source);
         let violated = ("violated".to_owned(), "partial_op/_partial_a".to_owned());
         let placement = model.placement;
-        let (expected_authored, expected_reads) = if placement.kernel_exclusion.is_some() {
-            (0, 0)
-        } else {
-            (placement.kernel_authored, placement.kernel_binder_reads)
-        };
+        let (expected_authored, expected_reads) =
+            (placement.kernel_authored, placement.kernel_binder_reads);
         let authored = observed
             .kernel_operations
             .iter()
@@ -633,6 +630,234 @@ fn partial_inventory_seq_binder_reads_are_guarded_and_not_listed_by_explain() {
     assert_eq!(observed.bmc.0, "verified");
     assert_eq!(observed.explicit.0, "proved");
     assert_eq!(observed.monitor, None);
+}
+
+/// Issue #1190: the issue's three statement-level `forall` bodies whose partial
+/// operation reads the binder. The Public Kernel used to fail with "cannot
+/// type identifier 'k'"; it now lists one closed entry per candidate (no free
+/// `k`), explain lists the one authored site, and the verdicts are unchanged:
+/// the unguarded `at` fails, the guarded index read and `1 / (k + 1)` do not.
+#[test]
+fn forall_statement_partial_operations_on_the_binder_are_listed_per_candidate() {
+    let cases = [
+        (
+            "forall_statement_at_binder",
+            "forall k: K { m[k] = s.at(k) }",
+            "at",
+            ("violated", "partial_op/_partial_a"),
+            ("violated", "partial_op/_partial_a"),
+            Some("partial_op"),
+        ),
+        (
+            "forall_statement_guarded_index_binder",
+            "forall k: K { m[k] = if k < s.size() then s[k] else 0 }",
+            "index",
+            ("verified", "/"),
+            ("proved", "/"),
+            None,
+        ),
+        (
+            "forall_statement_divide_binder",
+            "forall k: K { m[k] = 1 / (k + 1) }",
+            "divide",
+            ("verified", "/"),
+            ("proved", "/"),
+            None,
+        ),
+    ];
+    for (id, body, operation, bmc, explicit, monitor) in cases {
+        let source = partial_inventory_source(body);
+        let observed = observe_inventory(id, &source);
+        assert_eq!(observed.explain_sites, 1, "{id}");
+        assert_eq!(
+            observed.kernel_operations,
+            vec![(operation.to_owned(), false); 3],
+            "{id}"
+        );
+        assert_eq!(
+            observed.bmc,
+            (bmc.0.to_owned(), bmc.1.to_owned()),
+            "{id}: bmc"
+        );
+        assert_eq!(
+            observed.explicit,
+            (explicit.0.to_owned(), explicit.1.to_owned()),
+            "{id}: explicit"
+        );
+        assert_eq!(observed.monitor.as_deref(), monitor, "{id}: monitor");
+
+        let dir =
+            std::env::temp_dir().join(format!("fslc-typed-agreement-1190-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch directory");
+        let path = dir.join(format!("{id}.fsl"));
+        std::fs::write(&path, &source).expect("write generated model");
+        let kernel = cli_json(&["kernel", path.to_str().expect("utf-8 path")]);
+        let _ = std::fs::remove_file(&path);
+        let listed = kernel["actions"][0]["partial_operations"].to_string();
+        assert!(
+            !listed.contains("\"name\":\"k\""),
+            "{id}: a failure condition still names the binder: {listed}"
+        );
+    }
+}
+
+/// Negative control for #1190: a statement-level `forall` whose body has no
+/// partial operation still lists nothing, and is not a violation.
+#[test]
+fn forall_statement_without_partial_operation_lists_nothing() {
+    let observed = observe_inventory(
+        "forall_statement_total",
+        &partial_inventory_source("forall k: K where k > 0 { m[k] = m[k] }"),
+    );
+    assert_eq!(observed.explain_sites, 0);
+    assert!(
+        observed.kernel_operations.is_empty(),
+        "{:?}",
+        observed.kernel_operations
+    );
+    assert_eq!(observed.bmc.0, "verified");
+    assert_eq!(observed.explicit.0, "proved");
+    assert_eq!(observed.monitor, None);
+}
+
+/// `fslc kernel` on `partial_inventory_source(body)`.
+fn kernel_for_body(id: &str, body: &str) -> serde_json::Value {
+    let dir =
+        std::env::temp_dir().join(format!("fslc-typed-agreement-1190k-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create scratch directory");
+    let path = dir.join(format!("{id}.fsl"));
+    std::fs::write(&path, partial_inventory_source(body)).expect("write generated model");
+    let kernel = cli_json(&["kernel", path.to_str().expect("utf-8 path")]);
+    let _ = std::fs::remove_file(&path);
+    kernel
+}
+
+/// The value of a closed Public Kernel expression built only from literals,
+/// `ite` and binary operators -- what an expanded failure condition is once
+/// every binder is replaced by its candidate and nothing reads state.
+fn eval_closed(expr: &serde_json::Value) -> i64 {
+    match expr["kind"].as_str() {
+        Some("num") => expr["value"].as_i64().expect("num literal"),
+        Some("bool") => i64::from(expr["value"].as_bool().expect("bool literal")),
+        Some("ite") => {
+            if eval_closed(&expr["condition"]) != 0 {
+                eval_closed(&expr["then"])
+            } else {
+                eval_closed(&expr["else"])
+            }
+        }
+        Some("binary") => {
+            let (left, right) = (eval_closed(&expr["left"]), eval_closed(&expr["right"]));
+            match expr["operator"].as_str().expect("binary operator") {
+                "and" => i64::from(left != 0 && right != 0),
+                "or" => i64::from(left != 0 || right != 0),
+                "==" => i64::from(left == right),
+                "!=" => i64::from(left != right),
+                "<" => i64::from(left < right),
+                "<=" => i64::from(left <= right),
+                ">" => i64::from(left > right),
+                ">=" => i64::from(left >= right),
+                "+" => left + right,
+                "-" => left - right,
+                other => panic!("unexpected operator {other} in {expr}"),
+            }
+        }
+        _ => panic!("not a closed literal expression: {expr}"),
+    }
+}
+
+/// Review r1 M1 for #1190: the body of a statement-level `forall` with a
+/// `where` is listed under each candidate's membership-and-`where` guard.
+/// `2 / k` fails only for `k == 0`, which `where k > 0` excludes, so every one
+/// of the three entries -- the `k == 0` one included -- must be false. An
+/// unguarded entry would be `0 == 0`.
+#[test]
+fn forall_statement_where_guards_each_body_entry() {
+    let body = "forall k: K where k > 0 { m[k] = 2 / k }";
+    let observed = observe_inventory(
+        "forall_statement_where_guard",
+        &partial_inventory_source(body),
+    );
+    assert_eq!(observed.explain_sites, 1);
+    assert_eq!(
+        observed.kernel_operations,
+        vec![("divide".to_owned(), false); 3]
+    );
+    assert_eq!(observed.bmc.0, "verified");
+    assert_eq!(observed.explicit.0, "proved");
+    assert_eq!(observed.monitor, None);
+
+    let kernel = kernel_for_body("forall_statement_where_guard", body);
+    let entries = kernel["actions"][0]["partial_operations"]
+        .as_array()
+        .unwrap_or_else(|| panic!("kernel has no partial_operations: {kernel}"));
+    assert_eq!(entries.len(), 3);
+    for entry in entries {
+        let failure = &entry["failure_condition"];
+        assert_eq!(
+            eval_closed(failure),
+            0,
+            "an entry fires although `where k > 0` excludes it: {}",
+            without_spans(failure)
+        );
+    }
+}
+
+/// Review r1 M2 for #1190: a statement-level `forall` with no partial
+/// operation is not expanded, so a range whose bound is not a constant still
+/// produces a Kernel (listing nothing), as it did before #1190. A `Map` index
+/// read is not a partial operation.
+#[test]
+fn forall_statement_without_partial_operation_needs_no_constant_range() {
+    for (id, body) in [
+        (
+            "forall_statement_state_bound",
+            "forall k in 0..x { m[k] = 1 }",
+        ),
+        (
+            "forall_statement_state_bound_map_read",
+            "forall k in 0..x { m[k] = m[k] }",
+        ),
+    ] {
+        let kernel = kernel_for_body(id, body);
+        assert_ne!(kernel["result"], "error", "{id}: {kernel}");
+        assert_eq!(
+            kernel["actions"][0]["partial_operations"],
+            serde_json::json!([]),
+            "{id}: {kernel}"
+        );
+    }
+}
+
+/// Review r2 m1 for #1190: the positive control of
+/// `forall_statement_without_partial_operation_needs_no_constant_range`. With
+/// a partial operation in the body, a range whose bound is not a constant fails
+/// closed instead of listing nothing. Swallowing the candidate error would
+/// silently produce a false empty list.
+fn assert_kernel_fails_on_non_constant_range(id: &str, body: &str) {
+    let kernel = kernel_for_body(id, body);
+    assert_eq!(kernel["result"], "error", "{id}: {kernel}");
+    assert!(
+        kernel.to_string().contains("is not an integer const"),
+        "{id}: {kernel}"
+    );
+}
+
+#[test]
+fn forall_statement_with_division_needs_a_constant_range() {
+    assert_kernel_fails_on_non_constant_range(
+        "forall_statement_state_bound_divide",
+        "forall k in 0..x { m[k] = 2 / x }",
+    );
+}
+
+/// A `Seq` index read counts as a partial operation, unlike a `Map` one.
+#[test]
+fn forall_statement_with_seq_read_needs_a_constant_range() {
+    assert_kernel_fails_on_non_constant_range(
+        "forall_statement_state_bound_seq_read",
+        "forall k in 0..x { m[k] = s[k] }",
+    );
 }
 
 #[test]
