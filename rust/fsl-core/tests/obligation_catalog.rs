@@ -1619,7 +1619,8 @@ fn candidates_reach_the_row_from_every_operand_position() {
 
 /// #1258: `InitDiv` and `InitMapRead`, where `fslc verify --engine explicit`
 /// fails the `init` with `division by zero` and `map index outside finite key
-/// domain` while bmc and induction ask nothing. `init` is evaluated in action
+/// domain`, and bmc and induction report the same failure through their
+/// `init`/`definedness` question. `init` is evaluated in action
 /// context, so its `/` is a partial operation and an overflow candidate, and
 /// `m[i]` (`i: 0..5`, `K = 0..3`) can miss the key domain. `InitOvf` is the
 /// overflow-only control: a `*` without a partial operation or an index.
