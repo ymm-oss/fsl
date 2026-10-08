@@ -64,6 +64,12 @@
             "name": "OneEntry"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "reachable",
@@ -131,7 +137,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -140,7 +146,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -198,6 +204,12 @@
             "name": "SeenYellow"
           },
           {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 4,
             "elapsed_s": "<elapsed>",
             "kind": "reachable",
@@ -247,7 +259,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -256,7 +268,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -321,6 +333,12 @@
             "name": "NeverAboveCap"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 5,
             "elapsed_s": "<elapsed>",
             "kind": "reachable",
@@ -382,7 +400,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -391,7 +409,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -468,6 +486,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "OpenAtTop"
+          },
+          {
+            "checks": 14,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 6,
@@ -559,7 +583,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -568,7 +592,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -651,7 +675,13 @@
             "name": "QueuedInActive"
           },
           {
-            "checks": 22,
+            "checks": 60,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 32,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "complete"
@@ -727,7 +757,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -736,7 +766,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -796,6 +826,12 @@
             "name": "XNonNegative"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 5,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -824,7 +860,7 @@
           "check_elapsed_s": "<number>",
           "checks": "<number>",
           "conflicts": "<number>",
-          "decisions": "<null>",
+          "decisions": "<number>",
           "memory_mb": "<number>",
           "propagations": "<number>"
         }
@@ -843,7 +879,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -852,7 +888,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       }
     }
@@ -911,6 +947,12 @@
             "name": "XNonNegative"
           },
           {
+            "checks": 8,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 5,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -939,7 +981,7 @@
           "check_elapsed_s": "<number>",
           "checks": "<number>",
           "conflicts": "<number>",
-          "decisions": "<null>",
+          "decisions": "<number>",
           "memory_mb": "<number>",
           "propagations": "<number>"
         }
@@ -958,7 +1000,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -967,7 +1009,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       }
     }
@@ -1036,6 +1078,12 @@
             "name": "XRange"
           },
           {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -1088,7 +1136,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1097,7 +1145,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -1164,6 +1212,12 @@
             "name": "XRange"
           },
           {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -1221,7 +1275,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1230,7 +1284,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1297,6 +1351,12 @@
             "name": "XRange"
           },
           {
+            "checks": 10,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 6,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -1345,7 +1405,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1354,7 +1414,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1431,6 +1491,12 @@
             "name": "Responds"
           },
           {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
             "checks": 3,
             "elapsed_s": "<elapsed>",
             "kind": "type_bound",
@@ -1488,7 +1554,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1497,7 +1563,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "warnings": []
@@ -1574,6 +1640,12 @@
           {
             "checks": 2,
             "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
             "kind": "type_bound",
             "name": "_bounds_level"
           },
@@ -1632,7 +1704,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1641,7 +1713,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1712,6 +1784,12 @@
           {
             "checks": 2,
             "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 2,
+            "elapsed_s": "<elapsed>",
             "kind": "type_bound",
             "name": "_bounds_gate"
           },
@@ -1770,7 +1848,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1779,7 +1857,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1846,19 +1924,25 @@
             "name": "Finishes"
           },
           {
-            "checks": 34,
+            "checks": 16,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
+          },
+          {
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpEven"
           },
           {
-            "checks": 34,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "helpOdd"
           },
           {
-            "checks": 34,
+            "checks": 42,
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "rotate"
@@ -1954,7 +2038,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1963,7 +2047,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -2034,6 +2118,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "NonNeg"
+          },
+          {
+            "checks": 16,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 9,
@@ -2109,7 +2199,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -2118,7 +2208,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -2190,6 +2280,12 @@
             "elapsed_s": "<elapsed>",
             "kind": "partial_op",
             "name": "NoNegativeStock"
+          },
+          {
+            "checks": 24,
+            "elapsed_s": "<elapsed>",
+            "kind": "partial_op",
+            "name": "actions"
           },
           {
             "checks": 5,
@@ -2339,7 +2435,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.8.0"
+          "version": "4.9.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -2348,7 +2444,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.8.0"
+          "version": "4.9.0"
         }
       },
       "violated_at_step": 4,

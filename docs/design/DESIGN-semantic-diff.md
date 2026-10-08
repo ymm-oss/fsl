@@ -69,7 +69,35 @@ The finding carries `subject:"forbidden"`, the OLD case `id`, a stable
 `reason` (`forbidden_step_unrelatable` or `forbidden_replay_failed`), and the
 zero-based failing `step` plus `action` when available. A matching action that
 is disabled by its guard is a related rejection and therefore preserves the
-forbidden scenario; it is not reported as `unknown`.
+forbidden scenario; it is not reported as `unknown`. Known gap (issue #1239):
+the implementation applies this to a setup step as well, so a NEW setup step
+disabled by its guard is reported as preserved although NEW never runs the
+final step; only a disabled final step is evidence of a preserved rejection.
+A final step that both OLD and NEW reject as `bad_call` outside a declared type
+is preserved too, even though NEW cannot relate its arguments to an action: on
+both sides, every same-named action of that arity has an argument outside a
+range or enum parameter type. Each side is classified with its own `entity` /
+`number` types (DESIGN-forbidden.md §2), so a type that either side declares as
+an `instances` / `values` scope never yields a preserved `bad_call`. NEW's are
+known only for a spec, business, or requirements NEW, so a compose or
+other-dialect NEW never preserves a forbidden this way. An OLD final step
+outside an `entity` / `number` verify scope (including the NEW scope OLD is
+replayed under) was rejected by no guard (#1229), so it is `unknown` with
+`forbidden_replay_failed`; one only NEW's scope excludes is `unknown` /
+`forbidden_step_unrelatable`. Before #1229 both were `unknown` /
+`forbidden_step_unrelatable`, and a compose NEW that rejected an OLD `bad_call`
+as `bad_call` preserved it. An OLD final step that names no action,
+or no variant of that arity, is `unknown` / `forbidden_replay_failed`. A NEW
+final step that is enabled and then stops with a runtime violation is not a
+rejection either (DESIGN-forbidden.md §2, #1213): it is `forbidden_relaxed`, and
+its witness carries `violation` (`{kind, name}`). An OLD final step that is
+enabled and then violates was never a rejection to preserve, so it is `unknown`
+with `forbidden_replay_failed`.
+A NEW setup step that is enabled and then violates is `unknown` with
+`forbidden_replay_failed` as well: NEW never reaches the final step, so it
+neither preserves nor relaxes the OLD rejection. The same reasoning applies to
+a NEW setup step that its guard disables, but that step is still reported as
+preserved (the known gap above, issue #1239).
 
 ## Scope changes
 
