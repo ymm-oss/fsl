@@ -107,6 +107,16 @@ pub fn expression_has_partial_operation_candidate(expr: &Expr) -> bool {
     found
 }
 
+/// Visit every untyped candidate of `expr`, binder parts included, in the walk
+/// [`expression_has_partial_operation_candidate`] answers from, for a caller
+/// that tells the kinds apart.
+pub(crate) fn for_each_partial_operation_candidate(
+    expr: &Expr,
+    visit: &mut impl FnMut(PartialOperation),
+) {
+    walk_expr(expr, &mut Untyped, visit);
+}
+
 /// [`expression_has_partial_operation_candidate`] for a binder's range,
 /// collection and `where` parts.
 #[must_use]
@@ -125,6 +135,54 @@ pub fn lvalue_has_partial_operation_candidate(target: &LValue) -> bool {
         LValue::Var(_) => false,
         LValue::Index(_, _) => true,
         LValue::Field(base, _) => lvalue_has_partial_operation_candidate(base),
+    }
+}
+
+/// Whether any `requires`/`let`, statement, or `ensures` of `action` can
+/// reach a partial operation. The verifier skips its implicit `partial_op`
+/// queries when no action of the model has a candidate.
+#[must_use]
+pub fn action_has_partial_operation_candidate(action: &ActionDef) -> bool {
+    action.guards.iter().any(|guard| match guard {
+        ActionGuard::Let(_, expr) | ActionGuard::Requires(expr) => {
+            expression_has_partial_operation_candidate(expr)
+        }
+    }) || action
+        .statements
+        .iter()
+        .any(statement_has_partial_operation_candidate)
+        || action
+            .ensures
+            .iter()
+            .any(expression_has_partial_operation_candidate)
+}
+
+pub(crate) fn statement_has_partial_operation_candidate(statement: &Statement) -> bool {
+    match statement {
+        Statement::Assign { target, value, .. } => {
+            expression_has_partial_operation_candidate(value)
+                || lvalue_has_partial_operation_candidate(target)
+        }
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            expression_has_partial_operation_candidate(condition)
+                || then_statements
+                    .iter()
+                    .chain(else_statements)
+                    .any(statement_has_partial_operation_candidate)
+        }
+        Statement::ForAll {
+            binder, statements, ..
+        } => {
+            binder_has_partial_operation_candidate(binder)
+                || statements
+                    .iter()
+                    .any(statement_has_partial_operation_candidate)
+        }
     }
 }
 

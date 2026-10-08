@@ -36,6 +36,7 @@ mod domain;
 mod domain_lowering;
 mod expr_text;
 mod model;
+pub mod obligation;
 mod origin;
 mod partial_operation;
 mod public_kernel;
@@ -77,7 +78,8 @@ pub use origin::{
     type_target,
 };
 pub use partial_operation::{
-    ActionPartialOperation, PartialOperation, PartialOperationClause, action_partial_operations,
+    ActionPartialOperation, PartialOperation, PartialOperationClause,
+    action_has_partial_operation_candidate, action_partial_operations,
     binder_has_partial_operation_candidate, expression_has_partial_operation_candidate,
     lvalue_has_partial_operation_candidate,
 };
