@@ -1056,13 +1056,20 @@ fn project_scalar<S: SmtSolver>(
     if let TypeRef::Named(name) = ty
         && let Some(TypeDef::Enum { members, .. }) = model.types.get(name)
     {
-        let index = usize::try_from(value)
-            .map_err(|_| VerifyError::new("negative enum ordinal in solver model"))?;
-        let Some(member) = members.get(index) else {
-            // A type-bound counterexample deliberately assigns an invalid
-            // ordinal. Preserve that raw value so the verifier can emit the
-            // witness instead of turning a valid finding into a projection
-            // error.
+        // A type-bound counterexample deliberately assigns an invalid
+        // ordinal. Preserve that raw value so the verifier can emit the
+        // witness instead of turning a valid finding into a projection
+        // error. The out-of-range side is two-sided: an unconstrained enum
+        // state (e.g. its init assignment removed) lets the solver pick any
+        // integer, negative ones included, and `_bounds_<state>` is exactly
+        // the property that reports it. Negative ordinals are therefore kept
+        // as raw values like ordinals past the last member, rather than
+        // constraining the solver to non-negative ordinals, which would hide
+        // part of the type-bound violation space (#1283).
+        let Some(member) = usize::try_from(value)
+            .ok()
+            .and_then(|index| members.get(index))
+        else {
             return Ok(FslValue::Int(value));
         };
         return Ok(FslValue::Enum {

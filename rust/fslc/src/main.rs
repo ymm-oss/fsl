@@ -11429,6 +11429,26 @@ fn removed_init_assignment_root(
     })
 }
 
+/// Removing the init assignment of a state whose type has symbolic bounds
+/// leaves that state unconstrained, so `_bounds_<root>` is reported as the
+/// killer even when the oracle itself picked a different property or none.
+/// An oracle that failed (`build_spec` / `internal`) did not judge the mutant
+/// at all; overwriting it would turn that failure into a type-bound kill and
+/// hide it from the output, so the failure is kept as-is (#1283).
+fn apply_init_bounds_override(outcome: MutationOracle, root: &str) -> MutationOracle {
+    if matches!(
+        outcome.killed_by.as_deref(),
+        Some("build_spec" | "internal")
+    ) {
+        return outcome;
+    }
+    MutationOracle {
+        clean: false,
+        killed_by: Some(format!("_bounds_{root}")),
+        killer_requirements: Vec::new(),
+    }
+}
+
 fn type_has_symbolic_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Int | TypeRef::Bool => false,
@@ -12023,11 +12043,7 @@ fn run_mutate(
             && let Some((_, ty)) = model.state.iter().find(|(name, _)| name == &root)
             && type_has_symbolic_bounds(&model, ty)
         {
-            outcome = MutationOracle {
-                clean: false,
-                killed_by: Some(format!("_bounds_{root}")),
-                killer_requirements: Vec::new(),
-            };
+            outcome = apply_init_bounds_override(outcome, &root);
         }
         let status = if outcome.clean { "survived" } else { "killed" };
         let target = mutant
@@ -19474,5 +19490,42 @@ spec GrowFixture {
              not survive as the same mutation would against source B"
         );
         assert_eq!(outcome.killed_by.as_deref(), Some("NonNegative"));
+    }
+}
+
+#[cfg(test)]
+mod mutate_init_bounds_override_tests {
+    use super::*;
+
+    fn outcome(clean: bool, killed_by: Option<&str>) -> MutationOracle {
+        MutationOracle {
+            clean,
+            killed_by: killed_by.map(str::to_owned),
+            killer_requirements: Vec::new(),
+        }
+    }
+
+    /// Issue #1283: the init-assignment special case must not overwrite an
+    /// oracle failure with `_bounds_<root>`. Applying the overwrite before
+    /// looking at the oracle result turns `build_spec` / `internal` into a
+    /// type-bound kill and the failure disappears from the output.
+    #[test]
+    fn init_bounds_override_keeps_oracle_failures() {
+        for failure in ["build_spec", "internal"] {
+            let kept = apply_init_bounds_override(outcome(false, Some(failure)), "st");
+            assert!(!kept.clean);
+            assert_eq!(kept.killed_by.as_deref(), Some(failure));
+        }
+    }
+
+    /// The special case itself still applies to judged outcomes: a survivor
+    /// and a kill by another property both become `_bounds_<root>`.
+    #[test]
+    fn init_bounds_override_still_attributes_judged_outcomes() {
+        for judged in [outcome(true, None), outcome(false, Some("NoSelfLink"))] {
+            let overridden = apply_init_bounds_override(judged, "st");
+            assert!(!overridden.clean);
+            assert_eq!(overridden.killed_by.as_deref(), Some("_bounds_st"));
+        }
     }
 }
