@@ -932,6 +932,7 @@ impl Monitor {
         action: &str,
         params: &BTreeMap<String, Value>,
         kind: &str,
+        name: String,
         attempted_state: Option<State>,
     ) -> StepResult {
         self.step += 1;
@@ -942,7 +943,7 @@ impl Monitor {
             attempted_state,
             violation: Some(Violation {
                 kind: kind.to_owned(),
-                name: format!("_{kind}_{action}"),
+                name,
                 step: self.step,
             }),
         }
@@ -1114,10 +1115,24 @@ impl Monitor {
         let bindings = match evaluate_action_guards(&action, params, &self.state, &self.model) {
             Ok(Some(bindings)) => bindings,
             Ok(None) => {
-                return Ok(self.failed_step(action_name, params, "requires_failed", None));
+                return Ok(self.failed_step(
+                    action_name,
+                    params,
+                    "requires_failed",
+                    format!("_requires_failed_{action_name}"),
+                    None,
+                ));
             }
             Err(error) if is_partial_operation_error(&error) => {
-                return Ok(self.failed_step(action_name, params, "partial_op", None));
+                // The name BMC, explicit, induction, and the body and
+                // `step_candidate` paths give the same failure (#1244).
+                return Ok(self.failed_step(
+                    action_name,
+                    params,
+                    "partial_op",
+                    format!("_partial_{action_name}"),
+                    None,
+                ));
             }
             Err(error) => return Err(error),
         };
