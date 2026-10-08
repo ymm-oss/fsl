@@ -6,6 +6,7 @@ mod agreement;
 mod bmc;
 mod eval;
 mod induction;
+mod init_definedness;
 mod liveness;
 mod refinement;
 mod symmetry;
