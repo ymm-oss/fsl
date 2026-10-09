@@ -2211,6 +2211,12 @@ pub fn check_refinement_with_budget(
                 continue;
             }
             let child_state = stepped.state.clone();
+            // `None` when the mapping read an impl `Map` at a key outside its
+            // finite key domain (`RuntimeError::map_key_outside_domain`): the
+            // mapped abstract state does not exist. That is reported as
+            // `map_out_of_bounds`, but only where §2.4's order would report a
+            // bounds problem: after the stutter / abstract-guard checks that do
+            // not need `alpha_after` (DESIGN-refinement §2.4).
             let alpha_after = match alpha_state(
                 &child_state,
                 implementation,
@@ -2218,27 +2224,31 @@ pub fn check_refinement_with_budget(
                 mapping,
                 &eval_model,
             ) {
-                Ok(alpha) => alpha,
-                Err(error) if error.map_key_outside_domain => {
-                    let child_trace =
-                        refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
-                    check.failure = Some(refinement_failure(
-                        "map_out_of_bounds",
-                        Some("step"),
-                        step + 1,
-                        &child_trace,
-                        Some(alpha_before.clone()),
-                        None,
-                        None,
-                    ));
-                    return Ok(check);
-                }
+                Ok(alpha) => Some(alpha),
+                Err(error) if error.map_key_outside_domain => None,
                 Err(error) => return Err(error),
+            };
+            let out_of_bounds = |actual: Option<State>| {
+                let child_trace =
+                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                refinement_failure(
+                    "map_out_of_bounds",
+                    Some("step"),
+                    step + 1,
+                    &child_trace,
+                    Some(alpha_before.clone()),
+                    None,
+                    actual,
+                )
             };
             let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
                 ActionCorrespondenceTarget::Stutter => {
-                    if alpha_before != &alpha_after {
+                    let Some(alpha_after) = &alpha_after else {
+                        check.failure = Some(out_of_bounds(None));
+                        return Ok(check);
+                    };
+                    if alpha_before != alpha_after {
                         let child_trace =
                             refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
@@ -2248,7 +2258,7 @@ pub fn check_refinement_with_budget(
                             &child_trace,
                             Some(alpha_before.clone()),
                             Some(alpha_before.clone()),
-                            Some(alpha_after),
+                            Some(alpha_after.clone()),
                         ));
                         return Ok(check);
                     }
@@ -2295,8 +2305,8 @@ pub fn check_refinement_with_budget(
                                 step + 1,
                                 &child_trace,
                                 Some(alpha_before.clone()),
-                                Some(alpha_after.clone()),
-                                Some(alpha_after),
+                                alpha_after.clone(),
+                                alpha_after,
                             ));
                             return Ok(check);
                         }
@@ -2311,8 +2321,12 @@ pub fn check_refinement_with_budget(
                     // A mapped argument outside the abstract action's declared
                     // parameter domain (e.g. an impl whose parameter type is
                     // wider than the abstraction's) is a range escape of the
-                    // mapping, like an out-of-range mapped state value:
-                    // `map_out_of_bounds`, not an evaluation error from
+                    // mapping, like an out-of-range mapped state value. §2.4
+                    // checks the transition first, so the abstract guard is
+                    // still evaluated with that argument: a false guard is
+                    // `abs_requires_failed`, as before; only a guard that holds
+                    // (or whose evaluation fails on the argument) leaves the
+                    // range escape to report, as `map_out_of_bounds`, instead of
                     // stepping the abstraction with an ill-typed argument.
                     let mut out_of_domain = false;
                     for param in &abs_action.params {
@@ -2322,20 +2336,6 @@ pub fn check_refinement_with_budget(
                             out_of_domain = true;
                             break;
                         }
-                    }
-                    if out_of_domain {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
-                        check.failure = Some(refinement_failure(
-                            "map_out_of_bounds",
-                            Some("step"),
-                            step + 1,
-                            &child_trace,
-                            Some(alpha_before.clone()),
-                            None,
-                            Some(alpha_after),
-                        ));
-                        return Ok(check);
                     }
                     // See the step-0 `Monitor::from_state` note above: this
                     // state is already fully computed, so there is nothing
@@ -2347,9 +2347,17 @@ pub fn check_refinement_with_budget(
                         &expected_params,
                     )?;
                     let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
-                    let Some(abs_enabled) =
-                        refinement_action_instance(&abs_monitor, abs_action, expected_params)?
-                    else {
+                    let guard =
+                        match refinement_action_instance(&abs_monitor, abs_action, expected_params)
+                        {
+                            Ok(guard) => guard,
+                            Err(_) if out_of_domain => {
+                                check.failure = Some(out_of_bounds(alpha_after));
+                                return Ok(check);
+                            }
+                            Err(error) => return Err(error),
+                        };
+                    let Some(abs_enabled) = guard else {
                         let child_trace =
                             refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
@@ -2358,14 +2366,18 @@ pub fn check_refinement_with_budget(
                             step + 1,
                             &child_trace,
                             Some(alpha_before.clone()),
-                            Some(alpha_after.clone()),
-                            Some(alpha_after),
+                            alpha_after.clone(),
+                            alpha_after,
                         ));
+                        return Ok(check);
+                    };
+                    let Some(alpha_after) = alpha_after.as_ref().filter(|_| !out_of_domain) else {
+                        check.failure = Some(out_of_bounds(alpha_after));
                         return Ok(check);
                     };
                     let abs_step = abs_monitor.step(&abs_enabled)?;
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
-                    if expected_state != alpha_after {
+                    if &expected_state != alpha_after {
                         let child_trace =
                             refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
@@ -2375,12 +2387,17 @@ pub fn check_refinement_with_budget(
                             &child_trace,
                             Some(alpha_before.clone()),
                             Some(expected_state),
-                            Some(alpha_after),
+                            Some(alpha_after.clone()),
                         ));
                         return Ok(check);
                     }
                 }
             }
+            // Both arms above return when `alpha_after` is `None`.
+            let Some(alpha_after) = alpha_after else {
+                check.failure = Some(out_of_bounds(None));
+                return Ok(check);
+            };
             let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
             if let Some(violation) = alpha_monitor.current_violation()? {
                 let kind = if violation.kind == "type_bound" {

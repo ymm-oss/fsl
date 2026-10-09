@@ -415,3 +415,79 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
     assert_eq!(failure.kind, "map_out_of_bounds");
     assert_eq!(failure.at.as_deref(), Some("init"));
 }
+
+/// DESIGN-refinement §2.4 checks the transition before bounds: with an
+/// out-of-domain argument the abstract guard is still evaluated first, and a
+/// guard it fails is `abs_requires_failed`, exactly as before the
+/// out-of-domain check existed. Only a guard that holds leaves the range escape
+/// to report as `map_out_of_bounds`.
+#[test]
+fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
+    let implementation = model(
+        "spec SeqWider { type V = 0..3 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+         action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }",
+    );
+    let abstraction = model(
+        "spec SeqGuarded { type V = 0..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+         action push(v: V) { requires v <= 2 requires seq.size() < 2 seq = seq.push(v) } }",
+    );
+    let mapping = parse_refinement(
+        "refinement M { impl SeqWider abs SeqGuarded map seq = seq action push(v) -> push(v) }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
+        .expect("check_refinement runs");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "abs_requires_failed");
+    assert_eq!(failure.step, 1);
+}
+
+const BOOL_ABS: &str =
+    "spec BoolAbs { state { x: Bool } init { x = false } action go() { x = true } }";
+
+/// The step-level arm: a mapping expression that reads an impl `Map` at a key
+/// outside its domain only after some steps (`idx` reaches 2, `K` is 0..1).
+#[test]
+fn a_mapping_read_outside_an_impl_map_domain_mid_walk_is_map_out_of_bounds() {
+    let implementation = model(
+        "spec MapIdx { type K = 0..1 type J = 0..2 state { m: Map<K, Bool>, idx: J } \
+         init { forall k: K { m[k] = false } idx = 0 } \
+         action go() { requires idx < 2 idx = idx + 1 } }",
+    );
+    let abstraction = model(BOOL_ABS);
+    let mapping = parse_refinement(
+        "refinement M { impl MapIdx abs BoolAbs map x = m[idx] action go() -> stutter }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 4)
+        .expect("an out-of-domain map read is a finding, not an error");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "map_out_of_bounds");
+    assert_eq!(failure.at.as_deref(), Some("step"));
+    assert_eq!(failure.step, 2);
+}
+
+/// Negative control: only the map-key marker becomes `map_out_of_bounds`. Any
+/// other mapping evaluation error (here a `Seq` index out of range, a separate
+/// follow-up) stays an error.
+#[test]
+fn a_mapping_error_without_the_map_key_marker_stays_an_error() {
+    let implementation = model(
+        "spec SeqIdx { type J = 0..3 state { s: Seq<Bool, 2>, idx: J } \
+         init { s = Seq {} idx = 0 } action go() { requires idx < 3 idx = idx + 1 } }",
+    );
+    let abstraction = model(BOOL_ABS);
+    let mapping = parse_refinement(
+        "refinement M { impl SeqIdx abs BoolAbs map x = s[idx] action go() -> stutter }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+    let error = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 4)
+        .expect_err("a non-marker mapping error must not become a verdict");
+    assert!(!error.map_key_outside_domain, "{error:?}");
+}
