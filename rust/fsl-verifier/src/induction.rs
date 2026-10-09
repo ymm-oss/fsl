@@ -737,7 +737,9 @@ fn model_int<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<i64, VerifyErro
     match solver.model_eval(term)? {
         Some(ModelValue::Int(value)) => Ok(value),
         Some(ModelValue::Bool(_)) => Err(VerifyError::new("ranking measure is Boolean")),
-        None => Err(VerifyError::new("ranking measure is unavailable in model")),
+        None => Err(VerifyError::solver(
+            "ranking measure is unavailable in model",
+        )),
     }
 }
 
@@ -745,7 +747,7 @@ fn model_bool<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<bool, VerifyEr
     match solver.model_eval(term)? {
         Some(ModelValue::Bool(value)) => Ok(value),
         Some(ModelValue::Int(_)) => Err(VerifyError::new("ranking condition is an integer")),
-        None => Err(VerifyError::new(
+        None => Err(VerifyError::solver(
             "ranking condition is unavailable in model",
         )),
     }

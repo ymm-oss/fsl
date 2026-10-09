@@ -157,7 +157,8 @@ counting it as killed inflated `kill_rate`. It now carries
 *error* — it could not judge the mutant. An error is: Z3 could not be created
 (`error.stage:"solver"`, previously the `internal` kill); BMC failed because the
 solver answered `unknown`, the backend failed, or its model could not be read
-back (`stage:"bmc"`; the verifier marks these with
+back — a state value, a trace step's action choice, or a ranking value the
+model does not provide (`stage:"bmc"`; the verifier marks these with
 `VerifyError::is_solver_failure`, distinguishing them from the semantic errors
 above, which stay kills); or the acceptance/forbidden oracle or the implements
 oracle returned an error (`stage:"requirements"` / `"implements"`, previously
