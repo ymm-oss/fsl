@@ -10761,10 +10761,107 @@ fn run_explain_from_source(
     (Value::Object(output), 0)
 }
 
-struct MutationOracle {
-    clean: bool,
-    killed_by: Option<String>,
-    killer_requirements: Vec<String>,
+/// One mutant's verdict (#1251). The oracle itself is three-valued: `Clean`
+/// (survived), `Killed`, or `Error` — the oracle could not judge the mutant
+/// (Z3 could not be created, the solver answered `unknown` or failed, or a
+/// secondary oracle errored). `Error` is never a kill: it is published as
+/// `status:"error"`, excluded from both sides of `kill_rate`, and fails any
+/// requested gate. `Invalid` is a built-in mutant that never reached the
+/// oracle because it does not lower/build, classified like an external one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MutationOracle {
+    Clean,
+    Killed {
+        killed_by: String,
+        killer_requirements: Vec<String>,
+    },
+    Error(OracleFailure),
+    Invalid(String),
+}
+
+/// Where the oracle failed (`stage`: `solver`, `bmc`, `requirements`, or
+/// `implements`) and the underlying message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OracleFailure {
+    stage: &'static str,
+    message: String,
+}
+
+impl OracleFailure {
+    fn new(stage: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            stage,
+            message: message.into(),
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        json!({"stage":self.stage,"message":self.message})
+    }
+}
+
+impl MutationOracle {
+    fn killed(killed_by: impl Into<String>, killer_requirements: Vec<String>) -> Self {
+        Self::Killed {
+            killed_by: killed_by.into(),
+            killer_requirements,
+        }
+    }
+
+    const fn is_clean(&self) -> bool {
+        matches!(self, Self::Clean)
+    }
+
+    fn killed_by(&self) -> Option<&str> {
+        match self {
+            Self::Killed { killed_by, .. } => Some(killed_by),
+            _ => None,
+        }
+    }
+}
+
+/// Why the mutation BMC call returned no result. A semantic error (an
+/// undefined action body, inconsistent init, ...) is a finding about the
+/// mutant and stays the `build_spec` kill; a solver failure is an oracle
+/// error (#1251).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BmcFailure {
+    Semantic,
+    Oracle(OracleFailure),
+}
+
+fn classify_bmc_error(error: &fsl_verifier::VerifyError) -> BmcFailure {
+    if error.is_solver_failure() {
+        BmcFailure::Oracle(OracleFailure::new("bmc", error.to_string()))
+    } else {
+        BmcFailure::Semantic
+    }
+}
+
+/// The bounded check the mutation oracle runs on each (sub)model. Production
+/// uses [`native_mutation_bmc`]; tests inject solver failures through it.
+type MutationBmc<'a> =
+    dyn FnMut(&KernelModel, usize) -> Result<fsl_verifier::BmcResult, BmcFailure> + 'a;
+
+fn native_mutation_bmc(
+    model: &KernelModel,
+    depth: usize,
+) -> Result<fsl_verifier::BmcResult, BmcFailure> {
+    mutation_bmc_with_solver(fsl_solver_z3::Z3Solver::new, model, depth)
+}
+
+/// One mutation BMC call on a freshly created solver. A solver that cannot be
+/// created is an oracle error at stage `solver` (it used to be the
+/// `internal` kill).
+fn mutation_bmc_with_solver<S: fsl_solver::SmtSolver>(
+    new_solver: impl FnOnce() -> fsl_solver::SolverResult<S>,
+    model: &KernelModel,
+    depth: usize,
+) -> Result<fsl_verifier::BmcResult, BmcFailure> {
+    let mut solver = new_solver()
+        .map_err(|error| BmcFailure::Oracle(OracleFailure::new("solver", error.to_string())))?;
+    block_on_native(fsl_verifier::verify_bounded(model, &mut solver, depth))
+        .map_err(|error| classify_bmc_error(&error))
 }
 
 fn annotation_requirement_ids(annotations: &Annotations) -> Vec<String> {
@@ -10800,22 +10897,16 @@ fn property_requirements(model: &KernelModel, name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle {
+fn mutation_model_oracle(
+    mut model: KernelModel,
+    depth: usize,
+    bmc: &mut MutationBmc<'_>,
+) -> MutationOracle {
     loop {
-        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
-            return MutationOracle {
-                clean: false,
-                killed_by: Some("internal".to_owned()),
-                killer_requirements: Vec::new(),
-            };
-        };
-        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
-        else {
-            return MutationOracle {
-                clean: false,
-                killed_by: Some("build_spec".to_owned()),
-                killer_requirements: Vec::new(),
-            };
+        let result = match bmc(&model, depth) {
+            Ok(result) => result,
+            Err(BmcFailure::Semantic) => return MutationOracle::killed("build_spec", Vec::new()),
+            Err(BmcFailure::Oracle(failure)) => return MutationOracle::Error(failure),
         };
         if let Some(violation) = result.violation {
             if violation.kind == "ensures"
@@ -10830,16 +10921,10 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
                 action.ensure_spans.clear();
                 continue;
             }
-            return MutationOracle {
-                clean: false,
-                killed_by: Some(
-                    model.action_scoped_display_name(
-                        &violation.name,
-                        violation.last_action.as_deref(),
-                    ),
-                ),
-                killer_requirements: property_requirements(&model, &violation.name),
-            };
+            return MutationOracle::killed(
+                model.action_scoped_display_name(&violation.name, violation.last_action.as_deref()),
+                property_requirements(&model, &violation.name),
+            );
         }
         if let Some(property) = model.reachables.iter().find(|property| {
             result
@@ -10847,77 +10932,68 @@ fn mutation_model_oracle(mut model: KernelModel, depth: usize) -> MutationOracle
                 .get(&property.name)
                 .is_some_and(Option::is_none)
         }) {
-            return MutationOracle {
-                clean: false,
-                killed_by: Some(display(&property.name)),
-                killer_requirements: annotation_requirement_ids(&property.annotations),
-            };
+            return MutationOracle::killed(
+                display(&property.name),
+                annotation_requirement_ids(&property.annotations),
+            );
         }
         if let Some(violation) = result.leadsto_violation {
-            return MutationOracle {
-                clean: false,
-                killed_by: Some(display(&violation.name)),
-                killer_requirements: property_requirements(&model, &violation.name),
-            };
+            return MutationOracle::killed(
+                display(&violation.name),
+                property_requirements(&model, &violation.name),
+            );
         }
         break;
     }
-    MutationOracle {
-        clean: true,
-        killed_by: None,
-        killer_requirements: Vec::new(),
-    }
+    MutationOracle::Clean
 }
 
+/// A built-in mutant that does not lower/build never reaches the oracle: it is
+/// `Invalid`, exactly like an external mutant that fails to build (#1251).
 fn mutation_oracle(
     spec: fsl_syntax::SurfaceSpec,
     depth: usize,
     names: &KernelModel,
+    bmc: &mut MutationBmc<'_>,
 ) -> MutationOracle {
-    let Ok(kernel) = fsl_core::lower_direct_spec(spec) else {
-        return MutationOracle {
-            clean: false,
-            killed_by: Some("build_spec".to_owned()),
-            killer_requirements: Vec::new(),
-        };
-    };
-    let Ok(mut model) = fsl_core::build_model(kernel) else {
-        return MutationOracle {
-            clean: false,
-            killed_by: Some("build_spec".to_owned()),
-            killer_requirements: Vec::new(),
-        };
+    let mut model = match fsl_core::lower_direct_spec(spec)
+        .map_err(|error| error.to_string())
+        .and_then(|kernel| fsl_core::build_model(kernel).map_err(|error| error.to_string()))
+    {
+        Ok(model) => model,
+        Err(message) => return MutationOracle::Invalid(message),
     };
     model.inherit_compose_names(names);
-    mutation_oracle_for_model(model, depth)
+    mutation_oracle_for_model(model, depth, bmc)
 }
 
-fn mutation_oracle_for_model(model: KernelModel, depth: usize) -> MutationOracle {
+fn mutation_oracle_for_model(
+    model: KernelModel,
+    depth: usize,
+    bmc: &mut MutationBmc<'_>,
+) -> MutationOracle {
     if let Ok(fsl_runtime::BoundaryProbe {
         finding: Some((violation, trace)),
         ..
     }) = fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
     {
-        return MutationOracle {
-            clean: false,
-            killed_by: Some(
-                trace_last_action(&trace)
-                    .and_then(|action| model.component_public_name(&violation.name, action))
-                    .unwrap_or_else(|| violation.name.clone()),
-            ),
-            killer_requirements: property_requirements(&model, &violation.name),
-        };
+        return MutationOracle::killed(
+            trace_last_action(&trace)
+                .and_then(|action| model.component_public_name(&violation.name, action))
+                .unwrap_or_else(|| violation.name.clone()),
+            property_requirements(&model, &violation.name),
+        );
     }
     let mut automatic = model.clone();
     automatic.invariants.clear();
     automatic.transitions.clear();
     automatic.reachables.clear();
     automatic.leadstos.clear();
-    let automatic_result = mutation_model_oracle(automatic, depth);
-    if !automatic_result.clean {
+    let automatic_result = mutation_model_oracle(automatic, depth, bmc);
+    if !automatic_result.is_clean() {
         return automatic_result;
     }
-    mutation_model_oracle(model, depth)
+    mutation_model_oracle(model, depth, bmc)
 }
 
 fn clear_action_ensures(model: &mut KernelModel) {
@@ -11003,8 +11079,7 @@ fn isolate_model_for_ensures(model: &KernelModel, action_name: &str) -> KernelMo
 }
 
 fn isolated_oracle_kills(model: KernelModel, depth: usize, expected: &str) -> bool {
-    let outcome = mutation_model_oracle(model, depth);
-    !outcome.clean && outcome.killed_by.as_deref() == Some(expected)
+    mutation_model_oracle(model, depth, &mut native_mutation_bmc).killed_by() == Some(expected)
 }
 
 fn boundary_oracle_killers(model: &KernelModel, depth: usize) -> Vec<String> {
@@ -11020,12 +11095,11 @@ fn boundary_oracle_killers(model: &KernelModel, depth: usize) -> Vec<String> {
     automatic.transitions.clear();
     automatic.reachables.clear();
     automatic.leadstos.clear();
-    let outcome = mutation_model_oracle(automatic, depth);
-    if outcome.clean {
-        Vec::new()
-    } else {
-        outcome.killed_by.into_iter().collect()
-    }
+    mutation_model_oracle(automatic, depth, &mut native_mutation_bmc)
+        .killed_by()
+        .map(str::to_owned)
+        .into_iter()
+        .collect()
 }
 
 fn collect_oracle_killers(
@@ -11095,28 +11169,18 @@ fn collect_oracle_killers(
             killers.insert(label);
         }
     }
-    if mutation_oracle_for_model(model.clone(), depth).clean {
-        let mut outcome = MutationOracle {
-            clean: true,
-            killed_by: None,
-            killer_requirements: Vec::new(),
-        };
+    if mutation_oracle_for_model(model.clone(), depth, &mut native_mutation_bmc).is_clean() {
+        let mut outcome = MutationOracle::Clean;
         if apply_requirement_mutation_oracle(source, model, &mut outcome).is_ok()
-            && !outcome.clean
-            && let Some(killer) = outcome.killed_by
+            && let Some(killer) = outcome.killed_by()
         {
-            killers.insert(killer);
+            killers.insert(killer.to_owned());
         } else {
-            outcome = MutationOracle {
-                clean: true,
-                killed_by: None,
-                killer_requirements: Vec::new(),
-            };
+            outcome = MutationOracle::Clean;
             if apply_implements_mutation_oracle(source, base, model, depth, &mut outcome).is_ok()
-                && !outcome.clean
-                && let Some(killer) = outcome.killed_by
+                && let Some(killer) = outcome.killed_by()
             {
-                killers.insert(killer);
+                killers.insert(killer.to_owned());
             }
         }
     }
@@ -11193,7 +11257,7 @@ fn apply_requirement_mutation_oracle(
     model: &KernelModel,
     outcome: &mut MutationOracle,
 ) -> Result<(), String> {
-    if !outcome.clean {
+    if !outcome.is_clean() {
         return Ok(());
     }
     if let (Some(failure), _) = validate_requirement_trace_source(source, model)? {
@@ -11201,18 +11265,14 @@ fn apply_requirement_mutation_oracle(
             .get("kind")
             .and_then(Value::as_str)
             .unwrap_or("acceptance");
-        *outcome = MutationOracle {
-            clean: false,
-            killed_by: Some(
-                if kind.starts_with("forbidden") {
-                    "forbidden"
-                } else {
-                    "acceptance"
-                }
-                .to_owned(),
-            ),
-            killer_requirements: requirement_trace_failure_requirements(source, &failure)?,
-        };
+        *outcome = MutationOracle::killed(
+            if kind.starts_with("forbidden") {
+                "forbidden"
+            } else {
+                "acceptance"
+            },
+            requirement_trace_failure_requirements(source, &failure)?,
+        );
     }
     Ok(())
 }
@@ -11244,6 +11304,36 @@ impl ImplementsOracle {
     }
 }
 
+/// Run the acceptance/forbidden oracle and then the implements oracle on a
+/// mutant the BMC oracle left clean, for built-in and external mutants alike.
+/// A secondary oracle that returns `Err` has not judged the mutant, so its
+/// error becomes `Error` (stage `requirements` / `implements`) — never a kill
+/// and never `invalid` (#1251). An implements walk cut off by its budget is
+/// not an error: the outcome stays as it is and the `inconclusive` detail is
+/// returned alongside it (#1262).
+fn apply_secondary_mutation_oracles(
+    mut outcome: MutationOracle,
+    requirement: impl FnOnce(&mut MutationOracle) -> Result<(), String>,
+    implements: impl FnOnce(&mut MutationOracle) -> Result<ImplementsOracle, String>,
+) -> (MutationOracle, Option<Value>) {
+    if !outcome.is_clean() {
+        return (outcome, None);
+    }
+    if let Err(message) = requirement(&mut outcome) {
+        return (
+            MutationOracle::Error(OracleFailure::new("requirements", message)),
+            None,
+        );
+    }
+    match implements(&mut outcome) {
+        Ok(oracle) => (outcome, oracle.inconclusive_detail()),
+        Err(message) => (
+            MutationOracle::Error(OracleFailure::new("implements", message)),
+            None,
+        ),
+    }
+}
+
 /// The implements oracle (`requirements ... { implements Abs ... }`).
 fn apply_implements_mutation_oracle(
     source: &str,
@@ -11252,7 +11342,7 @@ fn apply_implements_mutation_oracle(
     depth: usize,
     outcome: &mut MutationOracle,
 ) -> Result<ImplementsOracle, String> {
-    if !outcome.clean {
+    if !outcome.is_clean() {
         return Ok(ImplementsOracle::Decided);
     }
     let resolver = fsl_core::FsResolver::new(base);
@@ -11285,28 +11375,53 @@ fn apply_implements_mutation_oracle(
     .map_or_else(Vec::new, |action| {
         annotation_requirement_ids(&action.annotations)
     });
-    *outcome = MutationOracle {
-        clean: false,
-        killed_by: Some("refinement".to_owned()),
-        killer_requirements,
-    };
+    *outcome = MutationOracle::killed("refinement", killer_requirements);
     Ok(ImplementsOracle::Decided)
 }
 
-/// A built-in mutant's `status`, and the `inconclusive` detail to publish
-/// with it. Every oracle has run by now, so a decided kill recorded after the
-/// implements cutoff (the `_bounds_*` init check) wins over the undecided
-/// cutoff: the mutant is `killed` and carries no `inconclusive` detail.
-fn builtin_mutant_status(
+/// The one place the published `status` of a mutant that reached an oracle is
+/// decided, for built-in and external mutants alike, together with the detail
+/// object to publish under the returned key (`error`, `invalid`, or
+/// `inconclusive`). External records rejected before any oracle (malformed
+/// JSON, a missing target, a mutated source that does not build) are published
+/// as `invalid` before this point.
+///
+/// Precedence for one mutant (#1251, #1262):
+/// `invalid` (never reached the oracle) — exclusive; otherwise
+/// `killed` > `error` > `inconclusive` > `survived`.
+///
+/// - A decided kill beats both undecided states: the oracles run in order and
+///   stop at the first kill, so a kill is evidence the spec detects the mutant
+///   whatever a later oracle would have said. This includes the `_bounds_*`
+///   init re-attribution of a clean outcome, so a kill recorded after an
+///   implements cutoff wins over the cutoff (#1262). The re-attribution is
+///   never applied to an `error` (see `apply_init_bounds_override`).
+/// - `error` beats `inconclusive`: an error means some oracle did not run at
+///   all (a tool or environment fault the user has to fix), while a cutoff
+///   means the implements walk ran within its budget. The error is the more
+///   severe and more actionable condition; both stay outside `kill_rate` and
+///   both fail a requested gate, so the choice changes only which reason is
+///   reported. In the current oracle order the two cannot co-occur (a
+///   secondary oracle error stops before or replaces the implements result),
+///   but the rule is fixed here so it cannot drift.
+fn mutant_status(
     outcome: &MutationOracle,
     inconclusive: Option<Value>,
-) -> (&'static str, Option<Value>) {
-    if !outcome.clean {
-        ("killed", None)
-    } else if let Some(detail) = inconclusive {
-        ("inconclusive", Some(detail))
-    } else {
-        ("survived", None)
+) -> (&'static str, Option<(&'static str, Value)>) {
+    match outcome {
+        MutationOracle::Invalid(message) => (
+            "invalid",
+            Some((
+                "invalid",
+                invalid_mutation_detail("semantics", message.as_str(), None),
+            )),
+        ),
+        MutationOracle::Killed { .. } => ("killed", None),
+        MutationOracle::Error(failure) => ("error", Some(("error", failure.to_json()))),
+        MutationOracle::Clean => match inconclusive {
+            Some(detail) => ("inconclusive", Some(("inconclusive", detail))),
+            None => ("survived", None),
+        },
     }
 }
 
@@ -11329,64 +11444,55 @@ fn mutation_kill_rate(killed: usize, survived: usize) -> Value {
 }
 
 fn mutation_summary(mutants: &[Value]) -> Value {
-    let summarize = |source: &str| {
-        let entries = mutants
+    let count = |entries: &[&Value], status: &str| {
+        entries
             .iter()
-            .filter(|item| item["source"].as_str() == Some(source))
-            .collect::<Vec<_>>();
-        let killed = entries
-            .iter()
-            .filter(|item| item["status"].as_str() == Some("killed"))
-            .count();
-        let survived = entries
-            .iter()
-            .filter(|item| item["status"].as_str() == Some("survived"))
-            .count();
-        let invalid = entries
-            .iter()
-            .filter(|item| item["status"].as_str() == Some("invalid"))
-            .count();
-        let inconclusive = entries
-            .iter()
-            .filter(|item| item["status"].as_str() == Some("inconclusive"))
-            .count();
-        with_inconclusive_count(
-            json!({"total":entries.len(),"killed":killed,"survived":survived,"invalid":invalid,"kill_rate":mutation_kill_rate(killed,survived)}),
-            inconclusive,
+            .filter(|item| item["status"].as_str() == Some(status))
+            .count()
+    };
+    // `error` (#1251) and `inconclusive` (#1262) mutants were not decided:
+    // like `invalid` they are outside both sides of `kill_rate`, but unlike
+    // `invalid` they fail any requested gate.
+    let summarize = |entries: &[&Value], by_source: Option<Value>| {
+        let killed = count(entries, "killed");
+        let survived = count(entries, "survived");
+        let mut object = json!({"total":entries.len(),"killed":killed,"survived":survived,"invalid":count(entries, "invalid"),"kill_rate":mutation_kill_rate(killed,survived)});
+        if let (Some(by_source), Value::Object(map)) = (by_source, &mut object) {
+            map.insert("by_source".to_owned(), by_source);
+        }
+        with_undecided_counts(
+            object,
+            count(entries, "error"),
+            count(entries, "inconclusive"),
         )
     };
-    let builtin = summarize("builtin");
-    let external = summarize("external");
-    let killed = mutants
-        .iter()
-        .filter(|item| item["status"].as_str() == Some("killed"))
-        .count();
-    let survived = mutants
-        .iter()
-        .filter(|item| item["status"].as_str() == Some("survived"))
-        .count();
-    let invalid = mutants
-        .iter()
-        .filter(|item| item["status"].as_str() == Some("invalid"))
-        .count();
-    let inconclusive = mutants
-        .iter()
-        .filter(|item| item["status"].as_str() == Some("inconclusive"))
-        .count();
-    with_inconclusive_count(
-        json!({"total":mutants.len(),"killed":killed,"survived":survived,"invalid":invalid,"kill_rate":mutation_kill_rate(killed,survived),"by_source":{"builtin":builtin,"external":external}}),
-        inconclusive,
+    let of_source = |source: &str| {
+        mutants
+            .iter()
+            .filter(|item| item["source"].as_str() == Some(source))
+            .collect::<Vec<_>>()
+    };
+    let builtin = summarize(&of_source("builtin"), None);
+    let external = summarize(&of_source("external"), None);
+    summarize(
+        &mutants.iter().collect::<Vec<_>>(),
+        Some(json!({"builtin":builtin,"external":external})),
     )
 }
 
-/// Adds `inconclusive` (issue #1262) to a summary or gate object only when
-/// it is non-zero, so a run with no cut-off mutant keeps its existing,
-/// byte-for-byte pinned envelope (the `issue_848` golden).
-fn with_inconclusive_count(mut object: Value, inconclusive: usize) -> Value {
-    if inconclusive > 0
-        && let Value::Object(map) = &mut object
-    {
-        map.insert("inconclusive".to_owned(), json!(inconclusive));
+/// Adds `errored` (#1251) and `inconclusive` (#1262) to a summary or gate
+/// object only when non-zero, so a run in which every mutant was decided
+/// keeps its existing, byte-for-byte pinned envelope (the `issue_848`
+/// golden). A reader computes `total = killed + survived + invalid +
+/// errored + inconclusive`, reading an absent count as 0.
+fn with_undecided_counts(mut object: Value, errored: usize, inconclusive: usize) -> Value {
+    if let Value::Object(map) = &mut object {
+        if errored > 0 {
+            map.insert("errored".to_owned(), json!(errored));
+        }
+        if inconclusive > 0 {
+            map.insert("inconclusive".to_owned(), json!(inconclusive));
+        }
     }
     object
 }
@@ -11496,20 +11602,15 @@ fn removed_init_assignment_root(
 /// Removing the init assignment of a state whose type has symbolic bounds
 /// leaves that state unconstrained, so `_bounds_<root>` is reported as the
 /// killer even when the oracle itself picked a different property or none.
-/// An oracle that failed (`build_spec` / `internal`) did not judge the mutant
-/// at all; overwriting it would turn that failure into a type-bound kill and
-/// hide it from the output, so the failure is kept as-is (#1283).
+/// Only a judged outcome (`Clean` / `Killed`) is re-attributed: an oracle
+/// error or an invalid mutant was not judged, and overwriting it would turn
+/// that failure into a type-bound kill and hide it (#1251, #1283).
 fn apply_init_bounds_override(outcome: MutationOracle, root: &str) -> MutationOracle {
-    if matches!(
-        outcome.killed_by.as_deref(),
-        Some("build_spec" | "internal")
-    ) {
-        return outcome;
-    }
-    MutationOracle {
-        clean: false,
-        killed_by: Some(format!("_bounds_{root}")),
-        killer_requirements: Vec::new(),
+    match outcome {
+        MutationOracle::Clean | MutationOracle::Killed { .. } => {
+            MutationOracle::killed(format!("_bounds_{root}"), Vec::new())
+        }
+        MutationOracle::Error(_) | MutationOracle::Invalid(_) => outcome,
     }
 }
 
@@ -11908,6 +12009,9 @@ impl MutationGate {
     /// reproduced from the JSON alone: `--min-kill-rate` compares against the
     /// four-decimal `summary.kill_rate` with `>=`. Zero judged mutants fails
     /// either flag (`no_judged_mutants`): nothing was run, so nothing passed.
+    /// Any mutant the oracle failed to judge (`summary.errored`, #1251) fails
+    /// either flag (`oracle_errors`): the gate fails closed rather than
+    /// passing on mutants nobody adjudicated.
     /// Mutants dropped by `--max-mutants` are recorded, not failed.
     /// `inconclusive` mutants (an implements check cut off by its state
     /// budget, #1262) are outside `kill_rate`, so any one of them fails the
@@ -11915,10 +12019,14 @@ impl MutationGate {
     fn evaluate(self, summary: &Value, dropped: usize) -> Value {
         let count = |key: &str| summary.get(key).and_then(Value::as_u64).unwrap_or(0);
         let survived = count("survived");
+        let errored = count("errored");
         let inconclusive = count("inconclusive");
         let judged = count("killed") + survived;
         let kill_rate = summary.get("kill_rate").cloned().unwrap_or(Value::Null);
         let mut violations = Vec::new();
+        if errored > 0 {
+            violations.push("oracle_errors");
+        }
         if inconclusive > 0 {
             violations.push("inconclusive");
         }
@@ -11934,7 +12042,7 @@ impl MutationGate {
                 violations.push("kill_rate_below_min");
             }
         }
-        with_inconclusive_count(
+        with_undecided_counts(
             json!({
                 "fail_on_survivors": self.fail_on_survivors,
                 "min_kill_rate": self.min_kill_rate,
@@ -11945,6 +12053,7 @@ impl MutationGate {
                 "violations": violations,
                 "passed": violations.is_empty(),
             }),
+            usize::try_from(errored).unwrap_or(usize::MAX),
             usize::try_from(inconclusive).unwrap_or(usize::MAX),
         )
     }
@@ -11969,12 +12078,12 @@ fn run_mutate(
             external_mutants,
             gate,
         },
-        &mut mutation_oracle,
+        &mut native_mutation_bmc,
     )
 }
 
 /// `fslc mutate`'s options, bundled so [`run_mutate_with`] can also take the
-/// injectable built-in mutation oracle.
+/// injectable mutation BMC.
 #[derive(Clone, Copy)]
 struct MutateOptions<'a> {
     depth: usize,
@@ -11985,16 +12094,11 @@ struct MutateOptions<'a> {
     gate: MutationGate,
 }
 
-/// The oracle `run_mutate_with` runs on each built-in mutant. Production uses
-/// [`mutation_oracle`]; tests inject oracle failures through it.
-type BuiltinMutationOracle<'a> =
-    dyn FnMut(fsl_syntax::SurfaceSpec, usize, &KernelModel) -> MutationOracle + 'a;
-
 #[allow(clippy::too_many_lines)]
 fn run_mutate_with(
     path: &Path,
     options: MutateOptions<'_>,
-    builtin_oracle: &mut BuiltinMutationOracle<'_>,
+    bmc: &mut MutationBmc<'_>,
 ) -> (Value, i32) {
     let MutateOptions {
         depth,
@@ -12117,38 +12221,23 @@ fn run_mutate_with(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     for mutant in all_mutants.into_iter().take(max_mutants) {
         let mutated_spec = mutant.spec.clone();
-        let mut outcome = builtin_oracle(mutant.spec, depth, &model);
+        let mut outcome = mutation_oracle(mutant.spec, depth, &model, bmc);
         let mut inconclusive = None;
-        if outcome.clean
+        if outcome.is_clean()
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
             && let Ok(mutated_model) = fsl_core::build_model(kernel)
         {
-            if let Err(error) =
-                apply_requirement_mutation_oracle(&source, &mutated_model, &mut outcome)
-            {
-                outcome = MutationOracle {
-                    clean: false,
-                    killed_by: Some(error),
-                    killer_requirements: Vec::new(),
-                };
-            } else {
-                match apply_implements_mutation_oracle(
-                    &source,
-                    base,
-                    &mutated_model,
-                    depth,
-                    &mut outcome,
-                ) {
-                    Ok(oracle) => inconclusive = oracle.inconclusive_detail(),
-                    Err(_) => {
-                        outcome = MutationOracle {
-                            clean: false,
-                            killed_by: Some("refinement".to_owned()),
-                            killer_requirements: Vec::new(),
-                        };
-                    }
-                }
-            }
+            // A requirement/implements oracle error used to become the kill
+            // label itself (the error string, or `refinement`); it is an
+            // oracle error now (#1251). An implements cutoff stays
+            // `inconclusive` (#1262).
+            (outcome, inconclusive) = apply_secondary_mutation_oracles(
+                outcome,
+                |outcome| apply_requirement_mutation_oracle(&source, &mutated_model, outcome),
+                |outcome| {
+                    apply_implements_mutation_oracle(&source, base, &mutated_model, depth, outcome)
+                },
+            );
         }
         if mutant.op == "assignment_remove"
             && mutant.action.as_deref() == Some("init")
@@ -12167,7 +12256,7 @@ fn run_mutate_with(
         {
             outcome = apply_init_bounds_override(outcome, &root);
         }
-        let (status, inconclusive) = builtin_mutant_status(&outcome, inconclusive);
+        let (status, detail) = mutant_status(&outcome, inconclusive);
         let target = mutant
             .action
             .as_ref()
@@ -12181,14 +12270,12 @@ fn run_mutate_with(
             "loc":mutant.span.map(fsl_syntax::Span::python_loc),
             "target":target,
             "status":status,
-            "killed_by":outcome.killed_by,
+            "killed_by":outcome.killed_by(),
             "requirement":metadata(mutant.requirement.as_ref()),
             "source":"builtin",
         });
-        if let Some(detail) = inconclusive
-            && let Value::Object(public) = &mut public
-        {
-            public.insert("inconclusive".to_owned(), detail);
+        if let (Some((key, value)), Value::Object(public)) = (detail, &mut public) {
+            public.insert(key.to_owned(), value);
         }
         let annotations = mutant.action.as_deref().and_then(|name| {
             if name == "init" {
@@ -12223,22 +12310,23 @@ fn run_mutate_with(
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
             && let Ok(mutated_model) = fsl_core::build_model(kernel)
         {
-            let bounds_override = if outcome
-                .killed_by
-                .as_deref()
-                .is_some_and(|killer| killer.starts_with("_bounds_"))
-            {
-                outcome.killed_by.as_deref()
-            } else {
-                None
-            };
+            let bounds_override = outcome
+                .killed_by()
+                .filter(|killer| killer.starts_with("_bounds_"));
             let killers =
                 collect_oracle_killers(&mutated_model, depth, &source, base, bounds_override);
             if let Value::Object(public) = &mut public {
                 public.insert("killers".to_owned(), json!(killers));
             }
         }
-        for requirement in outcome.killer_requirements {
+        let killer_requirements = match outcome {
+            MutationOracle::Killed {
+                killer_requirements,
+                ..
+            } => killer_requirements,
+            _ => Vec::new(),
+        };
+        for requirement in killer_requirements {
             if let Some(Value::Object(entry)) = by_req.get_mut(&requirement) {
                 let kills = entry
                     .get("kills")
@@ -12289,53 +12377,36 @@ fn run_mutate_with(
                     continue;
                 }
             };
-            let mut outcome = mutation_oracle_for_model(mutated_model.clone(), depth);
-            let oracle = match apply_requirement_mutation_oracle(
-                mutated_source,
-                &mutated_model,
-                &mut outcome,
-            )
-            .and_then(|()| {
-                apply_implements_mutation_oracle(
-                    mutated_source,
-                    base,
-                    &mutated_model,
-                    depth,
-                    &mut outcome,
-                )
-            }) {
-                Ok(oracle) => oracle,
-                Err(error) => {
-                    public_mutants.push(external_mutant_public(
-                        &candidate,
-                        "invalid",
-                        None,
-                        Some(invalid_mutation_detail("semantics", error, None)),
-                    ));
-                    continue;
-                }
-            };
-            if let Some(detail) = oracle.inconclusive_detail().filter(|_| outcome.clean) {
-                let mut public = external_mutant_public(&candidate, "inconclusive", None, None);
-                if let Value::Object(public) = &mut public {
-                    public.insert("inconclusive".to_owned(), detail);
-                }
-                public_mutants.push(public);
-            } else if outcome.clean {
-                public_mutants.push(external_mutant_public(&candidate, "survived", None, None));
-            } else if outcome.killed_by.as_deref() == Some("build_spec") {
-                public_mutants.push(external_mutant_public(
-                    &candidate,
-                    "invalid",
-                    None,
-                    Some(invalid_mutation_detail(
-                        "semantics",
-                        "invalid external mutant",
-                        None,
-                    )),
-                ));
-            } else {
-                for requirement in &outcome.killer_requirements {
+            // The mutant built, so from here on it is judged exactly like a
+            // built-in one: a semantic BMC error is the `build_spec` kill, any
+            // oracle failure is `error` (neither `invalid` nor killed, #1251),
+            // and an implements cutoff is `inconclusive` (#1262).
+            let (outcome, inconclusive) = apply_secondary_mutation_oracles(
+                mutation_oracle_for_model(mutated_model.clone(), depth, bmc),
+                |outcome| {
+                    apply_requirement_mutation_oracle(mutated_source, &mutated_model, outcome)
+                },
+                |outcome| {
+                    apply_implements_mutation_oracle(
+                        mutated_source,
+                        base,
+                        &mutated_model,
+                        depth,
+                        outcome,
+                    )
+                },
+            );
+            let (status, detail) = mutant_status(&outcome, inconclusive);
+            let mut public = external_mutant_public(&candidate, status, outcome.killed_by(), None);
+            if let (Some((key, value)), Value::Object(public)) = (detail, &mut public) {
+                public.insert(key.to_owned(), value);
+            }
+            if let MutationOracle::Killed {
+                killed_by,
+                killer_requirements,
+            } = &outcome
+            {
+                for requirement in killer_requirements {
                     if let Some(Value::Object(entry)) = by_req.get_mut(requirement) {
                         let kills = entry
                             .get("kills")
@@ -12344,29 +12415,20 @@ fn run_mutate_with(
                         entry.insert("kills".to_owned(), json!(kills + 1));
                     }
                 }
-                let mut public = external_mutant_public(
-                    &candidate,
-                    "killed",
-                    outcome.killed_by.as_deref(),
-                    None,
-                );
                 if oracle_attribution {
                     let killers = collect_oracle_killers(
                         &mutated_model,
                         depth,
                         mutated_source,
                         base,
-                        outcome
-                            .killed_by
-                            .as_deref()
-                            .filter(|killer| killer.starts_with("_bounds_")),
+                        Some(killed_by.as_str()).filter(|killer| killer.starts_with("_bounds_")),
                     );
                     if let Value::Object(public) = &mut public {
                         public.insert("killers".to_owned(), json!(killers));
                     }
                 }
-                public_mutants.push(public);
             }
+            public_mutants.push(public);
         }
     }
     // Without a gate, survivors are only a review queue; with one (#1237) they
@@ -12401,6 +12463,15 @@ fn run_mutate_with(
             "invalid external mutants are generation-quality findings and are excluded from kill-rate denominators"
                 .to_owned(),
         );
+    }
+    let errored = public_mutants
+        .iter()
+        .filter(|item| item["status"].as_str() == Some("error"))
+        .count();
+    if errored > 0 {
+        notes.push(format!(
+            "{errored} mutant(s) could not be judged (status \"error\"): the oracle failed, so they are neither killed nor survived, are excluded from kill_rate, and fail any requested gate"
+        ));
     }
     if oracle_attribution {
         notes.push(
@@ -19689,13 +19760,310 @@ spec GrowFixture {
                 mutant.op == "requires_remove" && mutant.action.as_deref() == Some("dec")
             })
             .expect("dec requires_remove mutant present in source A");
-        let outcome = mutation_oracle(mutant.spec, 4, &model);
+        let outcome = mutation_oracle(mutant.spec, 4, &model, &mut native_mutation_bmc);
         assert!(
-            !outcome.clean,
+            !outcome.is_clean(),
             "removing dec's requires guard must be killed by source A's NonNegative invariant, \
              not survive as the same mutation would against source B"
         );
-        assert_eq!(outcome.killed_by.as_deref(), Some("NonNegative"));
+        assert_eq!(outcome.killed_by(), Some("NonNegative"));
+    }
+}
+
+#[cfg(test)]
+mod mutate_oracle_error_tests {
+    //! Issue #1251: an oracle that fails to judge a mutant must not count it as
+    //! killed. Failures are injected at the mutation BMC boundary
+    //! (`MutationBmc`) and at solver creation (`mutation_bmc_with_solver`);
+    //! that a solver `unknown` / backend failure reaches that boundary as a
+    //! solver failure is pinned in `tests/solver_fail_closed.rs`.
+    use super::*;
+
+    fn workspace_path(relative: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(relative)
+    }
+
+    fn small_model() -> KernelModel {
+        let source = "spec OracleErrorUnit {\n  type Small = 0..1\n  state { x: Small }\n  init { x = 0 }\n  action flip() { x = 1 - x }\n  invariant Safe { x <= 1 }\n}\n";
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("parse unit fixture");
+        fsl_core::build_model(kernel).expect("build unit fixture")
+    }
+
+    fn unknown_bmc(_: &KernelModel, _: usize) -> Result<fsl_verifier::BmcResult, BmcFailure> {
+        Err(classify_bmc_error(&fsl_verifier::VerifyError::solver(
+            "solver returned unknown",
+        )))
+    }
+
+    #[test]
+    fn solver_failures_are_oracle_errors_and_semantic_errors_stay_kills() {
+        assert_eq!(
+            classify_bmc_error(&fsl_verifier::VerifyError::solver(
+                "solver returned unknown"
+            )),
+            BmcFailure::Oracle(OracleFailure::new("bmc", "solver returned unknown"))
+        );
+        assert_eq!(
+            classify_bmc_error(&fsl_verifier::VerifyError::new(
+                "action 'deposit' body evaluation has a non-partial failure"
+            )),
+            BmcFailure::Semantic
+        );
+        let mut semantic = |_: &KernelModel, _: usize| Err(BmcFailure::Semantic);
+        assert_eq!(
+            mutation_model_oracle(small_model(), 1, &mut semantic),
+            MutationOracle::killed("build_spec", Vec::new())
+        );
+        let outcome = mutation_model_oracle(small_model(), 1, &mut unknown_bmc);
+        assert_eq!(mutant_status(&outcome, None).0, "error", "{outcome:?}");
+        assert_eq!(outcome.killed_by(), None);
+    }
+
+    /// Z3 cannot be created: previously the `internal` kill.
+    #[test]
+    fn solver_creation_failure_is_an_oracle_error() {
+        let failure = mutation_bmc_with_solver(
+            || {
+                Err::<fsl_solver_z3::Z3Solver, _>(fsl_solver::SolverError::new(
+                    "injected: cannot create solver",
+                ))
+            },
+            &small_model(),
+            1,
+        )
+        .expect_err("no solver, no result");
+        assert_eq!(
+            failure,
+            BmcFailure::Oracle(OracleFailure::new(
+                "solver",
+                "injected: cannot create solver"
+            ))
+        );
+        let mut no_solver = |model: &KernelModel, depth: usize| {
+            mutation_bmc_with_solver(
+                || Err::<fsl_solver_z3::Z3Solver, _>(fsl_solver::SolverError::new("no z3")),
+                model,
+                depth,
+            )
+        };
+        let outcome = mutation_model_oracle(small_model(), 1, &mut no_solver);
+        assert_eq!(
+            outcome,
+            MutationOracle::Error(OracleFailure::new("solver", "no z3"))
+        );
+    }
+
+    /// The requirement oracle's error string used to become `killed_by`, and
+    /// an implements oracle `Err` used to be a `refinement` kill.
+    #[test]
+    fn secondary_oracle_errors_are_oracle_errors() {
+        let requirement_error = apply_secondary_mutation_oracles(
+            MutationOracle::Clean,
+            |_| Err("requirement trace failure has no kind".to_owned()),
+            |_| panic!("implements must not run after a requirement oracle error"),
+        );
+        assert_eq!(
+            requirement_error,
+            (
+                MutationOracle::Error(OracleFailure::new(
+                    "requirements",
+                    "requirement trace failure has no kind"
+                )),
+                None
+            )
+        );
+        let implements_error = apply_secondary_mutation_oracles(
+            MutationOracle::Clean,
+            |_| Ok(()),
+            |_| Err("refinement check failed".to_owned()),
+        );
+        assert_eq!(
+            implements_error,
+            (
+                MutationOracle::Error(OracleFailure::new("implements", "refinement check failed")),
+                None
+            )
+        );
+        let killed = apply_secondary_mutation_oracles(
+            MutationOracle::Clean,
+            |outcome| {
+                *outcome = MutationOracle::killed("acceptance", Vec::new());
+                Ok(())
+            },
+            |_| Ok(ImplementsOracle::Decided),
+        );
+        assert_eq!(killed.0.killed_by(), Some("acceptance"));
+    }
+
+    /// A built-in mutant that does not build never reached the oracle: it is
+    /// `invalid`, as an external one is, not a `build_spec` kill.
+    #[test]
+    fn unbuildable_builtin_mutant_is_invalid_not_killed() {
+        let source = "spec Unbuildable {\n  state { x: Int }\n  init { x = true }\n  action stay() { x = x }\n}\n";
+        let Ok(fsl_syntax::SurfaceDocument::Spec(spec)) =
+            fsl_syntax::parse_surface_document(source)
+        else {
+            panic!("fixture must parse as a spec");
+        };
+        let outcome = mutation_oracle(spec, 1, &small_model(), &mut |_, _| {
+            panic!("an unbuildable mutant must not reach the BMC oracle")
+        });
+        assert!(matches!(outcome, MutationOracle::Invalid(_)), "{outcome:?}");
+        assert_eq!(mutant_status(&outcome, None).0, "invalid");
+    }
+
+    /// The init-assignment special case must not re-attribute an unjudged
+    /// mutant to `_bounds_<root>`.
+    #[test]
+    fn init_bounds_override_keeps_unjudged_outcomes() {
+        let error = MutationOracle::Error(OracleFailure::new("bmc", "solver returned unknown"));
+        assert_eq!(apply_init_bounds_override(error.clone(), "st"), error);
+        let invalid = MutationOracle::Invalid("type mismatch".to_owned());
+        assert_eq!(apply_init_bounds_override(invalid.clone(), "st"), invalid);
+        for judged in [
+            MutationOracle::Clean,
+            MutationOracle::killed("NoSelfLink", Vec::new()),
+        ] {
+            assert_eq!(
+                apply_init_bounds_override(judged, "st").killed_by(),
+                Some("_bounds_st")
+            );
+        }
+    }
+
+    fn options(
+        external: Option<&Path>,
+        max_mutants: usize,
+        gate: MutationGate,
+    ) -> MutateOptions<'_> {
+        MutateOptions {
+            depth: 4,
+            max_mutants,
+            by_requirement: false,
+            oracle_attribution: false,
+            external_mutants: external,
+            gate,
+        }
+    }
+
+    /// End to end over the real `fslc mutate` pipeline with every mutation
+    /// BMC call answering `unknown`: no mutant may be killed by the BMC
+    /// oracle, the failures are published as `status:"error"` with the stage,
+    /// counted in `summary.errored`, kept out of `kill_rate`, and the gate
+    /// fails closed.
+    #[test]
+    fn builtin_oracle_errors_are_not_kills_and_fail_the_gate() {
+        let spec = workspace_path("rust/fslc/tests/fixtures/issue_848_bank_healthy.fsl");
+        let gate = MutationGate {
+            fail_on_survivors: true,
+            min_kill_rate: None,
+        };
+        let (output, status) = run_mutate_with(&spec, options(None, 200, gate), &mut unknown_bmc);
+        assert_eq!(output["result"], "mutated", "{output}");
+        let mutants = output["mutants"].as_array().expect("mutants");
+        let errors = mutants
+            .iter()
+            .filter(|mutant| mutant["status"] == "error")
+            .collect::<Vec<_>>();
+        assert!(!errors.is_empty(), "{output}");
+        for mutant in &errors {
+            assert_eq!(mutant["killed_by"], Value::Null, "{mutant}");
+            assert_eq!(mutant["error"]["stage"], "bmc", "{mutant}");
+        }
+        // Only the concrete boundary probe, which runs before any BMC call,
+        // can still kill a mutant here.
+        for mutant in mutants.iter().filter(|mutant| mutant["status"] == "killed") {
+            assert_ne!(mutant["killed_by"], "build_spec", "{mutant}");
+            assert_ne!(mutant["killed_by"], "internal", "{mutant}");
+        }
+        let summary = &output["summary"];
+        assert_eq!(summary["errored"], json!(errors.len()), "{summary}");
+        assert_eq!(
+            summary["by_source"]["builtin"]["errored"],
+            json!(errors.len())
+        );
+        let killed = summary["killed"].as_u64().expect("killed");
+        let survived = summary["survived"].as_u64().expect("survived");
+        assert_eq!(
+            killed + survived + summary["invalid"].as_u64().expect("invalid") + errors.len() as u64,
+            summary["total"].as_u64().expect("total")
+        );
+        assert_eq!(output["gate"]["errored"], json!(errors.len()));
+        assert!(
+            output["gate"]["violations"]
+                .as_array()
+                .expect("violations")
+                .contains(&json!("oracle_errors")),
+            "{}",
+            output["gate"]
+        );
+        assert_eq!(output["gate"]["passed"], false);
+        assert_eq!(status, 1);
+    }
+
+    /// An external mutant whose BMC rejects it with a semantic error (a finding
+    /// about the mutant, e.g. an undefined action body) is the `build_spec`
+    /// kill, exactly like a built-in one. Before #1251 the external path
+    /// turned every `build_spec` into `invalid`.
+    #[test]
+    fn external_semantic_bmc_error_is_a_build_spec_kill() {
+        let spec = workspace_path("specs/cart_v1.fsl");
+        let from = workspace_path("rust/fslc/tests/fixtures/issue_1237_killed.jsonl");
+        let mut semantic = |_: &KernelModel, _: usize| Err(BmcFailure::Semantic);
+        let (output, _) = run_mutate_with(
+            &spec,
+            options(Some(&from), 0, MutationGate::default()),
+            &mut semantic,
+        );
+        let externals = output["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .filter(|mutant| mutant["source"] == "external")
+            .collect::<Vec<_>>();
+        assert!(!externals.is_empty(), "{output}");
+        assert!(
+            externals
+                .iter()
+                .any(|mutant| mutant["status"] == "killed" && mutant["killed_by"] == "build_spec"),
+            "{output}"
+        );
+        for mutant in &externals {
+            assert_eq!(mutant["status"], "killed", "{mutant}");
+        }
+    }
+
+    /// An external mutant whose oracle fails is `error`, not `invalid`; and a
+    /// `--min-kill-rate` gate fails closed on it as well.
+    #[test]
+    fn external_oracle_errors_are_errors_not_invalid() {
+        let spec = workspace_path("specs/cart_v1.fsl");
+        let from = workspace_path("rust/fslc/tests/fixtures/issue_1237_killed.jsonl");
+        let gate = MutationGate {
+            fail_on_survivors: false,
+            min_kill_rate: Some(0.0),
+        };
+        let (output, status) =
+            run_mutate_with(&spec, options(Some(&from), 0, gate), &mut unknown_bmc);
+        let summary = &output["summary"]["by_source"]["external"];
+        assert_eq!(summary["invalid"], 0, "{output}");
+        let errored = summary["errored"].as_u64().expect("errored");
+        assert!(errored > 0, "{output}");
+        for mutant in output["mutants"].as_array().expect("mutants") {
+            if mutant["status"] == "error" {
+                assert_eq!(mutant["error"]["stage"], "bmc", "{mutant}");
+                assert_eq!(mutant["killed_by"], Value::Null, "{mutant}");
+            }
+        }
+        assert_eq!(
+            output["gate"]["violations"],
+            json!(["oracle_errors"]),
+            "{output}"
+        );
+        assert_eq!(status, 1);
     }
 }
 
@@ -19712,19 +20080,19 @@ spec GrowFixture {
 mod mutant_status_tests {
     use super::*;
 
-    fn outcome(clean: bool, killed_by: Option<&str>) -> MutationOracle {
-        MutationOracle {
-            clean,
-            killed_by: killed_by.map(str::to_owned),
-            killer_requirements: Vec::new(),
-        }
+    fn error() -> MutationOracle {
+        MutationOracle::Error(OracleFailure::new("bmc", "solver returned unknown"))
+    }
+
+    fn cutoff(states: usize) -> Value {
+        inconclusive_budget_detail(states)
     }
 
     #[test]
     fn a_later_bounds_kill_wins_over_an_implements_cutoff() {
-        let (status, detail) = builtin_mutant_status(
-            &outcome(false, Some("_bounds_seq")),
-            Some(inconclusive_budget_detail(50_000)),
+        let (status, detail) = mutant_status(
+            &MutationOracle::killed("_bounds_seq", Vec::new()),
+            Some(cutoff(50_000)),
         );
         assert_eq!(status, "killed");
         assert_eq!(
@@ -19735,56 +20103,106 @@ mod mutant_status_tests {
 
     #[test]
     fn a_clean_outcome_with_a_cutoff_is_inconclusive_not_survived() {
-        let (status, detail) =
-            builtin_mutant_status(&outcome(true, None), Some(inconclusive_budget_detail(7)));
+        let (status, detail) = mutant_status(&MutationOracle::Clean, Some(cutoff(7)));
         assert_eq!(status, "inconclusive");
         assert_eq!(
             detail,
-            Some(json!({"reason":"unknown_budget","states_explored":7}))
+            Some((
+                "inconclusive",
+                json!({"reason":"unknown_budget","states_explored":7})
+            ))
         );
     }
 
     #[test]
     fn a_clean_outcome_without_a_cutoff_survives() {
         assert_eq!(
-            builtin_mutant_status(&outcome(true, None), None),
+            mutant_status(&MutationOracle::Clean, None),
             ("survived", None)
+        );
+    }
+
+    /// #1251 x #1262: `error` beats `inconclusive`, and carries only the
+    /// `error` detail.
+    #[test]
+    fn an_oracle_error_wins_over_a_cutoff() {
+        for inconclusive in [None, Some(cutoff(3))] {
+            let (status, detail) = mutant_status(&error(), inconclusive);
+            assert_eq!(status, "error");
+            assert_eq!(
+                detail,
+                Some((
+                    "error",
+                    json!({"stage":"bmc","message":"solver returned unknown"})
+                ))
+            );
+        }
+    }
+
+    /// The whole precedence table: invalid is exclusive; otherwise
+    /// killed > error > inconclusive > survived.
+    #[test]
+    fn status_precedence_table() {
+        let invalid = MutationOracle::Invalid("type mismatch".to_owned());
+        let killed = MutationOracle::killed("Safe", Vec::new());
+        for inconclusive in [None, Some(cutoff(1))] {
+            assert_eq!(mutant_status(&invalid, inconclusive.clone()).0, "invalid");
+            assert_eq!(mutant_status(&killed, inconclusive.clone()).0, "killed");
+            assert_eq!(mutant_status(&error(), inconclusive.clone()).0, "error");
+        }
+        assert_eq!(
+            mutant_status(&MutationOracle::Clean, Some(cutoff(1))).0,
+            "inconclusive"
+        );
+        assert_eq!(mutant_status(&MutationOracle::Clean, None).0, "survived");
+    }
+
+    /// The implements oracle's `Err` is `error` (stage `implements`); its
+    /// budget cutoff is not an error and stays a clean outcome with the
+    /// `inconclusive` detail, which `mutant_status` publishes as
+    /// `inconclusive`. This is the path both the built-in and the external
+    /// loop take.
+    #[test]
+    fn implements_err_is_error_and_implements_cutoff_is_inconclusive() {
+        let (outcome, inconclusive) = apply_secondary_mutation_oracles(
+            MutationOracle::Clean,
+            |_| Ok(()),
+            |_| Err("refinement check failed".to_owned()),
+        );
+        assert_eq!(mutant_status(&outcome, inconclusive).0, "error");
+        let (outcome, inconclusive) = apply_secondary_mutation_oracles(
+            MutationOracle::Clean,
+            |_| Ok(()),
+            |_| Ok(ImplementsOracle::Inconclusive { states_explored: 9 }),
+        );
+        assert_eq!(outcome, MutationOracle::Clean);
+        assert_eq!(
+            mutant_status(&outcome, inconclusive),
+            (
+                "inconclusive",
+                Some((
+                    "inconclusive",
+                    json!({"reason":"unknown_budget","states_explored":9})
+                ))
+            )
         );
     }
 }
 
 #[cfg(test)]
 mod mutate_init_bounds_override_tests {
+    //! #1283 / #1251: the unit behavior of `apply_init_bounds_override` is
+    //! pinned in `mutate_oracle_error_tests`; this pins its wiring in
+    //! `run_mutate`.
     use super::*;
 
-    fn outcome(clean: bool, killed_by: Option<&str>) -> MutationOracle {
-        MutationOracle {
-            clean,
-            killed_by: killed_by.map(str::to_owned),
-            killer_requirements: Vec::new(),
-        }
-    }
-
-    /// Issue #1283: the init-assignment special case must not overwrite an
-    /// oracle failure with `_bounds_<root>`. Applying the overwrite before
-    /// looking at the oracle result turns `build_spec` / `internal` into a
-    /// type-bound kill and the failure disappears from the output.
+    /// With every mutation BMC call answering `unknown`, the removed `st`
+    /// init assignment (fixture line 13, an enum state, so the `_bounds_st`
+    /// special case applies) must stay an oracle error. Reverting the call
+    /// site to the unconditional overwrite turns it into a `_bounds_st` kill
+    /// and fails here.
     #[test]
-    fn init_bounds_override_keeps_oracle_failures() {
-        for failure in ["build_spec", "internal"] {
-            let kept = apply_init_bounds_override(outcome(false, Some(failure)), "st");
-            assert!(!kept.clean);
-            assert_eq!(kept.killed_by.as_deref(), Some(failure));
-        }
-    }
-
-    /// The wiring in `run_mutate`: with the built-in oracle failing on every
-    /// mutant, the removed `st` init assignment (fixture line 13, an enum
-    /// state, so the `_bounds_st` special case applies) must keep the
-    /// failure. Reverting the call site to the unconditional overwrite turns
-    /// it into a `_bounds_st` kill and fails here.
-    #[test]
-    fn run_mutate_keeps_oracle_failure_for_init_bounds_mutant() {
+    fn run_mutate_keeps_oracle_error_for_init_bounds_mutant() {
         let spec = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/issue_1283_pointer_registry.fsl");
         let options = MutateOptions {
@@ -19795,27 +20213,20 @@ mod mutate_init_bounds_override_tests {
             external_mutants: None,
             gate: MutationGate::default(),
         };
-        let mut failing = |_: fsl_syntax::SurfaceSpec, _: usize, _: &KernelModel| {
-            outcome(false, Some("build_spec"))
+        let mut unknown = |_: &KernelModel, _: usize| {
+            Err(classify_bmc_error(&fsl_verifier::VerifyError::solver(
+                "solver returned unknown",
+            )))
         };
-        let (output, _) = run_mutate_with(&spec, options, &mut failing);
+        let (output, _) = run_mutate_with(&spec, options, &mut unknown);
         let mutant = output["mutants"]
             .as_array()
             .expect("mutants")
             .iter()
             .find(|mutant| mutant["op"] == "assignment_remove" && mutant["loc"]["line"] == 13)
             .unwrap_or_else(|| panic!("st init removal mutant: {output}"));
-        assert_eq!(mutant["killed_by"], "build_spec", "{mutant}");
-    }
-
-    /// The special case itself still applies to judged outcomes: a survivor
-    /// and a kill by another property both become `_bounds_<root>`.
-    #[test]
-    fn init_bounds_override_still_attributes_judged_outcomes() {
-        for judged in [outcome(true, None), outcome(false, Some("NoSelfLink"))] {
-            let overridden = apply_init_bounds_override(judged, "st");
-            assert!(!overridden.clean);
-            assert_eq!(overridden.killed_by.as_deref(), Some("_bounds_st"));
-        }
+        assert_eq!(mutant["status"], "error", "{mutant}");
+        assert_eq!(mutant["killed_by"], Value::Null, "{mutant}");
+        assert_eq!(mutant["error"]["stage"], "bmc", "{mutant}");
     }
 }

@@ -137,16 +137,48 @@ forbidden + refinement oracle as a built-in mutant.
 Each built-in mutant = mutated AST → `build_spec`; each valid external mutant =
 mutated source → `parse_src` → `build_spec`. Both then run **`verify` (BMC,
 depth K) + acceptance/forbidden
-replay + implements refine**. If any of these returns violated/reachable_failed/error/
-refinement_failed, or build_spec raises FslError → **killed** (killer recorded). All clean →
-**SURVIVED**. Induction is not used (`unknown_cti` makes the kill decision ambiguous and slow).
+replay + implements refine**. If any of these returns violated/reachable_failed/
+refinement_failed, or BMC rejects the mutant with a semantic error (for example an action
+body that is undefined in a reachable state, reported as `killed_by:"build_spec"`) →
+**killed** (killer recorded). All clean → **SURVIVED**. Induction is not used (`unknown_cti`
+makes the kill decision ambiguous and slow).
 **Baseline gate**: if the pre-mutation spec is not verified, refuse (in a buggy spec every
 mutant is killed trivially, which is meaningless).
 
-For external mutants only, parse/name/type/semantic construction failures are
-intercepted before the kill oracle and classified `invalid`. Built-in behavior
-is unchanged for compatibility: its AST catalog is compiler-owned, so a
-build-time failure remains a killed mutation.
+Parse/name/type/semantic construction failures are intercepted before the kill
+oracle and classified `invalid`, for built-in and external mutants alike
+(#1251). A built-in mutant that does not lower/build used to be a `build_spec`
+kill on the grounds that the AST catalog is compiler-owned; but a mutant that
+never reached the oracle says nothing about the spec's constraint strength, so
+counting it as killed inflated `kill_rate`. It now carries
+`invalid:{kind:"semantics",message}` like an external one.
+
+**Oracle errors (#1251).** The oracle is three-valued: clean, killed, or
+*error* — it could not judge the mutant. An error is: Z3 could not be created
+(`error.stage:"solver"`, previously the `internal` kill); BMC failed because the
+solver answered `unknown`, the backend failed, or its model could not be read
+back — a state value, a trace step's action choice, or a ranking value the
+model does not provide (`stage:"bmc"`; the verifier marks these with
+`VerifyError::is_solver_failure`, distinguishing them from the semantic errors
+above, which stay kills); or the acceptance/forbidden oracle or the implements
+oracle returned an error (`stage:"requirements"` / `"implements"`, previously
+the error string itself or `refinement` as the killer for built-ins and
+`invalid` for externals). Such a mutant is published with `status:"error"`,
+`killed_by:null`, and `error:{stage,message}`; it is never killed, never
+`invalid`, excluded from both sides of `kill_rate`, counted in
+`summary.errored` (and per source; the key appears only when non-zero, see
+§5), and fails any requested gate. **Known residual:** a BMC error the verifier
+does not mark as a solver failure stays the `build_spec` kill. That includes
+"unsupported expression" and "ill-typed value" errors, which are arguably
+limits of the verifier rather than findings about the mutant, and the `Seq`
+length projection errors ("model sequence length is negative / exceeds
+capacity"), which are likely the same type-bound projection gap #1283 closed
+for enum ordinals; both are left for follow-ups. The rule is
+the same for both sources: a failure before the mutant builds is `invalid`, a
+failure after it builds is `error`. The init-assignment `_bounds_<state>`
+re-attribution applies only to judged (clean/killed) outcomes, so it cannot
+hide an error. Without a gate the run still exits 0, and a note states how many
+mutants could not be judged.
 
 **Inconclusive (#1262).** The implements refine shares `check_refinement`'s
 fixed correspondence-walk budget (50,000 states, #1041). When a mutant's walk
@@ -157,10 +189,28 @@ survived: it is `status:"inconclusive"` with
 `survived` would claim the spec missed a mutant it was never fully checked
 against; counting it `killed` would inflate `kill_rate` (the fail-open
 direction #1251 describes for oracle failures). A later decided oracle wins
-over the cutoff (a built-in `_bounds_*` init kill stays `killed`). This is the
-one oracle outcome that is undecided rather than a kill or a clean pass; how
-#1251's internal oracle failures (`killed_by:"internal"`/`"build_spec"`) are
-classified is still that issue's decision, and may reuse `inconclusive`.
+over the cutoff (a built-in `_bounds_*` init kill stays `killed`). An implements
+oracle that returns an error rather than a verdict is `error` (above), not
+`inconclusive`: the two undecided states stay distinct because they call for
+different action (fix the tool or input vs. accept or raise the budget).
+
+**Status precedence (#1251, #1262).** One function (`mutant_status` in
+`rust/fslc/src/main.rs`) decides the `status` of every mutant that reached an
+oracle, for both sources (external records rejected before any oracle are
+published as `invalid` earlier):
+`invalid` is exclusive (the mutant never reached the oracle); otherwise
+`killed` > `error` > `inconclusive` > `survived`. A decided kill beats both
+undecided states: the oracles run in order and stop at the first kill, so a
+kill is evidence the spec detects the mutant whatever a later oracle would have
+said (this includes the `_bounds_*` re-attribution of a clean outcome, which is
+why a kill after a cutoff wins). The re-attribution never applies to an
+`error`, so an error is never turned into a kill. `error` beats
+`inconclusive`: an error means some oracle did not run at all — a tool or
+environment fault the user must fix — while a cutoff means the walk ran within
+its budget; the error is the more severe and more actionable condition. Both
+are outside `kill_rate` and both fail a requested gate, so the choice changes
+only which reason is reported (in the current oracle order the two cannot
+co-occur on one mutant, but the rule is fixed so it cannot drift).
 
 ## 4. `--by-requirement` (requirement stress report) — the reverse definition
 
@@ -194,8 +244,10 @@ fabricated (no empty `killers` arrays on the default path).
 ```json
 {"result":"mutated","spec":"…","depth":8,"baseline":"verified",
  "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"kill_rate":0.75,
-            "by_source":{"builtin":{...},"external":{...}}},
- "mutants":[{"op","loc","target","status","killed_by","requirement","source"}],
+            "by_source":{"builtin":{...},"external":{...}},
+            "errored"?:E,"inconclusive"?:C},
+ "mutants":[{"op","loc","target","status","killed_by","requirement","source",
+             "invalid"?,"error"?,"inconclusive"?}],
  "by_requirement":{"REQ-7":{"kills":0,"warning":"empty_formalization"}},
  "notes":["mutant cap 200 reached: 37 dropped"]}
 ```
@@ -216,9 +268,13 @@ The combined and per-source kill rates use `killed / (killed + survived)`;
 generation-quality evidence (an `invalid` record says nothing about the spec's
 constraint strength — it failed before reaching the kill oracle, so counting it
 either way would distort the score). `inconclusive` mutants (§3) are excluded
-from the denominator too; `summary` and each `by_source` entry carry an
-`inconclusive` count only when it is non-zero, so a run without a cutoff keeps
-its existing envelope byte for byte. Built-in entries have `source:"builtin"`;
+from the denominator too, and so are `error` mutants. `summary` and each
+`by_source` entry carry the `errored` and `inconclusive` counts only when they
+are non-zero, so a run in which every mutant was decided keeps its existing
+envelope byte for byte; one policy covers both undecided counts (#1251 adopted
+#1262's rather than always emitting `errored`). A reader computes
+`total = killed + survived + invalid + errored + inconclusive`, reading an
+absent count as 0. Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
 Mutation uses the ordinary bounded verifier, including its normal termination
 after the initial state when a model has no action instances.
@@ -249,6 +305,10 @@ reproduced from the JSON alone:
 - Zero judged mutants fails either flag with the single violation
   `no_judged_mutants` (for example `--max-mutants 0` with no `--from`): a run
   that adjudicated nothing is not evidence that nothing survives.
+- Any oracle error (`summary.errored > 0`, #1251) adds `oracle_errors` under
+  either flag, whatever the other counts, and `gate.errored` carries the count
+  (only when non-zero): the gate fails closed on mutants nobody adjudicated
+  instead of passing on them. `oracle_errors` is listed before `inconclusive`.
 - `--fail-on-survivors` adds `survivors` when `survived > 0`. Survivors dead at
   baseline count; there is no equivalent-mutant exclusion yet.
 - `--min-kill-rate R` adds `kill_rate_below_min` unless the published,

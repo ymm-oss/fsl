@@ -8,6 +8,6 @@ unknown solver detector must reject this fail-open branch.
      match solver.check().await? {
          SatResult::Sat => {}
          SatResult::Unsat => return Err(VerifyError::new("init constraints are unsatisfiable")),
--        SatResult::Unknown => return Err(VerifyError::new("solver returned unknown for init")),
+-        SatResult::Unknown => return Err(VerifyError::solver("solver returned unknown for init")),
 +        SatResult::Unknown => {}
      }

@@ -1015,6 +1015,12 @@ pub(crate) fn project_value<S: SmtSolver>(
         )),
         SymbolicValue::Seq { slots, len, .. } => {
             let len = project_int(solver, len)?;
+            // Not a solver failure: an unconstrained `Seq` length (for example
+            // its init assignment removed) can legitimately be negative or past
+            // the capacity in a type-bound counterexample, the same shape as
+            // the enum ordinal case (#1283). Until that projection keeps the raw
+            // length (a follow-up), it stays a semantic error, so `fslc mutate`
+            // counts it as the `build_spec` kill rather than an oracle error.
             let len = usize::try_from(len)
                 .map_err(|_| VerifyError::new("model sequence length is negative"))?;
             if len > slots.len() {
@@ -1083,19 +1089,19 @@ fn project_scalar<S: SmtSolver>(
 fn project_bool<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<bool, VerifyError> {
     match solver.model_eval(term)? {
         Some(ModelValue::Bool(value)) => Ok(value),
-        Some(ModelValue::Int(_)) => Err(VerifyError::new(
+        Some(ModelValue::Int(_)) => Err(VerifyError::solver(
             "solver projected integer for Boolean term",
         )),
-        None => Err(VerifyError::new("Boolean model value is unavailable")),
+        None => Err(VerifyError::solver("Boolean model value is unavailable")),
     }
 }
 
 fn project_int<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<i64, VerifyError> {
     match solver.model_eval(term)? {
         Some(ModelValue::Int(value)) => Ok(value),
-        Some(ModelValue::Bool(_)) => Err(VerifyError::new(
+        Some(ModelValue::Bool(_)) => Err(VerifyError::solver(
             "solver projected Boolean for integer term",
         )),
-        None => Err(VerifyError::new("integer model value is unavailable")),
+        None => Err(VerifyError::solver("integer model value is unavailable")),
     }
 }
