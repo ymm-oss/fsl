@@ -185,7 +185,11 @@ Two consequences fall out of reusing the same merge, not from new logic:
    explanatory `note`, never `result:"refines"` and never folded into
    `refinement_failed` (whose `kind`s below describe a mismatch *between*
    impl and abs, not a defect in the impl alone). If this precondition finds
-   a violation, steps 1-4 do not run. This precondition and step 1 below both
+   a violation, steps 1-4 do not run. It visits at most
+   `IMPLEMENTS_SEARCH_BUDGET` distinct impl states, the correspondence walk's
+   budget (issue #1246): reaching it before deciding reports
+   `budget_exhausted` (`unknown_budget`), and steps 1-4 do not run either.
+   This precondition and step 1 below both
    reason over the impl's full set of concrete initial valuations (§2.8), not
    one materialized default, so a self-violation reachable only from a
    non-default nondeterministic initial branch is not missed either.
@@ -849,6 +853,33 @@ and gave both outputs a value for the cutoff: a `fslc diff` direction reports
 `unknown_budget` with `states_explored` and an `unknown_budget` finding that
 fails the gate unconditionally (see `DESIGN-semantic-diff.md`), and a
 `fslc mutate` mutant is `inconclusive`, outside `kill_rate` and a failure of
-any requested gate (see `DESIGN-mutate.md` §3). The impl self-consistency
-precondition (`first_self_violation`) has no budget and no way to report a
-cutoff (#1246).
+any requested gate (see `DESIGN-mutate.md` §3).
+
+#### The self-consistency precondition takes the same budget (issue #1246)
+
+#1060 bounded only the correspondence walk. The impl self-consistency
+precondition (step 0, `first_self_violation`) walks the same reachable set
+first, unbounded, so the walk's budget never limited peak memory: #1041's
+original reproducer still exceeded 6 GB inside the precondition (measured
+before this change: abort at a 6 GB address-space limit with 5.76 GB peak
+RSS; after: `unknown_budget`, `states_explored: 50000`, 1.19 GB peak RSS).
+The precondition now takes the walk's `budget`, checked right after each new
+insert as the walk does, and reports reaching it as `budget_exhausted`. Every
+consumer reads the outcome through `RefinementCheck::verdict()`, so each one,
+`fslc diff` and `fslc mutate` included, reports a precondition cutoff exactly
+as a walk cutoff.
+
+The two walks were kept separate rather than merged into one, so the
+reporting priority is unchanged: a self-violation the precondition reaches is
+still reported before any correspondence verdict. The cost is that a
+precondition cutoff decides the run: an impl whose reachable set within
+`depth` reaches the budget is `unknown_budget` even when the walk would have
+found a correspondence failure in its first layers. Before this change such a
+run either exhausted memory in the precondition or, when it fit, reported
+that failure. Recovering it is a deferred option, not decided here: after a
+precondition cutoff, the existing correspondence walk could still run under
+its own budget and report a correspondence failure it finds before that
+budget. That changes which verdict a cut-off precondition yields, so adopting
+it must change the tests that pin this order
+(`a_pre_pass_cutoff_is_reported_even_when_the_walk_would_fail_at_step_one`,
+`refine_reports_the_pre_pass_cutoff_before_an_early_correspondence_failure`).

@@ -1699,8 +1699,14 @@ at that link (`failed_link.kind` is `null`), a `fslc chain` refine layer fails
 with `result: "unknown_budget"`, and a governance `preservation` reports
 `unknown_budget` as its `result`. This changed verdicts: a refinement whose
 correspondence check reaches the budget used to report `refines` (exit 0).
-The self-consistency precondition above has no such budget. `fslc diff`
-reports a direction cut off this way as `result: "unknown_budget"` with
+The self-consistency precondition above walks the same reachable set first and
+stops at the same budget, with the same `unknown_budget` report: a
+self-violation it did not reach is not searched for, and the correspondence
+check does not run. An impl whose reachable set within `--depth` reaches the
+budget is therefore `unknown_budget` even when the correspondence check would
+have found a mismatch early; before this bound such a run either exhausted
+memory in the precondition or, when it fit, reported the decided result.
+`fslc diff` reports a direction cut off this way as `result: "unknown_budget"` with
 `states_explored`, and adds an `unknown_budget` finding that fails the gate
 whatever `--forbid` says (exit 1, never `no_semantic_change`); `fslc diff
 --git` and `fslc approval diff` report the same. `fslc mutate` reports such a
