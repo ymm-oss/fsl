@@ -4160,6 +4160,7 @@ mod refinement_verdict_precedence {
     }
 
     /// `verdict()` itself refuses a check with two outcomes in debug builds.
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "more than one outcome")]
     fn verdict_rejects_two_outcome_fields_in_debug_builds() {

@@ -11293,6 +11293,23 @@ fn apply_implements_mutation_oracle(
     Ok(ImplementsOracle::Decided)
 }
 
+/// A built-in mutant's `status`, and the `inconclusive` detail to publish
+/// with it. Every oracle has run by now, so a decided kill recorded after the
+/// implements cutoff (the `_bounds_*` init check) wins over the undecided
+/// cutoff: the mutant is `killed` and carries no `inconclusive` detail.
+fn builtin_mutant_status(
+    outcome: &MutationOracle,
+    inconclusive: Option<Value>,
+) -> (&'static str, Option<Value>) {
+    if !outcome.clean {
+        ("killed", None)
+    } else if let Some(detail) = inconclusive {
+        ("inconclusive", Some(detail))
+    } else {
+        ("survived", None)
+    }
+}
+
 /// The `inconclusive` detail of a mutant whose implements check was cut off
 /// by its state budget (issue #1262): the same `unknown_budget` /
 /// `states_explored` vocabulary `fslc refine` and `fslc diff` use.
@@ -12090,16 +12107,7 @@ fn run_mutate(
                 killer_requirements: Vec::new(),
             };
         }
-        // A later oracle that decides (the `_bounds_` init check above) wins
-        // over an undecided implements cutoff.
-        let inconclusive = inconclusive.filter(|_| outcome.clean);
-        let status = if !outcome.clean {
-            "killed"
-        } else if inconclusive.is_some() {
-            "inconclusive"
-        } else {
-            "survived"
-        };
+        let (status, inconclusive) = builtin_mutant_status(&outcome, inconclusive);
         let target = mutant
             .action
             .as_ref()
@@ -19628,5 +19636,59 @@ spec GrowFixture {
              not survive as the same mutation would against source B"
         );
         assert_eq!(outcome.killed_by.as_deref(), Some("NonNegative"));
+    }
+}
+
+/// The status precedence of a built-in mutant (issue #1262). Asserted at the
+/// helper rather than end-to-end: an implements cutoff followed by a
+/// `_bounds_*` init kill needs a removed init assignment that is a finite
+/// scalar (so the refinement walk can enumerate its free initial values) and
+/// that the BMC oracle still passes. The Seq, Set, Range and enum shapes tried
+/// for this test were all killed earlier, by the BMC oracle or by the
+/// refinement check failing to enumerate the free value, so none reached the
+/// implements cutoff. The rule is still what the output promises, so it is
+/// pinned here.
+#[cfg(test)]
+mod mutant_status_tests {
+    use super::*;
+
+    fn outcome(clean: bool, killed_by: Option<&str>) -> MutationOracle {
+        MutationOracle {
+            clean,
+            killed_by: killed_by.map(str::to_owned),
+            killer_requirements: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_later_bounds_kill_wins_over_an_implements_cutoff() {
+        let (status, detail) = builtin_mutant_status(
+            &outcome(false, Some("_bounds_seq")),
+            Some(inconclusive_budget_detail(50_000)),
+        );
+        assert_eq!(status, "killed");
+        assert_eq!(
+            detail, None,
+            "a killed mutant must not carry `inconclusive`"
+        );
+    }
+
+    #[test]
+    fn a_clean_outcome_with_a_cutoff_is_inconclusive_not_survived() {
+        let (status, detail) =
+            builtin_mutant_status(&outcome(true, None), Some(inconclusive_budget_detail(7)));
+        assert_eq!(status, "inconclusive");
+        assert_eq!(
+            detail,
+            Some(json!({"reason":"unknown_budget","states_explored":7}))
+        );
+    }
+
+    #[test]
+    fn a_clean_outcome_without_a_cutoff_survives() {
+        assert_eq!(
+            builtin_mutant_status(&outcome(true, None), None),
+            ("survived", None)
+        );
     }
 }
