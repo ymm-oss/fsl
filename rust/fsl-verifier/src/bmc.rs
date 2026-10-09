@@ -210,7 +210,11 @@ async fn terms_are_unsat<S: SmtSolver>(
 /// # Errors
 ///
 /// Returns [`VerifyError`] for unsupported symbolic expressions, ill-typed
-/// kernel values, inconsistent init, or an unknown/backend solver result.
+/// kernel values, inconsistent init, an unknown/backend solver result, or a
+/// solver model that cannot be projected back to kernel values. An enum
+/// ordinal outside the declared members (negative or past the last member)
+/// is not a projection failure: it is kept as a raw integer witness for the
+/// `_bounds_<state>` violation (#1283).
 pub async fn verify_bounded<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
