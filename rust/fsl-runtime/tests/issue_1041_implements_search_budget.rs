@@ -65,22 +65,20 @@ fn a_budget_smaller_than_the_reachable_set_reports_exhaustion_not_a_verdict() {
         fsl_runtime::check_refinement_with_budget(&implementation, &abstraction, &mapping, 3, 2)
             .expect("check_refinement_with_budget runs");
 
-    let explored = checked
-        .budget_exhausted
-        .expect("a budget of 2 must cut off a 4-state reachable set");
+    // `verdict()` reads the cutoff first, so a `BudgetExhausted` verdict
+    // also means no decided failure/impl violation is reported for it.
+    let fsl_runtime::RefinementVerdict::BudgetExhausted {
+        states_explored: explored,
+    } = checked.verdict()
+    else {
+        panic!(
+            "a budget of 2 must cut off a 4-state reachable set: {:?}",
+            checked.verdict()
+        );
+    };
     assert!(
         explored >= 2,
         "cutoff must not fire before visited.len() reaches the budget: {explored}"
-    );
-    assert!(
-        checked.failure.is_none(),
-        "an exhausted walk must not also report a decided refinement failure: {:?}",
-        checked.failure
-    );
-    assert!(
-        checked.impl_violation.is_none(),
-        "an exhausted walk must not also report a decided impl violation: {:?}",
-        checked.impl_violation
     );
 }
 
@@ -101,16 +99,10 @@ fn removing_the_budget_lets_the_same_fixture_reach_its_real_verdict() {
     )
     .expect("check_refinement_with_budget runs");
 
-    assert!(
-        checked.budget_exhausted.is_none(),
-        "a budget of 1,000 must not cut off a 4-state reachable set: {:?}",
-        checked.budget_exhausted
-    );
-    assert!(checked.failure.is_none(), "{:?}", checked.failure);
-    assert!(
-        checked.impl_violation.is_none(),
-        "{:?}",
-        checked.impl_violation
+    assert_eq!(
+        checked.verdict(),
+        fsl_runtime::RefinementVerdict::Refines,
+        "a budget of 1,000 must not cut off a 4-state reachable set"
     );
 }
 
@@ -125,15 +117,5 @@ fn the_production_entry_point_is_unaffected_by_the_budget_for_a_small_domain() {
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
         .expect("check_refinement runs");
 
-    assert!(
-        checked.budget_exhausted.is_none(),
-        "{:?}",
-        checked.budget_exhausted
-    );
-    assert!(checked.failure.is_none(), "{:?}", checked.failure);
-    assert!(
-        checked.impl_violation.is_none(),
-        "{:?}",
-        checked.impl_violation
-    );
+    assert_eq!(checked.verdict(), fsl_runtime::RefinementVerdict::Refines);
 }

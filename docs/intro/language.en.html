@@ -1322,7 +1322,7 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 <tr>
 <td><code>unknown_budget</code></td>
 <td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline <code>implements Abs from "file" { }</code> seam (<code>check</code>/<code>verify</code>), <code>fslc refine</code> (single or chain), a <code>fslc chain</code> refine layer, or a governance <code>preservation</code> (§10, §13)</td>
-<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> and <code>fslc mutate</code> do not read this cutoff yet (<code>diff</code> reports <code>no_semantic_change</code> / exit 0, <code>mutate</code> counts the mutant as survived)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> reports a cut-off direction as <code>unknown_budget</code> and fails its gate unconditionally (an <code>unknown_budget</code> finding, exit 1); <code>fslc mutate</code> reports the mutant as <code>inconclusive</code>, outside <code>kill_rate</code>, and fails a requested gate</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1758,9 +1758,16 @@ at that link (<code>failed_link.kind</code> is <code>null</code>), a <code>fslc 
 with <code>result: "unknown_budget"</code>, and a governance <code>preservation</code> reports
 <code>unknown_budget</code> as its <code>result</code>. This changed verdicts: a refinement whose
 correspondence check reaches the budget used to report <code>refines</code> (exit 0).
-The self-consistency precondition above has no such budget. <code>fslc diff</code> and
-<code>fslc mutate</code> do not read this cutoff yet: <code>fslc diff</code> still reports
-<code>no_semantic_change</code> (exit 0) and <code>fslc mutate</code> counts the mutant as survived.</p>
+The self-consistency precondition above has no such budget. <code>fslc diff</code>
+reports a direction cut off this way as <code>result: "unknown_budget"</code> with
+<code>states_explored</code>, and adds an <code>unknown_budget</code> finding that fails the gate
+whatever <code>--forbid</code> says (exit 1, never <code>no_semantic_change</code>); <code>fslc diff
+--git</code> and <code>fslc approval diff</code> report the same. <code>fslc mutate</code> reports such a
+mutant as <code>status: "inconclusive"</code> with <code>inconclusive.reason:
+"unknown_budget"</code>: it is excluded from <code>kill_rate</code>, counted in
+<code>summary.inconclusive</code>, and fails a requested <code>--fail-on-survivors</code> /
+<code>--min-kill-rate</code> gate. Both used to report the cutoff as a pass
+(<code>no_semantic_change</code> / exit 0, and <code>survived</code>).</p>
 <p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
 unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
 full type domain, not a value silently defaulted — <code>refine</code> checks it that

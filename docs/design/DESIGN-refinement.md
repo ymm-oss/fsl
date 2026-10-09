@@ -843,7 +843,12 @@ link; a governance preservation reports `unknown_budget`. The Worker
 governance path also stopped reporting a self-violating `after` spec as
 `refines` and now reports `violated`, as native does. `fslc diff`'s direction
 check and `fslc mutate`'s implements oracle still read the outcome fields
-themselves; their outputs have no `unknown_budget` value yet, so how they
-report the cutoff is a separate decision. The impl self-consistency
+themselves at first. #1262 made every `RefinementCheck` field private, so the
+outcome can only be read through `verdict()` (the bypass no longer compiles),
+and gave both outputs a value for the cutoff: a `fslc diff` direction reports
+`unknown_budget` with `states_explored` and an `unknown_budget` finding that
+fails the gate unconditionally (see `DESIGN-semantic-diff.md`), and a
+`fslc mutate` mutant is `inconclusive`, outside `kill_rate` and a failure of
+any requested gate (see `DESIGN-mutate.md` §3). The impl self-consistency
 precondition (`first_self_violation`) has no budget and no way to report a
 cutoff (#1246).

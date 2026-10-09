@@ -148,6 +148,20 @@ intercepted before the kill oracle and classified `invalid`. Built-in behavior
 is unchanged for compatibility: its AST catalog is compiler-owned, so a
 build-time failure remains a killed mutation.
 
+**Inconclusive (#1262).** The implements refine shares `check_refinement`'s
+fixed correspondence-walk budget (50,000 states, #1041). When a mutant's walk
+reaches it before deciding within the depth, the mutant is neither killed nor
+survived: it is `status:"inconclusive"` with
+`inconclusive:{"reason":"unknown_budget","states_explored":N}` and
+`killed_by:null`, for built-in and external mutants alike. Counting it
+`survived` would claim the spec missed a mutant it was never fully checked
+against; counting it `killed` would inflate `kill_rate` (the fail-open
+direction #1251 describes for oracle failures). A later decided oracle wins
+over the cutoff (a built-in `_bounds_*` init kill stays `killed`). This is the
+one oracle outcome that is undecided rather than a kill or a clean pass; how
+#1251's internal oracle failures (`killed_by:"internal"`/`"build_spec"`) are
+classified is still that issue's decision, and may reuse `inconclusive`.
+
 ## 4. `--by-requirement` (requirement stress report) — the reverse definition
 
 "What breaks if you remove an invariant" is **fundamentally a no-op for safety**: deleting an
@@ -201,7 +215,10 @@ The combined and per-source kill rates use `killed / (killed + survived)`;
 `invalid` records are excluded from the denominator and retained as external
 generation-quality evidence (an `invalid` record says nothing about the spec's
 constraint strength — it failed before reaching the kill oracle, so counting it
-either way would distort the score). Built-in entries have `source:"builtin"`;
+either way would distort the score). `inconclusive` mutants (§3) are excluded
+from the denominator too; `summary` and each `by_source` entry carry an
+`inconclusive` count only when it is non-zero, so a run without a cutoff keeps
+its existing envelope byte for byte. Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
 Mutation uses the ordinary bounded verifier, including its normal termination
 after the initial state when a model has no action instances.
@@ -224,7 +241,11 @@ the envelope and exit code are byte-for-byte what they were. With one or both,
 reproduced from the JSON alone:
 
 - `judged` is `summary.killed + summary.survived`; `invalid` external records
-  are excluded, as in the kill-rate denominator.
+  and `inconclusive` mutants are excluded, as in the kill-rate denominator.
+- Any `inconclusive` mutant (§3) adds the violation `inconclusive`, whichever
+  flag was given, and `gate.inconclusive` carries the count (the key appears
+  only when non-zero): each one could be a survivor the run never decided, so
+  the gate fails closed rather than passing on a kill rate that left it out.
 - Zero judged mutants fails either flag with the single violation
   `no_judged_mutants` (for example `--max-mutants 0` with no `--from`): a run
   that adjudicated nothing is not evidence that nothing survives.

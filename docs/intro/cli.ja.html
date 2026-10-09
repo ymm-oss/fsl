@@ -634,12 +634,14 @@ options:
   --max-mutants MAX_MUTANTS
   --from MUTANTS_FROM   adjudicate external JSONL mutants in addition to the
                         built-in catalog
-  --fail-on-survivors   gate: exit 1 if any judged mutant survives, or if none
-                        was judged (opt-in; adds gate to the output)
+  --fail-on-survivors   gate: exit 1 if any judged mutant survives, if any is
+                        inconclusive, or if none was judged (opt-in; adds gate
+                        to the output)
   --min-kill-rate MIN_KILL_RATE
                         gate: exit 1 unless the four-decimal summary.kill_rate
-                        is &gt;= MIN_KILL_RATE in [0, 1], or if no mutant was
-                        judged (opt-in; adds gate to the output)
+                        is &gt;= MIN_KILL_RATE in [0, 1], if any mutant is
+                        inconclusive, or if no mutant was judged (opt-in; adds
+                        gate to the output)
 </pre></div></details>
 <details><summary>fslc refine</summary><div class="tree-body"><pre>usage: fslc refine [-h] [--depth DEPTH] impl abs mapping [rest ...]
 
