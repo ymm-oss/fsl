@@ -96,8 +96,8 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    duplicate actions), so the public action name `alias.name` is built from this
    pair and never parsed back out of the physical name: `use X as a__b` with
    action `c` is `a__b.c`, as in the frozen Python reference. A name derived from
-   an action (`_requires_failed_<action>`, `_partial_op_<action>`,
-   `_partial_<action>`, an `ensures` violation) is rebuilt from the action that
+   an action (`_requires_failed_<action>`, `_partial_<action>`, an `ensures`
+   violation) is rebuilt from the action that
    produced it, so the alias boundary comes from the same pair. Every output of
    `verify` (all engines, including `action_coverage`, `action_profile`,
    `cost.properties`, vacuity warnings, and induction CTIs), `sweep`,

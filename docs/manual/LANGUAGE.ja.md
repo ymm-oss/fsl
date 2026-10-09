@@ -1152,7 +1152,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
-| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` と `fslc mutate` はまだこの打ち切りを読まない(`diff` は `no_semantic_change`/exit 0 を報告し、`mutate` はその mutant を survived と数える) |
+| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` は打ち切られた方向を `unknown_budget` と報告し、gate を無条件に落とす(finding `unknown_budget`、exit 1)。`fslc mutate` はその mutant を `inconclusive` と報告し、`kill_rate` から外し、要求された gate を落とす |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
@@ -1639,9 +1639,15 @@ gate を無条件に(`--forbid` の対象ではなく)失敗させます。自�
 `result: "unknown_budget"` で失敗し、governance の `preservation` は `result` に
 `unknown_budget` を報告します。これは判定の変更です: 対応検査が上限に達する
 refinement は、以前は `refines`(exit 0)を報告していました。上記の自己一貫性の
-precondition には、この上限はありません。`fslc diff` と `fslc mutate` はまだこの
-打ち切りを読みません: `fslc diff` は `no_semantic_change`(exit 0)を報告し、
-`fslc mutate` はその mutant を survived と数えます。
+precondition には、この上限はありません。`fslc diff` は、こうして打ち切られた方向を
+`states_explored` 付きの `result: "unknown_budget"` と報告し、`unknown_budget` の
+finding を足します。この finding は `--forbid` の指定に依らず gate を落とします
+(exit 1。`no_semantic_change` にはなりません)。`fslc diff --git` と
+`fslc approval diff` も同じです。`fslc mutate` はそうした mutant を
+`inconclusive.reason: "unknown_budget"` 付きの `status: "inconclusive"` と報告します。
+`kill_rate` からは外し、`summary.inconclusive` に数え、`--fail-on-survivors` /
+`--min-kill-rate` の gate を要求していればそれを落とします。どちらも以前は打ち切りを
+合格として報告していました(`no_semantic_change`/exit 0、および `survived`)。
 
 `init` がどの経路でも一度も代入しない状態変数(例えば、代入されていない `Bool`
 を読む `init if`)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
@@ -3039,7 +3045,7 @@ DESIGN-*.md があります)。
   同じく `invalid` です。オラクルが判定できなかったミュータント(Z3 を作れない、
   solver の `unknown`/backend の失敗、acceptance/forbidden/implements オラクルの
   エラー)は `status:"error"` と `error{stage, message}` になり、決して killed には
-  ならず、`kill_rate` から除外され、`summary.errored` に数えられ、要求された
+  ならず、`kill_rate` から除外され、`summary.errored`(`summary.inconclusive` と同じく非 0 のときだけ出ます)に数えられ、要求された
   gate を不合格にします(`oracle_errors`)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
   組み込みのカタログだけを上限にするので、`--max-mutants 0 --from ...` は外部のみ
@@ -3054,8 +3060,9 @@ DESIGN-*.md があります)。
   `by_obligation` の sole/shared 集計を追加します。既定出力は変わらず、これらの
   カウントは観測された下界であり、完全性や正しさの尺度ではありません。
   `--fail-on-survivors` と `--min-kill-rate R`(opt-in、`R` は `[0, 1]`)は
-  `gate{fail_on_survivors, min_kill_rate, judged, survived, errored, kill_rate,
-  dropped, violations, passed}` を追加します。`result` は `mutated` のままで、
+  `gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}`(非 0 のときは `errored` / `inconclusive` も)を追加します。
+  1 つのミュータントの状態の優先順位は `killed` > `error` > `inconclusive` > `survived` です。`result` は `mutated` のままで、
   `gate.passed` が exit code を決めます(false なら 1)。判定済みミュータントが
   0 件ならどちらのフラグでも不合格(`no_judged_mutants`)、オラクルのエラーが
   1 件でもあればどちらのフラグでも不合格(`oracle_errors`)、`--min-kill-rate` は

@@ -1200,7 +1200,7 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
 | `unknown_cti` / `partial_op` | A state satisfying every proved invariant reaches a partial operation (§6) in a guard, body, property, or reached `ensures` | Guard the operation with a short-circuit `and`/`=>`/`or`/`if`, or add an auxiliary invariant that excludes the state if it is unreachable |
 | `unknown_cti` / `ensures` | An action's reached `ensures` is false on a step between states that satisfy every proved invariant | Fix the body or the `ensures`; if the start state is unreachable, add an auxiliary invariant that excludes it |
-| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` and `fslc mutate` do not read this cutoff yet (`diff` reports `no_semantic_change` / exit 0, `mutate` counts the mutant as survived) |
+| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` reports a cut-off direction as `unknown_budget` and fails its gate unconditionally (an `unknown_budget` finding, exit 1); `fslc mutate` reports the mutant as `inconclusive`, outside `kill_rate`, and fails a requested gate |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `--engine auto` composes explicit and bmc: it tries explicit first (faster,
@@ -1699,9 +1699,16 @@ at that link (`failed_link.kind` is `null`), a `fslc chain` refine layer fails
 with `result: "unknown_budget"`, and a governance `preservation` reports
 `unknown_budget` as its `result`. This changed verdicts: a refinement whose
 correspondence check reaches the budget used to report `refines` (exit 0).
-The self-consistency precondition above has no such budget. `fslc diff` and
-`fslc mutate` do not read this cutoff yet: `fslc diff` still reports
-`no_semantic_change` (exit 0) and `fslc mutate` counts the mutant as survived.
+The self-consistency precondition above has no such budget. `fslc diff`
+reports a direction cut off this way as `result: "unknown_budget"` with
+`states_explored`, and adds an `unknown_budget` finding that fails the gate
+whatever `--forbid` says (exit 1, never `no_semantic_change`); `fslc diff
+--git` and `fslc approval diff` report the same. `fslc mutate` reports such a
+mutant as `status: "inconclusive"` with `inconclusive.reason:
+"unknown_budget"`: it is excluded from `kill_rate`, counted in
+`summary.inconclusive`, and fails a requested `--fail-on-survivors` /
+`--min-kill-rate` gate. Both used to report the cutoff as a pass
+(`no_semantic_change` / exit 0, and `survived`).
 
 A state variable `init` never assigns on any path (an `init if` reading an
 unassigned `Bool`, for example) is a genuinely free initial value across its
@@ -3132,7 +3139,9 @@ DESIGN-*.md).
   could not judge (Z3 unavailable, solver `unknown`/backend failure, or an
   acceptance/forbidden/implements oracle error) is `status:"error"` with
   `error{stage, message}`: never killed, excluded from `kill_rate`, counted in
-  `summary.errored`, and it fails any requested gate (`oracle_errors`).
+  `summary.errored` (present only when non-zero, like `summary.inconclusive`),
+  and it fails any requested gate (`oracle_errors`). Precedence for one mutant:
+  `killed` > `error` > `inconclusive` > `survived`.
   Every entry carries `source:"builtin"|"external"`; `--max-mutants` caps only
   the built-in catalog, so `--max-mutants 0 --from ...` runs external-only.
   `--by-requirement` flags "a requirement that kills no behavior mutant" as an
@@ -3146,8 +3155,8 @@ DESIGN-*.md).
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
   `--fail-on-survivors` and `--min-kill-rate R` (opt-in, `R` in `[0, 1]`) add a
-  `gate{fail_on_survivors, min_kill_rate, judged, survived, errored, kill_rate,
-  dropped, violations, passed}` object; `result` stays `mutated` and
+  `gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}` object (plus `errored` / `inconclusive` when non-zero); `result` stays `mutated` and
   `gate.passed` decides the exit code (1 when false). Zero judged mutants fails
   either flag (`no_judged_mutants`), and so does any oracle error
   (`oracle_errors`); `--min-kill-rate` compares the published four-decimal

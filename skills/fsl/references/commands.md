@@ -128,7 +128,9 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
-                                                  # bounded semantic change report
+                                                  # bounded semantic change report; impl_violated and
+                                                  # unknown_budget (state budget cut the check off)
+                                                  # fail the gate even without --forbid
 fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
                                                   # materialize both full revision trees; omit spec for changed .fsl batch
 fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
@@ -545,6 +547,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   does any mutant the oracle could not judge (`oracle_errors`); the
   threshold compares the published four-decimal `summary.kill_rate` with `>=`;
   mutants dropped by `--max-mutants` are recorded as `gate.dropped`, not failed.
+  A mutant whose implements refine hit the fixed 50,000-state budget is
+  `status:"inconclusive"` (`inconclusive:{reason:"unknown_budget",
+  states_explored}`), neither killed nor survived; `summary.inconclusive`
+  (present only when non-zero) counts it and any one adds the gate violation
+  `inconclusive`.
   `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
   sensitivity: it depends on the operator mix, `--max-mutants` cap, depth, and
   oracle, and a high value is not a real-bug detection probability, spec
@@ -569,7 +576,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   build is `invalid` too). A mutant the oracle could not judge (Z3
   unavailable, solver `unknown`/backend failure, or an
   acceptance/forbidden/implements oracle error) is `status:"error"` with
-  `error{stage, message}`, never killed, and counted in `summary.errored`.
+  `error{stage, message}`, never killed, and counted in `summary.errored`
+  (present only when non-zero). Precedence for one mutant: `killed` > `error`
+  > `inconclusive` > `survived`.
   `summary.kill_rate` and `summary.by_source` exclude invalid and error
   records from their denominator, and each
   mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
@@ -804,8 +813,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   refine layer fails with `result:"unknown_budget"`, and a governance
   preservation reports `unknown_budget`. Such a run used to report `refines`
   (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
-  and `fslc mutate` do not read this cutoff yet (`diff` reports
-  `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
+  reports a cut-off direction as `result:"unknown_budget"` with
+  `states_explored` and an `unknown_budget` finding that fails the gate
+  unconditionally (exit 1; also `diff --git` and `approval diff`), never
+  `no_semantic_change`. `fslc mutate` reports the mutant as
+  `status:"inconclusive"` (`inconclusive.reason:"unknown_budget"`), outside
+  `kill_rate`, and any one fails a requested gate (#1262).
 - **action-correspondence argument partial_op (#512)**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action

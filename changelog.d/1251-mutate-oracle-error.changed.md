@@ -9,14 +9,21 @@ killer and `invalid` for external mutants) now give `status:"error"`,
 `killed_by:null`, and `error:{stage,message}` with `stage` one of `solver`,
 `bmc`, `requirements`, `implements`. These mutants are excluded from both
 sides of `kill_rate`, counted in the new `summary.errored` (also per source in
-`summary.by_source`), and listed in a note. With `--fail-on-survivors` or
+`summary.by_source`; like #1262's `summary.inconclusive`, the key appears only
+when non-zero, so a fully decided run's envelope is unchanged), and listed in a
+note. With `--fail-on-survivors` or
 `--min-kill-rate`, any such mutant adds the gate violation `oracle_errors` and
-the new `gate.errored` count, so the gate fails closed (exit 1); without a gate
+the `gate.errored` count (when non-zero), so the gate fails closed (exit 1); without a gate
 the exit code is unchanged. A BMC rejection that is a finding about the mutant
 (for example an action body undefined in a reachable state) is still the
 `build_spec` kill. A built-in mutant that does not lower/build is now
 `invalid` with `invalid:{kind:"semantics",message}`, as an external one
-already was, instead of a `build_spec` kill. The `_bounds_<state>` attribution
+already was, instead of a `build_spec` kill. `error` stays distinct from #1262's budget `inconclusive`; for one mutant
+`killed` > `error` > `inconclusive` > `survived`, decided in one place for
+built-in and external mutants. An implements oracle error (for example a
+widened parameter domain the abstraction rejects, such as `type_bound_lo_minus1`
+in #1262's fixture) is now `error` instead of a `refinement` kill. The
+`_bounds_<state>` attribution
 for a removed init assignment no longer overwrites an oracle error; this
 refines #1283's rule, which kept any `build_spec`/`internal` killer: a
 semantic `build_spec` kill is a judged outcome and is re-attributed to
@@ -25,6 +32,6 @@ former `internal`) keeps `status:"error"`. The
 verifier marks solver failures with `VerifyError::is_solver_failure`.
 Migration: read `summary.errored` / `status:"error"` alongside
 `killed`/`survived`/`invalid` (`total` = `killed + survived + invalid +
-errored`); a gated run that now fails with `oracle_errors` had mutants whose
+errored + inconclusive`, absent counts read as 0); a gated run that now fails with `oracle_errors` had mutants whose
 kills were never established — rerun, or fix the
 oracle error reported in `error.message`.

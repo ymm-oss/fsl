@@ -165,12 +165,43 @@ the error string itself or `refinement` as the killer for built-ins and
 `invalid` for externals). Such a mutant is published with `status:"error"`,
 `killed_by:null`, and `error:{stage,message}`; it is never killed, never
 `invalid`, excluded from both sides of `kill_rate`, counted in
-`summary.errored` (and per source), and fails any requested gate. The rule is
+`summary.errored` (and per source; the key appears only when non-zero, see
+§5), and fails any requested gate. The rule is
 the same for both sources: a failure before the mutant builds is `invalid`, a
 failure after it builds is `error`. The init-assignment `_bounds_<state>`
 re-attribution applies only to judged (clean/killed) outcomes, so it cannot
 hide an error. Without a gate the run still exits 0, and a note states how many
 mutants could not be judged.
+
+**Inconclusive (#1262).** The implements refine shares `check_refinement`'s
+fixed correspondence-walk budget (50,000 states, #1041). When a mutant's walk
+reaches it before deciding within the depth, the mutant is neither killed nor
+survived: it is `status:"inconclusive"` with
+`inconclusive:{"reason":"unknown_budget","states_explored":N}` and
+`killed_by:null`, for built-in and external mutants alike. Counting it
+`survived` would claim the spec missed a mutant it was never fully checked
+against; counting it `killed` would inflate `kill_rate` (the fail-open
+direction #1251 describes for oracle failures). A later decided oracle wins
+over the cutoff (a built-in `_bounds_*` init kill stays `killed`). An implements
+oracle that returns an error rather than a verdict is `error` (above), not
+`inconclusive`: the two undecided states stay distinct because they call for
+different action (fix the tool or input vs. accept or raise the budget).
+
+**Status precedence (#1251, #1262).** One function (`mutant_status` in
+`rust/fslc/src/main.rs`) decides every mutant's `status`, for both sources:
+`invalid` is exclusive (the mutant never reached the oracle); otherwise
+`killed` > `error` > `inconclusive` > `survived`. A decided kill beats both
+undecided states: the oracles run in order and stop at the first kill, so a
+kill is evidence the spec detects the mutant whatever a later oracle would have
+said (this includes the `_bounds_*` re-attribution of a clean outcome, which is
+why a kill after a cutoff wins). The re-attribution never applies to an
+`error`, so an error is never turned into a kill. `error` beats
+`inconclusive`: an error means some oracle did not run at all — a tool or
+environment fault the user must fix — while a cutoff means the walk ran within
+its budget; the error is the more severe and more actionable condition. Both
+are outside `kill_rate` and both fail a requested gate, so the choice changes
+only which reason is reported (in the current oracle order the two cannot
+co-occur on one mutant, but the rule is fixed so it cannot drift).
 
 ## 4. `--by-requirement` (requirement stress report) — the reverse definition
 
@@ -203,10 +234,11 @@ fabricated (no empty `killers` arrays on the default path).
 
 ```json
 {"result":"mutated","spec":"…","depth":8,"baseline":"verified",
- "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"errored":E,"kill_rate":0.75,
-            "by_source":{"builtin":{...},"external":{...}}},
+ "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"kill_rate":0.75,
+            "by_source":{"builtin":{...},"external":{...}},
+            "errored"?:E,"inconclusive"?:C},
  "mutants":[{"op","loc","target","status","killed_by","requirement","source",
-             "invalid"?,"error"?}],
+             "invalid"?,"error"?,"inconclusive"?}],
  "by_requirement":{"REQ-7":{"kills":0,"warning":"empty_formalization"}},
  "notes":["mutant cap 200 reached: 37 dropped"]}
 ```
@@ -226,7 +258,14 @@ The combined and per-source kill rates use `killed / (killed + survived)`;
 `invalid` records are excluded from the denominator and retained as external
 generation-quality evidence (an `invalid` record says nothing about the spec's
 constraint strength — it failed before reaching the kill oracle, so counting it
-either way would distort the score). Built-in entries have `source:"builtin"`;
+either way would distort the score). `inconclusive` mutants (§3) are excluded
+from the denominator too, and so are `error` mutants. `summary` and each
+`by_source` entry carry the `errored` and `inconclusive` counts only when they
+are non-zero, so a run in which every mutant was decided keeps its existing
+envelope byte for byte; one policy covers both undecided counts (#1251 adopted
+#1262's rather than always emitting `errored`). A reader computes
+`total = killed + survived + invalid + errored + inconclusive`, reading an
+absent count as 0. Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
 Mutation uses the ordinary bounded verifier, including its normal termination
 after the initial state when a model has no action instances.
@@ -240,8 +279,8 @@ the envelope and exit code are byte-for-byte what they were. With one or both,
 
 ```json
 {"gate":{"fail_on_survivors":true,"min_kill_rate":0.8,"judged":19,"survived":13,
- "errored":0,"kill_rate":0.3158,"dropped":0,
- "violations":["survivors","kill_rate_below_min"],"passed":false}}
+ "kill_rate":0.3158,"dropped":0,"violations":["survivors","kill_rate_below_min"],
+ "passed":false}}
 ```
 
 `gate.passed` decides the exit code (0 when true, 1 when false), exactly as
@@ -249,13 +288,18 @@ the envelope and exit code are byte-for-byte what they were. With one or both,
 reproduced from the JSON alone:
 
 - `judged` is `summary.killed + summary.survived`; `invalid` external records
-  are excluded, as in the kill-rate denominator.
+  and `inconclusive` mutants are excluded, as in the kill-rate denominator.
+- Any `inconclusive` mutant (§3) adds the violation `inconclusive`, whichever
+  flag was given, and `gate.inconclusive` carries the count (the key appears
+  only when non-zero): each one could be a survivor the run never decided, so
+  the gate fails closed rather than passing on a kill rate that left it out.
 - Zero judged mutants fails either flag with the single violation
   `no_judged_mutants` (for example `--max-mutants 0` with no `--from`): a run
   that adjudicated nothing is not evidence that nothing survives.
-- Any oracle error (`errored = summary.errored > 0`, #1251) adds
-  `oracle_errors` under either flag, whatever the other counts: the gate fails
-  closed on mutants nobody adjudicated instead of passing on them.
+- Any oracle error (`summary.errored > 0`, #1251) adds `oracle_errors` under
+  either flag, whatever the other counts, and `gate.errored` carries the count
+  (only when non-zero): the gate fails closed on mutants nobody adjudicated
+  instead of passing on them. `oracle_errors` is listed before `inconclusive`.
 - `--fail-on-survivors` adds `survivors` when `survived > 0`. Survivors dead at
   baseline count; there is no equivalent-mutant exclusion yet.
 - `--min-kill-rate R` adds `kill_rate_below_min` unless the published,

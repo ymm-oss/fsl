@@ -1,7 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
+use fsl_core::TraceStep;
 use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
+use fsl_runtime::{RefinementCheck, RefinementFailure, RefinementVerdict, Violation};
+
+// The outcome is read only through `RefinementCheck::verdict` (#1262). In
+// debug builds `verdict()` also asserts that at most one outcome field is
+// set, which is what the old "impl_violation and failure must be mutually
+// exclusive" assertions here checked by hand.
+
+fn impl_violation(checked: &RefinementCheck) -> (&Violation, &[TraceStep]) {
+    match checked.verdict() {
+        RefinementVerdict::ImplViolated { violation, trace } => (violation, trace),
+        other => panic!("expected the impl's own violation, got {other:?}"),
+    }
+}
+
+fn failure(checked: &RefinementCheck) -> &RefinementFailure {
+    match checked.verdict() {
+        RefinementVerdict::Failed(failure) => failure,
+        other => panic!("expected a refinement failure, got {other:?}"),
+    }
+}
+
+fn assert_refines(checked: &RefinementCheck) {
+    assert_eq!(checked.verdict(), RefinementVerdict::Refines);
+}
 
 fn model(source: &str) -> fsl_core::KernelModel {
     build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse kernel"))
@@ -34,17 +59,10 @@ fn check_refinement_reports_an_impl_self_violation_instead_of_refines() {
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 4)
         .expect("check_refinement runs");
 
-    let (violation, trace) = checked
-        .impl_violation
-        .expect("impl's own type-bound violation must be reported");
+    let (violation, trace) = impl_violation(&checked);
     assert_eq!(violation.kind, "type_bound");
     assert_eq!(violation.name, "_bounds_n");
     assert!(!trace.is_empty());
-    assert!(
-        checked.failure.is_none(),
-        "impl_violation and failure must be mutually exclusive: {:?}",
-        checked.failure
-    );
 }
 
 /// Regression control: an impl that never breaks its own bounds and
@@ -67,8 +85,7 @@ fn check_refinement_still_refines_when_the_impl_is_internally_consistent() {
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 4)
         .expect("check_refinement runs");
 
-    assert!(checked.impl_violation.is_none());
-    assert!(checked.failure.is_none());
+    assert_refines(&checked);
 }
 
 /// Regression control: a genuine refinement fidelity failure (impl weakens
@@ -95,12 +112,7 @@ fn check_refinement_still_reports_abs_requires_failed_for_a_pure_guard_weakening
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("check_refinement runs");
 
-    assert!(
-        checked.impl_violation.is_none(),
-        "impl_violation: {:?}",
-        checked.impl_violation
-    );
-    let failure = checked.failure.expect("guard weakening must be detected");
+    let failure = failure(&checked);
     assert_eq!(failure.kind, "abs_requires_failed");
 }
 
@@ -130,14 +142,7 @@ fn check_refinement_finds_init_mismatch_reachable_only_from_a_nondeterministic_i
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("check_refinement runs");
 
-    assert!(
-        checked.impl_violation.is_none(),
-        "impl_violation: {:?}",
-        checked.impl_violation
-    );
-    let failure = checked
-        .failure
-        .expect("the choose = true initial branch must be checked and must not refine");
+    let failure = failure(&checked);
     assert_eq!(failure.kind, "abs_state_mismatch");
     assert_eq!(failure.at.as_deref(), Some("init"));
     assert_eq!(
@@ -174,16 +179,7 @@ fn check_refinement_accepts_a_correct_refinement_of_a_nondeterministic_abs_init(
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("check_refinement runs");
 
-    assert!(
-        checked.impl_violation.is_none(),
-        "impl_violation: {:?}",
-        checked.impl_violation
-    );
-    assert!(
-        checked.failure.is_none(),
-        "a genuine refinement of a nondeterministic abs init must not be rejected: {:?}",
-        checked.failure
-    );
+    assert_refines(&checked);
 }
 
 /// Regression control: an ordinary refinement where both impl and abs `init`
@@ -210,8 +206,7 @@ fn check_refinement_still_refines_with_ordinary_deterministic_init_on_both_sides
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("check_refinement runs");
 
-    assert!(checked.impl_violation.is_none());
-    assert!(checked.failure.is_none());
+    assert_refines(&checked);
 }
 
 /// Negative control for #493's step-0 precondition ([`first_self_violation`]
@@ -237,19 +232,12 @@ fn check_refinement_finds_a_self_violation_reachable_only_from_a_nondeterministi
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("check_refinement runs");
 
-    let (violation, trace) = checked
-        .impl_violation
-        .expect("the choose = true branch's own out-of-bounds init must be reported");
+    let (violation, trace) = impl_violation(&checked);
     assert_eq!(violation.kind, "type_bound");
     assert_eq!(
         trace[0].state["choose"],
         fsl_core::FslValue::Bool(true),
         "the reported counterexample must be the violating branch"
-    );
-    assert!(
-        checked.failure.is_none(),
-        "impl_violation and failure must be mutually exclusive: {:?}",
-        checked.failure
     );
 }
 
@@ -290,9 +278,7 @@ fn check_refinement_finds_a_self_violation_two_steps_into_one_of_two_nondetermin
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 4)
         .expect("check_refinement runs");
 
-    let (violation, trace) = checked
-        .impl_violation
-        .expect("the choose = true root's two-step-deep out-of-bounds walk must be reported");
+    let (violation, trace) = impl_violation(&checked);
     assert_eq!(violation.kind, "type_bound");
     assert_eq!(
         trace.len(),
@@ -308,11 +294,6 @@ fn check_refinement_finds_a_self_violation_two_steps_into_one_of_two_nondetermin
     assert_eq!(trace[0].state["n"], fsl_core::FslValue::Int(0));
     assert_eq!(trace[1].state["n"], fsl_core::FslValue::Int(2));
     assert_eq!(trace[2].state["n"], fsl_core::FslValue::Int(4));
-    assert!(
-        checked.failure.is_none(),
-        "impl_violation and failure must be mutually exclusive: {:?}",
-        checked.failure
-    );
 }
 
 const DIVMAP_ABS: &str = "spec DivMapAbs { state { q: 0..10 } init { q = 0 } \
@@ -349,14 +330,9 @@ fn check_refinement_reports_map_partial_op_for_a_zero_divisor_in_a_correspondenc
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
         .expect("check_refinement runs");
 
-    assert!(
-        checked.impl_violation.is_none(),
-        "the impl's own body never divides; this is a mapping-argument defect, not a self-violation: {:?}",
-        checked.impl_violation
-    );
-    let failure = checked
-        .failure
-        .expect("the zero-divisor correspondence argument must be reported, not silently ignored");
+    // Not an impl violation: the impl's own body never divides; this is a
+    // mapping-argument defect. Nor silently ignored: it must be reported.
+    let failure = failure(&checked);
     assert_eq!(failure.kind, "map_partial_op");
 }
 
@@ -383,6 +359,5 @@ fn check_refinement_still_refines_when_the_correspondence_divisor_is_always_guar
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
         .expect("check_refinement runs");
 
-    assert!(checked.impl_violation.is_none());
-    assert!(checked.failure.is_none(), "failure: {:?}", checked.failure);
+    assert_refines(&checked);
 }
