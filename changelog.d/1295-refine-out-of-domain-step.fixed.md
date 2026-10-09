@@ -1,4 +1,4 @@
-Fixed (#1251): `fslc refine`, `fslc verify`'s inline `implements`, and the
+Fixed (#1295): `fslc refine`, `fslc verify`'s inline `implements`, and the
 `fslc mutate` implements oracle stopped with `result:"error"` / `kind:"type"`
 (exit 2) instead of a refinement verdict when the impl's domain differed from
 the abstraction's: an action-correspondence argument outside the abstract
