@@ -1,0 +1,42 @@
+// expected-command: check
+// expected-result: error
+// expected-kind: forbidden
+// SPDX-License-Identifier: Apache-2.0
+
+// Negative control (L tier): weakened pay_submit guard allows payment before assessment.
+requirements InsuranceClaimDesignLNegative {
+  type Claim = 0..1
+  type Amount = 0..3
+  type LedgerCount = 0..2
+
+  enum DSt { DIntake, DAssessment, DPaySubmitted }
+
+  struct DClaim { st: DSt, amount: Amount }
+
+  state {
+    d: Map<Claim, DClaim>,
+    paid_ghost: LedgerCount,
+  }
+
+  init {
+    forall c: Claim { d[c] = DClaim { st: DIntake, amount: 0 } }
+    paid_ghost = 0
+  }
+
+  requirement REQ-1 "Weakened payment guard" {
+    fair action pay_submit(c: Claim) {
+      requires d[c].st == DIntake or d[c].st == DAssessment
+      requires paid_ghost < 2
+      d[c].st = DPaySubmitted
+      paid_ghost = paid_ghost + 1
+    }
+    invariant PaidGhostConsistent {
+      paid_ghost == count(c: Claim where d[c].st == DPaySubmitted)
+    }
+  }
+
+  forbidden FB-1 "Payment before assessment is rejected" {
+    pay_submit(0)
+    expect rejected
+  }
+}
