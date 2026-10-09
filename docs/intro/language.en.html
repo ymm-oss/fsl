@@ -893,6 +893,18 @@ variable.</p></div></details>
 </tbody>
 </table>
 <ul>
+<li><code>init</code> is evaluated with the action-context rules. A <code>/</code>/<code>%</code> by zero, a
+  partial <code>Seq</code> operation, a finite <code>Map</code> key outside its domain (read or
+  assignment target), or checked i64 overflow that init evaluation reaches
+  (an operation on the unreached side of an init <code>if</code>, conditional, or
+  <code>and</code>/<code>or</code>/<code>=&gt;</code> is not reached) is a semantics error, exit 2, under every
+  engine. It is not a <code>partial_op</code> violation, because there is no step before
+  the initial state. <code>bmc</code> and <code>induction</code> (whose base case is <code>bmc</code>) name the
+  failure and the init statement, e.g. <code>division by zero in init at 9:5</code>,
+  also when init is nondeterministic (#1258). One exception: when init also
+  assigns a value outside a state variable's type, <code>bmc</code> and <code>induction</code>
+  report that step-0 <code>type_bound</code> violation (exit 1) instead, because they
+  ask the init question under the step-0 type bounds.</li>
 <li>A deadlock warning includes which state you got stuck in (e.g. <code>deadlock reachable at
   step 1 (state: status=ToolFault, ...)</code>). The full trace is also in the JSON <code>deadlock.trace</code>.</li>
 <li><strong>Intended terminal states</strong> (states where stopping is correct, such as
@@ -1310,7 +1322,7 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 <tr>
 <td><code>unknown_budget</code></td>
 <td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline <code>implements Abs from "file" { }</code> seam (<code>check</code>/<code>verify</code>), <code>fslc refine</code> (single or chain), a <code>fslc chain</code> refine layer, or a governance <code>preservation</code> (§10, §13)</td>
-<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> and <code>fslc mutate</code> do not read this cutoff yet (<code>diff</code> reports <code>no_semantic_change</code> / exit 0, <code>mutate</code> counts the mutant as survived)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> reports a cut-off direction as <code>unknown_budget</code> and fails its gate unconditionally (an <code>unknown_budget</code> finding, exit 1); <code>fslc mutate</code> reports the mutant as <code>inconclusive</code>, outside <code>kill_rate</code>, and fails a requested gate</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1753,9 +1765,15 @@ check does not run. An impl whose reachable set within <code>--depth</code> reac
 budget is therefore <code>unknown_budget</code> even when the correspondence check would
 have found a mismatch early; before this bound such a run either exhausted
 memory in the precondition or, when it fit, reported the decided result.
-<code>fslc diff</code> and
-<code>fslc mutate</code> do not read this cutoff yet: <code>fslc diff</code> still reports
-<code>no_semantic_change</code> (exit 0) and <code>fslc mutate</code> counts the mutant as survived.</p>
+<code>fslc diff</code> reports a direction cut off this way as <code>result: "unknown_budget"</code> with
+<code>states_explored</code>, and adds an <code>unknown_budget</code> finding that fails the gate
+whatever <code>--forbid</code> says (exit 1, never <code>no_semantic_change</code>); <code>fslc diff
+--git</code> and <code>fslc approval diff</code> report the same. <code>fslc mutate</code> reports such a
+mutant as <code>status: "inconclusive"</code> with <code>inconclusive.reason:
+"unknown_budget"</code>: it is excluded from <code>kill_rate</code>, counted in
+<code>summary.inconclusive</code>, and fails a requested <code>--fail-on-survivors</code> /
+<code>--min-kill-rate</code> gate. Both used to report the cutoff as a pass
+(<code>no_semantic_change</code> / exit 0, and <code>survived</code>).</p>
 <p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
 unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
 full type domain, not a value silently defaulted — <code>refine</code> checks it that

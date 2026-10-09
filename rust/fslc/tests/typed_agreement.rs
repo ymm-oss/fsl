@@ -803,6 +803,101 @@ fn forall_statement_where_guards_each_body_entry() {
     }
 }
 
+/// The value of a Public Kernel failure condition in `partial_inventory_source`'s
+/// initial state (`x == 0`, `y == 0`), for conditions over `x`, `y`, literals,
+/// `not`, and the operators [`eval_closed`] knows.
+fn eval_in_initial_state(expr: &serde_json::Value) -> i64 {
+    match expr["kind"].as_str() {
+        Some("var") => match expr["name"].as_str() {
+            Some("x" | "y") => 0,
+            other => panic!("unexpected variable {other:?} in {expr}"),
+        },
+        Some("not") => i64::from(eval_in_initial_state(&expr["operand"]) == 0),
+        Some("ite" | "binary") => {
+            let mut closed = expr.clone();
+            for key in ["condition", "then", "else", "left", "right"] {
+                if let Some(child) = closed.get_mut(key) {
+                    *child = serde_json::json!({
+                        "kind": "num",
+                        "value": eval_in_initial_state(child),
+                    });
+                }
+            }
+            eval_closed(&closed)
+        }
+        _ => eval_closed(expr),
+    }
+}
+
+/// Issue #1260: a division in a statement-level `if` branch is listed under
+/// the branch's condition, so whether some Kernel failure condition holds in
+/// the initial state agrees with whether the engines and the Monitor find the
+/// `partial_op` there (`x` and `s` never change, so every reachable state
+/// is the initial one for them). The Kernel listed an unconditional `x == 0`,
+/// which holds although a branch that is not taken never divides.
+#[test]
+fn statement_if_failure_conditions_agree_with_the_engines() {
+    for (id, body, fails) in [
+        ("if_statement_not_taken", "if x != 0 { y = 2 / x }", false),
+        (
+            "if_statement_else_not_taken",
+            "if x == 0 { y = 1 } else { y = 2 / x }",
+            false,
+        ),
+        ("if_statement_taken", "if x == 0 { y = 2 / x }", true),
+        (
+            "if_statement_nested_not_taken",
+            "if x == 0 { if x != 0 { y = 2 / x } }",
+            false,
+        ),
+        (
+            "if_statement_forall_not_taken",
+            "if x != 0 { forall k: K { m[k] = 2 / x } }",
+            false,
+        ),
+        (
+            "forall_statement_if_not_taken",
+            "forall k: K { if x > k { m[k] = 2 / x } }",
+            false,
+        ),
+        (
+            "forall_statement_if_taken",
+            "forall k: K { if k > x { m[k] = 2 / x } }",
+            true,
+        ),
+    ] {
+        let observed = observe_inventory(id, &partial_inventory_source(body));
+        let kernel = kernel_for_body(id, body);
+        let entries = kernel["actions"][0]["partial_operations"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id}: kernel has no partial_operations: {kernel}"));
+        assert!(!entries.is_empty(), "{id}: nothing listed");
+        let kernel_fails = entries
+            .iter()
+            .any(|entry| eval_in_initial_state(&entry["failure_condition"]) != 0);
+        let conditions = entries
+            .iter()
+            .map(|entry| without_spans(&entry["failure_condition"]))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kernel_fails, fails,
+            "{id}: Kernel failure conditions {conditions:?}"
+        );
+        let (bmc, explicit, monitor) = if fails {
+            ("violated", "violated", Some("partial_op"))
+        } else {
+            ("verified", "proved", None)
+        };
+        assert_eq!(observed.bmc.0, bmc, "{id}: bmc {:?}", observed.bmc);
+        assert_eq!(
+            observed.explicit.0, explicit,
+            "{id}: explicit {:?}",
+            observed.explicit
+        );
+        assert_eq!(observed.monitor.as_deref(), monitor, "{id}: monitor");
+    }
+}
+
 /// Review r1 M2 for #1190: a statement-level `forall` with no partial
 /// operation is not expanded, so a range whose bound is not a constant still
 /// produces a Kernel (listing nothing), as it did before #1190. A `Map` index

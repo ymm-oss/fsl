@@ -13,7 +13,8 @@ because the unbounded precondition happened to fit in memory — a
 self-violation found beyond the first 50,000 states (`violated` /
 `impl_violated`), or a correspondence failure the walk found before its own
 budget (`refinement_failed`). Lower the depth or narrow both layers'
-`verify {}` domains. `fslc diff` and `fslc mutate` still do not read this
-cutoff (#1262): on such an impl `fslc diff` can now report `no_semantic_change`
-(exit 0) where it reported `impl_violated`, and `fslc mutate` counts the
-mutant as survived.
+`verify {}` domains. `fslc diff` and `fslc mutate` read this cutoff as they read a
+correspondence cutoff (#1262): where they used to report a self-violation
+found past the budget (`impl_violated` / killed), `fslc diff` now reports an
+`unknown_budget` direction that fails its gate, and `fslc mutate` reports the
+mutant as `inconclusive`.

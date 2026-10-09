@@ -782,6 +782,16 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 | trans | 2 状態の述語が到達可能なすべての遷移で成立するか | `violated` / `trans` / `trans` + トレース |
 | leadsTo | `within` 締め切りの超過、深さ K までの lasso、デッドロックによる停滞を通じた P ~> Q 違反(締め切りの超過と停滞は、`--depth` が締め切り/停滞のステップに達した時点で、またそれ以降のすべてのより大きな深さで検出されます。ちょうどそのステップに一致したときだけではありません) | `violated` / `leadsTo` / `bindings` + トレース |
 
+- `init` は action 文脈の規則で評価されます。init の評価が到達する `/`/`%` の
+  ゼロ除算、`Seq` の部分演算、有限キー域の外にある `Map` のキー(読み出しと代入
+  先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
+  (exit 2)です(init の `if`・条件式・`and`/`or`/`=>` の到達しない側の演算は
+  到達しません)。初期状態より前のステップが無いため、`partial_op` 違反には
+  なりません。`bmc` と `induction`(base case が `bmc`)は、init が非決定的な
+  場合も含め、失敗と init の文を名指しします(例: `division by zero in init at
+  9:5`)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
+  とき、`bmc` と `induction` は step 0 の型境界を仮定して init を問うため、
+  その step 0 の `type_bound` 違反(exit 1)を報告します。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
@@ -1142,7 +1152,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
-| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` と `fslc mutate` はまだこの打ち切りを読まない(`diff` は `no_semantic_change`/exit 0 を報告し、`mutate` はその mutant を survived と数える) |
+| `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` は打ち切られた方向を `unknown_budget` と報告し、gate を無条件に落とす(finding `unknown_budget`、exit 1)。`fslc mutate` はその mutant を `inconclusive` と報告し、`kill_rate` から外し、要求された gate を落とす |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
@@ -1634,9 +1644,15 @@ precondition は同じ到達可能状態を先にたどり、同じ上限で止�
 `--depth` の範囲の到達可能状態が上限に達する impl は、対応検査なら早い段で不一致を
 見つけられた場合でも `unknown_budget` になります。この上限が入る前は、そうした実行は
 precondition でメモリを使い切るか、収まった場合は判定のついた結果を報告していました。
-`fslc diff` と `fslc mutate` はまだこの
-打ち切りを読みません: `fslc diff` は `no_semantic_change`(exit 0)を報告し、
-`fslc mutate` はその mutant を survived と数えます。
+`fslc diff` は、こうして打ち切られた方向を
+`states_explored` 付きの `result: "unknown_budget"` と報告し、`unknown_budget` の
+finding を足します。この finding は `--forbid` の指定に依らず gate を落とします
+(exit 1。`no_semantic_change` にはなりません)。`fslc diff --git` と
+`fslc approval diff` も同じです。`fslc mutate` はそうした mutant を
+`inconclusive.reason: "unknown_budget"` 付きの `status: "inconclusive"` と報告します。
+`kill_rate` からは外し、`summary.inconclusive` に数え、`--fail-on-survivors` /
+`--min-kill-rate` の gate を要求していればそれを落とします。どちらも以前は打ち切りを
+合格として報告していました(`no_semantic_change`/exit 0、および `survived`)。
 
 `init` がどの経路でも一度も代入しない状態変数(例えば、代入されていない `Bool`
 を読む `init if`)は、黙ってデフォルト値になるのではなく、その型の全域にわたって

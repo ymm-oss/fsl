@@ -82,12 +82,8 @@ fn a_pre_pass_cut_off_before_the_self_violation_is_a_budget_verdict() {
         fsl_runtime::check_refinement_with_budget(&implementation, &abstraction, &mapping, 6, 2)
             .expect("check_refinement_with_budget runs");
 
-    assert!(
-        checked.impl_violation.is_none(),
-        "the pre-pass must stop at the budget, not search on to the violation: {:?}",
-        checked.impl_violation
-    );
-    assert!(checked.failure.is_none(), "{:?}", checked.failure);
+    // Only the cutoff: an unbounded pre-pass reads `ImplViolated` here (the
+    // step-4 violation it searches on to).
     assert_eq!(
         checked.verdict(),
         RefinementVerdict::BudgetExhausted { states_explored: 2 }

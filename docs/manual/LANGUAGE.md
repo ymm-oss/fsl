@@ -813,6 +813,18 @@ variable.
 | trans | Whether the two-state predicate holds across all reachable transitions | `violated` / `trans` / `trans` + trace |
 | leadsTo | A P ~> Q violation via a missed `within` deadline, a lasso up to depth K, or deadlock stagnation (deadline misses and stagnation are detected as soon as `--depth` reaches the deadline/stalling step, and at every larger depth after that, not only when it lands exactly on that step) | `violated` / `leadsTo` / `bindings` + trace |
 
+- `init` is evaluated with the action-context rules. A `/`/`%` by zero, a
+  partial `Seq` operation, a finite `Map` key outside its domain (read or
+  assignment target), or checked i64 overflow that init evaluation reaches
+  (an operation on the unreached side of an init `if`, conditional, or
+  `and`/`or`/`=>` is not reached) is a semantics error, exit 2, under every
+  engine. It is not a `partial_op` violation, because there is no step before
+  the initial state. `bmc` and `induction` (whose base case is `bmc`) name the
+  failure and the init statement, e.g. `division by zero in init at 9:5`,
+  also when init is nondeterministic (#1258). One exception: when init also
+  assigns a value outside a state variable's type, `bmc` and `induction`
+  report that step-0 `type_bound` violation (exit 1) instead, because they
+  ask the init question under the step-0 type bounds.
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.
 - **Intended terminal states** (states where stopping is correct, such as
@@ -1188,7 +1200,7 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
 | `unknown_cti` / `partial_op` | A state satisfying every proved invariant reaches a partial operation (§6) in a guard, body, property, or reached `ensures` | Guard the operation with a short-circuit `and`/`=>`/`or`/`if`, or add an auxiliary invariant that excludes the state if it is unreachable |
 | `unknown_cti` / `ensures` | An action's reached `ensures` is false on a step between states that satisfy every proved invariant | Fix the body or the `ensures`; if the start state is unreachable, add an auxiliary invariant that excludes it |
-| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` and `fslc mutate` do not read this cutoff yet (`diff` reports `no_semantic_change` / exit 0, `mutate` counts the mutant as survived) |
+| `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` reports a cut-off direction as `unknown_budget` and fails its gate unconditionally (an `unknown_budget` finding, exit 1); `fslc mutate` reports the mutant as `inconclusive`, outside `kill_rate`, and fails a requested gate |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
 
 `--engine auto` composes explicit and bmc: it tries explicit first (faster,
@@ -1694,9 +1706,15 @@ check does not run. An impl whose reachable set within `--depth` reaches the
 budget is therefore `unknown_budget` even when the correspondence check would
 have found a mismatch early; before this bound such a run either exhausted
 memory in the precondition or, when it fit, reported the decided result.
-`fslc diff` and
-`fslc mutate` do not read this cutoff yet: `fslc diff` still reports
-`no_semantic_change` (exit 0) and `fslc mutate` counts the mutant as survived.
+`fslc diff` reports a direction cut off this way as `result: "unknown_budget"` with
+`states_explored`, and adds an `unknown_budget` finding that fails the gate
+whatever `--forbid` says (exit 1, never `no_semantic_change`); `fslc diff
+--git` and `fslc approval diff` report the same. `fslc mutate` reports such a
+mutant as `status: "inconclusive"` with `inconclusive.reason:
+"unknown_budget"`: it is excluded from `kill_rate`, counted in
+`summary.inconclusive`, and fails a requested `--fail-on-survivors` /
+`--min-kill-rate` gate. Both used to report the cutoff as a pass
+(`no_semantic_change` / exit 0, and `survived`).
 
 A state variable `init` never assigns on any path (an `init if` reading an
 unassigned `Bool`, for example) is a genuinely free initial value across its

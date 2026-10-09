@@ -101,7 +101,11 @@ indexed assignment target's index expression is listed like any other operand.
 A quantifier, an aggregate and a statement-level `forall` are expanded into one
 entry per finite candidate, with the binder replaced by the candidate and the
 failure condition guarded by the candidate's membership and `where`, so no
-failure condition names a bound variable (#1190). A statement-level `forall`
+failure condition names a bound variable (#1190). An operation in a branch of
+an expression or statement-level `if` is guarded by the branch's condition,
+negated for `else`, and nested `if`s and `forall`s stack their guards, so a
+failure condition holds only on a path that evaluates the operation (#1260).
+A statement-level `forall`
 with no partial operation in its binder, `where` or body is not expanded, so its
 range need not have constant bounds. Every classified failure
 above rolls back the whole step: the Monitor returns the input state and leaves
@@ -132,6 +136,23 @@ engine, also for an action without a body. The renderer finds the failing guard
 by re-evaluating the guards on the trace's last pre-state
 (`fsl_runtime::guard_partial_operation`). A body `partial_op` keeps its
 existing location.
+
+`partial_operations` is an action-context list only. An `init` statement's
+partial operations (and its other failure sites, such as a `Map` key outside
+the finite key domain or a checked integer overflow) are not published in the
+Public Kernel: an init failure is neither a rollback nor a `partial_op`
+violation, because there is no prior state to return to and no step to blame.
+Init definedness is a verifier obligation instead: every engine (explicit,
+`bmc`, `induction`) reports an init that some initial state cannot evaluate as
+a `semantics` error with exit code 2, and the symbolic engines locate it at the
+failing init statement (e.g. `division by zero in init at 9:5`; #1258). The
+one exception is an init that also assigns a value outside a state variable's
+type: `bmc` and `induction` assume the step-0 type bounds when they ask the
+init question, so they report the search's step-0 `type_bound` violation
+(exit 1) instead, while the explicit engine reports the init failure (exit 2).
+The schema is unchanged. Publishing init failure conditions, should a Kernel
+consumer need them, would add a field with its own `state_effect_on_failure`
+value and so a minor schema version.
 
 ## Concrete boundary pre-pass budget
 

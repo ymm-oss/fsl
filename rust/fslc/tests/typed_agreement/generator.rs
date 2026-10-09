@@ -989,7 +989,7 @@ const fn placement(
 
 /// Every placement is in action context and outside `requires`/`let`, so the
 /// failure is a `partial_op` verdict. `K` has three values and `s` capacity 2.
-pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 13] = [
+pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 17] = [
     placement("plain", "y = OP", 1, 0),
     placement(
         "quantifier_body",
@@ -1040,6 +1040,28 @@ pub const PARTIAL_INVENTORY_PLACEMENTS: [PartialInventoryPlacement; 13] = [
     placement(
         "forall_statement_body_binder",
         "forall k: K { m[k] = if k >= 0 then OP else 0 }",
+        3,
+        0,
+    ),
+    // A statement-level `if` branch is listed under its condition, negated
+    // on the `else` side (#1260); each branch here is taken in the initial
+    // state, so the operation still fails.
+    placement("if_statement_then", "if x == 0 { y = OP }", 1, 0),
+    placement(
+        "if_statement_else",
+        "if x != 0 { y = 1 } else { y = OP }",
+        1,
+        0,
+    ),
+    placement(
+        "if_statement_forall",
+        "if x == 0 { forall k: K { m[k] = OP } }",
+        3,
+        0,
+    ),
+    placement(
+        "forall_statement_if",
+        "forall k: K { if k == 0 { m[k] = OP } }",
         3,
         0,
     ),

@@ -719,6 +719,7 @@ fn compose_scenario_expected_state_follows_declaration_order() {
 /// Detector (E3): a component guard that divides by zero is a `partial_op`
 /// conformance outcome; 5b5e2177 renamed outcome names through a prefix
 /// table that lacked `_partial_op_`, so it printed `_partial_op_calc__div`.
+/// Since #1244 the outcome is `_partial_calc.div`, the name verify gives.
 #[test]
 fn guard_division_by_zero_outcome_is_named_from_the_action() {
     let dir = scratch_dir("guard-partial");
@@ -726,7 +727,7 @@ fn guard_division_by_zero_outcome_is_named_from_the_action() {
     let output = fslc(&["conformance", &path_arg(&dir, "calc.fsl"), "--depth", "2"]);
     assert_eq!(output.status.code(), Some(0), "{:#}", json_of(&output));
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"_partial_op_calc.div\""), "{stdout}");
+    assert!(stdout.contains("\"_partial_calc.div\""), "{stdout}");
     assert!(!stdout.contains("__"), "{stdout}");
 
     let output = fslc(&[
@@ -736,7 +737,7 @@ fn guard_division_by_zero_outcome_is_named_from_the_action() {
         "2",
     ]);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"_partial_op_a__b.div\""), "{stdout}");
+    assert!(stdout.contains("\"_partial_a__b.div\""), "{stdout}");
     assert_eq!(wrong_action_spellings(&stdout), Vec::<String>::new());
 }
 
@@ -937,7 +938,7 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             vec!["conformance", &partial, "--depth", "2"],
             0,
             None,
-            vec!["\"_partial_op_a__b.div\"", "\"_requires_failed_a__b.bump\""],
+            vec!["\"_partial_a__b.div\"", "\"_requires_failed_a__b.bump\""],
         ),
         (
             vec!["conformance", &split, "--depth", "2"],

@@ -847,8 +847,13 @@ link; a governance preservation reports `unknown_budget`. The Worker
 governance path also stopped reporting a self-violating `after` spec as
 `refines` and now reports `violated`, as native does. `fslc diff`'s direction
 check and `fslc mutate`'s implements oracle still read the outcome fields
-themselves; their outputs have no `unknown_budget` value yet, so how they
-report the cutoff is a separate decision (#1262).
+themselves at first. #1262 made every `RefinementCheck` field private, so the
+outcome can only be read through `verdict()` (the bypass no longer compiles),
+and gave both outputs a value for the cutoff: a `fslc diff` direction reports
+`unknown_budget` with `states_explored` and an `unknown_budget` finding that
+fails the gate unconditionally (see `DESIGN-semantic-diff.md`), and a
+`fslc mutate` mutant is `inconclusive`, outside `kill_rate` and a failure of
+any requested gate (see `DESIGN-mutate.md` §3).
 
 #### The self-consistency precondition takes the same budget (issue #1246)
 
@@ -860,9 +865,9 @@ before this change: abort at a 6 GB address-space limit with 5.76 GB peak
 RSS; after: `unknown_budget`, `states_explored: 50000`, 1.19 GB peak RSS).
 The precondition now takes the walk's `budget`, checked right after each new
 insert as the walk does, and reports reaching it as `budget_exhausted`. Every
-consumer that reads `RefinementCheck::verdict()` therefore reports a
-precondition cutoff exactly as a walk cutoff; `fslc diff` and `fslc mutate`
-still do not read either (#1262).
+consumer reads the outcome through `RefinementCheck::verdict()`, so each one,
+`fslc diff` and `fslc mutate` included, reports a precondition cutoff exactly
+as a walk cutoff.
 
 The two walks were kept separate rather than merged into one, so the
 reporting priority is unchanged: a self-violation the precondition reaches is

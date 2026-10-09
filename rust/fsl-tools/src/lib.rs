@@ -114,7 +114,7 @@ pub use domain::{
     analyze_domain, assumptions as domain_assumptions, check_domain, domain_adapter_files,
     domain_kernel_source, domain_scaffold, domain_scaffold_metadata,
 };
-pub use html::render_html_report;
+pub use html::{VERIFY_VERDICTS, render_html_report, verdict_class};
 pub use ledger::{render_ledger, render_ledger_with_approvals};
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;

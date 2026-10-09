@@ -863,6 +863,16 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 </tbody>
 </table>
 <ul>
+<li><code>init</code> は action 文脈の規則で評価されます。init の評価が到達する <code>/</code>/<code>%</code> の
+  ゼロ除算、<code>Seq</code> の部分演算、有限キー域の外にある <code>Map</code> のキー(読み出しと代入
+  先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
+  (exit 2)です(init の <code>if</code>・条件式・<code>and</code>/<code>or</code>/<code>=&gt;</code> の到達しない側の演算は
+  到達しません)。初期状態より前のステップが無いため、<code>partial_op</code> 違反には
+  なりません。<code>bmc</code> と <code>induction</code>(base case が <code>bmc</code>)は、init が非決定的な
+  場合も含め、失敗と init の文を名指しします(例: <code>division by zero in init at
+  9:5</code>)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
+  とき、<code>bmc</code> と <code>induction</code> は step 0 の型境界を仮定して init を問うため、
+  その step 0 の <code>type_bound</code> 違反(exit 1)を報告します。</li>
 <li>デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   <code>deadlock reachable at step 1 (state: status=ToolFault, ...)</code>)。完全なトレースは
   JSON の <code>deadlock.trace</code> にもあります。</li>
@@ -1265,7 +1275,7 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 <tr>
 <td><code>unknown_budget</code></td>
 <td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline <code>implements Abs from "file" { }</code> seam(<code>check</code>/<code>verify</code>)、<code>fslc refine</code>(単体・chain)、<code>fslc chain</code> の refine 層、governance の <code>preservation</code>(§10、§13)</td>
-<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する。<code>fslc diff</code> と <code>fslc mutate</code> はまだこの打ち切りを読まない(<code>diff</code> は <code>no_semantic_change</code>/exit 0 を報告し、<code>mutate</code> はその mutant を survived と数える)</td>
+<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する。<code>fslc diff</code> は打ち切られた方向を <code>unknown_budget</code> と報告し、gate を無条件に落とす(finding <code>unknown_budget</code>、exit 1)。<code>fslc mutate</code> はその mutant を <code>inconclusive</code> と報告し、<code>kill_rate</code> から外し、要求された gate を落とす</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1694,9 +1704,15 @@ precondition は同じ到達可能状態を先にたどり、同じ上限で止�
 <code>--depth</code> の範囲の到達可能状態が上限に達する impl は、対応検査なら早い段で不一致を
 見つけられた場合でも <code>unknown_budget</code> になります。この上限が入る前は、そうした実行は
 precondition でメモリを使い切るか、収まった場合は判定のついた結果を報告していました。
-<code>fslc diff</code> と <code>fslc mutate</code> はまだこの
-打ち切りを読みません: <code>fslc diff</code> は <code>no_semantic_change</code>(exit 0)を報告し、
-<code>fslc mutate</code> はその mutant を survived と数えます。</p>
+<code>fslc diff</code> は、こうして打ち切られた方向を
+<code>states_explored</code> 付きの <code>result: "unknown_budget"</code> と報告し、<code>unknown_budget</code> の
+finding を足します。この finding は <code>--forbid</code> の指定に依らず gate を落とします
+(exit 1。<code>no_semantic_change</code> にはなりません)。<code>fslc diff --git</code> と
+<code>fslc approval diff</code> も同じです。<code>fslc mutate</code> はそうした mutant を
+<code>inconclusive.reason: "unknown_budget"</code> 付きの <code>status: "inconclusive"</code> と報告します。
+<code>kill_rate</code> からは外し、<code>summary.inconclusive</code> に数え、<code>--fail-on-survivors</code> /
+<code>--min-kill-rate</code> の gate を要求していればそれを落とします。どちらも以前は打ち切りを
+合格として報告していました(<code>no_semantic_change</code>/exit 0、および <code>survived</code>)。</p>
 <p><code>init</code> がどの経路でも一度も代入しない状態変数(例えば、代入されていない <code>Bool</code>
 を読む <code>init if</code>)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
 本当に自由な初期値です — <code>refine</code> は impl 側でも abs 側でもこの通りに検査します。
