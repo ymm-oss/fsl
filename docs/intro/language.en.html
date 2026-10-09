@@ -1804,9 +1804,11 @@ reinterpreted as whichever abs member sits at the same ordinal index. Domain
 types (<code>type X = lo..hi</code>) may safely share a name with different bounds; an
 out-of-range value there is still caught as <code>map_out_of_bounds</code>/
 <code>abs_state_mismatch</code>. That includes an action-correspondence argument outside
-the abstract action's parameter domain (a wider impl parameter type) and a
-mapping that reads an impl <code>Map</code> key outside its domain (a narrower impl key
-type): both are <code>map_out_of_bounds</code> (exit 1), not a <code>kind: "type"</code> error.</p>
+the abstract action's parameter domain (a wider impl parameter type; a false
+abstract guard is still reported first as <code>abs_requires_failed</code>) and a
+state-mapping expression that reads an impl <code>Map</code> at a key outside its domain
+(for example a narrower impl key type): both are <code>map_out_of_bounds</code> (exit 1),
+not a <code>kind: "type"</code> error.</p>
 <h3 id="chain-checking-composition-of-mappings">Chain checking (composition of mappings)</h3>
 <p>The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)
 can be checked <strong>directly by composition</strong> when you line up <code>(spec mapping)</code> in

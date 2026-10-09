@@ -1739,7 +1739,7 @@ enum(または struct)は、マージされるのではなく <code>kind: "type"
 されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
 メンバーとして黙って再解釈されかねないからです。ドメイン型
 (<code>type X = lo..hi</code>)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として <code>map_out_of_bounds</code>/<code>abs_state_mismatch</code> として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合)と、impl の <code>Map</code> の定義域の外のキーを読むマッピング(impl のキー型が狭い場合)も、<code>kind: "type"</code> のエラーではなく <code>map_out_of_bounds</code>(exit 1)になります。</p>
+依然として <code>map_out_of_bounds</code>/<code>abs_state_mismatch</code> として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合。抽象の guard が偽ならこれまでどおり先に <code>abs_requires_failed</code> になります)と、impl の <code>Map</code> を定義域の外のキーで読む状態マッピングの式(impl のキー型が狭い場合など)も、<code>kind: "type"</code> のエラーではなく <code>map_out_of_bounds</code>(exit 1)になります。</p>
 <h3 id="_1">チェーン検査(マッピングの合成)</h3>
 <p>レイヤーのチェーン(business ⊒ requirements ⊒ design …)の端から端までの忠実性は、
 <code>(spec mapping)</code> を順に並べると、<strong>合成によって直接</strong>検査できます:</p>
