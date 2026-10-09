@@ -1639,7 +1639,12 @@ gate を無条件に(`--forbid` の対象ではなく)失敗させます。自�
 `result: "unknown_budget"` で失敗し、governance の `preservation` は `result` に
 `unknown_budget` を報告します。これは判定の変更です: 対応検査が上限に達する
 refinement は、以前は `refines`(exit 0)を報告していました。上記の自己一貫性の
-precondition には、この上限はありません。`fslc diff` は、こうして打ち切られた方向を
+precondition は同じ到達可能状態を先にたどり、同じ上限で止まって同じ `unknown_budget`
+を報告します: たどり着かなかった自己違反は探さず、対応検査も実行しません。そのため
+`--depth` の範囲の到達可能状態が上限に達する impl は、対応検査なら早い段で不一致を
+見つけられた場合でも `unknown_budget` になります。この上限が入る前は、そうした実行は
+precondition でメモリを使い切るか、収まった場合は判定のついた結果を報告していました。
+`fslc diff` は、こうして打ち切られた方向を
 `states_explored` 付きの `result: "unknown_budget"` と報告し、`unknown_budget` の
 finding を足します。この finding は `--forbid` の指定に依らず gate を落とします
 (exit 1。`no_semantic_change` にはなりません)。`fslc diff --git` と
@@ -1677,7 +1682,7 @@ enum(または struct)は、マージされるのではなく `kind: "type"`(exi
 されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
 メンバーとして黙って再解釈されかねないからです。ドメイン型
 (`type X = lo..hi`)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として `map_out_of_bounds`/`abs_state_mismatch` として捕捉されます。
+依然として `map_out_of_bounds`/`abs_state_mismatch` として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合)と、impl の `Map` の定義域の外のキーを読むマッピング(impl のキー型が狭い場合)も、`kind: "type"` のエラーではなく `map_out_of_bounds`(exit 1)になります。
 
 ### チェーン検査(マッピングの合成)
 

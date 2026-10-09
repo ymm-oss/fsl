@@ -1699,8 +1699,14 @@ at that link (`failed_link.kind` is `null`), a `fslc chain` refine layer fails
 with `result: "unknown_budget"`, and a governance `preservation` reports
 `unknown_budget` as its `result`. This changed verdicts: a refinement whose
 correspondence check reaches the budget used to report `refines` (exit 0).
-The self-consistency precondition above has no such budget. `fslc diff`
-reports a direction cut off this way as `result: "unknown_budget"` with
+The self-consistency precondition above walks the same reachable set first and
+stops at the same budget, with the same `unknown_budget` report: a
+self-violation it did not reach is not searched for, and the correspondence
+check does not run. An impl whose reachable set within `--depth` reaches the
+budget is therefore `unknown_budget` even when the correspondence check would
+have found a mismatch early; before this bound such a run either exhausted
+memory in the precondition or, when it fit, reported the decided result.
+`fslc diff` reports a direction cut off this way as `result: "unknown_budget"` with
 `states_explored`, and adds an `unknown_budget` finding that fails the gate
 whatever `--forbid` says (exit 1, never `no_semantic_change`); `fslc diff
 --git` and `fslc approval diff` report the same. `fslc mutate` reports such a
@@ -1741,7 +1747,10 @@ rather than merged — merging would let an impl-only member get silently
 reinterpreted as whichever abs member sits at the same ordinal index. Domain
 types (`type X = lo..hi`) may safely share a name with different bounds; an
 out-of-range value there is still caught as `map_out_of_bounds`/
-`abs_state_mismatch`.
+`abs_state_mismatch`. That includes an action-correspondence argument outside
+the abstract action's parameter domain (a wider impl parameter type) and a
+mapping that reads an impl `Map` key outside its domain (a narrower impl key
+type): both are `map_out_of_bounds` (exit 1), not a `kind: "type"` error.
 
 ### Chain checking (composition of mappings)
 

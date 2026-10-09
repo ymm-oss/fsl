@@ -155,13 +155,6 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-runtime/src/lib.rs",
-        2234,
-        "first_self_violation",
-        ResultOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fsl-runtime/src/lib.rs",
         3199,
         "record_reachables",
         ResultOption

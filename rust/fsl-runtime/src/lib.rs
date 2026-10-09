@@ -68,6 +68,11 @@ pub struct RuntimeError {
     /// engines report as `partial_op` rather than as a raw runtime error
     /// (issue #1166: this used to be recovered by matching `message`).
     pub partial_operation: Option<PartialOperation>,
+    /// Set exactly when a `Map` was indexed with a key outside its finite key
+    /// domain. A refinement check whose mapping reads such a key (an impl key
+    /// domain narrower than the abstraction's) reports `map_out_of_bounds`
+    /// rather than this error.
+    pub map_key_outside_domain: bool,
 }
 
 impl fmt::Display for RuntimeError {
@@ -88,6 +93,7 @@ impl From<ModelError> for RuntimeError {
             message: error.message,
             span: error.span,
             partial_operation: None,
+            map_key_outside_domain: false,
         }
     }
 }
@@ -189,10 +195,10 @@ fn eval_inner(
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;
             match base {
-                Value::Map(values) => values
-                    .get(&index)
-                    .cloned()
-                    .ok_or_else(|| runtime_error("map index outside finite key domain")),
+                Value::Map(values) => values.get(&index).cloned().ok_or_else(|| RuntimeError {
+                    map_key_outside_domain: true,
+                    ..runtime_error("map index outside finite key domain")
+                }),
                 Value::Seq(values) => values
                     .get(partial_index(index, PartialOperation::Index)?)
                     .cloned()
@@ -783,6 +789,7 @@ fn runtime_error(message: impl Into<String>) -> RuntimeError {
         message: message.into(),
         span: None,
         partial_operation: None,
+        map_key_outside_domain: false,
     }
 }
 
@@ -808,6 +815,7 @@ fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
         message: message.into(),
         span: Some(span),
         partial_operation: None,
+        map_key_outside_domain: false,
     }
 }
 
@@ -1555,11 +1563,12 @@ pub struct RefinementCheck {
     /// broken on its own), not a refinement fidelity verdict, so it must
     /// never be reported as `refines` or folded into `refinement_failed`.
     impl_violation: Option<(Violation, Vec<TraceStep>)>,
-    /// Set to the walk's `visited.len()` at the cutoff when the
-    /// correspondence walk hit its state-count budget before exhausting the
-    /// reachable set within `depth` (issue #1041): the search stopped
-    /// early, so neither `refines` nor a decided `failure`/`impl_violation`
-    /// would be true -- reporting either would be a false result.
+    /// Set to the cut-off search's `visited.len()` when either the
+    /// self-consistency pre-pass (issue #1246) or the correspondence walk
+    /// (issue #1041) hit the state-count budget before exhausting the
+    /// reachable set within `depth`: the search stopped early, so neither
+    /// `refines` nor a decided `failure`/`impl_violation` would be true --
+    /// reporting either would be a false result.
     budget_exhausted: Option<usize>,
 }
 
@@ -1572,8 +1581,9 @@ pub struct RefinementCheck {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum RefinementVerdict<'a> {
-    /// The correspondence walk hit its state budget before deciding within
-    /// `depth`: neither `refines` nor a failure is known.
+    /// The self-consistency pre-pass or the correspondence walk hit its
+    /// state budget before deciding within `depth`: neither `refines` nor a
+    /// failure is known.
     BudgetExhausted { states_explored: usize },
     /// The implementation violates its own semantics within `depth`.
     ImplViolated {
@@ -1654,7 +1664,8 @@ impl RefinementCheck {
 }
 
 /// Bounded-search budget for [`check_refinement`]'s correspondence walk
-/// (issue #1041). Unlike [`find_boundary_violation`]'s `budget` parameter,
+/// (issue #1041) and for its self-consistency pre-pass, which walks the same
+/// reachable set first (issue #1246). Unlike [`find_boundary_violation`]'s `budget` parameter,
 /// this one has no CLI-facing knob (`fslc check` stays a flag-free fast
 /// check; `fslc verify` does not reuse `--explicit-budget` here either,
 /// because that flag governs a different search and one knob covering two
@@ -1978,10 +1989,21 @@ pub fn check_refinement_with_budget(
     // (issue #493), not one arbitrarily materialized default, so this
     // precondition cannot miss a self-violation reachable only from a
     // non-default initial branch either.
+    //
+    // The pre-pass walks the same reachable set the correspondence walk
+    // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
+    // every reachable state before the walk's own cutoff could apply. A
+    // pre-pass cut off before finding a self-violation has decided nothing,
+    // so it reports `budget_exhausted` -- never `refines` and never a walk
+    // started on an impl whose own consistency was not established.
     let impl_initial_states = concrete_initial_states(implementation)?;
-    if let Some((violation, trace)) =
-        first_self_violation(implementation, &impl_initial_states, depth)?
-    {
+    let (impl_violation, budget_exhausted) =
+        match first_self_violation(implementation, &impl_initial_states, depth, budget)? {
+            SelfConsistency::Consistent => (None, None),
+            SelfConsistency::Violated(violation, trace) => (Some((violation, trace)), None),
+            SelfConsistency::BudgetExhausted { states_explored } => (None, Some(states_explored)),
+        };
+    if impl_violation.is_some() || budget_exhausted.is_some() {
         return Ok(RefinementCheck {
             implementation: implementation.name.clone(),
             abstraction: abstraction.name.clone(),
@@ -1989,8 +2011,8 @@ pub fn check_refinement_with_budget(
             action_map: BTreeMap::new(),
             abs_has_ensures: false,
             failure: None,
-            impl_violation: Some((violation, trace)),
-            budget_exhausted: None,
+            impl_violation,
+            budget_exhausted,
         });
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
@@ -2035,19 +2057,40 @@ pub fn check_refinement_with_budget(
     // nondeterministic initial branch, not just one.
     let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
-        let alpha_initial = alpha_state(
-            &impl_state,
-            implementation,
-            abstraction,
-            mapping,
-            &eval_model,
-        )?;
         let initial_trace = vec![TraceStep {
             step: 0,
             state: impl_state.clone(),
             action: None,
             changes: BTreeMap::new(),
         }];
+        let alpha_initial = match alpha_state(
+            &impl_state,
+            implementation,
+            abstraction,
+            mapping,
+            &eval_model,
+        ) {
+            Ok(alpha) => alpha,
+            // The mapping read a key outside an impl `Map`'s finite key
+            // domain (an impl key type narrower than the abstraction's): the
+            // mapped abstract state cannot be built for every abstract key, a
+            // range escape of the mapping (`map_out_of_bounds`), not an
+            // evaluation error. A whole-map mapping with missing keys is
+            // already caught by the type-bound check below.
+            Err(error) if error.map_key_outside_domain => {
+                check.failure = Some(refinement_failure(
+                    "map_out_of_bounds",
+                    Some("init"),
+                    0,
+                    &initial_trace,
+                    None,
+                    None,
+                    None,
+                ));
+                return Ok(check);
+            }
+            Err(error) => return Err(error),
+        };
         // `alpha_initial` is already a complete concrete abs state (the
         // impl initial state mapped through the refinement correspondence),
         // so there is nothing for the abstraction's own `init` to compute —
@@ -2168,13 +2211,30 @@ pub fn check_refinement_with_budget(
                 continue;
             }
             let child_state = stepped.state.clone();
-            let alpha_after = alpha_state(
+            let alpha_after = match alpha_state(
                 &child_state,
                 implementation,
                 abstraction,
                 mapping,
                 &eval_model,
-            )?;
+            ) {
+                Ok(alpha) => alpha,
+                Err(error) if error.map_key_outside_domain => {
+                    let child_trace =
+                        refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                    check.failure = Some(refinement_failure(
+                        "map_out_of_bounds",
+                        Some("step"),
+                        step + 1,
+                        &child_trace,
+                        Some(alpha_before.clone()),
+                        None,
+                        None,
+                    ));
+                    return Ok(check);
+                }
+                Err(error) => return Err(error),
+            };
             let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
                 ActionCorrespondenceTarget::Stutter => {
@@ -2248,6 +2308,35 @@ pub fn check_refinement_with_budget(
                         .zip(values)
                         .map(|(param, value)| (param.name().to_owned(), value))
                         .collect::<BTreeMap<_, _>>();
+                    // A mapped argument outside the abstract action's declared
+                    // parameter domain (e.g. an impl whose parameter type is
+                    // wider than the abstraction's) is a range escape of the
+                    // mapping, like an out-of-range mapped state value:
+                    // `map_out_of_bounds`, not an evaluation error from
+                    // stepping the abstraction with an ill-typed argument.
+                    let mut out_of_domain = false;
+                    for param in &abs_action.params {
+                        if let Some(value) = expected_params.get(param.name())
+                            && !parameter_value_in_domain(param, value, abstraction)?
+                        {
+                            out_of_domain = true;
+                            break;
+                        }
+                    }
+                    if out_of_domain {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        check.failure = Some(refinement_failure(
+                            "map_out_of_bounds",
+                            Some("step"),
+                            step + 1,
+                            &child_trace,
+                            Some(alpha_before.clone()),
+                            None,
+                            Some(alpha_after),
+                        ));
+                        return Ok(check);
+                    }
                     // See the step-0 `Monitor::from_state` note above: this
                     // state is already fully computed, so there is nothing
                     // for `abstraction.init` to determine here either.
@@ -2594,6 +2683,18 @@ pub fn find_boundary_violation(
     })
 }
 
+/// The outcome of [`first_self_violation`]'s bounded self-consistency
+/// pre-pass (issue #1246).
+enum SelfConsistency {
+    /// The whole reachable set within `depth` is free of self-violations.
+    Consistent,
+    /// The first self-violation found, with its trace.
+    Violated(Violation, Vec<TraceStep>),
+    /// The pre-pass reached `budget` visited states before either finding a
+    /// self-violation or exhausting the reachable set within `depth`.
+    BudgetExhausted { states_explored: usize },
+}
+
 /// Find the first violation of ANY kind (type bound, user invariant, `trans`,
 /// `ensures`, or `partial_op`) the model has against its own semantics,
 /// concretely, within `depth` — i.e. whether the model is internally
@@ -2613,6 +2714,11 @@ pub fn find_boundary_violation(
 /// including a violation already present in the initial state (init can
 /// itself violate an invariant or type bound before any action runs).
 ///
+/// `budget` bounds `visited.len()` exactly as the correspondence walk's
+/// budget does (issue #1246): checked right after a new insert, so the
+/// pre-pass never holds more than `budget` visited states. A violation found
+/// before the cutoff is still reported; one beyond it is not searched for.
+///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when concrete evaluation or execution fails.
@@ -2620,7 +2726,8 @@ fn first_self_violation(
     model: &KernelModel,
     initial_states: &[State],
     depth: usize,
-) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    budget: usize,
+) -> Result<SelfConsistency, RuntimeError> {
     // Queue nodes carry `State` only; a scratch `Monitor` is re-pointed at
     // each popped state instead of cloning the whole model per node, and the
     // trace is reconstructed from parent links only when a violation is
@@ -2640,11 +2747,23 @@ fn first_self_violation(
         scratch.state = state.clone();
         scratch.step = 0;
         if let Some(violation) = scratch.current_violation()? {
-            return Ok(Some((violation, trace::reconstruct_trace(state, &parents))));
+            return Ok(SelfConsistency::Violated(
+                violation,
+                trace::reconstruct_trace(state, &parents),
+            ));
         }
         if visited.insert(state.clone()) {
             queue.push_back((state.clone(), 0_usize));
         }
+    }
+    // After the root loop, not inside it: every initial state is already
+    // materialized in `initial_states`, so checking each one for an
+    // immediate violation costs no extra memory, and a cutoff here must not
+    // skip a later root's init violation.
+    if visited.len() >= budget {
+        return Ok(SelfConsistency::BudgetExhausted {
+            states_explored: visited.len(),
+        });
     }
     while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
@@ -2660,7 +2779,7 @@ fn first_self_violation(
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = trace::reconstruct_trace(&state, &parents);
                 found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
-                return Ok(Some((violation, found_trace)));
+                return Ok(SelfConsistency::Violated(violation, found_trace));
             }
             let child_state = scratch.state.clone();
             if visited.insert(child_state.clone()) {
@@ -2674,11 +2793,16 @@ fn first_self_violation(
                         },
                     },
                 );
+                if visited.len() >= budget {
+                    return Ok(SelfConsistency::BudgetExhausted {
+                        states_explored: visited.len(),
+                    });
+                }
                 queue.push_back((child_state, step + 1));
             }
         }
     }
-    Ok(None)
+    Ok(SelfConsistency::Consistent)
 }
 
 /// The outcome of a budgeted vacuity-reachability probe for one
@@ -3719,6 +3843,21 @@ fn action_parameter_bindings(
     Ok(bindings)
 }
 
+/// Whether `value` belongs to `parameter`'s declared domain (its type, or its
+/// `lo..hi` range).
+fn parameter_value_in_domain(
+    parameter: &ParamDef,
+    value: &Value,
+    model: &KernelModel,
+) -> Result<bool, RuntimeError> {
+    Ok(match parameter {
+        ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
+        ParamDef::Range { lo, hi, .. } => {
+            matches!(value, Value::Int(value) if lo <= value && value <= hi)
+        }
+    })
+}
+
 fn validate_action_parameters(
     action: &ActionDef,
     params: &Bindings,
@@ -3734,13 +3873,7 @@ fn validate_action_parameters(
         let value = params.get(parameter.name()).ok_or_else(|| {
             runtime_error(format!("parameters do not match action '{}'", action.name))
         })?;
-        let belongs = match parameter {
-            ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
-            ParamDef::Range { lo, hi, .. } => {
-                matches!(value, Value::Int(value) if lo <= value && value <= hi)
-            }
-        };
-        if !belongs {
+        if !parameter_value_in_domain(parameter, value, model)? {
             return Err(runtime_error(format!(
                 "parameter '{}' does not belong to its declared domain for action '{}'",
                 parameter.name(),
