@@ -40,6 +40,18 @@ const IMPL_BODY: &str = "  type IV = 0..5\n  state { seq: Seq<IV, 7> }\n  \
      init { seq = Seq {} }\n  action push(v: IV) {\n    requires seq.size() < 7\n    \
      seq = seq.push(v)\n  }\n  invariant ShorterThanSeven { seq.size() < 7 }\n";
 
+/// The same pushes without the invariant: self-consistent, 55,987 states
+/// within depth 6.
+const CONSISTENT_IMPL: &str = "spec WideConsistent {\n  type IV = 0..5\n  \
+     state { seq: Seq<IV, 7> }\n  init { seq = Seq {} }\n  action push(v: IV) {\n    \
+     requires seq.size() < 7\n    seq = seq.push(v)\n  }\n}\n";
+
+/// An abstraction that refuses to push 5, so `WideConsistent`'s first
+/// `push(5)` is an `abs_requires_failed` mismatch at step 1.
+const NARROW_ABS: &str = "spec NarrowAbs {\n  type AV = 0..5\n  state { seq: Seq<AV, 7> }\n  \
+     init { seq = Seq {} }\n  action push(v: AV) {\n    requires v <= 4\n    \
+     requires seq.size() < 7\n    seq = seq.push(v)\n  }\n}\n";
+
 fn fixture(name: &str) -> PathBuf {
     let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
@@ -70,6 +82,13 @@ fn fixture(name: &str) -> PathBuf {
              preservation WidePreserved {\n    before WideAbs from \"abs.fsl\"\n    \
              after WideBroken from \"impl.fsl\"\n    preserve CTRL-WIDE\n    \
              checked_by refinement \"impl_refines_abs.fsl\"\n  }\n}\n"
+                .to_owned(),
+        ),
+        ("narrow_abs.fsl", NARROW_ABS.to_owned()),
+        ("consistent_impl.fsl", CONSISTENT_IMPL.to_owned()),
+        (
+            "consistent_refines_narrow.fsl",
+            "refinement ConsistentRefinesNarrow { impl WideConsistent abs NarrowAbs maps auto }\n"
                 .to_owned(),
         ),
     ] {
@@ -171,4 +190,38 @@ fn governance_reports_unknown_budget_for_a_pre_pass_cutoff() {
         value["governance"]["preservations"][0]["result"], "unknown_budget",
         "{value:#}"
     );
+}
+
+/// The order this issue fixes, under the real budget: the pre-pass reaches
+/// 50,000 states before the walk runs, so the run is `unknown_budget` even
+/// though the walk would find a mismatch at step 1. The depth-1 control on
+/// the same files shows the mismatch is real. Running the walk after a
+/// pre-pass cutoff is a deferred option; adopting it must change this test.
+#[test]
+fn refine_reports_the_pre_pass_cutoff_before_an_early_correspondence_failure() {
+    let dir = fixture("order");
+    let refine = |depth: &str| {
+        fslc(
+            &dir,
+            &[
+                "refine",
+                "consistent_impl.fsl",
+                "narrow_abs.fsl",
+                "consistent_refines_narrow.fsl",
+                "--depth",
+                depth,
+            ],
+        )
+    };
+
+    let (shallow, shallow_status) = refine("1");
+    assert_eq!(shallow["result"], "refinement_failed", "{shallow:#}");
+    assert_eq!(shallow["kind"], "abs_requires_failed", "{shallow:#}");
+    assert_eq!(shallow["violated_at_step"], 1, "{shallow:#}");
+    assert_eq!(shallow_status, 1, "{shallow:#}");
+
+    let (deep, deep_status) = refine("6");
+    assert_eq!(deep["result"], "unknown_budget", "{deep:#}");
+    assert_eq!(deep["states_explored"], BUDGET, "{deep:#}");
+    assert_eq!(deep_status, 1, "{deep:#}");
 }

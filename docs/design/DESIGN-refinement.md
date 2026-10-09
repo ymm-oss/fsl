@@ -871,6 +871,10 @@ precondition cutoff decides the run: an impl whose reachable set within
 `depth` reaches the budget is `unknown_budget` even when the walk would have
 found a correspondence failure in its first layers. Before this change such a
 run either exhausted memory in the precondition or, when it fit, reported
-that failure. Recovering it needs the merged walk #1050 discusses, which has
-to keep `alpha_before`'s layer computation order and record the changed
-priority here.
+that failure. Recovering it is a deferred option, not decided here: after a
+precondition cutoff, the existing correspondence walk could still run under
+its own budget and report a correspondence failure it finds before that
+budget. That changes which verdict a cut-off precondition yields, so adopting
+it must change the tests that pin this order
+(`a_pre_pass_cutoff_is_reported_even_when_the_walk_would_fail_at_step_one`,
+`refine_reports_the_pre_pass_cutoff_before_an_early_correspondence_failure`).
