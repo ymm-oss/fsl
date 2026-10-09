@@ -1682,7 +1682,7 @@ enum(または struct)は、マージされるのではなく `kind: "type"`(exi
 されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
 メンバーとして黙って再解釈されかねないからです。ドメイン型
 (`type X = lo..hi`)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として `map_out_of_bounds`/`abs_state_mismatch` として捕捉されます。
+依然として `map_out_of_bounds`/`abs_state_mismatch` として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合)と、impl の `Map` の定義域の外のキーを読むマッピング(impl のキー型が狭い場合)も、`kind: "type"` のエラーではなく `map_out_of_bounds`(exit 1)になります。
 
 ### チェーン検査(マッピングの合成)
 

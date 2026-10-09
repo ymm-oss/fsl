@@ -68,6 +68,11 @@ pub struct RuntimeError {
     /// engines report as `partial_op` rather than as a raw runtime error
     /// (issue #1166: this used to be recovered by matching `message`).
     pub partial_operation: Option<PartialOperation>,
+    /// Set exactly when a `Map` was indexed with a key outside its finite key
+    /// domain. A refinement check whose mapping reads such a key (an impl key
+    /// domain narrower than the abstraction's) reports `map_out_of_bounds`
+    /// rather than this error.
+    pub map_key_outside_domain: bool,
 }
 
 impl fmt::Display for RuntimeError {
@@ -88,6 +93,7 @@ impl From<ModelError> for RuntimeError {
             message: error.message,
             span: error.span,
             partial_operation: None,
+            map_key_outside_domain: false,
         }
     }
 }
@@ -189,10 +195,10 @@ fn eval_inner(
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;
             match base {
-                Value::Map(values) => values
-                    .get(&index)
-                    .cloned()
-                    .ok_or_else(|| runtime_error("map index outside finite key domain")),
+                Value::Map(values) => values.get(&index).cloned().ok_or_else(|| RuntimeError {
+                    map_key_outside_domain: true,
+                    ..runtime_error("map index outside finite key domain")
+                }),
                 Value::Seq(values) => values
                     .get(partial_index(index, PartialOperation::Index)?)
                     .cloned()
@@ -783,6 +789,7 @@ fn runtime_error(message: impl Into<String>) -> RuntimeError {
         message: message.into(),
         span: None,
         partial_operation: None,
+        map_key_outside_domain: false,
     }
 }
 
@@ -808,6 +815,7 @@ fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
         message: message.into(),
         span: Some(span),
         partial_operation: None,
+        map_key_outside_domain: false,
     }
 }
 
@@ -2049,19 +2057,40 @@ pub fn check_refinement_with_budget(
     // nondeterministic initial branch, not just one.
     let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
-        let alpha_initial = alpha_state(
-            &impl_state,
-            implementation,
-            abstraction,
-            mapping,
-            &eval_model,
-        )?;
         let initial_trace = vec![TraceStep {
             step: 0,
             state: impl_state.clone(),
             action: None,
             changes: BTreeMap::new(),
         }];
+        let alpha_initial = match alpha_state(
+            &impl_state,
+            implementation,
+            abstraction,
+            mapping,
+            &eval_model,
+        ) {
+            Ok(alpha) => alpha,
+            // The mapping read a key outside an impl `Map`'s finite key
+            // domain (an impl key type narrower than the abstraction's): the
+            // mapped abstract state cannot be built for every abstract key, a
+            // range escape of the mapping (`map_out_of_bounds`), not an
+            // evaluation error. A whole-map mapping with missing keys is
+            // already caught by the type-bound check below.
+            Err(error) if error.map_key_outside_domain => {
+                check.failure = Some(refinement_failure(
+                    "map_out_of_bounds",
+                    Some("init"),
+                    0,
+                    &initial_trace,
+                    None,
+                    None,
+                    None,
+                ));
+                return Ok(check);
+            }
+            Err(error) => return Err(error),
+        };
         // `alpha_initial` is already a complete concrete abs state (the
         // impl initial state mapped through the refinement correspondence),
         // so there is nothing for the abstraction's own `init` to compute —
@@ -2182,13 +2211,30 @@ pub fn check_refinement_with_budget(
                 continue;
             }
             let child_state = stepped.state.clone();
-            let alpha_after = alpha_state(
+            let alpha_after = match alpha_state(
                 &child_state,
                 implementation,
                 abstraction,
                 mapping,
                 &eval_model,
-            )?;
+            ) {
+                Ok(alpha) => alpha,
+                Err(error) if error.map_key_outside_domain => {
+                    let child_trace =
+                        refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                    check.failure = Some(refinement_failure(
+                        "map_out_of_bounds",
+                        Some("step"),
+                        step + 1,
+                        &child_trace,
+                        Some(alpha_before.clone()),
+                        None,
+                        None,
+                    ));
+                    return Ok(check);
+                }
+                Err(error) => return Err(error),
+            };
             let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
                 ActionCorrespondenceTarget::Stutter => {
@@ -2262,6 +2308,35 @@ pub fn check_refinement_with_budget(
                         .zip(values)
                         .map(|(param, value)| (param.name().to_owned(), value))
                         .collect::<BTreeMap<_, _>>();
+                    // A mapped argument outside the abstract action's declared
+                    // parameter domain (e.g. an impl whose parameter type is
+                    // wider than the abstraction's) is a range escape of the
+                    // mapping, like an out-of-range mapped state value:
+                    // `map_out_of_bounds`, not an evaluation error from
+                    // stepping the abstraction with an ill-typed argument.
+                    let mut out_of_domain = false;
+                    for param in &abs_action.params {
+                        if let Some(value) = expected_params.get(param.name())
+                            && !parameter_value_in_domain(param, value, abstraction)?
+                        {
+                            out_of_domain = true;
+                            break;
+                        }
+                    }
+                    if out_of_domain {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        check.failure = Some(refinement_failure(
+                            "map_out_of_bounds",
+                            Some("step"),
+                            step + 1,
+                            &child_trace,
+                            Some(alpha_before.clone()),
+                            None,
+                            Some(alpha_after),
+                        ));
+                        return Ok(check);
+                    }
                     // See the step-0 `Monitor::from_state` note above: this
                     // state is already fully computed, so there is nothing
                     // for `abstraction.init` to determine here either.
@@ -3768,6 +3843,21 @@ fn action_parameter_bindings(
     Ok(bindings)
 }
 
+/// Whether `value` belongs to `parameter`'s declared domain (its type, or its
+/// `lo..hi` range).
+fn parameter_value_in_domain(
+    parameter: &ParamDef,
+    value: &Value,
+    model: &KernelModel,
+) -> Result<bool, RuntimeError> {
+    Ok(match parameter {
+        ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
+        ParamDef::Range { lo, hi, .. } => {
+            matches!(value, Value::Int(value) if lo <= value && value <= hi)
+        }
+    })
+}
+
 fn validate_action_parameters(
     action: &ActionDef,
     params: &Bindings,
@@ -3783,13 +3873,7 @@ fn validate_action_parameters(
         let value = params.get(parameter.name()).ok_or_else(|| {
             runtime_error(format!("parameters do not match action '{}'", action.name))
         })?;
-        let belongs = match parameter {
-            ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
-            ParamDef::Range { lo, hi, .. } => {
-                matches!(value, Value::Int(value) if lo <= value && value <= hi)
-            }
-        };
-        if !belongs {
+        if !parameter_value_in_domain(parameter, value, model)? {
             return Err(runtime_error(format!(
                 "parameter '{}' does not belong to its declared domain for action '{}'",
                 parameter.name(),

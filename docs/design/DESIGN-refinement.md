@@ -636,6 +636,17 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 6. **static checks**: missing map / unknown action / missing correspondence →
    kind: type, exit 2.
 7. **bounds**: the mapping value is out of the abs type range → map_out_of_bounds.
+   The same kind covers the two domain escapes that used to stop the check
+   with a runtime error (`kind: type`, exit 2) instead of a verdict: an
+   action-correspondence argument outside the abstract action's declared
+   parameter domain (an impl parameter type wider than the abstraction's; the
+   check runs before the abstract action is evaluated), and a mapping that
+   reads an impl `Map` key outside its finite key domain (an impl key type
+   narrower than the abstraction's, so the mapped abstract `Map` cannot cover
+   its own key domain). Both are range escapes of the mapping, reported
+   `refinement_failed` / `map_out_of_bounds` (exit 1) at the step (or `init`)
+   where they occur; reusing the existing kind keeps the documented promise
+   that a shrunken impl against a full-size abstract fails `map_out_of_bounds`.
 8. **conflicting same-named type**: impl and abs both declare a type with the
    same name but a different shape (an enum with different members, or a
    struct with different fields) → kind: type, exit 2. Type metadata is

@@ -361,3 +361,57 @@ fn check_refinement_still_refines_when_the_correspondence_divisor_is_always_guar
 
     assert_refines(&checked);
 }
+
+const SEQ_ABS: &str = "spec SeqAbs { type V = 0..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+     action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }";
+
+const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
+     init { forall k: K { m[k] = false } } action set(k: K) { m[k] = true } \
+     invariant Total { forall k: K { m[k] or not m[k] } } }";
+
+/// An impl whose parameter domain is wider than the abstract action's maps a
+/// step to an abstract call with an argument outside the abstract parameter
+/// domain. That is a range escape of the mapping (`map_out_of_bounds`), not a
+/// runtime error from stepping the abstraction with an ill-typed argument.
+#[test]
+fn an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds() {
+    let implementation = model(
+        "spec SeqWide { type V = -1..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+         action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }",
+    );
+    let abstraction = model(SEQ_ABS);
+    let mapping = parse_refinement(
+        "refinement M { impl SeqWide abs SeqAbs map seq = seq action push(v) -> push(v) }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
+        .expect("an out-of-domain abstract argument is a finding, not an error");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "map_out_of_bounds");
+    assert_eq!(failure.at.as_deref(), Some("step"));
+    assert_eq!(failure.step, 1);
+}
+
+/// A narrower impl key domain under an indexed map: the mapping reads impl
+/// keys the impl does not have.
+#[test]
+fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
+    let implementation = model(
+        "spec MapNarrow { type K = 0..1 state { m: Map<K, Bool> } \
+         init { forall k: K { m[k] = false } } action set(k: K) { m[k] = true } }",
+    );
+    let abstraction = model(MAP_ABS);
+    let mapping = parse_refinement(
+        "refinement M { impl MapNarrow abs MapAbs maps auto }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
+        .expect("a missing abstract key is a finding, not an error");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "map_out_of_bounds");
+    assert_eq!(failure.at.as_deref(), Some("init"));
+}
