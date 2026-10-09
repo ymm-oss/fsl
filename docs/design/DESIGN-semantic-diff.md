@@ -130,8 +130,22 @@ The stable top-level shape is:
 
 Finding kinds are `behavior_added`, `behavior_removed`,
 `invariant_weakened`, `invariant_strengthened`, `forbidden_relaxed`,
-`scope_changed`, and `unknown`. With no findings, `summary` is exactly
-`["no_semantic_change"]`.
+`scope_changed`, `unknown`, `impl_violated`, and `unknown_budget`. With no
+findings, `summary` is exactly `["no_semantic_change"]`.
+
+A direction's refinement check reads `RefinementCheck::verdict()`, the one
+reading `fslc refine` uses, so every outcome has a direction `result`:
+`refines`, `refinement_failed`, `impl_violated` (that side breaks its own
+type bounds/invariants, #466), `unknown_budget` (#1262), or `unknown` (no
+check ran: names differ, or the automatic mapping failed). `unknown_budget`
+means the correspondence walk reached its fixed state budget (50,000 states,
+#1041; no CLI flag) before deciding within `--depth`. That direction carries
+`states_explored` and no `checked_to_depth`, and an `unknown_budget` finding
+with the same `direction` and `states_explored` is emitted. The unvisited part
+of the reachable set may hold a difference, so before #1262 reporting the
+direction as `refines` let `no_semantic_change` pass a gate with a difference
+beyond the budget. It is not folded into `unknown` (which only fails under
+`--forbid unknown`).
 
 Analysis completion exits 0 even when findings exist. CI policy is explicit:
 
@@ -140,9 +154,18 @@ fslc diff old.fsl new.fsl --depth 8 \
   --forbid behavior_added,invariant_weakened,forbidden_relaxed
 ```
 
-Only a finding named by `--forbid` makes `gate.passed:false` and exits 1.
+Only a finding named by `--forbid` makes `gate.passed:false` and exits 1, with
+two exceptions that fail the gate unconditionally, whatever `--forbid` says:
+`impl_violated` (one input is broken on its own) and `unknown_budget` (the
+comparison was not completed). Both are added to `gate.violations` themselves.
 Parse/type/IO errors remain exit 2 and internal failures exit 3. This separates
 an informative change report from a repository-specific compatibility gate.
+
+`fslc diff --git` and `fslc approval diff` run this same comparison, so they
+report the same findings. `approval diff` passes no `--forbid`; it therefore
+exits 1 exactly when `impl_violated` or `unknown_budget` is present, and 0
+otherwise (decided in #1262: an approval baseline compared only up to a cutoff
+is not evidence that the change is behaviour-neutral).
 
 ## Non-goals
 

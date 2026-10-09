@@ -57,9 +57,9 @@ fn main() {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "implementation": checked.implementation,
-                    "abstraction": checked.abstraction,
-                    "depth": checked.depth,
+                    "implementation": checked.implementation(),
+                    "abstraction": checked.abstraction(),
+                    "depth": checked.depth(),
                     "verdict": verdict,
                     "kind": kind,
                 }))

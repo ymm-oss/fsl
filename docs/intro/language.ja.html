@@ -1275,7 +1275,7 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 <tr>
 <td><code>unknown_budget</code></td>
 <td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline <code>implements Abs from "file" { }</code> seam(<code>check</code>/<code>verify</code>)、<code>fslc refine</code>(単体・chain)、<code>fslc chain</code> の refine 層、governance の <code>preservation</code>(§10、§13)</td>
-<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する。<code>fslc diff</code> と <code>fslc mutate</code> はまだこの打ち切りを読まない(<code>diff</code> は <code>no_semantic_change</code>/exit 0 を報告し、<code>mutate</code> はその mutant を survived と数える)</td>
+<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する。<code>fslc diff</code> は打ち切られた方向を <code>unknown_budget</code> と報告し、gate を無条件に落とす(finding <code>unknown_budget</code>、exit 1)。<code>fslc mutate</code> はその mutant を <code>inconclusive</code> と報告し、<code>kill_rate</code> から外し、要求された gate を落とす</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1699,9 +1699,15 @@ gate を無条件に(<code>--forbid</code> の対象ではなく)失敗させま
 <code>result: "unknown_budget"</code> で失敗し、governance の <code>preservation</code> は <code>result</code> に
 <code>unknown_budget</code> を報告します。これは判定の変更です: 対応検査が上限に達する
 refinement は、以前は <code>refines</code>(exit 0)を報告していました。上記の自己一貫性の
-precondition には、この上限はありません。<code>fslc diff</code> と <code>fslc mutate</code> はまだこの
-打ち切りを読みません: <code>fslc diff</code> は <code>no_semantic_change</code>(exit 0)を報告し、
-<code>fslc mutate</code> はその mutant を survived と数えます。</p>
+precondition には、この上限はありません。<code>fslc diff</code> は、こうして打ち切られた方向を
+<code>states_explored</code> 付きの <code>result: "unknown_budget"</code> と報告し、<code>unknown_budget</code> の
+finding を足します。この finding は <code>--forbid</code> の指定に依らず gate を落とします
+(exit 1。<code>no_semantic_change</code> にはなりません)。<code>fslc diff --git</code> と
+<code>fslc approval diff</code> も同じです。<code>fslc mutate</code> はそうした mutant を
+<code>inconclusive.reason: "unknown_budget"</code> 付きの <code>status: "inconclusive"</code> と報告します。
+<code>kill_rate</code> からは外し、<code>summary.inconclusive</code> に数え、<code>--fail-on-survivors</code> /
+<code>--min-kill-rate</code> の gate を要求していればそれを落とします。どちらも以前は打ち切りを
+合格として報告していました(<code>no_semantic_change</code>/exit 0、および <code>survived</code>)。</p>
 <p><code>init</code> がどの経路でも一度も代入しない状態変数(例えば、代入されていない <code>Bool</code>
 を読む <code>init if</code>)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
 本当に自由な初期値です — <code>refine</code> は impl 側でも abs 側でもこの通りに検査します。
