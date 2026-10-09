@@ -1043,17 +1043,16 @@ fn statement_partial(
             else_statements,
             span,
         } => {
-            walk_partial(
-                &closed(condition),
-                env,
-                model,
-                path,
-                *span,
-                path_condition,
-                output,
-            )?;
-            for item in then_statements.iter().chain(else_statements) {
-                statement_partial(item, env, model, path, replacements, path_condition, output)?;
+            // The condition is evaluated on every path; each branch body only
+            // on the paths that take it, so its failures are guarded by the
+            // condition, negated for `else`, as an expression `if` is (#1260).
+            let condition = closed(condition);
+            walk_partial(&condition, env, model, path, *span, path_condition, output)?;
+            for (statements, negated) in [(then_statements, false), (else_statements, true)] {
+                let branch = extend_path_condition(path_condition, &condition, negated);
+                for item in statements {
+                    statement_partial(item, env, model, path, replacements, Some(&branch), output)?;
+                }
             }
         }
         Statement::ForAll {
@@ -1799,6 +1798,90 @@ mod tests {
         assert_eq!(
             partial["failure_condition"]["left"]["operand"]["name"],
             "gate"
+        );
+    }
+
+    /// A failure condition rendered as text: variables, literals, `not`, and
+    /// binary operators, each binary fully parenthesized.
+    fn render(expr: &Value) -> String {
+        match expr["kind"].as_str() {
+            Some("var") => expr["name"].as_str().expect("var name").to_owned(),
+            Some("num" | "bool") => expr["value"].to_string(),
+            Some("not") => format!("not {}", render(&expr["operand"])),
+            Some("binary") => format!(
+                "({} {} {})",
+                render(&expr["left"]),
+                expr["operator"].as_str().expect("binary operator"),
+                render(&expr["right"])
+            ),
+            other => panic!("unexpected expression kind {other:?}: {expr}"),
+        }
+    }
+
+    /// Every rendered failure condition of the only action of `spec S`, whose
+    /// state is `gate: Bool, x: N, y: N, m: Map<K, N>` with `body` as the
+    /// action body.
+    fn statement_failures(body: &str) -> Vec<String> {
+        let source = format!(
+            "spec S {{ type N = 0..3 type K = 0..1 \
+             state {{ gate: Bool, x: N, y: N, m: Map<K, N> }} \
+             init {{ gate = false x = 0 y = 0 forall k: K {{ m[k] = 0 }} }} \
+             action a() {{ {body} }} invariant I {{ true }} }}"
+        );
+        let kernel = parse_direct_kernel_spec(&source).expect("parse");
+        let model = build_model(kernel.clone()).expect("model");
+        let contract =
+            public_kernel_contract(&kernel, &model, "s.fsl", "kernel").expect("contract");
+        contract["actions"][0]["partial_operations"]
+            .as_array()
+            .expect("partial_operations")
+            .iter()
+            .map(|entry| {
+                assert_eq!(entry["operation"], "divide", "{entry}");
+                render(&entry["failure_condition"])
+            })
+            .collect()
+    }
+
+    /// Issue #1260: a partial operation in a statement-level `if` body is
+    /// guarded by the `if` condition (negated on the `else` side), as one in
+    /// an expression-level `if` already was. It was an unconditional `x == 0`.
+    #[test]
+    fn statement_if_partial_operation_is_guarded_by_its_branch() {
+        assert_eq!(
+            statement_failures("if gate { y = 2 / x }"),
+            ["(gate and (x == 0))"]
+        );
+        assert_eq!(
+            statement_failures("if gate { y = 1 } else { y = 2 / x }"),
+            ["(not gate and (x == 0))"]
+        );
+        // The condition itself is evaluated unconditionally.
+        assert_eq!(statement_failures("if 2 / x == 1 { y = 1 }"), ["(x == 0)"]);
+    }
+
+    /// Issue #1260: nested statement-level `if`s and `forall`s stack their
+    /// conditions; a `forall` binder in an `if` condition is replaced by the
+    /// candidate, so every condition stays closed.
+    #[test]
+    fn nested_statement_if_conditions_accumulate() {
+        assert_eq!(
+            statement_failures("if gate { if x < 2 { y = 1 } else { y = 2 / x } }"),
+            ["((gate and not (x < 2)) and (x == 0))"]
+        );
+        assert_eq!(
+            statement_failures("if gate { forall k: K { m[k] = 2 / x } }"),
+            [
+                "((gate and true) and (x == 0))",
+                "((gate and true) and (x == 0))"
+            ]
+        );
+        assert_eq!(
+            statement_failures("forall k: K { if k > 0 { m[k] = 2 / x } }"),
+            [
+                "((true and (0 > 0)) and (x == 0))",
+                "((true and (1 > 0)) and (x == 0))"
+            ]
         );
     }
 }
