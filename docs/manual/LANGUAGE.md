@@ -1747,7 +1747,12 @@ rather than merged — merging would let an impl-only member get silently
 reinterpreted as whichever abs member sits at the same ordinal index. Domain
 types (`type X = lo..hi`) may safely share a name with different bounds; an
 out-of-range value there is still caught as `map_out_of_bounds`/
-`abs_state_mismatch`.
+`abs_state_mismatch`. That includes an action-correspondence argument outside
+the abstract action's parameter domain (a wider impl parameter type; a false
+abstract guard is still reported first as `abs_requires_failed`) and a
+state-mapping expression that reads an impl `Map` at a key outside its domain
+(for example a narrower impl key type): both are `map_out_of_bounds` (exit 1),
+not a `kind: "type"` error.
 
 ### Chain checking (composition of mappings)
 

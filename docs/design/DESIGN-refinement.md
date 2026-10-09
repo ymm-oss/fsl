@@ -636,6 +636,33 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 6. **static checks**: missing map / unknown action / missing correspondence →
    kind: type, exit 2.
 7. **bounds**: the mapping value is out of the abs type range → map_out_of_bounds.
+   The same kind covers two domain escapes that used to stop the check with a
+   runtime error (`kind: type`, exit 2) instead of a verdict. Both are range
+   escapes of the mapping, reported `refinement_failed` / `map_out_of_bounds`
+   (exit 1) at the step (or `init`) where they occur; reusing the existing kind
+   keeps the documented promise that a shrunken impl against a full-size
+   abstract fails `map_out_of_bounds`.
+   - An action-correspondence argument outside the abstract action's declared
+     parameter domain (an impl parameter type wider than the abstraction's).
+     §2.4's order is kept: the abstract guard is evaluated first with that
+     argument, so a guard it fails is still `abs_requires_failed`; the range
+     escape is reported only when the guard holds (or its evaluation fails on
+     the argument), instead of stepping the abstraction with an ill-typed
+     argument.
+   - A state-mapping expression that reads any impl `Map` at a key outside its
+     finite key domain (for example an indexed map over an impl key type
+     narrower than the abstraction's, or `map x = m[idx]` once `idx` leaves
+     `m`'s key domain). The evaluator marks that error
+     (`RuntimeError::map_key_outside_domain`); at `init` it is reported before
+     init correspondence, and at a step after the checks that do not need the
+     mapped state (a stutter mapping has nothing to compare, so it reports the
+     escape; an action mapping first evaluates the abstract guard, so a failed
+     guard stays `abs_requires_failed`).
+   Not covered yet (follow-ups; they still stop with an error): a `Seq` index
+   out of range inside a state-mapping expression, a `Map` read at an
+   out-of-domain key inside an action-correspondence argument expression, and
+   an abstract guard whose evaluation fails at the mapped state for reasons
+   other than an out-of-domain argument.
 8. **conflicting same-named type**: impl and abs both declare a type with the
    same name but a different shape (an enum with different members, or a
    struct with different fields) → kind: type, exit 2. Type metadata is
