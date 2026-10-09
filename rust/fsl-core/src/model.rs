@@ -342,7 +342,7 @@ impl KernelModel {
     /// `name` is either the action itself or a name the Monitor or the
     /// verifier built while `action` stepped: a kind prefix followed by the
     /// internal action name (`_requires_failed_<action>`,
-    /// `_partial_op_<action>`, `_partial_<action>`). The prefix is kept and the
+    /// `_partial_<action>`). The prefix is kept and the
     /// action suffix is respelled from the structural table, so no list of
     /// prefixes has to track the builders.
     #[must_use]
