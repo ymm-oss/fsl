@@ -166,7 +166,13 @@ the error string itself or `refinement` as the killer for built-ins and
 `killed_by:null`, and `error:{stage,message}`; it is never killed, never
 `invalid`, excluded from both sides of `kill_rate`, counted in
 `summary.errored` (and per source; the key appears only when non-zero, see
-§5), and fails any requested gate. The rule is
+§5), and fails any requested gate. **Known residual:** a BMC error the verifier
+does not mark as a solver failure stays the `build_spec` kill. That includes
+"unsupported expression" and "ill-typed value" errors, which are arguably
+limits of the verifier rather than findings about the mutant, and the `Seq`
+length projection errors ("model sequence length is negative / exceeds
+capacity"), which are likely the same type-bound projection gap #1283 closed
+for enum ordinals; both are left for follow-ups. The rule is
 the same for both sources: a failure before the mutant builds is `invalid`, a
 failure after it builds is `error`. The init-assignment `_bounds_<state>`
 re-attribution applies only to judged (clean/killed) outcomes, so it cannot
@@ -188,7 +194,9 @@ oracle that returns an error rather than a verdict is `error` (above), not
 different action (fix the tool or input vs. accept or raise the budget).
 
 **Status precedence (#1251, #1262).** One function (`mutant_status` in
-`rust/fslc/src/main.rs`) decides every mutant's `status`, for both sources:
+`rust/fslc/src/main.rs`) decides the `status` of every mutant that reached an
+oracle, for both sources (external records rejected before any oracle are
+published as `invalid` earlier):
 `invalid` is exclusive (the mutant never reached the oracle); otherwise
 `killed` > `error` > `inconclusive` > `survived`. A decided kill beats both
 undecided states: the oracles run in order and stop at the first kill, so a

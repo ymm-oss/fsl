@@ -11379,9 +11379,12 @@ fn apply_implements_mutation_oracle(
     Ok(ImplementsOracle::Decided)
 }
 
-/// The one place a mutant's published `status` is decided, for built-in and
-/// external mutants alike, together with the detail object to publish under
-/// the returned key (`error`, `invalid`, or `inconclusive`).
+/// The one place the published `status` of a mutant that reached an oracle is
+/// decided, for built-in and external mutants alike, together with the detail
+/// object to publish under the returned key (`error`, `invalid`, or
+/// `inconclusive`). External records rejected before any oracle (malformed
+/// JSON, a missing target, a mutated source that does not build) are published
+/// as `invalid` before this point.
 ///
 /// Precedence for one mutant (#1251, #1262):
 /// `invalid` (never reached the oracle) — exclusive; otherwise
@@ -19999,6 +20002,38 @@ mod mutate_oracle_error_tests {
         );
         assert_eq!(output["gate"]["passed"], false);
         assert_eq!(status, 1);
+    }
+
+    /// An external mutant whose BMC rejects it with a semantic error (a finding
+    /// about the mutant, e.g. an undefined action body) is the `build_spec`
+    /// kill, exactly like a built-in one. Before #1251 the external path
+    /// turned every `build_spec` into `invalid`.
+    #[test]
+    fn external_semantic_bmc_error_is_a_build_spec_kill() {
+        let spec = workspace_path("specs/cart_v1.fsl");
+        let from = workspace_path("rust/fslc/tests/fixtures/issue_1237_killed.jsonl");
+        let mut semantic = |_: &KernelModel, _: usize| Err(BmcFailure::Semantic);
+        let (output, _) = run_mutate_with(
+            &spec,
+            options(Some(&from), 0, MutationGate::default()),
+            &mut semantic,
+        );
+        let externals = output["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .filter(|mutant| mutant["source"] == "external")
+            .collect::<Vec<_>>();
+        assert!(!externals.is_empty(), "{output}");
+        assert!(
+            externals
+                .iter()
+                .any(|mutant| mutant["status"] == "killed" && mutant["killed_by"] == "build_spec"),
+            "{output}"
+        );
+        for mutant in &externals {
+            assert_eq!(mutant["status"], "killed", "{mutant}");
+        }
     }
 
     /// An external mutant whose oracle fails is `error`, not `invalid`; and a

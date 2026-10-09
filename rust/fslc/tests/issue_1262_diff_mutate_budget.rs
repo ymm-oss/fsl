@@ -399,26 +399,9 @@ fn mutate_reports_a_budget_cutoff_as_inconclusive_and_fails_a_requested_gate() {
     let count = |key: &str| summary[key].as_u64().unwrap_or(0);
     assert_eq!(
         count("total"),
-        count("killed")
-            + count("survived")
-            + count("invalid")
-            + count("errored")
-            + count("inconclusive"),
+        count("killed") + count("survived") + count("invalid") + count("inconclusive"),
         "{summary}"
     );
-    // #1251: widening `V` below 0 makes the implements oracle return an
-    // error (the mutated parameter domain is outside the abstraction's)
-    // instead of a refinement verdict. That error used to be counted as a
-    // `refinement` kill; it is an undecided `error` now, kept apart from the
-    // budget cutoff and also failing the gate.
-    let errors = mutants
-        .iter()
-        .filter(|mutant| mutant["status"] == "error")
-        .collect::<Vec<_>>();
-    assert_eq!(errors.len(), 1, "{output}");
-    assert_eq!(errors[0]["op"], "type_bound_lo_minus1", "{output}");
-    assert_eq!(errors[0]["error"]["stage"], "implements", "{output}");
-    assert_eq!(count("errored"), 1, "{summary}");
     assert!(count("killed") > 0, "{summary}");
     #[allow(clippy::cast_precision_loss)]
     let expected_rate = count("killed") as f64 / (count("killed") + count("survived")) as f64;
@@ -428,10 +411,9 @@ fn mutate_reports_a_budget_cutoff_as_inconclusive_and_fails_a_requested_gate() {
 
     let gate = &output["gate"];
     assert_eq!(gate["inconclusive"], 2, "{gate}");
-    assert_eq!(gate["errored"], 1, "{gate}");
     assert_eq!(
         gate["violations"],
-        serde_json::json!(["oracle_errors", "inconclusive"]),
+        serde_json::json!(["inconclusive"]),
         "{gate}"
     );
     assert_eq!(gate["passed"], false, "{gate}");

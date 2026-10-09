@@ -1015,12 +1015,16 @@ pub(crate) fn project_value<S: SmtSolver>(
         )),
         SymbolicValue::Seq { slots, len, .. } => {
             let len = project_int(solver, len)?;
+            // Not a solver failure: an unconstrained `Seq` length (for example
+            // its init assignment removed) can legitimately be negative or past
+            // the capacity in a type-bound counterexample, the same shape as
+            // the enum ordinal case (#1283). Until that projection keeps the raw
+            // length (a follow-up), it stays a semantic error, so `fslc mutate`
+            // counts it as the `build_spec` kill rather than an oracle error.
             let len = usize::try_from(len)
-                .map_err(|_| VerifyError::solver("model sequence length is negative"))?;
+                .map_err(|_| VerifyError::new("model sequence length is negative"))?;
             if len > slots.len() {
-                return Err(VerifyError::solver(
-                    "model sequence length exceeds capacity",
-                ));
+                return Err(VerifyError::new("model sequence length exceeds capacity"));
             }
             Ok(FslValue::Seq(
                 slots[..len]

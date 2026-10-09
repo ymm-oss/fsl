@@ -20,10 +20,10 @@ the exit code is unchanged. A BMC rejection that is a finding about the mutant
 `invalid` with `invalid:{kind:"semantics",message}`, as an external one
 already was, instead of a `build_spec` kill. `error` stays distinct from #1262's budget `inconclusive`; for one mutant
 `killed` > `error` > `inconclusive` > `survived`, decided in one place for
-built-in and external mutants. An implements oracle error (for example a
-widened parameter domain the abstraction rejects, such as `type_bound_lo_minus1`
-in #1262's fixture) is now `error` instead of a `refinement` kill. The
-`_bounds_<state>` attribution
+built-in and external mutants. An implements oracle error is now `error`
+instead of a `refinement` kill (an impl parameter or key domain that differs
+from the abstraction's is a refinement verdict, `map_out_of_bounds`, not an
+error; see the separate fix). The `_bounds_<state>` attribution
 for a removed init assignment no longer overwrites an oracle error; this
 refines #1283's rule, which kept any `build_spec`/`internal` killer: a
 semantic `build_spec` kill is a judged outcome and is re-attributed to
