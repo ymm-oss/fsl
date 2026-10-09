@@ -23,7 +23,7 @@ already was, instead of a `build_spec` kill. `error` stays distinct from #1262's
 built-in and external mutants. An implements oracle error is now `error`
 instead of a `refinement` kill (an impl parameter or key domain that differs
 from the abstraction's is a refinement verdict, `map_out_of_bounds`, not an
-error; see the separate fix). The `_bounds_<state>` attribution
+error; see #1295). The `_bounds_<state>` attribution
 for a removed init assignment no longer overwrites an oracle error; this
 refines #1283's rule, which kept any `build_spec`/`internal` killer: a
 semantic `build_spec` kill is a judged outcome and is re-attributed to
