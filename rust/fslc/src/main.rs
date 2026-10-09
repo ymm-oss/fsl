@@ -11493,6 +11493,26 @@ fn removed_init_assignment_root(
     })
 }
 
+/// Removing the init assignment of a state whose type has symbolic bounds
+/// leaves that state unconstrained, so `_bounds_<root>` is reported as the
+/// killer even when the oracle itself picked a different property or none.
+/// An oracle that failed (`build_spec` / `internal`) did not judge the mutant
+/// at all; overwriting it would turn that failure into a type-bound kill and
+/// hide it from the output, so the failure is kept as-is (#1283).
+fn apply_init_bounds_override(outcome: MutationOracle, root: &str) -> MutationOracle {
+    if matches!(
+        outcome.killed_by.as_deref(),
+        Some("build_spec" | "internal")
+    ) {
+        return outcome;
+    }
+    MutationOracle {
+        clean: false,
+        killed_by: Some(format!("_bounds_{root}")),
+        killer_requirements: Vec::new(),
+    }
+}
+
 fn type_has_symbolic_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Int | TypeRef::Bool => false,
@@ -11930,7 +11950,6 @@ impl MutationGate {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_mutate(
     path: &Path,
     depth: usize,
@@ -11940,6 +11959,51 @@ fn run_mutate(
     external_mutants: Option<&Path>,
     gate: MutationGate,
 ) -> (Value, i32) {
+    run_mutate_with(
+        path,
+        MutateOptions {
+            depth,
+            max_mutants,
+            by_requirement,
+            oracle_attribution,
+            external_mutants,
+            gate,
+        },
+        &mut mutation_oracle,
+    )
+}
+
+/// `fslc mutate`'s options, bundled so [`run_mutate_with`] can also take the
+/// injectable built-in mutation oracle.
+#[derive(Clone, Copy)]
+struct MutateOptions<'a> {
+    depth: usize,
+    max_mutants: usize,
+    by_requirement: bool,
+    oracle_attribution: bool,
+    external_mutants: Option<&'a Path>,
+    gate: MutationGate,
+}
+
+/// The oracle `run_mutate_with` runs on each built-in mutant. Production uses
+/// [`mutation_oracle`]; tests inject oracle failures through it.
+type BuiltinMutationOracle<'a> =
+    dyn FnMut(fsl_syntax::SurfaceSpec, usize, &KernelModel) -> MutationOracle + 'a;
+
+#[allow(clippy::too_many_lines)]
+fn run_mutate_with(
+    path: &Path,
+    options: MutateOptions<'_>,
+    builtin_oracle: &mut BuiltinMutationOracle<'_>,
+) -> (Value, i32) {
+    let MutateOptions {
+        depth,
+        max_mutants,
+        by_requirement,
+        oracle_attribution,
+        external_mutants,
+        gate,
+    } = options;
     // Capture one root-spec snapshot up front (#808): the baseline verify, the
     // Kernel/model load, the requirements-trace contract, and the surface
     // parse all derive from this same `source` instead of independently
@@ -12053,7 +12117,7 @@ fn run_mutate(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     for mutant in all_mutants.into_iter().take(max_mutants) {
         let mutated_spec = mutant.spec.clone();
-        let mut outcome = mutation_oracle(mutant.spec, depth, &model);
+        let mut outcome = builtin_oracle(mutant.spec, depth, &model);
         let mut inconclusive = None;
         if outcome.clean
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
@@ -12101,11 +12165,7 @@ fn run_mutate(
             && let Some((_, ty)) = model.state.iter().find(|(name, _)| name == &root)
             && type_has_symbolic_bounds(&model, ty)
         {
-            outcome = MutationOracle {
-                clean: false,
-                killed_by: Some(format!("_bounds_{root}")),
-                killer_requirements: Vec::new(),
-            };
+            outcome = apply_init_bounds_override(outcome, &root);
         }
         let (status, inconclusive) = builtin_mutant_status(&outcome, inconclusive);
         let target = mutant
@@ -19690,5 +19750,72 @@ mod mutant_status_tests {
             builtin_mutant_status(&outcome(true, None), None),
             ("survived", None)
         );
+    }
+}
+
+#[cfg(test)]
+mod mutate_init_bounds_override_tests {
+    use super::*;
+
+    fn outcome(clean: bool, killed_by: Option<&str>) -> MutationOracle {
+        MutationOracle {
+            clean,
+            killed_by: killed_by.map(str::to_owned),
+            killer_requirements: Vec::new(),
+        }
+    }
+
+    /// Issue #1283: the init-assignment special case must not overwrite an
+    /// oracle failure with `_bounds_<root>`. Applying the overwrite before
+    /// looking at the oracle result turns `build_spec` / `internal` into a
+    /// type-bound kill and the failure disappears from the output.
+    #[test]
+    fn init_bounds_override_keeps_oracle_failures() {
+        for failure in ["build_spec", "internal"] {
+            let kept = apply_init_bounds_override(outcome(false, Some(failure)), "st");
+            assert!(!kept.clean);
+            assert_eq!(kept.killed_by.as_deref(), Some(failure));
+        }
+    }
+
+    /// The wiring in `run_mutate`: with the built-in oracle failing on every
+    /// mutant, the removed `st` init assignment (fixture line 13, an enum
+    /// state, so the `_bounds_st` special case applies) must keep the
+    /// failure. Reverting the call site to the unconditional overwrite turns
+    /// it into a `_bounds_st` kill and fails here.
+    #[test]
+    fn run_mutate_keeps_oracle_failure_for_init_bounds_mutant() {
+        let spec = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/issue_1283_pointer_registry.fsl");
+        let options = MutateOptions {
+            depth: 2,
+            max_mutants: 5,
+            by_requirement: false,
+            oracle_attribution: false,
+            external_mutants: None,
+            gate: MutationGate::default(),
+        };
+        let mut failing = |_: fsl_syntax::SurfaceSpec, _: usize, _: &KernelModel| {
+            outcome(false, Some("build_spec"))
+        };
+        let (output, _) = run_mutate_with(&spec, options, &mut failing);
+        let mutant = output["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .find(|mutant| mutant["op"] == "assignment_remove" && mutant["loc"]["line"] == 13)
+            .unwrap_or_else(|| panic!("st init removal mutant: {output}"));
+        assert_eq!(mutant["killed_by"], "build_spec", "{mutant}");
+    }
+
+    /// The special case itself still applies to judged outcomes: a survivor
+    /// and a kill by another property both become `_bounds_<root>`.
+    #[test]
+    fn init_bounds_override_still_attributes_judged_outcomes() {
+        for judged in [outcome(true, None), outcome(false, Some("NoSelfLink"))] {
+            let overridden = apply_init_bounds_override(judged, "st");
+            assert!(!overridden.clean);
+            assert_eq!(overridden.killed_by.as_deref(), Some("_bounds_st"));
+        }
     }
 }
