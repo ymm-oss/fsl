@@ -17,7 +17,11 @@ the exit code is unchanged. A BMC rejection that is a finding about the mutant
 `build_spec` kill. A built-in mutant that does not lower/build is now
 `invalid` with `invalid:{kind:"semantics",message}`, as an external one
 already was, instead of a `build_spec` kill. The `_bounds_<state>` attribution
-for a removed init assignment no longer overwrites an oracle error. The
+for a removed init assignment no longer overwrites an oracle error; this
+refines #1283's rule, which kept any `build_spec`/`internal` killer: a
+semantic `build_spec` kill is a judged outcome and is re-attributed to
+`_bounds_<state>` like any other kill, while an oracle error (including the
+former `internal`) keeps `status:"error"`. The
 verifier marks solver failures with `VerifyError::is_solver_failure`.
 Migration: read `summary.errored` / `status:"error"` alongside
 `killed`/`survived`/`invalid` (`total` = `killed + survived + invalid +

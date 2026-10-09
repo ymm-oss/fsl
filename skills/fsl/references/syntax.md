@@ -867,6 +867,12 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
    so `a / 0` inside an invariant/trans/reachable/leadsTo/mapping expression always
    evaluates to `0` rather than being undefined — only the unguarded-in-action-context
    check is skipped there.
+   `init` uses the action-context rules: a reached `/`/`%` by zero, `Seq` partial
+   operation, `Map` key outside its domain, or i64 overflow in init is a semantics
+   error (exit 2) under every engine, e.g. `division by zero in init at 9:5` from
+   `bmc`/`induction` — not a `partial_op` violation. Guard it with an init `if`.
+   Exception: if init also assigns a value outside a state's type, `bmc`/`induction`
+   report the step-0 `type_bound` violation (exit 1) instead.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
    counterexamples. Fairness applies to whole action instances; model conditional

@@ -19888,3 +19888,45 @@ mod mutate_oracle_error_tests {
         assert_eq!(status, 1);
     }
 }
+
+#[cfg(test)]
+mod mutate_init_bounds_override_tests {
+    //! #1283 / #1251: the unit behavior of `apply_init_bounds_override` is
+    //! pinned in `mutate_oracle_error_tests`; this pins its wiring in
+    //! `run_mutate`.
+    use super::*;
+
+    /// With every mutation BMC call answering `unknown`, the removed `st`
+    /// init assignment (fixture line 13, an enum state, so the `_bounds_st`
+    /// special case applies) must stay an oracle error. Reverting the call
+    /// site to the unconditional overwrite turns it into a `_bounds_st` kill
+    /// and fails here.
+    #[test]
+    fn run_mutate_keeps_oracle_error_for_init_bounds_mutant() {
+        let spec = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/issue_1283_pointer_registry.fsl");
+        let options = MutateOptions {
+            depth: 2,
+            max_mutants: 5,
+            by_requirement: false,
+            oracle_attribution: false,
+            external_mutants: None,
+            gate: MutationGate::default(),
+        };
+        let mut unknown = |_: &KernelModel, _: usize| {
+            Err(classify_bmc_error(&fsl_verifier::VerifyError::solver(
+                "solver returned unknown",
+            )))
+        };
+        let (output, _) = run_mutate_with(&spec, options, &mut unknown);
+        let mutant = output["mutants"]
+            .as_array()
+            .expect("mutants")
+            .iter()
+            .find(|mutant| mutant["op"] == "assignment_remove" && mutant["loc"]["line"] == 13)
+            .unwrap_or_else(|| panic!("st init removal mutant: {output}"));
+        assert_eq!(mutant["status"], "error", "{mutant}");
+        assert_eq!(mutant["killed_by"], Value::Null, "{mutant}");
+        assert_eq!(mutant["error"]["stage"], "bmc", "{mutant}");
+    }
+}

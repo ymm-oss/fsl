@@ -863,6 +863,16 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 </tbody>
 </table>
 <ul>
+<li><code>init</code> は action 文脈の規則で評価されます。init の評価が到達する <code>/</code>/<code>%</code> の
+  ゼロ除算、<code>Seq</code> の部分演算、有限キー域の外にある <code>Map</code> のキー(読み出しと代入
+  先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
+  (exit 2)です(init の <code>if</code>・条件式・<code>and</code>/<code>or</code>/<code>=&gt;</code> の到達しない側の演算は
+  到達しません)。初期状態より前のステップが無いため、<code>partial_op</code> 違反には
+  なりません。<code>bmc</code> と <code>induction</code>(base case が <code>bmc</code>)は、init が非決定的な
+  場合も含め、失敗と init の文を名指しします(例: <code>division by zero in init at
+  9:5</code>)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
+  とき、<code>bmc</code> と <code>induction</code> は step 0 の型境界を仮定して init を問うため、
+  その step 0 の <code>type_bound</code> 違反(exit 1)を報告します。</li>
 <li>デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   <code>deadlock reachable at step 1 (state: status=ToolFault, ...)</code>)。完全なトレースは
   JSON の <code>deadlock.trace</code> にもあります。</li>

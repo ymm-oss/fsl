@@ -7,13 +7,14 @@ use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
 use crate::eval::{eval, evaluation_status, property_evaluation_status};
+use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guard_definedness, action_guards,
     action_has_partial_operation_candidate, action_instances, action_statements_evaluation_status,
-    init_constraints, transition_constraint,
+    init_constraints, init_evaluation_status, transition_constraint,
 };
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
@@ -209,7 +210,11 @@ async fn terms_are_unsat<S: SmtSolver>(
 /// # Errors
 ///
 /// Returns [`VerifyError`] for unsupported symbolic expressions, ill-typed
-/// kernel values, inconsistent init, or an unknown/backend solver result.
+/// kernel values, inconsistent init, an unknown/backend solver result, or a
+/// solver model that cannot be projected back to kernel values. An enum
+/// ordinal outside the declared members (negative or past the last member)
+/// is not a projection failure: it is kept as a raw integer witness for the
+/// `_bounds_<state>` violation (#1283).
 pub async fn verify_bounded<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
@@ -311,6 +316,23 @@ impl SearchProgress {
     }
 }
 
+/// What the definedness pass found undefined.
+#[derive(Debug)]
+enum Undefined {
+    /// An init failure site some initial state reaches (#1258), as the
+    /// located error the concrete engines report for it.
+    Init(VerifyError),
+    /// A `partial_op` at this step (#1240), which the caller leaves to the
+    /// search's own report.
+    Action(usize),
+}
+
+/// The bounded search, then the definedness pass on the reset solver: init
+/// definedness (#1258), then every action instance's (#1240).
+///
+/// An undefined init supersedes whatever the search returned, a verdict or an
+/// error: no state the search reasoned about is one a concrete engine can
+/// reach. A snapshot start has no init.
 async fn verify_bounded_session<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
@@ -340,41 +362,45 @@ async fn verify_bounded_session<S: SmtSolver>(
     // asserted the transitions of later steps, each of which requires a
     // successor state, so without it every path that dead-ends after step `s`
     // would be missing from the step-`s` questions and an undefined action on
-    // such a path would go unreported (see `check_action_definedness`).
+    // such a path would go unreported (see `check_definedness`).
     // The search itself still asks the typed partial-operation probes it
     // always asked, so its verdicts and evidence are the ones it produced
     // before the definedness pass existed.
+    // #1258: init definedness is asked first in the same pass, on the same
+    // step-0 state, and supersedes the search's outcome.
     let limit = progress.definedness_limit(depth);
-    if let Some(step) =
-        check_action_definedness(model, solver, checked_bounds, initial_state, limit).await?
-    {
+    match check_definedness(model, solver, checked_bounds, initial_state, limit).await? {
+        Some(Undefined::Init(error)) => return Err(error),
         // A `partial_op` the definedness pass reports is one the search's own
         // typed probes report at the same step and stop on: both ask the same
         // questions of the same unrolling, in the same instance order.
-        if progress
-            != (SearchProgress {
-                step,
-                actions_checked: true,
-            })
+        Some(Undefined::Action(step))
+            if progress
+                != (SearchProgress {
+                    step,
+                    actions_checked: true,
+                }) =>
         {
             return Err(VerifyError::new(format!(
                 "action definedness pass disagrees with the bounded search at step {step}"
             )));
         }
+        Some(Undefined::Action(_)) | None => {}
     }
     searched
 }
 
-/// The action definedness pass (#1240): a fresh unrolling of the same
-/// initial states and transitions on the reset solver, asking
+/// The definedness pass: a fresh unrolling of the same initial states and
+/// transitions on the reset solver. It first asks init definedness on the
+/// step-0 state (#1258; [`init_definedness_failure`]), then
 /// [`check_action_partial_operations`] at each step below `limit` in
-/// declaration order. A non-partial failure is returned as the error the
-/// search would have reported at that point; `Some(step)` is a `partial_op`
-/// at `step`, which the caller leaves to the search's own report.
+/// declaration order (#1240). A non-partial failure is returned as the error
+/// the search would have reported at that point.
 ///
 /// The type bounds asserted here are the ones the search proved at the same
 /// steps (`check_state_properties` asserts each after proving it), so they
-/// are entailed and cannot change any answer.
+/// are entailed and cannot change any answer. The init question sees only
+/// the init constraints and the step-0 bounds.
 ///
 /// The reset carries soundness, not only native/Worker parity. The search
 /// leaves the transitions of every step it unrolled asserted, and a
@@ -384,19 +410,30 @@ async fn verify_bounded_session<S: SmtSolver>(
 /// `terminal` state), and an action undefined on such a path would be
 /// reported `verified`. Asked here, step `s` sees only the initial states,
 /// the transitions of steps `0..s`, and the bounds of `0..=s`.
-async fn check_action_definedness<S: SmtSolver>(
+///
+/// An init with no operation that can fail ([`init_may_fail`]) and a snapshot
+/// start ask no init question and build no init term: Z3's term table is
+/// shared with the later sessions on the thread, and terms the search did not
+/// build move their answers (for example induction's CTIs). With neither an
+/// init question nor an action step to ask, the solver is not even reset.
+async fn check_definedness<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
     checked_bounds: Option<&BTreeSet<String>>,
     initial_state: Option<&BTreeMap<String, FslValue>>,
     limit: usize,
-) -> Result<Option<usize>, VerifyError> {
-    if limit == 0 {
+) -> Result<Option<Undefined>, VerifyError> {
+    let ask_init = initial_state.is_none() && init_may_fail(model);
+    if limit == 0 && !ask_init {
         return Ok(None);
     }
     solver.reset()?;
-    let instances = action_instances(solver, model)?;
-    if instances.is_empty() {
+    let instances = if limit == 0 {
+        Vec::new()
+    } else {
+        action_instances(solver, model)?
+    };
+    if instances.is_empty() && !ask_init {
         return Ok(None);
     }
     let initial = symbolic_state(solver, model, 0)?;
@@ -407,23 +444,19 @@ async fn check_action_definedness<S: SmtSolver>(
             solver.assert(&constraint)?;
         }
     }
+    assert_state_bounds(solver, model, checked_bounds, &initial)?;
+    if ask_init && let Some(error) = init_definedness_failure(solver, model, &initial).await? {
+        return Ok(Some(Undefined::Init(error)));
+    }
+    if instances.is_empty() {
+        return Ok(None);
+    }
     let mut states = vec![initial];
     let mut choices = Vec::new();
     let mut range_lemmas = Vec::new();
     for step in 0..limit {
-        for (name, _) in &model.state {
-            if checked_bounds.is_some_and(|selected| !selected.contains(&format!("_bounds_{name}")))
-            {
-                continue;
-            }
-            let valid = bounds(
-                solver,
-                model,
-                states[step]
-                    .get(name)
-                    .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?,
-            )?;
-            solver.assert(&valid)?;
+        if step > 0 {
+            assert_state_bounds(solver, model, checked_bounds, &states[step])?;
         }
         if check_action_partial_operations(
             solver,
@@ -437,13 +470,73 @@ async fn check_action_definedness<S: SmtSolver>(
         .await?
         .is_some()
         {
-            return Ok(Some(step));
+            return Ok(Some(Undefined::Action(step)));
         }
         if step + 1 < limit {
             unroll_step(solver, model, &instances, &mut states, &mut choices, step)?;
         }
     }
     Ok(None)
+}
+
+/// Assert the selected type bounds of `state`.
+fn assert_state_bounds<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    checked_bounds: Option<&BTreeSet<String>>,
+    state: &SymbolicState<S::Term>,
+) -> Result<(), VerifyError> {
+    for (name, _) in &model.state {
+        if checked_bounds.is_some_and(|selected| !selected.contains(&format!("_bounds_{name}"))) {
+            continue;
+        }
+        let valid = bounds(
+            solver,
+            model,
+            state
+                .get(name)
+                .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?,
+        )?;
+        solver.assert(&valid)?;
+    }
+    Ok(())
+}
+
+/// The init definedness question (#1258), on a solver that holds exactly the
+/// init constraints and the step-0 bounds of `initial`: `Some` is the first
+/// failure site, in init evaluation order, that some initial state reaches,
+/// as the error the concrete engines report for it, located at its init
+/// statement.
+async fn init_definedness_failure<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    initial: &SymbolicState<S::Term>,
+) -> Result<Option<VerifyError>, VerifyError> {
+    let sites = init_failure_sites(solver, model, initial)?;
+    first_init_failure(solver, model, initial, sites).await
+}
+
+/// Whether init is defined is decided by `init_evaluation_status` alone,
+/// asked whatever `sites` holds (the gate that keeps an init with nothing
+/// that can fail from building terms is `init_may_fail`). `sites` only name
+/// the failure; an undefined init that no site names is still an error.
+async fn first_init_failure<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    initial: &SymbolicState<S::Term>,
+    sites: Vec<InitFailureSite<S::Term>>,
+) -> Result<Option<VerifyError>, VerifyError> {
+    let undefined = solver.not(&init_evaluation_status(solver, model, initial)?.fully_defined)?;
+    solver.set_query_context("init", "definedness");
+    if !probe(solver, &undefined).await? {
+        return Ok(None);
+    }
+    for site in sites {
+        if probe(solver, &site.condition).await? {
+            return Ok(Some(VerifyError::new(site.message)));
+        }
+    }
+    Ok(Some(VerifyError::new("init evaluation is undefined")))
 }
 
 /// Pin `initial` to a complete concrete logical-state snapshot.
@@ -1944,5 +2037,70 @@ async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool
         SatResult::Sat => Ok(true),
         SatResult::Unsat => Ok(false),
         SatResult::Unknown => Err(VerifyError::solver("solver returned unknown")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    use fsl_core::{FsResolver, build_model, parse_kernel_source};
+
+    use super::*;
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(result) => result,
+            Poll::Pending => panic!("native solver unexpectedly yielded Pending"),
+        }
+    }
+
+    /// #1258 m1: the definedness verdict does not depend on the failure
+    /// sites. An undefined init that no site names (here, every site
+    /// dropped) is still an error, under the generic message.
+    #[test]
+    fn an_undefined_init_no_site_names_is_still_an_error() {
+        let source = "spec InitDiv {
+  type Small = 0..3
+  state {
+    d: Small,
+    x: Int
+  }
+  init {
+    d = 0
+    x = 6 / d
+  }
+  action tick() {
+    requires d < 3
+    d = d + 1
+  }
+  invariant Ok { x >= 0 }
+}
+";
+        let kernel = parse_kernel_source(source, &FsResolver::new(std::path::Path::new(".")))
+            .expect("parse");
+        let model = build_model(kernel).expect("build model");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+        let initial = symbolic_state(&solver, &model, 0).expect("initial state");
+        for constraint in init_constraints(&solver, &model, &initial).expect("init") {
+            solver.assert(&constraint).expect("assert init");
+        }
+        assert_state_bounds(&mut solver, &model, None, &initial).expect("bounds");
+
+        let sites = init_failure_sites(&solver, &model, &initial).expect("sites");
+        assert!(!sites.is_empty(), "the full site list names the division");
+        let error = block_on(first_init_failure(
+            &mut solver,
+            &model,
+            &initial,
+            Vec::new(),
+        ))
+        .expect("asked")
+        .expect("undefined");
+        assert_eq!(error.message, "init evaluation is undefined");
     }
 }
