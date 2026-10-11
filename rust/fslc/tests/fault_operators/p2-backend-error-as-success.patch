@@ -12,4 +12,4 @@ than allowing a clean result.
 +    match solver.check().await.unwrap_or(SatResult::Sat) {
          SatResult::Sat => {}
          SatResult::Unsat => return Err(VerifyError::new("init constraints are unsatisfiable")),
-         SatResult::Unknown => return Err(VerifyError::new("solver returned unknown for init")),
+         SatResult::Unknown => return Err(VerifyError::solver("solver returned unknown for init")),

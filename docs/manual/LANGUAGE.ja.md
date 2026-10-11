@@ -3046,7 +3046,12 @@ DESIGN-*.md があります)。
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
   combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
-  なく、外部ジェネレーターの品質を測ります)。
+  なく、外部ジェネレーターの品質を測ります)。構築できない組み込みミュータントも
+  同じく `invalid` です。オラクルが判定できなかったミュータント(Z3 を作れない、
+  solver の `unknown`/backend の失敗、acceptance/forbidden/implements オラクルの
+  エラー)は `status:"error"` と `error{stage, message}` になり、決して killed には
+  ならず、`kill_rate` から除外され、`summary.errored`(`summary.inconclusive` と同じく非 0 のときだけ出ます)に数えられ、要求された
+  gate を不合格にします(`oracle_errors`)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
   組み込みのカタログだけを上限にするので、`--max-mutants 0 --from ...` は外部のみ
   を実行します。
@@ -3061,9 +3066,11 @@ DESIGN-*.md があります)。
   カウントは観測された下界であり、完全性や正しさの尺度ではありません。
   `--fail-on-survivors` と `--min-kill-rate R`(opt-in、`R` は `[0, 1]`)は
   `gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
-  violations, passed}` を追加します。`result` は `mutated` のままで、
+  violations, passed}`(非 0 のときは `errored` / `inconclusive` も)を追加します。
+  1 つのミュータントの状態の優先順位は `killed` > `error` > `inconclusive` > `survived` です。`result` は `mutated` のままで、
   `gate.passed` が exit code を決めます(false なら 1)。判定済みミュータントが
-  0 件ならどちらのフラグでも不合格(`no_judged_mutants`)、`--min-kill-rate` は
+  0 件ならどちらのフラグでも不合格(`no_judged_mutants`)、オラクルのエラーが
+  1 件でもあればどちらのフラグでも不合格(`oracle_errors`)、`--min-kill-rate` は
   公開される 4 桁丸めの `summary.kill_rate` と `>=` で比べ、`--max-mutants` で
   落ちた組み込みミュータントは `gate.dropped` に記録するだけで不合格にしません。
   どちらのフラグも無ければ出力と exit code は変わりません。→

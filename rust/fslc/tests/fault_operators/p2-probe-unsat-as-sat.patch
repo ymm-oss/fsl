@@ -10,6 +10,6 @@ the real invariant witness, cutting model↔oracle identity.
          SatResult::Sat => Ok(true),
 -        SatResult::Unsat => Ok(false),
 +        SatResult::Unsat => Ok(true),
-         SatResult::Unknown => Err(VerifyError::new("solver returned unknown")),
+         SatResult::Unknown => Err(VerifyError::solver("solver returned unknown")),
      }
  }

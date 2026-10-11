@@ -73,7 +73,7 @@ fn project_action<S: SmtSolver>(
         Some(ModelValue::Bool(_)) => {
             return Err(VerifyError::new("Boolean action choice in model"));
         }
-        None => return Err(VerifyError::new("action choice is unavailable in model")),
+        None => return Err(VerifyError::solver("action choice is unavailable in model")),
     };
     let instance = instances
         .get(index)
