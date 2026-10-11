@@ -11,7 +11,7 @@
       "remove_from_cart": "remove_from_cart",
       "reserve": "stutter"
     },
-    "note": "abs ensures are not checked during refinement; verify/prove the abstract spec separately"
+    "note": "abs ensures are checked only on the abstract steps the impl's transitions correspond to within checked_to_depth; verify/prove the abstract spec separately"
   },
   "specs/seat_refines.fsl": {
     "fsl": "1.0",
@@ -37,7 +37,7 @@
       "submit_deposit": "deposit",
       "withdraw_cleared": "withdraw"
     },
-    "note": "abs ensures are not checked during refinement; verify/prove the abstract spec separately"
+    "note": "abs ensures are checked only on the abstract steps the impl's transitions correspond to within checked_to_depth; verify/prove the abstract spec separately"
   },
   "examples/gallery/errors/refinement_failed_map.fsl": {
     "fsl": "1.0",

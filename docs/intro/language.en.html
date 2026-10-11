@@ -723,7 +723,8 @@ variable capture instead of inventing internal binder names. See
   mapping expression, since it constructs an abstract action call: it gets the
   same <code>partial_op</code> treatment, surfaced as <code>kind: "map_partial_op"</code>. The
   corresponded abstract action's own body is action context too: a partial
-  operation it hits at the mapped state is <code>kind: "abs_partial_op"</code>.</li>
+  operation it hits at the mapped state is <code>kind: "abs_partial_op"</code>; one in
+  its post-state checks or <code>ensures</code> is <code>kind: "abs_step_violation"</code>.</li>
 <li>Comparison: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>Logical: <code>and or not =&gt;</code></li>
 <li>Conditional: <code>if condition then when_true else when_false</code>. The condition is
@@ -1731,7 +1732,7 @@ design_exists[convert(column_key, c)]</code> with <code>column_key Column -&gt; 
 </code></pre>
 <p>Success: <code>result: "refines"</code> (exit 0). Violation: <code>refinement_failed</code> (exit 1)
 with <code>kind</code> (<code>abs_requires_failed</code> / <code>abs_state_mismatch</code> / <code>stutter_changed_abs</code> /
-<code>map_out_of_bounds</code> / <code>map_partial_op</code> / <code>abs_partial_op</code>), <code>impl_trace</code>, and the post-mapping
+<code>map_out_of_bounds</code> / <code>map_partial_op</code> / <code>abs_partial_op</code> / <code>abs_step_violation</code>), <code>impl_trace</code>, and the post-mapping
 <code>abs_before</code> / <code>abs_after_*</code>. A static error (a missing map, an unknown action,
 etc.) is <code>kind: "type"</code> (exit 2). <code>map_partial_op</code> is an action-correspondence
 argument expression (<code>impl_action(a) -&gt; abs_action(a / c)</code>) dividing by an impl
@@ -1741,7 +1742,17 @@ not the "no check" property context a refinement <em>state</em> map gets.
 partial operation (a zero divisor, <code>pop</code>/<code>head</code>/<code>at</code> on a too-short <code>Seq</code>) at
 the mapped state of an impl step whose abstract guard holds: the abstraction
 has no defined successor there, so the step cannot correspond (there is no
-<code>abs_after_expected</code>). A false abstract guard is still <code>abs_requires_failed</code>.</p>
+<code>abs_after_expected</code>). A false abstract guard is still <code>abs_requires_failed</code>.
+<code>abs_step_violation</code> is the corresponded abstract step being rejected by the
+abstraction itself: its successor violates an abstract type bound, invariant or
+<code>trans</code>, its <code>ensures</code> is false, or one of those checks hits a partial
+operation. The step cannot correspond whatever the impl's mapped state is, so
+it fails even when the impl leaves the mapped state unchanged; <code>abs_violation</code>
+gives the abstract <code>kind</code> and <code>name</code>, <code>abs_after_attempted</code> the rejected
+successor, and there is no <code>abs_after_expected</code>. So abstract <code>ensures</code> and
+invariants are checked on every corresponded step within <code>--depth</code> — but only
+there: verify the abstract spec on its own as well (the <code>refines</code> note says
+so).</p>
 <p>Before any correspondence is checked, <code>refine</code> first verifies that the impl
 spec is internally consistent on its own — does not violate its own type
 bounds or invariants — within <code>--depth</code>. A refinement mapping cannot make a

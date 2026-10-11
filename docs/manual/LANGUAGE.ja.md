@@ -643,7 +643,8 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
   action 文脈であり、同じ `partial_op` 扱いを受けて `kind: "map_partial_op"` として
   報告されます。対応先の抽象 action の本体も action 文脈であり、マッピング後の
-  状態で本体が部分演算に当たると `kind: "abs_partial_op"` として報告されます。
+  状態で本体が部分演算に当たると `kind: "abs_partial_op"`、事後状態の検査や
+  `ensures` で部分演算に当たると `kind: "abs_step_violation"` として報告されます。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
@@ -1611,7 +1612,7 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 
 成功: `result: "refines"`(exit 0)。違反: `refinement_failed`(exit 1)で、
 `kind`(`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds` / `map_partial_op` / `abs_partial_op`)、`impl_trace`、マッピング後の
+`map_out_of_bounds` / `map_partial_op` / `abs_partial_op` / `abs_step_violation`)、`impl_trace`、マッピング後の
 `abs_before` / `abs_after_*` を伴います。静的なエラー(マップの欠落、未知の
 action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action 対応の
 引数式(`impl_action(a) -> abs_action(a / c)`)がゼロになりうる impl の state
@@ -1622,6 +1623,14 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 `pop`/`head`/`at`)に当たるケースです — 抽象側にそこからの後続状態が定義されない
 ので、そのステップは対応できません(`abs_after_expected` はありません)。抽象 guard
 が偽なら従来どおり `abs_requires_failed` です。
+`abs_step_violation` は、対応先の抽象ステップそのものを抽象側が拒否するケースです
+— 後続状態が抽象の型境界・不変条件・`trans` を破る、`ensures` が偽になる、または
+それらの検査が部分演算に当たる。impl のマッピング後の状態が何であってもそのステップ
+は対応できないので、impl がマッピング後の状態を変えなくても失敗します。
+`abs_violation` が抽象側の `kind` と `name` を、`abs_after_attempted` が拒否された
+後続状態を示し、`abs_after_expected` はありません。つまり抽象の `ensures` と不変条件は
+`--depth` 内で対応づけられたステップごとに検査されますが、検査されるのはそこだけ
+です — 抽象 spec 単体の検証も行ってください(`refines` の note もそう述べます)。
 
 `refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま

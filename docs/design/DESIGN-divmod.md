@@ -43,7 +43,9 @@ with `+ - * / %`.
    is no invariant to name (issue #512). A division inside the corresponded
    abstract action's own body that reaches a zero divisor at the mapped state
    is the same rule on the abstract side: `kind:"abs_partial_op"`
-   (`docs/design/DESIGN-refinement.md` §5 item 12, issue #1296).
+   (`docs/design/DESIGN-refinement.md` §5 item 12, issue #1296); one inside
+   that action's `ensures` or post-state checks is `kind:"abs_step_violation"`
+   with `abs_violation.kind:"partial_op"` (§5 item 13, issue #1302).
 4. **Negative numbers follow SMT-LIB (Euclidean)**: when `b != 0`,
    `a = b * (a / b) + (a % b)` and `0 <= a % b < |b|`.
    - Z3's Int div/mod use this definition (used as-is).

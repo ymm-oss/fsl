@@ -207,9 +207,16 @@ Two consequences fall out of reusing the same merge, not from new logic:
      evaluated values of e) is **enabled** in α(s) (its requires hold), b's
      body evaluates at α(s) **without a partial operation** (a zero divisor,
      `pop`/`head`/`at`/index on a too-short `Seq`; otherwise
-     `abs_partial_op`, issue #1296), and the result of applying b's update to
-     α(s) is **logically equal to α(s')**. The three are checked in that
-     order, so a false guard is still `abs_requires_failed`.
+     `abs_partial_op`, issue #1296), b's step is **accepted by the
+     abstraction** — the successor b's update produces satisfies the abs
+     type bounds, invariants and `trans`, and b's `ensures`, each evaluated
+     without a partial operation (otherwise `abs_step_violation`, issue
+     #1302) — and the result of applying b's update to α(s) is **logically
+     equal to α(s')**. The four are checked in that order, so a false guard
+     is still `abs_requires_failed`, a body partial operation is still
+     `abs_partial_op`, and a rejected abstract step is reported as
+     `abs_step_violation` whatever α(s') is (never as `abs_state_mismatch`
+     against the rolled-back α(s)).
 3. The check is done over the impl's BMC expansion (depth K): at each step t,
    for each impl instance, if "the choice is that instance ∧ the negation of the
    correspondence condition" is sat, it is a violation. The impl trace + the abs
@@ -219,9 +226,14 @@ Two consequences fall out of reusing the same merge, not from new logic:
    `P(α(s)) ~> Q(α(s))`. A lasso or deadlock/stall counterexample is reported as
    `refinement_failed / kind:"progress_lost" / violation_kind:"leadsTo"`.
 
-The abs-side invariants are not checked (verifying/proving abs separately is the
-premise. However, if α(s₀..s_K) breaks an abs invariant, that usually manifests
-as a transition-correspondence violation itself). The abs-side automatic bounds
+The abs side is checked only where the impl's transitions reach it, not over
+the abstraction's own reachable set (verifying/proving abs separately is still
+the premise). Since issue #1302 that includes the abstract step itself: an abs
+invariant, `trans`, type bound or `ensures` that the corresponded abstract
+step violates — at the successor b's update produces, which need not equal
+α(s') — fails the step as `abs_step_violation` (step 2 above). Before, the
+walk read only the rolled-back α(s) that `Monitor::step` returns on a
+violation, so those were silently accepted. The abs-side automatic bounds
 (_bounds_*) are likewise out of scope — however, it is not necessarily the case
 that α's value escaping the abs type range is detected naturally as a
 transition-correspondence violation (because it cannot match b's update result),
@@ -506,16 +518,29 @@ Violation:
   "violated_at_step": 3,
   "impl_action": { "name": "rebalance", "params": {...}, "loc": ... },
   "kind": "abs_requires_failed" | "abs_state_mismatch" | "stutter_changed_abs"
-        | "map_out_of_bounds" | "map_partial_op" | "abs_partial_op",
+        | "map_out_of_bounds" | "map_partial_op" | "abs_partial_op"
+        | "abs_step_violation",
   "impl_trace": [ ...existing trace format... ],
   "abs_before": { ...logical state of α(s)... },
   "abs_after_expected": { ...after applying b... } | null,
   "abs_after_actual": { ...α(s') ... },
+  "abs_violation": { "kind": "ensures", "name": "checkout" },  // abs_step_violation only
+  "abs_after_attempted": { ...successor b's update would produce... },  // abs_step_violation only
   "mismatch": ["stock[1]", ...],            // logical paths where equality broke (as far as known)
   "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action" }
 ```
 
 exit: refines = 0, refinement_failed = 1, error = 2/3.
+
+`abs_after_expected` is absent for `abs_partial_op` and `abs_step_violation`:
+the abstraction has no valid successor there. For `abs_step_violation`,
+`abs_violation` names what the abstract step violated (`kind` is the abstract
+monitor's `type_bound` / `invariant` / `trans` / `ensures` / `partial_op`, and
+`name` is the property, `_bounds_<var>`, the action for `ensures`, or
+`_partial_<action>`), and `abs_after_attempted` is the successor it rejected —
+reported under its own key because it is not an expected state. `fslc diff`
+carries `abs_violation` on the failing direction; inline `implements` reports
+the `kind` only.
 
 ### Inline `implements` bounds propagation (`fslc verify`)
 
@@ -592,9 +617,14 @@ Static checks (`kind: "type"` error, exit 2):
 - An impl action with no correspondence
 - A type mismatch of a mapping expression or argument expression (matched
   against the expected type on the abs side)
-- When abs has ensures: since the correspondence check is done with "requires +
-  body update," ensures is **assumed to be separately verified on the abs side**
-  (stated in the note)
+- When abs has ensures: b's `ensures` is evaluated on every corresponded
+  abstract step the walk takes (a false one, or one hitting a partial
+  operation, is `abs_step_violation`, issue #1302), but only on those steps,
+  so the rest of the abstraction's `ensures` coverage is **still assumed to be
+  verified separately on the abs side** (stated in the `refines` note:
+  "abs ensures are checked only on the abstract steps the impl's transitions
+  correspond to within checked_to_depth; verify/prove the abstract spec
+  separately")
 
 ## 4. Implementation Notes
 
@@ -726,13 +756,60 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    their order. Every consumer reads it through `RefinementCheck::verdict()`
    (`refine`, inline `implements` in `check`/`verify`, `diff`, governance
    preservations native and Worker, the `fslc mutate` implements oracle, which
-   counts it as a kill). Not covered (follow-ups): a partial operation in the
-   abstract action's post-state checks or `ensures` (the walk still reads the
-   unchanged state `step` returns for those), and an abstract guard whose
-   evaluation fails (still an error, §5 item 7). Rust coverage:
+   counts it as a kill). A partial operation in the abstract action's
+   post-state checks or `ensures` is not this kind but item 13's
+   `abs_step_violation`. Not covered: an abstract guard whose evaluation
+   fails (still an error, §5 item 7). Rust coverage:
    `rust/fsl-runtime/tests/refinement.rs` and
    `rust/fslc/tests/issue_1296_abs_partial_op.rs`; Worker parity in
    `rust/fsl-wasm/src/lib.rs`.
+13. **abstract step violation (issue #1302)**: the corresponded abstract
+   action's guard holds and its body evaluates, but the abstraction rejects
+   the step: the successor violates an abs type bound (`go() { y = y + 5 }`
+   with `y: 0..4`), an abs invariant or `trans`, b's `ensures` is false, or a
+   post-state check / `ensures` hits a partial operation (`ensures 4 / y == 0`
+   at `y = 0`) → `abs_step_violation` at that step, with `abs_violation`
+   (the abstract kind and name), `abs_after_attempted` (the rejected
+   successor), and no `abs_after_expected`. `Monitor::step` reports these with
+   the would-be successor in `attempted_state` and returns the rolled-back
+   α(s) as `state`; the walk used to compare only that `state` with α(s'), so
+   an impl step leaving the mapped state unchanged was a false `refines`, and
+   one changing it was `abs_state_mismatch` with the rolled-back α(s) shown as
+   `abs_after_expected`.
+   - Semantics chosen: fail the step whatever α(s') is (not "compare α(s')
+     with `attempted_state`"). The abstraction defines no valid successor
+     there, so no α(s') can correspond. Comparing against `attempted_state`
+     alone would accept an impl that reproduces a rejected abstract step
+     whenever α(s') does not itself show the violation (a false `ensures`, a
+     partial operation in `ensures`, a `trans` violation), and would blame the
+     mapping (`map_out_of_bounds`) for a type bound the abstraction's own
+     update breaks; adding "and fail on any violation" makes the verdict the
+     same as failing the step, but the reported kind would then depend on
+     whether α(s') happens to equal the rejected successor
+     (`abs_state_mismatch` or not), hiding the abstract-side cause. One kind
+     for every abstract-side cause keeps the cause in `abs_violation.kind`.
+   - A false abstract `ensures` and an abstract invariant violated by the
+     abstract successor now fail the refinement: the impl invokes an abstract
+     step its own contract rejects, so `refines` would certify an impl
+     behaviour the abstraction forbids. This narrows, but does not replace,
+     the "verify abs separately" premise: only steps the walk corresponds are
+     checked.
+   - Not `abs_partial_op` (#1296), which is the body having no value at all
+     (`attempted_state` absent); not `abs_state_mismatch`, which is a state
+     difference — here α(s') may equal the attempted successor. The new arm
+     runs after #1296's (stutter → abstract guard → domain escape → body
+     partial → abstract step violation → state comparison) and matches every
+     remaining violation, so it stays fail-closed should `step` ever report
+     another shape. Every consumer reads it through
+     `RefinementCheck::verdict()` (`refine`, inline `implements`, `diff`,
+     governance native and Worker, the `fslc mutate` implements oracle as a
+     kill). Rust coverage: `rust/fsl-runtime/tests/refinement.rs`,
+     `rust/fslc/tests/issue_1302_abs_step_violation.rs`; Worker parity in
+     `rust/fsl-wasm/src/lib.rs`. The "domain escape before the abstract step"
+     order is pinned by
+     `an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds`
+     (stepping with the out-of-domain argument would be an abstract
+     `type_bound` violation).
 
 ## 6. Documentation Reflection
 

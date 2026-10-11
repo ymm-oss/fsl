@@ -669,7 +669,8 @@ variable capture instead of inventing internal binder names. See
   mapping expression, since it constructs an abstract action call: it gets the
   same `partial_op` treatment, surfaced as `kind: "map_partial_op"`. The
   corresponded abstract action's own body is action context too: a partial
-  operation it hits at the mapped state is `kind: "abs_partial_op"`.
+  operation it hits at the mapped state is `kind: "abs_partial_op"`; one in
+  its post-state checks or `ensures` is `kind: "abs_step_violation"`.
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Conditional: `if condition then when_true else when_false`. The condition is
@@ -1670,7 +1671,7 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 
 Success: `result: "refines"` (exit 0). Violation: `refinement_failed` (exit 1)
 with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds` / `map_partial_op` / `abs_partial_op`), `impl_trace`, and the post-mapping
+`map_out_of_bounds` / `map_partial_op` / `abs_partial_op` / `abs_step_violation`), `impl_trace`, and the post-mapping
 `abs_before` / `abs_after_*`. A static error (a missing map, an unknown action,
 etc.) is `kind: "type"` (exit 2). `map_partial_op` is an action-correspondence
 argument expression (`impl_action(a) -> abs_action(a / c)`) dividing by an impl
@@ -1681,6 +1682,16 @@ partial operation (a zero divisor, `pop`/`head`/`at` on a too-short `Seq`) at
 the mapped state of an impl step whose abstract guard holds: the abstraction
 has no defined successor there, so the step cannot correspond (there is no
 `abs_after_expected`). A false abstract guard is still `abs_requires_failed`.
+`abs_step_violation` is the corresponded abstract step being rejected by the
+abstraction itself: its successor violates an abstract type bound, invariant or
+`trans`, its `ensures` is false, or one of those checks hits a partial
+operation. The step cannot correspond whatever the impl's mapped state is, so
+it fails even when the impl leaves the mapped state unchanged; `abs_violation`
+gives the abstract `kind` and `name`, `abs_after_attempted` the rejected
+successor, and there is no `abs_after_expected`. So abstract `ensures` and
+invariants are checked on every corresponded step within `--depth` — but only
+there: verify the abstract spec on its own as well (the `refines` note says
+so).
 
 Before any correspondence is checked, `refine` first verifies that the impl
 spec is internally consistent on its own — does not violate its own type

@@ -152,6 +152,7 @@
       <tr><td>Mapping range</td><td>Mapped values stay inside the abstract type.</td><td><code>map_out_of_bounds</code> — the projection escaped the abstract domain.</td></tr>
       <tr><td>Correspondence argument</td><td>An action-correspondence argument expression evaluates without hitting an undefined operation (e.g. a zero divisor).</td><td><code>map_partial_op</code> — the mapping itself is undefined for this reachable value.</td></tr>
       <tr><td>Abstract body</td><td>The mapped abstract action's body evaluates at the mapped state without hitting an undefined operation (e.g. a zero divisor).</td><td><code>abs_partial_op</code> — the requirement has no defined next state for this step.</td></tr>
+      <tr><td>Abstract step accepted</td><td>The mapped abstract action's next state keeps the requirement's type bounds and invariants, and its <code>ensures</code> holds.</td><td><code>abs_step_violation</code> — the requirement itself rejects this step (<code>abs_violation</code> says which check).</td></tr>
     </table>
 
     <div class="vs reveal" style="margin-top:24px">
