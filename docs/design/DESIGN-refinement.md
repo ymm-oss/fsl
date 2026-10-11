@@ -726,7 +726,7 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    their order. Every consumer reads it through `RefinementCheck::verdict()`
    (`refine`, inline `implements` in `check`/`verify`, `diff`, governance
    preservations native and Worker, the `fslc mutate` implements oracle, which
-   counts it as a kill). Not covered (follow-ups): the other violations the
+   counts it as a kill). Not covered (follow-up #1302): the other violations the
    abstract step reports while returning the state unchanged -- an abstract
    `ensures` that is false, a partial operation inside an abstract `ensures`, a
    post-state type-bound violation, and an abstract invariant (or `trans`)

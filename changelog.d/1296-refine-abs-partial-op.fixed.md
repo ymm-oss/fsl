@@ -18,7 +18,7 @@ checks keep their order. `abs_partial_op` is a new `kind` value; a consumer
 that matches on the documented kind list should add it. Migration: a spec or
 mapping that `refines` today may now fail with `abs_partial_op`; guard the
 abstract action (`requires y != 0`) or make its body total, or keep the impl
-from invoking it in that state. Unchanged (follow-ups): the other violations
+from invoking it in that state. Unchanged (follow-up #1302): the other violations
 the abstract step reports with its state left unchanged are still not read as
 such -- an abstract `ensures` that is false, a partial operation inside an
 abstract `ensures`, a post-state type-bound violation, and an abstract
