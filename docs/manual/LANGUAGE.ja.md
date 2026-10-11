@@ -1621,7 +1621,10 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 対応先の抽象 action の本体が部分演算(ゼロ除算、短すぎる `Seq` への
 `pop`/`head`/`at`)に当たるケースです — 抽象側にそこからの後続状態が定義されない
 ので、そのステップは対応できません(`abs_after_expected` はありません)。抽象 guard
-が偽なら従来どおり `abs_requires_failed` です。
+が偽なら従来どおり `abs_requires_failed` です。抽象 action 冒頭の `let` は guard
+と一緒に評価されるため、そこでの部分演算(`y = 0` での `let q = 4 / y`)は
+`abs_partial_op` にはならず、評価に失敗する抽象 guard と同じく
+`result: "error"`(exit 2)で止まります。
 
 `refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま

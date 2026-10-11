@@ -1683,7 +1683,10 @@ action など)は <code>kind: "type"</code>(exit 2)です。<code>map_partial_op
 対応先の抽象 action の本体が部分演算(ゼロ除算、短すぎる <code>Seq</code> への
 <code>pop</code>/<code>head</code>/<code>at</code>)に当たるケースです — 抽象側にそこからの後続状態が定義されない
 ので、そのステップは対応できません(<code>abs_after_expected</code> はありません)。抽象 guard
-が偽なら従来どおり <code>abs_requires_failed</code> です。</p>
+が偽なら従来どおり <code>abs_requires_failed</code> です。抽象 action 冒頭の <code>let</code> は guard
+と一緒に評価されるため、そこでの部分演算(<code>y = 0</code> での <code>let q = 4 / y</code>)は
+<code>abs_partial_op</code> にはならず、評価に失敗する抽象 guard と同じく
+<code>result: "error"</code>(exit 2)で止まります。</p>
 <p><code>refine</code> はどの対応関係も検査する前に、まず impl spec が <code>--depth</code> の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
 す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、

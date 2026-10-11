@@ -1681,6 +1681,9 @@ partial operation (a zero divisor, `pop`/`head`/`at` on a too-short `Seq`) at
 the mapped state of an impl step whose abstract guard holds: the abstraction
 has no defined successor there, so the step cannot correspond (there is no
 `abs_after_expected`). A false abstract guard is still `abs_requires_failed`.
+A leading `let` of the abstract action is evaluated with its guard, so a
+partial operation there (`let q = 4 / y` at `y = 0`) is not `abs_partial_op`:
+like a failing abstract guard, it still stops with `result: "error"` (exit 2).
 
 Before any correspondence is checked, `refine` first verifies that the impl
 spec is internally consistent on its own — does not violate its own type

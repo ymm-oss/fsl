@@ -1741,7 +1741,10 @@ not the "no check" property context a refinement <em>state</em> map gets.
 partial operation (a zero divisor, <code>pop</code>/<code>head</code>/<code>at</code> on a too-short <code>Seq</code>) at
 the mapped state of an impl step whose abstract guard holds: the abstraction
 has no defined successor there, so the step cannot correspond (there is no
-<code>abs_after_expected</code>). A false abstract guard is still <code>abs_requires_failed</code>.</p>
+<code>abs_after_expected</code>). A false abstract guard is still <code>abs_requires_failed</code>.
+A leading <code>let</code> of the abstract action is evaluated with its guard, so a
+partial operation there (<code>let q = 4 / y</code> at <code>y = 0</code>) is not <code>abs_partial_op</code>:
+like a failing abstract guard, it still stops with <code>result: "error"</code> (exit 2).</p>
 <p>Before any correspondence is checked, <code>refine</code> first verifies that the impl
 spec is internally consistent on its own — does not violate its own type
 bounds or invariants — within <code>--depth</code>. A refinement mapping cannot make a
