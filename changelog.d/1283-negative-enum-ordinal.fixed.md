@@ -9,8 +9,8 @@ member, so the run reports `violated` / `_bounds_<state>` (exit 1). In
 built-in `assignment_remove` of such an init line no longer lists
 `"build_spec"` in `--oracle-attribution` `killers`, and the equivalent
 external mutant is now `killed` by `_bounds_<state>` instead of `invalid`, so
-built-in and external verdicts agree. The built-in init-assignment special
-case also no longer overwrites an oracle failure (`build_spec` / `internal`)
-with `_bounds_<state>`; such a mutant keeps its failure in `killed_by`.
+built-in and external verdicts agree. (Which outcomes the built-in
+init-assignment special case re-attributes to `_bounds_<state>` is described
+under #1251.)
 Migration: a spec that relied on the previous `error` exit 2 for this shape
 now gets `violated` exit 1.
