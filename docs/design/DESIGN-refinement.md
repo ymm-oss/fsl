@@ -537,7 +537,9 @@ the abstraction has no valid successor there. For `abs_step_violation`,
 `abs_violation` names what the abstract step violated (`kind` is the abstract
 monitor's `type_bound` / `invariant` / `trans` / `ensures` / `partial_op`, and
 `name` is the property, `_bounds_<var>`, the action for `ensures`, or
-`_partial_<action>`), and `abs_after_attempted` is the successor it rejected —
+`_partial_<action>` for a partial operation in `ensures`, or
+`_partial_property_<P>` for one inside property `P`, an invariant or `trans`,
+where only a `Seq` operation can be partial), and `abs_after_attempted` is the successor it rejected —
 reported under its own key because it is not an expected state. `fslc diff`
 carries `abs_violation` on the failing direction; inline `implements` reports
 the `kind` only.
@@ -758,7 +760,7 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    preservations native and Worker, the `fslc mutate` implements oracle, which
    counts it as a kill). The other violations the abstract step reports --
    an abstract `ensures` that is false, a partial operation inside an abstract
-   `ensures` or post-state check, a post-state type-bound violation, and an
+   `ensures` or post-state check (`Seq` operations; `/` `%` are total there), a post-state type-bound violation, and an
    abstract invariant (or `trans`) violation -- are not this kind but item
    13's `abs_step_violation` (issue #1302). Not covered: an abstract guard or
    leading `let` whose evaluation fails is still an error (§5 item 7): a
@@ -771,7 +773,7 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    action's guard holds and its body evaluates, but the abstraction rejects
    the step: the successor violates an abs type bound (`go() { y = y + 5 }`
    with `y: 0..4`), an abs invariant or `trans`, b's `ensures` is false, or a
-   post-state check / `ensures` hits a partial operation (`ensures 4 / y == 0`
+   post-state check (`Seq` operations; `/` `%` are total there) / `ensures` hits a partial operation (`ensures 4 / y == 0`
    at `y = 0`) → `abs_step_violation` at that step, with `abs_violation`
    (the abstract kind and name), `abs_after_attempted` (the rejected
    successor), and no `abs_after_expected`. `Monitor::step` reports these with

@@ -839,7 +839,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - **abstract step violation (#1302)**: the corresponded abstract step being
   rejected by the abstraction — its successor violates an abstract type
   bound, invariant or `trans`, its `ensures` is false, or one of those checks
-  hits a partial operation — is `kind:"abs_step_violation"`
+  hits a partial operation (`Seq` operations; `/` `%` are total there) — is `kind:"abs_step_violation"`
   (`refinement_failed`, exit 1) with `abs_violation` (`{"kind","name"}`),
   `abs_after_attempted` (the rejected successor) and no `abs_after_expected`,
   whether or not the impl step changes the mapped state. Abstract `ensures`

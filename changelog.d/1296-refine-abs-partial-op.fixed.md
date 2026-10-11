@@ -20,7 +20,7 @@ mapping that `refines` today may now fail with `abs_partial_op`; guard the
 abstract action (`requires y != 0`) or make its body total, or keep the impl
 from invoking it in that state. The other violations
 the abstract step reports -- an abstract `ensures` that is false, a partial
-operation inside an abstract `ensures` or post-state check, a post-state
+operation inside an abstract `ensures` or post-state check (`Seq` operations; `/` `%` are total there), a post-state
 type-bound violation, and an abstract invariant (or `trans`) violation -- are
 not `abs_partial_op` but `abs_step_violation` (#1302). An abstract guard
 or leading `let` whose evaluation fails (for example `let q = 4 / y`) still

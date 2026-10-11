@@ -840,3 +840,36 @@ fn an_abstract_invariant_the_successor_keeps_still_refines() {
         STEP_MAP_W,
     ));
 }
+
+/// A `trans` the abstract step breaks: `Grow` needs `y` to increase, the
+/// abstract update keeps it. α(s') equals the attempted successor, so only
+/// the abstract step's own `trans` check sees it.
+#[test]
+fn an_abstract_trans_violated_by_the_abstract_step_is_not_refines() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_SAME,
+            "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+             action go() { y = y } trans Grow { y > old(y) } }",
+            STEP_MAP,
+        ),
+        "trans",
+        "Grow",
+    );
+}
+
+/// A partial operation inside an abstract invariant at the attempted
+/// successor: `q.pop()` empties `q`, and `P`'s `q.head()` has no value there
+/// (a `Seq` operation; `/` and `%` are total in property context).
+#[test]
+fn a_partial_op_in_an_abstract_invariant_at_the_successor_is_not_refines() {
+    let checked = step_check(
+        STEP_IMPL_SAME,
+        "spec A { type N = 0..4 state { y: N, q: Seq<N, 2> } \
+         init { y = 0 q = Seq { 1 } } action go() { q = q.pop() } \
+         invariant P { q.head() >= 0 } }",
+        "refinement M { impl I abs A map y = z map q = Seq { 1 } action go() -> go() }",
+    );
+    let failure = assert_abs_step_violation(&checked, "partial_op", "_partial_property_P");
+    assert!(failure.alpha_after_attempted.is_some(), "{failure:?}");
+}

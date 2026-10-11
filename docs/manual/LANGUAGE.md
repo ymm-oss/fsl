@@ -670,7 +670,8 @@ variable capture instead of inventing internal binder names. See
   same `partial_op` treatment, surfaced as `kind: "map_partial_op"`. The
   corresponded abstract action's own body is action context too: a partial
   operation it hits at the mapped state is `kind: "abs_partial_op"`; one in
-  its post-state checks or `ensures` is `kind: "abs_step_violation"`.
+  its `ensures`, or a partial operation in an abstract post-state check
+  (`Seq` operations; `/` `%` are total there), is `kind: "abs_step_violation"`.
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Conditional: `if condition then when_true else when_false`. The condition is
@@ -1688,7 +1689,8 @@ like a failing abstract guard, it still stops with `result: "error"` (exit 2).
 `abs_step_violation` is the corresponded abstract step being rejected by the
 abstraction itself: its successor violates an abstract type bound, invariant or
 `trans`, its `ensures` is false, or one of those checks hits a partial
-operation. The step cannot correspond whatever the impl's mapped state is, so
+operation (in an invariant or `trans`, only a `Seq` operation can: `/` `%`
+are total there). The step cannot correspond whatever the impl's mapped state is, so
 it fails even when the impl leaves the mapped state unchanged; `abs_violation`
 gives the abstract `kind` and `name`, `abs_after_attempted` the rejected
 successor, and there is no `abs_after_expected`. So abstract `ensures` and

@@ -643,8 +643,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
   action 文脈であり、同じ `partial_op` 扱いを受けて `kind: "map_partial_op"` として
   報告されます。対応先の抽象 action の本体も action 文脈であり、マッピング後の
-  状態で本体が部分演算に当たると `kind: "abs_partial_op"`、事後状態の検査や
-  `ensures` で部分演算に当たると `kind: "abs_step_violation"` として報告されます。
+  状態で本体が部分演算に当たると `kind: "abs_partial_op"`、`ensures` や事後状態の
+  検査(`Seq` 操作。そこでは `/` `%` は全域)で部分演算に当たると
+  `kind: "abs_step_violation"` として報告されます。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
@@ -1628,7 +1629,8 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 `result: "error"`(exit 2)で止まります。
 `abs_step_violation` は、対応先の抽象ステップそのものを抽象側が拒否するケースです
 — 後続状態が抽象の型境界・不変条件・`trans` を破る、`ensures` が偽になる、または
-それらの検査が部分演算に当たる。impl のマッピング後の状態が何であってもそのステップ
+それらの検査が部分演算に当たる(不変条件・`trans` で当たりうるのは `Seq` 操作だけで、
+`/` `%` はそこでは全域)。impl のマッピング後の状態が何であってもそのステップ
 は対応できないので、impl がマッピング後の状態を変えなくても失敗します。
 `abs_violation` が抽象側の `kind` と `name` を、`abs_after_attempted` が拒否された
 後続状態を示し、`abs_after_expected` はありません。つまり抽象の `ensures` と不変条件は

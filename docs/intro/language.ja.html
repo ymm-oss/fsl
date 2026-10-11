@@ -698,8 +698,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
   action 文脈であり、同じ <code>partial_op</code> 扱いを受けて <code>kind: "map_partial_op"</code> として
   報告されます。対応先の抽象 action の本体も action 文脈であり、マッピング後の
-  状態で本体が部分演算に当たると <code>kind: "abs_partial_op"</code>、事後状態の検査や
-  <code>ensures</code> で部分演算に当たると <code>kind: "abs_step_violation"</code> として報告されます。</li>
+  状態で本体が部分演算に当たると <code>kind: "abs_partial_op"</code>、<code>ensures</code> や事後状態の
+  検査(<code>Seq</code> 操作。そこでは <code>/</code> <code>%</code> は全域)で部分演算に当たると
+  <code>kind: "abs_step_violation"</code> として報告されます。</li>
 <li>比較: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>論理: <code>and or not =&gt;</code></li>
 <li>条件: <code>if condition then when_true else when_false</code>。条件は <code>Bool</code> で、両方の
@@ -1690,7 +1691,8 @@ action など)は <code>kind: "type"</code>(exit 2)です。<code>map_partial_op
 <code>result: "error"</code>(exit 2)で止まります。
 <code>abs_step_violation</code> は、対応先の抽象ステップそのものを抽象側が拒否するケースです
 — 後続状態が抽象の型境界・不変条件・<code>trans</code> を破る、<code>ensures</code> が偽になる、または
-それらの検査が部分演算に当たる。impl のマッピング後の状態が何であってもそのステップ
+それらの検査が部分演算に当たる(不変条件・<code>trans</code> で当たりうるのは <code>Seq</code> 操作だけで、
+<code>/</code> <code>%</code> はそこでは全域)。impl のマッピング後の状態が何であってもそのステップ
 は対応できないので、impl がマッピング後の状態を変えなくても失敗します。
 <code>abs_violation</code> が抽象側の <code>kind</code> と <code>name</code> を、<code>abs_after_attempted</code> が拒否された
 後続状態を示し、<code>abs_after_expected</code> はありません。つまり抽象の <code>ensures</code> と不変条件は
