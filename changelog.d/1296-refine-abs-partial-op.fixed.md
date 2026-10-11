@@ -1,8 +1,10 @@
 Fixed (#1296): a refinement whose corresponded abstract action hits a partial
 operation in its own body at the mapped state (`action go() { y = 4 / y }`
 reached at `y = 0`, or `s.pop()` on an empty `Seq`) was reported as `refines`
-(exit 0) whenever the impl step left the mapped state unchanged: the abstract
-step's `partial_op` was recorded and then ignored. It is now
+(exit 0) whenever the impl step left the mapped state unchanged, and as
+`abs_state_mismatch` with the unchanged pre-state shown as
+`abs_after_expected` when it changed it: the abstract step's `partial_op` was
+recorded and then ignored. It is now
 `refinement_failed` / `kind:"abs_partial_op"` (exit 1) at that step, with
 `abs_before` / `abs_after_actual` and no `abs_after_expected` (the abstraction
 has no defined successor there). Every consumer of the refinement verdict
@@ -18,7 +20,9 @@ checks keep their order. `abs_partial_op` is a new `kind` value; a consumer
 that matches on the documented kind list should add it. Migration: a spec or
 mapping that `refines` today may now fail with `abs_partial_op`; guard the
 abstract action (`requires y != 0`) or make its body total, or keep the impl
-from invoking it in that state. The other violations
+from invoking it in that state; a refinement that failed with
+`abs_state_mismatch` for this reason now reports `abs_partial_op` instead.
+The other violations
 the abstract step reports -- an abstract `ensures` that is false, a partial
 operation inside an abstract `ensures` or post-state check (`Seq` operations; `/` `%` are total there), a post-state
 type-bound violation, and an abstract invariant (or `trans`) violation -- are
