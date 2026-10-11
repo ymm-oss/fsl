@@ -831,6 +831,11 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   by zero (caught by the impl self-violation precondition above). A
   correspondence whose divisor is always guarded on every reachable impl
   step still `refines`.
+- **abstract-body partial_op (#1296)**: the corresponded abstract action's
+  own body hitting a partial operation at the mapped state (`y = 4 / y` at
+  `y = 0`) is `kind:"abs_partial_op"` (`refinement_failed`, exit 1, no
+  `abs_after_expected`), never `refines`. A false abstract guard is still
+  `abs_requires_failed`.
 - **nondeterministic `init` (#493)**: a state variable `init` never assigns
   on any path (an `init if` reading an unassigned `Bool`) is a genuinely free
   initial value across its type domain, not a silently defaulted one. The

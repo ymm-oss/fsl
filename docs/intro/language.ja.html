@@ -697,7 +697,8 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   refinement の action 対応の<strong>引数</strong>式(§10、<code>impl_action(a) -&gt; abs_action(a / c)</code>)
   は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
   action 文脈であり、同じ <code>partial_op</code> 扱いを受けて <code>kind: "map_partial_op"</code> として
-  報告されます。</li>
+  報告されます。対応先の抽象 action の本体も action 文脈であり、マッピング後の
+  状態で本体が部分演算に当たると <code>kind: "abs_partial_op"</code> として報告されます。</li>
 <li>比較: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>論理: <code>and or not =&gt;</code></li>
 <li>条件: <code>if condition then when_true else when_false</code>。条件は <code>Bool</code> で、両方の
@@ -1672,12 +1673,17 @@ binder を逆方向に変換します。例えば <code>column_key Column -&gt; 
 </code></pre>
 <p>成功: <code>result: "refines"</code>(exit 0)。違反: <code>refinement_failed</code>(exit 1)で、
 <code>kind</code>(<code>abs_requires_failed</code> / <code>abs_state_mismatch</code> / <code>stutter_changed_abs</code> /
-<code>map_out_of_bounds</code> / <code>map_partial_op</code>)、<code>impl_trace</code>、マッピング後の
+<code>map_out_of_bounds</code> / <code>map_partial_op</code> / <code>abs_partial_op</code>)、<code>impl_trace</code>、マッピング後の
 <code>abs_before</code> / <code>abs_after_*</code> を伴います。静的なエラー(マップの欠落、未知の
 action など)は <code>kind: "type"</code>(exit 2)です。<code>map_partial_op</code> は、action 対応の
 引数式(<code>impl_action(a) -&gt; abs_action(a / c)</code>)がゼロになりうる impl の state
 変数で除算しているケースです — action 文脈であり、refinement の state map が
-受ける「チェックなし」の property 文脈ではありません(§3 のゼロ除算規則)。</p>
+受ける「チェックなし」の property 文脈ではありません(§3 のゼロ除算規則)。
+<code>abs_partial_op</code> は、抽象 guard が成り立つ impl ステップのマッピング後の状態で、
+対応先の抽象 action の本体が部分演算(ゼロ除算、短すぎる <code>Seq</code> への
+<code>pop</code>/<code>head</code>/<code>at</code>)に当たるケースです — 抽象側にそこからの後続状態が定義されない
+ので、そのステップは対応できません(<code>abs_after_expected</code> はありません)。抽象 guard
+が偽なら従来どおり <code>abs_requires_failed</code> です。</p>
 <p><code>refine</code> はどの対応関係も検査する前に、まず impl spec が <code>--depth</code> の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
 す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、

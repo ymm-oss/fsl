@@ -155,6 +155,7 @@
       <tr><td>stutter</td><td><code>stutter</code> にした操作が、本当に抽象側を変えない。</td><td><code>stutter_changed_abs</code> — 「内部だけ」という主張が嘘。</td></tr>
       <tr><td>対応値の範囲</td><td>対応づけた値が、抽象の型の範囲に収まる。</td><td><code>map_out_of_bounds</code> — 射影が抽象の範囲を超えた。</td></tr>
       <tr><td>対応の引数</td><td>action 対応の引数式が、未定義の演算(ゼロ除算など)に当たらずに評価できる。</td><td><code>map_partial_op</code> — この到達可能な値に対して、対応づけ自体が未定義。</td></tr>
+      <tr><td>抽象の本体</td><td>対応先の抽象 action の本体が、対応づけた状態で未定義の演算(ゼロ除算など)に当たらずに評価できる。</td><td><code>abs_partial_op</code> — このステップに対して、要求側の次の状態が定義されない。</td></tr>
     </table>
 
     <div class="vs reveal" style="margin-top:24px">

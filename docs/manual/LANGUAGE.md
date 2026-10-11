@@ -667,7 +667,9 @@ variable capture instead of inventing internal binder names. See
   refinement action-correspondence *argument* expression (§10,
   `impl_action(a) -> abs_action(a / c)`) is action context, not a property-context
   mapping expression, since it constructs an abstract action call: it gets the
-  same `partial_op` treatment, surfaced as `kind: "map_partial_op"`.
+  same `partial_op` treatment, surfaced as `kind: "map_partial_op"`. The
+  corresponded abstract action's own body is action context too: a partial
+  operation it hits at the mapped state is `kind: "abs_partial_op"`.
 - Comparison: `== != < <= > >=`
 - Logical: `and or not =>`
 - Conditional: `if condition then when_true else when_false`. The condition is
@@ -1668,12 +1670,17 @@ fslc refine specs/cart_impl.fsl specs/cart_v1.fsl specs/cart_refines.fsl --depth
 
 Success: `result: "refines"` (exit 0). Violation: `refinement_failed` (exit 1)
 with `kind` (`abs_requires_failed` / `abs_state_mismatch` / `stutter_changed_abs` /
-`map_out_of_bounds` / `map_partial_op`), `impl_trace`, and the post-mapping
+`map_out_of_bounds` / `map_partial_op` / `abs_partial_op`), `impl_trace`, and the post-mapping
 `abs_before` / `abs_after_*`. A static error (a missing map, an unknown action,
 etc.) is `kind: "type"` (exit 2). `map_partial_op` is an action-correspondence
 argument expression (`impl_action(a) -> abs_action(a / c)`) dividing by an impl
 state variable that can be zero — action context (§3/§6's `partial_op` rule),
 not the "no check" property context a refinement *state* map gets.
+`abs_partial_op` is the corresponded abstract action's own body hitting a
+partial operation (a zero divisor, `pop`/`head`/`at` on a too-short `Seq`) at
+the mapped state of an impl step whose abstract guard holds: the abstraction
+has no defined successor there, so the step cannot correspond (there is no
+`abs_after_expected`). A false abstract guard is still `abs_requires_failed`.
 
 Before any correspondence is checked, `refine` first verifies that the impl
 spec is internally consistent on its own — does not violate its own type
