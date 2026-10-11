@@ -12,8 +12,11 @@ unchanged, and as `abs_state_mismatch` with the rolled-back pre-state shown as
 abstraction rejected), and no `abs_after_expected`. Every consumer of the
 refinement verdict reports it: `fslc refine`, `fslc check` / `fslc verify`
 inline `implements` (`implements.violation.kind`), `fslc diff` (the failing
-direction, with `abs_violation`), governance preservations
-(`result:"refinement_failed"`, native and Worker), and the `fslc mutate`
+direction, with `abs_violation`), governance preservations (native and
+Worker: only `governance.preservations[].result` becomes
+`"refinement_failed"`; the top-level `result` and the exit code of `fslc
+check` on the governance file are unchanged, as for any other failed
+preservation), and the `fslc mutate`
 implements oracle, which now kills a mutant that reaches such a step
 (`killed_by:"refinement"`). The `refines` note for an abstraction with
 `ensures` now reads "abs ensures are checked only on the abstract steps the

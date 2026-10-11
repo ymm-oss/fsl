@@ -756,10 +756,14 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    their order. Every consumer reads it through `RefinementCheck::verdict()`
    (`refine`, inline `implements` in `check`/`verify`, `diff`, governance
    preservations native and Worker, the `fslc mutate` implements oracle, which
-   counts it as a kill). A partial operation in the abstract action's
-   post-state checks or `ensures` is not this kind but item 13's
-   `abs_step_violation`. Not covered: an abstract guard whose evaluation
-   fails (still an error, §5 item 7). Rust coverage:
+   counts it as a kill). The other violations the abstract step reports --
+   an abstract `ensures` that is false, a partial operation inside an abstract
+   `ensures` or post-state check, a post-state type-bound violation, and an
+   abstract invariant (or `trans`) violation -- are not this kind but item
+   13's `abs_step_violation` (issue #1302). Not covered: an abstract guard or
+   leading `let` whose evaluation fails is still an error (§5 item 7): a
+   leading `let` is part of the guard, so `let q = 4 / y` at `y = 0` is
+   `result:"error"`, not `abs_partial_op`. Rust coverage:
    `rust/fsl-runtime/tests/refinement.rs` and
    `rust/fslc/tests/issue_1296_abs_partial_op.rs`; Worker parity in
    `rust/fsl-wasm/src/lib.rs`.

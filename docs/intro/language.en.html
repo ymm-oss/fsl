@@ -1743,6 +1743,9 @@ partial operation (a zero divisor, <code>pop</code>/<code>head</code>/<code>at</
 the mapped state of an impl step whose abstract guard holds: the abstraction
 has no defined successor there, so the step cannot correspond (there is no
 <code>abs_after_expected</code>). A false abstract guard is still <code>abs_requires_failed</code>.
+A leading <code>let</code> of the abstract action is evaluated with its guard, so a
+partial operation there (<code>let q = 4 / y</code> at <code>y = 0</code>) is not <code>abs_partial_op</code>:
+like a failing abstract guard, it still stops with <code>result: "error"</code> (exit 2).
 <code>abs_step_violation</code> is the corresponded abstract step being rejected by the
 abstraction itself: its successor violates an abstract type bound, invariant or
 <code>trans</code>, its <code>ensures</code> is false, or one of those checks hits a partial

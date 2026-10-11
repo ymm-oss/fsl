@@ -1682,6 +1682,9 @@ partial operation (a zero divisor, `pop`/`head`/`at` on a too-short `Seq`) at
 the mapped state of an impl step whose abstract guard holds: the abstraction
 has no defined successor there, so the step cannot correspond (there is no
 `abs_after_expected`). A false abstract guard is still `abs_requires_failed`.
+A leading `let` of the abstract action is evaluated with its guard, so a
+partial operation there (`let q = 4 / y` at `y = 0`) is not `abs_partial_op`:
+like a failing abstract guard, it still stops with `result: "error"` (exit 2).
 `abs_step_violation` is the corresponded abstract step being rejected by the
 abstraction itself: its successor violates an abstract type bound, invariant or
 `trans`, its `ensures` is false, or one of those checks hits a partial

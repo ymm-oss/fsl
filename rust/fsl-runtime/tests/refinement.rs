@@ -601,6 +601,27 @@ fn a_total_abstract_body_division_still_refines() {
     assert_refines(&checked);
 }
 
+/// The body partial-op check runs before the state comparison. Here the impl
+/// step moves the mapped state to `y = 3` while the abstract `go()` divides by
+/// zero at `y = 0`: the state `step` returns (the unchanged `y = 0`) also
+/// differs from `y = 3`, so a check placed after the comparison would report
+/// `abs_state_mismatch` against a successor the abstraction does not have.
+#[test]
+fn an_abstract_body_partial_op_is_reported_before_the_state_comparison() {
+    let implementation = model(
+        "spec I { type N = 0..4 state { z: N } init { z = 0 } \
+         action go() { requires z == 0 z = 3 } }",
+    );
+    let abstraction =
+        model("spec A { type N = 0..4 state { y: N } init { y = 0 } action go() { y = 4 / y } }");
+    let mapping = parse_refinement(DIV_MAP, &implementation, &abstraction).expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("check_refinement runs");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "abs_partial_op");
+    assert_eq!(failure.alpha_after_expected, None);
+}
+
 // Issue #1302: the corresponded abstract step itself violates something other
 // than a body partial operation -- a post-state type bound, an abstract
 // invariant, a false `ensures`, or a partial operation inside `ensures`.

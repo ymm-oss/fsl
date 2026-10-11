@@ -1622,7 +1622,10 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 対応先の抽象 action の本体が部分演算(ゼロ除算、短すぎる `Seq` への
 `pop`/`head`/`at`)に当たるケースです — 抽象側にそこからの後続状態が定義されない
 ので、そのステップは対応できません(`abs_after_expected` はありません)。抽象 guard
-が偽なら従来どおり `abs_requires_failed` です。
+が偽なら従来どおり `abs_requires_failed` です。抽象 action 冒頭の `let` は guard
+と一緒に評価されるため、そこでの部分演算(`y = 0` での `let q = 4 / y`)は
+`abs_partial_op` にはならず、評価に失敗する抽象 guard と同じく
+`result: "error"`(exit 2)で止まります。
 `abs_step_violation` は、対応先の抽象ステップそのものを抽象側が拒否するケースです
 — 後続状態が抽象の型境界・不変条件・`trans` を破る、`ensures` が偽になる、または
 それらの検査が部分演算に当たる。impl のマッピング後の状態が何であってもそのステップ
