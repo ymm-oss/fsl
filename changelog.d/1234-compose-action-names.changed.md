@@ -10,8 +10,9 @@ non-partial failure`, likewise for `guard` and `ensures`; it printed `bank__sett
 sweep, scenarios, explain, testgen, conformance, mutate, refine, diff, html,
 ledger, analyze, the `untagged` warnings of `check --strict-tags`, and
 `fslc replay`, including names built from the action such
-as `_requires_failed_bank.settle`, `_partial_op_bank.settle`, and
-`_partial_bank.settle`. Lists keyed by these names (`reachables`,
+as `_requires_failed_bank.settle` and `_partial_bank.settle` (a guard partial
+operation's `_partial_op_` prefix becomes `_partial_` in the same release,
+#1244). Lists keyed by these names (`reachables`,
 `action_coverage`, `action_profile`, induction `k_used`, `cost.properties`,
 scenarios `reach_*` and `respond_*`, the leadsTo warnings of `fslc scenarios`,
 refine `action_map` and `progress`, and the ai-review

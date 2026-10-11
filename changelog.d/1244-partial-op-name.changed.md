@@ -6,7 +6,9 @@ output**: a partial operation reached in an action's guard (`requires` or
 name a body partial operation already had everywhere. It was
 `_partial_op_<action>`, so the same failure could not be matched between a
 conformance vector and the verify result for one spec. For a compose
-component action the name is `_partial_alias.action` (it was
-`_partial_op_alias.action`). The `kind` stays `partial_op`. To migrate,
+component action the name is `_partial_alias.action` (#1234), such as
+`_partial_bank.settle`; it was `_partial_op_bank__settle` in `conformance`
+and `_partial_op_bank.settle` in `replay` (`_partial_op_a.b__c` for alias
+`a__b` and action `c`). The `kind` stays `partial_op`. To migrate,
 rewrite stored conformance vectors, replay results, or test expectations
 from `_partial_op_<action>` to `_partial_<action>`.
