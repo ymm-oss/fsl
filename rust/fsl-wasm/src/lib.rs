@@ -1725,6 +1725,47 @@ mod tests {
         assert_eq!(worker_preservation_result(&request), json!("violated"));
     }
 
+    /// Issue #1296: the `before` (abstract) action divides by zero at the
+    /// mapped state of the `after` step. Native governance reports
+    /// `refinement_failed` (`rust/fslc/tests/issue_1296_abs_partial_op.rs`);
+    /// the Worker reads the same `RefinementCheck::verdict()` and must too.
+    #[test]
+    fn governance_reports_refinement_failed_for_an_abstract_body_partial_op() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: "governance G {\n  control CTRL-1 \"go is preserved\"\n\n  \
+                     preservation P {\n    before A from \"abs.fsl\"\n    \
+                     after I from \"impl.fsl\"\n    preserve CTRL-1\n    \
+                     checked_by refinement \"map.fsl\"\n  }\n}\n"
+                .to_owned(),
+            source_file: "governance.fsl".to_owned(),
+            files: BTreeMap::from([
+                (
+                    "abs.fsl".to_owned(),
+                    "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+                     action go() { y = 4 / y } }\n"
+                        .to_owned(),
+                ),
+                (
+                    "impl.fsl".to_owned(),
+                    "spec I { type N = 0..4 state { z: N } init { z = 0 } \
+                     action go() { z = 0 } }\n"
+                        .to_owned(),
+                ),
+                (
+                    "map.fsl".to_owned(),
+                    "refinement M { impl I abs A map y = z action go() -> go() }\n".to_owned(),
+                ),
+            ]),
+            options: Options::default(),
+        };
+
+        assert_eq!(
+            worker_preservation_result(&request),
+            json!("refinement_failed")
+        );
+    }
+
     /// Control: a small, correct preservation still `refines`.
     #[test]
     fn governance_still_refines_a_small_preservation() {

@@ -491,3 +491,133 @@ fn a_mapping_error_without_the_map_key_marker_stays_an_error() {
         .expect_err("a non-marker mapping error must not become a verdict");
     assert!(!error.map_key_outside_domain, "{error:?}");
 }
+
+// Issue #1296: the abstract action's own body hits a partial operation at
+// the mapped state. The impl `go()` corresponds to the abstract `go()`, but
+// the abstraction has no defined successor there, so the step cannot
+// correspond. `Monitor::step` reports the body's `partial_op`; the
+// correspondence walk used to ignore it and accept the step.
+
+const DIV_IMPL: &str =
+    "spec I { type N = 0..4 state { z: N } init { z = 0 } action go() { z = 0 } }";
+const DIV_MAP: &str = "refinement M { impl I abs A map y = z action go() -> go() }";
+
+fn div_check(abs: &str) -> RefinementCheck {
+    let implementation = model(DIV_IMPL);
+    let abstraction = model(abs);
+    let mapping = parse_refinement(DIV_MAP, &implementation, &abstraction).expect("parse mapping");
+    fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("an abstract-body partial operation is a finding, not an error")
+}
+
+/// The issue's repro: `y = 4 / y` from `y = 0`. Under the total `/` the
+/// update would be `y = 0`, equal to the mapped impl state, so this is not a
+/// state mismatch: it is the action-context `partial_op` rule applied to the
+/// abstract action the impl step invokes (DESIGN-divmod §2.2).
+#[test]
+fn an_abstract_body_division_by_zero_is_abs_partial_op() {
+    let checked = div_check(
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } action go() { y = 4 / y } }",
+    );
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "abs_partial_op");
+    assert_eq!(failure.at.as_deref(), Some("step"));
+    assert_eq!(failure.step, 1);
+    assert_eq!(
+        failure
+            .impl_action
+            .as_ref()
+            .map(|action| action.name.as_str()),
+        Some("go")
+    );
+    // No abstract successor exists, so there is no expected state.
+    assert_eq!(failure.alpha_after_expected, None);
+    assert!(failure.alpha_before.is_some() && failure.alpha_after_actual.is_some());
+}
+
+/// §2.4 order: the abstract guard is evaluated before the body, so a false
+/// guard is still `abs_requires_failed` even though the body would divide by
+/// zero at the same state.
+#[test]
+fn a_false_abstract_guard_still_wins_over_a_partial_abstract_body() {
+    let checked = div_check(
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { requires y > 0 y = 4 / y } }",
+    );
+    assert_eq!(failure(&checked).kind, "abs_requires_failed");
+}
+
+/// The guarded variant whose guard holds at the mapped state: the body is
+/// reached and divides by zero.
+#[test]
+fn a_true_abstract_guard_reaches_the_partial_body_as_abs_partial_op() {
+    let checked = div_check(
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { requires y < 4 y = 4 / y } }",
+    );
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "abs_partial_op");
+    assert_eq!(failure.step, 1);
+}
+
+/// Not only division: a `Seq` `pop()` on the empty abstract sequence has no
+/// value at all (no total fallback), and is the same finding.
+#[test]
+fn an_abstract_body_pop_on_an_empty_seq_is_abs_partial_op() {
+    let implementation = model(
+        "spec SI { type V = 0..1 state { t: Seq<V, 2> } init { t = Seq {} } \
+         action take() { t = t } }",
+    );
+    let abstraction = model(
+        "spec SA { type V = 0..1 state { s: Seq<V, 2> } init { s = Seq {} } \
+         action take() { s = s.pop() } }",
+    );
+    let mapping = parse_refinement(
+        "refinement M { impl SI abs SA map s = t action take() -> take() }",
+        &implementation,
+        &abstraction,
+    )
+    .expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
+        .expect("check_refinement runs");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "abs_partial_op");
+    assert_eq!(failure.step, 1);
+}
+
+/// Negative control: an abstract body whose division never reaches a zero
+/// divisor on a corresponded step still `refines`.
+#[test]
+fn a_total_abstract_body_division_still_refines() {
+    let implementation = model(
+        "spec I { type N = 0..4 state { z: N } init { z = 0 } action go() { z = 4 / (z + 1) } }",
+    );
+    let abstraction = model(
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } action go() { y = 4 / (y + 1) } }",
+    );
+    let mapping = parse_refinement(DIV_MAP, &implementation, &abstraction).expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("check_refinement runs");
+    assert_refines(&checked);
+}
+
+/// The body partial-op check runs before the state comparison. Here the impl
+/// step moves the mapped state to `y = 3` while the abstract `go()` divides by
+/// zero at `y = 0`: the state `step` returns (the unchanged `y = 0`) also
+/// differs from `y = 3`, so a check placed after the comparison would report
+/// `abs_state_mismatch` against a successor the abstraction does not have.
+#[test]
+fn an_abstract_body_partial_op_is_reported_before_the_state_comparison() {
+    let implementation = model(
+        "spec I { type N = 0..4 state { z: N } init { z = 0 } \
+         action go() { requires z == 0 z = 3 } }",
+    );
+    let abstraction =
+        model("spec A { type N = 0..4 state { y: N } init { y = 0 } action go() { y = 4 / y } }");
+    let mapping = parse_refinement(DIV_MAP, &implementation, &abstraction).expect("parse mapping");
+    let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("check_refinement runs");
+    let failure = failure(&checked);
+    assert_eq!(failure.kind, "abs_partial_op");
+    assert_eq!(failure.alpha_after_expected, None);
+}

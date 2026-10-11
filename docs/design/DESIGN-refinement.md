@@ -204,8 +204,12 @@ Two consequences fall out of reusing the same merge, not from new logic:
    - `a -> stutter` case: **α(s') == α(s)** (logical equality reuses leadsTo's
      `_logical_eq`).
    - `a(p…) -> b(e…)` case: the instance of abs action b (arguments = the
-     evaluated values of e) is **enabled** in α(s) (its requires hold), and the
-     result of applying b's update to α(s) is **logically equal to α(s')**.
+     evaluated values of e) is **enabled** in α(s) (its requires hold), b's
+     body evaluates at α(s) **without a partial operation** (a zero divisor,
+     `pop`/`head`/`at`/index on a too-short `Seq`; otherwise
+     `abs_partial_op`, issue #1296), and the result of applying b's update to
+     α(s) is **logically equal to α(s')**. The three are checked in that
+     order, so a false guard is still `abs_requires_failed`.
 3. The check is done over the impl's BMC expansion (depth K): at each step t,
    for each impl instance, if "the choice is that instance ∧ the negation of the
    correspondence condition" is sat, it is a violation. The impl trace + the abs
@@ -502,7 +506,7 @@ Violation:
   "violated_at_step": 3,
   "impl_action": { "name": "rebalance", "params": {...}, "loc": ... },
   "kind": "abs_requires_failed" | "abs_state_mismatch" | "stutter_changed_abs"
-        | "map_out_of_bounds" | "map_partial_op",
+        | "map_out_of_bounds" | "map_partial_op" | "abs_partial_op",
   "impl_trace": [ ...existing trace format... ],
   "abs_before": { ...logical state of α(s)... },
   "abs_after_expected": { ...after applying b... } | null,
@@ -700,6 +704,41 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    `check_refinement` contract directly) and
    `rust/fslc/tests/issue_512_refine_map_partial_op.rs` (the `fslc refine` CLI
    contract).
+12. **abstract-body partial_op (issue #1296)**: the corresponded abstract
+   action's own body hits a partial operation at α(s) (`action go() { y = 4 / y }`
+   reached at `y = 0`, or `s.pop()` on an empty `Seq`) → `abs_partial_op` at
+   that step, with `abs_after_expected` absent (the abstraction has no defined
+   successor). It used to be accepted: `Monitor::step` reported the body's
+   `partial_op`, but the walk compared only the returned state, which is α(s)
+   unchanged, so a step that left the mapped state unchanged was a false
+   `refines`. A new kind rather than an existing one:
+   - not `abs_state_mismatch`: under the total `/` (`a / 0 == 0`) the update
+     *has* a value and it can equal α(s'), as in the repro; the finding is the
+     action-context `partial_op` rule (`docs/design/DESIGN-divmod.md` §2.2),
+     not a state difference, and a `Seq` partial operation has no successor
+     to compare at all;
+   - not `map_partial_op`: that kind is the correspondence *argument*
+     expression and directs the fix to the mapping, while here the abstraction
+     is undefined at a state the impl reaches through a corresponded step;
+   - not `abs_requires_failed`: the guard held.
+   The order is §2's: a false abstract guard is still `abs_requires_failed`,
+   and the stutter / guard / out-of-domain checks that run before the body keep
+   their order. Every consumer reads it through `RefinementCheck::verdict()`
+   (`refine`, inline `implements` in `check`/`verify`, `diff`, governance
+   preservations native and Worker, the `fslc mutate` implements oracle, which
+   counts it as a kill). Not covered (follow-up #1302): the other violations the
+   abstract step reports while returning the state unchanged -- an abstract
+   `ensures` that is false, a partial operation inside an abstract `ensures`, a
+   post-state type-bound violation, and an abstract invariant (or `trans`)
+   violation. The walk still reads only the returned state for those: when the
+   abstract update changes the state they surface as `abs_state_mismatch` with
+   `abs_after_expected` set to the unchanged α(s), and when it does not the step
+   is accepted. An abstract guard or leading `let` whose evaluation fails is
+   still an error (§5 item 7): a leading `let` is part of the guard, so
+   `let q = 4 / y` at `y = 0` is `result:"error"`, not `abs_partial_op`. Rust coverage:
+   `rust/fsl-runtime/tests/refinement.rs` and
+   `rust/fslc/tests/issue_1296_abs_partial_op.rs`; Worker parity in
+   `rust/fsl-wasm/src/lib.rs`.
 
 ## 6. Documentation Reflection
 

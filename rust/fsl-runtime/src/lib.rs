@@ -2376,6 +2376,33 @@ pub fn check_refinement_with_budget(
                         return Ok(check);
                     };
                     let abs_step = abs_monitor.step(&abs_enabled)?;
+                    // The abstract body hit a partial operation (issue #1296):
+                    // the abstract action has no defined successor at α(s),
+                    // so this step cannot correspond to it. `step` reports a
+                    // body `partial_op` with no `attempted_state` (the
+                    // post-state and `ensures` failures carry one; those are
+                    // not this finding). The guard already held above, so a
+                    // false guard stays `abs_requires_failed` (§2.4). There
+                    // is no expected state to report.
+                    if abs_step.attempted_state.is_none()
+                        && abs_step
+                            .violation
+                            .as_ref()
+                            .is_some_and(|violation| violation.kind == "partial_op")
+                    {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        check.failure = Some(refinement_failure(
+                            "abs_partial_op",
+                            Some("step"),
+                            step + 1,
+                            &child_trace,
+                            Some(alpha_before.clone()),
+                            None,
+                            Some(alpha_after.clone()),
+                        ));
+                        return Ok(check);
+                    }
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
                     if &expected_state != alpha_after {
                         let child_trace =
