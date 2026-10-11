@@ -621,3 +621,255 @@ fn an_abstract_body_partial_op_is_reported_before_the_state_comparison() {
     assert_eq!(failure.kind, "abs_partial_op");
     assert_eq!(failure.alpha_after_expected, None);
 }
+
+// Issue #1302: the corresponded abstract step itself violates something other
+// than a body partial operation -- a post-state type bound, an abstract
+// invariant, a false `ensures`, or a partial operation inside `ensures`.
+// `Monitor::step` reports it with the would-be successor in
+// `attempted_state` and returns the rolled-back α(s) as `state`. The walk
+// used to compare only that rolled-back state with α(s'): a false `refines`
+// when the impl step left the mapped state unchanged, and an
+// `abs_state_mismatch` whose `abs_after_expected` was the rolled-back α(s)
+// when it changed it. Each row below is checked both ways.
+
+const STEP_IMPL_SAME: &str =
+    "spec I { type N = 0..4 state { z: N } init { z = 0 } action go() { z = 0 } }";
+const STEP_IMPL_CHANGED: &str = "spec I { type N = 0..4 state { z: N } init { z = 0 } \
+     action go() { requires z == 0 z = 1 } }";
+const STEP_MAP: &str = "refinement M { impl I abs A map y = z action go() -> go() }";
+const STEP_MAP_W: &str = "refinement M { impl I abs A map y = z map w = 0 action go() -> go() }";
+
+fn step_check(implementation: &str, abs: &str, map: &str) -> RefinementCheck {
+    let implementation = model(implementation);
+    let abstraction = model(abs);
+    let mapping = parse_refinement(map, &implementation, &abstraction).expect("parse mapping");
+    fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 3)
+        .expect("an abstract step violation is a finding, not an error")
+}
+
+/// The finding every row shares: the step fails at step 1 on the impl's
+/// `go`, no abstract successor is reported as expected (the abstraction has
+/// none; the rolled-back α(s) is not one), and the abstract step's own
+/// violation is carried as `abs_violation`.
+fn assert_abs_step_violation<'a>(
+    checked: &'a RefinementCheck,
+    abs_kind: &str,
+    abs_name: &str,
+) -> &'a RefinementFailure {
+    let failure = failure(checked);
+    assert_eq!(failure.kind, "abs_step_violation", "{failure:?}");
+    assert_eq!(failure.at.as_deref(), Some("step"));
+    assert_eq!(failure.step, 1);
+    assert_eq!(
+        failure
+            .impl_action
+            .as_ref()
+            .map(|action| action.name.as_str()),
+        Some("go")
+    );
+    assert_eq!(failure.alpha_after_expected, None, "{failure:?}");
+    assert!(failure.alpha_before.is_some() && failure.alpha_after_actual.is_some());
+    let violation = failure
+        .abs_violation
+        .as_ref()
+        .expect("abs_step_violation carries the abstract violation");
+    assert_eq!(
+        (violation.kind.as_str(), violation.name.as_str()),
+        (abs_kind, abs_name)
+    );
+    assert!(
+        failure.alpha_after_attempted.is_some(),
+        "abs_step_violation carries the attempted abstract successor: {failure:?}"
+    );
+    failure
+}
+
+const TYPE_ABS: &str =
+    "spec A { type N = 0..4 state { y: N } init { y = 0 } action go() { y = y + 5 } }";
+
+/// Row 1, impl leaves the mapped state unchanged (was `refines`): the
+/// abstract successor `y = 5` escapes `N = 0..4`.
+#[test]
+fn an_abstract_post_state_type_bound_violation_is_not_refines() {
+    let checked = step_check(STEP_IMPL_SAME, TYPE_ABS, STEP_MAP);
+    let failure = assert_abs_step_violation(&checked, "type_bound", "_bounds_y");
+    // The attempted successor is `y = 5`, the out-of-type state the
+    // violation is about -- not the rolled-back α(s) `y = 0`.
+    assert_eq!(
+        failure
+            .alpha_after_attempted
+            .as_ref()
+            .and_then(|state| state.get("y")),
+        Some(&fsl_core::FslValue::Int(5)),
+        "{failure:?}"
+    );
+}
+
+/// Row 1, impl changes the mapped state (was `abs_state_mismatch` with the
+/// rolled-back α(s) as `abs_after_expected`).
+#[test]
+fn an_abstract_post_state_type_bound_violation_is_not_a_state_mismatch() {
+    assert_abs_step_violation(
+        &step_check(STEP_IMPL_CHANGED, TYPE_ABS, STEP_MAP),
+        "type_bound",
+        "_bounds_y",
+    );
+}
+
+/// Row 2, unchanged: `ensures y == 3` is false at the abstract successor.
+#[test]
+fn a_false_abstract_ensures_is_not_refines() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_SAME,
+            "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y ensures y == 3 } }",
+            STEP_MAP,
+        ),
+        "ensures",
+        "go",
+    );
+}
+
+/// Row 2, changed: the update matches the impl (`y = 1`), only `ensures`
+/// is false.
+#[test]
+fn a_false_abstract_ensures_is_not_a_state_mismatch() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_CHANGED,
+            "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y + 1 ensures y == 3 } }",
+            STEP_MAP,
+        ),
+        "ensures",
+        "go",
+    );
+}
+
+/// Row 3, unchanged: `ensures 4 / y == 0` divides by zero at `y = 0`.
+/// Unlike #1296's body partial op, `step` reports this one with an
+/// `attempted_state`.
+#[test]
+fn a_partial_op_in_abstract_ensures_is_not_refines() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_SAME,
+            "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y ensures 4 / y == 0 } }",
+            STEP_MAP,
+        ),
+        "partial_op",
+        "_partial_go",
+    );
+}
+
+/// Row 3, changed: the update matches the impl, `ensures` divides by zero.
+#[test]
+fn a_partial_op_in_abstract_ensures_is_not_a_state_mismatch() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_CHANGED,
+            "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y + 1 ensures 4 / (y - 1) == 0 } }",
+            STEP_MAP,
+        ),
+        "partial_op",
+        "_partial_go",
+    );
+}
+
+/// Row 4, unchanged: the abstract successor `w = 1` violates `W`, while
+/// α(s') (`w = 0` by the mapping) does not, so the existing α(s') check
+/// does not see it either.
+#[test]
+fn an_abstract_invariant_violated_by_the_abstract_successor_is_not_refines() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_SAME,
+            "spec A { type N = 0..4 state { y: N, w: N } init { y = 0 w = 0 } \
+         action go() { w = 1 } invariant W { w == 0 } }",
+            STEP_MAP_W,
+        ),
+        "invariant",
+        "W",
+    );
+}
+
+/// Row 4, changed.
+#[test]
+fn an_abstract_invariant_violated_by_the_abstract_successor_is_not_a_state_mismatch() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_CHANGED,
+            "spec A { type N = 0..4 state { y: N, w: N } init { y = 0 w = 0 } \
+         action go() { y = y + 1 w = 1 } invariant W { w == 0 } }",
+            STEP_MAP_W,
+        ),
+        "invariant",
+        "W",
+    );
+}
+
+/// Negative controls: an abstract `ensures` that holds still `refines`,
+/// whether the corresponded step leaves the mapped state unchanged or not.
+#[test]
+fn an_abstract_ensures_that_holds_still_refines() {
+    assert_refines(&step_check(
+        STEP_IMPL_SAME,
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y ensures y == 0 } }",
+        STEP_MAP,
+    ));
+    assert_refines(&step_check(
+        STEP_IMPL_CHANGED,
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y + 1 ensures y == 1 } }",
+        STEP_MAP,
+    ));
+}
+
+/// Negative control: an abstract invariant the abstract successor keeps
+/// still `refines`.
+#[test]
+fn an_abstract_invariant_the_successor_keeps_still_refines() {
+    assert_refines(&step_check(
+        STEP_IMPL_CHANGED,
+        "spec A { type N = 0..4 state { y: N, w: N } init { y = 0 w = 0 } \
+         action go() { y = y + 1 } invariant W { w == 0 } }",
+        STEP_MAP_W,
+    ));
+}
+
+/// A `trans` the abstract step breaks: `Grow` needs `y` to increase, the
+/// abstract update keeps it. α(s') equals the attempted successor, so only
+/// the abstract step's own `trans` check sees it.
+#[test]
+fn an_abstract_trans_violated_by_the_abstract_step_is_not_refines() {
+    assert_abs_step_violation(
+        &step_check(
+            STEP_IMPL_SAME,
+            "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+             action go() { y = y } trans Grow { y > old(y) } }",
+            STEP_MAP,
+        ),
+        "trans",
+        "Grow",
+    );
+}
+
+/// A partial operation inside an abstract invariant at the attempted
+/// successor: `q.pop()` empties `q`, and `P`'s `q.head()` has no value there
+/// (a `Seq` operation; `/` and `%` are total in property context).
+#[test]
+fn a_partial_op_in_an_abstract_invariant_at_the_successor_is_not_refines() {
+    let checked = step_check(
+        STEP_IMPL_SAME,
+        "spec A { type N = 0..4 state { y: N, q: Seq<N, 2> } \
+         init { y = 0 q = Seq { 1 } } action go() { q = q.pop() } \
+         invariant P { q.head() >= 0 } }",
+        "refinement M { impl I abs A map y = z map q = Seq { 1 } action go() -> go() }",
+    );
+    let failure = assert_abs_step_violation(&checked, "partial_op", "_partial_property_P");
+    assert!(failure.alpha_after_attempted.is_some(), "{failure:?}");
+}

@@ -836,6 +836,14 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `y = 0`) is `kind:"abs_partial_op"` (`refinement_failed`, exit 1, no
   `abs_after_expected`), never `refines`. A false abstract guard is still
   `abs_requires_failed`.
+- **abstract step violation (#1302)**: the corresponded abstract step being
+  rejected by the abstraction — its successor violates an abstract type
+  bound, invariant or `trans`, its `ensures` is false, or one of those checks
+  hits a partial operation (`Seq` operations; `/` `%` are total there) — is `kind:"abs_step_violation"`
+  (`refinement_failed`, exit 1) with `abs_violation` (`{"kind","name"}`),
+  `abs_after_attempted` (the rejected successor) and no `abs_after_expected`,
+  whether or not the impl step changes the mapped state. Abstract `ensures`
+  and invariants are therefore checked on corresponded steps, but only there.
 - **nondeterministic `init` (#493)**: a state variable `init` never assigns
   on any path (an `init if` reading an unassigned `Bool`) is a genuinely free
   initial value across its type domain, not a silently defaulted one. The

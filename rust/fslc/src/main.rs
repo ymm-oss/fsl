@@ -16038,10 +16038,14 @@ fn diff_direction_from_check(
                 failure.alpha_after_expected.as_ref(),
                 failure.alpha_after_actual.as_ref(),
             );
-            let public = json!({
+            let mut public = json!({
                 "result":"refinement_failed","checked_to_depth":depth,
                 "kind":failure.kind,"violated_at_step":failure.step,
             });
+            if let Some(violation) = &failure.abs_violation {
+                public["abs_violation"] =
+                    abs_violation_json(abstraction, checked.action_map(), failure, violation);
+            }
             let raw = json!({
                 "kind":failure.kind,"violated_at_step":failure.step,
                 "impl_action":impl_action,"mismatch":mismatch,
@@ -17178,6 +17182,27 @@ fn implements_error_output(
     fslc_rust::verification_output::render_requirements_implements_error(envelope(), error)
 }
 
+/// `{"kind", "name"}` of the abstract step's own violation behind an
+/// `abs_step_violation` (issue #1302), with the name spelled the way the
+/// abstraction's own `verify` would report it (scoped to the corresponded
+/// abstract action, so a compose component keeps its public name).
+fn abs_violation_json(
+    abstraction: &KernelModel,
+    action_map: &std::collections::BTreeMap<String, String>,
+    failure: &fsl_runtime::RefinementFailure,
+    violation: &fsl_runtime::Violation,
+) -> Value {
+    let abs_action = failure
+        .impl_action
+        .as_ref()
+        .and_then(|action| action_map.get(&action.name))
+        .map(String::as_str);
+    json!({
+        "kind": violation.kind,
+        "name": abstraction.action_scoped_display_name(&violation.name, abs_action),
+    })
+}
+
 fn mismatch_paths(
     model: &KernelModel,
     expected: Option<&std::collections::BTreeMap<String, FslValue>>,
@@ -17425,6 +17450,21 @@ fn run_refine(
         if let Some(state) = &failure.alpha_after_actual {
             output.insert("abs_after_actual".to_owned(), fslc_rust::state_json(state));
         }
+        // `abs_step_violation` (issue #1302): the abstract step's own
+        // violation and the successor it rejected. The latter is not an
+        // expected state, so it is a separate key, never `abs_after_expected`.
+        if let Some(violation) = &failure.abs_violation {
+            output.insert(
+                "abs_violation".to_owned(),
+                abs_violation_json(&abstraction, checked.action_map(), failure, violation),
+            );
+        }
+        if let Some(state) = &failure.alpha_after_attempted {
+            output.insert(
+                "abs_after_attempted".to_owned(),
+                fslc_rust::state_json(state),
+            );
+        }
         output.insert(
             "mismatch".to_owned(),
             Value::Array(
@@ -17546,7 +17586,7 @@ fn run_refine(
     if checked.abs_has_ensures() {
         output.insert(
             "note".to_owned(),
-            json!("abs ensures are not checked during refinement; verify/prove the abstract spec separately"),
+            json!("abs ensures are checked only on the abstract steps the impl's transitions correspond to within checked_to_depth; verify/prove the abstract spec separately"),
         );
     }
     if let Some(progress) = progress

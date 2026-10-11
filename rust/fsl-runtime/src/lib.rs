@@ -1539,6 +1539,18 @@ pub struct RefinementFailure {
     pub alpha_before: Option<State>,
     pub alpha_after_expected: Option<State>,
     pub alpha_after_actual: Option<State>,
+    /// For `abs_step_violation` (issue #1302): the violation the corresponded
+    /// abstract step reported (`type_bound`, `invariant`, `trans`, `ensures`,
+    /// or `partial_op` in a post-state check or `ensures`). Its `step` is
+    /// the abstract monitor's own counter, not the walk's step. `None` for
+    /// every other kind.
+    pub abs_violation: Option<Violation>,
+    /// For `abs_step_violation`: the abstract successor that step would have
+    /// produced (`Monitor::step`'s `attempted_state`), the state the
+    /// violation is about. It is not an expected state -- the abstraction
+    /// rejected it -- so it is never `alpha_after_expected`. `None` for every
+    /// other kind.
+    pub alpha_after_attempted: Option<State>,
     pub impl_trace: Vec<TraceStep>,
 }
 
@@ -1797,6 +1809,8 @@ fn refinement_failure(
         alpha_before: before,
         alpha_after_expected: expected,
         alpha_after_actual: actual,
+        abs_violation: None,
+        alpha_after_attempted: None,
         impl_trace: trace.to_vec(),
     }
 }
@@ -2401,6 +2415,41 @@ pub fn check_refinement_with_budget(
                             None,
                             Some(alpha_after.clone()),
                         ));
+                        return Ok(check);
+                    }
+                    // Any other violation of the abstract step (issue #1302):
+                    // a post-state type bound, an abstract invariant or
+                    // `trans`, a false `ensures`, or a partial operation in
+                    // one of those checks. `step` rolled back and returned
+                    // α(s) as `state`, with the would-be successor in
+                    // `attempted_state`, so comparing `state` with α(s')
+                    // would accept an unchanged impl step (a false
+                    // `refines`) or report the rolled-back α(s) as the
+                    // expected successor. The abstraction defines no valid
+                    // successor here, so the step cannot correspond whatever
+                    // α(s') is: it fails before the state comparison, with
+                    // no expected state. Matching every remaining violation,
+                    // not only `attempted_state: Some`, keeps the walk
+                    // fail-closed should `step` ever report another shape.
+                    if let Some(violation) = &abs_step.violation {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let mut failure = refinement_failure(
+                            "abs_step_violation",
+                            Some("step"),
+                            step + 1,
+                            &child_trace,
+                            Some(alpha_before.clone()),
+                            None,
+                            Some(alpha_after.clone()),
+                        );
+                        failure.abs_violation = Some(violation.clone());
+                        failure.alpha_after_attempted = abs_step
+                            .attempted_state
+                            .as_ref()
+                            .map(|attempted| project_abstract_state(attempted, abstraction))
+                            .transpose()?;
+                        check.failure = Some(failure);
                         return Ok(check);
                     }
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
@@ -4339,6 +4388,8 @@ mod refinement_verdict_precedence {
             alpha_before: None,
             alpha_after_expected: None,
             alpha_after_actual: None,
+            abs_violation: None,
+            alpha_after_attempted: None,
             impl_trace: Vec::new(),
         }
     }
