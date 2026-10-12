@@ -5,6 +5,443 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.10.0] - 2026-10-12
+
+- Added (#1201, #1202): `fsl_core::obligation::catalog`, a solver-free list of the
+  obligations a model owes -- one row per authored site and aspect (type bounds,
+  `invariant`/`trans`/`reachable`/`leadsTo` truth and definedness, `terminal`
+  definedness, action guard/body/`ensures` definedness and `ensures` truth,
+  `init` satisfiability, deadlock freedom), each marked when it is statically
+  vacuous. Rows come from the model's declarations rather than from engine
+  output, so a check no engine performs still has a row. Nothing reads the
+  catalog yet; CLI, Worker and Public Kernel output are unchanged. See
+  `docs/design/DESIGN-obligation-catalog.md`.
+- Added (#1202, #1221): the obligation catalog also lists `leadsTo` deadlines,
+  the ranking-proof rows of a `decreases` clause (measure definedness, lower
+  bound, no deadlock, one step row per action, and the `helpful` fairness and
+  stickiness rows), and two model-definedness rows on every site: `NoOverflow`
+  for `i64` overflow and `KeyInDomain` for a `Map` index outside its finite key
+  domain. A `KeyInDomain` row is marked statically vacuous only when every value
+  the index can take lies inside the key type, judged from the index forms a
+  declaration bounds rather than from the type `check` infers, and provided the
+  state satisfies its type bounds. CLI, Worker and Public Kernel output are
+  unchanged.
+- Added (#1237): `fslc mutate --fail-on-survivors` and `--min-kill-rate R` make a mutation run usable as a CI gate. Either flag adds a `gate` object (`fail_on_survivors`, `min_kill_rate`, `judged`, `survived`, `kill_rate`, `dropped`, `violations`, `passed`) to the envelope; `result` stays `mutated` and the run exits 1 when `gate.passed` is false. `--fail-on-survivors` fails on any judged survivor; `--min-kill-rate R` (a number in `[0, 1]`, otherwise a usage error) fails unless the published four-decimal `summary.kill_rate` is `>= R`. A run that judged no mutant fails either flag with `no_judged_mutants` rather than passing on no evidence; built-in mutants dropped by `--max-mutants` are recorded as `gate.dropped` and do not fail the gate. Without either flag the output and exit code are unchanged, and a baseline that does not verify is still re-emitted with its own exit code. Equivalent-mutant exclusion is not part of this change.
+- Changed (#1226): an invocation that passed `--instances` / `--values` naming
+  something a `requirements` / `business` document does not declare as `entity` /
+  `number` (including a raw `type X = lo..hi` range) used to run with exit 0/1
+  and report the verdict of a model the override did not shrink as asked — the
+  name was dropped, or, for a raw range `X` that types a requirements process
+  field, the override's `lo` replaced the field's default initial value (so
+  `--values X=0..1` could flip the verdict); it now fails with exit 2 before
+  verification. Migration: override only declared `entity` / `number` / `process`
+  names; to shrink a raw range, declare it as `number X` with
+  `verify { values X = lo..hi }` and override that, or edit the `type` bounds.
+  Separately, `fslc diff` on a `requirements` document whose `verify` block
+  carries `values X = a..b` for a raw `type X = lo..hi` that types a `process`
+  field, when the scope changed, no longer reports a false `behavior_removed`
+  (`old_to_new` `refinement_failed`). It used to forward `X` to the re-scoped old
+  model resolved to the type's `lo..hi`, which moved the field's default initial
+  value from `a` to `lo`; the re-scoped old model now keeps the document's own
+  bound, so only the real differences are reported. Specs without such a field
+  diff as before.
+- Changed (#1234), **breaking for stored `fslc analyze` node IDs of compose
+  specs**: a compose component action now has one public name, `alias.action`,
+  built from the `use` alias and the action name, so `use X as a__b` with action
+  `c` is `a__b.c` (it was `a.b__c`, and some outputs printed the internal
+  `a__b__c`), matching the frozen Python reference. Every command that names a
+  component action uses it: verify on every engine (traces, `action_coverage`,
+  `action_profile`, `cost.properties[].name`, vacuity warnings, induction CTIs,
+  and the BMC `semantics` error `action 'bank.settle' body evaluation has a
+  non-partial failure`, likewise for `guard` and `ensures`; it printed `bank__settle`),
+  sweep, scenarios, explain, testgen, conformance, mutate, refine, diff, html,
+  ledger, analyze, the `untagged` warnings of `check --strict-tags`, and
+  `fslc replay`, including names built from the action such
+  as `_requires_failed_bank.settle` and `_partial_bank.settle` (a guard partial
+  operation's `_partial_op_` prefix becomes `_partial_` in the same release,
+  #1244). Lists keyed by these names (`reachables`,
+  `action_coverage`, `action_profile`, induction `k_used`, `cost.properties`,
+  scenarios `reach_*` and `respond_*`, the leadsTo warnings of `fslc scenarios`,
+  refine `action_map` and `progress`, and the ai-review
+  conservation findings) are ordered by the name they print, so `acct.go` sorts
+  before `acct2.go`, and a glue action `z__a`, printed `z.a`, sorts before the
+  component action `z.b`. `fslc refine` success output now prints `action_map`
+  keys and values as `a__b.go` (the keys were `a.b__go`) and `progress.*.actions`
+  as `acct.back` (it was the internal `acct__back`). A v1 replay trace can now write
+  `bank.settle`, the name testgen emits, so a generated test's actions replay
+  `conformant` instead of failing with `bad_call`. v1 replay still accepts the
+  older `bank__settle` for the same action, looked up in the model's table of
+  component actions rather than rewritten; sync actions and non-compose actions
+  such as `foo__bar` keep exact-name matching. `fslc replay --from-log` with a
+  `maps auto` mapping matches a log action written `a__b.c` as well as the
+  `a.b__c` it matched before. Replay's `state_mismatch.action`
+  and `bad_call.action` report `bank.settle` where they used to echo
+  `bank__settle`. The breaking part: in `fslc analyze` output (the default graph,
+  `--profile ai-review`, and `--export tag-review`), the node IDs of a component
+  action and of its requires, effect, and ensures clauses move from
+  `action:bank__settle`, `guard:bank__settle:0`, `effect:bank__settle:0`, and
+  `ensures:bank__settle:0` to `action:bank.settle`, `guard:bank.settle:0`,
+  `effect:bank.settle:0`, and `ensures:bank.settle:0`, and edge IDs and endpoints
+  follow. The `name` field of those nodes moves the same way (`bank__settle` to
+  `bank.settle`, `bank__settle:0` to `bank.settle:0`), and with alias `a__b` their
+  `label` spells the action `a__b.c` instead of `a.b__c` (`a__b.c requires 0`).
+  `--export tag-review` prints a component
+  action's `name` as `bank.settle`, and an `undecided:` record of a component
+  action, shown by `html`, `ledger`, and `--profile ai-review`, has
+  `declaration` `action bank.settle` and `node` `action:bank.settle`. In the
+  project `traceability_graph` projection of `fslc analyze <manifest>`, a
+  refinement's `action_map:` and `stutter_map:` node IDs and labels and its
+  `maps_action` endpoints use the same name (`design:action:bank.settle`), so
+  every edge ends at a node the graph declares; before, a compose layer left
+  edges ending at undeclared `action:bank__settle` nodes, dropped the
+  `lower_anchor` edges from requirements covering an abstract component action,
+  and reported a spurious `traceability_gap`. All of these IDs now differ from
+  the frozen Python reference, which keeps `action:bank__settle`; this is
+  intended. To migrate, rewrite stored node IDs and `--focus` arguments from
+  `alias__action` to `alias.action`: `--focus action:bank.settle` already
+  resolved for an alias without `__` and keeps resolving, while
+  `--focus action:bank__settle` now fails with "unknown analyze focus node"
+  (exit 2). State and property node IDs are unchanged. `fslc document` claim
+  IDs and fingerprints are unchanged, because the document projection rejects
+  compose specs. For a compose spec, `fslc testgen` now lists the keys of each
+  scenario's expected state in state declaration order (`bank.cleared`,
+  `bank.pending`, `audit.balance`, `audit.log`, `withdrawn` for
+  `specs/bank_system.fsl`) in the vitest, swift, kotlin, dart, and phpunit
+  scaffolds, as pytest already did; they used to list the compose spec's own
+  state first and component state after it in name order. The values and the
+  partial-match check are unchanged, so a generated test passes or fails as
+  before. Non-compose specs change in two corner cases. A keyed list now
+  orders a name containing `__` by the `.` form it prints, so `step__a`
+  (printed `step.a`) sorts before `step2`; it sorted after. `fslc testgen` now
+  accepts a state whose name has two `__` separators, such as `a__b__c`
+  (printed `a.b__c`), and generates every target; it failed with "testgen
+  concrete vector.initial has unknown state fields: a.b__c" (exit 2). Every other non-compose output is unchanged.
+- Changed (#1244), **breaking for stored `fslc conformance` and `fslc replay`
+  output**: a partial operation reached in an action's guard (`requires` or
+  `let`, such as `requires 2 / x >= 0` with `x == 0`) is now named
+  `_partial_<action>` by `conformance` (`vectors[].outcome.name`) and `replay`
+  (`violation.name`), the name `verify` already gave it on every engine and the
+  name a body partial operation already had everywhere. It was
+  `_partial_op_<action>`, so the same failure could not be matched between a
+  conformance vector and the verify result for one spec. For a compose
+  component action the name is `_partial_alias.action` (#1234), such as
+  `_partial_bank.settle`; it was `_partial_op_bank__settle` in `conformance`
+  and `_partial_op_bank.settle` in `replay` (`_partial_op_a.b__c` for alias
+  `a__b` and action `c`). The `kind` stays `partial_op`. To migrate,
+  rewrite stored conformance vectors, replay results, or test expectations
+  from `_partial_op_<action>` to `_partial_<action>`.
+- Changed (#1251), **breaking for `fslc mutate` consumers that read `status`
+  or `summary`**: a mutant the oracle could not judge is no longer
+  counted as killed. Z3 not being creatable (previously `killed_by:"internal"`),
+  a BMC call the solver could not decide (solver `unknown`, a backend failure, or
+  an unreadable model; previously `killed_by:"build_spec"` for built-ins and
+  `invalid` for external mutants), and an acceptance/forbidden or implements
+  oracle error (previously the error text, or `refinement`, as the built-in
+  killer and `invalid` for external mutants) now give `status:"error"`,
+  `killed_by:null`, and `error:{stage,message}` with `stage` one of `solver`,
+  `bmc`, `requirements`, `implements`. These mutants are excluded from both
+  sides of `kill_rate`, counted in the new `summary.errored` (also per source in
+  `summary.by_source`; like #1262's `summary.inconclusive`, the key appears only
+  when non-zero, so a fully decided run's envelope is unchanged), and listed in a
+  note. With `--fail-on-survivors` or
+  `--min-kill-rate`, any such mutant adds the gate violation `oracle_errors` and
+  the `gate.errored` count (when non-zero), so the gate fails closed (exit 1); without a gate
+  the exit code is unchanged. A BMC rejection that is a finding about the mutant
+  (for example an action body undefined in a reachable state) is still the
+  `build_spec` kill. A built-in mutant that does not lower/build is now
+  `invalid` with `invalid:{kind:"semantics",message}`, as an external one
+  already was, instead of a `build_spec` kill. `error` stays distinct from #1262's budget `inconclusive`; for one mutant
+  `killed` > `error` > `inconclusive` > `survived`, decided in one place for
+  built-in and external mutants. An implements oracle error is now `error`
+  instead of a `refinement` kill (an impl parameter or key domain that differs
+  from the abstraction's is a refinement verdict, `map_out_of_bounds`, not an
+  error; see #1295). The `_bounds_<state>` attribution
+  for a removed init assignment, which used to overwrite every outcome of such
+  a mutant, now applies only to a judged one: a kill (including a semantic
+  `build_spec` kill) or a survivor is re-attributed to `_bounds_<state>` as
+  before, while an oracle error (including the former `internal`) keeps
+  `status:"error"` and a mutant that does not build stays `invalid`. The
+  verifier marks solver failures with `VerifyError::is_solver_failure`.
+  Migration: read `summary.errored` / `status:"error"` alongside
+  `killed`/`survived`/`invalid` (`total` = `killed + survived + invalid +
+  errored + inconclusive`, absent counts read as 0); a gated run that now fails with `oracle_errors` had mutants whose
+  kills were never established — rerun, or fix the
+  oracle error reported in `error.message`.
+- Fixed (#1021): `fslc html` drew a `verify` result outside a short hand list
+  as a neutral `info` badge, so `unknown_budget` and `error` looked harmless in
+  the report. The Result badge (hero summary and status section) now has an
+  explicit class for every verdict `verify` publishes: `verified` and `proved`
+  are `ok`; `violated`, `reachable_failed`, `refinement_failed`,
+  `impl_violated`, and `error` are `bad`; `unknown_cti` and `unknown_budget`
+  are `warn`. Any other value, or a missing `result`, is drawn as a `bad` badge
+  that reads `<value> (unrecognized verdict)` instead of a neutral one, so a
+  verdict added later without a class shows up in the report. A test in `fslc`
+  checks each listed verdict's class against `outcome_class`, the vocabulary's
+  owner, which `fsl-tools` cannot see. Coverage markers and witness `kind`
+  badges are unchanged. The `unknown_budget`, `error`, and unrecognized-value
+  badges now differ from the frozen Python reference, which draws them `info`;
+  this is intended. JSON output and exit codes are unchanged.
+- Fixed (#1190): `fslc kernel` failed with `semantics: public Kernel cannot type
+  identifier 'k'` on a statement-level `forall k: K { … }` whose body had a
+  partial operation that read the binder (`m[k] = s.at(k)`, `m[k] = 1 / (k + 1)`,
+  or a correctly guarded `m[k] = if k < s.size() then s[k] else 0`), although
+  `verify` and `explain` handled the same spec. The Public Kernel's
+  `partial_operations` now expands a statement-level `forall` like a quantifier:
+  one entry per candidate for each partial operation in the body and in the
+  binder's `where` (previously not listed at all), with the binder replaced by
+  the candidate and the failure condition guarded by the candidate's membership
+  and `where`. A `forall` body operation that does not read the binder, which
+  was listed once with an unguarded failure condition, is now listed once per
+  candidate. A statement-level `forall` with no partial operation in its
+  binder, `where` or body is still not expanded and lists nothing, so
+  `forall k in 0..x { m[k] = 1 }` with a non-constant bound keeps producing a
+  Kernel. One that does have a partial operation now needs constant bounds,
+  like a quantifier: `forall k in 0..x { m[k] = 2 / x }`, which used to list
+  the division once unguarded, now fails with `'x' is not an integer const`
+  (the BMC engine already rejected it the same way). Commands built on the
+  Public Kernel (`testgen`, `testplan`, `document`) no longer stop with the
+  "cannot type identifier" error. Verification verdicts are
+  unchanged, and no spec or fixture in the repository corpus changes its
+  `fslc kernel` output.
+- Fixed (#1191): a partial operation reached in an action's `requires` or `let`
+  (`requires s.head() == 0` or `let h = s.head()` on an empty sequence,
+  `requires 2 / x == 0` with `x == 0`) made `verify --engine explicit`, the
+  default `auto` engine, and `verify --engine bmc` on a deterministic init return
+  `result: error, kind: semantics` (exit 2) with the raw evaluation message. They
+  now report `violated` / `partial_op` / `_partial_<action>` (exit 1) with the
+  same replayable trace the symbolic engine already gave for a nondeterministic
+  init, as `docs/manual/LANGUAGE.md` §6 states. The `loc` of such a guard
+  `partial_op` is now, in every engine, the span the Public Kernel's
+  `partial_operations` gives that site: the `requires` clause, or the action for
+  a `let`. It used to be the action body's first statement, or `null` for an
+  action without a body (`rust/fslc/tests/fixtures/replay_trace.fsl`'s `partial`
+  now reports line 27). A `partial_op` in the body keeps its location. The concrete
+  action enumeration that explicit, Monitor BFS, the BMC/Worker boundary pre-pass,
+  refinement's self-violation walk, `scenarios`' cover and response walks, and
+  trace replay share no longer aborts on such a guard: it is that action's
+  `partial_op`, is not a deadlock, and is skipped by walks that only follow
+  successful steps. Commands that take a `verify` baseline follow it: `fslc
+  ledger` on such a spec now exits 1 and lists the `partial_op` row instead of
+  exiting 2 over a ledger that claimed nothing was detected
+  (`rust/fslc/tests/fixtures/replay_trace.fsl`). A spec whose guards never reach
+  a partial operation is unchanged.
+- Fixed (#1226): `verify` / `sweep` `--instances NAME=N` / `--values NAME=LO..HI`
+  on a `requirements` or `business` document accepted a `NAME` the document does
+  not declare as `entity` / `number` — a typo, or the name of a raw
+  `type X = lo..hi` range — and echoed it under `bounds_overrides`. The name was
+  dropped, so `--values X=0..2` returned a verdict over the full declared domain
+  of `X`, except that for a raw range typing a requirements `process` field the
+  override's `lo` silently became the field's default initial value. The
+  native CLI now rejects such a name as `docs/manual/LANGUAGE.md` and the frozen
+  Python reference already did: `result: "error"`, `kind: "semantics"`,
+  `verify instances references undeclared entity 'NAME' at 1:1` /
+  `verify values references undeclared number 'NAME' at 1:1`, exit 2 — the same
+  message a kernel `spec` already produced. A requirements `process` name counts
+  as an entity (it is one after lowering), and the business dialect, which has no
+  `number`, rejects every `--values`. Kernel `spec` behavior and every override
+  of a declared name are unchanged. `fslc diff`, which forwards a document's own
+  `verify` bounds to the re-scoped old model, now forwards only the declared
+  names; this changes its output only for a raw range typing a requirements
+  `process` field (see the Changed entry).
+- Fixed (#1246): the impl self-consistency precondition that runs before every
+  refinement correspondence check (`fslc refine` single and chain, the
+  `fslc chain` refine layer, an inline `implements` seam in `check`/`verify`,
+  governance preservations, `fslc diff`, `fslc mutate`'s implements oracle) now
+  stops at the same 50,000-state budget as the correspondence check (#1041).
+  It walked the whole reachable set unbounded first, so #1041's original
+  reproducer still aborted above 6 GB; it now reports `unknown_budget`
+  (exit 1, `states_explored: 50000`) at about 1.2 GB. A precondition cutoff is
+  reported exactly as a correspondence cutoff, through the same consumers.
+  Migration: an impl whose reachable set within the depth reaches 50,000 states
+  now reports `unknown_budget` even where it used to report a decided result
+  because the unbounded precondition happened to fit in memory — a
+  self-violation found beyond the first 50,000 states (`violated` /
+  `impl_violated`), or a correspondence failure the walk found before its own
+  budget (`refinement_failed`). Lower the depth or narrow both layers'
+  `verify {}` domains. `fslc diff` and `fslc mutate` read this cutoff as they read a
+  correspondence cutoff (#1262): where they used to report a self-violation
+  found past the budget (`impl_violated` / killed), `fslc diff` now reports an
+  `unknown_budget` direction that fails its gate, and `fslc mutate` reports the
+  mutant as `inconclusive`.
+- Fixed (#1258): `verify --engine bmc` reported `verified` and `--engine
+  induction` reported `proved` (exit 0) for a spec whose `init` reaches a
+  failing operation, e.g. `init { d = 0  x = 6 / d }` or a finite `Map` read
+  outside its key domain, while `--engine explicit` stops on the same spec with
+  `division by zero` (exit 2). The symbolic init encoding totalized those
+  operations, and a failing deterministic init also disabled the concrete
+  pre-pass; a nondeterministic init never had it. BMC (and so the induction
+  base case, every `verify_bounded` caller, and the browser Worker) now asks
+  after the search whether init is defined: a `/`/`%` by zero, a partial `Seq`
+  operation, a `Map` key outside its domain (read or assignment target), or
+  checked i64 overflow that init evaluation reaches is a `kind: "semantics"`
+  error, exit 2, whose message names the failure with the explicit engine's
+  wording and the init statement, e.g. `division by zero in init at 9:5`. It
+  supersedes the search's verdict. An operation on the unreached side of an
+  init `if`, conditional, or `and`/`or`/`=>` stays defined, and the step-0
+  type bounds the search asserts are assumed, as before. An init overflow that
+  used to surface as `integer model value is unavailable` now reads e.g.
+  `integer overflow in multiplication in init at 9:5`.
+
+  Migration: a spec that was `verified`/`proved` only because of this defect
+  now exits 2; guard the init operation with an init `if` (or fix the initial
+  value). No spec under `specs/`, `examples/`, or the test fixtures changes
+  verdict, exit code, or message. When init contains an operation that can fail,
+  `cost.properties` gains one `{"kind": "init", "name": "definedness"}` entry
+  (and `cost.solver.checks` counts it); an init with nothing that can fail builds
+  no solver term and asks nothing, so its output is byte-identical.
+  `fslc kernel`'s `partial_operations` and `fslc explain`'s `auto_checks` still
+  list action sites only.
+- Fixed (#1260): `fslc kernel` listed a partial operation in the body of a
+  statement-level `if` with an unguarded failure condition, so for
+  `if gate { y = 2 / x }` it printed `x == 0` although the division is never
+  evaluated when `gate` is false (verify and the runtime already agreed it is
+  not). The Public Kernel's `partial_operations[].failure_condition` is now
+  guarded by the `if` condition, `gate and x == 0`, as an expression-level
+  `if-then-else` already was; an operation in the `else` branch is guarded by
+  `not gate`, and nested statement `if`s and `forall`s stack their guards
+  (`forall k: K { if k > 0 { m[k] = 2 / x } }` lists one entry per candidate,
+  each guarded by `k > 0` with `k` replaced by the candidate). An operation in
+  the `if` condition itself stays unguarded by it. Kernel consumers that read
+  `failure_condition` (`testgen`, `testplan`, `document`) see the narrower
+  condition. Verification verdicts are unchanged, and no spec or fixture in
+  the repository corpus changes its `fslc kernel` output.
+- Fixed (#1262), **breaking for `fslc diff` / `fslc mutate` consumers**: `fslc diff`
+  and the `fslc mutate` implements oracle no longer treat a refinement
+  correspondence check cut off by its fixed state budget (50,000 states, #1041)
+  as a pass. A `fslc diff` direction that hits the budget now reports
+  `result: "unknown_budget"` with `states_explored` (no `checked_to_depth`)
+  instead of `refines`, and the diff adds an `unknown_budget` finding (also in
+  `summary`) that fails the gate whatever `--forbid` says, like `impl_violated`;
+  `fslc diff --git` and `fslc approval diff` report the same and exit 1. Before,
+  both directions of such a diff could report `refines`, giving
+  `no_semantic_change` / exit 0 even under `--forbid behavior_removed` when the
+  difference lay beyond the budget. A `fslc mutate` mutant whose implements check
+  hits the budget is now `status: "inconclusive"` with
+  `inconclusive: {"reason": "unknown_budget", "states_explored": N}` and
+  `killed_by: null`, instead of `survived`; it is excluded from `kill_rate`,
+  counted in `summary.inconclusive` and `summary.by_source.*.inconclusive`
+  (present only when non-zero), and fails a requested `--fail-on-survivors` /
+  `--min-kill-rate` gate with the violation `inconclusive` (`gate.inconclusive`
+  carries the count). `RefinementCheck`'s fields are now private: Rust callers of
+  `fsl_runtime::check_refinement` read the outcome through `verdict()` and the
+  names/depth/action map through accessors. Migration: a diff that used to exit 0
+  with `no_semantic_change` on budget-scale specs now exits 1 with
+  `unknown_budget`; lower `--depth` or narrow both specs' `verify {}` domains. A
+  mutate consumer that assumed every mutant is `killed`, `survived` or `invalid`
+  must handle `inconclusive`; runs without a cut-off mutant print exactly the same
+  JSON as before.
+- Fixed (#1283): when an enum-valued state was left unconstrained (for example
+  its `init` assignment removed), `fslc verify --engine bmc` could fail with
+  `error` / `semantics` `negative enum ordinal in solver model` (exit 2) instead
+  of reporting the `_bounds_<state>` type-bound violation, depending on which
+  ordinal the solver picked. The counterexample projection now keeps a negative
+  ordinal as a raw integer witness, exactly like an ordinal past the last
+  member, so the run reports `violated` / `_bounds_<state>` (exit 1). In
+  `fslc mutate`, the same failure no longer surfaces as `build_spec`: the
+  built-in `assignment_remove` of such an init line no longer lists
+  `"build_spec"` in `--oracle-attribution` `killers`, and the equivalent
+  external mutant is now `killed` by `_bounds_<state>` instead of `invalid`, so
+  built-in and external verdicts agree. (Which outcomes the built-in
+  init-assignment special case re-attributes to `_bounds_<state>` is described
+  under #1251.)
+  Migration: a spec that relied on the previous `error` exit 2 for this shape
+  now gets `violated` exit 1.
+- Fixed (#1295): `fslc refine`, `fslc verify`'s inline `implements`, and the
+  `fslc mutate` implements oracle stopped with `result:"error"` / `kind:"type"`
+  (exit 2) instead of a refinement verdict when the impl's domain differed from
+  the abstraction's: an action-correspondence argument outside the abstract
+  action's declared parameter domain (an impl parameter type wider than the
+  abstraction's: "parameter 'v' does not belong to its declared domain for
+  action 'push'"), or a state-mapping expression that reads an impl `Map` at a
+  key outside its finite key domain (for example an impl key type narrower than
+  the abstraction's: "map index outside finite key domain"). Both are now
+  `refinement_failed` / `kind:"map_out_of_bounds"` (exit 1) at the step or
+  `init` where they occur, the kind already documented for a shrunken impl
+  against a full-size abstract. The documented check order is kept: a false
+  abstract guard is still `abs_requires_failed`, and a stutter or action
+  mapping's own checks run before the escape is reported. A `Seq` index out of
+  range in a mapping, a `Map` read outside its domain in an
+  action-correspondence argument, and other abstract-guard evaluation errors
+  still stop with an error.
+  In `fslc mutate`, a `type_bound_*` mutant that widens or narrows such a type is
+  killed by `refinement` as before, and `--oracle-attribution` now lists
+  `refinement` among its `killers` (the attribution pass used to drop the error
+  and list none). Migration: a spec whose `refine`/`verify` exited 2 with one of
+  these messages now exits 1 with a located `map_out_of_bounds` finding; align
+  the impl's parameter or key type with the abstraction's, or map it explicitly.
+- Fixed (#1296): a refinement whose corresponded abstract action hits a partial
+  operation in its own body at the mapped state (`action go() { y = 4 / y }`
+  reached at `y = 0`, or `s.pop()` on an empty `Seq`) was reported as `refines`
+  (exit 0) whenever the impl step left the mapped state unchanged, and as
+  `abs_state_mismatch` with the unchanged pre-state shown as
+  `abs_after_expected` when it changed it: the abstract step's `partial_op` was
+  recorded and then ignored. It is now
+  `refinement_failed` / `kind:"abs_partial_op"` (exit 1) at that step, with
+  `abs_before` / `abs_after_actual` and no `abs_after_expected` (the abstraction
+  has no defined successor there). Every consumer of the refinement verdict
+  reports it: `fslc refine`, `fslc check` / `fslc verify` inline `implements`
+  (`implements.violation.kind`), `fslc diff` (the direction whose abstraction is
+  partial), governance preservations (native and Worker: only
+  `governance.preservations[].result` becomes `"refinement_failed"`; the
+  top-level `result` and the exit code of `fslc check` on the governance file
+  are unchanged, as for any other failed preservation), and the `fslc mutate` implements oracle, which now kills a mutant
+  that reaches such a state (`killed_by:"refinement"`). A false abstract guard
+  is still `abs_requires_failed`, and the stutter, guard, and out-of-domain
+  checks keep their order. `abs_partial_op` is a new `kind` value; a consumer
+  that matches on the documented kind list should add it. Migration: a spec or
+  mapping that `refines` today may now fail with `abs_partial_op`; guard the
+  abstract action (`requires y != 0`) or make its body total, or keep the impl
+  from invoking it in that state; a refinement that failed with
+  `abs_state_mismatch` for this reason now reports `abs_partial_op` instead.
+  The other violations
+  the abstract step reports -- an abstract `ensures` that is false, a partial
+  operation inside an abstract `ensures` or post-state check (`Seq` operations; `/` `%` are total there), a post-state
+  type-bound violation, and an abstract invariant (or `trans`) violation -- are
+  not `abs_partial_op` but `abs_step_violation` (#1302). An abstract guard
+  or leading `let` whose evaluation fails (for example `let q = 4 / y`) still
+  stops with `result:"error"` (exit 2).
+- Fixed (#1302): a refinement whose corresponded abstract step is rejected by
+  the abstraction itself — the successor violates an abstract type bound
+  (`action go() { y = y + 5 }` with `y: 0..4`), an abstract invariant or
+  `trans`, the abstract action's `ensures` is false, or a post-state check
+  (`Seq` operations; `/` `%` are total there) or `ensures` hits a partial operation (`ensures 4 / y == 0` at `y = 0`) — was
+  reported as `refines` (exit 0) whenever the impl step left the mapped state
+  unchanged, and as `abs_state_mismatch` with the rolled-back pre-state shown as
+  `abs_after_expected` when it changed it. It is now `refinement_failed` /
+  `kind:"abs_step_violation"` (exit 1) at that step, with `abs_violation`
+  (`{"kind", "name"}` of the abstract violation: `type_bound` / `invariant` /
+  `trans` / `ensures` / `partial_op`), `abs_after_attempted` (the successor the
+  abstraction rejected), and no `abs_after_expected`. Every consumer of the
+  refinement verdict reports it: `fslc refine`, `fslc check` / `fslc verify`
+  inline `implements` (`implements.violation.kind`), `fslc diff` (the failing
+  direction, with `abs_violation`), governance preservations (native and
+  Worker: only `governance.preservations[].result` becomes
+  `"refinement_failed"`; the top-level `result` and the exit code of `fslc
+  check` on the governance file are unchanged, as for any other failed
+  preservation), and the `fslc mutate`
+  implements oracle, which now kills a mutant that reaches such a step
+  (`killed_by:"refinement"`). The `refines` note for an abstraction with
+  `ensures` now reads "abs ensures are checked only on the abstract steps the
+  impl's transitions correspond to within checked_to_depth; verify/prove the
+  abstract spec separately". `abs_step_violation`, `abs_violation` and
+  `abs_after_attempted` are new; a consumer that matches on the documented kind
+  list or on the note text should add or update them. Migration: a refinement
+  that `refines` today may now fail with `abs_step_violation`; the abstract-side
+  conditions now checked on every corresponded step are the abstract type
+  bounds, invariants and `trans` at the abstract successor, and the abstract
+  action's `ensures` (including partial operations in any of them; in the invariants and `trans`
+  only `Seq` operations can be partial, as `/` `%` are total there). Fix the
+  abstract action (or its `ensures` / invariant) or keep the impl from invoking
+  it in that state; a refinement that failed with `abs_state_mismatch` for this
+  reason now reports `abs_step_violation` instead. A false abstract guard is
+  still `abs_requires_failed`, a body partial operation still `abs_partial_op`,
+  and an abstract guard whose evaluation fails is unchanged.
+- Unified (#1201): the verifier's per-action partial-operation candidate check
+  (`action_has_partial_operation_candidate`) moved unchanged into `fsl-core`, next
+  to the partial-operation inventory, so the verifier and the obligation catalog
+  decide whether an action can reach a partial operation with one function.
+  Verification output is unchanged.
+
 ## [4.9.0] - 2026-10-07
 
 - Added (#1082): every release now carries a signed packslip manifest, so mise can install the commands and the Agent Skills together. `mise use packslip:github.com/ymm-oss/fsl/fslc` fetches the skills declared there, and `mise skills sync` links them where an agent reads them, per project and per pinned version. The manifest declares every directory under `skills/` at the release commit, so the shipped set cannot drift from the source tree. The release workflow signs it with its own identity, and asserts the platform each artifact name claims before the release is made public.
@@ -6826,7 +7263,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.9.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.10.0...HEAD
+[4.10.0]: https://github.com/ymm-oss/fsl/compare/v4.9.0...v4.10.0
 [4.9.0]: https://github.com/ymm-oss/fsl/compare/v4.8.1...v4.9.0
 [4.8.1]: https://github.com/ymm-oss/fsl/compare/v4.8.0...v4.8.1
 [4.8.0]: https://github.com/ymm-oss/fsl/compare/v4.7.0...v4.8.0
