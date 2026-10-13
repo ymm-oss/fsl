@@ -155,13 +155,6 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-runtime/src/lib.rs",
-        2234,
-        "first_self_violation",
-        ResultOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fsl-runtime/src/lib.rs",
         3199,
         "record_reachables",
         ResultOption
@@ -230,10 +223,31 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
+        Ordinary,
+        "rust/fsl-runtime/src/lib.rs",
+        3656,
+        "evaluate_action_guards_at",
+        ResultOption
+    ),
+    entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
-        373,
-        "check_action_definedness",
+        421,
+        "check_definedness",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        510,
+        "init_definedness_failure",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        524,
+        "first_init_failure",
         ResultOption
     ),
     entry!(
@@ -332,6 +346,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-core/src/dialect.rs",
         3311,
         "verify_scope_type_names",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/model.rs",
+        419,
+        "resolve_replay_action",
         ResultOption
     ),
     entry!(

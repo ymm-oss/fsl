@@ -986,13 +986,21 @@ fn extend_path_condition(path: Option<&Expr>, condition: &Expr, negated: bool) -
     })
 }
 
+/// `replacements` maps every enclosing statement-level `forall` binder to the
+/// candidate being expanded, and `path_condition` is that expansion's
+/// membership-and-`where` guard, so every listed failure condition is closed
+/// and fires only for a candidate the `forall` actually visits (#1190).
+#[allow(clippy::too_many_arguments)]
 fn statement_partial(
     statement: &Statement,
     env: &TypeEnv,
     model: &KernelModel,
     path: &str,
+    replacements: &HashMap<String, Expr>,
+    path_condition: Option<&Expr>,
     output: &mut Vec<Value>,
 ) -> Result<(), PublicKernelError> {
+    let closed = |expr: &Expr| crate::substitute_expr(expr.clone(), replacements);
     match statement {
         Statement::Assign {
             target,
@@ -1005,13 +1013,29 @@ fn statement_partial(
                 match target {
                     LValue::Var(_) => break,
                     LValue::Index(_, index) => {
-                        walk_partial(index, env, model, path, *span, None, output)?;
+                        walk_partial(
+                            &closed(index),
+                            env,
+                            model,
+                            path,
+                            *span,
+                            path_condition,
+                            output,
+                        )?;
                         break;
                     }
                     LValue::Field(base, _) => target = base,
                 }
             }
-            walk_partial(value, env, model, path, *span, None, output)?;
+            walk_partial(
+                &closed(value),
+                env,
+                model,
+                path,
+                *span,
+                path_condition,
+                output,
+            )?;
         }
         Statement::If {
             condition,
@@ -1019,18 +1043,60 @@ fn statement_partial(
             else_statements,
             span,
         } => {
-            walk_partial(condition, env, model, path, *span, None, output)?;
-            for item in then_statements.iter().chain(else_statements) {
-                statement_partial(item, env, model, path, output)?;
+            // The condition is evaluated on every path; each branch body only
+            // on the paths that take it, so its failures are guarded by the
+            // condition, negated for `else`, as an expression `if` is (#1260).
+            let condition = closed(condition);
+            walk_partial(&condition, env, model, path, *span, path_condition, output)?;
+            for (statements, negated) in [(then_statements, false), (else_statements, true)] {
+                let branch = extend_path_condition(path_condition, &condition, negated);
+                for item in statements {
+                    statement_partial(item, env, model, path, replacements, Some(&branch), output)?;
+                }
             }
         }
         Statement::ForAll {
-            statements, span, ..
+            binder,
+            statements,
+            span,
         } => {
-            for item in statements {
-                statement_partial(item, env, model, path, output)?;
+            // Expanded exactly like a quantifier (`walk_quantified_partial`):
+            // one term per finite candidate, the binder's range/collection and
+            // `where` walked under the enclosing guard, the body under the
+            // candidate's own membership-and-`where` guard.
+            //
+            // A `forall` with nothing to list is not expanded at all, so its
+            // range need not be statically finite: `forall k in 0..x { m[k] =
+            // 1 }` lists nothing, as before #1190. With a partial operation, a
+            // non-constant range fails closed like a quantifier's.
+            if !crate::partial_operation::statement_has_partial_operation(statement, env, model) {
+                return Ok(());
             }
-            let _ = span;
+            let binder = crate::substitute_binder(
+                binder.clone(),
+                replacements,
+                &crate::IndexedReplacements::new(),
+            );
+            let (name, candidates, filter) = finite_binder_candidates(&binder, env, model)?;
+            for (candidate, membership) in candidates {
+                let selected = HashMap::from([(name.clone(), candidate.clone())]);
+                let effective = aggregate_condition(membership, filter.as_ref(), &selected);
+                walk_partial(&effective, env, model, path, *span, path_condition, output)?;
+                let body_condition = extend_path_condition(path_condition, &effective, false);
+                let mut inner = replacements.clone();
+                inner.insert(name.clone(), candidate);
+                for item in statements {
+                    statement_partial(
+                        item,
+                        env,
+                        model,
+                        path,
+                        &inner,
+                        Some(&body_condition),
+                        output,
+                    )?;
+                }
+            }
         }
     }
     Ok(())
@@ -1535,6 +1601,8 @@ pub fn public_kernel_contract(
                     &local,
                     model,
                     source_path,
+                    &HashMap::new(),
+                    None,
                     &mut partial,
                 )?;
             }
@@ -1730,6 +1798,90 @@ mod tests {
         assert_eq!(
             partial["failure_condition"]["left"]["operand"]["name"],
             "gate"
+        );
+    }
+
+    /// A failure condition rendered as text: variables, literals, `not`, and
+    /// binary operators, each binary fully parenthesized.
+    fn render(expr: &Value) -> String {
+        match expr["kind"].as_str() {
+            Some("var") => expr["name"].as_str().expect("var name").to_owned(),
+            Some("num" | "bool") => expr["value"].to_string(),
+            Some("not") => format!("not {}", render(&expr["operand"])),
+            Some("binary") => format!(
+                "({} {} {})",
+                render(&expr["left"]),
+                expr["operator"].as_str().expect("binary operator"),
+                render(&expr["right"])
+            ),
+            other => panic!("unexpected expression kind {other:?}: {expr}"),
+        }
+    }
+
+    /// Every rendered failure condition of the only action of `spec S`, whose
+    /// state is `gate: Bool, x: N, y: N, m: Map<K, N>` with `body` as the
+    /// action body.
+    fn statement_failures(body: &str) -> Vec<String> {
+        let source = format!(
+            "spec S {{ type N = 0..3 type K = 0..1 \
+             state {{ gate: Bool, x: N, y: N, m: Map<K, N> }} \
+             init {{ gate = false x = 0 y = 0 forall k: K {{ m[k] = 0 }} }} \
+             action a() {{ {body} }} invariant I {{ true }} }}"
+        );
+        let kernel = parse_direct_kernel_spec(&source).expect("parse");
+        let model = build_model(kernel.clone()).expect("model");
+        let contract =
+            public_kernel_contract(&kernel, &model, "s.fsl", "kernel").expect("contract");
+        contract["actions"][0]["partial_operations"]
+            .as_array()
+            .expect("partial_operations")
+            .iter()
+            .map(|entry| {
+                assert_eq!(entry["operation"], "divide", "{entry}");
+                render(&entry["failure_condition"])
+            })
+            .collect()
+    }
+
+    /// Issue #1260: a partial operation in a statement-level `if` body is
+    /// guarded by the `if` condition (negated on the `else` side), as one in
+    /// an expression-level `if` already was. It was an unconditional `x == 0`.
+    #[test]
+    fn statement_if_partial_operation_is_guarded_by_its_branch() {
+        assert_eq!(
+            statement_failures("if gate { y = 2 / x }"),
+            ["(gate and (x == 0))"]
+        );
+        assert_eq!(
+            statement_failures("if gate { y = 1 } else { y = 2 / x }"),
+            ["(not gate and (x == 0))"]
+        );
+        // The condition itself is evaluated unconditionally.
+        assert_eq!(statement_failures("if 2 / x == 1 { y = 1 }"), ["(x == 0)"]);
+    }
+
+    /// Issue #1260: nested statement-level `if`s and `forall`s stack their
+    /// conditions; a `forall` binder in an `if` condition is replaced by the
+    /// candidate, so every condition stays closed.
+    #[test]
+    fn nested_statement_if_conditions_accumulate() {
+        assert_eq!(
+            statement_failures("if gate { if x < 2 { y = 1 } else { y = 2 / x } }"),
+            ["((gate and not (x < 2)) and (x == 0))"]
+        );
+        assert_eq!(
+            statement_failures("if gate { forall k: K { m[k] = 2 / x } }"),
+            [
+                "((gate and true) and (x == 0))",
+                "((gate and true) and (x == 0))"
+            ]
+        );
+        assert_eq!(
+            statement_failures("forall k: K { if k > 0 { m[k] = 2 / x } }"),
+            [
+                "((true and (0 > 0)) and (x == 0))",
+                "((true and (1 > 0)) and (x == 0))"
+            ]
         );
     }
 }

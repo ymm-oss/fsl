@@ -14,7 +14,7 @@ use super::{
     load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
     load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output,
+    semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
     validate_requirement_traces_from_source, validate_specialized_document_from_source,
 };
 
@@ -111,7 +111,7 @@ fn origin_aware_action_json(
     fallback_loc: Value,
 ) -> Value {
     let Some(origin) = model.action_origin(name) else {
-        return json!({"name": display(name), "params": params, "loc": fallback_loc});
+        return json!({"name": model.action_display_name(name), "params": params, "loc": fallback_loc});
     };
     let loc = origin
         .primary
@@ -120,8 +120,8 @@ fn origin_aware_action_json(
         .map_or(fallback_loc, fsl_syntax::Span::python_loc);
     json!({
         "name": ::fslc_rust::origin_display_name(origin)
-            .map_or_else(|| display(name), str::to_owned),
-        "generated_name": display(name),
+            .map_or_else(|| model.action_display_name(name), str::to_owned),
+        "generated_name": model.action_display_name(name),
         "params": params,
         "loc": loc,
         "origin": ::fslc_rust::internal_origin_json(origin),
@@ -138,9 +138,15 @@ struct SolvedBmc {
     statistics: fsl_solver::VerificationStatistics,
 }
 
-fn verification_cost(started: Instant, statistics: &fsl_solver::VerificationStatistics) -> Value {
-    serde_json::to_value(statistics.with_elapsed(started.elapsed().as_secs_f64()))
-        .expect("verification cost serializes")
+fn verification_cost(
+    model: &KernelModel,
+    started: Instant,
+    statistics: &fsl_solver::VerificationStatistics,
+) -> Value {
+    fslc_rust::verification_output::cost_json(
+        model,
+        statistics.with_elapsed(started.elapsed().as_secs_f64()),
+    )
 }
 
 fn load_selected_model(selection: ModelSelection<'_>) -> Result<KernelModel, SpecLoadError> {
@@ -565,7 +571,7 @@ fn render_induction_cti(
     let name = if partial || ensures {
         // `_partial_<action>` / `_partial_property_<name>`: the same synthetic
         // names BMC's `partial_op` violations carry (#1196).
-        display(&cti.name)
+        model.action_scoped_display_name(&cti.name, trace_last_action(&cti.trace))
     } else {
         origin_aware_property_name(&mut output, model, property_kind, &cti.name)
     };
@@ -637,7 +643,10 @@ fn render_induction_cti(
             ),
         );
     }
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
+    output.insert(
+        "cost".to_owned(),
+        verification_cost(model, started, statistics),
+    );
     (Value::Object(output), 1)
 }
 
@@ -723,7 +732,10 @@ fn render_rank_failure(
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert("completeness".to_owned(), json!("bounded"));
     output.insert("trace_type".to_owned(), json!("induction_cti"));
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
+    output.insert(
+        "cost".to_owned(),
+        verification_cost(model, started, statistics),
+    );
     (Value::Object(output), 1)
 }
 
@@ -745,10 +757,9 @@ fn render_induction_success(
     output.insert(
         "k_used".to_owned(),
         Value::Object(
-            induction
-                .k_used
-                .iter()
-                .map(|(name, k)| (display(name), json!(k)))
+            ::fslc_rust::verification_output::sorted_by_published(&induction.k_used, display)
+                .into_iter()
+                .map(|(name, _, k)| (name, json!(k)))
                 .collect(),
         ),
     );
@@ -824,7 +835,10 @@ fn render_induction_success(
         };
         output.insert("note".to_owned(), json!(note));
     }
-    output.insert("cost".to_owned(), verification_cost(started, statistics));
+    output.insert(
+        "cost".to_owned(),
+        verification_cost(model, started, statistics),
+    );
     (Value::Object(output), 0)
 }
 
@@ -1370,7 +1384,11 @@ fn adjudicate_lemma(
             "expression":source,"name":name,"status":"rejected","used":false,
             "proof":{
                 "result":"violated","violation_kind":violation.kind,
-                "invariant":display(&violation.name),"violated_at_step":violation.step,
+                "invariant":candidate.action_scoped_display_name(
+                    &violation.name,
+                    violation.last_action.as_deref(),
+                ),
+                "violated_at_step":violation.step,
                 "trace": ::fslc_rust::trace_json(&candidate, &violation.trace),
             },
         });
@@ -1403,7 +1421,10 @@ fn adjudicate_lemma(
             json!({
                 "expression":source,"name":name,"status":"rejected","used":false,
                 "proof":{
-                    "result":"unknown_cti","invariant":display(&cti.name),"k":cti.k,
+                    "result":"unknown_cti",
+                    "invariant":candidate
+                        .action_scoped_display_name(&cti.name, trace_last_action(&cti.trace)),
+                    "k":cti.k,
                     "checked_to_depth":depth,"completeness":"bounded",
                     "trace_type":"induction_cti",
                     "cti":{

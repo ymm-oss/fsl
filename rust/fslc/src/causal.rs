@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     block_on_native, display, envelope, error_output, json_mismatches, load_snapshot_value_object,
-    mapping_json_expr, parse_params, read_jsonl_records, required_option_value,
+    log_action_matches, mapping_json_expr, parse_params, read_jsonl_records, required_option_value,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -921,7 +921,7 @@ fn run_causal_observe_expectations(
                         let action = spec_model
                             .actions
                             .iter()
-                            .find(|action| display(&action.name) == source_action)
+                            .find(|action| log_action_matches(&spec_model, action, source_action))
                             .ok_or_else(|| {
                                 format!("no action mapping for log action '{source_action}'")
                             })?;
@@ -1092,7 +1092,7 @@ fn run_causal_observe_expectations(
                         "kind": "observation_replay_nonconformant",
                         "message": format!(
                             "log record {record_index}: action '{source_action}' (mapped to '{}') is not enabled; evidence cannot be generated from a nonconformant log",
-                            display(&target_action)
+                            spec_model.action_display_name(&target_action)
                         ),
                         "failed_at_record": record_index,
                         "do_not_assume": DO_NOT_ASSUME_CAUSAL_OBSERVATION,

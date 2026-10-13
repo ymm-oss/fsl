@@ -3,14 +3,15 @@ baseline `verify` came back `violated`/`reachable_failed`/`unknown_cti`/
 `unknown_budget` exits 0 while its envelope still reports the failure. A gate
 reading only the exit code sees a pass. This is #554 itself. Since #1002 the
 same row also carries `refinement_failed`/`impl_violated`, so the mutation now
-sends a failed inline `implements` seam to zero as well.
+sends a failed inline `implements` seam to zero as well, and since #1237 a
+`mutated` run whose opt-in `gate` failed.
 
 --- a/rust/fslc/src/outcome.rs
 +++ b/rust/fslc/src/outcome.rs
 @@ -580,7 +580,7 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
          Some(
              "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
-             | "refinement_failed" | "impl_violated",
+             | "refinement_failed" | "impl_violated" | "mutated",
 -        ) => 1,
 +        ) => 0,
          // A failure-class value outside this command's vocabulary, or one

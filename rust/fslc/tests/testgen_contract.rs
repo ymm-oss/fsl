@@ -227,6 +227,9 @@ spec NestedOptionTestgen {
     assert_eq!(trace["steps"][2]["expected"], json!({"x": null}));
 }
 
+/// The vitest golden moved in #1234: the compose bridge now takes public state
+/// names, so scenario expected states are keyed in declaration order, as
+/// pytest already was. No line other than those `assertPartial` calls changed.
 #[test]
 fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
     for (target, digest) in [
@@ -236,7 +239,7 @@ fn compose_bridge_preserves_pytest_and_baked_target_goldens() {
         ),
         (
             "vitest",
-            "8dab1494cf7c91530416fb02ff9c9a63063bb1b0c948dffbfe0a5bc99fb8fd01",
+            "81e925d1d3c1b7f0bccae2f04f66f9a37942f6f9cd5b815281a72de89357a11d",
         ),
     ] {
         assert_eq!(

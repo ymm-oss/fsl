@@ -31,20 +31,62 @@ fn text(value: &Value) -> String {
     }
 }
 
-fn status_class(status: &str) -> &'static str {
-    match status {
-        "verified" | "proved" | "ok" | "covered" | "refines" | "generated" => "ok",
+/// Every top-level `result` `fslc verify` publishes, each with its own
+/// [`verdict_class`] arm (#1021).
+pub const VERIFY_VERDICTS: [&str; 9] = [
+    "verified",
+    "proved",
+    "violated",
+    "reachable_failed",
+    "refinement_failed",
+    "impl_violated",
+    "error",
+    "unknown_cti",
+    "unknown_budget",
+];
+
+/// Badge class of a `verify` envelope's top-level `result`, the only verdict
+/// the report draws as a badge (#1021). Every value `verify` publishes has
+/// its own arm; anything else is `None`, which [`verdict_badge`] draws as a
+/// failure labelled unrecognized rather than as a neutral badge, so a verdict
+/// added to the vocabulary without an arm here shows up instead of reading
+/// as harmless. `fslc`'s `html_verdict_classes_agree_with_outcome_class`
+/// checks every arm against the vocabulary's owner, `outcome_class`.
+#[must_use]
+pub fn verdict_class(result: &str) -> Option<&'static str> {
+    match result {
+        "verified" | "proved" => Some("ok"),
         "violated"
         | "reachable_failed"
-        | "nonconformant"
         | "refinement_failed"
         // #1002 folds a failed inline `implements` seam into the top-level
-        // `result`, so `impl_violated` reaches this classifier for the first
-        // time. Without this arm it falls to `_ => "info"` and the report
-        // renders a failing seam as a neutral badge.
+        // `result`.
         | "impl_violated"
-        | "uncovered" => "bad",
-        "warning" | "unknown_cti" => "warn",
+        | "error" => Some("bad"),
+        // Not a counterexample, and not a pass either.
+        "unknown_cti" | "unknown_budget" => Some("warn"),
+        _ => None,
+    }
+}
+
+/// The badge of a verdict: its [`verdict_class`], or a failure badge that says
+/// the value is unrecognized.
+fn verdict_badge(result: &str) -> String {
+    match verdict_class(result) {
+        Some(class) => format!("<span class=\"badge {class}\">{}</span>", escape(result)),
+        None => format!(
+            "<span class=\"badge bad\" title=\"unrecognized verdict\">{} (unrecognized verdict)</span>",
+            escape(result)
+        ),
+    }
+}
+
+/// Badge class of a non-verdict marker: an action's coverage, or a witness
+/// `kind`, which is open-ended and therefore neutral.
+fn marker_class(marker: &str) -> &'static str {
+    match marker {
+        "covered" => "ok",
+        "uncovered" => "bad",
         _ => "info",
     }
 }
@@ -52,7 +94,7 @@ fn badge(value: &Value) -> String {
     let value = text(value);
     format!(
         "<span class=\"badge {}\">{}</span>",
-        status_class(&value),
+        marker_class(&value),
         escape(&value)
     )
 }
@@ -200,14 +242,7 @@ fn hero(
 "#,
         escape(spec),
         escape(&subtitle),
-        metric(
-            "Result",
-            &format!(
-                "<span class=\"badge {}\">{}</span>",
-                status_class(status),
-                escape(status)
-            )
-        ),
+        metric("Result", &verdict_badge(status)),
         metric("Depth", &escape(&text(depth))),
         metric("States", &state.to_string()),
         metric("Actions", &actions.to_string()),
@@ -732,7 +767,7 @@ fn properties_section(properties: &[Value], checks: &[Value], verification: &Val
 
 fn status_section(verification: &Value) -> String {
     let mut fields = vec![
-        ("Result", badge(&verification["result"])),
+        ("Result", verdict_badge(&text(&verification["result"]))),
         ("Assurance", escape(&assurance(verification))),
         (
             "Completeness",
@@ -1277,8 +1312,8 @@ pub fn render_html_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{status_class, status_section};
-    use serde_json::json;
+    use super::{VERIFY_VERDICTS, badge, hero, status_section, verdict_class};
+    use serde_json::{Value, json};
 
     /// #1008: a selected `verify` reports `implements.result:"not_evaluated"`.
     /// The report must show that value verbatim and must never classify it as
@@ -1286,7 +1321,7 @@ mod tests {
     /// nested seam from the top-level `result`).
     #[test]
     fn a_not_evaluated_seam_never_renders_as_satisfied() {
-        assert_ne!(status_class("not_evaluated"), "ok");
+        assert_ne!(verdict_class("not_evaluated"), Some("ok"));
         let html = status_section(&json!({
             "result": "verified",
             "implements": {
@@ -1302,18 +1337,89 @@ mod tests {
     }
 
     /// Both inline-`implements` failure verdicts reach the top-level `result`
-    /// since #1002, and `html` renders that value through `status_class`
-    /// (`("Result", badge(&verification["result"]))`). Before `impl_violated`
-    /// was listed, it fell through to `_ => "info"` and a failing seam was
-    /// drawn as a neutral badge. The nested `implements` field is rendered as
-    /// JSON, not as a badge, so this position is new for that value.
+    /// since #1002, and `html` renders that value as the Result badge. Before
+    /// `impl_violated` was listed, it fell through to `_ => "info"` and a
+    /// failing seam was drawn as a neutral badge.
     #[test]
     fn seam_failure_verdicts_render_as_failures() {
-        assert_eq!(status_class("refinement_failed"), "bad");
-        assert_eq!(status_class("impl_violated"), "bad");
-        // Rejecting control: the passing seam value must not be "bad", or the
-        // assertion above would pass under a classifier that calls everything
-        // a failure.
-        assert_eq!(status_class("refines"), "ok");
+        assert_eq!(verdict_class("refinement_failed"), Some("bad"));
+        assert_eq!(verdict_class("impl_violated"), Some("bad"));
+        // Rejecting control: a passing verdict must not be "bad", or the
+        // assertions above would pass under a classifier that calls
+        // everything a failure.
+        assert_eq!(verdict_class("verified"), Some("ok"));
+    }
+
+    /// The Result badge in both places the report draws it: the hero summary
+    /// and the status section.
+    fn result_badges(result: &Value) -> [String; 2] {
+        let status = result.as_str().unwrap_or("unknown");
+        [
+            hero("S", "s.fsl", &json!(3), status, 1, 1, 1, "n/a", 0, 0, 0),
+            status_section(&json!({ "result": result })),
+        ]
+    }
+
+    /// #1021: every verdict `verify` publishes has its own class, so none is
+    /// drawn as the neutral `info` badge. `unknown_budget` (reachable since
+    /// #1266) and `error` were neutral.
+    #[test]
+    fn every_verify_verdict_renders_with_its_own_class() {
+        for (result, class) in [
+            ("verified", "ok"),
+            ("proved", "ok"),
+            ("violated", "bad"),
+            ("reachable_failed", "bad"),
+            ("refinement_failed", "bad"),
+            ("impl_violated", "bad"),
+            ("error", "bad"),
+            ("unknown_cti", "warn"),
+            ("unknown_budget", "warn"),
+        ] {
+            assert!(VERIFY_VERDICTS.contains(&result), "{result}");
+            for html in result_badges(&json!(result)) {
+                let expected = format!("<span class=\"badge {class}\">{result}</span>");
+                assert!(html.contains(&expected), "{result}: {html}");
+            }
+        }
+        for result in VERIFY_VERDICTS {
+            assert!(verdict_class(result).is_some(), "{result} has no arm");
+        }
+    }
+
+    /// #1021: a `result` outside the verdict vocabulary, or none at all, is
+    /// drawn as a failure that says it is unrecognized, never as a neutral
+    /// badge. Before, the catch-all classified it `info`.
+    #[test]
+    fn an_unrecognized_verdict_renders_as_a_visible_failure() {
+        for result in [json!("sweep_failed"), json!("no_such_verdict"), Value::Null] {
+            for html in result_badges(&result) {
+                assert!(
+                    html.contains("<span class=\"badge bad\" title=\"unrecognized verdict\">"),
+                    "{result}: {html}"
+                );
+                assert!(html.contains("(unrecognized verdict)"), "{result}: {html}");
+                assert!(!html.contains("badge info"), "{result}: {html}");
+            }
+        }
+    }
+
+    /// Control for the split: a witness `kind` and a coverage marker are not
+    /// verdicts, so an open-ended `kind` stays neutral and is not labelled
+    /// unrecognized.
+    #[test]
+    fn markers_are_not_classified_as_verdicts() {
+        assert_eq!(
+            badge(&json!("reachable")),
+            "<span class=\"badge info\">reachable</span>"
+        );
+        assert_eq!(
+            badge(&json!("covered")),
+            "<span class=\"badge ok\">covered</span>"
+        );
+        assert_eq!(
+            badge(&json!("uncovered")),
+            "<span class=\"badge bad\">uncovered</span>"
+        );
     }
 }

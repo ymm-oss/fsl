@@ -1116,18 +1116,28 @@ fn type_ref_text(ty: &TypeRef) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn render_operation(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
-    let name = claim.subject["action"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
+    let key = claim.subject["action"].as_str().unwrap_or_default();
+    let action = ctx
+        .model
+        .actions
+        .iter()
+        .find(|action| ctx.model.action_key(&action.name) == key);
+    let name = action.map_or_else(
+        || display_name(key),
+        |action| ctx.model.action_display_name(&action.name),
+    );
     let label = ctx
         .glossary
-        .and_then(|glossary| glossary.labels.get(&action_target(&name)))
+        .and_then(|glossary| {
+            glossary
+                .labels
+                .get(&action_target(action.map_or(key, |action| &action.name)))
+        })
         .map(String::as_str);
-    let Some(action) = ctx.model.actions.iter().find(|action| action.name == name) else {
-        return metadata_header(claim, &display_name(&name), label, ctx.locale);
+    let Some(action) = action else {
+        return metadata_header(claim, &name, label, ctx.locale);
     };
-    let mut out = metadata_header(claim, &display_name(&name), label, ctx.locale);
+    let mut out = metadata_header(claim, &name, label, ctx.locale);
 
     let params_label = match ctx.locale {
         Locale::Ja => "パラメータ",
@@ -1157,29 +1167,21 @@ fn render_operation(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .filter(|guard| matches!(guard, ActionGuard::Requires(_)))
         .count();
     let intro = match (requires_count, ctx.locale) {
-        (0, Locale::Ja) => format!(
-            "操作 `{}` は常に実行できる（enablement 条件は宣言されていない）。",
-            display_name(&name)
-        ),
-        (0, Locale::En) => format!(
-            "Action `{}` is always enabled (no enablement conditions are declared).",
-            display_name(&name)
-        ),
-        (1, Locale::Ja) => format!(
-            "操作 `{}` を実行できるのは、次の条件を満たす場合に限る。",
-            display_name(&name)
-        ),
-        (1, Locale::En) => format!(
-            "Action `{}` can be executed only when the following condition holds.",
-            display_name(&name)
-        ),
-        (_, Locale::Ja) => format!(
-            "操作 `{}` を実行できるのは、次の条件をすべて満たす場合に限る。",
-            display_name(&name)
-        ),
+        (0, Locale::Ja) => {
+            format!("操作 `{name}` は常に実行できる（enablement 条件は宣言されていない）。")
+        }
+        (0, Locale::En) => {
+            format!("Action `{name}` is always enabled (no enablement conditions are declared).")
+        }
+        (1, Locale::Ja) => format!("操作 `{name}` を実行できるのは、次の条件を満たす場合に限る。"),
+        (1, Locale::En) => {
+            format!("Action `{name}` can be executed only when the following condition holds.")
+        }
+        (_, Locale::Ja) => {
+            format!("操作 `{name}` を実行できるのは、次の条件をすべて満たす場合に限る。")
+        }
         (_, Locale::En) => format!(
-            "Action `{}` can be executed only when all of the following conditions hold.",
-            display_name(&name)
+            "Action `{name}` can be executed only when all of the following conditions hold."
         ),
     };
     let _ = write!(out, "\n\n{intro}");

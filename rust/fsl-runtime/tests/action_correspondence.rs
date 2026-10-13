@@ -85,7 +85,7 @@ fn enum_conversion_agrees_across_concrete_refinement_routes_without_ordinal_coer
         parse_refinement(mapping, &implementation, &abstraction).expect("explicit enum conversion");
     let result = check_refinement(&implementation, &abstraction, &refinement, 2)
         .expect("concrete refinement check");
-    assert!(result.failure.is_none(), "{result:?}");
+    assert_eq!(result.verdict(), fsl_runtime::RefinementVerdict::Refines);
 
     let wrong = parse_refinement(
         "refinement R { impl Impl abs Abs enum conversion stage ImplStage -> AbsStage { A -> B B -> A C -> C } map status = convert(stage, stage) action step() -> step() }",
@@ -96,7 +96,7 @@ fn enum_conversion_agrees_across_concrete_refinement_routes_without_ordinal_coer
     let wrong = check_refinement(&implementation, &abstraction, &wrong, 2)
         .expect("negative control executes");
     assert!(
-        wrong.failure.is_some(),
+        matches!(wrong.verdict(), fsl_runtime::RefinementVerdict::Failed(_)),
         "wrong member mapping must not refine"
     );
 
@@ -120,7 +120,10 @@ fn enum_conversion_agrees_across_concrete_refinement_routes_without_ordinal_coer
     )
     .expect("action-argument negative control executes");
     assert!(
-        wrong_argument.failure.is_some(),
+        matches!(
+            wrong_argument.verdict(),
+            fsl_runtime::RefinementVerdict::Failed(_)
+        ),
         "member-swapped action argument must not produce a false-green refinement"
     );
 
@@ -146,7 +149,10 @@ fn enum_conversion_agrees_across_concrete_refinement_routes_without_ordinal_coer
         2,
     )
     .expect("inline concrete refinement check");
-    assert!(inline_result.failure.is_none(), "{inline_result:?}");
+    assert_eq!(
+        inline_result.verdict(),
+        fsl_runtime::RefinementVerdict::Refines
+    );
 }
 
 #[test]
@@ -165,7 +171,7 @@ fn enum_abstraction_rejects_wrong_many_to_one_state_and_action_mappings() {
     .expect("source-total mapping");
     let result = check_refinement(&implementation, &abstraction, &correct, 3)
         .expect("concrete many-to-one refinement check");
-    assert!(result.failure.is_none(), "{result:?}");
+    assert_eq!(result.verdict(), fsl_runtime::RefinementVerdict::Refines);
 
     let wrong = parse_refinement(
         "refinement R { impl Impl abs Abs enum abstraction stage ImplStage -> AbsStage { A -> X B -> X C -> X } map status = abstract(stage, stage) action hold() -> hold() action advance() -> advance() }",
@@ -176,7 +182,7 @@ fn enum_abstraction_rejects_wrong_many_to_one_state_and_action_mappings() {
     let wrong = check_refinement(&implementation, &abstraction, &wrong, 3)
         .expect("wrong mapping negative control executes");
     assert!(
-        wrong.failure.is_some(),
+        matches!(wrong.verdict(), fsl_runtime::RefinementVerdict::Failed(_)),
         "wrong many-to-one state mapping must not refine"
     );
 
@@ -200,7 +206,10 @@ fn enum_abstraction_rejects_wrong_many_to_one_state_and_action_mappings() {
     )
     .expect("wrong argument negative control executes");
     assert!(
-        wrong_argument.failure.is_some(),
+        matches!(
+            wrong_argument.verdict(),
+            fsl_runtime::RefinementVerdict::Failed(_)
+        ),
         "wrong many-to-one action argument must not refine"
     );
 }

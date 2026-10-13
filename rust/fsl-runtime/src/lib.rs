@@ -68,6 +68,11 @@ pub struct RuntimeError {
     /// engines report as `partial_op` rather than as a raw runtime error
     /// (issue #1166: this used to be recovered by matching `message`).
     pub partial_operation: Option<PartialOperation>,
+    /// Set exactly when a `Map` was indexed with a key outside its finite key
+    /// domain. A refinement check whose mapping reads such a key (an impl key
+    /// domain narrower than the abstraction's) reports `map_out_of_bounds`
+    /// rather than this error.
+    pub map_key_outside_domain: bool,
 }
 
 impl fmt::Display for RuntimeError {
@@ -88,6 +93,7 @@ impl From<ModelError> for RuntimeError {
             message: error.message,
             span: error.span,
             partial_operation: None,
+            map_key_outside_domain: false,
         }
     }
 }
@@ -189,10 +195,10 @@ fn eval_inner(
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;
             match base {
-                Value::Map(values) => values
-                    .get(&index)
-                    .cloned()
-                    .ok_or_else(|| runtime_error("map index outside finite key domain")),
+                Value::Map(values) => values.get(&index).cloned().ok_or_else(|| RuntimeError {
+                    map_key_outside_domain: true,
+                    ..runtime_error("map index outside finite key domain")
+                }),
                 Value::Seq(values) => values
                     .get(partial_index(index, PartialOperation::Index)?)
                     .cloned()
@@ -783,6 +789,7 @@ fn runtime_error(message: impl Into<String>) -> RuntimeError {
         message: message.into(),
         span: None,
         partial_operation: None,
+        map_key_outside_domain: false,
     }
 }
 
@@ -808,6 +815,7 @@ fn runtime_error_at(message: impl Into<String>, span: Span) -> RuntimeError {
         message: message.into(),
         span: Some(span),
         partial_operation: None,
+        map_key_outside_domain: false,
     }
 }
 
@@ -816,6 +824,42 @@ pub struct EnabledAction {
     pub action: String,
     pub params: BTreeMap<String, Value>,
     bindings: Bindings,
+}
+
+/// One bounded action instance whose guards do not evaluate to `false`.
+///
+/// Guards (`let` and `requires`) are evaluated in source order, and a guard
+/// that reaches a partial operation is that action's `partial_op` outcome,
+/// exactly like a partial operation reached in its body
+/// (`docs/design/DESIGN-kernel-contract.md`, Monitor order). A concrete
+/// walk that classifies body outcomes must classify this one too instead of
+/// aborting on the raw evaluation error (#1191).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ActionCandidate {
+    /// Every guard holds; the instance can step.
+    Enabled(EnabledAction),
+    /// A guard reaches a partial operation. Stepping it yields the action's
+    /// `partial_op` violation and leaves the state unchanged.
+    GuardPartial(EnabledAction),
+}
+
+impl ActionCandidate {
+    /// The action name and parameters of this instance.
+    #[must_use]
+    pub fn instance(&self) -> &EnabledAction {
+        match self {
+            Self::Enabled(instance) | Self::GuardPartial(instance) => instance,
+        }
+    }
+
+    /// The instance, when every guard holds.
+    #[must_use]
+    pub fn enabled(&self) -> Option<&EnabledAction> {
+        match self {
+            Self::Enabled(instance) => Some(instance),
+            Self::GuardPartial(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -896,6 +940,7 @@ impl Monitor {
         action: &str,
         params: &BTreeMap<String, Value>,
         kind: &str,
+        name: String,
         attempted_state: Option<State>,
     ) -> StepResult {
         self.step += 1;
@@ -906,7 +951,7 @@ impl Monitor {
             attempted_state,
             violation: Some(Violation {
                 kind: kind.to_owned(),
-                name: format!("_{kind}_{action}"),
+                name,
                 step: self.step,
             }),
         }
@@ -987,6 +1032,75 @@ impl Monitor {
         Ok(enabled)
     }
 
+    /// Enumerate every bounded action instance whose guards do not evaluate
+    /// to `false`, in [`Monitor::enabled`]'s order: the enabled ones, and the
+    /// ones whose guards reach a partial operation (#1191).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when parameter domains cannot be enumerated
+    /// or a guard fails for a reason other than a partial operation.
+    pub fn candidates(&self) -> Result<Vec<ActionCandidate>, RuntimeError> {
+        let mut candidates = Vec::new();
+        for action in &self.model.actions {
+            for params in action_parameter_bindings(action, &self.model)? {
+                match evaluate_action_guards(action, &params, &self.state, &self.model) {
+                    Ok(Some(bindings)) => {
+                        candidates.push(ActionCandidate::Enabled(EnabledAction {
+                            action: action.name.clone(),
+                            params,
+                            bindings,
+                        }));
+                    }
+                    Ok(None) => {}
+                    Err(error) if is_partial_operation_error(&error) => {
+                        candidates.push(ActionCandidate::GuardPartial(EnabledAction {
+                            action: action.name.clone(),
+                            bindings: params.clone(),
+                            params,
+                        }));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        Ok(candidates)
+    }
+
+    /// Step one [`Monitor::candidates`] instance while checking an optional
+    /// selection of implicit state-bound properties (see
+    /// [`Monitor::step_selected`]). A [`ActionCandidate::GuardPartial`]
+    /// instance yields its action's `partial_op` violation with the state
+    /// unchanged and no attempted state, the outcome a body partial
+    /// operation has.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] as [`Monitor::step_selected`] does.
+    pub fn step_candidate(
+        &mut self,
+        candidate: &ActionCandidate,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<StepResult, RuntimeError> {
+        match candidate {
+            ActionCandidate::Enabled(instance) => self.step_selected(instance, checked_bounds),
+            ActionCandidate::GuardPartial(instance) => {
+                self.step += 1;
+                Ok(StepResult {
+                    action: instance.action.clone(),
+                    params: instance.params.clone(),
+                    state: self.state.clone(),
+                    attempted_state: None,
+                    violation: Some(Violation {
+                        kind: "partial_op".to_owned(),
+                        name: format!("_partial_{}", instance.action),
+                        step: self.step,
+                    }),
+                })
+            }
+        }
+    }
+
     /// Evaluate and execute one bounded action call, including disabled and
     /// partial guard outcomes. This is the concrete conformance entry point.
     ///
@@ -1009,10 +1123,24 @@ impl Monitor {
         let bindings = match evaluate_action_guards(&action, params, &self.state, &self.model) {
             Ok(Some(bindings)) => bindings,
             Ok(None) => {
-                return Ok(self.failed_step(action_name, params, "requires_failed", None));
+                return Ok(self.failed_step(
+                    action_name,
+                    params,
+                    "requires_failed",
+                    format!("_requires_failed_{action_name}"),
+                    None,
+                ));
             }
             Err(error) if is_partial_operation_error(&error) => {
-                return Ok(self.failed_step(action_name, params, "partial_op", None));
+                // The name BMC, explicit, induction, and the body and
+                // `step_candidate` paths give the same failure (#1244).
+                return Ok(self.failed_step(
+                    action_name,
+                    params,
+                    "partial_op",
+                    format!("_partial_{action_name}"),
+                    None,
+                ));
             }
             Err(error) => return Err(error),
         };
@@ -1411,31 +1539,49 @@ pub struct RefinementFailure {
     pub alpha_before: Option<State>,
     pub alpha_after_expected: Option<State>,
     pub alpha_after_actual: Option<State>,
+    /// For `abs_step_violation` (issue #1302): the violation the corresponded
+    /// abstract step reported (`type_bound`, `invariant`, `trans`, `ensures`,
+    /// or `partial_op` in a post-state check or `ensures`). Its `step` is
+    /// the abstract monitor's own counter, not the walk's step. `None` for
+    /// every other kind.
+    pub abs_violation: Option<Violation>,
+    /// For `abs_step_violation`: the abstract successor that step would have
+    /// produced (`Monitor::step`'s `attempted_state`), the state the
+    /// violation is about. It is not an expected state -- the abstraction
+    /// rejected it -- so it is never `alpha_after_expected`. `None` for every
+    /// other kind.
+    pub alpha_after_attempted: Option<State>,
     pub impl_trace: Vec<TraceStep>,
 }
 
+/// The result of [`check_refinement`]. Every field is private (issue #1262):
+/// the outcome is read only through [`RefinementCheck::verdict`], so a
+/// consumer cannot read `failure`/`impl_violation` and silently fall through
+/// to `refines` on a walk the state budget cut off. Before this, `fslc diff`
+/// and the `fslc mutate` implements oracle did exactly that.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct RefinementCheck {
-    pub implementation: String,
-    pub abstraction: String,
-    pub depth: usize,
-    pub action_map: BTreeMap<String, String>,
-    pub abs_has_ensures: bool,
-    pub failure: Option<RefinementFailure>,
+    implementation: String,
+    abstraction: String,
+    depth: usize,
+    action_map: BTreeMap<String, String>,
+    abs_has_ensures: bool,
+    failure: Option<RefinementFailure>,
     /// Set instead of `failure` when the implementation violates its own
     /// semantics (a type bound, invariant, `trans`, `ensures`, or
     /// `partial_op`) within `depth`, independent of the refinement mapping.
     /// This is a property of the refinement *input* (the impl spec is
     /// broken on its own), not a refinement fidelity verdict, so it must
     /// never be reported as `refines` or folded into `refinement_failed`.
-    pub impl_violation: Option<(Violation, Vec<TraceStep>)>,
-    /// Set to the walk's `visited.len()` at the cutoff when the
-    /// correspondence walk hit its state-count budget before exhausting the
-    /// reachable set within `depth` (issue #1041): the search stopped
-    /// early, so neither `refines` nor a decided `failure`/`impl_violation`
-    /// would be true -- reporting either would be a false result.
-    pub budget_exhausted: Option<usize>,
+    impl_violation: Option<(Violation, Vec<TraceStep>)>,
+    /// Set to the cut-off search's `visited.len()` when either the
+    /// self-consistency pre-pass (issue #1246) or the correspondence walk
+    /// (issue #1041) hit the state-count budget before exhausting the
+    /// reachable set within `depth`: the search stopped early, so neither
+    /// `refines` nor a decided `failure`/`impl_violation` would be true --
+    /// reporting either would be a false result.
+    budget_exhausted: Option<usize>,
 }
 
 /// The one decided reading of a [`RefinementCheck`]: every caller that turns
@@ -1447,8 +1593,9 @@ pub struct RefinementCheck {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use]
 pub enum RefinementVerdict<'a> {
-    /// The correspondence walk hit its state budget before deciding within
-    /// `depth`: neither `refines` nor a failure is known.
+    /// The self-consistency pre-pass or the correspondence walk hit its
+    /// state budget before deciding within `depth`: neither `refines` nor a
+    /// failure is known.
     BudgetExhausted { states_explored: usize },
     /// The implementation violates its own semantics within `depth`.
     ImplViolated {
@@ -1462,12 +1609,60 @@ pub enum RefinementVerdict<'a> {
 }
 
 impl RefinementCheck {
+    /// The implementation spec's name.
+    #[must_use]
+    pub fn implementation(&self) -> &str {
+        &self.implementation
+    }
+
+    /// The abstraction spec's name.
+    #[must_use]
+    pub fn abstraction(&self) -> &str {
+        &self.abstraction
+    }
+
+    /// The depth the check was asked to cover. Not a claim that it was
+    /// covered: a [`RefinementVerdict::BudgetExhausted`] walk stopped short.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    /// Implementation action name to its mapped abstract action (or
+    /// `stutter`). Empty when the implementation violated its own semantics
+    /// before the mapping was read.
+    #[must_use]
+    pub fn action_map(&self) -> &BTreeMap<String, String> {
+        &self.action_map
+    }
+
+    /// Whether any abstract action declares `ensures`.
+    #[must_use]
+    pub fn abs_has_ensures(&self) -> bool {
+        self.abs_has_ensures
+    }
+
     /// Read this check as exactly one verdict. `check_refinement_with_budget`
     /// sets at most one of `budget_exhausted`, `impl_violation` and
     /// `failure`; the order here only fixes which one wins should that ever
     /// stop holding, and it puts the undecided outcome first so a decided
     /// verdict is never read off an incomplete walk.
+    ///
+    /// Debug builds also assert that at most one outcome field is set, so
+    /// every caller (and every test) that reads a verdict re-checks that
+    /// `check_refinement_with_budget` never reports two outcomes at once.
     pub fn verdict(&self) -> RefinementVerdict<'_> {
+        debug_assert!(
+            usize::from(self.budget_exhausted.is_some())
+                + usize::from(self.impl_violation.is_some())
+                + usize::from(self.failure.is_some())
+                <= 1,
+            "check_refinement set more than one outcome: {self:?}"
+        );
+        self.precedence_verdict()
+    }
+
+    fn precedence_verdict(&self) -> RefinementVerdict<'_> {
         if let Some(states_explored) = self.budget_exhausted {
             RefinementVerdict::BudgetExhausted { states_explored }
         } else if let Some((violation, trace)) = &self.impl_violation {
@@ -1481,7 +1676,8 @@ impl RefinementCheck {
 }
 
 /// Bounded-search budget for [`check_refinement`]'s correspondence walk
-/// (issue #1041). Unlike [`find_boundary_violation`]'s `budget` parameter,
+/// (issue #1041) and for its self-consistency pre-pass, which walks the same
+/// reachable set first (issue #1246). Unlike [`find_boundary_violation`]'s `budget` parameter,
 /// this one has no CLI-facing knob (`fslc check` stays a flag-free fast
 /// check; `fslc verify` does not reuse `--explicit-budget` here either,
 /// because that flag governs a different search and one knob covering two
@@ -1613,6 +1809,8 @@ fn refinement_failure(
         alpha_before: before,
         alpha_after_expected: expected,
         alpha_after_actual: actual,
+        abs_violation: None,
+        alpha_after_attempted: None,
         impl_trace: trace.to_vec(),
     }
 }
@@ -1805,10 +2003,21 @@ pub fn check_refinement_with_budget(
     // (issue #493), not one arbitrarily materialized default, so this
     // precondition cannot miss a self-violation reachable only from a
     // non-default initial branch either.
+    //
+    // The pre-pass walks the same reachable set the correspondence walk
+    // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
+    // every reachable state before the walk's own cutoff could apply. A
+    // pre-pass cut off before finding a self-violation has decided nothing,
+    // so it reports `budget_exhausted` -- never `refines` and never a walk
+    // started on an impl whose own consistency was not established.
     let impl_initial_states = concrete_initial_states(implementation)?;
-    if let Some((violation, trace)) =
-        first_self_violation(implementation, &impl_initial_states, depth)?
-    {
+    let (impl_violation, budget_exhausted) =
+        match first_self_violation(implementation, &impl_initial_states, depth, budget)? {
+            SelfConsistency::Consistent => (None, None),
+            SelfConsistency::Violated(violation, trace) => (Some((violation, trace)), None),
+            SelfConsistency::BudgetExhausted { states_explored } => (None, Some(states_explored)),
+        };
+    if impl_violation.is_some() || budget_exhausted.is_some() {
         return Ok(RefinementCheck {
             implementation: implementation.name.clone(),
             abstraction: abstraction.name.clone(),
@@ -1816,8 +2025,8 @@ pub fn check_refinement_with_budget(
             action_map: BTreeMap::new(),
             abs_has_ensures: false,
             failure: None,
-            impl_violation: Some((violation, trace)),
-            budget_exhausted: None,
+            impl_violation,
+            budget_exhausted,
         });
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
@@ -1862,19 +2071,40 @@ pub fn check_refinement_with_budget(
     // nondeterministic initial branch, not just one.
     let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
-        let alpha_initial = alpha_state(
-            &impl_state,
-            implementation,
-            abstraction,
-            mapping,
-            &eval_model,
-        )?;
         let initial_trace = vec![TraceStep {
             step: 0,
             state: impl_state.clone(),
             action: None,
             changes: BTreeMap::new(),
         }];
+        let alpha_initial = match alpha_state(
+            &impl_state,
+            implementation,
+            abstraction,
+            mapping,
+            &eval_model,
+        ) {
+            Ok(alpha) => alpha,
+            // The mapping read a key outside an impl `Map`'s finite key
+            // domain (an impl key type narrower than the abstraction's): the
+            // mapped abstract state cannot be built for every abstract key, a
+            // range escape of the mapping (`map_out_of_bounds`), not an
+            // evaluation error. A whole-map mapping with missing keys is
+            // already caught by the type-bound check below.
+            Err(error) if error.map_key_outside_domain => {
+                check.failure = Some(refinement_failure(
+                    "map_out_of_bounds",
+                    Some("init"),
+                    0,
+                    &initial_trace,
+                    None,
+                    None,
+                    None,
+                ));
+                return Ok(check);
+            }
+            Err(error) => return Err(error),
+        };
         // `alpha_initial` is already a complete concrete abs state (the
         // impl initial state mapped through the refinement correspondence),
         // so there is nothing for the abstraction's own `init` to compute —
@@ -1965,24 +2195,26 @@ pub fn check_refinement_with_budget(
         for (state_index, state) in layer.iter().enumerate() {
             scratch.state = state.clone();
             scratch.step = step;
-            for enabled in scratch.enabled()? {
+            for candidate in scratch.candidates()? {
+                let enabled = candidate.instance();
                 let action_index = implementation
                     .actions
                     .iter()
                     .position(|action| action.name == enabled.action)
                     .unwrap_or(usize::MAX);
-                candidates.push((action_index, enabled.params.clone(), state_index, enabled));
+                candidates.push((action_index, enabled.params.clone(), state_index, candidate));
             }
         }
         candidates.sort_by(|left, right| {
             (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
         });
-        for (_, _, state_index, enabled) in candidates {
+        for (_, _, state_index, candidate) in candidates {
             let state = &layer[state_index];
             let alpha_before = &alphas[state_index];
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&enabled)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
+            let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
                 // already proved the impl has no self-violation within
@@ -1993,19 +2225,46 @@ pub fn check_refinement_with_budget(
                 continue;
             }
             let child_state = stepped.state.clone();
-            let alpha_after = alpha_state(
+            // `None` when the mapping read an impl `Map` at a key outside its
+            // finite key domain (`RuntimeError::map_key_outside_domain`): the
+            // mapped abstract state does not exist. That is reported as
+            // `map_out_of_bounds`, but only where §2.4's order would report a
+            // bounds problem: after the stutter / abstract-guard checks that do
+            // not need `alpha_after` (DESIGN-refinement §2.4).
+            let alpha_after = match alpha_state(
                 &child_state,
                 implementation,
                 abstraction,
                 mapping,
                 &eval_model,
-            )?;
+            ) {
+                Ok(alpha) => Some(alpha),
+                Err(error) if error.map_key_outside_domain => None,
+                Err(error) => return Err(error),
+            };
+            let out_of_bounds = |actual: Option<State>| {
+                let child_trace =
+                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                refinement_failure(
+                    "map_out_of_bounds",
+                    Some("step"),
+                    step + 1,
+                    &child_trace,
+                    Some(alpha_before.clone()),
+                    None,
+                    actual,
+                )
+            };
             let action_map = &mapping.action_correspondences[&enabled.action];
             match &action_map.target {
                 ActionCorrespondenceTarget::Stutter => {
-                    if alpha_before != &alpha_after {
+                    let Some(alpha_after) = &alpha_after else {
+                        check.failure = Some(out_of_bounds(None));
+                        return Ok(check);
+                    };
+                    if alpha_before != alpha_after {
                         let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
                             Some("step"),
@@ -2013,7 +2272,7 @@ pub fn check_refinement_with_budget(
                             &child_trace,
                             Some(alpha_before.clone()),
                             Some(alpha_before.clone()),
-                            Some(alpha_after),
+                            Some(alpha_after.clone()),
                         ));
                         return Ok(check);
                     }
@@ -2051,7 +2310,7 @@ pub fn check_refinement_with_budget(
                                 state,
                                 &parents,
                                 step + 1,
-                                &enabled,
+                                enabled,
                                 &stepped,
                             );
                             check.failure = Some(refinement_failure(
@@ -2060,8 +2319,8 @@ pub fn check_refinement_with_budget(
                                 step + 1,
                                 &child_trace,
                                 Some(alpha_before.clone()),
-                                Some(alpha_after.clone()),
-                                Some(alpha_after),
+                                alpha_after.clone(),
+                                alpha_after,
                             ));
                             return Ok(check);
                         }
@@ -2073,6 +2332,25 @@ pub fn check_refinement_with_budget(
                         .zip(values)
                         .map(|(param, value)| (param.name().to_owned(), value))
                         .collect::<BTreeMap<_, _>>();
+                    // A mapped argument outside the abstract action's declared
+                    // parameter domain (e.g. an impl whose parameter type is
+                    // wider than the abstraction's) is a range escape of the
+                    // mapping, like an out-of-range mapped state value. §2.4
+                    // checks the transition first, so the abstract guard is
+                    // still evaluated with that argument: a false guard is
+                    // `abs_requires_failed`, as before; only a guard that holds
+                    // (or whose evaluation fails on the argument) leaves the
+                    // range escape to report, as `map_out_of_bounds`, instead of
+                    // stepping the abstraction with an ill-typed argument.
+                    let mut out_of_domain = false;
+                    for param in &abs_action.params {
+                        if let Some(value) = expected_params.get(param.name())
+                            && !parameter_value_in_domain(param, value, abstraction)?
+                        {
+                            out_of_domain = true;
+                            break;
+                        }
+                    }
                     // See the step-0 `Monitor::from_state` note above: this
                     // state is already fully computed, so there is nothing
                     // for `abstraction.init` to determine here either.
@@ -2083,27 +2361,101 @@ pub fn check_refinement_with_budget(
                         &expected_params,
                     )?;
                     let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
-                    let Some(abs_enabled) =
-                        refinement_action_instance(&abs_monitor, abs_action, expected_params)?
-                    else {
+                    let guard =
+                        match refinement_action_instance(&abs_monitor, abs_action, expected_params)
+                        {
+                            Ok(guard) => guard,
+                            Err(_) if out_of_domain => {
+                                check.failure = Some(out_of_bounds(alpha_after));
+                                return Ok(check);
+                            }
+                            Err(error) => return Err(error),
+                        };
+                    let Some(abs_enabled) = guard else {
                         let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_requires_failed",
                             Some("step"),
                             step + 1,
                             &child_trace,
                             Some(alpha_before.clone()),
-                            Some(alpha_after.clone()),
-                            Some(alpha_after),
+                            alpha_after.clone(),
+                            alpha_after,
                         ));
                         return Ok(check);
                     };
+                    let Some(alpha_after) = alpha_after.as_ref().filter(|_| !out_of_domain) else {
+                        check.failure = Some(out_of_bounds(alpha_after));
+                        return Ok(check);
+                    };
                     let abs_step = abs_monitor.step(&abs_enabled)?;
-                    let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
-                    if expected_state != alpha_after {
+                    // The abstract body hit a partial operation (issue #1296):
+                    // the abstract action has no defined successor at α(s),
+                    // so this step cannot correspond to it. `step` reports a
+                    // body `partial_op` with no `attempted_state` (the
+                    // post-state and `ensures` failures carry one; those are
+                    // not this finding). The guard already held above, so a
+                    // false guard stays `abs_requires_failed` (§2.4). There
+                    // is no expected state to report.
+                    if abs_step.attempted_state.is_none()
+                        && abs_step
+                            .violation
+                            .as_ref()
+                            .is_some_and(|violation| violation.kind == "partial_op")
+                    {
                         let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        check.failure = Some(refinement_failure(
+                            "abs_partial_op",
+                            Some("step"),
+                            step + 1,
+                            &child_trace,
+                            Some(alpha_before.clone()),
+                            None,
+                            Some(alpha_after.clone()),
+                        ));
+                        return Ok(check);
+                    }
+                    // Any other violation of the abstract step (issue #1302):
+                    // a post-state type bound, an abstract invariant or
+                    // `trans`, a false `ensures`, or a partial operation in
+                    // one of those checks. `step` rolled back and returned
+                    // α(s) as `state`, with the would-be successor in
+                    // `attempted_state`, so comparing `state` with α(s')
+                    // would accept an unchanged impl step (a false
+                    // `refines`) or report the rolled-back α(s) as the
+                    // expected successor. The abstraction defines no valid
+                    // successor here, so the step cannot correspond whatever
+                    // α(s') is: it fails before the state comparison, with
+                    // no expected state. Matching every remaining violation,
+                    // not only `attempted_state: Some`, keeps the walk
+                    // fail-closed should `step` ever report another shape.
+                    if let Some(violation) = &abs_step.violation {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let mut failure = refinement_failure(
+                            "abs_step_violation",
+                            Some("step"),
+                            step + 1,
+                            &child_trace,
+                            Some(alpha_before.clone()),
+                            None,
+                            Some(alpha_after.clone()),
+                        );
+                        failure.abs_violation = Some(violation.clone());
+                        failure.alpha_after_attempted = abs_step
+                            .attempted_state
+                            .as_ref()
+                            .map(|attempted| project_abstract_state(attempted, abstraction))
+                            .transpose()?;
+                        check.failure = Some(failure);
+                        return Ok(check);
+                    }
+                    let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
+                    if &expected_state != alpha_after {
+                        let child_trace =
+                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                         check.failure = Some(refinement_failure(
                             "abs_state_mismatch",
                             Some("step"),
@@ -2111,12 +2463,17 @@ pub fn check_refinement_with_budget(
                             &child_trace,
                             Some(alpha_before.clone()),
                             Some(expected_state),
-                            Some(alpha_after),
+                            Some(alpha_after.clone()),
                         ));
                         return Ok(check);
                     }
                 }
             }
+            // Both arms above return when `alpha_after` is `None`.
+            let Some(alpha_after) = alpha_after else {
+                check.failure = Some(out_of_bounds(None));
+                return Ok(check);
+            };
             let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
             if let Some(violation) = alpha_monitor.current_violation()? {
                 let kind = if violation.kind == "type_bound" {
@@ -2125,7 +2482,7 @@ pub fn check_refinement_with_budget(
                     "abs_state_mismatch"
                 };
                 let child_trace =
-                    refinement_child_trace(state, &parents, step + 1, &enabled, &stepped);
+                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
                 check.failure = Some(refinement_failure(
                     kind,
                     Some("step"),
@@ -2216,8 +2573,11 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
         result.states_explored += 1;
         scratch.state = state.clone();
         scratch.step = step;
-        let enabled = scratch.enabled()?;
-        if enabled.is_empty() {
+        // An instance whose guard reaches a partial operation is not
+        // disabled: it is that action's `partial_op` (#1191), so it keeps the
+        // state from being a deadlock and is stepped below like any other.
+        let candidates = scratch.candidates()?;
+        if candidates.is_empty() {
             let terminal = match terminal_holds(&scratch) {
                 Ok(value) => value,
                 Err(error) if is_partial_operation_error(&error) => {
@@ -2241,16 +2601,16 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 result.deadlock_step = Some(result.deadlock_step.map_or(step, |old| old.min(step)));
             }
         }
-        for instance in &enabled {
+        for instance in candidates.iter().filter_map(ActionCandidate::enabled) {
             result.action_coverage.insert(instance.action.clone(), true);
         }
         if step >= depth {
             continue;
         }
-        for instance in &enabled {
+        for candidate in &candidates {
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(instance)?;
+            let stepped = scratch.step_candidate(candidate, None)?;
             if let Some(violation) = stepped.violation {
                 if result
                     .violation
@@ -2369,19 +2729,15 @@ pub fn find_boundary_violation(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&instance)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
             if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
                     let mut found_trace = trace::reconstruct_trace(&state, &parents);
-                    found_trace.push(trace_step_from_result(
-                        step + 1,
-                        &state,
-                        &instance,
-                        &stepped,
-                    ));
+                    found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
                     return Ok(BoundaryProbe {
                         finding: Some((violation, found_trace)),
                         exhausted: false,
@@ -2420,6 +2776,18 @@ pub fn find_boundary_violation(
     })
 }
 
+/// The outcome of [`first_self_violation`]'s bounded self-consistency
+/// pre-pass (issue #1246).
+enum SelfConsistency {
+    /// The whole reachable set within `depth` is free of self-violations.
+    Consistent,
+    /// The first self-violation found, with its trace.
+    Violated(Violation, Vec<TraceStep>),
+    /// The pre-pass reached `budget` visited states before either finding a
+    /// self-violation or exhausting the reachable set within `depth`.
+    BudgetExhausted { states_explored: usize },
+}
+
 /// Find the first violation of ANY kind (type bound, user invariant, `trans`,
 /// `ensures`, or `partial_op`) the model has against its own semantics,
 /// concretely, within `depth` — i.e. whether the model is internally
@@ -2439,6 +2807,11 @@ pub fn find_boundary_violation(
 /// including a violation already present in the initial state (init can
 /// itself violate an invariant or type bound before any action runs).
 ///
+/// `budget` bounds `visited.len()` exactly as the correspondence walk's
+/// budget does (issue #1246): checked right after a new insert, so the
+/// pre-pass never holds more than `budget` visited states. A violation found
+/// before the cutoff is still reported; one beyond it is not searched for.
+///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when concrete evaluation or execution fails.
@@ -2446,7 +2819,8 @@ fn first_self_violation(
     model: &KernelModel,
     initial_states: &[State],
     depth: usize,
-) -> Result<Option<(Violation, Vec<TraceStep>)>, RuntimeError> {
+    budget: usize,
+) -> Result<SelfConsistency, RuntimeError> {
     // Queue nodes carry `State` only; a scratch `Monitor` is re-pointed at
     // each popped state instead of cloning the whole model per node, and the
     // trace is reconstructed from parent links only when a violation is
@@ -2466,11 +2840,23 @@ fn first_self_violation(
         scratch.state = state.clone();
         scratch.step = 0;
         if let Some(violation) = scratch.current_violation()? {
-            return Ok(Some((violation, trace::reconstruct_trace(state, &parents))));
+            return Ok(SelfConsistency::Violated(
+                violation,
+                trace::reconstruct_trace(state, &parents),
+            ));
         }
         if visited.insert(state.clone()) {
             queue.push_back((state.clone(), 0_usize));
         }
+    }
+    // After the root loop, not inside it: every initial state is already
+    // materialized in `initial_states`, so checking each one for an
+    // immediate violation costs no extra memory, and a cutoff here must not
+    // skip a later root's init violation.
+    if visited.len() >= budget {
+        return Ok(SelfConsistency::BudgetExhausted {
+            states_explored: visited.len(),
+        });
     }
     while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
@@ -2478,19 +2864,15 @@ fn first_self_violation(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&instance)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = trace::reconstruct_trace(&state, &parents);
-                found_trace.push(trace_step_from_result(
-                    step + 1,
-                    &state,
-                    &instance,
-                    &stepped,
-                ));
-                return Ok(Some((violation, found_trace)));
+                found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
+                return Ok(SelfConsistency::Violated(violation, found_trace));
             }
             let child_state = scratch.state.clone();
             if visited.insert(child_state.clone()) {
@@ -2504,11 +2886,16 @@ fn first_self_violation(
                         },
                     },
                 );
+                if visited.len() >= budget {
+                    return Ok(SelfConsistency::BudgetExhausted {
+                        states_explored: visited.len(),
+                    });
+                }
                 queue.push_back((child_state, step + 1));
             }
         }
     }
-    Ok(None)
+    Ok(SelfConsistency::Consistent)
 }
 
 /// The outcome of a budgeted vacuity-reachability probe for one
@@ -2638,10 +3025,10 @@ pub fn expression_reachability(
         if step >= depth {
             continue;
         }
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step(&instance)?;
+            let stepped = scratch.step_candidate(&candidate, None)?;
             if stepped.violation.is_some() {
                 continue;
             }
@@ -2918,7 +3305,7 @@ pub fn never_enabled_action_warning(
     let origin = model.action_origin(&action.name);
     let name = origin
         .and_then(origin_display_name)
-        .map_or_else(|| display_name(&action.name), str::to_owned);
+        .map_or_else(|| model.action_display_name(&action.name), str::to_owned);
     // Keep this public diagnostic aligned with all other action JSON: a
     // source-backed lowered action reports the authored primary location,
     // while a kernel action retains its own declaration span. Zero spans are
@@ -2943,7 +3330,7 @@ pub fn never_enabled_action_warning(
         if let Some(origin) = origin {
             entry.insert(
                 "generated_name".to_owned(),
-                json!(display_name(&action.name)),
+                json!(model.action_display_name(&action.name)),
             );
             entry.insert("origin".to_owned(), internal_origin_json(origin));
         }
@@ -3024,39 +3411,25 @@ fn replay_trace_with_initial(
             .as_ref()
             .ok_or_else(|| runtime_error(format!("trace step {expected_step} has no action")))?;
         let before = monitor.state.clone();
-        let stepped = match monitor.enabled() {
-            Ok(enabled) => {
-                let instance = enabled
-                    .iter()
-                    .find(|instance| {
-                        instance.action == action.name && instance.params == action.params
-                    })
-                    .ok_or_else(|| {
-                        runtime_error(format!(
-                            "trace action '{}' is not enabled at step {expected_step}",
-                            action.name
-                        ))
-                    })?;
-                monitor.step(instance)?
-            }
-            Err(error)
-                if expected_step + 1 == trace.len() && is_partial_operation_error(&error) =>
-            {
-                let attempted = monitor.attempt(&action.name, &action.params)?;
-                if attempted
-                    .violation
-                    .as_ref()
-                    .is_none_or(|violation| violation.kind != "partial_op")
-                {
-                    return Err(runtime_error(format!(
-                        "trace action '{}' does not reproduce a partial operation at step {expected_step}",
-                        action.name
-                    )));
-                }
-                attempted
-            }
-            Err(error) => return Err(error),
-        };
+        // Only the trace's own instance matters: another instance whose guard
+        // reaches a partial operation does not make this step unreplayable
+        // (#1191). The trace's instance may itself be a guard `partial_op`
+        // only as the trace's final, failing step.
+        let candidates = monitor.candidates()?;
+        let candidate = candidates
+            .iter()
+            .find(|candidate| {
+                let instance = candidate.instance();
+                instance.action == action.name && instance.params == action.params
+            })
+            .filter(|candidate| candidate.enabled().is_some() || expected_step + 1 == trace.len())
+            .ok_or_else(|| {
+                runtime_error(format!(
+                    "trace action '{}' is not enabled at step {expected_step}",
+                    action.name
+                ))
+            })?;
+        let stepped = monitor.step_candidate(candidate, None)?;
         let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
         if observed_state != &entry.state {
             return Err(runtime_error(format!(
@@ -3117,16 +3490,17 @@ pub fn action_cover_traces(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        let enabled = scratch.enabled()?;
-        for instance in enabled {
+        let candidates = scratch.candidates()?;
+        for candidate in candidates {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let result = scratch.step(&instance)?;
+            let result = scratch.step_candidate(&candidate, None)?;
             if result.violation.is_none() {
                 let child_state = result.state.clone();
                 if !covered.contains_key(&instance.action) {
                     let mut witness = trace::reconstruct_trace(&state, &parents);
-                    witness.push(trace_step_from_result(step + 1, &state, &instance, &result));
+                    witness.push(trace_step_from_result(step + 1, &state, instance, &result));
                     covered.insert(instance.action.clone(), witness);
                 }
                 if visited.insert(child_state.clone()) {
@@ -3253,15 +3627,16 @@ pub fn leadsto_response_traces(
         }
         scratch.state = state.clone();
         scratch.step = step;
-        for instance in scratch.enabled()? {
+        for candidate in scratch.candidates()? {
+            let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let result = scratch.step(&instance)?;
+            let result = scratch.step_candidate(&candidate, None)?;
             if result.violation.is_some() {
                 continue;
             }
             let mut child_trace = trace.clone();
-            child_trace.push(trace_step_from_result(step + 1, &state, &instance, &result));
+            child_trace.push(trace_step_from_result(step + 1, &state, instance, &result));
             queue.push(result.state.clone(), child_trace, step + 1);
         }
     }
@@ -3561,6 +3936,21 @@ fn action_parameter_bindings(
     Ok(bindings)
 }
 
+/// Whether `value` belongs to `parameter`'s declared domain (its type, or its
+/// `lo..hi` range).
+fn parameter_value_in_domain(
+    parameter: &ParamDef,
+    value: &Value,
+    model: &KernelModel,
+) -> Result<bool, RuntimeError> {
+    Ok(match parameter {
+        ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
+        ParamDef::Range { lo, hi, .. } => {
+            matches!(value, Value::Int(value) if lo <= value && value <= hi)
+        }
+    })
+}
+
 fn validate_action_parameters(
     action: &ActionDef,
     params: &Bindings,
@@ -3576,13 +3966,7 @@ fn validate_action_parameters(
         let value = params.get(parameter.name()).ok_or_else(|| {
             runtime_error(format!("parameters do not match action '{}'", action.name))
         })?;
-        let belongs = match parameter {
-            ParamDef::Typed { ty, .. } => value_conforms(value, ty, model)?,
-            ParamDef::Range { lo, hi, .. } => {
-                matches!(value, Value::Int(value) if lo <= value && value <= hi)
-            }
-        };
-        if !belongs {
+        if !parameter_value_in_domain(parameter, value, model)? {
             return Err(runtime_error(format!(
                 "parameter '{}' does not belong to its declared domain for action '{}'",
                 parameter.name(),
@@ -3599,22 +3983,60 @@ fn evaluate_action_guards(
     state: &State,
     model: &KernelModel,
 ) -> Result<Option<Bindings>, RuntimeError> {
-    validate_action_parameters(action, params, model)?;
+    evaluate_action_guards_at(action, params, state, model).map_err(|(_, error)| error)
+}
+
+/// [`evaluate_action_guards`], also naming the index in `action.guards` of
+/// the guard whose evaluation failed (`None` when the parameters themselves
+/// were rejected).
+fn evaluate_action_guards_at(
+    action: &ActionDef,
+    params: &Bindings,
+    state: &State,
+    model: &KernelModel,
+) -> Result<Option<Bindings>, (Option<usize>, RuntimeError)> {
+    validate_action_parameters(action, params, model).map_err(|error| (None, error))?;
     let mut bindings = params.clone();
-    for guard in &action.guards {
+    for (index, guard) in action.guards.iter().enumerate() {
+        let failed = |error| (Some(index), error);
         match guard {
             ActionGuard::Let(name, expression) => {
-                let value = eval(expression, state, &mut bindings, model, None)?;
+                let value = eval(expression, state, &mut bindings, model, None).map_err(failed)?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expression) => {
-                if !as_bool(eval(expression, state, &mut bindings, model, None)?)? {
+                let value = eval(expression, state, &mut bindings, model, None)
+                    .and_then(as_bool)
+                    .map_err(failed)?;
+                if !value {
                     return Ok(None);
                 }
             }
         }
     }
     Ok(Some(bindings))
+}
+
+/// The guard (an index into `action.guards`, in source order) whose
+/// evaluation reaches a partial operation when `action` is attempted with
+/// `params` in `state`, or `None` when every guard evaluates -- to `true` or
+/// to `false` -- or fails for another reason.
+///
+/// This is the guard a [`ActionCandidate::GuardPartial`] instance failed in,
+/// so a renderer can locate that `partial_op` at the guard's own Public
+/// Kernel `partial_operations` site instead of the action body (#1191).
+#[must_use]
+pub fn guard_partial_operation(
+    model: &KernelModel,
+    action: &str,
+    params: &Bindings,
+    state: &State,
+) -> Option<usize> {
+    let definition = model.actions.iter().find(|item| item.name == action)?;
+    match evaluate_action_guards_at(definition, params, state, model) {
+        Err((Some(index), error)) if is_partial_operation_error(&error) => Some(index),
+        _ => None,
+    }
 }
 
 /// Execute one `init` statement, threading `written` — the concrete value
@@ -3930,4 +4352,88 @@ pub fn value_conforms(
         (Value::Some(value), TypeRef::Option(inner)) => value_conforms(value, inner, model)?,
         _ => false,
     })
+}
+
+/// The precedence [`RefinementCheck::verdict`] fixes when more than one
+/// outcome field is set. `check_refinement_with_budget` never produces such a
+/// check, and the fields are private (#1262), so this can only be built here.
+/// The end-to-end readings are covered by `tests/refinement_verdict.rs`.
+#[cfg(test)]
+mod refinement_verdict_precedence {
+    use super::{BTreeMap, RefinementCheck, RefinementFailure, RefinementVerdict, Violation};
+
+    fn check(
+        failure: Option<RefinementFailure>,
+        impl_violation: Option<Violation>,
+        budget_exhausted: Option<usize>,
+    ) -> RefinementCheck {
+        RefinementCheck {
+            implementation: "Impl".to_owned(),
+            abstraction: "Abs".to_owned(),
+            depth: 6,
+            action_map: BTreeMap::new(),
+            abs_has_ensures: false,
+            failure,
+            impl_violation: impl_violation.map(|violation| (violation, Vec::new())),
+            budget_exhausted,
+        }
+    }
+
+    fn failure() -> RefinementFailure {
+        RefinementFailure {
+            kind: "stutter_changed_abs".to_owned(),
+            at: None,
+            step: 4,
+            impl_action: None,
+            alpha_before: None,
+            alpha_after_expected: None,
+            alpha_after_actual: None,
+            abs_violation: None,
+            alpha_after_attempted: None,
+            impl_trace: Vec::new(),
+        }
+    }
+
+    fn violation() -> Violation {
+        Violation {
+            kind: "type_bound".to_owned(),
+            name: "n".to_owned(),
+            step: 1,
+        }
+    }
+
+    /// `verdict()` itself refuses a check with two outcomes in debug builds.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "more than one outcome")]
+    fn verdict_rejects_two_outcome_fields_in_debug_builds() {
+        let _ = check(Some(failure()), None, Some(7)).verdict();
+    }
+
+    #[test]
+    fn no_outcome_field_reads_as_refines() {
+        assert_eq!(
+            check(None, None, None).verdict(),
+            RefinementVerdict::Refines
+        );
+    }
+
+    /// The undecided cutoff first, so a decided verdict is never read off an
+    /// incomplete walk; then the impl's own violation; then the mismatch.
+    #[test]
+    fn the_cutoff_wins_over_every_decided_field() {
+        let expected_failure = failure();
+        assert_eq!(
+            check(Some(failure()), Some(violation()), Some(7)).precedence_verdict(),
+            RefinementVerdict::BudgetExhausted { states_explored: 7 }
+        );
+        assert!(matches!(
+            check(Some(failure()), Some(violation()), None).precedence_verdict(),
+            RefinementVerdict::ImplViolated { violation, .. } if violation.kind == "type_bound"
+        ));
+        assert_eq!(
+            check(Some(failure()), None, None).verdict(),
+            RefinementVerdict::Failed(&expected_failure)
+        );
+    }
 }

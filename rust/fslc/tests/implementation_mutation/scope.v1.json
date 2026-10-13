@@ -52,7 +52,7 @@
       "id": "p2.bmc.result-classification",
       "path": "rust/fsl-verifier/src/bmc.rs",
       "function": "verify_bounded_config",
-      "anchor": "SatResult::Unknown => return Err(VerifyError::new(\"solver returned unknown for init\"))",
+      "anchor": "SatResult::Unknown => return Err(VerifyError::solver(\"solver returned unknown for init\"))",
       "fault_classes": ["sat_unsat_unknown_substitution", "backend_failure_as_success"]
     },
     {
@@ -66,7 +66,7 @@
       "id": "p2.bmc.probe-classification",
       "path": "rust/fsl-verifier/src/bmc.rs",
       "function": "probe",
-      "anchor": "SatResult::Unknown => Err(VerifyError::new(\"solver returned unknown\"))",
+      "anchor": "SatResult::Unknown => Err(VerifyError::solver(\"solver returned unknown\"))",
       "fault_classes": ["sat_unsat_unknown_substitution"]
     },
     {

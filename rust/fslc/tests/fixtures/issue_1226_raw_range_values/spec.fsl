@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #1226 preservation control: a kernel `spec` already rejected an override of
+// a raw range name before #1226; the requirements/business fix must not change it.
+spec RawRangeOverrideSpec {
+  number Amount
+  type Level = 0..4
+
+  state { level: Level, amount: Amount }
+  init { level = 0 amount = 0 }
+
+  action raise() {
+    requires level < 4
+    level = level + 1
+  }
+
+  invariant LowLevel { level <= 2 }
+}
+verify {
+  values Amount = 0..1
+}

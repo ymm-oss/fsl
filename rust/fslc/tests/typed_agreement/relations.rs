@@ -685,6 +685,120 @@ spec R6ActionNegativeIndex {
     );
 }
 
+/// #1191: a partial operation reached in an action's `requires` or `let` is the
+/// same `partial_op` as one reached in its body (DESIGN-kernel-contract.md:
+/// guards are evaluated first and "a reached partial expression is
+/// `partial_op`"). Monitor BFS, explicit, and the concrete boundary pre-pass
+/// enumerate actions through their guards and used to stop with a raw
+/// evaluation error instead, while symbolic BMC already classified it.
+const R6_GUARD_PARTIAL_CASES: [(&str, &str); 7] = [
+    (
+        "r6_requires_head",
+        r"
+spec R6RequiresHead {
+  type Item = 0..2
+  state { queue: Seq<Item, 2>, last: Item }
+  init { queue = Seq {} last = 0 }
+  action drain() {
+    requires queue.head() == 0
+    last = 1
+  }
+}
+",
+    ),
+    (
+        "r6_let_head",
+        r"
+spec R6LetHead {
+  type Item = 0..2
+  state { queue: Seq<Item, 2>, last: Item }
+  init { queue = Seq {} last = 0 }
+  action drain() {
+    let h = queue.head()
+    last = h
+  }
+}
+",
+    ),
+    (
+        "r6_let_pop",
+        r"
+spec R6LetPop {
+  type Item = 0..2
+  state { queue: Seq<Item, 2> }
+  init { queue = Seq {} }
+  action drain() {
+    let rest = queue.pop()
+    queue = rest
+  }
+}
+",
+    ),
+    (
+        "r6_requires_at",
+        r"
+spec R6RequiresAt {
+  type Item = 0..2
+  state { queue: Seq<Item, 2>, picked: Item }
+  init { queue = Seq {} picked = 0 }
+  action pick() {
+    requires queue.at(0) == 0
+    picked = 1
+  }
+}
+",
+    ),
+    (
+        "r6_let_index",
+        r"
+spec R6LetIndex {
+  type Item = 0..2
+  state { queue: Seq<Item, 2>, picked: Item }
+  init { queue = Seq {} picked = 0 }
+  action pick() {
+    let v = queue[0]
+    picked = v
+  }
+}
+",
+    ),
+    (
+        "r6_requires_divide",
+        r"
+spec R6RequiresDivide {
+  type Small = -3..3
+  state { x: Small, q: Small }
+  init { x = 0 q = 0 }
+  action divide_unguarded() {
+    requires 2 / x == 0
+    q = 1
+  }
+}
+",
+    ),
+    (
+        "r6_let_remainder",
+        r"
+spec R6LetRemainder {
+  type Small = -3..3
+  state { x: Small, r: Small }
+  init { x = 0 r = 0 }
+  action remainder_unguarded() {
+    let m = 2 % x
+    r = m
+  }
+}
+",
+    ),
+];
+
+#[test]
+fn r6_guard_and_let_partial_operations_agree_across_all_engines() {
+    for (id, source) in R6_GUARD_PARTIAL_CASES {
+        assert_action_context_partial_op_agrees_across_engines(id, source, 2);
+    }
+}
+
 /// #650 regression: a reached partial Seq read in state-property context is a
 /// `partial_op` violation in every engine, never a raw concrete error or a
 /// solver-chosen phantom value.

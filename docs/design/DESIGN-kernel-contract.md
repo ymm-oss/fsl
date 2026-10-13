@@ -97,12 +97,62 @@ Partial operations (`head`, `pop`, `at`, sequence indexing, division, and
 remainder) are listed with a typed failure condition. The set is defined once as
 `fsl_core::PartialOperation` and shared by the Public Kernel, the verifier, the
 runtime (`RuntimeError::partial_operation`) and `fslc explain` (#1166); an
-indexed assignment target's index expression is listed like any other operand. Every classified failure
+indexed assignment target's index expression is listed like any other operand.
+A quantifier, an aggregate and a statement-level `forall` are expanded into one
+entry per finite candidate, with the binder replaced by the candidate and the
+failure condition guarded by the candidate's membership and `where`, so no
+failure condition names a bound variable (#1190). An operation in a branch of
+an expression or statement-level `if` is guarded by the branch's condition,
+negated for `else`, and nested `if`s and `forall`s stack their guards, so a
+failure condition holds only on a path that evaluates the operation (#1260).
+A statement-level `forall`
+with no partial operation in its binder, `where` or body is not expanded, so its
+range need not have constant bounds. Every classified failure
 above rolls back the whole step: the Monitor returns the input state and leaves
 its internal state unchanged. For diagnostics, `attempted_state` is absent for
 guard/body failures and is the exact uncommitted candidate for any later
 `type_bound`, `partial_op`, `invariant`, `trans`, or `ensures` failure. This
 rollback rule is shared by the schema and executable vectors.
+
+A guard (`let` or `requires`) that reaches a partial operation is that action's
+`partial_op` (`_partial_<action>`) in every engine, exactly like a body partial
+operation (#1191). The solver-free walks — explicit-state `verify`, Monitor
+BFS, the concrete boundary pre-pass below, refinement's self-violation walk,
+and the concrete cover/response/reachability walks — enumerate instances with
+`Monitor::candidates`, which returns such an instance as
+`ActionCandidate::GuardPartial` instead of aborting the whole walk with the raw
+evaluation error; `Monitor::step_candidate` turns it into the `partial_op`
+step (state unchanged, no `attempted_state`), the same evidence the symbolic
+engine's witness carries. Walks that only follow successful steps skip it like
+any other violating step. Such an instance is not *disabled* — its guard did
+not evaluate to `false` — so it keeps its state from being a deadlock and does
+not count toward action coverage. `Monitor::enabled` keeps returning the raw
+error for callers that need every guard to evaluate.
+
+The `verify` envelope's `loc` for a guard `partial_op` is the span the Public
+Kernel's `partial_operations` gives that guard's site — the `requires` clause,
+or the action itself for a `let`, which carries no span of its own — in every
+engine, also for an action without a body. The renderer finds the failing guard
+by re-evaluating the guards on the trace's last pre-state
+(`fsl_runtime::guard_partial_operation`). A body `partial_op` keeps its
+existing location.
+
+`partial_operations` is an action-context list only. An `init` statement's
+partial operations (and its other failure sites, such as a `Map` key outside
+the finite key domain or a checked integer overflow) are not published in the
+Public Kernel: an init failure is neither a rollback nor a `partial_op`
+violation, because there is no prior state to return to and no step to blame.
+Init definedness is a verifier obligation instead: every engine (explicit,
+`bmc`, `induction`) reports an init that some initial state cannot evaluate as
+a `semantics` error with exit code 2, and the symbolic engines locate it at the
+failing init statement (e.g. `division by zero in init at 9:5`; #1258). The
+one exception is an init that also assigns a value outside a state variable's
+type: `bmc` and `induction` assume the step-0 type bounds when they ask the
+init question, so they report the search's step-0 `type_bound` violation
+(exit 1) instead, while the explicit engine reports the init failure (exit 2).
+The schema is unchanged. Publishing init failure conditions, should a Kernel
+consumer need them, would add a field with its own `state_effect_on_failure`
+value and so a minor schema version.
 
 ## Concrete boundary pre-pass budget
 

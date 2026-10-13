@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// #1226: a requirements document that bounds three kinds of name. `Amount` is
+// a `number`, `Ticket` is a `process` (an entity with no `entity` line), and
+// `Level` is a raw `type Level = lo..hi` range, which no `--values` /
+// `--instances` override can name. `LowLevel` fails in the declared domain
+// (`raise` reaches 3), so a silently ignored `--values Level=0..2` reads as a
+// verdict over the full domain.
+requirements RawRangeOverride {
+  number Amount
+  type Level = 0..4
+
+  state { level: Level }
+  init { level = 0 }
+
+  process Ticket with amount: Amount = 0 {
+    stages Open, Closed
+    initial Open
+
+    transition close Open -> Closed by Agent
+      with value: Amount
+      when value > 0
+      set amount = value
+      covers REQ-1226 "An agent closes a ticket"
+  }
+
+  requirement REQ-1226-RAISE "the level rises one step at a time" {
+    action raise() {
+      requires level < 4
+      level = level + 1
+    }
+  }
+
+  invariant LowLevel "REQ-1226-RAISE: the level stays low" { level <= 2 }
+}
+verify {
+  instances Ticket = 1
+  values Amount = 0..1
+}

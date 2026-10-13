@@ -721,7 +721,11 @@ variable capture instead of inventing internal binder names. See
   refinement action-correspondence <em>argument</em> expression (§10,
   <code>impl_action(a) -&gt; abs_action(a / c)</code>) is action context, not a property-context
   mapping expression, since it constructs an abstract action call: it gets the
-  same <code>partial_op</code> treatment, surfaced as <code>kind: "map_partial_op"</code>.</li>
+  same <code>partial_op</code> treatment, surfaced as <code>kind: "map_partial_op"</code>. The
+  corresponded abstract action's own body is action context too: a partial
+  operation it hits at the mapped state is <code>kind: "abs_partial_op"</code>; one in
+  its <code>ensures</code>, or a partial operation in an abstract post-state check
+  (<code>Seq</code> operations; <code>/</code> <code>%</code> are total there), is <code>kind: "abs_step_violation"</code>.</li>
 <li>Comparison: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>Logical: <code>and or not =&gt;</code></li>
 <li>Conditional: <code>if condition then when_true else when_false</code>. The condition is
@@ -893,6 +897,18 @@ variable.</p></div></details>
 </tbody>
 </table>
 <ul>
+<li><code>init</code> is evaluated with the action-context rules. A <code>/</code>/<code>%</code> by zero, a
+  partial <code>Seq</code> operation, a finite <code>Map</code> key outside its domain (read or
+  assignment target), or checked i64 overflow that init evaluation reaches
+  (an operation on the unreached side of an init <code>if</code>, conditional, or
+  <code>and</code>/<code>or</code>/<code>=&gt;</code> is not reached) is a semantics error, exit 2, under every
+  engine. It is not a <code>partial_op</code> violation, because there is no step before
+  the initial state. <code>bmc</code> and <code>induction</code> (whose base case is <code>bmc</code>) name the
+  failure and the init statement, e.g. <code>division by zero in init at 9:5</code>,
+  also when init is nondeterministic (#1258). One exception: when init also
+  assigns a value outside a state variable's type, <code>bmc</code> and <code>induction</code>
+  report that step-0 <code>type_bound</code> violation (exit 1) instead, because they
+  ask the init question under the step-0 type bounds.</li>
 <li>A deadlock warning includes which state you got stuck in (e.g. <code>deadlock reachable at
   step 1 (state: status=ToolFault, ...)</code>). The full trace is also in the JSON <code>deadlock.trace</code>.</li>
 <li><strong>Intended terminal states</strong> (states where stopping is correct, such as
@@ -959,7 +975,8 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
-               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
+               [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
+                                                 # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
@@ -1218,7 +1235,8 @@ than an approval. Trust-key possession authenticates a signer but authorization
 remains an organizational policy. The exact canonicalization and key formats
 are specified in <code>docs/design/DESIGN-approval.md</code>.</p>
 <p>Exit codes: <code>0</code> = verified / proved / scenarios/testgen generated / conformant / refines /
-mutated / explained / analyzed / semantic_diff (unless its explicit gate fails) /
+mutated (unless its explicit gate fails) / explained / analyzed /
+semantic_diff (unless its explicit gate fails) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
@@ -1308,7 +1326,7 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 <tr>
 <td><code>unknown_budget</code></td>
 <td>Either: <code>--engine explicit</code> exceeded <code>--explicit-budget</code> before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline <code>implements Abs from "file" { }</code> seam (<code>check</code>/<code>verify</code>), <code>fslc refine</code> (single or chain), a <code>fslc chain</code> refine layer, or a governance <code>preservation</code> (§10, §13)</td>
-<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> and <code>fslc mutate</code> do not read this cutoff yet (<code>diff</code> reports <code>no_semantic_change</code> / exit 0, <code>mutate</code> counts the mutant as survived)</td>
+<td>For the explicit engine: raise the budget, or use <code>--engine bmc</code>/<code>induction</code> for this spec. For a refinement: lower the depth or narrow the <code>verify {}</code> domains of both layers; an inline <code>implements</code> seam can also be split into <code>fslc verify</code> of each layer, but <code>fslc refine</code> shares the same budget. <code>fslc diff</code> reports a cut-off direction as <code>unknown_budget</code> and fails its gate unconditionally (an <code>unknown_budget</code> finding, exit 1); <code>fslc mutate</code> reports the mutant as <code>inconclusive</code>, outside <code>kill_rate</code>, and fails a requested gate</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1715,12 +1733,31 @@ design_exists[convert(column_key, c)]</code> with <code>column_key Column -&gt; 
 </code></pre>
 <p>Success: <code>result: "refines"</code> (exit 0). Violation: <code>refinement_failed</code> (exit 1)
 with <code>kind</code> (<code>abs_requires_failed</code> / <code>abs_state_mismatch</code> / <code>stutter_changed_abs</code> /
-<code>map_out_of_bounds</code> / <code>map_partial_op</code>), <code>impl_trace</code>, and the post-mapping
+<code>map_out_of_bounds</code> / <code>map_partial_op</code> / <code>abs_partial_op</code> / <code>abs_step_violation</code>), <code>impl_trace</code>, and the post-mapping
 <code>abs_before</code> / <code>abs_after_*</code>. A static error (a missing map, an unknown action,
 etc.) is <code>kind: "type"</code> (exit 2). <code>map_partial_op</code> is an action-correspondence
 argument expression (<code>impl_action(a) -&gt; abs_action(a / c)</code>) dividing by an impl
 state variable that can be zero — action context (§3/§6's <code>partial_op</code> rule),
-not the "no check" property context a refinement <em>state</em> map gets.</p>
+not the "no check" property context a refinement <em>state</em> map gets.
+<code>abs_partial_op</code> is the corresponded abstract action's own body hitting a
+partial operation (a zero divisor, <code>pop</code>/<code>head</code>/<code>at</code> on a too-short <code>Seq</code>) at
+the mapped state of an impl step whose abstract guard holds: the abstraction
+has no defined successor there, so the step cannot correspond (there is no
+<code>abs_after_expected</code>). A false abstract guard is still <code>abs_requires_failed</code>.
+A leading <code>let</code> of the abstract action is evaluated with its guard, so a
+partial operation there (<code>let q = 4 / y</code> at <code>y = 0</code>) is not <code>abs_partial_op</code>:
+like a failing abstract guard, it still stops with <code>result: "error"</code> (exit 2).
+<code>abs_step_violation</code> is the corresponded abstract step being rejected by the
+abstraction itself: its successor violates an abstract type bound, invariant or
+<code>trans</code>, its <code>ensures</code> is false, or one of those checks hits a partial
+operation (in an invariant or <code>trans</code>, only a <code>Seq</code> operation can: <code>/</code> <code>%</code>
+are total there). The step cannot correspond whatever the impl's mapped state is, so
+it fails even when the impl leaves the mapped state unchanged; <code>abs_violation</code>
+gives the abstract <code>kind</code> and <code>name</code>, <code>abs_after_attempted</code> the rejected
+successor, and there is no <code>abs_after_expected</code>. So abstract <code>ensures</code> and
+invariants are checked on every corresponded step within <code>--depth</code> — but only
+there: verify the abstract spec on its own as well (the <code>refines</code> note says
+so).</p>
 <p>Before any correspondence is checked, <code>refine</code> first verifies that the impl
 spec is internally consistent on its own — does not violate its own type
 bounds or invariants — within <code>--depth</code>. A refinement mapping cannot make a
@@ -1744,9 +1781,22 @@ at that link (<code>failed_link.kind</code> is <code>null</code>), a <code>fslc 
 with <code>result: "unknown_budget"</code>, and a governance <code>preservation</code> reports
 <code>unknown_budget</code> as its <code>result</code>. This changed verdicts: a refinement whose
 correspondence check reaches the budget used to report <code>refines</code> (exit 0).
-The self-consistency precondition above has no such budget. <code>fslc diff</code> and
-<code>fslc mutate</code> do not read this cutoff yet: <code>fslc diff</code> still reports
-<code>no_semantic_change</code> (exit 0) and <code>fslc mutate</code> counts the mutant as survived.</p>
+The self-consistency precondition above walks the same reachable set first and
+stops at the same budget, with the same <code>unknown_budget</code> report: a
+self-violation it did not reach is not searched for, and the correspondence
+check does not run. An impl whose reachable set within <code>--depth</code> reaches the
+budget is therefore <code>unknown_budget</code> even when the correspondence check would
+have found a mismatch early; before this bound such a run either exhausted
+memory in the precondition or, when it fit, reported the decided result.
+<code>fslc diff</code> reports a direction cut off this way as <code>result: "unknown_budget"</code> with
+<code>states_explored</code>, and adds an <code>unknown_budget</code> finding that fails the gate
+whatever <code>--forbid</code> says (exit 1, never <code>no_semantic_change</code>); <code>fslc diff
+--git</code> and <code>fslc approval diff</code> report the same. <code>fslc mutate</code> reports such a
+mutant as <code>status: "inconclusive"</code> with <code>inconclusive.reason:
+"unknown_budget"</code>: it is excluded from <code>kill_rate</code>, counted in
+<code>summary.inconclusive</code>, and fails a requested <code>--fail-on-survivors</code> /
+<code>--min-kill-rate</code> gate. Both used to report the cutoff as a pass
+(<code>no_semantic_change</code> / exit 0, and <code>survived</code>).</p>
 <p>A state variable <code>init</code> never assigns on any path (an <code>init if</code> reading an
 unassigned <code>Bool</code>, for example) is a genuinely free initial value across its
 full type domain, not a value silently defaulted — <code>refine</code> checks it that
@@ -1776,7 +1826,12 @@ rather than merged — merging would let an impl-only member get silently
 reinterpreted as whichever abs member sits at the same ordinal index. Domain
 types (<code>type X = lo..hi</code>) may safely share a name with different bounds; an
 out-of-range value there is still caught as <code>map_out_of_bounds</code>/
-<code>abs_state_mismatch</code>.</p>
+<code>abs_state_mismatch</code>. That includes an action-correspondence argument outside
+the abstract action's parameter domain (a wider impl parameter type; a false
+abstract guard is still reported first as <code>abs_requires_failed</code>) and a
+state-mapping expression that reads an impl <code>Map</code> at a key outside its domain
+(for example a narrower impl key type): both are <code>map_out_of_bounds</code> (exit 1),
+not a <code>kind: "type"</code> error.</p>
 <h3 id="chain-checking-composition-of-mappings">Chain checking (composition of mappings)</h3>
 <p>The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)
 can be checked <strong>directly by composition</strong> when you line up <code>(spec mapping)</code> in
@@ -1890,7 +1945,18 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — excludes that action from interleaving.</li>
 <li>An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).</li>
 <li>JSON display: the physical name <code>alias__x</code> is output as <code>alias.x</code> (state keys,
-  action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).</li>
+  action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
+  A component action's public name is built from its alias and its action name,
+  so <code>use X as a__b</code> with action <code>c</code> is <code>a__b.c</code>. Every command that names a
+  component action — verify, sweep, scenarios, explain, testgen, conformance,
+  mutate, refine, diff, html, ledger, analyze (including graph IDs such as
+  <code>action:a__b.c</code>), <code>check --strict-tags</code> warnings, and <code>replay</code> output including <code>state_mismatch.action</code> — uses
+  this <code>alias.action</code> form, including in names derived from the action such as
+  <code>_requires_failed_a__b.c</code>. State keys keep the rule above, so the state <code>n</code> of
+  <code>use X as a__b</code> is shown as <code>a.b__n</code> (the frozen Python reference shows
+  <code>a__b.n</code>). A v1 <code>replay</code> trace may write a component action as <code>alias.action</code> or as
+  the older <code>alias__action</code>; both name the same action (see
+  <code>docs/design/DESIGN-replay-trace.md</code>).</li>
 </ul>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8
@@ -3101,7 +3167,14 @@ DESIGN-*.md).</p>
   mutants use the same verify/acceptance/forbidden/refinement oracle. JSON,
   instruction, parse, name, type, and construction errors are <code>invalid</code>, never
   killed, and are excluded from combined/per-source kill-rate denominators
-  (they measure external generator quality, not spec strength).
+  (they measure external generator quality, not spec strength); a built-in
+  mutant that does not build is <code>invalid</code> the same way. A mutant the oracle
+  could not judge (Z3 unavailable, solver <code>unknown</code>/backend failure, or an
+  acceptance/forbidden/implements oracle error) is <code>status:"error"</code> with
+  <code>error{stage, message}</code>: never killed, excluded from <code>kill_rate</code>, counted in
+  <code>summary.errored</code> (present only when non-zero, like <code>summary.inconclusive</code>),
+  and it fails any requested gate (<code>oracle_errors</code>). Precedence for one mutant:
+  <code>killed</code> &gt; <code>error</code> &gt; <code>inconclusive</code> &gt; <code>survived</code>.
   Every entry carries <code>source:"builtin"|"external"</code>; <code>--max-mutants</code> caps only
   the built-in catalog, so <code>--max-mutants 0 --from ...</code> runs external-only.
   <code>--by-requirement</code> flags "a requirement that kills no behavior mutant" as an
@@ -3114,6 +3187,15 @@ DESIGN-*.md).</p>
   <code>killers</code> arrays and <code>by_obligation</code> sole/shared counts keyed by oracle display
   names; default output is unchanged and these counts are observed lower bounds,
   not completeness or correctness measures.
+  <code>--fail-on-survivors</code> and <code>--min-kill-rate R</code> (opt-in, <code>R</code> in <code>[0, 1]</code>) add a
+  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}</code> object (plus <code>errored</code> / <code>inconclusive</code> when non-zero); <code>result</code> stays <code>mutated</code> and
+  <code>gate.passed</code> decides the exit code (1 when false). Zero judged mutants fails
+  either flag (<code>no_judged_mutants</code>), and so does any oracle error
+  (<code>oracle_errors</code>); <code>--min-kill-rate</code> compares the published four-decimal
+  <code>summary.kill_rate</code> with <code>&gt;=</code>; built-in mutants dropped by <code>--max-mutants</code> are
+  recorded in <code>gate.dropped</code> and do not fail the gate. Without either flag the
+  output and exit code are unchanged.
   → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — a text view over skeleton enumeration (state,
   action who/when/what-changes, verification bounds, fairness, KPI projections,

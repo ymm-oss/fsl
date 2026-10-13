@@ -241,16 +241,15 @@ pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
                     let origin = model.action_origin(&action.name);
                     action_json.insert(
                         "name".to_owned(),
-                        json!(
-                            origin
-                                .and_then(origin_display_name)
-                                .map_or_else(|| display_name(&action.name), str::to_owned)
-                        ),
+                        json!(origin.and_then(origin_display_name).map_or_else(
+                            || model.action_display_name(&action.name),
+                            str::to_owned
+                        )),
                     );
                     if let Some(origin) = origin {
                         action_json.insert(
                             "generated_name".to_owned(),
-                            json!(display_name(&action.name)),
+                            json!(model.action_display_name(&action.name)),
                         );
                         action_json.insert("origin".to_owned(), internal_origin_json(origin));
                     }

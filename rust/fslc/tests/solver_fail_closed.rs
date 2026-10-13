@@ -17,16 +17,60 @@ enum InjectedCheck {
     BackendError,
 }
 
+/// Injects one fault at the `fault_at`-th satisfiability check (`check` or
+/// `check_assuming`, 1-based) and counts every check it sees.
 struct FirstCheckFault {
     inner: fsl_solver_z3::Z3Solver,
     first: Option<InjectedCheck>,
+    fault_at: usize,
+    checks: usize,
+    /// The 1-based model read that answers "unavailable" (`None`), if any.
+    no_model_at: Option<usize>,
+    model_reads: std::cell::Cell<usize>,
 }
 
 impl FirstCheckFault {
     fn new(first: InjectedCheck) -> Self {
+        Self::at(first, 1)
+    }
+
+    fn at(fault: InjectedCheck, fault_at: usize) -> Self {
         Self {
             inner: fsl_solver_z3::Z3Solver::new().expect("create Z3 solver"),
-            first: Some(first),
+            first: Some(fault),
+            fault_at,
+            checks: 0,
+            no_model_at: None,
+            model_reads: std::cell::Cell::new(0),
+        }
+    }
+
+    fn counting() -> Self {
+        Self {
+            inner: fsl_solver_z3::Z3Solver::new().expect("create Z3 solver"),
+            first: None,
+            fault_at: 0,
+            checks: 0,
+            no_model_at: None,
+            model_reads: std::cell::Cell::new(0),
+        }
+    }
+
+    fn injected(&mut self) -> Option<InjectedCheck> {
+        self.checks += 1;
+        if self.checks == self.fault_at {
+            self.first.take()
+        } else {
+            None
+        }
+    }
+}
+
+fn injected_check(fault: InjectedCheck) -> CheckFuture<'static> {
+    match fault {
+        InjectedCheck::Unknown => Box::pin(async { Ok(SatResult::Unknown) }),
+        InjectedCheck::BackendError => {
+            Box::pin(async { Err(SolverError::new("injected backend failure")) })
         }
     }
 }
@@ -177,17 +221,17 @@ impl SmtSolver for FirstCheckFault {
     }
 
     fn check(&mut self) -> CheckFuture<'_> {
-        match self.first.take() {
-            Some(InjectedCheck::Unknown) => Box::pin(async { Ok(SatResult::Unknown) }),
-            Some(InjectedCheck::BackendError) => {
-                Box::pin(async { Err(SolverError::new("injected backend failure")) })
-            }
+        match self.injected() {
+            Some(fault) => injected_check(fault),
             None => self.inner.check(),
         }
     }
 
     fn check_assuming(&mut self, assumptions: &[Self::Term]) -> CheckFuture<'_> {
-        self.inner.check_assuming(assumptions)
+        match self.injected() {
+            Some(fault) => injected_check(fault),
+            None => self.inner.check_assuming(assumptions),
+        }
     }
 
     fn unsat_core(&self) -> SolverResult<Vec<Self::Term>> {
@@ -195,6 +239,11 @@ impl SmtSolver for FirstCheckFault {
     }
 
     fn model_eval(&self, term: &Self::Term) -> SolverResult<Option<ModelValue>> {
+        let read = self.model_reads.get() + 1;
+        self.model_reads.set(read);
+        if self.no_model_at == Some(read) {
+            return Ok(None);
+        }
         self.inner.model_eval(term)
     }
 }
@@ -230,6 +279,8 @@ fn bmc_rejects_unknown_initial_solver_result() {
     let error = block_on(fsl_verifier::verify_bounded(&model(), &mut solver, 1))
         .expect_err("unknown must not become a clean BMC result");
     assert!(error.to_string().contains("unknown"));
+    // #1251: `fslc mutate` must be able to tell this apart from a finding.
+    assert!(error.is_solver_failure(), "{error}");
 }
 
 #[test]
@@ -238,6 +289,28 @@ fn bmc_rejects_backend_failure() {
     let error = block_on(fsl_verifier::verify_bounded(&model(), &mut solver, 1))
         .expect_err("backend failure must not become a clean BMC result");
     assert!(error.to_string().contains("injected backend failure"));
+    assert!(error.is_solver_failure(), "{error}");
+}
+
+/// #1251 control: a semantic BMC error (an action body undefined in a
+/// reachable state) is a finding about the model, not a solver failure, so
+/// `fslc mutate` keeps counting it as the `build_spec` kill.
+#[test]
+fn bmc_semantic_error_is_not_a_solver_failure() {
+    let source = r"
+spec UnboundedInitDefinedness {
+  type Amount = 0..3
+  state { balance: Int }
+  init { }
+  action deposit(a: Amount) { requires a > 0 balance = balance + a }
+}
+";
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse fixture");
+    let model = build_model(kernel).expect("build fixture");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 4))
+        .expect_err("an undefined action body is a BMC error");
+    assert!(!error.is_solver_failure(), "{error}");
 }
 
 #[test]
@@ -476,4 +549,150 @@ spec EnsuresBoundary {
     let replay_error = fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
         .expect_err("a corrupted symbolic witness must fail concrete replay");
     assert!(!replay_error.is_empty());
+}
+
+/// The decided part of a BMC result: what was violated or reached and at which
+/// step, coverage, and deadlock. Witness *values* are left out: a tolerated
+/// `unknown` (a dropped range lemma) can make the solver pick a different, still
+/// valid, witness.
+fn verdict(result: &fsl_verifier::BmcResult) -> String {
+    let violation = |violation: &Option<fsl_verifier::BmcViolation>| {
+        violation.as_ref().map(|violation| {
+            (
+                violation.kind.clone(),
+                violation.name.clone(),
+                violation.step,
+            )
+        })
+    };
+    let reachables = result
+        .reachables
+        .iter()
+        .map(|(name, witness)| (name.clone(), witness.as_ref().map(|witness| witness.step)))
+        .collect::<Vec<_>>();
+    format!(
+        "{:?}",
+        (
+            violation(&result.violation),
+            violation(&result.leadsto_violation),
+            reachables,
+            &result.action_coverage,
+            result.deadlock_step,
+            result.frontier_progress,
+        )
+    )
+}
+
+/// #1251 behavioural complement to `fsl-verifier`'s source contract: an
+/// `unknown` answer at *any* satisfiability check of a BMC run must either
+/// surface as an error the verifier marks as a solver failure, or leave the
+/// result exactly as the clean run computed it. The second case is the
+/// documented tolerance of checks whose answer can only strengthen a query
+/// (`entailed` keeps a range lemma out on `unknown`). A check that folded
+/// `unknown` into a decided answer would change the result here: the clean run
+/// has satisfiable probes (action coverage, the reachable witness), so folding
+/// one of them into "unsat" drops coverage or the witness; and an unmarked
+/// error fails the `is_solver_failure` assertion.
+#[test]
+fn bmc_never_folds_an_unknown_into_a_different_result() {
+    let source = r"
+spec EveryCheck {
+  type Small = 0..2
+  state { x: Small, q: Seq<Small, 2> }
+  init { x = 0 q = Seq {} }
+  action up() { requires x < 2 x = x + 1 }
+  action push(v: Small) { requires q.size() < 2 q = q.push(v) }
+  action pop() { requires q.size() > 0 q = q.pop() }
+  invariant Small { x <= 2 }
+  reachable Full { q.size() == 2 }
+}
+";
+    let model = build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse"))
+        .expect("build");
+    let depth = 3;
+    let mut counting = FirstCheckFault::counting();
+    let clean = verdict(
+        &block_on(fsl_verifier::verify_bounded(&model, &mut counting, depth)).expect("clean run"),
+    );
+    let checks = counting.checks;
+    assert!(
+        checks > 3,
+        "the run must reach the per-step probes: {checks}"
+    );
+    let mut errors = 0;
+    for fault_at in 1..=checks {
+        let mut solver = FirstCheckFault::at(InjectedCheck::Unknown, fault_at);
+        match block_on(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
+            Err(error) => {
+                errors += 1;
+                assert!(
+                    error.is_solver_failure(),
+                    "check {fault_at} of {checks}: {error}"
+                );
+            }
+            Ok(result) => assert_eq!(
+                verdict(&result),
+                clean,
+                "an unknown at check {fault_at} of {checks} was folded into a different result"
+            ),
+        }
+    }
+    assert!(errors > 0, "no injected unknown surfaced as an error");
+}
+
+/// #1251 MF2: an unconstrained `Seq` length can be projected negative in a
+/// type-bound counterexample. That is a semantic error (a likely projection
+/// gap like #1283's), not a solver failure, so `fslc mutate` keeps it a kill.
+#[test]
+fn a_negative_seq_length_projection_is_not_a_solver_failure() {
+    let source = r"
+spec SeqNoInit {
+  type V = 0..2
+  state { q: Seq<V, 2>, n: Int }
+  init { n = 0 }
+  action push(v: V) { requires q.size() < 2 q = q.push(v) n = 1 }
+  action pop() { requires q.size() > 0 q = q.pop() }
+}
+";
+    let model = build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse"))
+        .expect("build");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 3))
+        .expect_err("the unconstrained Seq length is projected out of range");
+    assert!(
+        error.to_string().contains("model sequence length"),
+        "{error}"
+    );
+    assert!(!error.is_solver_failure(), "{error}");
+}
+
+/// #1251: a model value the solver cannot produce (`model_eval` answering
+/// `None`) while extracting a witness is a solver failure, like an `unknown`
+/// answer, at every extraction site: each run makes one model read (the k-th,
+/// for every k a clean run performs) unavailable, which reaches the state
+/// values as well as the action choice of a trace step.
+#[test]
+fn an_unavailable_model_value_is_a_solver_failure() {
+    let source = r"
+spec NoModel {
+  type Small = 0..2
+  state { x: Small }
+  init { x = 0 }
+  action up() { requires x < 2 x = x + 1 }
+  reachable Two { x == 2 }
+}
+";
+    let model = build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse"))
+        .expect("build");
+    let mut counting = FirstCheckFault::counting();
+    let _ = block_on(fsl_verifier::verify_bounded(&model, &mut counting, 3)).expect("clean run");
+    let reads = counting.model_reads.get();
+    assert!(reads > 0, "the reachable witness must be extracted");
+    for read in 1..=reads {
+        let mut solver = FirstCheckFault::counting();
+        solver.no_model_at = Some(read);
+        let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 3))
+            .expect_err(&format!("model read {read} of {reads} is needed"));
+        assert!(error.is_solver_failure(), "read {read} of {reads}: {error}");
+    }
 }

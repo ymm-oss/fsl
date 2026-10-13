@@ -1,0 +1,53 @@
+spec PointerRegistry {
+  type K = 0..3
+  enum S { Empty, Open, Done, Dead }
+
+  state {
+    st: Map<K, S>,
+    ptr: Map<K, Option<K>>,
+    link: relation K -> K
+  }
+
+  init {
+    forall i: K {
+      st[i] = if i == 0 then Done else Empty
+      ptr[i] = none
+    }
+    link = Set {}
+  }
+
+  def gone(x: K) = exists z: K { ptr[z] == some(x) and st[z] == Done }
+  def live(m: K) = st[m] == Done and not gone(m)
+  def busy() = exists y: K { st[y] == Open and not gone(y) }
+
+  action open(out: K, src: K) {
+    requires st[out] == Empty
+    requires not busy()
+    requires live(src)
+    st[out] = Open
+    link = link.add(out, src)
+  }
+
+  action reopen(out: K, src: K, prev: K) {
+    requires st[out] == Empty
+    requires not busy()
+    requires live(prev)
+    requires live(src)
+    st[out] = Open
+    ptr[out] = some(prev)
+    link = link.add(out, src)
+  }
+
+  action attach(out: K, x: K) {
+    requires st[out] == Open
+    requires x != out
+    requires live(x)
+    link = link.add(out, x)
+  }
+
+  action close(i: K) { requires st[i] == Open  st[i] = Done }
+  action kill(i: K) { requires st[i] == Open  st[i] = Dead }
+
+  invariant NoLiveOnDead { forall a: K { forall m: K { (live(a) and link.contains(a, m)) => st[m] != Dead } } }
+  invariant NoSelfLink { forall a: K { not link.contains(a, a) } }
+}

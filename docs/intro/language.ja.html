@@ -697,7 +697,10 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   refinement の action 対応の<strong>引数</strong>式(§10、<code>impl_action(a) -&gt; abs_action(a / c)</code>)
   は、抽象 action 呼び出しを構成するものなので property 文脈の mapping 式ではなく
   action 文脈であり、同じ <code>partial_op</code> 扱いを受けて <code>kind: "map_partial_op"</code> として
-  報告されます。</li>
+  報告されます。対応先の抽象 action の本体も action 文脈であり、マッピング後の
+  状態で本体が部分演算に当たると <code>kind: "abs_partial_op"</code>、<code>ensures</code> や事後状態の
+  検査(<code>Seq</code> 操作。そこでは <code>/</code> <code>%</code> は全域)で部分演算に当たると
+  <code>kind: "abs_step_violation"</code> として報告されます。</li>
 <li>比較: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
 <li>論理: <code>and or not =&gt;</code></li>
 <li>条件: <code>if condition then when_true else when_false</code>。条件は <code>Bool</code> で、両方の
@@ -863,6 +866,16 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 </tbody>
 </table>
 <ul>
+<li><code>init</code> は action 文脈の規則で評価されます。init の評価が到達する <code>/</code>/<code>%</code> の
+  ゼロ除算、<code>Seq</code> の部分演算、有限キー域の外にある <code>Map</code> のキー(読み出しと代入
+  先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
+  (exit 2)です(init の <code>if</code>・条件式・<code>and</code>/<code>or</code>/<code>=&gt;</code> の到達しない側の演算は
+  到達しません)。初期状態より前のステップが無いため、<code>partial_op</code> 違反には
+  なりません。<code>bmc</code> と <code>induction</code>(base case が <code>bmc</code>)は、init が非決定的な
+  場合も含め、失敗と init の文を名指しします(例: <code>division by zero in init at
+  9:5</code>)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
+  とき、<code>bmc</code> と <code>induction</code> は step 0 の型境界を仮定して init を問うため、
+  その step 0 の <code>type_bound</code> 違反(exit 1)を報告します。</li>
 <li>デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   <code>deadlock reachable at step 1 (state: status=ToolFault, ...)</code>)。完全なトレースは
   JSON の <code>deadlock.trace</code> にもあります。</li>
@@ -929,7 +942,8 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
 fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max-mutants N]
-               [--from mutants.jsonl]             # built-in + external spec mutation (§15)
+               [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
+                                                 # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
 fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
@@ -1174,7 +1188,8 @@ spec を省略すると、変更されたすべての <code>.fsl</code> パス�
 所持は署名者を認証しますが、認可は依然として組織のポリシーの問題です。正確な正準化
 と鍵のフォーマットは <code>docs/design/DESIGN-approval.md</code> で規定されています。</p>
 <p>Exit code: <code>0</code> = verified / proved / scenarios/testgen の生成 / conformant / refines /
-mutated / explained / analyzed / semantic_diff(明示的なゲートが失敗しない限り) /
+mutated(明示的なゲートが失敗しない限り) / explained / analyzed /
+semantic_diff(明示的なゲートが失敗しない限り) /
 typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
@@ -1263,7 +1278,7 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 <tr>
 <td><code>unknown_budget</code></td>
 <td>いずれか: <code>--engine explicit</code> が閉じる前に <code>--explicit-budget</code> を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline <code>implements Abs from "file" { }</code> seam(<code>check</code>/<code>verify</code>)、<code>fslc refine</code>(単体・chain)、<code>fslc chain</code> の refine 層、governance の <code>preservation</code>(§10、§13)</td>
-<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する。<code>fslc diff</code> と <code>fslc mutate</code> はまだこの打ち切りを読まない(<code>diff</code> は <code>no_semantic_change</code>/exit 0 を報告し、<code>mutate</code> はその mutant を survived と数える)</td>
+<td>explicit engine の場合: 予算を上げるか、この spec には <code>--engine bmc</code>/<code>induction</code> を使う。refinement の場合: depth を下げるか、両層の <code>verify {}</code> の domain を縮める。inline <code>implements</code> seam は各層の <code>fslc verify</code> に分けることもできるが、<code>fslc refine</code> は同じ予算を共有する。<code>fslc diff</code> は打ち切られた方向を <code>unknown_budget</code> と報告し、gate を無条件に落とす(finding <code>unknown_budget</code>、exit 1)。<code>fslc mutate</code> はその mutant を <code>inconclusive</code> と報告し、<code>kill_rate</code> から外し、要求された gate を落とす</td>
 </tr>
 <tr>
 <td><code>error</code></td>
@@ -1660,12 +1675,29 @@ binder を逆方向に変換します。例えば <code>column_key Column -&gt; 
 </code></pre>
 <p>成功: <code>result: "refines"</code>(exit 0)。違反: <code>refinement_failed</code>(exit 1)で、
 <code>kind</code>(<code>abs_requires_failed</code> / <code>abs_state_mismatch</code> / <code>stutter_changed_abs</code> /
-<code>map_out_of_bounds</code> / <code>map_partial_op</code>)、<code>impl_trace</code>、マッピング後の
+<code>map_out_of_bounds</code> / <code>map_partial_op</code> / <code>abs_partial_op</code> / <code>abs_step_violation</code>)、<code>impl_trace</code>、マッピング後の
 <code>abs_before</code> / <code>abs_after_*</code> を伴います。静的なエラー(マップの欠落、未知の
 action など)は <code>kind: "type"</code>(exit 2)です。<code>map_partial_op</code> は、action 対応の
 引数式(<code>impl_action(a) -&gt; abs_action(a / c)</code>)がゼロになりうる impl の state
 変数で除算しているケースです — action 文脈であり、refinement の state map が
-受ける「チェックなし」の property 文脈ではありません(§3 のゼロ除算規則)。</p>
+受ける「チェックなし」の property 文脈ではありません(§3 のゼロ除算規則)。
+<code>abs_partial_op</code> は、抽象 guard が成り立つ impl ステップのマッピング後の状態で、
+対応先の抽象 action の本体が部分演算(ゼロ除算、短すぎる <code>Seq</code> への
+<code>pop</code>/<code>head</code>/<code>at</code>)に当たるケースです — 抽象側にそこからの後続状態が定義されない
+ので、そのステップは対応できません(<code>abs_after_expected</code> はありません)。抽象 guard
+が偽なら従来どおり <code>abs_requires_failed</code> です。抽象 action 冒頭の <code>let</code> は guard
+と一緒に評価されるため、そこでの部分演算(<code>y = 0</code> での <code>let q = 4 / y</code>)は
+<code>abs_partial_op</code> にはならず、評価に失敗する抽象 guard と同じく
+<code>result: "error"</code>(exit 2)で止まります。
+<code>abs_step_violation</code> は、対応先の抽象ステップそのものを抽象側が拒否するケースです
+— 後続状態が抽象の型境界・不変条件・<code>trans</code> を破る、<code>ensures</code> が偽になる、または
+それらの検査が部分演算に当たる(不変条件・<code>trans</code> で当たりうるのは <code>Seq</code> 操作だけで、
+<code>/</code> <code>%</code> はそこでは全域)。impl のマッピング後の状態が何であってもそのステップ
+は対応できないので、impl がマッピング後の状態を変えなくても失敗します。
+<code>abs_violation</code> が抽象側の <code>kind</code> と <code>name</code> を、<code>abs_after_attempted</code> が拒否された
+後続状態を示し、<code>abs_after_expected</code> はありません。つまり抽象の <code>ensures</code> と不変条件は
+<code>--depth</code> 内で対応づけられたステップごとに検査されますが、検査されるのはそこだけ
+です — 抽象 spec 単体の検証も行ってください(<code>refines</code> の note もそう述べます)。</p>
 <p><code>refine</code> はどの対応関係も検査する前に、まず impl spec が <code>--depth</code> の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
 す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、
@@ -1687,9 +1719,20 @@ gate を無条件に(<code>--forbid</code> の対象ではなく)失敗させま
 <code>result: "unknown_budget"</code> で失敗し、governance の <code>preservation</code> は <code>result</code> に
 <code>unknown_budget</code> を報告します。これは判定の変更です: 対応検査が上限に達する
 refinement は、以前は <code>refines</code>(exit 0)を報告していました。上記の自己一貫性の
-precondition には、この上限はありません。<code>fslc diff</code> と <code>fslc mutate</code> はまだこの
-打ち切りを読みません: <code>fslc diff</code> は <code>no_semantic_change</code>(exit 0)を報告し、
-<code>fslc mutate</code> はその mutant を survived と数えます。</p>
+precondition は同じ到達可能状態を先にたどり、同じ上限で止まって同じ <code>unknown_budget</code>
+を報告します: たどり着かなかった自己違反は探さず、対応検査も実行しません。そのため
+<code>--depth</code> の範囲の到達可能状態が上限に達する impl は、対応検査なら早い段で不一致を
+見つけられた場合でも <code>unknown_budget</code> になります。この上限が入る前は、そうした実行は
+precondition でメモリを使い切るか、収まった場合は判定のついた結果を報告していました。
+<code>fslc diff</code> は、こうして打ち切られた方向を
+<code>states_explored</code> 付きの <code>result: "unknown_budget"</code> と報告し、<code>unknown_budget</code> の
+finding を足します。この finding は <code>--forbid</code> の指定に依らず gate を落とします
+(exit 1。<code>no_semantic_change</code> にはなりません)。<code>fslc diff --git</code> と
+<code>fslc approval diff</code> も同じです。<code>fslc mutate</code> はそうした mutant を
+<code>inconclusive.reason: "unknown_budget"</code> 付きの <code>status: "inconclusive"</code> と報告します。
+<code>kill_rate</code> からは外し、<code>summary.inconclusive</code> に数え、<code>--fail-on-survivors</code> /
+<code>--min-kill-rate</code> の gate を要求していればそれを落とします。どちらも以前は打ち切りを
+合格として報告していました(<code>no_semantic_change</code>/exit 0、および <code>survived</code>)。</p>
 <p><code>init</code> がどの経路でも一度も代入しない状態変数(例えば、代入されていない <code>Bool</code>
 を読む <code>init if</code>)は、黙ってデフォルト値になるのではなく、その型の全域にわたって
 本当に自由な初期値です — <code>refine</code> は impl 側でも abs 側でもこの通りに検査します。
@@ -1716,7 +1759,7 @@ enum(または struct)は、マージされるのではなく <code>kind: "type"
 されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
 メンバーとして黙って再解釈されかねないからです。ドメイン型
 (<code>type X = lo..hi</code>)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として <code>map_out_of_bounds</code>/<code>abs_state_mismatch</code> として捕捉されます。</p>
+依然として <code>map_out_of_bounds</code>/<code>abs_state_mismatch</code> として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合。抽象の guard が偽ならこれまでどおり先に <code>abs_requires_failed</code> になります)と、impl の <code>Map</code> を定義域の外のキーで読む状態マッピングの式(impl のキー型が狭い場合など)も、<code>kind: "type"</code> のエラーではなく <code>map_out_of_bounds</code>(exit 1)になります。</p>
 <h3 id="_1">チェーン検査(マッピングの合成)</h3>
 <p>レイヤーのチェーン(business ⊒ requirements ⊒ design …)の端から端までの忠実性は、
 <code>(spec mapping)</code> を順に並べると、<strong>合成によって直接</strong>検査できます:</p>
@@ -1826,7 +1869,18 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — その action をインターリービングから除外します。</li>
 <li>(<code>=</code> のない)通常の <code>action</code> も書けます(グルー action)。</li>
 <li>JSON の表示: 物理名 <code>alias__x</code> は <code>alias.x</code> として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。</li>
+  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
+  コンポーネントの action の公開名は alias と action 名から作るので、
+  <code>use X as a__b</code> の action <code>c</code> は <code>a__b.c</code> です。コンポーネントの action を名指す
+  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
+  mutate、refine、diff、html、ledger、analyze(<code>action:a__b.c</code> のようなグラフの ID を
+  含む)、<code>check --strict-tags</code> の警告、<code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を
+  使います。<code>_requires_failed_a__b.c</code> のように action から作る名前も同じです。
+  状態のキーは上の規則のままなので、<code>use X as a__b</code> の状態 <code>n</code> は <code>a.b__n</code> と
+  表示されます(凍結した Python 参照実装では <code>a__b.n</code>)。
+  v1 の <code>replay</code> トレースでは、コンポーネントの action を <code>alias.action</code> と書いても
+  旧来の <code>alias__action</code> と書いてもかまいません。どちらも同じ action を指します
+  (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。</li>
 </ul>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8
@@ -3012,7 +3066,12 @@ DESIGN-*.md があります)。</p>
   verify/acceptance/forbidden/refinement のオラクルを使います。JSON、命令、
   パース、名前、型、構築のエラーは <code>invalid</code> で、決して killed にはならず、
   combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
-  なく、外部ジェネレーターの品質を測ります)。
+  なく、外部ジェネレーターの品質を測ります)。構築できない組み込みミュータントも
+  同じく <code>invalid</code> です。オラクルが判定できなかったミュータント(Z3 を作れない、
+  solver の <code>unknown</code>/backend の失敗、acceptance/forbidden/implements オラクルの
+  エラー)は <code>status:"error"</code> と <code>error{stage, message}</code> になり、決して killed には
+  ならず、<code>kill_rate</code> から除外され、<code>summary.errored</code>(<code>summary.inconclusive</code> と同じく非 0 のときだけ出ます)に数えられ、要求された
+  gate を不合格にします(<code>oracle_errors</code>)。
   すべてのエントリは <code>source:"builtin"|"external"</code> を運びます。<code>--max-mutants</code> は
   組み込みのカタログだけを上限にするので、<code>--max-mutants 0 --from ...</code> は外部のみ
   を実行します。
@@ -3024,7 +3083,17 @@ DESIGN-*.md があります)。</p>
   ではなく、trace case ID は宣言種別ごとに一意です。<code>--oracle-attribution</code>
   (opt-in) はミュータントごとの <code>killers</code> 配列と、oracle 表示名をキーにした
   <code>by_obligation</code> の sole/shared 集計を追加します。既定出力は変わらず、これらの
-  カウントは観測された下界であり、完全性や正しさの尺度ではありません。→
+  カウントは観測された下界であり、完全性や正しさの尺度ではありません。
+  <code>--fail-on-survivors</code> と <code>--min-kill-rate R</code>(opt-in、<code>R</code> は <code>[0, 1]</code>)は
+  <code>gate{fail_on_survivors, min_kill_rate, judged, survived, kill_rate, dropped,
+  violations, passed}</code>(非 0 のときは <code>errored</code> / <code>inconclusive</code> も)を追加します。
+  1 つのミュータントの状態の優先順位は <code>killed</code> &gt; <code>error</code> &gt; <code>inconclusive</code> &gt; <code>survived</code> です。<code>result</code> は <code>mutated</code> のままで、
+  <code>gate.passed</code> が exit code を決めます(false なら 1)。判定済みミュータントが
+  0 件ならどちらのフラグでも不合格(<code>no_judged_mutants</code>)、オラクルのエラーが
+  1 件でもあればどちらのフラグでも不合格(<code>oracle_errors</code>)、<code>--min-kill-rate</code> は
+  公開される 4 桁丸めの <code>summary.kill_rate</code> と <code>&gt;=</code> で比べ、<code>--max-mutants</code> で
+  落ちた組み込みミュータントは <code>gate.dropped</code> に記録するだけで不合格にしません。
+  どちらのフラグも無ければ出力と exit code は変わりません。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-mutate.md"><code>DESIGN-mutate.md</code></a>
 - <strong><code>fslc explain --readable</code></strong> — 骨格の列挙(状態、action の誰が/いつ/何を変える
   か、検証の境界、公平性、KPI の射影、branch の lowering、合成された refinement

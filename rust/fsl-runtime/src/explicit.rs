@@ -224,7 +224,14 @@ pub fn verify_explicit_selected(
         for state in &frontier {
             scratch.state = state.clone();
             scratch.step = level;
-            let enabled = scratch.enabled()?;
+            // A guard that reaches a partial operation is neither enabled nor
+            // disabled: it is stepped below into that action's `partial_op`
+            // (#1191), and it keeps this state from being a deadlock.
+            let candidates = scratch.candidates()?;
+            let enabled = candidates
+                .iter()
+                .filter_map(super::ActionCandidate::enabled)
+                .collect::<Vec<_>>();
             for instance in &enabled {
                 result.action_coverage.insert(instance.action.clone(), true);
             }
@@ -241,7 +248,7 @@ pub fn verify_explicit_selected(
                     .expect("enabled action belongs to the model")
                     .enabled += 1;
             }
-            if enabled.is_empty() && result.deadlock_step.is_none() {
+            if candidates.is_empty() && result.deadlock_step.is_none() {
                 let terminal = match terminal_holds(&scratch) {
                     Ok(value) => value,
                     Err(error) if super::is_partial_operation_error(&error) => {
@@ -262,7 +269,7 @@ pub fn verify_explicit_selected(
                     result.deadlock_trace = Some(reconstruct_trace(state, &parents));
                 }
             }
-            enabled_by_state.insert(state.clone(), enabled);
+            enabled_by_state.insert(state.clone(), candidates);
         }
 
         if level == depth {
@@ -271,10 +278,11 @@ pub fn verify_explicit_selected(
 
         let mut next = BTreeSet::new();
         for state in &frontier {
-            for instance in &enabled_by_state[state] {
+            for candidate in &enabled_by_state[state] {
+                let instance = candidate.instance();
                 scratch.state = state.clone();
                 scratch.step = level;
-                let stepped = scratch.step_selected(instance, checked_bounds)?;
+                let stepped = scratch.step_candidate(candidate, checked_bounds)?;
                 if let Some(violation) = stepped.violation {
                     // The Monitor rolls back on violation (`state` is the pre-step
                     // state); the trace must show the attempted post-state.

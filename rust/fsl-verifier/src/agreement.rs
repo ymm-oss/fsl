@@ -139,7 +139,7 @@ async fn transition_matches_step_with_bounds<S: SmtSolver>(
             SatResult::Sat => return Ok(true),
             SatResult::Unsat => {}
             SatResult::Unknown => {
-                return Err(VerifyError::new(
+                return Err(VerifyError::solver(
                     "solver returned unknown in transition agreement",
                 ));
             }
@@ -401,7 +401,7 @@ async fn action_condition_is_implied<S: SmtSolver>(
     match result? {
         SatResult::Unsat => Ok(true),
         SatResult::Sat => Ok(false),
-        SatResult::Unknown => Err(VerifyError::new(
+        SatResult::Unknown => Err(VerifyError::solver(
             "solver returned unknown in action-outcome agreement",
         )),
     }
@@ -491,7 +491,7 @@ async fn post_outcome_matches<S: SmtSolver>(
     match solver.check().await? {
         SatResult::Unsat => Ok(true),
         SatResult::Sat => Ok(false),
-        SatResult::Unknown => Err(VerifyError::new(
+        SatResult::Unknown => Err(VerifyError::solver(
             "solver returned unknown in post-outcome agreement",
         )),
     }
@@ -872,7 +872,7 @@ pub async fn expression_matches_value<S: SmtSolver>(
     match solver.check().await? {
         SatResult::Unsat => Ok(true),
         SatResult::Sat => Ok(false),
-        SatResult::Unknown => Err(VerifyError::new(
+        SatResult::Unknown => Err(VerifyError::solver(
             "solver returned unknown in expression agreement",
         )),
     }
@@ -934,7 +934,7 @@ pub async fn invariant_implication<S: SmtSolver>(
         SatResult::Sat => Ok(ImplicationResult::Counterexample(project_state(
             solver, consequent, &state,
         )?)),
-        SatResult::Unknown => Err(VerifyError::new(
+        SatResult::Unknown => Err(VerifyError::solver(
             "solver returned unknown in invariant implication",
         )),
     }

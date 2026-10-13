@@ -10,7 +10,7 @@
 //! `rust/fslc/tests/refine_budget_unknown.rs` and the `fsl-wasm` unit tests.
 
 use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
-use fsl_runtime::{RefinementCheck, RefinementVerdict};
+use fsl_runtime::RefinementVerdict;
 
 fn model(source: &str) -> fsl_core::KernelModel {
     build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse kernel"))
@@ -77,96 +77,14 @@ fn a_walk_cut_off_before_the_mismatch_is_a_budget_verdict_not_refines() {
         fsl_runtime::check_refinement_with_budget(&implementation, &abstraction, &mapping, 6, 2)
             .expect("check_refinement_with_budget runs");
 
-    assert!(checked.failure.is_none(), "{:?}", checked.failure);
-    assert!(checked.impl_violation.is_none());
+    // `BudgetExhausted` is read first and `verdict()` debug-asserts that no
+    // other outcome field is set alongside it.
     assert_eq!(
         checked.verdict(),
         RefinementVerdict::BudgetExhausted { states_explored: 2 }
     );
 }
 
-fn bare_check() -> RefinementCheck {
-    let (implementation, abstraction, mapping) = stutter_mismatch_fixture();
-    let found = fsl_runtime::check_refinement_with_budget(
-        &implementation,
-        &abstraction,
-        &mapping,
-        6,
-        1_000,
-    )
-    .expect("check_refinement_with_budget runs");
-    RefinementCheck {
-        failure: None,
-        impl_violation: None,
-        budget_exhausted: None,
-        ..found
-    }
-}
-
-/// No outcome field set reads as `Refines`.
-#[test]
-fn no_outcome_field_reads_as_refines() {
-    assert_eq!(bare_check().verdict(), RefinementVerdict::Refines);
-}
-
-/// The order the verdict fixes if more than one field were ever set: the
-/// undecided cutoff first, so a decided verdict is never read off an
-/// incomplete walk; then the impl's own violation; then the mismatch.
-#[test]
-fn the_cutoff_wins_over_every_decided_field() {
-    let (implementation, abstraction, mapping) = stutter_mismatch_fixture();
-    let failed = fsl_runtime::check_refinement_with_budget(
-        &implementation,
-        &abstraction,
-        &mapping,
-        6,
-        1_000,
-    )
-    .expect("check_refinement_with_budget runs");
-    let failure = failed.failure.clone().expect("calibrated mismatch");
-    let self_violating = model(
-        "spec SelfViolating { type IQty = 0..1 state { n: IQty } init { n = 1 } \
-         action dec() { n = n - 1 } }",
-    );
-    let self_abs = model(
-        "spec SelfAbs { type AQty = 0..1 state { n: AQty } init { n = 1 } \
-         action dec() { requires n > 0  n = n - 1 } }",
-    );
-    let self_mapping = parse_refinement(
-        "refinement S { impl SelfViolating abs SelfAbs maps auto }",
-        &self_violating,
-        &self_abs,
-    )
-    .expect("parse mapping");
-    let impl_violation =
-        fsl_runtime::check_refinement(&self_violating, &self_abs, &self_mapping, 4)
-            .expect("check_refinement runs")
-            .impl_violation
-            .expect("calibrated self-violation");
-
-    let all = RefinementCheck {
-        failure: Some(failure.clone()),
-        impl_violation: Some(impl_violation.clone()),
-        budget_exhausted: Some(7),
-        ..bare_check()
-    };
-    assert_eq!(
-        all.verdict(),
-        RefinementVerdict::BudgetExhausted { states_explored: 7 }
-    );
-
-    let decided = RefinementCheck {
-        budget_exhausted: None,
-        ..all.clone()
-    };
-    assert!(matches!(
-        decided.verdict(),
-        RefinementVerdict::ImplViolated { violation, .. } if violation.kind == "type_bound"
-    ));
-
-    let mismatch_only = RefinementCheck {
-        impl_violation: None,
-        ..decided
-    };
-    assert_eq!(mismatch_only.verdict(), RefinementVerdict::Failed(&failure));
-}
+// The precedence `verdict()` fixes when more than one outcome field is set
+// can only be built inside the crate now that the fields are private (#1262):
+// see `refinement_verdict_precedence` in `src/lib.rs`.

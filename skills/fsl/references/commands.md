@@ -113,7 +113,7 @@ fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-mutants N=200]
-              [--from mutants.jsonl]
+              [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
 fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
 fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <reproducer.json>
@@ -128,7 +128,9 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
 fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
-                                                  # bounded semantic change report
+                                                  # bounded semantic change report; impl_violated and
+                                                  # unknown_budget (state budget cut the check off)
+                                                  # fail the gate even without --forbid
 fslc diff --git BASE..HEAD [spec.fsl] [--depth K]
                                                   # materialize both full revision trees; omit spec for changed .fsl batch
 fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
@@ -203,7 +205,11 @@ state divergence is exit 1 with leaf mismatches. `initial` is checked against
 `init` leaves any state variable free (BMC explores every admissible value
 there), `initial` is trusted as the concrete starting point directly instead
 of failing `initial_state_mismatch` against an arbitrary default value for
-that variable. Bare arrays/`{events}` are the
+that variable. A compose spec's component action is written `alias.action`
+(the name testgen, conformance, and the Monitor emit); the older
+`alias__action` is still accepted for the same action, and replay output,
+including `state_mismatch.action`, always uses `alias.action`. Sync actions and
+non-compose actions match their exact name only. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input. See `docs/design/DESIGN-replay-trace.md`.
 
@@ -402,7 +408,9 @@ refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
 node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
-reports); `--focus` accepts either a node's raw id or its displayed name.
+reports); `--focus` accepts either a node's raw id or its displayed name. A
+compose component action and its clauses use the action's public name in both
+id and label (`action:a__b.c`, `guard:a__b.c:0`, label `a__b.c`).
 `action_dependency_graph`'s `enables`/`conflicts_with` edges carry every
 shared read/write state bridge for the action pair in `states` (plural);
 `state` (singular) is only the first one, kept for backward compatibility.
@@ -532,7 +540,18 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
-  whether it is killed by BMC/acceptance/forbidden/refinement. exit is always 0.
+  whether it is killed by BMC/acceptance/forbidden/refinement. exit is 0 unless an
+  opt-in gate is requested: `--fail-on-survivors` / `--min-kill-rate R` (`R` in
+  `[0, 1]`) add `gate{..., violations, passed}` and exit 1 when `passed` is
+  false. Zero judged mutants fails either flag (`no_judged_mutants`), and so
+  does any mutant the oracle could not judge (`oracle_errors`); the
+  threshold compares the published four-decimal `summary.kill_rate` with `>=`;
+  mutants dropped by `--max-mutants` are recorded as `gate.dropped`, not failed.
+  A mutant whose implements refine hit the fixed 50,000-state budget is
+  `status:"inconclusive"` (`inconclusive:{reason:"unknown_budget",
+  states_explored}`), neither killed nor survived; `summary.inconclusive`
+  (present only when non-zero) counts it and any one adds the gate violation
+  `inconclusive`.
   `summary.kill_rate = killed / (killed + survived)` is bounded mutant-set
   sensitivity: it depends on the operator mix, `--max-mutants` cap, depth, and
   oracle, and a high value is not a real-bug detection probability, spec
@@ -553,8 +572,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `mutated_spec` source (`spec` alias accepted) or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
   same oracle; malformed JSON/instructions and parse/name/type/construction
-  errors are `invalid` rather than killed. `summary.kill_rate` and
-  `summary.by_source` exclude invalid records from their denominator, and each
+  errors are `invalid` rather than killed (a built-in mutant that does not
+  build is `invalid` too). A mutant the oracle could not judge (Z3
+  unavailable, solver `unknown`/backend failure, or an
+  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  `error{stage, message}`, never killed, and counted in `summary.errored`
+  (present only when non-zero). Precedence for one mutant: `killed` > `error`
+  > `inconclusive` > `survived`.
+  `summary.kill_rate` and `summary.by_source` exclude invalid and error
+  records from their denominator, and each
   mutant carries `source:"builtin"|"external"`. `--max-mutants` applies only
   to the built-in catalog (`0` gives an external-only run).
   `mutate` also accepts `domain` documents: it mutates the same rendered
@@ -786,9 +812,16 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
   refine layer fails with `result:"unknown_budget"`, and a governance
   preservation reports `unknown_budget`. Such a run used to report `refines`
-  (exit 0). The self-consistency precondition is not budgeted. `fslc diff`
-  and `fslc mutate` do not read this cutoff yet (`diff` reports
-  `no_semantic_change` / exit 0, `mutate` counts the mutant as survived).
+  (exit 0). The self-consistency precondition walks the same reachable set
+  first and stops at the same budget with the same `unknown_budget` report,
+  so an impl whose reachable set within `--depth` reaches the budget is
+  `unknown_budget` even if a mismatch lies early. `fslc diff`
+  reports a cut-off direction as `result:"unknown_budget"` with
+  `states_explored` and an `unknown_budget` finding that fails the gate
+  unconditionally (exit 1; also `diff --git` and `approval diff`), never
+  `no_semantic_change`. `fslc mutate` reports the mutant as
+  `status:"inconclusive"` (`inconclusive.reason:"unknown_budget"`), outside
+  `kill_rate`, and any one fails a requested gate (#1262).
 - **action-correspondence argument partial_op (#512)**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action
@@ -798,6 +831,19 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   by zero (caught by the impl self-violation precondition above). A
   correspondence whose divisor is always guarded on every reachable impl
   step still `refines`.
+- **abstract-body partial_op (#1296)**: the corresponded abstract action's
+  own body hitting a partial operation at the mapped state (`y = 4 / y` at
+  `y = 0`) is `kind:"abs_partial_op"` (`refinement_failed`, exit 1, no
+  `abs_after_expected`), never `refines`. A false abstract guard is still
+  `abs_requires_failed`.
+- **abstract step violation (#1302)**: the corresponded abstract step being
+  rejected by the abstraction — its successor violates an abstract type
+  bound, invariant or `trans`, its `ensures` is false, or one of those checks
+  hits a partial operation (`Seq` operations; `/` `%` are total there) — is `kind:"abs_step_violation"`
+  (`refinement_failed`, exit 1) with `abs_violation` (`{"kind","name"}`),
+  `abs_after_attempted` (the rejected successor) and no `abs_after_expected`,
+  whether or not the impl step changes the mapped state. Abstract `ensures`
+  and invariants are therefore checked on corresponded steps, but only there.
 - **nondeterministic `init` (#493)**: a state variable `init` never assigns
   on any path (an `init if` reading an unassigned `Bool`) is a genuinely free
   initial value across its type domain, not a silently defaulted one. The
