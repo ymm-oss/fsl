@@ -42,7 +42,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "markdown>=3", "PyYAML>=6"]
+dev = ["pytest>=7", "markdown>=3,<3.11.1", "PyYAML>=6"]
 
 [project.urls]
 Homepage = "https://github.com/ymm-oss/fsl"
