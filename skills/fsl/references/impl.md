@@ -49,6 +49,18 @@ oracle, stepping through the implementation one step at a time. A failure = a
 divergence between implementation and spec (read the trace to decide which one is
 correct).
 
+Generated tests and conformance vectors step the implementation one spec
+action at a time. A spec action is atomic in the model, so the generated
+sequences do not enumerate interleaving or crash points inside an action.
+Whether anything interleaves inside the implementation's handling of one
+action is decided by the implementation and the Adapter, not by the generated
+sequence. If the implementation carries out one design action as several
+transactions, an error that needs an interleaving or a crash between those
+transactions can pass every generated test and vector. Cover each procedure
+the design declares atomic with implementation tests that interleave or crash
+at the implementation's own transaction boundaries; a conformance run with
+zero divergences does not show that the implementation keeps that atomicity.
+
 The native pytest/Vitest/Swift/Kotlin/Dart/PHPUnit emitters share one validated
 input adapter: Public Kernel v1 metadata, scenario JSON, and the versioned
 fixed-seed `testgen-trace.v1` conformance trace. They never consume a private

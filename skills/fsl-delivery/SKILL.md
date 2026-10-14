@@ -102,7 +102,7 @@ rules in this skill.
 | Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed seam exits 1 with top-level `refinement_failed` or `impl_violated` |
 | Design | kernel `spec` plus mapping to requirements | check, verify, induction, refine |
 | Implementation | Adapter or event log connected to real behavior | testgen run with ≥ 1 executed test against the wired Adapter (chain `[impl]` with `report` → `passed`, not `indeterminate`), or replay; do not claim conformance before this |
-| Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, optional mutate/vacuity |
+| Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, `fslc diff --forbid behavior_removed` between before and after when they share state and action names, optional mutate/vacuity |
 
 For every layer, also run:
 
