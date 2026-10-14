@@ -1162,20 +1162,36 @@ impl Monitor {
     ) -> Result<StepResult, RuntimeError> {
         match candidate {
             ActionCandidate::Enabled(instance) => self.step_selected(instance, checked_bounds),
-            ActionCandidate::GuardPartial(instance) => {
-                self.step += 1;
-                Ok(StepResult {
-                    action: instance.action.clone(),
-                    params: instance.params.clone(),
-                    state: self.state.clone(),
-                    attempted_state: None,
-                    violation: Some(Violation {
-                        kind: "partial_op".to_owned(),
-                        name: format!("_partial_{}", instance.action),
-                        step: self.step,
-                    }),
-                })
-            }
+            ActionCandidate::GuardPartial(instance) => Ok(self.guard_partial_step(instance)),
+        }
+    }
+
+    /// [`Monitor::step_candidate`] for a candidate that [`Monitor::candidates`]
+    /// just enumerated at the current state, for the refinement searches
+    /// (issue #1247). `step_selected` re-evaluates every guard to reject a
+    /// stale instance; here the instance's `bindings` are the ones those
+    /// guards produced at this very state, so the re-evaluation could only
+    /// recompute them. Not for an instance from another state (replay, a
+    /// caller-held `EnabledAction`): those go through `step_candidate`.
+    fn step_enumerated(&mut self, candidate: &ActionCandidate) -> Result<StepResult, RuntimeError> {
+        match candidate {
+            ActionCandidate::Enabled(instance) => self.execute_selected(instance, None),
+            ActionCandidate::GuardPartial(instance) => Ok(self.guard_partial_step(instance)),
+        }
+    }
+
+    fn guard_partial_step(&mut self, instance: &EnabledAction) -> StepResult {
+        self.step += 1;
+        StepResult {
+            action: instance.action.clone(),
+            params: instance.params.clone(),
+            state: self.state.clone(),
+            attempted_state: None,
+            violation: Some(Violation {
+                kind: "partial_op".to_owned(),
+                name: format!("_partial_{}", instance.action),
+                step: self.step,
+            }),
         }
     }
 
@@ -1196,9 +1212,8 @@ impl Monitor {
             .actions
             .iter()
             .find(|action| action.name == action_name)
-            .cloned()
             .ok_or_else(|| runtime_error(format!("unknown action '{action_name}'")))?;
-        let bindings = match evaluate_action_guards(&action, params, &self.state, &self.model) {
+        let bindings = match evaluate_action_guards(action, params, &self.state, &self.model) {
             Ok(Some(bindings)) => bindings,
             Ok(None) => {
                 return Ok(self.failed_step(
@@ -1262,10 +1277,11 @@ impl Monitor {
             .actions
             .iter()
             .find(|action| action.name == enabled.action)
-            .cloned()
             .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
-        let bindings = evaluate_action_guards(&action, &enabled.params, &self.state, &self.model)?
-            .ok_or_else(|| runtime_error(format!("stale enabled action '{}'", enabled.action)))?;
+        let bindings = evaluate_action_guards(action, &enabled.params, &self.state, &self.model)?
+            .ok_or_else(|| {
+            runtime_error(format!("stale enabled action '{}'", enabled.action))
+        })?;
         self.execute_selected(
             &EnabledAction {
                 action: enabled.action.clone(),
@@ -2296,7 +2312,7 @@ pub fn check_refinement_with_budget(
             let alpha_before = &alphas[state_index];
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+            let stepped = scratch.step_enumerated(&candidate)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -2953,7 +2969,7 @@ fn first_self_violation(
             let instance = candidate.instance();
             scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+            let stepped = scratch.step_enumerated(&candidate)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = trace::reconstruct_trace(&state, &parents);
                 found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
