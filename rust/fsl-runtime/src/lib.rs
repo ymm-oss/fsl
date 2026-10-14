@@ -2632,17 +2632,25 @@ pub fn check_refinement_with_budget(
                 ));
                 return Ok(check);
             }
-            if !visited.contains(child_state) {
+            // A child already in `parents` is already queued for the next
+            // layer (roots never are, but they are `visited` by now): its
+            // first parent link stays, as `or_insert_with` kept it, and a
+            // second copy in the queue would only pop as a duplicate that
+            // `visited.insert` rejects without counting it (issue #1247: the
+            // e2e repro popped 101,149 times for 30,387 new states, cloning
+            // the key into `parents.entry` for each).
+            if !visited.contains(child_state) && !parents.contains_key(child_state) {
                 let child_state = stepped.state;
-                parents
-                    .entry(child_state.clone())
-                    .or_insert_with(|| trace::ParentLink {
+                parents.insert(
+                    child_state.clone(),
+                    trace::ParentLink {
                         parent: state.clone(),
                         action: TraceAction {
                             name: enabled.action.clone(),
                             params: enabled.params.clone(),
                         },
-                    });
+                    },
+                );
                 queue.push(child_state, step + 1);
             }
         }
