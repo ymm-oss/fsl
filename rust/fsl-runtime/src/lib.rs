@@ -1173,26 +1173,30 @@ impl Monitor {
     /// guards produced at this very state, so the re-evaluation could only
     /// recompute them. Not for an instance from another state (replay, a
     /// caller-held `EnabledAction`): those go through `step_candidate`.
-    fn step_enumerated(&mut self, candidate: &ActionCandidate) -> Result<StepResult, RuntimeError> {
+    ///
+    /// `state` is the state the candidate was enumerated at; the monitor's
+    /// own state is neither read nor updated, so a search steps every
+    /// candidate of one state without re-pointing the monitor at it each
+    /// time. Only `step` advances, as for any step.
+    fn step_enumerated(
+        &mut self,
+        state: &State,
+        candidate: &ActionCandidate,
+    ) -> Result<StepResult, RuntimeError> {
         match candidate {
-            ActionCandidate::Enabled(instance) => self.execute_selected(instance, None),
-            ActionCandidate::GuardPartial(instance) => Ok(self.guard_partial_step(instance)),
+            ActionCandidate::Enabled(instance) => {
+                Self::execute_from(&self.model, state, &mut self.step, instance, None)
+            }
+            ActionCandidate::GuardPartial(instance) => {
+                self.step += 1;
+                Ok(guard_partial_result(instance, state.clone(), self.step))
+            }
         }
     }
 
     fn guard_partial_step(&mut self, instance: &EnabledAction) -> StepResult {
         self.step += 1;
-        StepResult {
-            action: instance.action.clone(),
-            params: instance.params.clone(),
-            state: self.state.clone(),
-            attempted_state: None,
-            violation: Some(Violation {
-                kind: "partial_op".to_owned(),
-                name: format!("_partial_{}", instance.action),
-                step: self.step,
-            }),
-        }
+        guard_partial_result(instance, self.state.clone(), self.step)
     }
 
     /// Evaluate and execute one bounded action call, including disabled and
@@ -1292,42 +1296,66 @@ impl Monitor {
         )
     }
 
-    #[allow(clippy::too_many_lines)]
     fn execute_selected(
         &mut self,
         enabled: &EnabledAction,
         checked_bounds: Option<&BTreeSet<String>>,
     ) -> Result<StepResult, RuntimeError> {
-        let action = self
-            .model
+        let stepped = Self::execute_from(
+            &self.model,
+            &self.state,
+            &mut self.step,
+            enabled,
+            checked_bounds,
+        )?;
+        if stepped.violation.is_none() {
+            self.state = stepped.state.clone();
+        }
+        Ok(stepped)
+    }
+
+    /// Execute `enabled` from `old_state` without touching the monitor's own
+    /// state: every outcome but a clean step leaves the state unchanged, and
+    /// a clean step's successor is `state` of the result. Borrowing the
+    /// pre-state instead of copying it out of the monitor first, and letting
+    /// a search keep its own pre-state, saves the per-step `State` copies
+    /// issue #1247 measured (`old_state`, and the `self.state` round trip).
+    #[allow(clippy::too_many_lines)]
+    fn execute_from(
+        model: &KernelModel,
+        old_state: &State,
+        step: &mut usize,
+        enabled: &EnabledAction,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<StepResult, RuntimeError> {
+        let action = model
             .actions
             .iter()
             .find(|action| action.name == enabled.action)
             .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
-        let old_state = self.state.clone();
         let mut pending = State::new();
         let mut writes = BTreeSet::new();
         let mut bindings = enabled.bindings.clone();
         for statement in &action.statements {
             if let Err(error) = compute_statement_update(
                 statement,
-                &old_state,
+                old_state,
                 &mut pending,
                 &mut writes,
                 &mut bindings,
-                &self.model,
+                model,
             ) {
                 if is_partial_operation_error(&error) {
-                    self.step += 1;
+                    *step += 1;
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
-                        state: old_state,
+                        state: old_state.clone(),
                         attempted_state: None,
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
                             name: format!("_partial_{}", action.name),
-                            step: self.step,
+                            step: *step,
                         }),
                     });
                 }
@@ -1336,53 +1364,48 @@ impl Monitor {
         }
         let mut next = old_state.clone();
         next.extend(pending);
-        self.step += 1;
-        let violation = match check_state_selected(
-            &next,
-            Some(&old_state),
-            &self.model,
-            self.step,
-            checked_bounds,
-        ) {
-            Ok(violation) => violation,
-            Err(error) if is_partial_operation_error(&error) => {
-                return Ok(StepResult {
-                    action: enabled.action.clone(),
-                    params: enabled.params.clone(),
-                    state: old_state,
-                    attempted_state: Some(next),
-                    violation: Some(Violation {
-                        kind: "partial_op".to_owned(),
-                        name: format!("_partial_{}", action.name),
-                        step: self.step,
-                    }),
-                });
-            }
-            Err(error) => return Err(error),
-        };
+        *step += 1;
+        let violation =
+            match check_state_selected(&next, Some(old_state), model, *step, checked_bounds) {
+                Ok(violation) => violation,
+                Err(error) if is_partial_operation_error(&error) => {
+                    return Ok(StepResult {
+                        action: enabled.action.clone(),
+                        params: enabled.params.clone(),
+                        state: old_state.clone(),
+                        attempted_state: Some(next),
+                        violation: Some(Violation {
+                            kind: "partial_op".to_owned(),
+                            name: format!("_partial_{}", action.name),
+                            step: *step,
+                        }),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
         if let Some(violation) = violation {
             return Ok(StepResult {
                 action: enabled.action.clone(),
                 params: enabled.params.clone(),
-                state: old_state,
+                state: old_state.clone(),
                 attempted_state: Some(next),
                 violation: Some(violation),
             });
         }
         for ensure in &action.ensures {
-            let evaluated = eval(ensure, &next, &mut bindings, &self.model, Some(&old_state));
+            let evaluated = eval(ensure, &next, &mut bindings, model, Some(old_state));
             let value = match evaluated {
                 Ok(value) => value,
                 Err(error) if is_partial_operation_error(&error) => {
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
-                        state: old_state,
+                        state: old_state.clone(),
                         attempted_state: Some(next),
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
                             name: format!("_partial_{}", action.name),
-                            step: self.step,
+                            step: *step,
                         }),
                     });
                 }
@@ -1392,17 +1415,16 @@ impl Monitor {
                 return Ok(StepResult {
                     action: enabled.action.clone(),
                     params: enabled.params.clone(),
-                    state: old_state,
+                    state: old_state.clone(),
                     attempted_state: Some(next),
                     violation: Some(Violation {
                         kind: "ensures".to_owned(),
                         name: action.name.clone(),
-                        step: self.step,
+                        step: *step,
                     }),
                 });
             }
         }
-        self.state = next.clone();
         Ok(StepResult {
             action: enabled.action.clone(),
             params: enabled.params.clone(),
@@ -1432,6 +1454,22 @@ impl Monitor {
         checked_bounds: Option<&BTreeSet<String>>,
     ) -> Result<Option<Violation>, RuntimeError> {
         check_state_selected(&self.state, None, &self.model, self.step, checked_bounds)
+    }
+}
+
+/// The `partial_op` outcome of a [`ActionCandidate::GuardPartial`] instance:
+/// the state unchanged and no attempted state.
+fn guard_partial_result(instance: &EnabledAction, state: State, step: usize) -> StepResult {
+    StepResult {
+        action: instance.action.clone(),
+        params: instance.params.clone(),
+        state,
+        attempted_state: None,
+        violation: Some(Violation {
+            kind: "partial_op".to_owned(),
+            name: format!("_partial_{}", instance.action),
+            step,
+        }),
     }
 }
 
@@ -2310,9 +2348,8 @@ pub fn check_refinement_with_budget(
         for (_, _, state_index, candidate) in candidates {
             let state = &layer[state_index];
             let alpha_before = &alphas[state_index];
-            scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step_enumerated(&candidate)?;
+            let stepped = scratch.step_enumerated(state, &candidate)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -2323,7 +2360,7 @@ pub fn check_refinement_with_budget(
                 // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
-            let child_state = stepped.state.clone();
+            let child_state = &stepped.state;
             // `None` when the mapping read an impl `Map` at a key outside its
             // finite key domain (`RuntimeError::map_key_outside_domain`): the
             // mapped abstract state does not exist. That is reported as
@@ -2331,7 +2368,7 @@ pub fn check_refinement_with_budget(
             // bounds problem: after the stutter / abstract-guard checks that do
             // not need `alpha_after` (DESIGN-refinement §2.4).
             let alpha_after = match alpha_state(
-                &child_state,
+                child_state,
                 implementation,
                 abstraction,
                 mapping,
@@ -2595,7 +2632,8 @@ pub fn check_refinement_with_budget(
                 ));
                 return Ok(check);
             }
-            if !visited.contains(&child_state) {
+            if !visited.contains(child_state) {
+                let child_state = stepped.state;
                 parents
                     .entry(child_state.clone())
                     .or_insert_with(|| trace::ParentLink {
@@ -2967,15 +3005,14 @@ fn first_self_violation(
         scratch.step = step;
         for candidate in scratch.candidates()? {
             let instance = candidate.instance();
-            scratch.state = state.clone();
             scratch.step = step;
-            let stepped = scratch.step_enumerated(&candidate)?;
+            let stepped = scratch.step_enumerated(&state, &candidate)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = trace::reconstruct_trace(&state, &parents);
                 found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
                 return Ok(SelfConsistency::Violated(violation, found_trace));
             }
-            let child_state = scratch.state.clone();
+            let child_state = stepped.state;
             if visited.insert(child_state.clone()) {
                 parents.insert(
                     child_state.clone(),
