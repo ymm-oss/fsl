@@ -2621,16 +2621,18 @@ top-level `result`; every preservation keeps its own value under
 
 A run that already fails for its own reasons (`error`, or a failure-class
 verdict of the document's own kernel) keeps its verdict; the section is
-evidence only. A preservation that cannot be evaluated at all (a missing or
-ill-typed `before`/`after`/mapping file) is a located `error` (exit 2) under
-`verify` too, as it already was under `check`.
+evidence only. Any governance contract error that `check` reports (a
+delegated business file, a control, a `satisfied_by` mapping, or a
+preservation's `before`/`after`/mapping files that are missing or ill-typed)
+is the same located `error` (exit 2) under `verify` too; a preservation
+refinement that fails internally is `error`/`internal` (exit 3) under both.
 Consumers of the `check`/`verify` envelope read the folded verdict: a
 `fslc chain` spec layer fails, `fslc ledger`, `fslc html`, and `fslc mutate`
 exit 1 from the same baseline, and the browser Worker folds `check` and
 `verify` the same way. This changed exit codes: before 4.11 a failed
 preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
 `verify` reported no `governance` section at all (and answered `verified` even
-for a preservation whose files were missing). A CI that gated on the exit
+for a contract `check` rejected). A CI that gated on the exit
 code passed a broken preservation; it now fails it. To keep a preservation
 advisory, run it as a separate `fslc refine` step whose exit the CI ignores.
 

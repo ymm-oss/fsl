@@ -19,8 +19,10 @@ example `examples/refinement_liveness/governance_detects_safety_loss.fsl`)
 now exits 1 instead of 0, and its top-level `result` is the preservation's
 failure instead of `ok`/`verified`. Fix the preservation, or, to keep it
 advisory, check it in a separate `fslc refine` step whose exit the CI
-ignores. `fslc verify` of a governance document whose preservation cannot
-be evaluated (a missing or ill-typed `before`/`after`/mapping file) now
-reports the same located `error` as `check` (exit 2) instead of `verified`
-(exit 0). Consumers that read `verify` envelopes of governance documents
+ignores. `fslc verify` of a governance document with any governance
+contract error that `check` reports (a delegated business file, a control, a
+`satisfied_by` mapping, or preservation files) now reports the same located
+`error` as `check` (exit 2) instead of `verified` (exit 0), and a preservation
+refinement that fails internally is `error`/`internal` (exit 3) under both
+commands instead of a located exit-2 diagnostic. Consumers that read `verify` envelopes of governance documents
 should expect the new `governance` key.

@@ -220,3 +220,31 @@ fn verify_rejects_a_preservation_it_cannot_evaluate() {
         "{value:#}"
     );
 }
+
+/// `verify` now evaluates the whole governance contract, not only its
+/// preservations: a contract error unrelated to any preservation (here a
+/// malformed delegated business file) is the located `error` (exit 2) `check`
+/// reports for the same document, not `verified` over the trivial kernel.
+#[test]
+fn verify_rejects_a_contract_error_check_reports() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = scratch("malformed-dependency");
+    for file in [
+        "governance_malformed_dependency.fsl",
+        "governance_malformed_business.fsl",
+    ] {
+        fs::copy(
+            root.join("examples/gallery/errors").join(file),
+            dir.join(file),
+        )
+        .expect("copy gallery fixture");
+    }
+    let (checked, check_status) = fslc(&dir, &["check", "governance_malformed_dependency.fsl"]);
+    let (verified, verify_status) = fslc(&dir, &["verify", "governance_malformed_dependency.fsl"]);
+    assert_eq!(verify_status, 2, "{verified:#}");
+    assert_eq!(check_status, 2, "{checked:#}");
+    for key in ["result", "kind", "message", "loc"] {
+        assert_eq!(verified[key], checked[key], "{key}: {verified:#}");
+    }
+    assert_eq!(verified["result"], "error", "{verified:#}");
+}

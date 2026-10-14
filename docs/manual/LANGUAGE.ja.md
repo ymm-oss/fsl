@@ -2525,15 +2525,17 @@ top-level の `result` を決め、各 preservation 自身の値は `governance.
 | それ以外 | `error`、`kind: "internal"` | 3 |
 
 実行がそれ自身の理由ですでに失敗している場合(`error`、または文書自身の kernel の
-失敗クラスの判定)はその判定を保ち、セクションは証跡としてだけ付きます。preservation を
-そもそも評価できない場合(`before`/`after`/mapping ファイルが無い・型が誤っている)は、
-`check` と同じく `verify` でも位置付きの `error`(exit 2)です。`check`/`verify` の封筒を読む側は
+失敗クラスの判定)はその判定を保ち、セクションは証跡としてだけ付きます。`check` が報告する
+governance 契約のエラー(委譲先の business ファイル、control、`satisfied_by` の対応付け、
+または preservation の `before`/`after`/mapping ファイルが無い・型が誤っている)はすべて、
+`verify` でも同じ位置付きの `error`(exit 2)です。preservation の refinement が内部で
+失敗した場合は、どちらでも `error`/`internal`(exit 3)です。`check`/`verify` の封筒を読む側は
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
 `fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
-exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(preservation の
-ファイルが無くても `verified` と答えていました)。exit code
+exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が
+拒否する契約に対しても `verified` と答えていました)。exit code
 で判定する CI は壊れた preservation を通していましたが、今は落とします。preservation を
 助言扱いに留めたい場合は、exit を CI が無視する別の `fslc refine` ステップとして実行して
 ください。
