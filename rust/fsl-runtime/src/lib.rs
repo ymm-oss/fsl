@@ -2349,13 +2349,19 @@ pub fn check_refinement_with_budget(
                     .iter()
                     .position(|action| action.name == enabled.action)
                     .unwrap_or(usize::MAX);
-                candidates.push((action_index, enabled.params.clone(), state_index, candidate));
+                candidates.push((action_index, state_index, candidate));
             }
         }
+        // Ordered by (action, params, state) as before; the params are read
+        // in place instead of cloned into each sort key (issue #1247).
         candidates.sort_by(|left, right| {
-            (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
+            (left.0, &left.2.instance().params, left.1).cmp(&(
+                right.0,
+                &right.2.instance().params,
+                right.1,
+            ))
         });
-        for (_, _, state_index, candidate) in candidates {
+        for (_, state_index, candidate) in candidates {
             let (state_id, state) = (layer[state_index].0, &layer[state_index].1);
             let alpha_before = &alphas[state_index];
             let stepped = scratch.step_enumerated(state, step, &candidate)?;
