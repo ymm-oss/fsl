@@ -2203,6 +2203,10 @@ pub fn check_refinement_with_budget(
     // failure reported is stable). Every candidate that passes seeds its
     // own root below, so the walk explores the full reachable set of every
     // nondeterministic initial branch, not just one.
+    // Visited states and parent links are one packed `trace::StateStore`
+    // (issue #1247), as in `first_self_violation`: every state the walk has
+    // queued is stored once, as bytes, and the frontier holds store ids.
+    let mut visited = trace::StateStore::new();
     let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
         let initial_trace = vec![TraceStep {
@@ -2278,19 +2282,24 @@ pub fn check_refinement_with_budget(
             ));
             return Ok(check);
         }
-        queue.push(impl_state, 0);
+        if let Some(id) = visited.insert_root(&impl_state) {
+            queue.push(id, 0);
+        }
     }
 
-    // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
+    // The frontier carries a store id only, not `Monitor` -- a full `Monitor`
     // clone per candidate transition duplicates the whole `KernelModel`
     // repeatedly at every layer (issue #783's 1.72 GB @ depth 3). `scratch`
     // is re-pointed at each state instead, following `first_self_violation`
     // and `bfs`'s established pattern. Traces are no longer carried in the
-    // queue either; `parents` -- left empty for every root, per
-    // `trace::reconstruct_trace`'s multi-root contract -- reconstructs one
+    // queue either; the store's parent links -- none for a root, per
+    // `trace::reconstruct_trace`'s multi-root contract -- reconstruct one
     // only when a failure is about to be reported.
-    let mut visited = BTreeSet::new();
-    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    //
+    // Every queued state is new (a child is queued only when the store did
+    // not have it, and the roots are distinct), so every pop is a new visit
+    // and `popped` is the `visited.len()` the budget bounds.
+    let mut popped = 0_usize;
     let mut scratch = Monitor::from_state(implementation.clone(), State::new());
     // The abstract side is re-pointed the same way (issues #1174, #1247): a
     // `Monitor::from_state(abstraction.clone(), ..)` per mapped transition
@@ -2300,19 +2309,18 @@ pub fn check_refinement_with_budget(
     while let Some(step) = queue.front_step() {
         let mut layer = Vec::new();
         while queue.front_step() == Some(step) {
-            let Some((state, _)) = queue.pop() else {
+            let Some((id, _)) = queue.pop() else {
                 unreachable!("queue front was present");
             };
-            let inserted = visited.insert(state.clone());
-            if inserted && step < depth {
-                layer.push(state);
+            popped += 1;
+            if step < depth {
+                layer.push((id, visited.state(id)));
             }
-            // Checked right after a genuine new insert (mirroring
-            // `find_boundary_violation`'s own placement), so a duplicate
-            // pop of an already-visited state cannot re-trigger this and
-            // the budget bounds exactly `visited.len()`, not pop count.
-            if inserted && visited.len() >= budget {
-                check.budget_exhausted = Some(visited.len());
+            // Checked right after each new visit (mirroring
+            // `find_boundary_violation`'s own placement), so the budget
+            // bounds exactly the number of distinct states visited.
+            if popped >= budget {
+                check.budget_exhausted = Some(popped);
                 return Ok(check);
             }
         }
@@ -2321,7 +2329,7 @@ pub fn check_refinement_with_budget(
         // candidate -- to keep both the values and their computation order
         // identical to the pre-#783 per-node walk.
         let mut alphas = Vec::with_capacity(layer.len());
-        for state in &layer {
+        for (_, state) in &layer {
             alphas.push(alpha_state(
                 state,
                 implementation,
@@ -2331,7 +2339,7 @@ pub fn check_refinement_with_budget(
             )?);
         }
         let mut candidates = Vec::new();
-        for (state_index, state) in layer.iter().enumerate() {
+        for (state_index, (_, state)) in layer.iter().enumerate() {
             scratch.state = state.clone();
             scratch.step = step;
             for candidate in scratch.candidates()? {
@@ -2348,7 +2356,7 @@ pub fn check_refinement_with_budget(
             (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
         });
         for (_, _, state_index, candidate) in candidates {
-            let state = &layer[state_index];
+            let (state_id, state) = (layer[state_index].0, &layer[state_index].1);
             let alpha_before = &alphas[state_index];
             let stepped = scratch.step_enumerated(state, step, &candidate)?;
             let enabled = candidate.instance();
@@ -2381,7 +2389,7 @@ pub fn check_refinement_with_budget(
             };
             let out_of_bounds = |actual: Option<State>| {
                 let child_trace =
-                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                    refinement_child_trace(&visited, state_id, state, step + 1, enabled, &stepped);
                 refinement_failure(
                     "map_out_of_bounds",
                     Some("step"),
@@ -2400,8 +2408,14 @@ pub fn check_refinement_with_budget(
                         return Ok(check);
                     };
                     if alpha_before != alpha_after {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
                             Some("step"),
@@ -2444,8 +2458,9 @@ pub fn check_refinement_with_budget(
                         // internal error that the CLI defaults to `kind:"type"`.
                         Err(error) if is_partial_operation_error(&error) => {
                             let child_trace = refinement_child_trace(
+                                &visited,
+                                state_id,
                                 state,
-                                &parents,
                                 step + 1,
                                 enabled,
                                 &stepped,
@@ -2510,8 +2525,14 @@ pub fn check_refinement_with_budget(
                             Err(error) => return Err(error),
                         };
                     let Some(abs_enabled) = guard else {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "abs_requires_failed",
                             Some("step"),
@@ -2542,8 +2563,14 @@ pub fn check_refinement_with_budget(
                             .as_ref()
                             .is_some_and(|violation| violation.kind == "partial_op")
                     {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "abs_partial_op",
                             Some("step"),
@@ -2570,8 +2597,14 @@ pub fn check_refinement_with_budget(
                     // not only `attempted_state: Some`, keeps the walk
                     // fail-closed should `step` ever report another shape.
                     if let Some(violation) = &abs_step.violation {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         let mut failure = refinement_failure(
                             "abs_step_violation",
                             Some("step"),
@@ -2592,8 +2625,14 @@ pub fn check_refinement_with_budget(
                     }
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
                     if &expected_state != alpha_after {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "abs_state_mismatch",
                             Some("step"),
@@ -2621,7 +2660,7 @@ pub fn check_refinement_with_budget(
                     "abs_state_mismatch"
                 };
                 let child_trace =
-                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                    refinement_child_trace(&visited, state_id, state, step + 1, enabled, &stepped);
                 check.failure = Some(refinement_failure(
                     kind,
                     Some("step"),
@@ -2633,46 +2672,36 @@ pub fn check_refinement_with_budget(
                 ));
                 return Ok(check);
             }
-            // A child already in `parents` is already queued for the next
-            // layer (roots never are, but they are `visited` by now): its
-            // first parent link stays, as `or_insert_with` kept it, and a
-            // second copy in the queue would only pop as a duplicate that
-            // `visited.insert` rejects without counting it (issue #1247: the
-            // e2e repro popped 101,149 times for 30,387 new states, cloning
-            // the key into `parents.entry` for each).
-            if !visited.contains(child_state) && !parents.contains_key(child_state) {
-                let child_state = stepped.state;
-                parents.insert(
-                    child_state.clone(),
-                    trace::ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: enabled.action.clone(),
-                            params: enabled.params.clone(),
-                        },
-                    },
-                );
-                queue.push(child_state, step + 1);
+            // A child the store already has is visited or already queued for
+            // the next layer: its first parent link stays, and a second copy
+            // in the queue would only pop as a duplicate (issue #1247: the
+            // e2e repro popped 101,149 times for 30,387 new states).
+            if let Some(child) =
+                visited.insert_child(child_state, state_id, &enabled.action, &enabled.params)
+            {
+                queue.push(child, step + 1);
             }
         }
     }
     Ok(check)
 }
 
-/// The replayable trace ending at the step just taken from `state`, built by
-/// walking `parents` back to the walk's root and appending that one step --
+/// The replayable trace ending at the step just taken from `state` (stored
+/// as `state_id`), built by walking the store's parent links back to the
+/// walk's root and appending that one step --
 /// reconstructed only when a refinement failure is about to be reported,
 /// mirroring `find_boundary_violation`'s and `first_self_violation`'s
 /// on-demand trace construction (issue #783) instead of carrying a growing
 /// `Vec<TraceStep>` clone in every queued frontier node.
 fn refinement_child_trace(
+    visited: &trace::StateStore,
+    state_id: usize,
     state: &State,
-    parents: &BTreeMap<State, trace::ParentLink>,
     next_step: usize,
     enabled: &EnabledAction,
     stepped: &StepResult,
 ) -> Vec<TraceStep> {
-    let mut child_trace = trace::reconstruct_trace(state, parents);
+    let mut child_trace = visited.trace(state_id);
     child_trace.push(trace_step_from_result(next_step, state, enabled, stepped));
     child_trace
 }

@@ -34,23 +34,27 @@ use super::State;
 /// ..)>` instead of using this type is not stopped by it. Pair any change
 /// to a lane using `LeanFrontier` with its ceiling regression test
 /// (`tests/issue_730_bfs_memory_ceiling.rs`'s pattern) in review.
+///
+/// `Node` is the `State` itself, or a [`StateStore`] id for a lane that keeps
+/// its states packed (the refinement walk, issue #1247): either way a node is
+/// a state and a depth, nothing wider.
 #[derive(Debug, Default)]
-pub(crate) struct LeanFrontier {
-    queue: VecDeque<(State, usize)>,
+pub(crate) struct LeanFrontier<Node = State> {
+    queue: VecDeque<(Node, usize)>,
 }
 
-impl LeanFrontier {
+impl<Node> LeanFrontier<Node> {
     pub(crate) fn new() -> Self {
         Self {
             queue: VecDeque::new(),
         }
     }
 
-    pub(crate) fn push(&mut self, state: State, step: usize) {
-        self.queue.push_back((state, step));
+    pub(crate) fn push(&mut self, node: Node, step: usize) {
+        self.queue.push_back((node, step));
     }
 
-    pub(crate) fn pop(&mut self) -> Option<(State, usize)> {
+    pub(crate) fn pop(&mut self) -> Option<(Node, usize)> {
         self.queue.pop_front()
     }
 
