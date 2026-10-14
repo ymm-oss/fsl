@@ -192,29 +192,19 @@ fn eval_inner(
         }
         Expr::Stage { .. } => Err(runtime_error("unlowered stage access")),
         Expr::Index(base, index) => {
+            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+                return Ok(value);
+            }
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;
-            match base {
-                Value::Map(values) => values.get(&index).cloned().ok_or_else(|| RuntimeError {
-                    map_key_outside_domain: true,
-                    ..runtime_error("map index outside finite key domain")
-                }),
-                Value::Seq(values) => values
-                    .get(partial_index(index, PartialOperation::Index)?)
-                    .cloned()
-                    .ok_or_else(|| partial_operation_error(PartialOperation::Index)),
-                _ => Err(runtime_error("indexing requires a map or sequence")),
-            }
+            index_place(&base, index).cloned()
         }
         Expr::Field(base, field) => {
-            let base = eval(base, state, bindings, model, old_state)?;
-            match base {
-                Value::Struct { fields, .. } => fields
-                    .get(field)
-                    .cloned()
-                    .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'"))),
-                _ => Err(runtime_error("field access requires a struct")),
+            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+                return Ok(value);
             }
+            let base = eval(base, state, bindings, model, old_state)?;
+            field_place(&base, field).cloned()
         }
         Expr::Method {
             receiver,
@@ -383,6 +373,94 @@ fn eval_inner(
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
             "unsupported ternary function '{name}'"
         ))),
+    }
+}
+
+/// Read a `Var`/`Index`/`Field` chain such as `design[c].st` by reference,
+/// cloning only the addressed leaf (issue #1247). Evaluating the chain
+/// bottom-up through [`eval`] cloned the whole state variable (`design`, every
+/// claim) and then every intermediate value just to read one field.
+///
+/// The observable order is the bottom-up one: the root name is resolved
+/// first, then each step from the innermost outward evaluates its index
+/// expression and then performs its lookup, so the first failing step reports
+/// the same error it did before. Returns `Ok(None)` when the chain is not
+/// rooted at a `Var`; the caller then evaluates it the original way.
+fn eval_place(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Option<Value>, RuntimeError> {
+    enum PlaceStep<'expr> {
+        Index(&'expr Expr),
+        Field(&'expr str),
+    }
+    let mut steps = Vec::new();
+    let mut root = expr;
+    let name = loop {
+        match root {
+            Expr::Index(base, index) => {
+                steps.push(PlaceStep::Index(index));
+                root = base;
+            }
+            Expr::Field(base, field) => {
+                steps.push(PlaceStep::Field(field));
+                root = base;
+            }
+            Expr::Var(name) => break name,
+            _ => return Ok(None),
+        }
+    };
+    // `eval_inner`'s `Var` lookup order. A bound root is copied out: the
+    // index expressions below need `bindings` mutably (an `is` pattern may
+    // bind a new name), so a borrow of a bound value cannot be held across
+    // them. State and model values are borrowed for the whole walk.
+    let owned;
+    let mut current: &Value = if let Some(value) = bindings.get(name) {
+        owned = value.clone();
+        &owned
+    } else {
+        state
+            .get(name)
+            .or_else(|| model.consts.get(name))
+            .or_else(|| model.enum_members.get(name))
+            .ok_or_else(|| runtime_error(format!("unknown identifier '{name}'")))?
+    };
+    for step in steps.into_iter().rev() {
+        current = match step {
+            PlaceStep::Index(index) => {
+                let index = eval(index, state, bindings, model, old_state)?;
+                index_place(current, index)?
+            }
+            PlaceStep::Field(field) => field_place(current, field)?,
+        };
+    }
+    Ok(Some(current.clone()))
+}
+
+/// The element `base[index]` addresses, with `Expr::Index`'s errors.
+fn index_place(base: &Value, index: Value) -> Result<&Value, RuntimeError> {
+    match base {
+        Value::Map(values) => values.get(&index).ok_or_else(|| RuntimeError {
+            map_key_outside_domain: true,
+            ..runtime_error("map index outside finite key domain")
+        }),
+        Value::Seq(values) => values
+            .get(partial_index(index, PartialOperation::Index)?)
+            .ok_or_else(|| partial_operation_error(PartialOperation::Index)),
+        _ => Err(runtime_error("indexing requires a map or sequence")),
+    }
+}
+
+/// The field `base.field` addresses, with `Expr::Field`'s errors.
+fn field_place<'value>(base: &'value Value, field: &str) -> Result<&'value Value, RuntimeError> {
+    match base {
+        Value::Struct { fields, .. } => fields
+            .get(field)
+            .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'"))),
+        _ => Err(runtime_error("field access requires a struct")),
     }
 }
 
