@@ -206,7 +206,7 @@ async fn check(request: &Request, solver_version: &str) -> Value {
         &warning_ctx,
     );
     output.insert("warnings".to_owned(), Value::Array(warnings));
-    let mut output = match implements_output(request, &model, 8) {
+    let output = match implements_output(request, &model, 8) {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
         Err(failure) => return implements_error(solver_version, &failure),
     };
