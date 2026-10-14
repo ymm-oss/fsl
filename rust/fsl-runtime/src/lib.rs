@@ -2236,6 +2236,11 @@ pub fn check_refinement_with_budget(
     let mut visited = BTreeSet::new();
     let mut parents = BTreeMap::<State, trace::ParentLink>::new();
     let mut scratch = Monitor::from_state(implementation.clone(), State::new());
+    // The abstract side is re-pointed the same way (issues #1174, #1247): a
+    // `Monitor::from_state(abstraction.clone(), ..)` per mapped transition
+    // copied the whole abstract `KernelModel` once for the abstract step and
+    // once more for the α(s') check, on every transition walked.
+    let mut abs_scratch = Monitor::from_state(abstraction.clone(), State::new());
     while let Some(step) = queue.front_step() {
         let mut layer = Vec::new();
         while queue.front_step() == Some(step) {
@@ -2438,9 +2443,10 @@ pub fn check_refinement_with_budget(
                         abs_action,
                         &expected_params,
                     )?;
-                    let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
+                    abs_scratch.state = abs_state;
+                    abs_scratch.step = 0;
                     let guard =
-                        match refinement_action_instance(&abs_monitor, abs_action, expected_params)
+                        match refinement_action_instance(&abs_scratch, abs_action, expected_params)
                         {
                             Ok(guard) => guard,
                             Err(_) if out_of_domain => {
@@ -2467,7 +2473,7 @@ pub fn check_refinement_with_budget(
                         check.failure = Some(out_of_bounds(alpha_after));
                         return Ok(check);
                     };
-                    let abs_step = abs_monitor.step(&abs_enabled)?;
+                    let abs_step = abs_scratch.step(&abs_enabled)?;
                     // The abstract body hit a partial operation (issue #1296):
                     // the abstract action has no defined successor at α(s),
                     // so this step cannot correspond to it. `step` reports a
@@ -2552,8 +2558,9 @@ pub fn check_refinement_with_budget(
                 check.failure = Some(out_of_bounds(None));
                 return Ok(check);
             };
-            let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
-            if let Some(violation) = alpha_monitor.current_violation()? {
+            // `Monitor::current_violation` of a fresh monitor at α(s'),
+            // without building one.
+            if let Some(violation) = check_state(&alpha_after, None, abstraction, 0)? {
                 let kind = if violation.kind == "type_bound" {
                     "map_out_of_bounds"
                 } else {
