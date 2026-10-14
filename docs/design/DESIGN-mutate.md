@@ -239,6 +239,24 @@ and not an assurance-class upgrade. The flag is explicit because full attributio
 is more expensive than first-killer recording; when the flag is off, nothing is
 fabricated (no empty `killers` arrays on the default path).
 
+The attribution reuses the main oracle's result (#1282): the type-bound killer
+(the boundary probe's raw violation name, or the bounds-only model's kill, labelled
+against the attributed model) and the main oracle's clean/killed verdict — before the
+requirement/implements oracles and the `_bounds_*` re-attribution — which decides
+whether the requirement/implements oracles add a killer. Only the per-property
+isolated models (one per invariant, reachable, transition, leadsTo, and action with
+`ensures`) are checked again, so a killed mutant costs the main oracle plus one check
+per isolated model.
+
+The attribution reuses the main oracle's result (#1282): the type-bound killer
+(the boundary probe's raw violation name, or the bounds-only model's kill, labelled
+against the attributed model) and the main oracle's clean/killed verdict — before the
+requirement/implements oracles and the `_bounds_*` re-attribution — which decides
+whether the requirement/implements oracles add a killer. Only the per-property
+isolated models (one per invariant, reachable, transition, leadsTo, and action with
+`ensures`) are checked again, so a killed mutant costs the main oracle plus one check
+per isolated model.
+
 ## 5. Output / ripple
 
 ```json
