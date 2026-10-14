@@ -1177,19 +1177,21 @@ impl Monitor {
     /// `state` is the state the candidate was enumerated at; the monitor's
     /// own state is neither read nor updated, so a search steps every
     /// candidate of one state without re-pointing the monitor at it each
-    /// time. Only `step` advances, as for any step.
+    /// time. `step` is the logical step of `state`; the monitor's own
+    /// `step` is not used either.
     fn step_enumerated(
-        &mut self,
+        &self,
         state: &State,
+        step: usize,
         candidate: &ActionCandidate,
     ) -> Result<StepResult, RuntimeError> {
+        let mut step = step;
         match candidate {
             ActionCandidate::Enabled(instance) => {
-                Self::execute_from(&self.model, state, &mut self.step, instance, None)
+                Self::execute_from(&self.model, state, &mut step, instance, None)
             }
             ActionCandidate::GuardPartial(instance) => {
-                self.step += 1;
-                Ok(guard_partial_result(instance, state.clone(), self.step))
+                Ok(guard_partial_result(instance, state.clone(), step + 1))
             }
         }
     }
@@ -2348,8 +2350,7 @@ pub fn check_refinement_with_budget(
         for (_, _, state_index, candidate) in candidates {
             let state = &layer[state_index];
             let alpha_before = &alphas[state_index];
-            scratch.step = step;
-            let stepped = scratch.step_enumerated(state, &candidate)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -2979,21 +2980,25 @@ fn first_self_violation(
     // concrete initial state) are handled by leaving every root out of
     // `parents` and letting `trace::reconstruct_trace` discover whichever
     // root a given state actually descends from -- see its doc comment.
+    //
+    // `visited` and the parent links are one packed `StateStore` (issue
+    // #1247): each reached state is held once, as bytes, instead of three
+    // times as a full `State`, and the queue holds store ids. A state is
+    // decoded again only when it is expanded or appears in a violation trace.
     let mut scratch = Monitor::from_state(model.clone(), State::new());
     let mut queue = VecDeque::new();
-    let mut visited = BTreeSet::new();
-    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let mut visited = trace::StateStore::new();
     for state in initial_states {
         scratch.state = state.clone();
         scratch.step = 0;
         if let Some(violation) = scratch.current_violation()? {
             return Ok(SelfConsistency::Violated(
                 violation,
-                trace::reconstruct_trace(state, &parents),
+                trace::reconstruct_trace(state, &BTreeMap::new()),
             ));
         }
-        if visited.insert(state.clone()) {
-            queue.push_back((state.clone(), 0_usize));
+        if let Some(id) = visited.insert_root(state) {
+            queue.push_back((id, 0_usize));
         }
     }
     // After the root loop, not inside it: every initial state is already
@@ -3005,39 +3010,29 @@ fn first_self_violation(
             states_explored: visited.len(),
         });
     }
-    while let Some((state, step)) = queue.pop_front() {
+    while let Some((id, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        scratch.state = state.clone();
-        scratch.step = step;
+        scratch.state = visited.state(id);
+        let state = &scratch.state;
         for candidate in scratch.candidates()? {
             let instance = candidate.instance();
-            scratch.step = step;
-            let stepped = scratch.step_enumerated(&state, &candidate)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate)?;
             if let Some(violation) = stepped.violation.clone() {
-                let mut found_trace = trace::reconstruct_trace(&state, &parents);
-                found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
+                let mut found_trace = visited.trace(id);
+                found_trace.push(trace_step_from_result(step + 1, state, instance, &stepped));
                 return Ok(SelfConsistency::Violated(violation, found_trace));
             }
-            let child_state = stepped.state;
-            if visited.insert(child_state.clone()) {
-                parents.insert(
-                    child_state.clone(),
-                    trace::ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: instance.action.clone(),
-                            params: instance.params.clone(),
-                        },
-                    },
-                );
+            if let Some(child) =
+                visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
+            {
                 if visited.len() >= budget {
                     return Ok(SelfConsistency::BudgetExhausted {
                         states_explored: visited.len(),
                     });
                 }
-                queue.push_back((child_state, step + 1));
+                queue.push_back((child, step + 1));
             }
         }
     }
