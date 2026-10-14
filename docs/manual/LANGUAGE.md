@@ -1170,7 +1170,8 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
-because inline `implements` propagates that seam verdict to the top-level `result`. The fold
+because inline `implements` propagates that seam verdict to the top-level `result`; a failed
+governance `preservation` folds into `check`/`verify` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
@@ -2602,6 +2603,36 @@ refinement at depth 8 and report results under `governance.preservations`:
 `refines`, `refinement_failed`, `violated` (the `after` spec breaks its own
 semantics, §10), or `unknown_budget` (the correspondence check reached its
 state budget, §10). The browser Worker reports the same values.
+
+A preservation that does not `refines` is the command's verdict, fail-closed,
+for `fslc check` and `fslc verify` alike (`verify` runs the preservations at
+depth 8 too, whatever its `--depth`, and attaches the same `governance`
+section). The first non-`refines` preservation in declaration order sets the
+top-level `result`; every preservation keeps its own value under
+`governance.preservations`:
+
+| preservation `result` | top-level `result` | exit |
+|---|---|---|
+| `refines` (every preservation) | unchanged (`ok` / `verified` / `proved`) | unchanged (0) |
+| `refinement_failed` | `refinement_failed` | 1 |
+| `violated` | `impl_violated` (the spelling an inline `implements` seam uses for the same condition) | 1 |
+| `unknown_budget` | `unknown_budget` | 1 |
+| anything else | `error`, `kind: "internal"` | 3 |
+
+A run that already fails for its own reasons (`error`, or a failure-class
+verdict of the document's own kernel) keeps its verdict; the section is
+evidence only. A preservation that cannot be evaluated at all (a missing or
+ill-typed `before`/`after`/mapping file) is a located `error` (exit 2) under
+`verify` too, as it already was under `check`.
+Consumers of the `check`/`verify` envelope read the folded verdict: a
+`fslc chain` spec layer fails, `fslc ledger`, `fslc html`, and `fslc mutate`
+exit 1 from the same baseline, and the browser Worker folds `check` and
+`verify` the same way. This changed exit codes: before 4.11 a failed
+preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
+`verify` reported no `governance` section at all (and answered `verified` even
+for a preservation whose files were missing). A CI that gated on the exit
+code passed a broken preservation; it now fails it. To keep a preservation
+advisory, run it as a separate `fslc refine` step whose exit the CI ignores.
 
 ### 13.4 How to write non-functional requirements (NFRs)
 

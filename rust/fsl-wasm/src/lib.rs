@@ -210,12 +210,21 @@ async fn check(request: &Request, solver_version: &str) -> Value {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
         Err(failure) => return implements_error(solver_version, &failure),
     };
+    fold_governance(request, solver_version, output).await
+}
+
+/// Evaluate a governance document's preservations and fold them into a
+/// `check`/`verify` envelope, as native `fold_governance_from_source` does
+/// (issue #1303): an `error` envelope is returned untouched, a governance
+/// diagnostic replaces the envelope, and otherwise
+/// [`fslc_rust::verification_output::attach_governance`] owns the verdict.
+async fn fold_governance(request: &Request, solver_version: &str, mut output: Value) -> Value {
+    if output.get("result").and_then(Value::as_str) == Some("error") {
+        return output;
+    }
     match governance_output(request).await {
         Ok(Some(governance)) => {
-            output
-                .as_object_mut()
-                .expect("check envelope")
-                .insert("governance".to_owned(), governance);
+            fslc_rust::verification_output::attach_governance(&mut output, governance);
         }
         Ok(None) => {}
         Err(failure) => {
@@ -374,8 +383,13 @@ fn add_frontend_metadata(
     output
 }
 
-#[allow(clippy::too_many_lines)]
 async fn verify(request: &Request, solver_version: &str) -> Value {
+    let output = verify_kernel(request, solver_version).await;
+    fold_governance(request, solver_version, output).await
+}
+
+#[allow(clippy::too_many_lines)]
+async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
     let started = performance_now();
     // The stages ahead of the solver follow native `run_verify_from_source`
     // in its order (issue #1163): surface parse and the Agent rejection,
@@ -1723,6 +1737,61 @@ mod tests {
         );
 
         assert_eq!(worker_preservation_result(&request), json!("violated"));
+    }
+
+    /// Issue #1303's reproducer, from the same fixture files native
+    /// `rust/fslc/tests/issue_1303_preservation_verdict.rs` runs.
+    fn issue_1303_check_request(source: &str) -> Request {
+        Request {
+            cmd: "check".to_owned(),
+            source: source.to_owned(),
+            source_file: "governance.fsl".to_owned(),
+            files: BTreeMap::from([
+                (
+                    "abs.fsl".to_owned(),
+                    include_str!("../../fslc/tests/fixtures/issue_1303/abs.fsl").to_owned(),
+                ),
+                (
+                    "impl.fsl".to_owned(),
+                    include_str!("../../fslc/tests/fixtures/issue_1303/impl.fsl").to_owned(),
+                ),
+                (
+                    "impl_refines.fsl".to_owned(),
+                    include_str!("../../fslc/tests/fixtures/issue_1303/impl_refines.fsl")
+                        .to_owned(),
+                ),
+                (
+                    "map.fsl".to_owned(),
+                    include_str!("../../fslc/tests/fixtures/issue_1303/map.fsl").to_owned(),
+                ),
+            ]),
+            options: Options::default(),
+        }
+    }
+
+    /// A failed preservation is the Worker's `check` verdict, as it is
+    /// native's; a refining one leaves `ok` alone. Worker `verify` folds
+    /// through the same `fold_governance` after its solver run, which needs
+    /// the browser Z3 bridge: `test-browser.mjs` compares its envelope with
+    /// native's on `governance_detects_safety_loss.fsl`.
+    #[test]
+    fn a_failed_preservation_folds_into_check() {
+        let failing = include_str!("../../fslc/tests/fixtures/issue_1303/governance.fsl");
+        let refining = include_str!("../../fslc/tests/fixtures/issue_1303/governance_refines.fsl");
+        for (source, result, preservation) in [
+            (failing, "refinement_failed", "refinement_failed"),
+            (refining, "ok", "refines"),
+        ] {
+            let checked = block_on(check(
+                &issue_1303_check_request(source),
+                TEST_SOLVER_VERSION,
+            ));
+            assert_eq!(checked["result"], result, "{checked:#}");
+            assert_eq!(
+                checked["governance"]["preservations"][0]["result"], preservation,
+                "{checked:#}"
+            );
+        }
     }
 
     /// Issue #1296: the `before` (abstract) action divides by zero at the

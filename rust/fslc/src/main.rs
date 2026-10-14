@@ -6419,22 +6419,17 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 .chain(model_level_warnings)
                 .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
-            let Ok((mut output, status)) = attach_check_implements(output, implements) else {
+            let Ok((output, status)) = attach_check_implements(output, implements) else {
                 return (error_output("internal", "check envelope"), 3);
             };
-            match governance_result_from_source(path, source, 8) {
-                Ok(Some(governance)) => {
-                    output.insert("governance".to_owned(), governance);
+            let mut output = Value::Object(output);
+            match fold_governance_from_source(path, source, &mut output) {
+                Ok(folded) => {
+                    let status = folded.unwrap_or(status);
+                    (output, status)
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    return (
-                        fslc_rust::verification_output::render_governance_error(envelope(), &error),
-                        2,
-                    );
-                }
+                Err(error) => (error, 2),
             }
-            (Value::Object(output), status)
         }
         Err(result) => result,
     }
@@ -17128,6 +17123,37 @@ fn governance_result_from_source(
     })
 }
 
+/// Evaluate a governance document's preservations and fold them into a
+/// `check`/`verify` envelope (issue #1303).
+///
+/// Returns the exit code the fold implies, `None` to leave the caller's own
+/// exit alone (no governance document, every preservation `refines`, or an
+/// envelope that already fails), or the governance diagnostic envelope (exit
+/// 2) when a preservation cannot be evaluated. An `error` envelope is
+/// returned untouched without running any preservation: the run already
+/// failed for a reason of its own. Preservations always run at depth 8, the
+/// depth `docs/manual/LANGUAGE.md` §13 publishes, whatever `--depth` the
+/// command was given for the document's own kernel.
+fn fold_governance_from_source(
+    path: &Path,
+    source: &str,
+    output: &mut Value,
+) -> Result<Option<i32>, Value> {
+    if output.get("result").and_then(Value::as_str) == Some("error") {
+        return Ok(None);
+    }
+    match governance_result_from_source(path, source, 8) {
+        Ok(Some(governance)) => Ok(fslc_rust::verification_output::attach_governance(
+            output, governance,
+        )),
+        Ok(None) => Ok(None),
+        Err(error) => Err(fslc_rust::verification_output::render_governance_error(
+            envelope(),
+            &error,
+        )),
+    }
+}
+
 fn attach_check_implements(
     output: Map<String, Value>,
     implements: Option<Value>,
@@ -17978,7 +18004,15 @@ fn run_verify_from_source(
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
     let status = implements_exit.unwrap_or(status);
-    (output, status)
+    // The `ledger`/`html`/`mutate` baseline folds a failed governance
+    // preservation exactly as `check` and `verify` do (issue #1303).
+    match fold_governance_from_source(path, source, &mut output) {
+        Ok(folded) => {
+            let status = folded.unwrap_or(status);
+            (output, status)
+        }
+        Err(error) => (error, 2),
+    }
 }
 
 fn apply_vacuity_mode(output: &mut Value, mode: &str) -> Option<i32> {

@@ -77,7 +77,8 @@ the relevant role skill directs it.
   `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
   then carry both the broken policy/goal and satisfied controls. A standalone
   `governance Name { ... }` catalog can require controls across business specs
-  and run preservation refinements during `fslc check`.
+  and run preservation refinements during `fslc check` and `fslc verify`; a
+  preservation that does not `refines` fails the command (exit 1).
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
   the process+data profile first for a single-entity lifecycle: transition
@@ -250,7 +251,14 @@ For cross-business or enterprise-level controls, use a standalone `governance`
 catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
-`preservation` block runs its declared refinement at depth 8.
+`preservation` block runs its declared refinement at depth 8 (`fslc verify`
+runs it too, at depth 8 whatever its `--depth`). Each result stays under
+`governance.preservations[].result`; the first non-`refines` one in
+declaration order is also the command's verdict, fail-closed:
+`refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
+breaks its own semantics) -> `impl_violated`, `unknown_budget` ->
+`unknown_budget`, all exit 1; any other value is `error`/`internal` (exit 3).
+Before 4.11 such a run reported `ok`/`verified` with exit 0.
 
 No `terminal` syntax exists in business — it is derived automatically. Each
 process's sink stages (stages with no outgoing `transition`, e.g.

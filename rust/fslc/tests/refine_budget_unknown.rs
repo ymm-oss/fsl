@@ -276,9 +276,10 @@ fn governance_reports_unknown_budget_for_a_cut_off_preservation() {
         value["governance"]["preservations"][0]["result"], "unknown_budget",
         "{value:#}"
     );
-    // A preservation result does not fold into `check`'s own verdict; the
-    // same holds for `refinement_failed` (cli_regression.rs).
-    assert_eq!(status, 0, "{value:#}");
+    // A cut-off preservation folds into `check`'s own verdict and exit
+    // (issue #1303), as an inline `implements` seam's cutoff does.
+    assert_eq!(value["result"], "unknown_budget", "{value:#}");
+    assert_eq!(status, 1, "{value:#}");
 }
 
 const SMALL_ABS: &str = "spec SmallAbs { type AQty = 0..3 state { n: AQty } init { n = 0 } \
@@ -329,7 +330,9 @@ fn governance_still_refines_a_small_preservation() {
 
 /// Native reads a self-violating `after` spec off `refine`'s own `violated`
 /// verdict; the Worker must report the same value (`fsl-wasm` unit tests use
-/// the same sources).
+/// the same sources). The top level spells it `impl_violated`, the verdict an
+/// inline `implements` seam reports for the same condition, and exits 1
+/// (issue #1303).
 #[test]
 fn governance_reports_violated_for_a_self_violating_after_spec() {
     let dir = fixture("governance-violated");
@@ -346,7 +349,8 @@ fn governance_reports_violated_for_a_self_violating_after_spec() {
 
     let (value, status) = fslc(&dir, &["check", "governance.fsl"]);
 
-    assert_eq!(status, 0, "{value:#}");
+    assert_eq!(status, 1, "{value:#}");
+    assert_eq!(value["result"], "impl_violated", "{value:#}");
     assert_eq!(
         value["governance"]["preservations"][0]["result"], "violated",
         "{value:#}"
