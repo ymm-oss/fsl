@@ -239,10 +239,9 @@ impl GovernanceOutputError {
     /// An internal failure located at the preservation that hit it.
     #[must_use]
     pub fn internal(message: impl Into<String>, line: u32, column: u32) -> Self {
-        Self {
-            internal: true,
-            ..Self::new(message, line, column)
-        }
+        let mut error = Self::new(message, line, column);
+        error.internal = true;
+        error
     }
 
     /// The exit code `docs/manual/LANGUAGE.md`'s table gives this diagnostic:
