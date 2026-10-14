@@ -159,12 +159,15 @@ fn run_verify(path: &Path) -> (Value, i32) {
 fn expected_verify_exit(envelope: &Value) -> i32 {
     match envelope.get("result").and_then(Value::as_str) {
         Some("verified" | "proved") => 0,
-        Some("violated" | "reachable_failed" | "unknown_cti" | "unknown_budget") => 1,
-        // A failed inline `implements` seam or governance preservation folded
-        // into the verdict (`docs/manual/LANGUAGE.md` exit table; issue #1303
-        // made `examples/refinement_liveness/governance_detects_safety_loss.fsl`
+        // `refinement_failed` / `impl_violated`: a failed inline `implements`
+        // seam or governance preservation folded into the verdict
+        // (`docs/manual/LANGUAGE.md` exit table; issue #1303 made
+        // `examples/refinement_liveness/governance_detects_safety_loss.fsl`
         // the corpus's first such `verify`).
-        Some("refinement_failed" | "impl_violated") => 1,
+        Some(
+            "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
+            | "refinement_failed" | "impl_violated",
+        ) => 1,
         Some("error") if envelope.get("kind").and_then(Value::as_str) == Some("internal") => 3,
         Some("error") => 2,
         result => panic!(

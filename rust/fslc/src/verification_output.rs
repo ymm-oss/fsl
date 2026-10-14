@@ -3574,7 +3574,10 @@ mod tests {
             (Value::Null, "error", Some(3)),
         ] {
             let mut envelope = envelope_with("ok");
-            let exit = attach_governance(&mut envelope, governance_with(&[preservation.clone()]));
+            let exit = attach_governance(
+                &mut envelope,
+                governance_with(std::slice::from_ref(&preservation)),
+            );
             assert_eq!(exit, expected_exit, "{preservation}: {envelope}");
             assert_eq!(envelope["result"], expected_result, "{preservation}");
             assert_eq!(
