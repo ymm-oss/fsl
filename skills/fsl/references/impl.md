@@ -131,6 +131,34 @@ testgen input problem — is returned verbatim (verdict, exit code, and trace
 unchanged), the same envelope `verify`/`scenarios` return for the identical
 spec; it is never re-wrapped as a generic exit-2 spec error.
 
+### Using conformance as an implementation loop for an AI agent
+
+Implementation conformance (`testgen` tests, `fslc conformance` vectors,
+`replay`) checks the implementation against the spec, not against the intent
+behind it. Where the spec differs from the intent — for example, it accepts a
+call the owner meant to reject because the rejecting condition was never
+written — an implementation that follows the intent can fail conformance on
+the cases that reach the difference. An agent told to reach zero divergence
+may then change correct code to match the spec, or reach zero by lowering the
+depth or skipping the diverging vectors. This applies at whichever layer the
+tests are generated from; it does not change "Layer selection for conformance
+tests" above.
+
+- Before handing the loop to an agent, confirm the spec against intent: the
+  formalization memo is confirmed, each rejection rule the source states is
+  carried by a declaration and exercised by a `forbidden` trace, and the owner
+  has read the `acceptance` / `forbidden` traces (or `fslc explain --readable`).
+- When a divergence appears, classify it before changing code: (a) the spec
+  misses or contradicts the intent, (b) the Adapter projects state wrongly, or
+  (c) the implementation is wrong. (a) goes back to the spec owner as a
+  question, (b) is fixed in the Adapter, and only (c) is fixed by editing the
+  implementation.
+- State the depth, and any vectors or tests that may be left unexecuted, in
+  the task. An agent that cannot reach zero divergence on those terms reports
+  the remaining divergences; it does not lower the depth, skip or filter
+  vectors, or disable tests to get there. Count the loop as complete only on
+  those terms — "the last run shows zero divergence" alone is not completion.
+
 ## 11. Non-functional requirements (NFR)
 
 | NFR | How to write it |

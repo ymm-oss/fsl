@@ -148,6 +148,11 @@ Stop and ask for a product/business/design decision before changing behavior whe
   lower layer
 - a refinement mapping or stutter correspondence is not obvious from the source
 - an implementation Adapter must decide how to project real state into FSL state
+- an implementation-conformance run (generated tests, conformance vectors, or
+  replay) diverges from a spec whose `acceptance` / `forbidden` the owner has
+  not confirmed against intent, so the divergence may be the spec's error
+  rather than the implementation's (see `../fsl/references/impl.md` §9, "Using
+  conformance as an implementation loop for an AI agent")
 
 Representation-only modeling choices, such as finite domain sizes for model
 checking, may be chosen by the agent. Label them separately from product
