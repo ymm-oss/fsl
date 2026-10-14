@@ -219,6 +219,10 @@ pub struct GovernanceOutputError {
     pub message: String,
     pub line: u32,
     pub column: u32,
+    /// The diagnostic is an internal inconsistency of the run (a
+    /// preservation's refinement exited 3), not a defect of the document:
+    /// rendered `kind:"internal"`, exit 3 (issue #1303).
+    pub internal: bool,
 }
 
 impl GovernanceOutputError {
@@ -228,7 +232,24 @@ impl GovernanceOutputError {
             message: message.into(),
             line,
             column,
+            internal: false,
         }
+    }
+
+    /// An internal failure located at the preservation that hit it.
+    #[must_use]
+    pub fn internal(message: impl Into<String>, line: u32, column: u32) -> Self {
+        Self {
+            internal: true,
+            ..Self::new(message, line, column)
+        }
+    }
+
+    /// The exit code `docs/manual/LANGUAGE.md`'s table gives this diagnostic:
+    /// `2` for a document error, `3` for an internal one.
+    #[must_use]
+    pub fn exit_status(&self) -> i32 {
+        if self.internal { 3 } else { 2 }
     }
 }
 
@@ -245,7 +266,10 @@ pub fn render_governance_error(
     error: &GovernanceOutputError,
 ) -> Value {
     output.insert("result".to_owned(), json!("error"));
-    output.insert("kind".to_owned(), json!("type"));
+    output.insert(
+        "kind".to_owned(),
+        json!(if error.internal { "internal" } else { "type" }),
+    );
     output.insert("message".to_owned(), json!(error.message));
     output.insert(
         "loc".to_owned(),

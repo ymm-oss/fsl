@@ -2107,7 +2107,7 @@ pub(super) fn run_verify_cli_from_source(
     // with a `depth` -- goes through this one point.
     match super::fold_governance_from_source(path, source, &mut output) {
         Ok(folded) => (output, folded.unwrap_or(status)),
-        Err(error) => (error, 2),
+        Err(error) => error,
     }
 }
 
