@@ -197,6 +197,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-runtime/src/lib.rs",
+        389,
+        "eval_place",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-runtime/src/lib.rs",
         1468,
         "refinement_action_instance",
         ResultOption

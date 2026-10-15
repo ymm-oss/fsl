@@ -64,12 +64,14 @@ jobs:
       # frozen Python `fslc` package, lark, or z3-solver: the CLI pages are generated from
       # rust/fslc/cli-contract.json (#1007), and the generator's last `fslc` import, an
       # unused `fslc.cli_help` helper, was removed in #1176. The specifiers mirror
-      # pyproject.toml's dev extra. They are deliberately not pinned: a direct
-      # cross-version measurement (CPython 3.9.6/markdown 3.9 vs. CPython 3.14.6/markdown
-      # 3.10.2) produced byte-identical generated pages. If a step here starts importing
+      # pyproject.toml's dev extra. markdown is capped below 3.11.1: markdown 3.9,
+      # 3.10.2 and 3.11 produce byte-identical generated pages, but 3.11.1 stops
+      # rendering `**...**` next to CJK characters as <strong> (docs/intro/language.ja.html
+      # goes stale on every PR). Lift the cap only after regenerating with the newer
+      # version and checking the Japanese pages. If a step here starts importing
       # `fslc`, it fails with ModuleNotFoundError rather than passing on a partial install.
       - name: Install the generator's test dependencies
-        run: pip install "pytest>=7" "markdown>=3"
+        run: pip install "pytest>=7" "markdown>=3,<3.11.1"
 
       - name: Check examples explain deadlock-ignore commands
         run: python3 tools/check-example-deadlock-ignore.py

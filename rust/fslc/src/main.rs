@@ -10893,15 +10893,28 @@ fn property_requirements(model: &KernelModel, name: &str) -> Vec<String> {
 }
 
 fn mutation_model_oracle(
-    mut model: KernelModel,
+    model: KernelModel,
     depth: usize,
     bmc: &mut MutationBmc<'_>,
 ) -> MutationOracle {
+    mutation_model_verdict(model, depth, bmc).0
+}
+
+/// [`mutation_model_oracle`] plus the raw violation (Kernel name, last
+/// action) behind a violation kill, so `--oracle-attribution` can label it
+/// against its own model without re-running the check (#1282).
+fn mutation_model_verdict(
+    mut model: KernelModel,
+    depth: usize,
+    bmc: &mut MutationBmc<'_>,
+) -> (MutationOracle, Option<(String, Option<String>)>) {
     loop {
         let result = match bmc(&model, depth) {
             Ok(result) => result,
-            Err(BmcFailure::Semantic) => return MutationOracle::killed("build_spec", Vec::new()),
-            Err(BmcFailure::Oracle(failure)) => return MutationOracle::Error(failure),
+            Err(BmcFailure::Semantic) => {
+                return (MutationOracle::killed("build_spec", Vec::new()), None);
+            }
+            Err(BmcFailure::Oracle(failure)) => return (MutationOracle::Error(failure), None),
         };
         if let Some(violation) = result.violation {
             if violation.kind == "ensures"
@@ -10916,9 +10929,15 @@ fn mutation_model_oracle(
                 action.ensure_spans.clear();
                 continue;
             }
-            return MutationOracle::killed(
-                model.action_scoped_display_name(&violation.name, violation.last_action.as_deref()),
-                property_requirements(&model, &violation.name),
+            return (
+                MutationOracle::killed(
+                    model.action_scoped_display_name(
+                        &violation.name,
+                        violation.last_action.as_deref(),
+                    ),
+                    property_requirements(&model, &violation.name),
+                ),
+                Some((violation.name, violation.last_action)),
             );
         }
         if let Some(property) = model.reachables.iter().find(|property| {
@@ -10927,20 +10946,62 @@ fn mutation_model_oracle(
                 .get(&property.name)
                 .is_some_and(Option::is_none)
         }) {
-            return MutationOracle::killed(
-                display(&property.name),
-                annotation_requirement_ids(&property.annotations),
+            return (
+                MutationOracle::killed(
+                    display(&property.name),
+                    annotation_requirement_ids(&property.annotations),
+                ),
+                None,
             );
         }
         if let Some(violation) = result.leadsto_violation {
-            return MutationOracle::killed(
-                display(&violation.name),
-                property_requirements(&model, &violation.name),
+            return (
+                MutationOracle::killed(
+                    display(&violation.name),
+                    property_requirements(&model, &violation.name),
+                ),
+                None,
             );
         }
-        break;
+        return (MutationOracle::Clean, None);
     }
-    MutationOracle::Clean
+}
+
+/// What decided the type-bound half of the main oracle (the boundary probe
+/// or the bounds-only model) when it killed the mutant. `--oracle-attribution`
+/// reuses it instead of re-running that half (#1282).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum BoundaryKiller {
+    /// The published label as is: the probe's raw violation name, or a
+    /// non-violation kill such as `build_spec`.
+    Label(String),
+    /// A violation of the bounds-only model, labelled against the model the
+    /// caller attributes on (a built-in mutant's attribution model does not
+    /// inherit compose names, so its label can differ from `killed_by`'s).
+    Violation {
+        name: String,
+        last_action: Option<String>,
+    },
+}
+
+impl BoundaryKiller {
+    fn label(&self, model: &KernelModel) -> String {
+        match self {
+            Self::Label(label) => label.clone(),
+            Self::Violation { name, last_action } => {
+                model.action_scoped_display_name(name, last_action.as_deref())
+            }
+        }
+    }
+}
+
+/// The main mutation oracle's result: the verdict before the secondary
+/// (requirements / implements) oracles and the `_bounds_*` re-attribution,
+/// and the type-bound killer when that half decided (#1282).
+#[derive(Debug)]
+struct MainOracle {
+    outcome: MutationOracle,
+    boundary_killer: Option<BoundaryKiller>,
 }
 
 /// A built-in mutant that does not lower/build never reaches the oracle: it is
@@ -10950,13 +11011,18 @@ fn mutation_oracle(
     depth: usize,
     names: &KernelModel,
     bmc: &mut MutationBmc<'_>,
-) -> MutationOracle {
+) -> MainOracle {
     let mut model = match fsl_core::lower_direct_spec(spec)
         .map_err(|error| error.to_string())
         .and_then(|kernel| fsl_core::build_model(kernel).map_err(|error| error.to_string()))
     {
         Ok(model) => model,
-        Err(message) => return MutationOracle::Invalid(message),
+        Err(message) => {
+            return MainOracle {
+                outcome: MutationOracle::Invalid(message),
+                boundary_killer: None,
+            };
+        }
     };
     model.inherit_compose_names(names);
     mutation_oracle_for_model(model, depth, bmc)
@@ -10966,29 +11032,44 @@ fn mutation_oracle_for_model(
     model: KernelModel,
     depth: usize,
     bmc: &mut MutationBmc<'_>,
-) -> MutationOracle {
+) -> MainOracle {
     if let Ok(fsl_runtime::BoundaryProbe {
         finding: Some((violation, trace)),
         ..
     }) = fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
     {
-        return MutationOracle::killed(
-            trace_last_action(&trace)
-                .and_then(|action| model.component_public_name(&violation.name, action))
-                .unwrap_or_else(|| violation.name.clone()),
-            property_requirements(&model, &violation.name),
-        );
+        return MainOracle {
+            outcome: MutationOracle::killed(
+                trace_last_action(&trace)
+                    .and_then(|action| model.component_public_name(&violation.name, action))
+                    .unwrap_or_else(|| violation.name.clone()),
+                property_requirements(&model, &violation.name),
+            ),
+            boundary_killer: Some(BoundaryKiller::Label(violation.name)),
+        };
     }
     let mut automatic = model.clone();
     automatic.invariants.clear();
     automatic.transitions.clear();
     automatic.reachables.clear();
     automatic.leadstos.clear();
-    let automatic_result = mutation_model_oracle(automatic, depth, bmc);
+    let (automatic_result, automatic_violation) = mutation_model_verdict(automatic, depth, bmc);
     if !automatic_result.is_clean() {
-        return automatic_result;
+        let boundary_killer = automatic_result.killed_by().map(|killed_by| {
+            automatic_violation.map_or_else(
+                || BoundaryKiller::Label(killed_by.to_owned()),
+                |(name, last_action)| BoundaryKiller::Violation { name, last_action },
+            )
+        });
+        return MainOracle {
+            outcome: automatic_result,
+            boundary_killer,
+        };
     }
-    mutation_model_oracle(model, depth, bmc)
+    MainOracle {
+        outcome: mutation_model_oracle(model, depth, bmc),
+        boundary_killer: None,
+    }
 }
 
 fn clear_action_ensures(model: &mut KernelModel) {
@@ -11073,43 +11154,34 @@ fn isolate_model_for_ensures(model: &KernelModel, action_name: &str) -> KernelMo
     isolated
 }
 
-fn isolated_oracle_kills(model: KernelModel, depth: usize, expected: &str) -> bool {
-    mutation_model_oracle(model, depth, &mut native_mutation_bmc).killed_by() == Some(expected)
+fn isolated_oracle_kills(
+    model: KernelModel,
+    depth: usize,
+    expected: &str,
+    bmc: &mut MutationBmc<'_>,
+) -> bool {
+    mutation_model_oracle(model, depth, bmc).killed_by() == Some(expected)
 }
 
-fn boundary_oracle_killers(model: &KernelModel, depth: usize) -> Vec<String> {
-    if let Ok(fsl_runtime::BoundaryProbe {
-        finding: Some((violation, _)),
-        ..
-    }) = fsl_runtime::find_boundary_violation(model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
-    {
-        return vec![violation.name.clone()];
-    }
-    let mut automatic = model.clone();
-    automatic.invariants.clear();
-    automatic.transitions.clear();
-    automatic.reachables.clear();
-    automatic.leadstos.clear();
-    mutation_model_oracle(automatic, depth, &mut native_mutation_bmc)
-        .killed_by()
-        .map(str::to_owned)
-        .into_iter()
-        .collect()
-}
-
+/// Every oracle that kills `model` on its own (`--oracle-attribution`). The
+/// main oracle already ran on this mutant: its type-bound killer and its
+/// verdict come from `main` instead of being recomputed (#1282), so only the
+/// per-property isolated models are checked here.
 fn collect_oracle_killers(
     model: &KernelModel,
     depth: usize,
     source: &str,
     base: &Path,
     bounds_override: Option<&str>,
+    main: &MainOracle,
+    bmc: &mut MutationBmc<'_>,
 ) -> Vec<String> {
     let mut killers = std::collections::BTreeSet::new();
     if let Some(name) = bounds_override {
         killers.insert(name.to_owned());
     }
-    for name in boundary_oracle_killers(model, depth) {
-        killers.insert(name);
+    if let Some(killer) = &main.boundary_killer {
+        killers.insert(killer.label(model));
     }
     for property in &model.invariants {
         let label = display(&property.name);
@@ -11117,6 +11189,7 @@ fn collect_oracle_killers(
             isolate_model_for_invariant(model, &property.name),
             depth,
             &label,
+            bmc,
         ) {
             killers.insert(label);
         }
@@ -11127,6 +11200,7 @@ fn collect_oracle_killers(
             isolate_model_for_reachable(model, &property.name),
             depth,
             &label,
+            bmc,
         ) {
             killers.insert(label);
         }
@@ -11137,6 +11211,7 @@ fn collect_oracle_killers(
             isolate_model_for_transition(model, &property.name),
             depth,
             &label,
+            bmc,
         ) {
             killers.insert(label);
         }
@@ -11147,6 +11222,7 @@ fn collect_oracle_killers(
             isolate_model_for_leadsto(model, &property.name),
             depth,
             &label,
+            bmc,
         ) {
             killers.insert(label);
         }
@@ -11160,11 +11236,12 @@ fn collect_oracle_killers(
             isolate_model_for_ensures(model, &action.name),
             depth,
             &label,
+            bmc,
         ) {
             killers.insert(label);
         }
     }
-    if mutation_oracle_for_model(model.clone(), depth, &mut native_mutation_bmc).is_clean() {
+    if main.outcome.is_clean() {
         let mut outcome = MutationOracle::Clean;
         if apply_requirement_mutation_oracle(source, model, &mut outcome).is_ok()
             && let Some(killer) = outcome.killed_by()
@@ -12216,7 +12293,8 @@ fn run_mutate_with(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     for mutant in all_mutants.into_iter().take(max_mutants) {
         let mutated_spec = mutant.spec.clone();
-        let mut outcome = mutation_oracle(mutant.spec, depth, &model, bmc);
+        let main = mutation_oracle(mutant.spec, depth, &model, bmc);
+        let mut outcome = main.outcome.clone();
         let mut inconclusive = None;
         if outcome.is_clean()
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
@@ -12308,8 +12386,15 @@ fn run_mutate_with(
             let bounds_override = outcome
                 .killed_by()
                 .filter(|killer| killer.starts_with("_bounds_"));
-            let killers =
-                collect_oracle_killers(&mutated_model, depth, &source, base, bounds_override);
+            let killers = collect_oracle_killers(
+                &mutated_model,
+                depth,
+                &source,
+                base,
+                bounds_override,
+                &main,
+                bmc,
+            );
             if let Value::Object(public) = &mut public {
                 public.insert("killers".to_owned(), json!(killers));
             }
@@ -12376,8 +12461,9 @@ fn run_mutate_with(
             // built-in one: a semantic BMC error is the `build_spec` kill, any
             // oracle failure is `error` (neither `invalid` nor killed, #1251),
             // and an implements cutoff is `inconclusive` (#1262).
+            let main = mutation_oracle_for_model(mutated_model.clone(), depth, bmc);
             let (outcome, inconclusive) = apply_secondary_mutation_oracles(
-                mutation_oracle_for_model(mutated_model.clone(), depth, bmc),
+                main.outcome.clone(),
                 |outcome| {
                     apply_requirement_mutation_oracle(mutated_source, &mutated_model, outcome)
                 },
@@ -12417,6 +12503,8 @@ fn run_mutate_with(
                         mutated_source,
                         base,
                         Some(killed_by.as_str()).filter(|killer| killer.starts_with("_bounds_")),
+                        &main,
+                        bmc,
                     );
                     if let Value::Object(public) = &mut public {
                         public.insert("killers".to_owned(), json!(killers));
@@ -19883,7 +19971,7 @@ spec GrowFixture {
                 mutant.op == "requires_remove" && mutant.action.as_deref() == Some("dec")
             })
             .expect("dec requires_remove mutant present in source A");
-        let outcome = mutation_oracle(mutant.spec, 4, &model, &mut native_mutation_bmc);
+        let outcome = mutation_oracle(mutant.spec, 4, &model, &mut native_mutation_bmc).outcome;
         assert!(
             !outcome.is_clean(),
             "removing dec's requires guard must be killed by source A's NonNegative invariant, \
@@ -20033,7 +20121,8 @@ mod mutate_oracle_error_tests {
         };
         let outcome = mutation_oracle(spec, 1, &small_model(), &mut |_, _| {
             panic!("an unbuildable mutant must not reach the BMC oracle")
-        });
+        })
+        .outcome;
         assert!(matches!(outcome, MutationOracle::Invalid(_)), "{outcome:?}");
         assert_eq!(mutant_status(&outcome, None).0, "invalid");
     }
@@ -20351,5 +20440,63 @@ mod mutate_init_bounds_override_tests {
         assert_eq!(mutant["status"], "error", "{mutant}");
         assert_eq!(mutant["killed_by"], Value::Null, "{mutant}");
         assert_eq!(mutant["error"]["stage"], "bmc", "{mutant}");
+    }
+}
+
+#[cfg(test)]
+mod mutate_attribution_reuse_tests {
+    //! Issue #1282: `--oracle-attribution` reuses the main oracle's result
+    //! instead of recomputing it. Counted at the injectable BMC boundary, so
+    //! every model check is one call.
+    use super::*;
+
+    fn model(source: &str) -> KernelModel {
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("parse unit fixture");
+        fsl_core::build_model(kernel).expect("build unit fixture")
+    }
+
+    /// Killed by its invariant at the full-model stage (bounds-only clean).
+    const INVARIANT_KILL: &str = "spec ReuseInvariantKill {\n  type Small = 0..1\n  state { x: Small }\n  init { x = 0 }\n  action flip() { x = 1 - x }\n  invariant Zero { x == 0 }\n}\n";
+
+    /// No init assignment: the boundary probe cannot run (nondeterministic
+    /// init), so the bounds-only BMC model kills it (`_bounds_x`).
+    const BOUNDS_KILL: &str = "spec ReuseBoundsKill {\n  enum S { A, B }\n  state { x: S }\n  init { }\n  action stay() { x = x }\n  invariant Any { x == A or x == B }\n}\n";
+
+    /// Returns (main-oracle calls, attribution calls, killers).
+    fn count(source: &str) -> (usize, usize, Vec<String>) {
+        let model = model(source);
+        let calls = std::cell::Cell::new(0);
+        let mut bmc = |model: &KernelModel, depth: usize| {
+            calls.set(calls.get() + 1);
+            native_mutation_bmc(model, depth)
+        };
+        let main = mutation_oracle_for_model(model.clone(), 2, &mut bmc);
+        assert!(main.outcome.killed_by().is_some(), "{main:?}");
+        let main_calls = calls.replace(0);
+        let killers =
+            collect_oracle_killers(&model, 2, source, Path::new("."), None, &main, &mut bmc);
+        (main_calls, calls.get(), killers)
+    }
+
+    /// Per killed mutant the attribution adds exactly one check per isolated
+    /// model (here one invariant), on top of the main oracle's own checks:
+    /// no second boundary pass and no second main oracle.
+    #[test]
+    fn attribution_checks_only_the_isolated_models() {
+        let (main_calls, attribution_calls, killers) = count(INVARIANT_KILL);
+        assert_eq!(main_calls, 2, "bounds-only model + full model");
+        assert_eq!(attribution_calls, 1, "one isolated invariant model");
+        assert_eq!(killers, ["Zero"]);
+    }
+
+    /// A kill decided by the bounds-only model is reused as the boundary
+    /// killer, with the label the recomputation produced.
+    #[test]
+    fn a_bounds_only_kill_is_reused_as_the_boundary_killer() {
+        let (main_calls, attribution_calls, killers) = count(BOUNDS_KILL);
+        assert_eq!(main_calls, 1, "the bounds-only model decides");
+        assert_eq!(attribution_calls, 1, "one isolated invariant model");
+        assert!(killers.contains(&"_bounds_x".to_owned()), "{killers:?}");
     }
 }
