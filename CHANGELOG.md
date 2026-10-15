@@ -5,6 +5,80 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.11.0] - 2026-10-15
+
+- Changed (#1247, #1174): the concrete refinement check (the impl
+  self-consistency pre-pass and the correspondence walk behind `fslc refine`,
+  `fslc chain`, inline `implements`, `fslc diff`, and `fslc mutate`'s implements
+  oracle) costs less per state; what it explores and reports is unchanged
+  (stdout byte-identical). Expression reads such as `design[c].st` no longer
+  copy the whole state variable, a step copies the state once instead of four
+  to five times, the walk reuses one abstract `Monitor` instead of copying the
+  abstract model twice per transition, and both searches keep their visited
+  states and parent links packed (one canonical byte string per state instead
+  of three full copies). On `examples/e2e` with `instances Claim = 4`,
+  `values Amount = 0..3`, `--depth 8`, user CPU time drops from 14.6 s to 3.1 s
+  and peak memory from 939 MB to 190 MB; with `values Amount = 0..5` the run
+  still stops at the 50,000-state budget (`unknown_budget`), now at 34 MB
+  instead of 1.2 GB. No migration is needed.
+- Changed (#1282): `fslc mutate --oracle-attribution` reuses the main oracle's
+  result (its type-bound killer and its verdict) instead of recomputing the
+  boundary probe, the bounds-only check, and the whole main oracle for every
+  killed mutant; only the per-property isolated models are checked again. The
+  `killers` and `by_obligation` output is unchanged, except that a `build_spec`
+  killer on a type-bound kill can appear or disappear, as it already could
+  when earlier Z3 calls in the same process changed.
+- Fixed (#1303): a governance `preservation` whose refinement does not
+  `refines` now fails `fslc check` and `fslc verify`, fail-closed. The first
+  non-`refines` preservation in declaration order sets the top-level `result`
+  through the same mapping an inline `implements` seam uses —
+  `refinement_failed` → `refinement_failed`, `violated` (the `after` spec breaks
+  its own semantics) → `impl_violated`, `unknown_budget` → `unknown_budget`, all
+  exit 1; any other value is `error`/`internal` (exit 3) — while
+  `governance.preservations[].result` keeps each preservation's own value.
+  `fslc verify` now runs the preservations (at depth 8, like `check`) and
+  attaches the same `governance` section; it is folded outside the verify
+  cache, so a cached `verified` cannot hide a preservation broken later. The
+  same verdict reaches a `fslc chain` spec layer, `fslc ledger` / `fslc html` /
+  `fslc mutate` (exit 1 from the shared verify baseline), and the browser
+  Worker's `check` and `verify`. Before this, `check` reported `ok` and `verify`
+  reported `verified`, both exit 0, so a CI gating on the exit code passed a
+  broken preservation. Migration: this changes exit codes of existing runs —
+  `check`/`verify` of a governance document with a failing preservation (for
+  example `examples/refinement_liveness/governance_detects_safety_loss.fsl`)
+  now exits 1 instead of 0, and its top-level `result` is the preservation's
+  failure instead of `ok`/`verified`. Fix the preservation, or, to keep it
+  advisory, check it in a separate `fslc refine` step whose exit the CI
+  ignores. `fslc verify` of a governance document with any governance
+  contract error that `check` reports (a delegated business file, a control, a
+  `satisfied_by` mapping, or preservation files) now reports the same located
+  `error` as `check` (exit 2) instead of `verified` (exit 0), and a preservation
+  refinement that fails internally is `error`/`internal` (exit 3) under both
+  commands instead of a located exit-2 diagnostic. Consumers that read `verify` envelopes of governance documents
+  should expect the new `governance` key.
+- Documented (#1300): the distributed skills now say that a rejection rule the
+  source states is carried by a checked declaration and a `forbidden` trace, not
+  by prose alone (`skills/fsl-requirements/SKILL.md` Guardrails,
+  `skills/fsl/references/layers.md`); that implementation conformance checks the
+  implementation against the spec, not the intent, so an agent loop is handed
+  over only after the spec is confirmed against intent, classifies each
+  divergence before editing code, and does not lower the depth or skip vectors
+  to reach zero (`skills/fsl/references/impl.md` §9, "Using conformance as an
+  implementation loop for an AI agent"); and that such a divergence against an
+  unconfirmed spec is a human decision gate (`skills/fsl-delivery/SKILL.md`).
+- Documented (#1304): `skills/fsl-design/SKILL.md` now says to declare, for each
+  failure the design must exclude, the property it would break (with the
+  construct that fits it), and to model transaction boundaries, queues and
+  outboxes, and retries as state and actions; that a bounded `verified` says
+  nothing past its depth and domain sizes, with routes to `--engine explicit`
+  and "Domain sizing"; and that a design change re-runs `verify` and `refine`
+  plus `fslc diff --forbid behavior_removed` (also added to the Review/change
+  row of `skills/fsl-delivery/SKILL.md` Stage Gates). `skills/fsl/references/impl.md`
+  §9 and fsl-design Workflow 7 add that generated tests and conformance vectors
+  do not enumerate interleaving or crash points inside one action, so a
+  procedure the design declares atomic needs implementation tests at the
+  implementation's own transaction boundaries.
+
 ## [4.10.0] - 2026-10-12
 
 - Added (#1201, #1202): `fsl_core::obligation::catalog`, a solver-free list of the
@@ -7263,7 +7337,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.10.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.11.0...HEAD
+[4.11.0]: https://github.com/ymm-oss/fsl/compare/v4.10.0...v4.11.0
 [4.10.0]: https://github.com/ymm-oss/fsl/compare/v4.9.0...v4.10.0
 [4.9.0]: https://github.com/ymm-oss/fsl/compare/v4.8.1...v4.9.0
 [4.8.1]: https://github.com/ymm-oss/fsl/compare/v4.8.0...v4.8.1
