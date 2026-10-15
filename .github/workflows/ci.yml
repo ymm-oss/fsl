@@ -619,7 +619,9 @@ jobs:
   semantic-mutation-mutants:
     name: mutation mutants
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 150, not 90: a changed-scope run with no critical-path line mutant escalates to
+    # the complete P2 scope, which ran past 90 minutes on PR #1318 (#1319).
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:

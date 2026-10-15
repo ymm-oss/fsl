@@ -985,6 +985,14 @@ The later run `31097824729` attempt 1 saved its semantic-mutation cache only aft
 using `post-if`'s ordinary `success()` branch. No observed semantic-mutation run has a cache written
 specifically following a timeout-driven cancellation.
 
+`mutation mutants` was raised again, from 90 to 150 minutes (#1319). On a pull request,
+`run-semantic-mutation-gate.sh changed` escalates to the complete P2 scope when the changed critical
+path yields no line mutant. PR #1318 run `38674812491` attempt 1 escalated, classified all 51 mutants
+(43 caught, 8 unviable; baseline about 18 minutes, mutants about 54 minutes), kept compiling for
+about 15 more minutes, and was cancelled at 90 minutes, so the required `semantic mutation (changed)`
+reported a failure it did not observe. Pull requests whose diff does yield line mutants finished in
+13–16 minutes (#1312, #1317).
+
 **The same closed loop appeared independently in `rust-native-z3`'s `windows-latest`/`macos-15`
 matrix. Windows recovery is now observed; macOS recovery is not established by this observation.**
 That job's `Swatinem/rust-cache` step carried `save-if` but not `cache-on-failure`. Warm Windows runs
