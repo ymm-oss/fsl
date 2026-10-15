@@ -97,6 +97,13 @@ while `implements.violation` (or `implements.states_explored` for
 `implements.result == "refines"` (the only passing value), or run
 `fslc chain`, which applies that gate for you.
 
+**Governance preservations are fail-closed the same way.** `check` and
+`verify` of a `governance` document run every `preservation` refinement at
+depth 8; the first one that is not `refines` becomes the top-level `result`
+(`refinement_failed`, `impl_violated` for a preservation `violated`, or
+`unknown_budget`) with exit 1, while `governance.preservations[].result`
+keeps each one's own value.
+
 ## Before writing a spec: source fidelity and the formalization memo
 
 FSL is a specification language, not a requirements generator. Encode only facts

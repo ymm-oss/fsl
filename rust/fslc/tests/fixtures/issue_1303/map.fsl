@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: Apache-2.0
+
+refinement M { impl I abs A map y = z action go() -> go() }

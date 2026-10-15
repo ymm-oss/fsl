@@ -6419,22 +6419,17 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 .chain(model_level_warnings)
                 .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
-            let Ok((mut output, status)) = attach_check_implements(output, implements) else {
+            let Ok((output, status)) = attach_check_implements(output, implements) else {
                 return (error_output("internal", "check envelope"), 3);
             };
-            match governance_result_from_source(path, source, 8) {
-                Ok(Some(governance)) => {
-                    output.insert("governance".to_owned(), governance);
+            let mut output = Value::Object(output);
+            match fold_governance_from_source(path, source, &mut output) {
+                Ok(folded) => {
+                    let status = folded.unwrap_or(status);
+                    (output, status)
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    return (
-                        fslc_rust::verification_output::render_governance_error(envelope(), &error),
-                        2,
-                    );
-                }
+                Err(error) => error,
             }
-            (Value::Object(output), status)
         }
         Err(result) => result,
     }
@@ -17199,21 +17194,67 @@ fn governance_result_from_source(
             &base.join(&preservation.refinement_path),
             depth,
         );
-        if status > 1 {
-            return Err(fslc_rust::verification_output::GovernanceOutputError::new(
-                result
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("governance preservation refinement failed"),
-                preservation.span.start.line,
-                preservation.span.start.column,
-            ));
-        }
-        Ok(result
-            .get("result")
-            .cloned()
-            .unwrap_or_else(|| json!("error")))
+        preservation_refine_result(&result, status, preservation.span)
     })
+}
+
+/// A preservation's `result` from its `run_refine` envelope and exit, or the
+/// governance diagnostic for a refinement that did not reach a verdict:
+/// status 2 is a document error (located `type`, exit 2), status 3 an
+/// internal one (located `internal`, exit 3, issue #1303).
+fn preservation_refine_result(
+    result: &Value,
+    status: i32,
+    span: fsl_syntax::Span,
+) -> Result<Value, fslc_rust::verification_output::GovernanceOutputError> {
+    if status > 1 {
+        let message = result
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("governance preservation refinement failed");
+        let (line, column) = (span.start.line, span.start.column);
+        return Err(if status == 2 {
+            fslc_rust::verification_output::GovernanceOutputError::new(message, line, column)
+        } else {
+            fslc_rust::verification_output::GovernanceOutputError::internal(message, line, column)
+        });
+    }
+    Ok(result
+        .get("result")
+        .cloned()
+        .unwrap_or_else(|| json!("error")))
+}
+
+/// Evaluate a governance document's preservations and fold them into a
+/// `check`/`verify` envelope (issue #1303).
+///
+/// Returns the exit code the fold implies, `None` to leave the caller's own
+/// exit alone (no governance document, every preservation `refines`, or an
+/// envelope that already fails), or the governance diagnostic envelope with
+/// its exit (2 for any contract error `check` reports, 3 for an internal
+/// refinement failure). An `error` envelope is
+/// returned untouched without running any preservation: the run already
+/// failed for a reason of its own. Preservations always run at depth 8, the
+/// depth `docs/manual/LANGUAGE.md` §13 publishes, whatever `--depth` the
+/// command was given for the document's own kernel.
+fn fold_governance_from_source(
+    path: &Path,
+    source: &str,
+    output: &mut Value,
+) -> Result<Option<i32>, (Value, i32)> {
+    if output.get("result").and_then(Value::as_str) == Some("error") {
+        return Ok(None);
+    }
+    match governance_result_from_source(path, source, 8) {
+        Ok(Some(governance)) => Ok(fslc_rust::verification_output::attach_governance(
+            output, governance,
+        )),
+        Ok(None) => Ok(None),
+        Err(error) => Err((
+            fslc_rust::verification_output::render_governance_error(envelope(), &error),
+            error.exit_status(),
+        )),
+    }
 }
 
 fn attach_check_implements(
@@ -18066,7 +18107,15 @@ fn run_verify_from_source(
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
     let status = implements_exit.unwrap_or(status);
-    (output, status)
+    // The `ledger`/`html`/`mutate` baseline folds a failed governance
+    // preservation exactly as `check` and `verify` do (issue #1303).
+    match fold_governance_from_source(path, source, &mut output) {
+        Ok(folded) => {
+            let status = folded.unwrap_or(status);
+            (output, status)
+        }
+        Err(error) => error,
+    }
 }
 
 fn apply_vacuity_mode(output: &mut Value, mode: &str) -> Option<i32> {
@@ -19004,6 +19053,40 @@ mod chain_jobs_tests {
 #[cfg(test)]
 mod exit_status_tests {
     use super::*;
+
+    /// Issue #1303: a preservation refinement that exits 3 is an internal
+    /// failure of the run (`kind:"internal"`, exit 3), never re-labelled a
+    /// located document error (exit 2); 0 and 1 are verdicts the fold reads.
+    #[test]
+    fn a_preservation_refinement_keeps_its_error_class() {
+        let at = fsl_syntax::SourcePos {
+            offset: 0,
+            line: 4,
+            column: 3,
+        };
+        let span = fsl_syntax::Span { start: at, end: at };
+        for (status, kind, exit) in [(2, "type", 2), (3, "internal", 3)] {
+            let failure = preservation_refine_result(
+                &json!({"result": "error", "kind": kind, "message": "boom"}),
+                status,
+                span,
+            )
+            .expect_err("a status above 1 is not a preservation verdict");
+            assert_eq!(failure.exit_status(), exit, "status {status}");
+            let rendered =
+                fslc_rust::verification_output::render_governance_error(envelope(), &failure);
+            assert_eq!(rendered["kind"], kind, "status {status}: {rendered}");
+            assert_eq!(rendered["message"], "boom");
+            assert_eq!(rendered["loc"], json!({"line": 4, "column": 3}));
+        }
+        for (status, verdict) in [(0, "refines"), (1, "refinement_failed")] {
+            assert_eq!(
+                preservation_refine_result(&json!({"result": verdict}), status, span)
+                    .expect("a verdict"),
+                json!(verdict)
+            );
+        }
+    }
 
     /// Rejecting control for the same `_ => 0` class inside `check`'s inline
     /// `implements` attachment. `attach_requirements_implements` returns `None`

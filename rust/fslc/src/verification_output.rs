@@ -219,6 +219,10 @@ pub struct GovernanceOutputError {
     pub message: String,
     pub line: u32,
     pub column: u32,
+    /// The diagnostic is an internal inconsistency of the run (a
+    /// preservation's refinement exited 3), not a defect of the document:
+    /// rendered `kind:"internal"`, exit 3 (issue #1303).
+    pub internal: bool,
 }
 
 impl GovernanceOutputError {
@@ -228,7 +232,23 @@ impl GovernanceOutputError {
             message: message.into(),
             line,
             column,
+            internal: false,
         }
+    }
+
+    /// An internal failure located at the preservation that hit it.
+    #[must_use]
+    pub fn internal(message: impl Into<String>, line: u32, column: u32) -> Self {
+        let mut error = Self::new(message, line, column);
+        error.internal = true;
+        error
+    }
+
+    /// The exit code `docs/manual/LANGUAGE.md`'s table gives this diagnostic:
+    /// `2` for a document error, `3` for an internal one.
+    #[must_use]
+    pub fn exit_status(&self) -> i32 {
+        if self.internal { 3 } else { 2 }
     }
 }
 
@@ -245,7 +265,10 @@ pub fn render_governance_error(
     error: &GovernanceOutputError,
 ) -> Value {
     output.insert("result".to_owned(), json!("error"));
-    output.insert("kind".to_owned(), json!("type"));
+    output.insert(
+        "kind".to_owned(),
+        json!(if error.internal { "internal" } else { "type" }),
+    );
     output.insert("message".to_owned(), json!(error.message));
     output.insert(
         "loc".to_owned(),
@@ -441,7 +464,29 @@ pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -
     let nested_result = map
         .get("implements")
         .and_then(|value| value.get("result"))
-        .and_then(Value::as_str);
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    fold_refinement_verdict(
+        map,
+        nested_result.as_deref(),
+        "malformed inline implements verdict",
+    )
+}
+
+/// Fold one nested refinement verdict into a success-class envelope's
+/// top-level `result`, returning the exit code the fold implies.
+///
+/// This is the single mapping from a nested refinement verdict to the
+/// command's verdict and exit code. Both nested refinement checks a
+/// `check`/`verify` envelope can carry use it: an inline `implements` seam
+/// ([`attach_requirements_implements`]) and a governance `preservation`
+/// ([`attach_governance`], issue #1303). Callers have already ruled out an
+/// `error` or failure-class envelope; on those the primary verdict stands.
+fn fold_refinement_verdict(
+    map: &mut Map<String, Value>,
+    nested_result: Option<&str>,
+    malformed_message: &str,
+) -> Option<i32> {
     match nested_result {
         Some("refines") => None,
         // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
@@ -454,8 +499,8 @@ pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -
         // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
         // leaves `check_folds_failed_inline_refinement_into_command_failure`
         // green). Nothing here detects the two drifting apart.
-        Some("refinement_failed" | "impl_violated") => {
-            map.insert("result".to_owned(), json!(nested_result));
+        Some(verdict @ ("refinement_failed" | "impl_violated")) => {
+            map.insert("result".to_owned(), json!(verdict));
             Some(1)
         }
         // The correspondence walk hit its state budget (issue #1041)
@@ -471,13 +516,63 @@ pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -
         _ => {
             map.insert("result".to_owned(), json!("error"));
             map.insert("kind".to_owned(), json!("internal"));
-            map.insert(
-                "message".to_owned(),
-                json!("malformed inline implements verdict"),
-            );
+            map.insert("message".to_owned(), json!(malformed_message));
             Some(3)
         }
     }
+}
+
+/// Attach a rendered `governance` section and, when the command envelope is
+/// still success-class, fold its first non-`refines` preservation into the
+/// top-level `result` (issue #1303).
+///
+/// Same rules as [`attach_requirements_implements`]: an `error` envelope gains
+/// nothing; a failure-class envelope gains the section as evidence and keeps
+/// its own verdict; a success-class envelope (`ok`, `verified`, ...) takes the
+/// first failing preservation in declaration order through
+/// [`fold_refinement_verdict`]. A preservation's `result` keeps its own
+/// published vocabulary (`refines` / `refinement_failed` / `violated` /
+/// `unknown_budget`); its `violated` is the `after` spec breaking its own
+/// semantics, which the top level spells `impl_violated` exactly as an inline
+/// `implements` seam reports the same condition -- a top-level `violated`
+/// would claim a counterexample (`trace`, `violated_at_step`) of the checked
+/// document itself. Any other value fails closed (`error` / `internal`,
+/// exit 3).
+pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32> {
+    let already_failing = !crate::outcome::outcome_class(envelope).is_success();
+    let Value::Object(map) = envelope else {
+        return Some(3);
+    };
+    if map.get("result").and_then(Value::as_str) == Some("error") {
+        return None;
+    }
+    let failing = governance
+        .get("preservations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|preservation| {
+            preservation
+                .get("result")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .find(|result| result.as_deref() != Some("refines"));
+    map.insert("governance".to_owned(), governance);
+    if already_failing {
+        return None;
+    }
+    // Every preservation `refines` (or there is none): the verdict stands.
+    let failing = failing?;
+    let nested_result = match failing.as_deref() {
+        Some("violated") => Some("impl_violated".to_owned()),
+        other => other.map(str::to_owned),
+    };
+    fold_refinement_verdict(
+        map,
+        nested_result.as_deref(),
+        "malformed governance preservation verdict",
+    )
 }
 
 /// `result` of an envelope section a run did not evaluate (issue #1008).
@@ -3464,5 +3559,109 @@ mod tests {
         assert_eq!(violated["result"], "violated");
         assert_eq!(violated["violation_kind"], "invariant");
         assert_eq!(violated["implements"]["result"], "impl_violated");
+    }
+
+    fn governance_with(results: &[Value]) -> Value {
+        json!({
+            "name": "G",
+            "controls": ["CTRL-1"],
+            "delegates": [],
+            "preservations": results
+                .iter()
+                .enumerate()
+                .map(|(index, result)| json!({"name": format!("P{index}"), "result": result}))
+                .collect::<Vec<_>>(),
+        })
+    }
+
+    fn envelope_with(result: &str) -> Value {
+        let mut envelope = test_envelope();
+        envelope.insert("result".to_owned(), json!(result));
+        Value::Object(envelope)
+    }
+
+    /// Issue #1303: every published preservation value, and what it makes of
+    /// a success-class envelope. `violated` (the `after` spec breaks its own
+    /// semantics) is spelled `impl_violated` at the top level, as an inline
+    /// `implements` seam spells it; anything outside the vocabulary fails
+    /// closed.
+    #[test]
+    fn attach_governance_folds_each_preservation_value() {
+        for (preservation, expected_result, expected_exit) in [
+            (json!("refines"), "ok", None),
+            (json!("refinement_failed"), "refinement_failed", Some(1)),
+            (json!("violated"), "impl_violated", Some(1)),
+            (json!("unknown_budget"), "unknown_budget", Some(1)),
+            (json!("error"), "error", Some(3)),
+            (json!("who_knows"), "error", Some(3)),
+            (Value::Null, "error", Some(3)),
+        ] {
+            let mut envelope = envelope_with("ok");
+            let exit = attach_governance(
+                &mut envelope,
+                governance_with(std::slice::from_ref(&preservation)),
+            );
+            assert_eq!(exit, expected_exit, "{preservation}: {envelope}");
+            assert_eq!(envelope["result"], expected_result, "{preservation}");
+            assert_eq!(
+                envelope["governance"]["preservations"][0]["result"], preservation,
+                "the preservation keeps its own value as evidence"
+            );
+        }
+    }
+
+    /// The first non-`refines` preservation in declaration order decides; a
+    /// contract with no preservation, or only refining ones, leaves the
+    /// verdict alone.
+    #[test]
+    fn attach_governance_takes_the_first_failing_preservation() {
+        let mut envelope = envelope_with("verified");
+        assert_eq!(
+            attach_governance(
+                &mut envelope,
+                governance_with(&[
+                    json!("refines"),
+                    json!("unknown_budget"),
+                    json!("refinement_failed"),
+                ]),
+            ),
+            Some(1)
+        );
+        assert_eq!(envelope["result"], "unknown_budget");
+
+        for results in [&[][..], &[json!("refines"), json!("refines")][..]] {
+            let mut envelope = envelope_with("verified");
+            assert_eq!(
+                attach_governance(&mut envelope, governance_with(results)),
+                None
+            );
+            assert_eq!(envelope["result"], "verified");
+        }
+    }
+
+    /// An `error` envelope gains nothing; a failure-class envelope gains the
+    /// section as evidence but keeps its own verdict and exit.
+    #[test]
+    fn attach_governance_leaves_error_and_failing_envelopes_alone() {
+        let mut errored = envelope_with("error");
+        assert_eq!(
+            attach_governance(&mut errored, governance_with(&[json!("refinement_failed")])),
+            None
+        );
+        assert!(errored.get("governance").is_none(), "{errored}");
+
+        let mut violated = envelope_with("violated");
+        assert_eq!(
+            attach_governance(
+                &mut violated,
+                governance_with(&[json!("refinement_failed")])
+            ),
+            None
+        );
+        assert_eq!(violated["result"], "violated");
+        assert_eq!(
+            violated["governance"]["preservations"][0]["result"],
+            "refinement_failed"
+        );
     }
 }

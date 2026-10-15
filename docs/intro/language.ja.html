@@ -1198,7 +1198,8 @@ indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが�
 <code>2</code> = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
 <code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
-inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。畳み込みは検証封筒を
+inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。失敗した governance の
+<code>preservation</code> も同じ対応付けで <code>check</code> / <code>verify</code> に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
 baseline の verdict をそのまま返し(baseline が <code>verified</code> でなくなるため変異を1つも生成しません)、
 <code>ledger</code> と <code>fslc html</code> は畳み込まれた検証封筒から同じ exit を引き継ぎ、<code>sweep</code> は
@@ -2530,6 +2531,62 @@ policy/goal、preservation ファイルを検証します。preservation ブロ�
 報告します: <code>refines</code>、<code>refinement_failed</code>、<code>violated</code>(<code>after</code> の spec がそれ自身の
 意味論を破る、§10)、<code>unknown_budget</code>(対応検査が状態の上限に達した、§10)のいずれか
 です。ブラウザの Worker も同じ値を報告します。</p>
+<p><code>refines</code> でない preservation は、<code>fslc check</code> でも <code>fslc verify</code> でもコマンドの判定に
+なります(fail-closed)。<code>verify</code> も <code>--depth</code> にかかわらず preservation を深さ 8 で実行し、
+同じ <code>governance</code> セクションを付けます。宣言順で最初の <code>refines</code> でない preservation が
+top-level の <code>result</code> を決め、各 preservation 自身の値は <code>governance.preservations</code> に
+そのまま残ります:</p>
+<table>
+<thead>
+<tr>
+<th>preservation の <code>result</code></th>
+<th>top-level の <code>result</code></th>
+<th>exit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>refines</code>(すべての preservation)</td>
+<td>変わらない(<code>ok</code> / <code>verified</code> / <code>proved</code>)</td>
+<td>変わらない(0)</td>
+</tr>
+<tr>
+<td><code>refinement_failed</code></td>
+<td><code>refinement_failed</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>violated</code></td>
+<td><code>impl_violated</code>(同じ条件に inline <code>implements</code> seam が使う綴り)</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>unknown_budget</code></td>
+<td><code>unknown_budget</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td>それ以外</td>
+<td><code>error</code>、<code>kind: "internal"</code></td>
+<td>3</td>
+</tr>
+</tbody>
+</table>
+<p>実行がそれ自身の理由ですでに失敗している場合(<code>error</code>、または文書自身の kernel の
+失敗クラスの判定)はその判定を保ち、セクションは証跡としてだけ付きます。<code>check</code> が報告する
+governance 契約のエラー(委譲先の business ファイル、control、<code>satisfied_by</code> の対応付け、
+または preservation の <code>before</code>/<code>after</code>/mapping ファイルが無い・型が誤っている)はすべて、
+<code>verify</code> でも同じ位置付きの <code>error</code>(exit 2)です。preservation の refinement が内部で
+失敗した場合は、どちらでも <code>error</code>/<code>internal</code>(exit 3)です。<code>check</code>/<code>verify</code> の封筒を読む側は
+畳み込まれた判定を読みます: <code>fslc chain</code> の spec レイヤーは失敗し、<code>fslc ledger</code>、
+<code>fslc html</code>、<code>fslc mutate</code> は同じ baseline から exit 1 を返し、ブラウザの Worker も
+<code>check</code> と <code>verify</code> を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
+失敗した preservation があっても <code>check</code> は <code>ok</code>、<code>verify</code> は <code>verified</code> で、どちらも
+exit 0 であり、<code>verify</code> は <code>governance</code> セクション自体を報告していませんでした(<code>check</code> が
+拒否する契約に対しても <code>verified</code> と答えていました)。exit code
+で判定する CI は壊れた preservation を通していましたが、今は落とします。preservation を
+助言扱いに留めたい場合は、exit を CI が無視する別の <code>fslc refine</code> ステップとして実行して
+ください。</p>
 <h3 id="134-nfr">13.4 非機能要件(NFR)の書き方</h3>
 <p>NFR の大半は、機能要件と同じ機構で書けます(詳細とデモは <code>DESIGN-nfr.md</code>):</p>
 <table>

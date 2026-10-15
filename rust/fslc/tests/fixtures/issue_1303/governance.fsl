@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1303 reproducer: the preservation's refinement fails, so `check`
+// and `verify` must not report `ok` / `verified` with exit 0.
+
+governance G {
+  control CTRL-1 "go is preserved"
+  preservation P {
+    before A from "abs.fsl"
+    after I from "impl.fsl"
+    preserve CTRL-1
+    checked_by refinement "map.fsl"
+  }
+}

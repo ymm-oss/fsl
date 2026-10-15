@@ -2091,8 +2091,28 @@ impl fsl_core::FileResolver for RecordingResolver {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 pub(super) fn run_verify_cli_from_source(
+    path: &Path,
+    cache_identity_path: &Path,
+    source: &str,
+    options: &CliVerifyOptions,
+) -> CommandResult {
+    let (mut output, status) =
+        run_verify_cli_kernel_from_source(path, cache_identity_path, source, options);
+    // A governance document's preservations fold into the verdict here,
+    // outside the verify cache (issue #1303): the cache key covers only the
+    // document's own kernel, so a cached `verified` must still be re-gated by
+    // the preservations' current files. Every `verify`-shaped caller --
+    // `verify` (including `--lemma`), `sweep` cells, and a `chain` spec layer
+    // with a `depth` -- goes through this one point.
+    match super::fold_governance_from_source(path, source, &mut output) {
+        Ok(folded) => (output, folded.unwrap_or(status)),
+        Err(error) => error,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_verify_cli_kernel_from_source(
     path: &Path,
     cache_identity_path: &Path,
     source: &str,
