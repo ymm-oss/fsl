@@ -985,6 +985,14 @@ The later run `31097824729` attempt 1 saved its semantic-mutation cache only aft
 using `post-if`'s ordinary `success()` branch. No observed semantic-mutation run has a cache written
 specifically following a timeout-driven cancellation.
 
+`mutation mutants` was raised again, from 90 to 150 minutes (#1319). On a pull request,
+`run-semantic-mutation-gate.sh changed` escalates to the complete P2 scope when the changed critical
+path yields no line mutant. PR #1318 run `38674812491` attempt 1 escalated, classified all 51 mutants
+(43 caught, 8 unviable; baseline about 18 minutes, mutants about 54 minutes), kept compiling for
+about 15 more minutes, and was cancelled at 90 minutes, so the required `semantic mutation (changed)`
+reported a failure it did not observe. Pull requests whose diff does yield line mutants finished in
+13–16 minutes (#1312, #1317).
+
 **The same closed loop appeared independently in `rust-native-z3`'s `windows-latest`/`macos-15`
 matrix. Windows recovery is now observed; macOS recovery is not established by this observation.**
 That job's `Swatinem/rust-cache` step carried `save-if` but not `cache-on-failure`. Warm Windows runs
@@ -1030,6 +1038,15 @@ These runs observe a recovery path after the combined change: a timeout-cancelle
 and the subsequent warm run completed. They do not attribute that save to `cache-on-failure` alone
 or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
 cache provides the recovery path.
+
+Both native Z3 jobs (`rust-native-z3-windows`, `rust-native-z3-macos`) were raised from 60 to 90
+minutes (#1322). By 4.11.0 the warm Windows job spent about 4–5 minutes on setup and 45–57 minutes in
+`cargo test` (sum of per-binary `finished in`: 2693 s on a 4.10.0-candidate success, 2885 s on a
+4.11.0-candidate success, 3250–3370 s on runs cancelled at 60 minutes), against 34m39s for the
+whole warm job in August. On the 4.11.0 candidate `a9f49e7a`, four of five Windows attempts were
+cancelled with every finished binary passing (runs `38710766880` attempts 1–3 and `38720126150`
+attempts 1 and 3; attempt 2 succeeded in 54 minutes); macOS ran 37–57 minutes. The raise restores
+headroom only; bringing the test volume back below the budget is tracked in #1322.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
