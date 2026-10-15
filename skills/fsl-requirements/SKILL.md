@@ -142,6 +142,21 @@ skill produced.
   requirements is not "minimal," it is unfinished. Cover every source requirement
   or record why not (out-of-scope / needs-decision) — but never close a gap by
   inventing a rule the source does not state.
+- Carry every rejection rule the source states in a checked declaration, not
+  in prose alone. Put the rejecting condition on the operation it restricts —
+  the transition's source stage, a `when` guard, or a kernel action's
+  `requires`, whichever expresses it — and add a `forbidden` trace that
+  exercises the rejection (Workflow step 6). A rule that lives only in
+  `requirement` block text, `covers` / `@requirement` text, or a `//` comment
+  is not checked by `verify`, `mutate`, or conformance, and does not reach a
+  reader or tool that takes the declarations without the prose. An omitted
+  rejecting condition is not a neutral gap: the model then accepts every call
+  the operation's remaining conditions allow, which can include calls the
+  source rejects. If an invariant or a `forbidden` trace catches that,
+  `verify` fails — add the condition the source states (or ask, if it states
+  none) rather than deleting the invariant or the trace to get green. If
+  nothing catches it, `verify` stays green, and scenarios, generated tests,
+  and conformance vectors can then encode the acceptance as expected behavior.
 - Stop at the requirements contract. Do not continue into design just because a
   design could be inferred. The handoff downward is a **refinement seam, not a plain
   baton pass**: when design work begins, this spec becomes the frozen contract the

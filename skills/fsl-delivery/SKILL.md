@@ -102,7 +102,7 @@ rules in this skill.
 | Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed seam exits 1 with top-level `refinement_failed` or `impl_violated` |
 | Design | kernel `spec` plus mapping to requirements | check, verify, induction, refine |
 | Implementation | Adapter or event log connected to real behavior | testgen run with ≥ 1 executed test against the wired Adapter (chain `[impl]` with `report` → `passed`, not `indeterminate`), or replay; do not claim conformance before this |
-| Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, optional mutate/vacuity |
+| Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, `fslc diff --forbid behavior_removed` between before and after when they share state and action names, optional mutate/vacuity |
 
 For every layer, also run:
 
@@ -148,6 +148,11 @@ Stop and ask for a product/business/design decision before changing behavior whe
   lower layer
 - a refinement mapping or stutter correspondence is not obvious from the source
 - an implementation Adapter must decide how to project real state into FSL state
+- an implementation-conformance run (generated tests, conformance vectors, or
+  replay) diverges from a spec whose `acceptance` / `forbidden` the owner has
+  not confirmed against intent, so the divergence may be the spec's error
+  rather than the implementation's (see `../fsl/references/impl.md` §9, "Using
+  conformance as an implementation loop for an AI agent")
 
 Representation-only modeling choices, such as finite domain sizes for model
 checking, may be chosen by the agent. Label them separately from product

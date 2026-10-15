@@ -873,3 +873,35 @@ fn a_partial_op_in_an_abstract_invariant_at_the_successor_is_not_refines() {
     let failure = assert_abs_step_violation(&checked, "partial_op", "_partial_property_P");
     assert!(failure.alpha_after_attempted.is_some(), "{failure:?}");
 }
+
+/// The walk steps the abstraction on one re-pointed monitor instead of a
+/// fresh `Monitor::from_state(abstraction.clone(), ..)` per transition
+/// (issues #1174, #1247). The abstract step's own violation must still read
+/// as that of a fresh monitor: here the abstract `ensures` first fails on
+/// the third mapped transition, after two abstract steps on the same
+/// monitor, and its `step` is still 1, not 3.
+#[test]
+fn an_abstract_step_violation_after_earlier_transitions_reads_as_a_fresh_step() {
+    let checked = step_check(
+        "spec I { type N = 0..4 state { z: N } init { z = 0 } \
+         action go() { requires z < 3 z = z + 1 } }",
+        "spec A { type N = 0..4 state { y: N } init { y = 0 } \
+         action go() { y = y + 1 ensures y <= 2 } }",
+        STEP_MAP,
+    );
+    let failure = failure(&checked);
+    assert_eq!(
+        (failure.kind.as_str(), failure.step),
+        ("abs_step_violation", 3)
+    );
+    let violation = failure.abs_violation.as_ref().expect("abs_violation");
+    assert_eq!(
+        (
+            violation.kind.as_str(),
+            violation.name.as_str(),
+            violation.step
+        ),
+        ("ensures", "go", 1),
+        "{failure:?}"
+    );
+}

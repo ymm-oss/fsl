@@ -161,6 +161,14 @@ verified, so it never drifts. In the requirements and design (kernel) layers:
    `@requirement("REQ-SCOPE-001", "one-sentence intent")` — the in-source prose
    that flows into all output (explain / html / counterexamples). It is
    NOT verified, so keep it a faithful paraphrase of the expression, not a rival truth.
+   The converse also holds for any rule FSL can express: do not let tag text,
+   `requirement` block text, or a `//` comment be the only place the rule
+   lives. `verify`, `mutate`, and conformance check declarations, not prose,
+   and a reader or tool that takes the declarations without the prose does not
+   see the rule. Write it with the construct that fits it (see
+   [nl-to-syntax](nl-to-syntax.md)) and let the tag describe that declaration.
+   What FSL cannot express stays in the layer's documents, as "Drawing the
+   layer boundary" below says.
 2. **Use the active ID policy.** The built-in forms are
    `REQ|NFR|INV-{SCOPE}-{NNN}` for requirement relations,
    `AC|FB|POL|GOAL|CTRL-{SCOPE}-{NNN}` for their respective declarations, and

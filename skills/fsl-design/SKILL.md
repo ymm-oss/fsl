@@ -44,6 +44,39 @@ for a contract decision.
 2. Write the design spec as kernel FSL. It may include internal states, queues,
    outboxes, two-phase operations, retries, and decomposition that are absent from
    requirements, as long as they map back to the upper contract.
+   Write the design so that the errors you want caught break something the
+   verifier checks. `fslc verify` and `fslc refine` report a design error
+   when it breaks something they evaluate, within the depth and domain sizes
+   of the run. For `fslc verify` that includes declared properties
+   (`invariant`, `trans`, `leadsTo`, `ensures`, `reachable`), `acceptance`
+   and `forbidden` scenarios, and automatic checks (type bounds, partial
+   operations, deadlock detection); `fslc refine` adds the correspondence to
+   the upper contract. This list is illustrative, not complete:
+   `../fsl/references/commands.md` is the reference for what each command
+   checks and returns. An error that breaks nothing they evaluate is not
+   reported, so an intent that no declaration states is checked only where
+   an automatic check happens to cover it. A run that reports no violation
+   has not thereby passed: `unknown_cti` and `unknown_budget` mean the check
+   did not decide. So list the failures this design must exclude — for
+   example: processed twice, lost, out of order, inconsistent after a crash,
+   wrong on retry, interleaved in the middle of a multi-step procedure, a
+   quantity not conserved — and for each one declare the property it would
+   break, using the construct that fits that property (see
+   `../fsl/references/nl-to-syntax.md`). The fit depends on what is meant:
+   "not lost" can be a safety property (the item is always held somewhere) or
+   a progress property (the item is eventually delivered), and the two are
+   written differently. If neither the source nor the upper contract states
+   the property, ask; do not invent it. Where the design has the following
+   mechanisms, model them as state and actions rather than folding them into
+   one step or leaving them in a comment (the order is not a ranking):
+   - **Transaction boundaries**: one `action` per step the implementation
+     performs atomically, with what must hold between those steps declared as
+     properties.
+   - **Queues and outboxes**: the queue held in `state`, with what the
+     contract requires of it declared as properties (for example: nothing is
+     lost, nothing is duplicated, only the head is processed).
+   - **Retries and idempotency**: for example an unknown outcome, the
+     idempotency key, and a release that is separate from its acknowledgement.
 3. Link every design declaration back to the requirement it serves with the
    canonical typed annotation, on the line before the declaration:
    `@requirement("REQ-CHECKOUT-001", "one-sentence intent")` before
@@ -57,6 +90,15 @@ for a contract decision.
    `fslc verify --engine induction`. Run `fslc lint <file>` as the tagging
    gate: it exits 1 on any non-canonical ID form, which `--strict-tags` accepts
    silently.
+   A bounded `verified` says nothing past the depth and the domain sizes it
+   ran at, and a design with many interleavings can hold its first violation
+   beyond the default depth. If induction returns `unknown_cti`, follow
+   `../fsl/references/commands.md`: try `--engine explicit` for closure before
+   hunting lemmas. If neither closes within the budget, raise `--depth` as far
+   as the budget allows and report the deepest depth that returned `verified`
+   as the bound of the claim. For properties about interactions between
+   entities, see "Domain sizing" in `../fsl/references/practices.md`: a result
+   at a smaller size, even a closed `proved`, does not cover a larger one.
 5. Write the mapping file:
    - `map abs_var = expr` or `map abs_var[x: T] = expr`
    - `action impl_action(...) -> abs_action(...)` for visible effects
@@ -69,6 +111,10 @@ for a contract decision.
    human revision.
 7. If implementation anchoring is required, run `fslc testgen` and wire the
    Adapter, or use `fslc replay` against execution logs.
+   Generated tests and conformance vectors are sequences of design actions
+   and do not enumerate interleaving or crash points inside one; where the
+   design declares a procedure atomic, plan implementation tests that
+   interleave or crash inside it (see `../fsl/references/impl.md` §9).
 
 ## Guardrails
 
@@ -80,6 +126,17 @@ for a contract decision.
   lower-layer ranked `leadsTo`.
 - Do not model variants by editing the abstract spec each time; keep variant detail
   in the design layer and fold it through the mapping.
+- When you change an existing design spec, re-run `fslc verify` on the changed
+  design and `fslc refine` against the unchanged requirements, and, when the
+  old and new design share state and action names, also run
+  `fslc diff old_design.fsl new_design.fsl --forbid behavior_removed`.
+  `refine` passes a change that only makes the design refuse more (a
+  strengthened guard); `diff` reports it as `behavior_removed`. Decide whether
+  that refusal is intended before accepting or reverting the change (see
+  `../fsl-design-review/SKILL.md`, Step 3). These checks are bounded by their
+  depth: a violation that first appears beyond the checked depth is not
+  reported. An `unknown` finding or an `unknown_budget` result from `diff` is
+  undecided; do not read it as "no behavior removed".
 - Report proof categories separately: design invariants proved, refinement to
   requirements proved, implementation conformance not yet proved unless `testgen`
   or `replay` has been anchored to real code/logs.
