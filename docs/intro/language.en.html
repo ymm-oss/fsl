@@ -1245,7 +1245,8 @@ indeterminate (<code>chain</code> when its <code>[impl]</code> layer has no evid
 <code>2</code> = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
-because inline <code>implements</code> propagates that seam verdict to the top-level <code>result</code>. The fold
+because inline <code>implements</code> propagates that seam verdict to the top-level <code>result</code>; a failed
+governance <code>preservation</code> folds into <code>check</code>/<code>verify</code> through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to <code>check</code> and
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
@@ -2623,6 +2624,64 @@ refinement at depth 8 and report results under <code>governance.preservations</c
 <code>refines</code>, <code>refinement_failed</code>, <code>violated</code> (the <code>after</code> spec breaks its own
 semantics, §10), or <code>unknown_budget</code> (the correspondence check reached its
 state budget, §10). The browser Worker reports the same values.</p>
+<p>A preservation that does not <code>refines</code> is the command's verdict, fail-closed,
+for <code>fslc check</code> and <code>fslc verify</code> alike (<code>verify</code> runs the preservations at
+depth 8 too, whatever its <code>--depth</code>, and attaches the same <code>governance</code>
+section). The first non-<code>refines</code> preservation in declaration order sets the
+top-level <code>result</code>; every preservation keeps its own value under
+<code>governance.preservations</code>:</p>
+<table>
+<thead>
+<tr>
+<th>preservation <code>result</code></th>
+<th>top-level <code>result</code></th>
+<th>exit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>refines</code> (every preservation)</td>
+<td>unchanged (<code>ok</code> / <code>verified</code> / <code>proved</code>)</td>
+<td>unchanged (0)</td>
+</tr>
+<tr>
+<td><code>refinement_failed</code></td>
+<td><code>refinement_failed</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>violated</code></td>
+<td><code>impl_violated</code> (the spelling an inline <code>implements</code> seam uses for the same condition)</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>unknown_budget</code></td>
+<td><code>unknown_budget</code></td>
+<td>1</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td><code>error</code>, <code>kind: "internal"</code></td>
+<td>3</td>
+</tr>
+</tbody>
+</table>
+<p>A run that already fails for its own reasons (<code>error</code>, or a failure-class
+verdict of the document's own kernel) keeps its verdict; the section is
+evidence only. Any governance contract error that <code>check</code> reports (a
+delegated business file, a control, a <code>satisfied_by</code> mapping, or a
+preservation's <code>before</code>/<code>after</code>/mapping files that are missing or ill-typed)
+is the same located <code>error</code> (exit 2) under <code>verify</code> too; a preservation
+refinement that fails internally is <code>error</code>/<code>internal</code> (exit 3) under both.
+Consumers of the <code>check</code>/<code>verify</code> envelope read the folded verdict: a
+<code>fslc chain</code> spec layer fails, <code>fslc ledger</code>, <code>fslc html</code>, and <code>fslc mutate</code>
+exit 1 from the same baseline, and the browser Worker folds <code>check</code> and
+<code>verify</code> the same way. This changed exit codes: before 4.11 a failed
+preservation left <code>check</code> at <code>ok</code> and <code>verify</code> at <code>verified</code>, both exit 0, and
+<code>verify</code> reported no <code>governance</code> section at all (and answered <code>verified</code> even
+for a contract <code>check</code> rejected). A CI that gated on the exit
+code passed a broken preservation; it now fails it. To keep a preservation
+advisory, run it as a separate <code>fslc refine</code> step whose exit the CI ignores.</p>
 <h3 id="134-how-to-write-non-functional-requirements-nfrs">13.4 How to write non-functional requirements (NFRs)</h3>
 <p>The majority of NFRs can be written with the same machinery as functional
 requirements (details and demonstration in <code>DESIGN-nfr.md</code>):</p>
