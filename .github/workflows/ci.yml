@@ -373,7 +373,8 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    timeout-minutes: 60
+    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -441,7 +442,8 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    timeout-minutes: 60
+    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 

@@ -1039,6 +1039,15 @@ and the subsequent warm run completed. They do not attribute that save to `cache
 or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
 cache provides the recovery path.
 
+Both native Z3 jobs (`rust-native-z3-windows`, `rust-native-z3-macos`) were raised from 60 to 90
+minutes (#1322). By 4.11.0 the warm Windows job spent about 4–5 minutes on setup and 45–57 minutes in
+`cargo test` (sum of per-binary `finished in`: 2693 s on a 4.10.0-candidate success, 2885 s on a
+4.11.0-candidate success, 3250–3370 s on runs cancelled at 60 minutes), against 34m39s for the
+whole warm job in August. On the 4.11.0 candidate `a9f49e7a`, four of five Windows attempts were
+cancelled with every finished binary passing (runs `38710766880` attempts 1–3 and `38720126150`
+attempts 1 and 3; attempt 2 succeeded in 54 minutes); macOS ran 37–57 minutes. The raise restores
+headroom only; bringing the test volume back below the budget is tracked in #1322.
+
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
 and on `main` pushes that touch it, `ci.yml`, or `merge-readiness.yml`. The runner first obtains
