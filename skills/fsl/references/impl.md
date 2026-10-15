@@ -49,6 +49,18 @@ oracle, stepping through the implementation one step at a time. A failure = a
 divergence between implementation and spec (read the trace to decide which one is
 correct).
 
+Generated tests and conformance vectors step the implementation one spec
+action at a time. A spec action is atomic in the model, so the generated
+sequences do not enumerate interleaving or crash points inside an action.
+Whether anything interleaves inside the implementation's handling of one
+action is decided by the implementation and the Adapter, not by the generated
+sequence. If the implementation carries out one design action as several
+transactions, an error that needs an interleaving or a crash between those
+transactions can pass every generated test and vector. Cover each procedure
+the design declares atomic with implementation tests that interleave or crash
+at the implementation's own transaction boundaries; a conformance run with
+zero divergences does not show that the implementation keeps that atomicity.
+
 The native pytest/Vitest/Swift/Kotlin/Dart/PHPUnit emitters share one validated
 input adapter: Public Kernel v1 metadata, scenario JSON, and the versioned
 fixed-seed `testgen-trace.v1` conformance trace. They never consume a private
@@ -130,6 +142,34 @@ Use `--strict` to restore all-or-nothing `reachable_failed`. A genuine
 testgen input problem — is returned verbatim (verdict, exit code, and trace
 unchanged), the same envelope `verify`/`scenarios` return for the identical
 spec; it is never re-wrapped as a generic exit-2 spec error.
+
+### Using conformance as an implementation loop for an AI agent
+
+Implementation conformance (`testgen` tests, `fslc conformance` vectors,
+`replay`) checks the implementation against the spec, not against the intent
+behind it. Where the spec differs from the intent — for example, it accepts a
+call the owner meant to reject because the rejecting condition was never
+written — an implementation that follows the intent can fail conformance on
+the cases that reach the difference. An agent told to reach zero divergence
+may then change correct code to match the spec, or reach zero by lowering the
+depth or skipping the diverging vectors. This applies at whichever layer the
+tests are generated from; it does not change "Layer selection for conformance
+tests" above.
+
+- Before handing the loop to an agent, confirm the spec against intent: the
+  formalization memo is confirmed, each rejection rule the source states is
+  carried by a declaration and exercised by a `forbidden` trace, and the owner
+  has read the `acceptance` / `forbidden` traces (or `fslc explain --readable`).
+- When a divergence appears, classify it before changing code: (a) the spec
+  misses or contradicts the intent, (b) the Adapter projects state wrongly, or
+  (c) the implementation is wrong. (a) goes back to the spec owner as a
+  question, (b) is fixed in the Adapter, and only (c) is fixed by editing the
+  implementation.
+- State the depth, and any vectors or tests that may be left unexecuted, in
+  the task. An agent that cannot reach zero divergence on those terms reports
+  the remaining divergences; it does not lower the depth, skip or filter
+  vectors, or disable tests to get there. Count the loop as complete only on
+  those terms — "the last run shows zero divergence" alone is not completion.
 
 ## 11. Non-functional requirements (NFR)
 
