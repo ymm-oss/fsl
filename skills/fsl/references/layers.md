@@ -77,7 +77,8 @@ the relevant role skill directs it.
   `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
   then carry both the broken policy/goal and satisfied controls. A standalone
   `governance Name { ... }` catalog can require controls across business specs
-  and run preservation refinements during `fslc check`.
+  and run preservation refinements during `fslc check` and `fslc verify`; a
+  preservation that does not `refines` fails the command (exit 1).
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
   the process+data profile first for a single-entity lifecycle: transition
@@ -161,6 +162,14 @@ verified, so it never drifts. In the requirements and design (kernel) layers:
    `@requirement("REQ-SCOPE-001", "one-sentence intent")` — the in-source prose
    that flows into all output (explain / html / counterexamples). It is
    NOT verified, so keep it a faithful paraphrase of the expression, not a rival truth.
+   The converse also holds for any rule FSL can express: do not let tag text,
+   `requirement` block text, or a `//` comment be the only place the rule
+   lives. `verify`, `mutate`, and conformance check declarations, not prose,
+   and a reader or tool that takes the declarations without the prose does not
+   see the rule. Write it with the construct that fits it (see
+   [nl-to-syntax](nl-to-syntax.md)) and let the tag describe that declaration.
+   What FSL cannot express stays in the layer's documents, as "Drawing the
+   layer boundary" below says.
 2. **Use the active ID policy.** The built-in forms are
    `REQ|NFR|INV-{SCOPE}-{NNN}` for requirement relations,
    `AC|FB|POL|GOAL|CTRL-{SCOPE}-{NNN}` for their respective declarations, and
@@ -250,7 +259,14 @@ For cross-business or enterprise-level controls, use a standalone `governance`
 catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
-`preservation` block runs its declared refinement at depth 8.
+`preservation` block runs its declared refinement at depth 8 (`fslc verify`
+runs it too, at depth 8 whatever its `--depth`). Each result stays under
+`governance.preservations[].result`; the first non-`refines` one in
+declaration order is also the command's verdict, fail-closed:
+`refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
+breaks its own semantics) -> `impl_violated`, `unknown_budget` ->
+`unknown_budget`, all exit 1; any other value is `error`/`internal` (exit 3).
+Before 4.11 such a run reported `ok`/`verified` with exit 0.
 
 No `terminal` syntax exists in business — it is derived automatically. Each
 process's sink stages (stages with no outgoing `transition`, e.g.

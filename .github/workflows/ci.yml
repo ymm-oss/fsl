@@ -373,7 +373,8 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    timeout-minutes: 60
+    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -441,7 +442,8 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    timeout-minutes: 60
+    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -619,7 +621,9 @@ jobs:
   semantic-mutation-mutants:
     name: mutation mutants
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # 150, not 90: a changed-scope run with no critical-path line mutant escalates to
+    # the complete P2 scope, which ran past 90 minutes on PR #1318 (#1319).
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:

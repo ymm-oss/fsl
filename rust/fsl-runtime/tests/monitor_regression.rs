@@ -395,3 +395,72 @@ fn exists_binder_does_not_overwrite_a_shadowed_action_parameter() {
         "act(0) must clear a[0], not the witness's a[1]: {stepped:?}"
     );
 }
+
+/// Issue #1247 reads a `Var`/`Index`/`Field` chain (`design[c].st`) by
+/// reference instead of cloning the whole state variable at each level. The
+/// order a chain fails in must stay the bottom-up one: each step evaluates
+/// its index and then looks it up before the next index is evaluated. Both
+/// chains below have two failing steps; reading every index first (or every
+/// lookup last) would report the other one. The nested map is built by hand:
+/// `check` admits no `Map` of `Map`s, but the evaluator is shared by every
+/// shape a chain can take.
+#[test]
+fn place_read_chain_keeps_the_bottom_up_failure_order() {
+    use fsl_core::KernelExpr as Expr;
+
+    let model = model("spec Place { state { z: Int } init { z = 0 } action stay() { z = z } }");
+    let leaf = |a: i64| FslValue::Struct {
+        type_name: "P".to_owned(),
+        fields: BTreeMap::from([("a".to_owned(), FslValue::Int(a))]),
+    };
+    let row = |i: i64| FslValue::Map((0..2).map(|j| (FslValue::Int(j), leaf(i + j))).collect());
+    let state = BTreeMap::from([
+        (
+            "m".to_owned(),
+            FslValue::Map((0..2).map(|i| (FslValue::Int(i), row(i))).collect()),
+        ),
+        ("z".to_owned(), FslValue::Int(0)),
+    ]);
+    let boxed = Box::new;
+    let outside_key = || Expr::Num(9);
+    let zero_division = || Expr::Binary {
+        op: "/".to_owned(),
+        left: boxed(Expr::Num(1)),
+        right: boxed(Expr::Var("z".to_owned())),
+    };
+    let chain = |inner: Expr, outer: Expr| {
+        Expr::Field(
+            boxed(Expr::Index(
+                boxed(Expr::Index(boxed(Expr::Var("m".to_owned())), boxed(inner))),
+                boxed(outer),
+            )),
+            "a".to_owned(),
+        )
+    };
+    let eval = |expr: &Expr| fsl_runtime::eval(expr, &state, &mut BTreeMap::new(), &model, None);
+
+    let inner_key = eval(&chain(outside_key(), zero_division())).expect_err("m[9] is outside");
+    assert!(
+        inner_key.map_key_outside_domain && inner_key.partial_operation.is_none(),
+        "the inner lookup fails before the outer index is evaluated: {inner_key:?}"
+    );
+    let inner_division =
+        eval(&chain(zero_division(), outside_key())).expect_err("1 / 0 in action context");
+    assert!(
+        inner_division.partial_operation.is_some() && !inner_division.map_key_outside_domain,
+        "the inner index is evaluated before the outer lookup: {inner_division:?}"
+    );
+    let not_a_struct = eval(&Expr::Field(
+        boxed(Expr::Index(
+            boxed(Expr::Var("m".to_owned())),
+            boxed(Expr::Num(1)),
+        )),
+        "a".to_owned(),
+    ))
+    .expect_err("m[1] is a map");
+    assert_eq!(not_a_struct.message, "field access requires a struct");
+    assert_eq!(
+        eval(&chain(Expr::Num(1), Expr::Num(1))).expect("leaf read"),
+        FslValue::Int(2)
+    );
+}

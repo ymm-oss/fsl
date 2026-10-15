@@ -192,29 +192,19 @@ fn eval_inner(
         }
         Expr::Stage { .. } => Err(runtime_error("unlowered stage access")),
         Expr::Index(base, index) => {
+            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+                return Ok(value);
+            }
             let base = eval(base, state, bindings, model, old_state)?;
             let index = eval(index, state, bindings, model, old_state)?;
-            match base {
-                Value::Map(values) => values.get(&index).cloned().ok_or_else(|| RuntimeError {
-                    map_key_outside_domain: true,
-                    ..runtime_error("map index outside finite key domain")
-                }),
-                Value::Seq(values) => values
-                    .get(partial_index(index, PartialOperation::Index)?)
-                    .cloned()
-                    .ok_or_else(|| partial_operation_error(PartialOperation::Index)),
-                _ => Err(runtime_error("indexing requires a map or sequence")),
-            }
+            index_place(&base, index).cloned()
         }
         Expr::Field(base, field) => {
-            let base = eval(base, state, bindings, model, old_state)?;
-            match base {
-                Value::Struct { fields, .. } => fields
-                    .get(field)
-                    .cloned()
-                    .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'"))),
-                _ => Err(runtime_error("field access requires a struct")),
+            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+                return Ok(value);
             }
+            let base = eval(base, state, bindings, model, old_state)?;
+            field_place(&base, field).cloned()
         }
         Expr::Method {
             receiver,
@@ -383,6 +373,94 @@ fn eval_inner(
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
             "unsupported ternary function '{name}'"
         ))),
+    }
+}
+
+/// Read a `Var`/`Index`/`Field` chain such as `design[c].st` by reference,
+/// cloning only the addressed leaf (issue #1247). Evaluating the chain
+/// bottom-up through [`eval`] cloned the whole state variable (`design`, every
+/// claim) and then every intermediate value just to read one field.
+///
+/// The observable order is the bottom-up one: the root name is resolved
+/// first, then each step from the innermost outward evaluates its index
+/// expression and then performs its lookup, so the first failing step reports
+/// the same error it did before. Returns `Ok(None)` when the chain is not
+/// rooted at a `Var`; the caller then evaluates it the original way.
+fn eval_place(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Option<Value>, RuntimeError> {
+    enum PlaceStep<'expr> {
+        Index(&'expr Expr),
+        Field(&'expr str),
+    }
+    let mut steps = Vec::new();
+    let mut root = expr;
+    let name = loop {
+        match root {
+            Expr::Index(base, index) => {
+                steps.push(PlaceStep::Index(index));
+                root = base;
+            }
+            Expr::Field(base, field) => {
+                steps.push(PlaceStep::Field(field));
+                root = base;
+            }
+            Expr::Var(name) => break name,
+            _ => return Ok(None),
+        }
+    };
+    // `eval_inner`'s `Var` lookup order. A bound root is copied out: the
+    // index expressions below need `bindings` mutably (an `is` pattern may
+    // bind a new name), so a borrow of a bound value cannot be held across
+    // them. State and model values are borrowed for the whole walk.
+    let owned;
+    let mut current: &Value = if let Some(value) = bindings.get(name) {
+        owned = value.clone();
+        &owned
+    } else {
+        state
+            .get(name)
+            .or_else(|| model.consts.get(name))
+            .or_else(|| model.enum_members.get(name))
+            .ok_or_else(|| runtime_error(format!("unknown identifier '{name}'")))?
+    };
+    for step in steps.into_iter().rev() {
+        current = match step {
+            PlaceStep::Index(index) => {
+                let index = eval(index, state, bindings, model, old_state)?;
+                index_place(current, index)?
+            }
+            PlaceStep::Field(field) => field_place(current, field)?,
+        };
+    }
+    Ok(Some(current.clone()))
+}
+
+/// The element `base[index]` addresses, with `Expr::Index`'s errors.
+fn index_place(base: &Value, index: Value) -> Result<&Value, RuntimeError> {
+    match base {
+        Value::Map(values) => values.get(&index).ok_or_else(|| RuntimeError {
+            map_key_outside_domain: true,
+            ..runtime_error("map index outside finite key domain")
+        }),
+        Value::Seq(values) => values
+            .get(partial_index(index, PartialOperation::Index)?)
+            .ok_or_else(|| partial_operation_error(PartialOperation::Index)),
+        _ => Err(runtime_error("indexing requires a map or sequence")),
+    }
+}
+
+/// The field `base.field` addresses, with `Expr::Field`'s errors.
+fn field_place<'value>(base: &'value Value, field: &str) -> Result<&'value Value, RuntimeError> {
+    match base {
+        Value::Struct { fields, .. } => fields
+            .get(field)
+            .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'"))),
+        _ => Err(runtime_error("field access requires a struct")),
     }
 }
 
@@ -1084,21 +1162,43 @@ impl Monitor {
     ) -> Result<StepResult, RuntimeError> {
         match candidate {
             ActionCandidate::Enabled(instance) => self.step_selected(instance, checked_bounds),
+            ActionCandidate::GuardPartial(instance) => Ok(self.guard_partial_step(instance)),
+        }
+    }
+
+    /// [`Monitor::step_candidate`] for a candidate that [`Monitor::candidates`]
+    /// just enumerated at the current state, for the refinement searches
+    /// (issue #1247). `step_selected` re-evaluates every guard to reject a
+    /// stale instance; here the instance's `bindings` are the ones those
+    /// guards produced at this very state, so the re-evaluation could only
+    /// recompute them. Not for an instance from another state (replay, a
+    /// caller-held `EnabledAction`): those go through `step_candidate`.
+    ///
+    /// `state` is the state the candidate was enumerated at; the monitor's
+    /// own state is neither read nor updated, so a search steps every
+    /// candidate of one state without re-pointing the monitor at it each
+    /// time. `step` is the logical step of `state`; the monitor's own
+    /// `step` is not used either.
+    fn step_enumerated(
+        &self,
+        state: &State,
+        step: usize,
+        candidate: &ActionCandidate,
+    ) -> Result<StepResult, RuntimeError> {
+        let mut step = step;
+        match candidate {
+            ActionCandidate::Enabled(instance) => {
+                Self::execute_from(&self.model, state, &mut step, instance, None)
+            }
             ActionCandidate::GuardPartial(instance) => {
-                self.step += 1;
-                Ok(StepResult {
-                    action: instance.action.clone(),
-                    params: instance.params.clone(),
-                    state: self.state.clone(),
-                    attempted_state: None,
-                    violation: Some(Violation {
-                        kind: "partial_op".to_owned(),
-                        name: format!("_partial_{}", instance.action),
-                        step: self.step,
-                    }),
-                })
+                Ok(guard_partial_result(instance, state.clone(), step + 1))
             }
         }
+    }
+
+    fn guard_partial_step(&mut self, instance: &EnabledAction) -> StepResult {
+        self.step += 1;
+        guard_partial_result(instance, self.state.clone(), self.step)
     }
 
     /// Evaluate and execute one bounded action call, including disabled and
@@ -1118,9 +1218,8 @@ impl Monitor {
             .actions
             .iter()
             .find(|action| action.name == action_name)
-            .cloned()
             .ok_or_else(|| runtime_error(format!("unknown action '{action_name}'")))?;
-        let bindings = match evaluate_action_guards(&action, params, &self.state, &self.model) {
+        let bindings = match evaluate_action_guards(action, params, &self.state, &self.model) {
             Ok(Some(bindings)) => bindings,
             Ok(None) => {
                 return Ok(self.failed_step(
@@ -1184,10 +1283,11 @@ impl Monitor {
             .actions
             .iter()
             .find(|action| action.name == enabled.action)
-            .cloned()
             .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
-        let bindings = evaluate_action_guards(&action, &enabled.params, &self.state, &self.model)?
-            .ok_or_else(|| runtime_error(format!("stale enabled action '{}'", enabled.action)))?;
+        let bindings = evaluate_action_guards(action, &enabled.params, &self.state, &self.model)?
+            .ok_or_else(|| {
+            runtime_error(format!("stale enabled action '{}'", enabled.action))
+        })?;
         self.execute_selected(
             &EnabledAction {
                 action: enabled.action.clone(),
@@ -1198,42 +1298,66 @@ impl Monitor {
         )
     }
 
-    #[allow(clippy::too_many_lines)]
     fn execute_selected(
         &mut self,
         enabled: &EnabledAction,
         checked_bounds: Option<&BTreeSet<String>>,
     ) -> Result<StepResult, RuntimeError> {
-        let action = self
-            .model
+        let stepped = Self::execute_from(
+            &self.model,
+            &self.state,
+            &mut self.step,
+            enabled,
+            checked_bounds,
+        )?;
+        if stepped.violation.is_none() {
+            self.state = stepped.state.clone();
+        }
+        Ok(stepped)
+    }
+
+    /// Execute `enabled` from `old_state` without touching the monitor's own
+    /// state: every outcome but a clean step leaves the state unchanged, and
+    /// a clean step's successor is `state` of the result. Borrowing the
+    /// pre-state instead of copying it out of the monitor first, and letting
+    /// a search keep its own pre-state, saves the per-step `State` copies
+    /// issue #1247 measured (`old_state`, and the `self.state` round trip).
+    #[allow(clippy::too_many_lines)]
+    fn execute_from(
+        model: &KernelModel,
+        old_state: &State,
+        step: &mut usize,
+        enabled: &EnabledAction,
+        checked_bounds: Option<&BTreeSet<String>>,
+    ) -> Result<StepResult, RuntimeError> {
+        let action = model
             .actions
             .iter()
             .find(|action| action.name == enabled.action)
             .ok_or_else(|| runtime_error(format!("unknown action '{}'", enabled.action)))?;
-        let old_state = self.state.clone();
         let mut pending = State::new();
         let mut writes = BTreeSet::new();
         let mut bindings = enabled.bindings.clone();
         for statement in &action.statements {
             if let Err(error) = compute_statement_update(
                 statement,
-                &old_state,
+                old_state,
                 &mut pending,
                 &mut writes,
                 &mut bindings,
-                &self.model,
+                model,
             ) {
                 if is_partial_operation_error(&error) {
-                    self.step += 1;
+                    *step += 1;
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
-                        state: old_state,
+                        state: old_state.clone(),
                         attempted_state: None,
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
                             name: format!("_partial_{}", action.name),
-                            step: self.step,
+                            step: *step,
                         }),
                     });
                 }
@@ -1242,53 +1366,48 @@ impl Monitor {
         }
         let mut next = old_state.clone();
         next.extend(pending);
-        self.step += 1;
-        let violation = match check_state_selected(
-            &next,
-            Some(&old_state),
-            &self.model,
-            self.step,
-            checked_bounds,
-        ) {
-            Ok(violation) => violation,
-            Err(error) if is_partial_operation_error(&error) => {
-                return Ok(StepResult {
-                    action: enabled.action.clone(),
-                    params: enabled.params.clone(),
-                    state: old_state,
-                    attempted_state: Some(next),
-                    violation: Some(Violation {
-                        kind: "partial_op".to_owned(),
-                        name: format!("_partial_{}", action.name),
-                        step: self.step,
-                    }),
-                });
-            }
-            Err(error) => return Err(error),
-        };
+        *step += 1;
+        let violation =
+            match check_state_selected(&next, Some(old_state), model, *step, checked_bounds) {
+                Ok(violation) => violation,
+                Err(error) if is_partial_operation_error(&error) => {
+                    return Ok(StepResult {
+                        action: enabled.action.clone(),
+                        params: enabled.params.clone(),
+                        state: old_state.clone(),
+                        attempted_state: Some(next),
+                        violation: Some(Violation {
+                            kind: "partial_op".to_owned(),
+                            name: format!("_partial_{}", action.name),
+                            step: *step,
+                        }),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
         if let Some(violation) = violation {
             return Ok(StepResult {
                 action: enabled.action.clone(),
                 params: enabled.params.clone(),
-                state: old_state,
+                state: old_state.clone(),
                 attempted_state: Some(next),
                 violation: Some(violation),
             });
         }
         for ensure in &action.ensures {
-            let evaluated = eval(ensure, &next, &mut bindings, &self.model, Some(&old_state));
+            let evaluated = eval(ensure, &next, &mut bindings, model, Some(old_state));
             let value = match evaluated {
                 Ok(value) => value,
                 Err(error) if is_partial_operation_error(&error) => {
                     return Ok(StepResult {
                         action: enabled.action.clone(),
                         params: enabled.params.clone(),
-                        state: old_state,
+                        state: old_state.clone(),
                         attempted_state: Some(next),
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
                             name: format!("_partial_{}", action.name),
-                            step: self.step,
+                            step: *step,
                         }),
                     });
                 }
@@ -1298,17 +1417,16 @@ impl Monitor {
                 return Ok(StepResult {
                     action: enabled.action.clone(),
                     params: enabled.params.clone(),
-                    state: old_state,
+                    state: old_state.clone(),
                     attempted_state: Some(next),
                     violation: Some(Violation {
                         kind: "ensures".to_owned(),
                         name: action.name.clone(),
-                        step: self.step,
+                        step: *step,
                     }),
                 });
             }
         }
-        self.state = next.clone();
         Ok(StepResult {
             action: enabled.action.clone(),
             params: enabled.params.clone(),
@@ -1338,6 +1456,22 @@ impl Monitor {
         checked_bounds: Option<&BTreeSet<String>>,
     ) -> Result<Option<Violation>, RuntimeError> {
         check_state_selected(&self.state, None, &self.model, self.step, checked_bounds)
+    }
+}
+
+/// The `partial_op` outcome of a [`ActionCandidate::GuardPartial`] instance:
+/// the state unchanged and no attempted state.
+fn guard_partial_result(instance: &EnabledAction, state: State, step: usize) -> StepResult {
+    StepResult {
+        action: instance.action.clone(),
+        params: instance.params.clone(),
+        state,
+        attempted_state: None,
+        violation: Some(Violation {
+            kind: "partial_op".to_owned(),
+            name: format!("_partial_{}", instance.action),
+            step,
+        }),
     }
 }
 
@@ -2069,6 +2203,10 @@ pub fn check_refinement_with_budget(
     // failure reported is stable). Every candidate that passes seeds its
     // own root below, so the walk explores the full reachable set of every
     // nondeterministic initial branch, not just one.
+    // Visited states and parent links are one packed `trace::StateStore`
+    // (issue #1247), as in `first_self_violation`: every state the walk has
+    // queued is stored once, as bytes, and the frontier holds store ids.
+    let mut visited = trace::StateStore::new();
     let mut queue = trace::LeanFrontier::new();
     for impl_state in impl_initial_states {
         let initial_trace = vec![TraceStep {
@@ -2144,36 +2282,45 @@ pub fn check_refinement_with_budget(
             ));
             return Ok(check);
         }
-        queue.push(impl_state, 0);
+        if let Some(id) = visited.insert_root(&impl_state) {
+            queue.push(id, 0);
+        }
     }
 
-    // The frontier carries `State` only, not `Monitor` -- a full `Monitor`
+    // The frontier carries a store id only, not `Monitor` -- a full `Monitor`
     // clone per candidate transition duplicates the whole `KernelModel`
     // repeatedly at every layer (issue #783's 1.72 GB @ depth 3). `scratch`
     // is re-pointed at each state instead, following `first_self_violation`
     // and `bfs`'s established pattern. Traces are no longer carried in the
-    // queue either; `parents` -- left empty for every root, per
-    // `trace::reconstruct_trace`'s multi-root contract -- reconstructs one
+    // queue either; the store's parent links -- none for a root, per
+    // `trace::reconstruct_trace`'s multi-root contract -- reconstruct one
     // only when a failure is about to be reported.
-    let mut visited = BTreeSet::new();
-    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    //
+    // Every queued state is new (a child is queued only when the store did
+    // not have it, and the roots are distinct), so every pop is a new visit
+    // and `popped` is the `visited.len()` the budget bounds.
+    let mut popped = 0_usize;
     let mut scratch = Monitor::from_state(implementation.clone(), State::new());
+    // The abstract side is re-pointed the same way (issues #1174, #1247): a
+    // `Monitor::from_state(abstraction.clone(), ..)` per mapped transition
+    // copied the whole abstract `KernelModel` once for the abstract step and
+    // once more for the α(s') check, on every transition walked.
+    let mut abs_scratch = Monitor::from_state(abstraction.clone(), State::new());
     while let Some(step) = queue.front_step() {
         let mut layer = Vec::new();
         while queue.front_step() == Some(step) {
-            let Some((state, _)) = queue.pop() else {
+            let Some((id, _)) = queue.pop() else {
                 unreachable!("queue front was present");
             };
-            let inserted = visited.insert(state.clone());
-            if inserted && step < depth {
-                layer.push(state);
+            popped += 1;
+            if step < depth {
+                layer.push((id, visited.state(id)));
             }
-            // Checked right after a genuine new insert (mirroring
-            // `find_boundary_violation`'s own placement), so a duplicate
-            // pop of an already-visited state cannot re-trigger this and
-            // the budget bounds exactly `visited.len()`, not pop count.
-            if inserted && visited.len() >= budget {
-                check.budget_exhausted = Some(visited.len());
+            // Checked right after each new visit (mirroring
+            // `find_boundary_violation`'s own placement), so the budget
+            // bounds exactly the number of distinct states visited.
+            if popped >= budget {
+                check.budget_exhausted = Some(popped);
                 return Ok(check);
             }
         }
@@ -2182,7 +2329,7 @@ pub fn check_refinement_with_budget(
         // candidate -- to keep both the values and their computation order
         // identical to the pre-#783 per-node walk.
         let mut alphas = Vec::with_capacity(layer.len());
-        for state in &layer {
+        for (_, state) in &layer {
             alphas.push(alpha_state(
                 state,
                 implementation,
@@ -2192,7 +2339,7 @@ pub fn check_refinement_with_budget(
             )?);
         }
         let mut candidates = Vec::new();
-        for (state_index, state) in layer.iter().enumerate() {
+        for (state_index, (_, state)) in layer.iter().enumerate() {
             scratch.state = state.clone();
             scratch.step = step;
             for candidate in scratch.candidates()? {
@@ -2202,18 +2349,22 @@ pub fn check_refinement_with_budget(
                     .iter()
                     .position(|action| action.name == enabled.action)
                     .unwrap_or(usize::MAX);
-                candidates.push((action_index, enabled.params.clone(), state_index, candidate));
+                candidates.push((action_index, state_index, candidate));
             }
         }
+        // Ordered by (action, params, state) as before; the params are read
+        // in place instead of cloned into each sort key (issue #1247).
         candidates.sort_by(|left, right| {
-            (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
+            (left.0, &left.2.instance().params, left.1).cmp(&(
+                right.0,
+                &right.2.instance().params,
+                right.1,
+            ))
         });
-        for (_, _, state_index, candidate) in candidates {
-            let state = &layer[state_index];
+        for (_, state_index, candidate) in candidates {
+            let (state_id, state) = (layer[state_index].0, &layer[state_index].1);
             let alpha_before = &alphas[state_index];
-            scratch.state = state.clone();
-            scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -2224,7 +2375,7 @@ pub fn check_refinement_with_budget(
                 // panic — would resurrect the false-green #466 fixes.
                 continue;
             }
-            let child_state = stepped.state.clone();
+            let child_state = &stepped.state;
             // `None` when the mapping read an impl `Map` at a key outside its
             // finite key domain (`RuntimeError::map_key_outside_domain`): the
             // mapped abstract state does not exist. That is reported as
@@ -2232,7 +2383,7 @@ pub fn check_refinement_with_budget(
             // bounds problem: after the stutter / abstract-guard checks that do
             // not need `alpha_after` (DESIGN-refinement §2.4).
             let alpha_after = match alpha_state(
-                &child_state,
+                child_state,
                 implementation,
                 abstraction,
                 mapping,
@@ -2244,7 +2395,7 @@ pub fn check_refinement_with_budget(
             };
             let out_of_bounds = |actual: Option<State>| {
                 let child_trace =
-                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                    refinement_child_trace(&visited, state_id, state, step + 1, enabled, &stepped);
                 refinement_failure(
                     "map_out_of_bounds",
                     Some("step"),
@@ -2263,8 +2414,14 @@ pub fn check_refinement_with_budget(
                         return Ok(check);
                     };
                     if alpha_before != alpha_after {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "stutter_changed_abs",
                             Some("step"),
@@ -2307,8 +2464,9 @@ pub fn check_refinement_with_budget(
                         // internal error that the CLI defaults to `kind:"type"`.
                         Err(error) if is_partial_operation_error(&error) => {
                             let child_trace = refinement_child_trace(
+                                &visited,
+                                state_id,
                                 state,
-                                &parents,
                                 step + 1,
                                 enabled,
                                 &stepped,
@@ -2360,9 +2518,10 @@ pub fn check_refinement_with_budget(
                         abs_action,
                         &expected_params,
                     )?;
-                    let mut abs_monitor = Monitor::from_state(abstraction.clone(), abs_state);
+                    abs_scratch.state = abs_state;
+                    abs_scratch.step = 0;
                     let guard =
-                        match refinement_action_instance(&abs_monitor, abs_action, expected_params)
+                        match refinement_action_instance(&abs_scratch, abs_action, expected_params)
                         {
                             Ok(guard) => guard,
                             Err(_) if out_of_domain => {
@@ -2372,8 +2531,14 @@ pub fn check_refinement_with_budget(
                             Err(error) => return Err(error),
                         };
                     let Some(abs_enabled) = guard else {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "abs_requires_failed",
                             Some("step"),
@@ -2389,7 +2554,7 @@ pub fn check_refinement_with_budget(
                         check.failure = Some(out_of_bounds(alpha_after));
                         return Ok(check);
                     };
-                    let abs_step = abs_monitor.step(&abs_enabled)?;
+                    let abs_step = abs_scratch.step(&abs_enabled)?;
                     // The abstract body hit a partial operation (issue #1296):
                     // the abstract action has no defined successor at α(s),
                     // so this step cannot correspond to it. `step` reports a
@@ -2404,8 +2569,14 @@ pub fn check_refinement_with_budget(
                             .as_ref()
                             .is_some_and(|violation| violation.kind == "partial_op")
                     {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "abs_partial_op",
                             Some("step"),
@@ -2432,8 +2603,14 @@ pub fn check_refinement_with_budget(
                     // not only `attempted_state: Some`, keeps the walk
                     // fail-closed should `step` ever report another shape.
                     if let Some(violation) = &abs_step.violation {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         let mut failure = refinement_failure(
                             "abs_step_violation",
                             Some("step"),
@@ -2454,8 +2631,14 @@ pub fn check_refinement_with_budget(
                     }
                     let expected_state = project_abstract_state(&abs_step.state, abstraction)?;
                     if &expected_state != alpha_after {
-                        let child_trace =
-                            refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                        let child_trace = refinement_child_trace(
+                            &visited,
+                            state_id,
+                            state,
+                            step + 1,
+                            enabled,
+                            &stepped,
+                        );
                         check.failure = Some(refinement_failure(
                             "abs_state_mismatch",
                             Some("step"),
@@ -2474,15 +2657,16 @@ pub fn check_refinement_with_budget(
                 check.failure = Some(out_of_bounds(None));
                 return Ok(check);
             };
-            let alpha_monitor = Monitor::from_state(abstraction.clone(), alpha_after.clone());
-            if let Some(violation) = alpha_monitor.current_violation()? {
+            // `Monitor::current_violation` of a fresh monitor at α(s'),
+            // without building one.
+            if let Some(violation) = check_state(&alpha_after, None, abstraction, 0)? {
                 let kind = if violation.kind == "type_bound" {
                     "map_out_of_bounds"
                 } else {
                     "abs_state_mismatch"
                 };
                 let child_trace =
-                    refinement_child_trace(state, &parents, step + 1, enabled, &stepped);
+                    refinement_child_trace(&visited, state_id, state, step + 1, enabled, &stepped);
                 check.failure = Some(refinement_failure(
                     kind,
                     Some("step"),
@@ -2494,37 +2678,36 @@ pub fn check_refinement_with_budget(
                 ));
                 return Ok(check);
             }
-            if !visited.contains(&child_state) {
-                parents
-                    .entry(child_state.clone())
-                    .or_insert_with(|| trace::ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: enabled.action.clone(),
-                            params: enabled.params.clone(),
-                        },
-                    });
-                queue.push(child_state, step + 1);
+            // A child the store already has is visited or already queued for
+            // the next layer: its first parent link stays, and a second copy
+            // in the queue would only pop as a duplicate (issue #1247: the
+            // e2e repro popped 101,149 times for 30,387 new states).
+            if let Some(child) =
+                visited.insert_child(child_state, state_id, &enabled.action, &enabled.params)
+            {
+                queue.push(child, step + 1);
             }
         }
     }
     Ok(check)
 }
 
-/// The replayable trace ending at the step just taken from `state`, built by
-/// walking `parents` back to the walk's root and appending that one step --
+/// The replayable trace ending at the step just taken from `state` (stored
+/// as `state_id`), built by walking the store's parent links back to the
+/// walk's root and appending that one step --
 /// reconstructed only when a refinement failure is about to be reported,
 /// mirroring `find_boundary_violation`'s and `first_self_violation`'s
 /// on-demand trace construction (issue #783) instead of carrying a growing
 /// `Vec<TraceStep>` clone in every queued frontier node.
 fn refinement_child_trace(
+    visited: &trace::StateStore,
+    state_id: usize,
     state: &State,
-    parents: &BTreeMap<State, trace::ParentLink>,
     next_step: usize,
     enabled: &EnabledAction,
     stepped: &StepResult,
 ) -> Vec<TraceStep> {
-    let mut child_trace = trace::reconstruct_trace(state, parents);
+    let mut child_trace = visited.trace(state_id);
     child_trace.push(trace_step_from_result(next_step, state, enabled, stepped));
     child_trace
 }
@@ -2832,21 +3015,25 @@ fn first_self_violation(
     // concrete initial state) are handled by leaving every root out of
     // `parents` and letting `trace::reconstruct_trace` discover whichever
     // root a given state actually descends from -- see its doc comment.
+    //
+    // `visited` and the parent links are one packed `StateStore` (issue
+    // #1247): each reached state is held once, as bytes, instead of three
+    // times as a full `State`, and the queue holds store ids. A state is
+    // decoded again only when it is expanded or appears in a violation trace.
     let mut scratch = Monitor::from_state(model.clone(), State::new());
     let mut queue = VecDeque::new();
-    let mut visited = BTreeSet::new();
-    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let mut visited = trace::StateStore::new();
     for state in initial_states {
         scratch.state = state.clone();
         scratch.step = 0;
         if let Some(violation) = scratch.current_violation()? {
             return Ok(SelfConsistency::Violated(
                 violation,
-                trace::reconstruct_trace(state, &parents),
+                trace::reconstruct_trace(state, &BTreeMap::new()),
             ));
         }
-        if visited.insert(state.clone()) {
-            queue.push_back((state.clone(), 0_usize));
+        if let Some(id) = visited.insert_root(state) {
+            queue.push_back((id, 0_usize));
         }
     }
     // After the root loop, not inside it: every initial state is already
@@ -2858,40 +3045,29 @@ fn first_self_violation(
             states_explored: visited.len(),
         });
     }
-    while let Some((state, step)) = queue.pop_front() {
+    while let Some((id, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        scratch.state = state.clone();
-        scratch.step = step;
+        scratch.state = visited.state(id);
+        let state = &scratch.state;
         for candidate in scratch.candidates()? {
             let instance = candidate.instance();
-            scratch.state = state.clone();
-            scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate)?;
             if let Some(violation) = stepped.violation.clone() {
-                let mut found_trace = trace::reconstruct_trace(&state, &parents);
-                found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
+                let mut found_trace = visited.trace(id);
+                found_trace.push(trace_step_from_result(step + 1, state, instance, &stepped));
                 return Ok(SelfConsistency::Violated(violation, found_trace));
             }
-            let child_state = scratch.state.clone();
-            if visited.insert(child_state.clone()) {
-                parents.insert(
-                    child_state.clone(),
-                    trace::ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: instance.action.clone(),
-                            params: instance.params.clone(),
-                        },
-                    },
-                );
+            if let Some(child) =
+                visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
+            {
                 if visited.len() >= budget {
                     return Ok(SelfConsistency::BudgetExhausted {
                         states_explored: visited.len(),
                     });
                 }
-                queue.push_back((child_state, step + 1));
+                queue.push_back((child, step + 1));
             }
         }
     }

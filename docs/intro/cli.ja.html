@@ -41,7 +41,8 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
 result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
-because inline `implements` propagates that seam verdict to the top-level `result`. The fold
+because inline `implements` propagates that seam verdict to the top-level `result`; a failed
+governance `preservation` folds into `check`/`verify` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the

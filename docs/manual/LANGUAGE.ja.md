@@ -1122,7 +1122,8 @@ indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が
 `2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
-inline `implements` が top-level `result` へ伝播するため列挙しています。畳み込みは検証封筒を
+inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
+`preservation` も同じ対応付けで `check` / `verify` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
@@ -2508,6 +2509,36 @@ policy/goal、preservation ファイルを検証します。preservation ブロ�
 報告します: `refines`、`refinement_failed`、`violated`(`after` の spec がそれ自身の
 意味論を破る、§10)、`unknown_budget`(対応検査が状態の上限に達した、§10)のいずれか
 です。ブラウザの Worker も同じ値を報告します。
+
+`refines` でない preservation は、`fslc check` でも `fslc verify` でもコマンドの判定に
+なります(fail-closed)。`verify` も `--depth` にかかわらず preservation を深さ 8 で実行し、
+同じ `governance` セクションを付けます。宣言順で最初の `refines` でない preservation が
+top-level の `result` を決め、各 preservation 自身の値は `governance.preservations` に
+そのまま残ります:
+
+| preservation の `result` | top-level の `result` | exit |
+|---|---|---|
+| `refines`(すべての preservation) | 変わらない(`ok` / `verified` / `proved`) | 変わらない(0) |
+| `refinement_failed` | `refinement_failed` | 1 |
+| `violated` | `impl_violated`(同じ条件に inline `implements` seam が使う綴り) | 1 |
+| `unknown_budget` | `unknown_budget` | 1 |
+| それ以外 | `error`、`kind: "internal"` | 3 |
+
+実行がそれ自身の理由ですでに失敗している場合(`error`、または文書自身の kernel の
+失敗クラスの判定)はその判定を保ち、セクションは証跡としてだけ付きます。`check` が報告する
+governance 契約のエラー(委譲先の business ファイル、control、`satisfied_by` の対応付け、
+または preservation の `before`/`after`/mapping ファイルが無い・型が誤っている)はすべて、
+`verify` でも同じ位置付きの `error`(exit 2)です。preservation の refinement が内部で
+失敗した場合は、どちらでも `error`/`internal`(exit 3)です。`check`/`verify` の封筒を読む側は
+畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
+`fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し、ブラウザの Worker も
+`check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
+失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
+exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が
+拒否する契約に対しても `verified` と答えていました)。exit code
+で判定する CI は壊れた preservation を通していましたが、今は落とします。preservation を
+助言扱いに留めたい場合は、exit を CI が無視する別の `fslc refine` ステップとして実行して
+ください。
 
 ### 13.4 非機能要件(NFR)の書き方
 

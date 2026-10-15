@@ -811,7 +811,8 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   never `refines`. Lower `--depth` or narrow both specs' `verify {}` domains.
   A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
   refine layer fails with `result:"unknown_budget"`, and a governance
-  preservation reports `unknown_budget`. Such a run used to report `refines`
+  preservation reports `unknown_budget` (which also fails that `check`/`verify`
+  with `result:"unknown_budget"`, exit 1). Such a run used to report `refines`
   (exit 0). The self-consistency precondition walks the same reachable set
   first and stops at the same budget with the same `unknown_budget` report,
   so an impl whose reachable set within `--depth` reaches the budget is

@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Issue #1303 control: the same contract over an `after` spec that refines.
+
+governance G {
+  control CTRL-1 "go is preserved"
+  preservation P {
+    before A from "abs.fsl"
+    after I from "impl_refines.fsl"
+    preserve CTRL-1
+    checked_by refinement "map.fsl"
+  }
+}

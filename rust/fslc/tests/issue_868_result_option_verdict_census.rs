@@ -197,6 +197,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-runtime/src/lib.rs",
+        389,
+        "eval_place",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-runtime/src/lib.rs",
         1468,
         "refinement_action_instance",
         ResultOption
@@ -530,6 +537,15 @@ const CLASSIFICATIONS: &[Classification] = &[
         "governance_result_from_source",
         ResultOption
     ),
+    // `Some(exit)` is the exit code a failed governance preservation folds
+    // into the envelope (#1303); discarding it reports the old exit.
+    entry!(
+        Verdict,
+        "rust/fslc/src/main.rs",
+        17136,
+        "fold_governance_from_source",
+        ResultOption
+    ),
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
@@ -708,6 +724,11 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
         "rust/fslc/src/verification.rs",
         1821,
         "run_verify_cli_from_source"
+    ),
+    unresolved_ordinary!(
+        "rust/fslc/src/verification.rs",
+        2114,
+        "run_verify_cli_kernel_from_source"
     ),
     unresolved_ordinary!(
         "rust/fslc/tests/issue_868_result_option_verdict_census.rs",

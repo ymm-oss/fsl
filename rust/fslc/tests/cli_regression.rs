@@ -354,8 +354,9 @@ fn native_check_reports_a_governance_counterexample_without_misclassifying_it() 
         "examples/refinement_liveness/governance_detects_safety_loss.fsl",
     ]);
 
-    assert_eq!(status, 0, "{value}");
-    assert_eq!(value["result"], "ok");
+    // The preservation's failure is the command's verdict (issue #1303).
+    assert_eq!(status, 1, "{value}");
+    assert_eq!(value["result"], "refinement_failed");
     assert_eq!(
         value["governance"]["preservations"][0]["result"],
         "refinement_failed"
