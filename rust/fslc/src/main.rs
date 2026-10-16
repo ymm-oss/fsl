@@ -1651,7 +1651,9 @@ fn command() -> Result<(Value, i32), String> {
                         );
                     }
                     _ => {
-                        args.positional(option, |option| format!("unknown diff option '{option}'"))?;
+                        args.positional(option, |option| {
+                            format!("unknown diff option '{option}'")
+                        })?;
                     }
                 }
             }
