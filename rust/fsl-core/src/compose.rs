@@ -1042,6 +1042,79 @@ fn rewrite_compose_item(
             meta,
             annotations,
         },
+        // Compose-level temporal properties read component state through
+        // `alias.var` exactly like invariants do; leaving them unresolved
+        // made `a.on` fail typing with exit 2 (#1297).
+        SpecItem::Until {
+            name,
+            before,
+            after,
+            span,
+            meta,
+            annotations,
+        } => SpecItem::Until {
+            name,
+            before: Box::new(resolve_alias_expr(*before, components, span)?),
+            after: Box::new(resolve_alias_expr(*after, components, span)?),
+            span,
+            meta,
+            annotations,
+        },
+        SpecItem::Unless {
+            name,
+            before,
+            after,
+            span,
+            meta,
+            annotations,
+        } => SpecItem::Unless {
+            name,
+            before: Box::new(resolve_alias_expr(*before, components, span)?),
+            after: Box::new(resolve_alias_expr(*after, components, span)?),
+            span,
+            meta,
+            annotations,
+        },
+        SpecItem::LeadsTo {
+            name,
+            binders,
+            before,
+            after,
+            span,
+            meta,
+            decreases,
+            within,
+            helpful,
+            annotations,
+        } => SpecItem::LeadsTo {
+            name,
+            binders: binders
+                .into_iter()
+                .map(|binder| resolve_alias_binder(binder, components, span))
+                .collect::<Result<_, _>>()?,
+            before: Box::new(resolve_alias_expr(*before, components, span)?),
+            after: Box::new(resolve_alias_expr(*after, components, span)?),
+            span,
+            meta,
+            decreases: decreases
+                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .transpose()?,
+            within: within
+                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .transpose()?,
+            helpful: helpful
+                .into_iter()
+                .map(|mut helper| {
+                    helper.args = helper
+                        .args
+                        .into_iter()
+                        .map(|arg| resolve_alias_expr(arg, components, span))
+                        .collect::<Result<_, _>>()?;
+                    Ok(helper)
+                })
+                .collect::<Result<_, CoreError>>()?,
+            annotations,
+        },
         other => other,
     })
 }
