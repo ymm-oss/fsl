@@ -348,6 +348,7 @@ spec AssuranceProbeKeyDomainCti {
   init { forall k: K { m[k] = 0 }  cur = 0  y = 0 }
   action advance() { requires cur < 3  cur = cur + 1 }
   action peek_next() { y = m[cur + 1] }
+  invariant MapNonNeg { forall k: K { m[k] >= 0 } }
   invariant YNonNeg { y >= 0 }
 }
 ";
