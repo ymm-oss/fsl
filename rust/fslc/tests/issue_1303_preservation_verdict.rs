@@ -230,6 +230,35 @@ fn ledger_body_shows_the_verdict_and_the_preservations_its_exit_reflects() {
     );
 }
 
+/// Issue #1314: `scenarios` built its envelope on the kernel path without
+/// reading any preservation (exit 0) and folded only on its
+/// `run_verify_from_source` fallback, so the verdict depended on an unrelated
+/// path. A governance document always takes the kernel path (its sentinel
+/// kernel has nothing to violate, reach, or deadlock on), so this is the path
+/// that has to fold: same `result`, `governance` section, and exit as
+/// `verify` of the same document.
+#[test]
+fn scenarios_folds_a_failed_preservation_as_verify_does() {
+    let dir = scratch("scenarios");
+    let (verified, verify_status) = fslc(&dir, &["verify", "governance.fsl"]);
+    let (scenarios, status) = fslc(&dir, &["scenarios", "governance.fsl"]);
+    assert_failed_preservation_folded(&scenarios, status);
+    assert_eq!(status, verify_status, "{scenarios:#}");
+    assert_eq!(scenarios["result"], verified["result"], "{scenarios:#}");
+    assert_eq!(
+        scenarios["governance"], verified["governance"],
+        "{scenarios:#}"
+    );
+
+    let (passing, passing_status) = fslc(&dir, &["scenarios", "governance_refines.fsl"]);
+    assert_eq!(passing_status, 0, "{passing:#}");
+    assert_eq!(passing["result"], "scenarios", "{passing:#}");
+    assert_eq!(
+        passing["governance"]["preservations"][0]["result"], "refines",
+        "{passing:#}"
+    );
+}
+
 /// A preservation `verify` cannot evaluate is the same located `error` (exit
 /// 2) `check` reports, not `verified` over the document's trivial kernel.
 #[test]

@@ -1123,11 +1123,14 @@ indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
-`preservation` も同じ対応付けで `check` / `verify` に畳み込まれます(§13)。畳み込みは検証封筒を
+`preservation` も同じ対応付けで `check` / `verify` / `scenarios` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
-真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。同じ `2` の
+真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。
+`scenarios` も、自身の有界実行で答えた場合と `verify` の封筒へフォールバックした場合のどちらでも、
+seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた `result`、exit 1、
+`implements` / `governance` セクション付き)。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -2532,7 +2535,8 @@ governance 契約のエラー(委譲先の business ファイル、control、`sa
 失敗した場合は、どちらでも `error`/`internal`(exit 3)です。`check`/`verify` の封筒を読む側は
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
 `fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
-すべての preservation とその結果を、失敗したものに印を付けて示します)、ブラウザの Worker も
+すべての preservation とその結果を、失敗したものに印を付けて示します)、`fslc scenarios` は
+`verify` と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
 exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が

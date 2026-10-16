@@ -5889,7 +5889,51 @@ fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32)
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false)
+    let (output, status) =
+        run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false);
+    fold_scenarios_refinements(path, &source, depth, output, status)
+}
+
+/// Fold inline `implements` and governance preservations into a `scenarios`
+/// envelope exactly as `verify` does (issue #1314).
+///
+/// `run_scenarios_mode_from_source` answers from its own bounded run and falls
+/// back to `run_verify_from_source` only when the document's kernel fails;
+/// that fallback already attaches and folds both. Without this the kernel
+/// path ignored them, so the same document exited 0 or 1 depending on an
+/// unrelated path. Only the kernel path's own `result:"scenarios"` envelope
+/// is folded here, in `run_verify_from_source`'s order (seam, then
+/// preservations) and through the same owners, so there is no second
+/// mapping; any other envelope is an error or the already-folded fallback.
+/// The `testgen` / `explain` / `ledger` callers of the builder are not
+/// changed.
+fn fold_scenarios_refinements(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    mut output: Value,
+    status: i32,
+) -> (Value, i32) {
+    if output.get("result").and_then(Value::as_str) != Some("scenarios") {
+        return (output, status);
+    }
+    let model = match load_model_from_source(path, source) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let implements = match implements_result_from_source(path, source, &model, depth) {
+        Ok(implements) => implements,
+        Err(error) => return (implements_error_output(&error), 2),
+    };
+    let status = implements
+        .and_then(|implements| {
+            fslc_rust::verification_output::attach_requirements_implements(&mut output, implements)
+        })
+        .unwrap_or(status);
+    match fold_governance_from_source(path, source, &mut output) {
+        Ok(folded) => (output, folded.unwrap_or(status)),
+        Err(error) => error,
+    }
 }
 
 /// Build one scenarios envelope from one caller-owned root-source snapshot.
