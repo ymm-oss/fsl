@@ -120,9 +120,9 @@ fn map_read_past_the_key_domain_is_never_proved_at_any_depth() {
         let (output, status) = verify(&fixture, "induction", depth);
         assert_key_domain_cti(&output, status, "_key_domain_peek_next", Some("peek_next"));
         // The CTI is the reachable state the bounded engines fail on.
-        let states = output["cti"]["states"].as_array().expect("CTI states");
-        assert_eq!(states[0]["state"]["cur"], 5, "{output:#}");
-        assert_eq!(states[1]["action"]["name"], "peek_next", "{output:#}");
+        let cti_states = output["cti"]["states"].as_array().expect("CTI states");
+        assert_eq!(cti_states[0]["state"]["cur"], 5, "{output:#}");
+        assert_eq!(cti_states[1]["action"]["name"], "peek_next", "{output:#}");
     }
     // Once the miss is within depth, every engine reports the same error.
     for engine in ["induction", "bmc", "explicit"] {
