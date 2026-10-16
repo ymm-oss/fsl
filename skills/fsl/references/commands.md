@@ -682,8 +682,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - `--strict-tags` on `check` / `verify` adds traceability warnings only to
   ok/verified/proved success results. The targets are untagged
   action/invariant/trans/reachable/leadsTo, and IDs declared via
-  `--requirements ids.txt` or a `requirement` block in the requirements dialect but
-  never referenced. A declaration linked by `@requirement("MODEL-SCOPE-001", ...)`
+  `--requirements ids.txt` (a file, one ID per line; a comma list is read as a
+  file name and fails with `kind:"io"`) or a `requirement` block in the
+  requirements dialect but never referenced. A declaration linked by `@requirement("MODEL-SCOPE-001", ...)`
   / `@requirement("ASSUME-SCOPE-001", ...)` does not become a warning. This gate
   only asks whether a tag exists, not whether it is canonical: a legacy
   `"REQ-1: text"` string counts as tagged here, and `fslc lint` is what reports

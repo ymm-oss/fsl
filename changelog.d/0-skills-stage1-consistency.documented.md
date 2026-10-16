@@ -10,4 +10,6 @@ reads; broken `§` cross-references now name the file. Release and issue history
 ("before #1229", "used to", "(issue #N)") was removed from the references;
 the current rule is kept. The skills no longer point at repository-only paths (`examples/`,
 `docs/`, `specs/`, `schemas/`) that a mise or install.sh user does not
-have; the needed gist is stated in the skill instead.
+have; the needed gist is stated in the skill instead. The business, requirements, and design check loops now include `fslc
+lint`, and `--requirements` is taught as a file of IDs (one per line), not a
+comma list.

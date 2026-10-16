@@ -96,10 +96,12 @@ for a contract decision.
    choice the requirements do not state. **Never use the `"REQ-1: text"` string
    slot** — it is non-canonical migration input and `fslc lint` reports it as
    `legacy_string_metadata`.
-4. Verify the design itself with `fslc check`, `fslc verify`, and usually
-   `fslc verify --engine induction`. Run `fslc lint <file>` as the tagging
+4. Verify the design itself with `fslc check`, `fslc lint <file>`, `fslc verify`,
+   and usually `fslc verify --engine induction`. `fslc lint` is the tagging
    gate: it exits 1 on any non-canonical ID form, which `--strict-tags` accepts
-   silently.
+   silently; the design is not done until it reports no findings. For
+   traceability, add `fslc check <file> --strict-tags --requirements ids.txt`
+   (a file with one requirement ID per line, not a comma list).
    A bounded `verified` says nothing past the depth and the domain sizes it
    ran at, and a design with many interleavings can hold its first violation
    beyond the default depth. If induction returns `unknown_cti`, follow

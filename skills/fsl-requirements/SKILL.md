@@ -40,8 +40,9 @@ thin spec) and **inventing** a rule the source never stated. Hold both ends:
   question for the human — not a default you may pick to reach `verified`.
 - **Make it mechanical.** `fslc check <file> --strict-tags` flags every `untagged`
   declaration (an invented rule) and every `unreferenced_requirement` (a
-  requirement nothing checks); **done = zero of both**. Add `--requirements <ids>`
-  (the memo's source-ID list) to also catch requirements omitted entirely. Keep
+  requirement nothing checks); **done = zero of both**. Add `--requirements ids.txt`
+  (the memo's source IDs in a file, one per line — not a comma list) to also
+  catch requirements omitted entirely. Keep
   provenance in the `.fsl` as tags, not a separate file.
 
 ## Boundary
@@ -129,11 +130,13 @@ skill produced.
      checking that a tighter deadline fails
 9. Run `fslc check --strict-tags` as the faithfulness gate — not done until it
    reports zero `untagged` and zero `unreferenced_requirement` (add
-   `--requirements <ids>` from the memo to also catch fully omitted requirements).
+   `--requirements ids.txt` — the memo's IDs in a file, one per line, not a comma
+   list — to also catch fully omitted requirements).
    `--strict-tags` counts a legacy `"REQ-1: text"` string as tagged, so also run
    `fslc lint <file>`: it exits 1 with `legacy_string_metadata` and a
    machine-applicable `@requirement(...)` replacement for every non-canonical
    form, and with `non_canonical_id` for an ID outside the active policy.
+   Not done until `fslc lint` also reports no findings.
    Then `fslc verify`, and for stable requirements
    `fslc verify --engine induction`. Run `fslc scenarios` to hand development the
    acceptance/forbidden skeletons.

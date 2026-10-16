@@ -207,7 +207,8 @@ reference.
 1. Write the spec → `fslc check file.fsl` (syntax and types only, fast; fix
    following the error's `loc`/`expected`/`hint`).
    When checking requirement traceability strictly, add `--strict-tags`
-   (and `--requirements ids.txt` if needed). Only when the result is
+   (and `--requirements ids.txt`, a file with one requirement ID per line — not
+   a comma list — to catch requirements nothing references). Only when the result is
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
    **The one canonical way to link a declaration to a requirement ID** is the

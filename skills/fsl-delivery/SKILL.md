@@ -68,6 +68,7 @@ rules in this skill.
    externally observable behavior; design speaks in internal mechanics.
 4. Verify each layer before depending on it:
    - `fslc check <file>`
+   - `fslc lint <file>` (no findings)
    - `fslc verify <file> --depth 8`
    - `fslc verify <file> --engine induction`
 5. Connect layers downward. Each handoff is a **refinement seam (a contract), not a
@@ -105,8 +106,9 @@ rules in this skill.
 
 For every layer, also run:
 
-- `fslc verify <file> --strict-tags` (traceability — untagged declarations and
-  unreferenced requirement IDs)
+- `fslc verify <file> --strict-tags --requirements ids.txt` (traceability —
+  untagged declarations and unreferenced requirement IDs; `ids.txt` holds one
+  requirement ID per line, not a comma list)
 - `fslc lint <file>` (ID form — exits 1 on a non-canonical `"REQ-1: text"`
   string tag, which `--strict-tags` accepts silently, and on an ID outside the
   active policy. The canonical link is `@requirement("REQ-SCOPE-001", "text")`,
