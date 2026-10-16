@@ -706,7 +706,10 @@ variable capture instead of inventing internal binder names. See
   that binds `v`; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
-  not a global binding. Ordering is not defined.
+  not a global binding. `v` must be a fresh name: `check` rejects a `v` that is
+  already a state variable, constant, enum member, action parameter, quantifier
+  binder, `let`, or an earlier pattern binding in scope, and asks you to rename
+  it. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`

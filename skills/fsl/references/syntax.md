@@ -795,6 +795,9 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
   required when `v` must be bound for the rest of the formula; equality creates
   no binding. The binding is scoped to the logical continuation where the match
   is true, such as the guarded RHS of `=>` or `and`, and is not global.
+  `v` must be fresh: `check` rejects a `v` that names a state variable,
+  constant, enum member, action parameter, binder, `let`, or an earlier pattern
+  binding in scope.
   Arithmetic and ordering on Option are type errors.
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)

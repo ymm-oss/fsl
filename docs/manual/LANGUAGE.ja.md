@@ -677,6 +677,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
   論理的な後続部分だけです。例えば `(x is some(v)) => ...` や
   `(x is some(v)) and ...` の右辺では使えますが、グローバルな束縛にはなりません。
+  `v` は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
+  引数・量化子の束縛変数・`let`・それより前のパターン束縛と同じ名前の `v` は
+  `check` が拒否し、名前を変えるよう求めます。
   順序は定義されません。
 - struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
   `==` はフィールドごとの等値
