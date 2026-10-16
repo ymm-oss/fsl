@@ -7,9 +7,7 @@ description: Shared FSL language and verifier reference for writing, checking, v
 
 FSL is a language not present in training data. **Do not write from memory;
 follow this guide.** Use the reference index below to read only the topical
-material needed for the task. Within the repository, `docs/manual/LANGUAGE.md` is the
-complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
-form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
+material needed for the task.
 
 **What makes FSL different — connectivity, not just per-spec checking.** Classic
 formal methods describe one hard spot and verify it in isolation (the "island"
@@ -56,8 +54,7 @@ through `python -m fslc`.
 
 External compilers and generators must use `fslc kernel <spec>` rather than the
 Python AST or source re-parsing. Validate independent implementations with
-`fslc conformance <spec> --depth N`; versioning and rollback semantics are in
-`docs/design/DESIGN-kernel-contract.md`.
+`fslc conformance <spec> --depth N`.
 
 Most commands print a single JSON document on stdout; `fslc ledger` and
 `fslc document generate` print Markdown instead, so gate on the exit code, not
@@ -81,8 +78,7 @@ failure to 1 instead. So branch on the exit code being non-zero, and read
 `indeterminate` (`chain`, when its `[impl]` layer has no evidence that a test executed),
 and the dialect commands add their own (`document check`'s
 `document_drifted`, `ai replay`'s `replay_nonconformant`, `ai eval`'s gate
-statuses). `docs/manual/LANGUAGE.md` lists the verify-family values with each one's
-producing command.
+statuses).
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
@@ -220,7 +216,7 @@ reference.
    `covers REQ-SCOPE-001 "..."` as the equivalent dialect sugar, and a
    `MODEL-`/`ASSUME-`prefixed id for modeling intent rather than a source
    requirement. The `invariant X "REQ-1: text" { ... }` string slot is
-   non-canonical migration input (`docs/design/DESIGN-id-policy.md`); `--strict-tags`
+   non-canonical migration input; `--strict-tags`
    still counts it as tagged, so add `fslc lint file.fsl`, which exits 1 with
    `legacy_string_metadata` plus a machine-applicable replacement.
 2. `fslc verify file.fsl --depth 8` → see the [repair protocol](references/errors.md)
@@ -349,11 +345,11 @@ When the task starts from role language rather than raw FSL syntax, use the role
 skill first. This prevents business, requirements, and design decisions from being
 mixed in one spec.
 
-| Role / intent | Use skill | Examples to read | Constructs mainly written |
+| Role / intent | Use skill | Constructs mainly written |
 |---|---|---|
-| Consultant (business flows, regulations, As-Is/To-Be) | `fsl-business` | `examples/consulting/`, `examples/pm/cancel_flow.fsl` | `business` ([layers](references/layers.md)) |
-| PM / PdM (requirement definition, acceptance criteria) | `fsl-requirements` | `examples/pm/`, `examples/e2e/2_requirements.fsl` | `requirements` and NFR ([layers](references/layers.md)) |
-| Engineer (design, implementation connection) | `fsl-design` | `examples/e2e/`, `examples/bank/` | kernel `spec` + refine mapping + Adapter ([impl](references/impl.md)) |
+| Consultant (business flows, regulations, As-Is/To-Be) | `fsl-business` | `business` ([layers](references/layers.md)) |
+| PM / PdM (requirement definition, acceptance criteria) | `fsl-requirements` | `requirements` and NFR ([layers](references/layers.md)) |
+| Engineer (design, implementation connection) | `fsl-design` | kernel `spec` + refine mapping + Adapter ([impl](references/impl.md)) |
 
 ## Reference index
 
@@ -370,8 +366,6 @@ collection preemptively.
 - [practices](references/practices.md) — apply optional authoring practices appropriate to the task's risk.
 - [impl](references/impl.md) — connect specifications to implementations and perform causal review.
 
-The flagship example threading all three roles through one domain is
-`examples/e2e/` (expense reimbursement).
 
 Once a `requirements`/`spec` dialect file is authored and checked, generating a
 stakeholder-facing requirements document from it (rather than authoring or

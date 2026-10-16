@@ -10,10 +10,10 @@ FSL file. Keep the output at the business/consulting level: process stages,
 business transitions, policies, KPIs, goals, and control preservation evidence.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language and verifier detail. When working inside this
-repository, read `examples/consulting/` for As-Is/To-Be work,
-`examples/pm/cancel_flow.fsl` for a PM-friendly business flow, and
-`examples/e2e/1_business.fsl` when this business layer will be chained downstream.
+load only the needed language and verifier detail. The complete business example
+to start from (actor roster, `entity` + `process`, `kpi`, `control`, stage-form
+`policy`/`goal`, and the `verify { instances }` bound) is in
+`../fsl/references/layers.md`, section "business (the consulting layer)".
 
 ## Boundary
 

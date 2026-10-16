@@ -150,8 +150,7 @@ acceptance, and forbidden IDs lower to the same annotation carrier, so an outer
 requirement coexists with an inner `undecided` marker. Explicit `covers` and requirement-block annotations retain their own spans;
 `undecided` is reserved and cannot be an explicit requirement ID.
 Multiple-relation JSON outputs use `requirements` and preserve singular fields
-as lexical compatibility projections. See `docs/design/DESIGN-undecided.md`,
-`docs/design/DESIGN-annotations.md`, and `docs/design/DESIGN-dialect-dispatch.md`. This syntax and its
+as lexical compatibility projections. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
 

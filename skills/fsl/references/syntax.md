@@ -225,11 +225,11 @@ artifact profiles into the same snapshot model; missing providers report
 (`verified_under_assumptions` on success). Use `fslc db observe` for runtime
 evidence only (`observed_mismatch`, not formal violation) and `fslc db import`
 for SQL DDL or minimal Prisma schema importers. Production-data preservation and
-DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
+DB-engine evidence use versioned JSON schemas with
 `formal_result: "not_run"`, not `verified`/`proved`. An unrecognized `check
 compatibility` rule name and an environment schema window the migration plan
 never reaches both fail validation with exit 2. `fslc db observe` validates its
-event envelope against `schemas/fslc/db/observation.v0.schema.json`
+event envelope against the `observation.v0` schema
 (exit 2 on a malformed record) and honors each event's `flags` snapshot the same
 way `fslc db check` does.
 
@@ -455,7 +455,7 @@ file), Wilson intervals, and `formal_result:"not_run"`. An unknown
 non-`statistically_supported` gate status (`dataset_invalid`,
 `evaluator_untrusted`, `slice_missing`, `insufficient_samples`,
 `inconclusive`, `statistically_unsupported`) exits 1, and the result carries
-the full `schemas/fslc/ai/statistical-result.v0.schema.json` field set
+the full `statistical-result.v0` field set
 (`schema_version`/`status`/`slice`/`metric`/`n`/`estimate`/`threshold`/
 `evaluator`/`assumptions` included, not just `result`/`interval`/`checks`).
 `fslc ai regress` checks the selected `ai_migration`'s declared aggregate
@@ -604,11 +604,10 @@ and drift over runtime telemetry (`observed_supported` / `observed_mismatch`);
 Hard boundary: every result carries `formal_result:"not_run"` and must never
 be displayed as `proved`/`verified`; a point-estimate-only requirement
 (`require accuracy >= 0.92` with no `ci_lower`/`ci_upper`) is rejected at eval
-time (`inconclusive`, exit 1), not warned past. Eval statuses are
+time (`inconclusive`, exit 1), not warned past. Eval statuses, in the
+order a result is decided (the first that applies wins), are
 `dataset_invalid`, `evaluator_untrusted`, `insufficient_samples`,
-`inconclusive`, `statistically_unsupported`, `statistically_supported`; the
-priority order and the eval-record JSONL schema live in
-`docs/design/DESIGN-stochastic.md`.
+`inconclusive`, `statistically_unsupported`, `statistically_supported`.
 
 Composite spec (a separate top-level form):
 

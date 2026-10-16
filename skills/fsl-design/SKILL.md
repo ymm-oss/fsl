@@ -13,10 +13,16 @@ requirements contract, and `fslc refine` verifies the seam. When a seam breaks,
 repair the design or the mapping — not the upper contract, unless a human revises it.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language and verifier detail. When working inside this
-repository, read `examples/e2e/3_design.fsl` and `examples/e2e/3_refines_2.fsl`
-for the main pattern, `examples/layers/` for a compact chain, and `examples/bank/`
-or `examples/refinement_liveness/` when the task is mostly refinement. Use
+load only the needed language and verifier detail. The main pattern: a kernel
+`spec` that declares `entity`/`number` domains (sizes in `verify`), tags each
+action and invariant with `@requirement(...)`, and adds internal detail the
+requirements do not have (review substages, payment submit/confirm, an outbox);
+plus a `refinement` file that maps it back — `map claim_stage[c: Claim] = if
+design[c].st == DesignAutoReview then Submitted else ...` collapses internal
+stages onto the requirements stage, `action pay_submit(c) -> pay(c)` names the
+visible step, and `action pay_confirm(c) -> stutter` hides an internal one.
+Refinement syntax is in `../fsl/references/syntax.md`; the seam rules are in
+`../fsl/references/layers.md`. Use
 `fsl-design-review` instead when the user asks for a design review, SOLID
 judgment, substitutability, or variant comparison.
 
@@ -88,8 +94,8 @@ for a contract decision.
    requirements spec owns the ID (`requirement REQ-CHECKOUT-001`); the design
    spec only links to it. Use a `MODEL-`/`ASSUME-`prefixed id for a design
    choice the requirements do not state. **Never use the `"REQ-1: text"` string
-   slot** — `docs/design/DESIGN-id-policy.md` classifies it as non-canonical migration
-   input and `fslc lint` reports it as `legacy_string_metadata`.
+   slot** — it is non-canonical migration input and `fslc lint` reports it as
+   `legacy_string_metadata`.
 4. Verify the design itself with `fslc check`, `fslc verify`, and usually
    `fslc verify --engine induction`. Run `fslc lint <file>` as the tagging
    gate: it exits 1 on any non-canonical ID form, which `--strict-tags` accepts

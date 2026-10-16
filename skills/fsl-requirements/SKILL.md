@@ -11,10 +11,12 @@ requirement IDs, source text, operations, guards, acceptance criteria, forbidden
 flows, and optional conformance to an upper business layer.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language and verifier detail. When working inside this
-repository, read `examples/pm/`, `examples/layers/return_system.fsl`, and
-`examples/e2e/2_requirements.fsl` for the requirements dialect. Read
-`examples/nfr/` only when SLA/deadline behavior is in scope.
+load only the needed language and verifier detail. The complete requirements
+example (process+data profile, `implements` of a business spec, `covers`
+traceability, `kpi`, `acceptance`, and the `verify { instances / values }`
+bound) is in `../fsl/references/layers.md`, section "requirements (the
+requirements layer)". Read the NFR section of `../fsl/references/impl.md` only
+when SLA/deadline behavior is in scope.
 
 ## Faithfulness gate (definition of done)
 
@@ -29,8 +31,8 @@ thin spec) and **inventing** a rule the source never stated. Hold both ends:
   `covers REQ-CHECKOUT-001 "..."` to source text, or the typed annotation
   `@requirement("REQ-CHECKOUT-001", "...")` on a declaration that links to an ID
   a `requirement` block owns, with a `MODEL-`/`ASSUME-`prefixed id for an
-  explicit modeling choice. Those two are the canonical forms
-  (`docs/design/DESIGN-id-policy.md`); the `"REQ-1: text"` string slot is non-canonical
+  explicit modeling choice. Those two are the canonical forms; the
+  `"REQ-1: text"` string slot is non-canonical
   migration input, so never write it. An untagged declaration is an ungrounded
   guess, not a style nit.
 - **Do not invent to reach green.** If `check`/`verify` needs a guard, bound,

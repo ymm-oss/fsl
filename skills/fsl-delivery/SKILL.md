@@ -89,8 +89,7 @@ rules in this skill.
      layer granularity as the implementation** (design `spec` for design-aligned
      code). From upper layers, reuse **`forbidden` negatives only** — they stay
      sound under refinement; upper **positive** scenarios can falsely fail a
-     sound refinement (see `../fsl/references/impl.md` §9 and
-     `examples/refinement_chain/{top,mid}.fsl`).
+     sound refinement (see `../fsl/references/impl.md` §9).
 6. Report proof categories separately. Never collapse "model is verified",
    "design refines requirements", and "implementation conforms" into one claim.
 
