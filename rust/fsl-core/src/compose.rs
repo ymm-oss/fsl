@@ -618,9 +618,42 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                 annotations,
             }
         }
-        item @ (SpecItem::Until { .. }
-        | SpecItem::Unless { .. }
-        | SpecItem::VerifyBounds { .. }
+        // A component's `until` / `unless` is a property like the others: its
+        // name gets the alias prefix and its operands read the component's
+        // own (prefixed) state. Passing it through unchanged left `held` to
+        // fail typing, or, when the compose declares a same-named state, to
+        // silently check the compose's variable instead (#1197).
+        SpecItem::Until {
+            name,
+            before,
+            after,
+            span,
+            meta,
+            annotations,
+        } => SpecItem::Until {
+            name: prefix(alias, &name),
+            before: Box::new(rewrite_expr(*before, component, &HashSet::new())),
+            after: Box::new(rewrite_expr(*after, component, &HashSet::new())),
+            span,
+            meta,
+            annotations,
+        },
+        SpecItem::Unless {
+            name,
+            before,
+            after,
+            span,
+            meta,
+            annotations,
+        } => SpecItem::Unless {
+            name: prefix(alias, &name),
+            before: Box::new(rewrite_expr(*before, component, &HashSet::new())),
+            after: Box::new(rewrite_expr(*after, component, &HashSet::new())),
+            span,
+            meta,
+            annotations,
+        },
+        item @ (SpecItem::VerifyBounds { .. }
         | SpecItem::Entity(..)
         | SpecItem::Number(..)
         | SpecItem::Def { .. }) => item,
