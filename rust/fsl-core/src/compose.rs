@@ -1077,47 +1077,56 @@ fn rewrite_compose_item(
             meta,
             annotations,
         },
-        SpecItem::LeadsTo {
-            name,
-            binders,
-            before,
-            after,
-            span,
-            meta,
-            decreases,
-            within,
-            helpful,
-            annotations,
-        } => SpecItem::LeadsTo {
-            name,
-            binders: binders
-                .into_iter()
-                .map(|binder| resolve_alias_binder(binder, components, span))
-                .collect::<Result<_, _>>()?,
-            before: Box::new(resolve_alias_expr(*before, components, span)?),
-            after: Box::new(resolve_alias_expr(*after, components, span)?),
-            span,
-            meta,
-            decreases: decreases
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
-                .transpose()?,
-            within: within
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
-                .transpose()?,
-            helpful: helpful
-                .into_iter()
-                .map(|mut helper| {
-                    helper.args = helper
-                        .args
-                        .into_iter()
-                        .map(|arg| resolve_alias_expr(arg, components, span))
-                        .collect::<Result<_, _>>()?;
-                    Ok(helper)
-                })
-                .collect::<Result<_, CoreError>>()?,
-            annotations,
-        },
+        item @ SpecItem::LeadsTo { .. } => resolve_alias_leads_to(item, components)?,
         other => other,
+    })
+}
+
+/// Resolve `alias.var` throughout a compose-level `leadsTo` (#1297).
+fn resolve_alias_leads_to(
+    item: SpecItem,
+    components: &BTreeMap<String, Component>,
+) -> Result<SpecItem, CoreError> {
+    let SpecItem::LeadsTo {
+        name,
+        binders,
+        before,
+        after,
+        span,
+        meta,
+        decreases,
+        within,
+        helpful,
+        annotations,
+    } = item
+    else {
+        return Ok(item);
+    };
+    let resolve = |expr: Box<Expr>| resolve_alias_expr(*expr, components, span).map(Box::new);
+    Ok(SpecItem::LeadsTo {
+        name,
+        binders: binders
+            .into_iter()
+            .map(|binder| resolve_alias_binder(binder, components, span))
+            .collect::<Result<_, _>>()?,
+        before: resolve(before)?,
+        after: resolve(after)?,
+        span,
+        meta,
+        decreases: decreases.map(resolve).transpose()?,
+        within: within.map(resolve).transpose()?,
+        helpful: helpful
+            .into_iter()
+            .map(|mut helper| {
+                helper.args = helper
+                    .args
+                    .into_iter()
+                    .map(|arg| resolve_alias_expr(arg, components, span))
+                    .collect::<Result<_, _>>()?;
+                Ok(helper)
+            })
+            .collect::<Result<_, CoreError>>()?,
+        annotations,
     })
 }
 
@@ -1190,24 +1199,7 @@ fn sync_action(
         .collect::<Result<Vec<_>, _>>()?;
     let mut items = Vec::new();
     let mut fair_constituents = Vec::new();
-    // Names a component `let` must not take over (see
-    // `substitute_action_items`): the sync action's parameters and every
-    // argument's free names, across all references.
-    let mut avoid = params
-        .iter()
-        .map(|param| match param {
-            Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
-        })
-        .collect::<HashSet<_>>();
-    for reference in &action.refs {
-        for arg in &reference.args {
-            avoid.extend(free_vars(&resolve_alias_expr(
-                arg.clone(),
-                components,
-                action.span,
-            )?));
-        }
-    }
+    let mut avoid = sync_avoid_names(action, &params, components)?;
     for reference in &action.refs {
         let component = components
             .get(&reference.alias)
@@ -1300,6 +1292,32 @@ fn sync_action(
         sync: true,
         annotations: action.annotations.clone(),
     })
+}
+
+/// Names a component `let` must not take over in a sync action (see
+/// `substitute_action_items`): the sync action's parameters and every
+/// argument's free names, across all references (#1254).
+fn sync_avoid_names(
+    action: &SyncAction,
+    params: &[Param],
+    components: &BTreeMap<String, Component>,
+) -> Result<HashSet<String>, CoreError> {
+    let mut avoid = params
+        .iter()
+        .map(|param| match param {
+            Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
+        })
+        .collect::<HashSet<_>>();
+    for reference in &action.refs {
+        for arg in &reference.args {
+            avoid.extend(free_vars(&resolve_alias_expr(
+                arg.clone(),
+                components,
+                action.span,
+            )?));
+        }
+    }
+    Ok(avoid)
 }
 
 fn resolve_alias_param(
