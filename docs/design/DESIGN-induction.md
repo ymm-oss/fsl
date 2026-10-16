@@ -291,9 +291,10 @@ division total while sequence access stays partial. So `d != 0 and x / d <
 100` is defined, `x / d < 100` alone is not. Only expressions with a static
 partial-operation candidate are queried, so specs without one issue no new
 solver checks. Checked i64 overflow is *not* part of this obligation (step
-states are unbounded integers); it remains a base-case fail-closed error
-(#1263). A finite `Map` index outside its key domain is asked by the
-obligation's key-domain half (§2.6.1).
+states are unbounded integers); it remains a base-case fail-closed error, and
+a `proved` verdict says so in `not_covered` (§2.6.2, #1263). A finite `Map`
+index outside its key domain is asked by the obligation's key-domain half
+(§2.6.1).
 
 Soundness: every reachable state satisfies the proved invariants, and every
 real (defined) step is a step of the totalized `T`, so `unsat` for every
@@ -323,7 +324,8 @@ narrowed run claims nothing the dropped invariant would have to carry.
 Selecting a `trans` keeps every invariant as hypothesis
 (`selected_transition_induction_model`). Of the non-partial undefinedness BMC
 fails closed on, a finite `Map` index outside its key domain is asked by
-§2.6.1; checked i64 overflow is not asked (#1263).
+§2.6.1; checked i64 overflow is not asked, and `proved` reports it in
+`not_covered` (§2.6.2, #1263).
 
 #### 2.6.1 Key-domain half (#1221)
 
@@ -368,7 +370,41 @@ while a state satisfying the invariants reaches it. An unreachable CTI start
 is excluded with an auxiliary invariant as usual. The classification leaves
 room for #1263: overflow would be a third `FailureClass`, asked the same way.
 It is not asked (decision: overflow of unbounded `Int` stays outside the step
-obligation).
+obligation; §2.6.2).
+
+#### 2.6.2 Overflow is not covered: `not_covered` (#1263)
+
+The step case, the step obligation and the ranking proof evaluate over
+unbounded integers; only the base case (BMC to `--depth`) checks i64
+overflow. A counter that overflows beyond `--depth` (`x = x +
+288230376151711744` from `x = 0`, overflowing at step 32) is therefore
+`proved` at `--depth 8`, while BMC and explicit report `integer overflow in
+addition` from depth 32. Adding overflow to the step obligation would turn
+most counter specs into `unknown_cti` (every unguarded `x + 1` has an
+invariant-satisfying pre-state at `i64::MAX`), so the verdict stays `proved`
+and the envelope states the gap instead:
+
+```json
+{ "result": "proved", "completeness": "unbounded", "not_covered": ["int_overflow"], ... }
+```
+
+`not_covered` is an array of stable strings; `int_overflow` is its only value
+today. It is present when some proof site -- an invariant, `trans`, `leadsTo`
+trigger/goal/measure, `terminal`, guard, body or `ensures` -- holds an
+operator that can overflow (`+ - * / %`, unary `-`, `abs`, `sum`): the
+obligation catalog's non-vacuous `NoOverflow` rows outside `Init`
+(`fsl_verifier::induction_not_covered`). The test is syntactic, so it also
+lists arithmetic that only ever sees small bounded values (`x + 1` on
+`0..3`); deciding that per site would need the solver queries the decision
+declines to add. The key is absent, never empty, when no proof site holds
+such an operator; `init` arithmetic does not count, because the base case
+evaluates `init` with overflow checked (#1258). Only `--engine induction`'s
+`proved` carries it: `--engine explicit` reaches `proved` by evaluating every
+reachable state concretely with overflow checked, and `verified` is bounded
+by construction. `--lemma` candidate proofs (`lemmas[].proof`) do not carry
+it; the target run's envelope does. `outcome.rs` projects it into nested
+`db`/`domain` kernels like `action_coverage`, since it qualifies the verdict.
+The verdict, exit code and every other field are unchanged.
 
 ### 2.7 Ensures obligation (#1217)
 

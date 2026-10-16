@@ -758,6 +758,13 @@ fn render_induction_success(
     output.insert("result".to_owned(), json!("proved"));
     output.insert("engine".to_owned(), json!("induction"));
     output.insert("completeness".to_owned(), json!("unbounded"));
+    // #1263: the step reasons over unbounded integers and does not ask i64
+    // overflow; say so instead of changing the verdict. Absent when the
+    // proof's sites hold no operator that can overflow.
+    let not_covered = fsl_verifier::induction_not_covered(model);
+    if !not_covered.is_empty() {
+        output.insert("not_covered".to_owned(), json!(not_covered));
+    }
     output.insert("checked_to_depth".to_owned(), json!(depth));
     output.insert(
         "k_used".to_owned(),

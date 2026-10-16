@@ -748,7 +748,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),
   `cost`, and `k_used` (the k used per invariant); reachables/coverage come from
-  the base case. Ranked leadsTo entries add
+  the base case. `not_covered: ["int_overflow"]` (#1263) means the proof does not
+  cover i64 overflow: the step reasons over unbounded integers and only the base
+  case to `checked_to_depth` checks overflow. It is present whenever an invariant,
+  `trans`, `leadsTo`, guard, body or `ensures` uses `+ - * / %`, unary `-`, `abs`
+  or `sum` (syntactic, so small bounded arithmetic carries it too) and absent
+  otherwise; the verdict is still `proved`. To rule overflow out, bound the
+  value (a range type, or a guard such as `requires x < 1000`) or check it with
+  `--engine bmc`/`explicit` at a depth that reaches it; the key is syntactic, so
+  it stays after such a fix. Ranked leadsTo entries add
   `{proved: true, completeness: "unbounded", proof: "ranking", decreases: ...}`.
   From `--engine explicit`, `proved` instead carries `closure: true` plus
   exploration stats (`states_explored`, `max_frontier_width`, `depth_reached`)

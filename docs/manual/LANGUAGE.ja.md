@@ -1154,6 +1154,7 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `sweep_inconclusive` | 真の失敗はないが、`insufficient_depth` だけを持つ `reachable_failed` のセルしかない `--instances`/`--values` スコープが1つ以上ある。そのスコープは `sweep.inconclusive_scopes` に列挙され、`minimal_counterexample` は null | 列挙されたスコープの `--depth` を上げるか sweep 境界を調整して再実行する |
 | `sweep_failed` | sweep セルに反例、またはフェイルクローズドな reachable classification がある | `sweep.minimal_counterexample` を調べて報告された問題を直す |
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
+| `proved` + `not_covered: ["int_overflow"]` | `--engine induction` は無界の整数の上で性質を証明した。i64 overflow を検査するのは `checked_to_depth` までの base case だけである。証明の対象箇所が `+ - * / %`・単項 `-`・`abs`・`sum` を使うときに付き、使わないときは付かない。結果と終了コードは変わらない | overflow が問題なら値を有界にする(範囲型か guard)か、overflow に届く深さで `--engine bmc`/`explicit` を実行する |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `key_domain` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が有限キーの `Map` をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する | 短絡する `and`/`=>`/`or`/`if` か `requires` で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |

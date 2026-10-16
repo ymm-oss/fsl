@@ -32,8 +32,9 @@ pub use bmc::{
     verify_bounded_from_state, verify_bounded_selected,
 };
 pub use induction::{
-    InductionCti, InductionResult, RankFailure, RankProof, RankedLeadstoResult, prove_induction,
-    prove_induction_invariants, prove_ranked_leadstos, ranked_leadsto_lasso_discharges,
+    InductionCti, InductionResult, NOT_COVERED_INT_OVERFLOW, RankFailure, RankProof,
+    RankedLeadstoResult, induction_not_covered, prove_induction, prove_induction_invariants,
+    prove_ranked_leadstos, ranked_leadsto_lasso_discharges,
 };
 pub use refinement::{ProgressCheck, check_refinement_progress};
 pub use vacuity::{VacuityFinding, model_vacuity_findings};

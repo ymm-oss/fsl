@@ -125,6 +125,9 @@
         "LockedOrOpen": 1,
         "_bounds_entries": 1
       },
+      "not_covered": [
+        "int_overflow"
+      ],
       "reachables": {
         "OneEntry": {
           "witness": "<replayed-base-witness>",
@@ -388,6 +391,9 @@
         "NeverAboveCap": 1,
         "_bounds_n": 1
       },
+      "not_covered": [
+        "int_overflow"
+      ],
       "reachables": {
         "HitCap": {
           "witness": "<replayed-base-witness>",
@@ -571,6 +577,9 @@
         "_bounds_floor": 1,
         "_bounds_target": 1
       },
+      "not_covered": [
+        "int_overflow"
+      ],
       "reachables": {
         "OpenAtTop": {
           "witness": "<replayed-base-witness>",
@@ -750,6 +759,9 @@
         "_bounds_jobs": 1,
         "_bounds_q": 1
       },
+      "not_covered": [
+        "int_overflow"
+      ],
       "reachables": {},
       "result": "proved",
       "spec": "GalleryAdversarialOptionStructSetSeqCombo",
@@ -1128,6 +1140,9 @@
           "proved": true
         }
       },
+      "not_covered": [
+        "int_overflow"
+      ],
       "note": "invariants and ranked leadsTo proved for all depths",
       "reachables": {},
       "result": "proved",
@@ -1546,6 +1561,9 @@
           "proved": true
         }
       },
+      "not_covered": [
+        "int_overflow"
+      ],
       "note": "invariants and ranked leadsTo proved for all depths",
       "reachables": {},
       "result": "proved",

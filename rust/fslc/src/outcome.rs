@@ -419,6 +419,9 @@ const PROJECTED_KERNEL_KEYS: &[&str] = &[
     "trace",
     "warnings",
     "action_coverage",
+    // #1263: what a `proved` induction verdict does not cover (i64
+    // overflow); like `action_coverage`, it qualifies the verdict itself.
+    "not_covered",
     "cti",
     "hint",
     "trace_type",
