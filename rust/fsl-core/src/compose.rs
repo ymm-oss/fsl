@@ -12,7 +12,9 @@ use fsl_syntax::{
 use serde_json::{Value, json};
 
 use crate::{
-    CoreError, IndexedReplacements, KernelSpec, PredicateExpander, expand_spec_domains, substitute,
+    CoreError, IndexedReplacements, KernelSpec, PredicateExpander,
+    capture_avoiding_binding_with_names, collect_binder_names, collect_names, expand_spec_domains,
+    free_vars, fresh_binding_name, substitute, substitute_binder,
 };
 
 pub trait FileResolver {
@@ -1188,6 +1190,24 @@ fn sync_action(
         .collect::<Result<Vec<_>, _>>()?;
     let mut items = Vec::new();
     let mut fair_constituents = Vec::new();
+    // Names a component `let` must not take over (see
+    // `substitute_action_items`): the sync action's parameters and every
+    // argument's free names, across all references.
+    let mut avoid = params
+        .iter()
+        .map(|param| match param {
+            Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
+        })
+        .collect::<HashSet<_>>();
+    for reference in &action.refs {
+        for arg in &reference.args {
+            avoid.extend(free_vars(&resolve_alias_expr(
+                arg.clone(),
+                components,
+                action.span,
+            )?));
+        }
+    }
     for reference in &action.refs {
         let component = components
             .get(&reference.alias)
@@ -1245,11 +1265,11 @@ fn sync_action(
                 ))
             })
             .collect::<Result<HashMap<_, _>, CoreError>>()?;
-        items.extend(
-            source_items
-                .into_iter()
-                .map(|item| substitute_action_item(item, &replacements)),
-        );
+        items.extend(substitute_action_items(
+            source_items,
+            &replacements,
+            &mut avoid,
+        ));
     }
     items.extend(
         action
@@ -1535,21 +1555,115 @@ fn resolve_alias_action_item(
     })
 }
 
-fn substitute_action_item(item: ActionItem, replacements: &HashMap<String, Expr>) -> ActionItem {
+/// Substitute a component action's parameters by a sync reference's arguments
+/// throughout the action's items, respecting every binder in scope (#1254).
+///
+/// `let` bindings scope over the items after them, so they are processed in
+/// order: a `let` shadows a parameter of the same name for the rest of the
+/// action, and a `let` whose name occurs free in an argument (`go(y) =
+/// c.poke(y)` against `let y = 0`) or in `avoid` is renamed to a fresh name,
+/// so neither the argument nor a later sync part reading that name is
+/// captured by it. `avoid` collects the names the composed action's other
+/// parts read: the sync action's own parameters, every argument's free
+/// names, and the `let`s already emitted by earlier references.
+fn substitute_action_items(
+    items: Vec<ActionItem>,
+    replacements: &HashMap<String, Expr>,
+    avoid: &mut HashSet<String>,
+) -> Vec<ActionItem> {
     let indexed = IndexedReplacements::new();
+    let mut names = avoid.clone();
+    names.extend(replacements.keys().cloned());
+    for replacement in replacements.values() {
+        collect_names(replacement, &mut names);
+    }
+    for item in &items {
+        collect_action_item_names(item, &mut names);
+    }
+    let mut current = replacements.clone();
+    items
+        .into_iter()
+        .map(|item| match item {
+            ActionItem::Requires(expr, span) => {
+                ActionItem::Requires(substitute(expr, &current, &indexed), span)
+            }
+            ActionItem::Ensures(expr, span) => {
+                ActionItem::Ensures(substitute(expr, &current, &indexed), span)
+            }
+            ActionItem::Let(name, expr, span) => {
+                let value = substitute(expr, &current, &indexed);
+                current.remove(&name);
+                let captures = avoid.contains(&name)
+                    || current
+                        .values()
+                        .any(|replacement| free_vars(replacement).contains(&name));
+                let name = if captures {
+                    let fresh = fresh_binding_name(&name, &names);
+                    names.insert(fresh.clone());
+                    current.insert(name, Expr::Var(fresh.clone()));
+                    fresh
+                } else {
+                    name
+                };
+                avoid.insert(name.clone());
+                ActionItem::Let(name, value, span)
+            }
+            ActionItem::Statement(statement) => {
+                ActionItem::Statement(substitute_statement(statement, &current))
+            }
+        })
+        .collect()
+}
+
+fn collect_action_item_names(item: &ActionItem, names: &mut HashSet<String>) {
     match item {
-        ActionItem::Requires(expr, span) => {
-            ActionItem::Requires(substitute(expr, replacements, &indexed), span)
+        ActionItem::Requires(expr, _) | ActionItem::Ensures(expr, _) => collect_names(expr, names),
+        ActionItem::Let(name, expr, _) => {
+            names.insert(name.clone());
+            collect_names(expr, names);
         }
-        ActionItem::Ensures(expr, span) => {
-            ActionItem::Ensures(substitute(expr, replacements, &indexed), span)
+        ActionItem::Statement(statement) => collect_statement_names(statement, names),
+    }
+}
+
+fn collect_statement_names(statement: &Statement, names: &mut HashSet<String>) {
+    match statement {
+        Statement::Assign { target, value, .. } => {
+            collect_lvalue_names(target, names);
+            collect_names(value, names);
         }
-        ActionItem::Let(name, expr, span) => {
-            ActionItem::Let(name, substitute(expr, replacements, &indexed), span)
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            collect_names(condition, names);
+            for statement in then_statements.iter().chain(else_statements) {
+                collect_statement_names(statement, names);
+            }
         }
-        ActionItem::Statement(statement) => {
-            ActionItem::Statement(substitute_statement(statement, replacements))
+        Statement::ForAll {
+            binder, statements, ..
+        } => {
+            collect_binder_names(binder, names);
+            for statement in statements {
+                collect_statement_names(statement, names);
+            }
         }
+    }
+}
+
+fn collect_lvalue_names(lvalue: &LValue, names: &mut HashSet<String>) {
+    match lvalue {
+        LValue::Var(name) => {
+            names.insert(name.clone());
+        }
+        LValue::Index(name, expr) => {
+            names.insert(name.clone());
+            collect_names(expr, names);
+        }
+        LValue::Field(base, _) => collect_lvalue_names(base, names),
     }
 }
 
@@ -1582,18 +1696,41 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
                 .collect(),
             span,
         },
+        // The statement `forall` follows the expression quantifier's rule
+        // (`substitute` in lib.rs): the binder's where / range / collection
+        // are substituted, the binding shadows a same-named parameter in its
+        // body, and a binding that an argument mentions free is renamed
+        // first so the argument is not captured (#1254).
         Statement::ForAll {
             binder,
             statements,
             span,
-        } => Statement::ForAll {
-            binder,
-            statements: statements
-                .into_iter()
-                .map(|statement| substitute_statement(statement, replacements))
-                .collect(),
-            span,
-        },
+        } => {
+            let original = binder_name(&binder).to_owned();
+            let mut body_names = HashSet::new();
+            for statement in &statements {
+                collect_statement_names(statement, &mut body_names);
+            }
+            let (binder, _, mut scoped, _) = capture_avoiding_binding_with_names(
+                binder,
+                Vec::new(),
+                replacements,
+                &indexed,
+                &body_names,
+            );
+            let renamed = binder_name(&binder).to_owned();
+            if renamed != original {
+                scoped.insert(original, Expr::Var(renamed));
+            }
+            Statement::ForAll {
+                binder: substitute_binder(binder, replacements, &indexed),
+                statements: statements
+                    .into_iter()
+                    .map(|statement| substitute_statement(statement, &scoped))
+                    .collect(),
+                span,
+            }
+        }
     }
 }
 
