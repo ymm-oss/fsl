@@ -101,8 +101,8 @@ the relevant role skill directs it.
   accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
   verifies at check time that the last step is rejected (not enabled; neither a
-  runtime violation, since #1213, nor an argument outside the `entity` / `number`
-  verify scope, since #1229, counts) — otherwise `kind: "forbidden"`.
+  runtime violation nor an argument outside the `entity` / `number` verify scope
+  counts) — otherwise `kind: "forbidden"`.
   Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
   required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
   `branches`, and explicit `maps` only for hard cases such as multi-entity
@@ -235,7 +235,7 @@ The natural business forms above are aliases for `responds { forall ... ~> ... }
 and `goal { forall/exists ... }`; the explicit expression forms remain available
 for policies that cannot be written as a simple stage progression.
 
-**No-bypass precedence** (#75): `policy CTRL-APPROVAL "..." every Return
+**No-bypass precedence**: `policy CTRL-APPROVAL "..." every Return
 reaching Refunded must have passed through Approved` synthesizes an invisible
 `Map<Return, Bool>` history flag (`return_stage_via_Approved`), sets it `true`
 on the transition landing on `Approved`, and compiles to `forall c: Return {
@@ -246,9 +246,9 @@ B`, `passed through X or Y`); two policies over the same `(process,
 waypoint-set)` share one history flag (dedup, name deterministic by the
 process's stage order). Alongside the flag, a `<PolicyId>_stability`
 auxiliary invariant is auto-synthesized from the process's stage graph
-(dominated-set of the waypoints; #85), so a **compliant** precedence policy
+(dominated-set of the waypoints), so a **compliant** precedence policy
 proves under `--engine induction` out of the box — no manual invariant, no
-ghost CTI. Design in `DESIGN-precedence-policy.md`. Limitation: the flag is
+ghost CTI. Limitation: the flag is
 business-layer-only synthesized state — a `requirements` spec refining it
 must map the flag explicitly or restate the rule at its own layer.
 
@@ -268,7 +268,6 @@ declaration order is also the command's verdict, fail-closed:
 `refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
 breaks its own semantics) -> `impl_violated`, `unknown_budget` ->
 `unknown_budget`, all exit 1; any other value is `error`/`internal` (exit 3).
-Before 4.11 such a run reported `ok`/`verified` with exit 0.
 
 No `terminal` syntax exists in business — it is derived automatically. Each
 process's sink stages (stages with no outgoing `transition`, e.g.
@@ -335,7 +334,7 @@ verify {
   `implements { }` block you write state `map` entries, `maps auto`,
   `preserve progress`, and `action <impl>(<params>) -> <abs>(<args>) | stutter`
   (same syntax as a separate refinement file's `action` item, including an
-  arity change between impl and abs params — #73). Action↔action
+  arity change between impl and abs params). Action↔action
   correspondence can also still be written as the `maps <abs_act>(...)` clause
   **on the requirement-level action** (auto-synthesized for matching names;
   `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
@@ -374,37 +373,29 @@ verify {
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected**, i.e. not enabled. If accepted,
   `kind: "forbidden"` (detection of under-constraint = a missing guard that a safety
-  invariant stays silent about). Since #1213 an enabled last step that stops
-  with an invariant/trans/ensures/type_bound/partial_op violation is also
+  invariant stays silent about). An enabled last step that stops with an
+  invariant/trans/ensures/type_bound/partial_op violation is also
   `kind: "forbidden"` (with `violation`): a violation is not a rejection, so write
-  the `requires` that rejects the call; every command that runs this check then
-  exits 2, except `explain` (exit 0, no witnesses; known gap #1242), `approval
-  create --kind ledger` (exit 0, records a ledger that lists the error; #1243),
-  and `approval check` of a ledger record (`drifted`, exit 0)
-  (`docs/design/DESIGN-forbidden.md` §2.1). If the premise is not enabled,
+  the `requires` that rejects the call. If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
-  outside the parameter's declared range or enum type). Since #1229 a last step
-  whose argument is outside the `verify { instances / values }` scope of an
+  outside the parameter's declared range or enum type). A last step whose
+  argument is outside the `verify { instances / values }` scope of an
   `entity` / `number` parameter (a `process` counts as an `entity`), such as
   `accept(7)` under `instances Case = 3`, is not a rejection: no guard was
   evaluated and an implementation may accept it. It is a `kind: "forbidden"`
   error with `out_of_scope_argument` — widen the scope or move the argument
-  inside it. Under a `--instances` / `--values` override that alone removed the
-  argument, the forbidden is `forbidden_skipped` instead. Breaking: such a step
-  used to satisfy the forbidden (as `requires_failed` before #1212, `bad_call`
-  since), so `check` passed. A last
-  step naming no action or no variant of that arity is a `kind: "forbidden"`
-  error with a `message`, not a rejection (breaking after 4.8.1: `check` used to
-  pass, and what the other commands reported depended on the rest of the spec).
-  On either step every command that runs this check now exits 2 with no
-  verdict, scenario, or test, except `explain`, which exits 0 with no
-  witnesses (known gap #1242), `approval create --kind ledger`, which exits 0
-  and records a ledger that lists the error (#1243), and `approval check` of a
-  ledger record, which reports `drifted` (exit 0). `fslc diff` replays the
-  forbidden too but reports a finding whose exit status follows `--forbid`, and
-  an override that alone removed the argument gives `forbidden_skipped` as
-  above, with the exit status of the rest of the spec (0 when it verifies) — `docs/design/DESIGN-forbidden.md` §2.1.
+  inside it. A last step naming no action or no variant of that arity is a
+  `kind: "forbidden"` error with a `message`, not a rejection. On any of these
+  errors every command that runs this check exits 2 with no verdict, scenario,
+  or test, except `explain`, which exits 0 with no witnesses (known gap #1242),
+  `approval create --kind ledger`, which exits 0 and records a ledger that
+  lists the error, and `approval check` of a ledger record, which reports
+  `drifted` (exit 0). `fslc diff` replays the forbidden too but reports a
+  finding whose exit status follows `--forbid`. Under a `--instances` /
+  `--values` override that alone removed the argument, the forbidden is
+  `forbidden_skipped`, with the exit status of the rest of the spec (0 when it
+  verifies).
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use

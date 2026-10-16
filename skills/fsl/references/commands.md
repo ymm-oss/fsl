@@ -41,7 +41,7 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
    `fslc scenarios` (integration-test skeleton JSON),
    `fslc testgen -o test_x.py`
    (implementation-conformance pytest skeleton), `fslc counterexample export -o bug.reproducer.json`
-   (export a bounded safety-invariant counterexample to reproducer.v1; slice 1 of #885),
+   (export a bounded safety-invariant counterexample to reproducer.v1),
    `fslc replay --trace events.json`
    (normalized spec-action log conformance), or `fslc replay --from-log
    events.jsonl --mapping log_mapping.fsl` (production action/state mapped through
@@ -305,13 +305,13 @@ is not supported. Most other spec-reading commands (`lint`, `migrate`, `fmt`,
 `document generate`/`claims`/`check`, and `approval create`/`check`/`diff`) reject `.md` input as an input-kind
 error (`kind:"usage"`, `diagnostic_code:"FSL-INPUT-LITERATE-UNSUPPORTED"`,
 `loc` naming the input file, not a spec position) instead of handing it to
-the parser (issue #665). `chain` (project manifest, not a spec) and `db import`
+the parser. `chain` (project manifest, not a spec) and `db import`
 (SQL/Prisma schema artifact) are not spec-path commands in this sense.
 `approval create`/`check`/`diff`'s positional is always parsed as an FSL spec
 regardless of `--kind` -- `--kind requirements_document`'s legitimately
 `.md`-shaped input is `--artifact`, never the positional -- so the guard above
 applies right after the positional is resolved, before `check`/`diff` read
-`--record` (issue #980). `ai eval`/`regress`/`drift` already parse `.md` through `load_ai_project`
+`--record`. `ai eval`/`regress`/`drift` already parse `.md` through `load_ai_project`
 (valid literate AI project succeeds; otherwise a clean semantic error) and are
 unaffected. See `rust/fslc/src/literate_access.rs`'s `LITERATE_EXCLUDED`.
 
@@ -320,33 +320,23 @@ between the OLD/NEW user-invariant conjunctions, and replay of OLD `forbidden`
 scenarios against NEW. Its stable finding kinds are `behavior_added`,
 `behavior_removed`, `invariant_weakened`, `invariant_strengthened`,
 `forbidden_relaxed`, `scope_changed`, and `unknown`; an empty report uses
-`no_semantic_change`. In the forbidden replay (`docs/design/DESIGN-semantic-diff.md`,
-"Forbidden replay") a NEW final step that its guard disables preserves the OLD
+`no_semantic_change`. In the forbidden replay a NEW final step that its guard disables preserves the OLD
 rejection, and so does a final step that OLD and NEW both reject as `bad_call`
 outside a range or enum parameter type. Each side is classified with its own `entity` /
-`number` types: since #1229 an OLD final step outside its verify scope
+`number` types: an OLD final step outside its verify scope
 (including the NEW scope OLD is replayed under) is `unknown` /
 `forbidden_replay_failed`, since no OLD guard rejected it, and an OLD `bad_call`
-that only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`
-(before #1229 both were `forbidden_step_unrelatable`). A compose NEW, or a NEW
+that only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`.
+A compose NEW, or a NEW
 of another dialect whose `entity` / `number` types are not in its source, never
-preserves an OLD `bad_call` (`unknown` / `forbidden_step_unrelatable`); before
-#1229 a compose NEW that rejected the step as `bad_call` preserved it, so such a
-forbidden now fails `--forbid unknown`. An OLD final step that names no action, or no
-variant of that arity, is `unknown` / `forbidden_replay_failed`. Before #1212 a
-both-side range `bad_call` was `unknown`, so that forbidden failed `--forbid
-unknown` and no longer does, and an OLD unknown action was preserved (the
-measured cases already exited 1 on the `unknown` that NEW's added action or
-changed arity produces; see
-`docs/design/DESIGN-forbidden.md` §2.1). Known gap (#1239): a NEW
+preserves an OLD `bad_call` (`unknown` / `forbidden_step_unrelatable`). An OLD
+final step that names no action, or no variant of that arity, is `unknown` /
+`forbidden_replay_failed`. Known gap (#1239): a NEW
 *setup* step that its guard disables is also reported as preserved, although NEW
-never runs the final step. Since #1213 a NEW final step that is enabled and then
+never runs the final step. A NEW final step that is enabled and then
 stops with a runtime violation is `forbidden_relaxed` too (its witness carries
 `violation`): a violation is not a rejection. An OLD final step or a NEW setup
-step that violates is `unknown` / `forbidden_replay_failed`; before #1213 all
-three were preserved, so that forbidden now fails `--forbid forbidden_relaxed`
-(NEW final violation) or `--forbid unknown` (the other two), where it failed
-neither. A changed
+step that violates is `unknown` / `forbidden_replay_failed`. A changed
 `verify` scope is explicit and comparison uses NEW's shared entity/number bounds. Findings exit 0 because the command is an
 analysis; use `--forbid` to turn selected kinds into an exit-1 CI gate. Every
 verdict is bounded by `--depth`, and a mapping only resolves the direction
@@ -374,7 +364,7 @@ fields/keys are `log_mapping` nonconformance. The first divergence includes
 `failed_at_record` (0-based), `log_line` (1-based), and the action/state
 mismatch. Finite replay does not check `leadsTo`.
 
-`verify` is backed by a persistent verdict cache (issue #169) keyed on every
+`verify` is backed by a persistent verdict cache keyed on every
 input that can affect its output (the post-desugaring kernel AST, the raw
 entry-file text, and every flag/override) plus an implementation fingerprint,
 so an unchanged re-run in the same write→verify→repair loop returns instantly
@@ -455,7 +445,7 @@ do not send source text, requirement text, comments, or analysis JSON outside th
 local environment unless the user or execution environment has explicitly opted
 in.
 
-`ledger` (issue #24) re-organizes `verify`/`scenarios`/`replay` findings **by
+`ledger` re-organizes `verify`/`scenarios`/`replay` findings **by
 requirement id** into a Markdown audit ledger a PM / governance / internal-audit
 reader can decide approve/reject/risk-accept from. It is a presentation layer
 (no new verification): the `trace_type` discriminator drives a per-finding
@@ -476,7 +466,7 @@ never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
 verdict). See `docs/design/DESIGN-ledger.md`.
 
-Digest-bound approvals (issue #190) are separate from assurance class and from
+Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
 clean tracked Git baseline and only accepts a reviewed artifact that matches a
 fresh rendering under the recorded inputs. The sidecar uses a lowered-kernel
@@ -490,7 +480,7 @@ repository's signed-commit/review/branch-protection policy. See
 `docs/design/DESIGN-approval.md`.
 
 Every requirement id in the ledger (and every property row in `fslc html`)
-carries an **assurance class** (issue #171): `proved(induction)` (k-induction,
+carries an **assurance class**: `proved(induction)` (k-induction,
 all depths) / `bounded(BMC depth k)` (BMC, depth k) / `replay-observed`
 (concrete log/trace checked, not a universal claim) / `statistical(Wilson c%)`
 (precomputed eval JSONL, aggregate not per-case) / `not_run` (no formal
@@ -637,7 +627,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   excused; one outside the declared bounds keeps the unscoped error, and a
   forbidden final step outside the overridden scope only because its argument
   was removed is reported as `forbidden_skipped`, not satisfied (one outside the
-  declared scope is the unscoped `kind: "forbidden"` error, #1229, unless the
+  declared scope is the unscoped `kind: "forbidden"` error, unless the
   override widens the scope to include it, in which case the guard is
   evaluated). When any scenario was skipped,
   the envelope also carries `requirement_traces: {result: "not_evaluated",
@@ -763,7 +753,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - faithfulness diagnostics may add `faithfulness_class` and
   `recommended_action`: `partial_op_unguarded`, `frozen_only_invariant`,
   `intent_unexercised`, or `liveness_not_refined`.
-- **blame assignment** (issue #170, additive): a `violated` result with
+- **blame assignment**: a `violated` result with
   `violation_kind` `invariant`/`type_bound` carries top-level
   `blame.conjuncts[]` (`{index, text, holds, violating_bindings?}`) — which
   AND-conjunct of the invariant is false — and each action-bearing `trace[k]`
@@ -812,8 +802,7 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   A chain check stops at that link (`failed_link.kind: null`), a `fslc chain`
   refine layer fails with `result:"unknown_budget"`, and a governance
   preservation reports `unknown_budget` (which also fails that `check`/`verify`
-  with `result:"unknown_budget"`, exit 1). Such a run used to report `refines`
-  (exit 0). The self-consistency precondition walks the same reachable set
+  with `result:"unknown_budget"`, exit 1). The self-consistency precondition walks the same reachable set
   first and stops at the same budget with the same `unknown_budget` report,
   so an impl whose reachable set within `--depth` reaches the budget is
   `unknown_budget` even if a mismatch lies early. `fslc diff`
@@ -822,8 +811,8 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   unconditionally (exit 1; also `diff --git` and `approval diff`), never
   `no_semantic_change`. `fslc mutate` reports the mutant as
   `status:"inconclusive"` (`inconclusive.reason:"unknown_budget"`), outside
-  `kill_rate`, and any one fails a requested gate (#1262).
-- **action-correspondence argument partial_op (#512)**: an
+  `kill_rate`, and any one fails a requested gate.
+- **action-correspondence argument partial_op**: an
   action-correspondence argument expression (`impl_action(a) -> abs_action(a
   / c)`) dividing by an impl state variable that can be zero is action
   context, not the "no check" property context a refinement state map gets —
@@ -832,12 +821,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   by zero (caught by the impl self-violation precondition above). A
   correspondence whose divisor is always guarded on every reachable impl
   step still `refines`.
-- **abstract-body partial_op (#1296)**: the corresponded abstract action's
+- **abstract-body partial_op**: the corresponded abstract action's
   own body hitting a partial operation at the mapped state (`y = 4 / y` at
   `y = 0`) is `kind:"abs_partial_op"` (`refinement_failed`, exit 1, no
   `abs_after_expected`), never `refines`. A false abstract guard is still
   `abs_requires_failed`.
-- **abstract step violation (#1302)**: the corresponded abstract step being
+- **abstract step violation**: the corresponded abstract step being
   rejected by the abstraction — its successor violates an abstract type
   bound, invariant or `trans`, its `ensures` is false, or one of those checks
   hits a partial operation (`Seq` operations; `/` `%` are total there) — is `kind:"abs_step_violation"`
@@ -845,27 +834,24 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `abs_after_attempted` (the rejected successor) and no `abs_after_expected`,
   whether or not the impl step changes the mapped state. Abstract `ensures`
   and invariants are therefore checked on corresponded steps, but only there.
-- **nondeterministic `init` (#493)**: a state variable `init` never assigns
+- **nondeterministic `init`**: a state variable `init` never assigns
   on any path (an `init if` reading an unassigned `Bool`) is a genuinely free
   initial value across its type domain, not a silently defaulted one. The
   self-violation precondition and init correspondence both check *every*
   concrete initial valuation on both impl and abs, not one materialized
   default — an impl-side valuation must not violate the impl itself, and its
   mapped state must be a member of the abs's own set of valid initial
-  valuations, for every valuation on both sides. Breaking: a mapping
-  previously `refines` only because one impl initial branch was checked can
-  now be `refinement_failed`; a mapping previously `refinement_failed` only
-  because α(s₀) missed the abs's single materialized default can now be
-  `refines` if it matches a different valid abs branch. A variable init
-  assigns on only some paths (not on any) keeps the prior single-value
-  behavior.
-- Definedness failure (#1196): `unknown_cti` / `violation_kind:"partial_op"` with
+  valuations, for every valuation on both sides. A mapping that matches only
+  one impl initial branch is `refinement_failed`; an α(s₀) that matches any
+  valid abs initial valuation is accepted. A variable that `init` assigns on
+  some but not all paths keeps one materialized default (it is not free).
+- Definedness failure: `unknown_cti` / `violation_kind:"partial_op"` with
   `invariant` = `_partial_<action>` (guard, body, or reached `ensures`; also
   `last_action`) or `_partial_property_<name>` (invariant, `leadsTo`, `trans`).
   The CTI start satisfies every proved invariant and reaches a partial operation;
   guard it with a short-circuit `and`/`=>`/`or`/`if`, or exclude an unreachable
   start with an auxiliary invariant. Never `proved` while such a state exists.
-- Ensures failure (#1217): `unknown_cti` / `violation_kind:"ensures"` with
+- Ensures failure: `unknown_cti` / `violation_kind:"ensures"` with
   `invariant` = the action name and `last_action`; a two-state CTI between
   invariant states whose last step falsifies the reached `ensures`.
 - leadsTo ranking failure: `unknown_cti` / `violation_kind:"leadsTo_rank"` with

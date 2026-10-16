@@ -120,14 +120,13 @@ emit the same scenarios:
   (`markTestSkipped` under `--allow-unwired`). Output defaults to
   `<SpecName>ConformanceTest.php`.
 
-**Unwired = fail, on every target (issue #1200, breaking).** Until the Adapter
+**Unwired = fail, on every target.** Until the Adapter
 is wired, every generated test fails with a message starting `adapter not
 wired`. Do not treat a green run of a generated suite as conformance evidence
 until you have seen it execute tests against the implementation: a suite that
 never calls the implementation proves nothing. `fslc testgen --allow-unwired`
 (also `fslc domain testgen`) is the explicit opt-in that restores
-skip-until-wired; its output is byte-identical to the pre-#1200 scaffold, and
-Kotlin rejects it. An `--allow-unwired` suite exits 0 with every test skipped,
+skip-until-wired; Kotlin rejects it. An `--allow-unwired` suite exits 0 with every test skipped,
 so in `fslc chain` give `[impl]` a JUnit `report` (see `commands.md`, `chain`):
 then zero executed tests is `indeterminate`, never `passed`. An `[impl]` with
 neither `report` nor `evidence = "exit_code"` is `indeterminate` on exit 0, and

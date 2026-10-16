@@ -35,7 +35,7 @@ relations and the legacy `"ID: text"` string slot (which `fslc lint` reports as
 [layers](layers.md#declaration-tags-common-to-all-layers).
 An annotation with nothing supported to attach to reports
 `FSL-ANNOTATION-TARGET`. `domain`/`dbsystem`/`ai_component` nested
-declarations also accept `@...` (issue #281): `domain` aggregate `command`,
+declarations also accept `@...`: `domain` aggregate `command`,
 `decide`, `evolve`, `invariant`, `projection`, `effect`, and saga `step`;
 `ai_component` `tool`, the `tools [a, b];` shorthand, `authority` (and each
 rule line), `fallback` (and each `when` item), `check`; `dbsystem`
@@ -119,7 +119,7 @@ business <Name> {
   policy <ID> "<text>" satisfies <ID> ...  // optional control traceability
                                            // `satisfies` of an undeclared control is a
                                            // located error; a control nothing satisfies
-                                           // is an `unused_control` warning (#1134)
+                                           // is an `unused_control` warning
 }
 requirements <Name> {
   entity <Entity>                          // optional explicit identity sort
@@ -331,11 +331,10 @@ path for semantically invalid domain input. `domain generate`, `domain replay`,
 `domain testgen`, and `domain check` extend the same single-snapshot contract
 through checked-kernel scaffolding, Monitor replay, generic and adapter test
 generation, and edition postprocessing.
-The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
-a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
-event flags sticky or treat one effect's status map as a general saga history.
+`event_*` flags are one-hot/current-step; do not make global event flags sticky
+or treat one effect's status map as a general saga history.
 A saga `compensation { when Trigger after After { ... } }` block is guarded by
-BOTH event flags (#713); because flags are one-hot, a compensation whose
+BOTH event flags; because flags are one-hot, a compensation whose
 trigger and after events differ is structurally disabled today and surfaces
 as a `fslc verify` never-enabled action warning — do not suppress that
 warning or weaken the guard to make it disappear.
@@ -345,7 +344,7 @@ lowering cannot publish. Versions, dialect, duplicate Kernel members, and
 missing lowered type/state/action counterparts fail closed; source expressions
 and effect/saga topology are authoritative in the companion because v1 has no
 equivalent nodes. Emitters never receive `DomainSpec`, never reparse source
-text, and the five targets preserve their pre-migration bytes.
+text.
 
 Effect completion classification first honors explicit roles:
 `success_event` -> `Succeeded`, `failure_event` -> `Failed`, and `timeout_event`
@@ -362,8 +361,7 @@ Kernel names only as machine detail, preserve primary/secondary origins and
 expansion steps (`can()`, membership, legacy operators), and represent
 source-less nodes as generated-only. Requirement tags are a separate
 traceability relation, not origin identities. Public Kernel v1 remains
-byte-compatible and does not expose the internal chain; publication belongs to
-v2 (#256).
+byte-compatible and does not expose the internal chain.
 
 Omitted domain aggregate initializers retain the current Bool `false`, Int
 `0`, enum first-member (rendered bare, as domain source itself accepts, no
@@ -372,7 +370,7 @@ value -- never `domain_kernel_source`'s kernel-mangled identifier), range
 lower-bound, external-placeholder `0`, `value_object` struct-literal,
 `Option<T>` -> `none`, `Set<T>` -> `Set {}`, or top-level `Map<K, V>` ->
 dense per-key `forall k: K { field[k] = <value default> }` behavior, and
-every one of those shapes emits `implicit_initial_value` (#731) -- the
+every one of those shapes emits `implicit_initial_value` -- the
 warning's dispatch matches the renderer's total dispatch
 (`fsl_core::domain_type_default`, the single owner of both the selected
 value and how any enum member within it is spelled). The warning carries the
@@ -380,10 +378,10 @@ selected value, reason, edition severities, source span, and -- where a safe
 insertion exists -- a machine-applicable edit. A top-level `Map<K, V>` field
 (no whole-field default exists at all) and a `Set<T>`/`value_object` field
 whose brace-literal default cannot yet round-trip through `fslc fmt`'s
-reformat-and-reparse pass (issue #770) omit the insertion and keep
+reformat-and-reparse pass omit the insertion and keep
 `edition_severity.next` at `warning`: `migrate --write` is fail-closed and
 would not write a corrupted file, but offering the insertion would trip
-#770's reformat failure and fail migration for the whole file, dropping
+that reformat failure and fail migration for the whole file, dropping
 every other edit in it too. An explicit whole-`Map` default and a `Map`
 nested as another `Map`'s value are both rejected ("whole-Map domain
 defaults are not supported" / "Map state requires explicit initialization
@@ -667,7 +665,7 @@ refinement <Name> {
   // formal params may be bare names or name: Type annotations matching the impl action
   // explicit map/action entries override maps auto; auto matches action params BY NAME
   // only (never position) — a different arity, a surplus/renamed impl param, or an
-  // unmatched abs param is a type error, never a positional guess (#494)
+  // unmatched abs param is a type error, never a positional guess
   preserve progress {                            // optional, only when upper leadsTo must be preserved
     respond <AbsLeadsTo> by <impl_act>, ...
   }
@@ -757,9 +755,8 @@ specification, const, `def` or its parameters, type, enum or its members, struct
 or its fields, state variable, action or its parameters, property, quantifier or
 aggregate binder, or an `is some(x)` pattern binding. They always resolve to the
 literal, so such a declaration is unreadable from every expression and the
-misreading is silent: `state { true: Bool }` with `invariant AlwaysHolds { true }`
-used to return `proved` while `init { true = false }` wrote a variable nothing
-could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
+misreading would be silent (`invariant AlwaysHolds { true }` reads the literal,
+never a state variable named `true`), so the declaration is rejected. No other word is reserved — `count`, `sum`, `stage`, `in`,
 `is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a,b)` `max(a,b)` `abs(a)`
