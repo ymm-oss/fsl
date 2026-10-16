@@ -338,9 +338,11 @@ both-side range `bad_call` was `unknown`, so that forbidden failed `--forbid
 unknown` and no longer does, and an OLD unknown action was preserved (the
 measured cases already exited 1 on the `unknown` that NEW's added action or
 changed arity produces; see
-`docs/design/DESIGN-forbidden.md` §2.1). Known gap (#1239): a NEW
-*setup* step that its guard disables is also reported as preserved, although NEW
-never runs the final step. Since #1213 a NEW final step that is enabled and then
+`docs/design/DESIGN-forbidden.md` §2.1). Since #1239 a NEW *setup* step that
+its guard disables is `unknown` / `forbidden_replay_failed` (`NEW forbidden setup
+was not enabled`): NEW never runs the final step, so the forbidden is not
+preserved; before it was, so such a diff now fails `--forbid unknown` (not
+`--forbid forbidden_relaxed`). Since #1213 a NEW final step that is enabled and then
 stops with a runtime violation is `forbidden_relaxed` too (its witness carries
 `violation`): a violation is not a rejection. An OLD final step or a NEW setup
 step that violates is `unknown` / `forbidden_replay_failed`; before #1213 all

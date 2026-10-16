@@ -1065,8 +1065,10 @@ NEW に対して replay します(`forbidden_relaxed`)。NEW の最後のステ�
 forbidden は今は `--forbid unknown` に落ちます。どの action も arity も指さない OLD の最後のステップは
 `unknown` / `forbidden_replay_failed` です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
 ステップは `forbidden_relaxed`、違反する OLD の最後のステップや NEW のセットアップの
-ステップは `unknown` / `forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
-ステップも保たれたと報告されます。
+ステップは `unknown` / `forbidden_replay_failed` です。#1239 から(破壊的変更)、ガードで無効な
+NEW のセットアップのステップも同じです。NEW は最後のステップを実行しないので、forbidden は
+保たれたことになりません(以前は保たれたと報告されていました)。これを落とす gate は `unknown`
+を指定します(
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md) の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の

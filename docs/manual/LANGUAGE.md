@@ -1111,8 +1111,9 @@ did, so such a forbidden now fails `--forbid unknown`. An OLD final step naming 
 `unknown` / `forbidden_replay_failed`. Since #1213 a NEW final step that is
 enabled and then stops with a runtime violation is `forbidden_relaxed`, and an
 OLD final step or a NEW setup step that violates is `unknown` /
-`forbidden_replay_failed` (known gap #1239: a guard-disabled NEW setup step is
-also reported as preserved; see
+`forbidden_replay_failed`. Since #1239 (breaking) so is a NEW setup step that
+its guard disables: NEW never runs the final step, so the forbidden is not
+preserved (it used to be), and a gate that must catch it lists `unknown` (see
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md), "Forbidden
 replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches

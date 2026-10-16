@@ -1191,8 +1191,9 @@ did, so such a forbidden now fails <code>--forbid unknown</code>. An OLD final s
 <code>unknown</code> / <code>forbidden_replay_failed</code>. Since #1213 a NEW final step that is
 enabled and then stops with a runtime violation is <code>forbidden_relaxed</code>, and an
 OLD final step or a NEW setup step that violates is <code>unknown</code> /
-<code>forbidden_replay_failed</code> (known gap #1239: a guard-disabled NEW setup step is
-also reported as preserved; see
+<code>forbidden_replay_failed</code>. Since #1239 (breaking) so is a NEW setup step that
+its guard disables: NEW never runs the final step, so the forbidden is not
+preserved (it used to be), and a gate that must catch it lists <code>unknown</code> (see
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a>, "Forbidden
 replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches

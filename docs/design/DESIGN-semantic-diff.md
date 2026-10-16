@@ -67,12 +67,17 @@ state before their values are matched to the NEW action parameter domains; NEW
 must not reinterpret a same-spelled nominal enum member as its own type.
 The finding carries `subject:"forbidden"`, the OLD case `id`, a stable
 `reason` (`forbidden_step_unrelatable` or `forbidden_replay_failed`), and the
-zero-based failing `step` plus `action` when available. A matching action that
-is disabled by its guard is a related rejection and therefore preserves the
-forbidden scenario; it is not reported as `unknown`. Known gap (issue #1239):
-the implementation applies this to a setup step as well, so a NEW setup step
-disabled by its guard is reported as preserved although NEW never runs the
-final step; only a disabled final step is evidence of a preserved rejection.
+zero-based failing `step` plus `action` when available. A matching NEW final
+step that is disabled by its guard is a related rejection and therefore
+preserves the forbidden scenario; it is not reported as `unknown`. Only the
+final step: a NEW setup step that its guard disables means NEW never runs the
+final step, so the forbidden is `unknown` / `forbidden_replay_failed` with
+`detail: "NEW forbidden setup was not enabled"` (issue #1239; before, it was
+reported as preserved, so a NEW that disabled a setup step and dropped the
+final step's guard passed `--forbid unknown`). An OLD setup step that is not
+enabled is `unknown` / `forbidden_replay_failed` the same way (`OLD forbidden
+setup was not enabled`). Neither is `forbidden_relaxed`: a gate that must catch
+them lists `unknown`.
 A final step that both OLD and NEW reject as `bad_call` outside a declared type
 is preserved too, even though NEW cannot relate its arguments to an action: on
 both sides, every same-named action of that arity has an argument outside a
@@ -95,9 +100,8 @@ enabled and then violates was never a rejection to preserve, so it is `unknown`
 with `forbidden_replay_failed`.
 A NEW setup step that is enabled and then violates is `unknown` with
 `forbidden_replay_failed` as well: NEW never reaches the final step, so it
-neither preserves nor relaxes the OLD rejection. The same reasoning applies to
-a NEW setup step that its guard disables, but that step is still reported as
-preserved (the known gap above, issue #1239).
+neither preserves nor relaxes the OLD rejection, as for a NEW setup step that
+its guard disables (above, #1239).
 
 ## Scope changes
 

@@ -16344,7 +16344,20 @@ fn forbidden_case_finding(
                 ));
             }
         };
-        let instance = instance?;
+        let Some(instance) = instance else {
+            if is_final {
+                // NEW's guard rejects the final step: the rejection is preserved.
+                return None;
+            }
+            // #1239: NEW never reaches the final step, so it neither preserves
+            // nor relaxes the OLD rejection (as for a violating setup step).
+            return Some(forbidden_unknown(
+                &case.id,
+                "forbidden_replay_failed",
+                Some((index, step)),
+                "NEW forbidden setup was not enabled",
+            ));
+        };
         let stepped = match monitor.step(&instance) {
             Ok(stepped) => stepped,
             Err(error) => {

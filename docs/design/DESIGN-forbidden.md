@@ -189,8 +189,12 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     is `unknown` / `forbidden_replay_failed` (OLD never rejected it). A NEW setup step that is
     enabled and then violates is `unknown` / `forbidden_replay_failed` too: NEW never reaches
     the final step, so it neither preserves nor relaxes the OLD rejection. A NEW setup step
-    that its guard disables never reaches the final step either, yet `fslc diff` still
-    reports it as preserved: a known gap tracked by issue #1239 (DESIGN-semantic-diff.md).
+    that its guard disables never reaches the final step either, so it is `unknown` /
+    `forbidden_replay_failed` too (`detail`: `NEW forbidden setup was not enabled`; issue
+    #1239, breaking: it used to be reported as preserved). Only a disabled NEW *final* step
+    preserves the OLD rejection. An OLD setup step that is not enabled is `unknown` /
+    `forbidden_replay_failed` (`OLD forbidden setup was not enabled`), as before
+    (DESIGN-semantic-diff.md).
   - The witness of a violation-carrying `forbidden_relaxed` differs from an accepted one:
     the final step was rolled back, so `trace` ends at the last setup step and `state` is the
     state before the final step; `violation` (`{kind, name}`) names what stopped it, and
@@ -467,6 +471,26 @@ diff` exits 0 in every row. Only the compose row changes an exit: before #1229 a
 NEW's `bad_call` counted as one outside a declared type, although its component bounds
 `Qty` by a verify scope.
 
+**#1239** (before: main at `ade95232`, v4.11.0; after: #1239 on top of it; debug binaries,
+each built in its own materialized tree). Only the `diff` judgment changes
+(`forbidden_case_finding`), so `diff`, `diff --git`, and `approval diff` are affected and
+no gate command is. OLD is the guarded Wallet (`withdraw` with `requires amount <= balance`,
+balance 50, `type Amount = 0..100`) with the forbidden `withdraw(10)` then `withdraw(60)`.
+For `FB-1`, `diff --depth 0` reports:
+
+| OLD → NEW | before | after | `--forbid forbidden_relaxed` | `--forbid unknown` |
+|---|---|---|---|---|
+| NEW adds `requires amount != 10` and relaxes the guard to `amount <= balance + 20` (the issue's case: the setup `withdraw(10)` is disabled, and NEW would accept the overdraw) | preserved | `unknown` / `forbidden_replay_failed`, `step: 0`, `detail: "NEW forbidden setup was not enabled"` | exit 0 → 0 | exit 0 → 1 |
+| the same NEW also declaring the forbidden (its own `check` is `forbidden_setup`) | preserved | same | exit 0 → 0 | exit 0 → 1 |
+| NEW tightens the guard to `amount <= balance - 5` (the final step is disabled; control) | preserved | preserved | exit 0 → 0 | exit 0 → 0 |
+| OLD whose setup is `withdraw(70)` (disabled in OLD) → NEW without `amount != 10` | `unknown` / `forbidden_replay_failed` (`OLD forbidden setup was not enabled`) | unchanged | exit 0 → 0 | exit 1 → 1 |
+| OLD against itself (control) | preserved | preserved | exit 0 → 0 | exit 0 → 0 |
+
+`--forbid forbidden_relaxed` keeps exiting 0 in the issue's case: NEW never runs the final
+step, so the finding is `unknown`, not a relaxation, and a gate that must catch it lists
+`unknown` (`--forbid forbidden_relaxed,unknown`), as for a NEW setup step that violates
+(#1213). The behaviour difference itself is still reported (`behavior_added`).
+
 ## 3. Ripple (verification engine and Monitor unmodified)
 
 - grammar.py: `forbidden_def` (`expect rejected` inline) + transformer.
@@ -506,7 +530,10 @@ naming the scope; in-scope guard refusals stay `requires_failed` in `check` and
 `scenarios`; a range-type violation stays `bad_call` alongside an out-of-scope id;
 override skip versus declared-scope error, and a widening override; `diff` of an OLD
 out-of-scope final step and of an OLD `bad_call` that a requirements or compose NEW only
-puts outside a verify scope). `fsl-core`'s `requirements_stage.rs` pins which types
+puts outside a verify scope), and `issue_1239_diff_forbidden_setup_disabled.rs` (`diff` of
+a NEW setup step its guard disables is `unknown` and fails `--forbid unknown` but not
+`--forbid forbidden_relaxed`; a NEW final step its guard disables stays preserved; an OLD
+setup step its guard disables is `unknown`). `fsl-core`'s `requirements_stage.rs` pins which types
 `verify_scope_type_names` reports for each document kind. The Worker's `check` / `verify`
 errors are pinned against native in `rust/fsl-wasm/src/lib.rs`.
 
