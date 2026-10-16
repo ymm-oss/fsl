@@ -7,8 +7,9 @@ use fslc_rust::literate_access::literate_access;
 use serde_json::{Map, Value, json};
 
 use super::{
-    block_on_native, display, envelope, error_output, json_mismatches, load_snapshot_value_object,
-    log_action_matches, mapping_json_expr, parse_params, read_jsonl_records, required_option_value,
+    CommandArgs, block_on_native, display, envelope, error_output, json_mismatches,
+    load_snapshot_value_object, log_action_matches, mapping_json_expr, parse_params,
+    read_jsonl_records, required_option_value,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -19,28 +20,29 @@ pub(super) fn causal_command(
         "usage: fslc causal <check|analyze|verify-expectations|observe-expectations|diff|ledger> ..."
             .to_owned()
     })?;
+    // Options may precede the file (#1250): each subcommand resolves it after
+    // its option loop, then gates it.
+    let file = |args: CommandArgs<_>| {
+        let path = args.single_positional(
+            || format!("fslc causal {subcommand} requires a file"),
+            |option| format!("unknown causal {subcommand} option '{option}'"),
+        )?;
+        Ok::<_, String>(literate_access(&format!("causal {subcommand}"), &path).map(|_| path))
+    };
+    let unknown = |option: &str| format!("unknown causal {subcommand} option '{option}'");
+    let mut args = CommandArgs::new(args);
     match subcommand.as_str() {
         "check" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc causal check requires a file".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("causal check", &path) {
-                return Ok(early_return);
+            while let Some(option) = args.next() {
+                args.positional(option, unknown)?;
             }
-            if let Some(option) = args.next() {
-                return Err(format!("unknown causal check option '{option}'"));
-            }
+            let path = match file(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_causal_check(&path))
         }
         "analyze" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc causal analyze requires a file".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("causal analyze", &path) {
-                return Ok(early_return);
-            }
             let mut projection = None;
             let mut profile = None;
             let mut format = "json".to_owned();
@@ -65,9 +67,13 @@ pub(super) fn causal_command(
                         "--lifecycle",
                     )?)),
                     "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
-                    _ => return Err(format!("unknown causal analyze option '{option}'")),
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = match file(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_causal_analyze(
                 &path,
                 projection.as_deref(),
@@ -79,13 +85,6 @@ pub(super) fn causal_command(
             ))
         }
         "verify-expectations" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc causal verify-expectations requires a file".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("causal verify-expectations", &path) {
-                return Ok(early_return);
-            }
             let mut depth = 8_usize;
             while let Some(option) = args.next() {
                 match option.as_str() {
@@ -94,23 +93,16 @@ pub(super) fn causal_command(
                             .parse()
                             .map_err(|_| "--depth requires a positive integer".to_owned())?;
                     }
-                    _ => {
-                        return Err(format!(
-                            "unknown causal verify-expectations option '{option}'"
-                        ));
-                    }
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = match file(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_causal_verify_expectations(&path, depth))
         }
         "observe-expectations" => {
-            let path =
-                PathBuf::from(args.next().ok_or_else(|| {
-                    "fslc causal observe-expectations requires a file".to_owned()
-                })?);
-            if let Err(early_return) = literate_access("causal observe-expectations", &path) {
-                return Ok(early_return);
-            }
             let mut from_log = None;
             let mut mapping = None;
             let mut scope_path = None;
@@ -151,13 +143,13 @@ pub(super) fn causal_command(
                             "--lifecycle-out",
                         )?));
                     }
-                    _ => {
-                        return Err(format!(
-                            "unknown causal observe-expectations option '{option}'"
-                        ));
-                    }
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = match file(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             let Some(from_log) = from_log else {
                 return Ok((error_output("usage", "--from-log is required"), 2));
             };
@@ -203,20 +195,6 @@ pub(super) fn causal_command(
             ))
         }
         "diff" => {
-            let before = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("causal diff", &before) {
-                return Ok(early_return);
-            }
-            let after = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("causal diff", &after) {
-                return Ok(early_return);
-            }
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--format" => {
@@ -224,19 +202,29 @@ pub(super) fn causal_command(
                             return Err("causal diff supports only --format json".to_owned());
                         }
                     }
-                    _ => return Err(format!("unknown causal diff option '{option}'")),
+                    _ => args.positional(option, unknown)?,
                 }
+            }
+            let mut positionals = args.into_positionals().map(PathBuf::from);
+            let mut operand = || {
+                positionals
+                    .next()
+                    .ok_or_else(|| "fslc causal diff requires two files".to_owned())
+            };
+            let before = operand()?;
+            if let Err(early_return) = literate_access("causal diff", &before) {
+                return Ok(early_return);
+            }
+            let after = operand()?;
+            if let Err(early_return) = literate_access("causal diff", &after) {
+                return Ok(early_return);
+            }
+            if let Some(option) = positionals.next() {
+                return Err(unknown(&option.to_string_lossy()));
             }
             Ok(run_causal_diff(&before, &after))
         }
         "ledger" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc causal ledger requires a file".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("causal ledger", &path) {
-                return Ok(early_return);
-            }
             let mut plans = Vec::new();
             let mut evidence = Vec::new();
             let mut lifecycle = Vec::new();
@@ -257,9 +245,13 @@ pub(super) fn causal_command(
                     )?)),
                     "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
                     "--format" => format = required_option_value(&mut args, "--format")?,
-                    _ => return Err(format!("unknown causal ledger option '{option}'")),
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = match file(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             if format != "json" {
                 return Err("causal ledger supports only --format json".to_owned());
             }
