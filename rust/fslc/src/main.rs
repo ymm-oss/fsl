@@ -1651,7 +1651,7 @@ fn command() -> Result<(Value, i32), String> {
                         );
                     }
                     _ => {
-                        args.positional(option, |option| format!("unknown diff option '{option}'"))?
+                        args.positional(option, |option| format!("unknown diff option '{option}'"))?;
                     }
                 }
             }
@@ -3262,7 +3262,7 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                         ));
                     }
                     _ => {
-                        args.positional(option, |_| "unexpected db observe argument".to_owned())?
+                        args.positional(option, |_| "unexpected db observe argument".to_owned())?;
                     }
                 }
             }
@@ -3467,7 +3467,7 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--logs" => {
-                        logs = Some(PathBuf::from(required_option_value(&mut args, &option)?))
+                        logs = Some(PathBuf::from(required_option_value(&mut args, &option)?));
                     }
                     "--baseline-logs" => {
                         baseline = Some(PathBuf::from(required_option_value(&mut args, &option)?));
@@ -3475,7 +3475,7 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                     "--property" => property = Some(required_option_value(&mut args, &option)?),
                     "--window" => window = Some(required_option_value(&mut args, &option)?),
                     "--baseline" => {
-                        baseline_label = Some(required_option_value(&mut args, &option)?)
+                        baseline_label = Some(required_option_value(&mut args, &option)?);
                     }
                     _ => args.positional(option, unknown)?,
                 }
