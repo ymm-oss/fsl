@@ -92,7 +92,11 @@ replayed under) was rejected by no guard (#1229), so it is `unknown` with
 `forbidden_step_unrelatable`. Before #1229 both were `unknown` /
 `forbidden_step_unrelatable`, and a compose NEW that rejected an OLD `bad_call`
 as `bad_call` preserved it. An OLD final step that names no action,
-or no variant of that arity, is `unknown` / `forbidden_replay_failed`. A NEW
+or no variant of that arity, or whose argument is not of its parameter's kind
+(an enum member or Bool for an integer parameter, an integer or another enum's
+member for an enum; #1241), is `unknown` / `forbidden_replay_failed`; an OLD
+`bad_call` whose argument NEW's parameter type makes a wrong kind is no NEW
+`bad_call`, so it is `unknown` / `forbidden_step_unrelatable`. A NEW
 final step that is enabled and then stops with a runtime violation is not a
 rejection either (DESIGN-forbidden.md §2, #1213): it is `forbidden_relaxed`, and
 its witness carries `violation` (`{kind, name}`). An OLD final step that is

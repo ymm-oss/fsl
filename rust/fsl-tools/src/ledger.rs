@@ -317,6 +317,9 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                     ForbiddenFailure::OutsideScope(message) => format!(
                         "禁止フローの最後の step の引数が検証の範囲の外にあり、ガードを試していない（拒否ではない。{message}）"
                     ),
+                    ForbiddenFailure::WrongKind(message) => format!(
+                        "禁止フローの最後の step の引数が宣言した型の値ではなく、step が書き誤りでガードを試していない（拒否ではない。{message}）"
+                    ),
                     ForbiddenFailure::Setup(step) => {
                         format!("禁止フローの前提 step {step} が実行できない（trace が壊れている）")
                     }
@@ -419,6 +422,10 @@ enum ForbiddenFailure<'a> {
     /// An argument of the final step is outside an `entity` / `number`
     /// verify scope, so no guard decided it (#1229).
     OutsideScope(&'a str),
+    /// An argument of the final step is not of its parameter's kind (a Bool
+    /// or an enum member for an integer, another enum), so the step is
+    /// malformed and no guard decided it (#1241).
+    WrongKind(&'a str),
     /// A setup step is not enabled or not ok (`forbidden_setup`).
     Setup(String),
     Other,
@@ -437,6 +444,9 @@ fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
         Some("forbidden") if raw.get("accepted_step").is_some() => ForbiddenFailure::Accepted,
         Some("forbidden") if raw.get("out_of_scope_argument").is_some() => {
             ForbiddenFailure::OutsideScope(raw.get("message").and_then(Value::as_str).unwrap_or(""))
+        }
+        Some("forbidden") if raw.get("wrong_kind_argument").is_some() => {
+            ForbiddenFailure::WrongKind(raw.get("message").and_then(Value::as_str).unwrap_or(""))
         }
         Some("forbidden") => raw
             .get("message")
@@ -471,6 +481,10 @@ fn translate(finding: &Finding) -> String {
             ),
             ForbiddenFailure::OutsideScope(_) => format!(
                 "禁止フロー『{}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。",
+                finding.name
+            ),
+            ForbiddenFailure::WrongKind(_) => format!(
+                "禁止フロー『{}』の最後の手順の引数が宣言した型の値ではなく（種類が違う）、ガードを試していないので禁止の証拠にならない。引数をその型の値に直す。",
                 finding.name
             ),
             ForbiddenFailure::Setup(_) => format!(
@@ -528,6 +542,7 @@ fn next_action(finding: &Finding) -> String {
                 ForbiddenFailure::OutsideScope(_) => {
                     "検証の範囲を広げる / step の引数を範囲内に直す"
                 }
+                ForbiddenFailure::WrongKind(_) => "step の引数を宣言した型の値に直す",
                 ForbiddenFailure::Setup(_) => "禁止フローの前提手順を修正",
                 ForbiddenFailure::Other => "付録の生 JSON を確認",
             },

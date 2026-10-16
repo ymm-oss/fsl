@@ -1149,7 +1149,8 @@ forbidden は今は <code>--forbid unknown</code> に落ちます。どの actio
 ステップは <code>unknown</code> / <code>forbidden_replay_failed</code> です。#1239 から(破壊的変更)、ガードで無効な
 NEW のセットアップのステップも同じです。NEW は最後のステップを実行しないので、forbidden は
 保たれたことになりません(以前は保たれたと報告されていました)。これを落とす gate は <code>unknown</code>
-を指定します(
+を指定します。引数の種類が違う OLD の最後のステップ(#1241)も <code>unknown</code> /
+<code>forbidden_replay_failed</code> です(
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a> の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
@@ -3046,8 +3047,14 @@ DESIGN-*.md があります)。</p>
   出力の実測は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1 にあります。
   scenario の <code>rejected_by</code>(testgen が assert します)は、
-  ガードによる拒否なら <code>requires_failed</code>、パラメータの宣言された範囲型や enum の
+  ガードによる拒否なら <code>requires_failed</code>、パラメータと同じ種類の値で宣言された範囲型の
   外の引数なら <code>bad_call</code> です(実装はデコードの境界でそれを拒否すべきです)。
+  <strong>#1241 から(破壊的変更)</strong>、種類の違う引数(<code>entity</code>・<code>number</code>・範囲型のパラメータに
+  enum のメンバーや Bool、enum のパラメータに整数や別の enum のメンバー。例:
+  <code>c: Case</code> に <code>respond(Waiting)</code>)は <code>bad_call</code> ではなく書き誤りのステップです。
+  forbidden の gate を走らせるすべてのコマンドで、<code>wrong_kind_argument</code>
+  (<code>{parameter, value, type}</code>)付きの <code>kind:"forbidden"</code> エラーになります。移行するには、
+  パラメータの型の値を書きます。
   <strong>#1229 から(破壊的変更)</strong>、<code>entity</code>(<code>verify { instances }</code>。<code>process</code> もこれで
   範囲が決まります)や <code>number</code>(<code>verify { values }</code>)のパラメータの検証の範囲の外の
   引数は拒否ではありません。<code>instances Case = 3</code> の下で最後のステップ <code>accept(7)</code> は

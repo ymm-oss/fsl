@@ -1068,7 +1068,8 @@ forbidden は今は `--forbid unknown` に落ちます。どの action も arity
 ステップは `unknown` / `forbidden_replay_failed` です。#1239 から(破壊的変更)、ガードで無効な
 NEW のセットアップのステップも同じです。NEW は最後のステップを実行しないので、forbidden は
 保たれたことになりません(以前は保たれたと報告されていました)。これを落とす gate は `unknown`
-を指定します(
+を指定します。引数の種類が違う OLD の最後のステップ(#1241)も `unknown` /
+`forbidden_replay_failed` です(
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md) の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
@@ -3020,8 +3021,14 @@ DESIGN-*.md があります)。
   出力の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
   scenario の `rejected_by`(testgen が assert します)は、
-  ガードによる拒否なら `requires_failed`、パラメータの宣言された範囲型や enum の
+  ガードによる拒否なら `requires_failed`、パラメータと同じ種類の値で宣言された範囲型の
   外の引数なら `bad_call` です(実装はデコードの境界でそれを拒否すべきです)。
+  **#1241 から(破壊的変更)**、種類の違う引数(`entity`・`number`・範囲型のパラメータに
+  enum のメンバーや Bool、enum のパラメータに整数や別の enum のメンバー。例:
+  `c: Case` に `respond(Waiting)`)は `bad_call` ではなく書き誤りのステップです。
+  forbidden の gate を走らせるすべてのコマンドで、`wrong_kind_argument`
+  (`{parameter, value, type}`)付きの `kind:"forbidden"` エラーになります。移行するには、
+  パラメータの型の値を書きます。
   **#1229 から(破壊的変更)**、`entity`(`verify { instances }`。`process` もこれで
   範囲が決まります)や `number`(`verify { values }`)のパラメータの検証の範囲の外の
   引数は拒否ではありません。`instances Case = 3` の下で最後のステップ `accept(7)` は

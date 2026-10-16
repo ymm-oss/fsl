@@ -342,7 +342,9 @@ changed arity produces; see
 its guard disables is `unknown` / `forbidden_replay_failed` (`NEW forbidden setup
 was not enabled`): NEW never runs the final step, so the forbidden is not
 preserved; before it was, so such a diff now fails `--forbid unknown` (not
-`--forbid forbidden_relaxed`). Since #1213 a NEW final step that is enabled and then
+`--forbid forbidden_relaxed`). Since #1241 an OLD final step whose argument is
+not of its parameter's kind (`respond(Waiting)` with `c: Case`) is `unknown` /
+`forbidden_replay_failed` too, where it was preserved. Since #1213 a NEW final step that is enabled and then
 stops with a runtime violation is `forbidden_relaxed` too (its witness carries
 `violation`): a violation is not a rejection. An OLD final step or a NEW setup
 step that violates is `unknown` / `forbidden_replay_failed`; before #1213 all

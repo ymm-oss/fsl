@@ -29,9 +29,11 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
   - `requires_failed` — every argument lies in its parameter domain and a `requires` guard
     refuses the call. A "correct prohibition by a guard" that is invisible as a safety
     invariant;
-  - `bad_call` — every action of that name and arity has an argument outside its declared
-    parameter type (DESIGN-bridge.md 1.2), so no guard is ever evaluated and an
-    implementation must reject the call at its decoding boundary.
+  - `bad_call` — every action of that name and arity has an argument of the parameter's
+    kind that lies outside its declared parameter type (DESIGN-bridge.md 1.2) — an integer
+    outside a range type such as `withdraw(500)` with `amount: 0..100` — so no guard is ever
+    evaluated and an implementation must reject the call at its decoding boundary. An
+    argument of another kind is no `bad_call` but a malformed step (issue #1241, below).
 
   The scenario's `rejected_by` names which one, and the generated negative test asserts that
   kind, so an out-of-domain call is never asserted as a guard refusal (issue #1212). The Monitor's
@@ -110,6 +112,42 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     if implementations are to reject an `entity` / `number` outside its scope as part of
     their type contract; then this case returns to `bad_call` and the testgen contract
     must say so.
+- **Argument of the wrong kind (issue #1241, breaking).** A last step whose argument is not
+  of its parameter's kind at all — an enum member or a Bool for an `entity` / `number` /
+  range parameter (`respond(Waiting)` or `respond(true)` with `c: Case`, `withdraw(Red)`
+  with `amount: Amount`), a member of another enum or a Bool for an enum parameter, an
+  integer for an enum parameter (step arguments are not ordinals: `paint(1)` is not
+  `paint(Blue)`) — is a spec typo, not a rejection: no guard was evaluated, and no
+  implementation boundary is tested by a call the implementation's decoder could not even
+  express. It used to count as `bad_call` and satisfy the forbidden (#1212 read "outside the
+  declared type" as "outside the domain"). It is now a `kind: "forbidden"` error carrying
+  `failed_step`, `step`, `step_results: []`, `message` (`argument <value> for '<param>' of
+  '<action>' is not a value of type '<type>' in forbidden, so no guard was evaluated`),
+  `wrong_kind_argument` (`{parameter, value, type}`, `type` as the source names the
+  parameter's type: `Case`, `Amount`, `Bool`, `0..100`), a `loc` at that step, and a hint
+  to change the step to a value of that type.
+  - Kind: an integer for an integer parameter (a range, `entity`, `number`, `process`, or
+    `Int`), a Bool for `Bool`, a member of the parameter's own enum for an enum. A value of
+    the right kind outside the declared range stays `bad_call` (#1212) and one outside a
+    verify scope stays the #1229 error.
+  - Classification is per same-named action, as above: `requires_failed` if one admits
+    every argument; else the #1229 error if one is excluded only by verify scopes; else
+    `bad_call` if one has every wrong argument of its kind and one outside a declared range;
+    else this error. Within one action a wrong-kind argument decides, so `pay(500, 3)` with
+    `urgent: Bool` is this error although 500 is also outside `Amount`. The same
+    `requirement_unenabled_step` serves every command listed in §2.1 and the Worker.
+  - `fslc diff`: such an OLD final step is `unknown` / `forbidden_replay_failed` (no OLD
+    rejection), like the #1229 case. An OLD `bad_call` that NEW's declared types make a
+    wrong kind is no NEW `bad_call`, so it is `unknown` / `forbidden_step_unrelatable`.
+  - `fslc ledger` summarizes the error as a final-step argument that is not a value of its
+    declared type; its next action is the error's hint.
+  - Migration: every command that runs the gate moves to exit 2 as for #1229, with the same
+    three exceptions (`explain`, `approval create --kind ledger`, `approval check` of a
+    ledger record); §2.1 has the measured table. The fix is to write a value of the
+    parameter's type: a member name of the right enum, an integer for an integer
+    parameter (the case or amount the forbidden is about). Corpus sweep (§6): no corpus
+    forbidden has such a step. No opt-out: a forbidden that "passes" on a step no
+    implementation can receive asserts nothing.
 - **Strict default (issue #1213, breaking).** A last step that is enabled and then
   stops with a runtime **violation** (`invariant` / `trans` / `ensures` / `type_bound` /
   `partial_op`, every kind the Monitor reports for an enabled step) is **not** a rejection:
@@ -491,6 +529,48 @@ step, so the finding is `unknown`, not a relaxation, and a gate that must catch 
 `unknown` (`--forbid forbidden_relaxed,unknown`), as for a NEW setup step that violates
 (#1213). The behaviour difference itself is still reported (`behavior_added`).
 
+**#1241** (before: main at `ade95232`, v4.11.0; after: #1241 on top of #1239; debug
+binaries as above). The specs are the issue's `CaseScope` (`entity Case`, unguarded
+`respond(c: Case)`, `instances Case = 3`) with the last step `respond(Waiting)`; a Wallet
+(`withdraw(amount: Amount)`, `type Amount = 0..100`, guarded by `requires amount <=
+balance`) with the last step `withdraw(Red)`; and the first plus
+`invariant NoneAccepted { forall c: Case { cases[c] != Accepted } }`, which `accept` breaks
+at depth 1 away from the forbidden trace. Default depth 3:
+
+| command | `respond(Waiting)` | `withdraw(Red)` | `respond(Waiting)`, with `NoneAccepted` |
+|---|---|---|---|
+| `check` | exit 0 → 2: `ok` → the error (`message`, `failed_step`, `step`, `step_results: []`, `wrong_kind_argument`, hint, `loc`) | same | same |
+| `verify` at `--depth` 1 and 3 | `verified` (exit 0) → 2 | same | `violated` (exit 1) → 2, no counterexample |
+| `verify --engine induction` | `proved` (exit 0) → 2 | same | `violated` (exit 1) → 2 |
+| `verify --engine explicit` | `verified` (exit 0) → 2 | `proved` (exit 0) → 2 | `violated` (exit 1) → 2 |
+| `sweep --depth 1..3` | `sweep_passed` (exit 0) → 2 | same | `sweep_failed` (exit 1) → 2 |
+| `chain` | `verified` (exit 0) → `kind: "chain"`, `failed: ["requirements"]`, the layer's `detail` is the error (exit 2) | same | `violated` (exit 1) → 2, same |
+| `scenarios` | exit 0 with every scenario, the forbidden one as `rejected_by: "bad_call"` → 2, no scenarios | same | `violated` (exit 1) → 2 |
+| `testgen` | exit 0 writing a test that asserts `bad_call` → 2, no file | same | `violated` (exit 1), no file → 2, no file |
+| `mutate --depth 1` | `mutated` (exit 0) → 2, no mutants | same | `violated` (exit 1) → 2 |
+| `html` | exit 0 → 2; the report is still written | same | exit 1 → 2; the report is still written |
+| `ledger` | exit 0 → 2; the ledger is still written and gains an `FB-1` row (the argument is not a value of its declared type; next action: the hint) | same | exit 1 → 2; same |
+| `counterexample export` | exit 2 → 2: `kind: "semantics"` (nothing to export) → the error; no file before or after | same | exit 1 writing the `NoneAccepted` reproducer → 2, no file |
+| `explain` | exit 0 → 0, but `witnesses` goes from 3 entries to `[]` | exit 0 → 0, 2 entries → `[]` | exit 0 → 0; `witnesses` was and stays `[]` |
+| `approval create --kind scenarios` | exit 0 creating a record → 2 (the error), no record | same | exit 2 (`violated`) → 2 (the error) |
+| `approval create --kind html` | exit 0 creating a record → 2, no record (stdout is the `html` result) | same | exit 2 → 2 |
+| `approval create --kind ledger` | exit 0 → 0, a record of the ledger that now lists the error | same | exit 2 (`kind: "semantics"`) → exit 0, a record |
+| `approval check` of a record created before | `scenarios`: `approved` → the error (exit 2); `html`: `approved` → exit 2; `ledger`: `approved` → `drifted` (exit 0) | same | none could be created |
+| Worker `check` / `verify` | the native error, pinned by the unit test `worker_reports_a_wrong_kind_forbidden_final_step_like_native` | same function | same function |
+
+The controls keep their classification (`issue_1241_forbidden_wrong_kind.rs`): `withdraw(-1)`
+stays `bad_call` (as `withdraw(500)` in `issue_1212_forbidden_bad_call.rs`), and a member of
+the parameter's own enum that the guard refuses stays `requires_failed`.
+
+For `FB-1`, `diff --depth 0` reports:
+
+| OLD → NEW | before | after | `--forbid unknown` |
+|---|---|---|---|
+| `respond(Waiting)` or `withdraw(Red)` against itself | preserved | `unknown` / `forbidden_replay_failed` (`OLD argument ... is not a value of type ...`) | exit 0 → 1 |
+| OLD `add(9)` with `q: Amt`, `type Amt = 0..3` (a `bad_call`) → NEW with `q: Color` | preserved | `unknown` / `forbidden_step_unrelatable` | exit 1 → 1 (the parameter type change is already an `unknown` finding) |
+
+`--forbid forbidden_relaxed` exits 0 before and after in every row.
+
 ## 3. Ripple (verification engine and Monitor unmodified)
 
 - grammar.py: `forbidden_def` (`expect rejected` inline) + transformer.
@@ -530,10 +610,18 @@ naming the scope; in-scope guard refusals stay `requires_failed` in `check` and
 `scenarios`; a range-type violation stays `bad_call` alongside an out-of-scope id;
 override skip versus declared-scope error, and a widening override; `diff` of an OLD
 out-of-scope final step and of an OLD `bad_call` that a requirements or compose NEW only
-puts outside a verify scope), and `issue_1239_diff_forbidden_setup_disabled.rs` (`diff` of
-a NEW setup step its guard disables is `unknown` and fails `--forbid unknown` but not
-`--forbid forbidden_relaxed`; a NEW final step its guard disables stays preserved; an OLD
-setup step its guard disables is `unknown`). `fsl-core`'s `requirements_stage.rs` pins which types
+puts outside a verify scope), `issue_1241_forbidden_wrong_kind.rs` (an enum member or a
+Bool for an `entity` and a range parameter, another enum's member, a Bool, and an integer for
+an enum parameter are errors in `check`, located at the step; `verify` with BMC, induction,
+and explicit, `sweep`, `scenarios`, `testgen`, `mutate`, `counterexample export`, and the
+`[requirements]` layer of `chain` return the error, `html` and `ledger` exit 2, and `ledger`
+names the malformed argument; a wrong-kind argument decides over an out-of-range one in the
+same call; a value below a range stays `bad_call` and an in-kind enum member the guard
+refuses stays `requires_failed`; `diff` of an OLD wrong-kind final step), and
+`issue_1239_diff_forbidden_setup_disabled.rs` (`diff` of a NEW setup step its guard disables
+is `unknown` and fails `--forbid unknown` but not `--forbid forbidden_relaxed`; a NEW final
+step its guard disables stays preserved; an OLD setup step its guard disables is `unknown`).
+`fsl-core`'s `requirements_stage.rs` pins which types
 `verify_scope_type_names` reports for each document kind. The Worker's `check` / `verify`
 errors are pinned against native in `rust/fsl-wasm/src/lib.rs`.
 
@@ -614,3 +702,17 @@ every run).
   the unguarded `respond(2)` under `instances Case = 2`) and stay `ok` otherwise
   (`respond(1, 9)`, the guarded `respond(2)` under `instances Case = 3`, and the kernel
   and `type Case = 0..2` specs).
+- #1239 and #1241, base main at `ade95232` (v4.11.0) → head with both changes, each a
+  debug binary. The tree now holds 563 `.fsl` files under the four directories. `fslc
+  check` for every file: verdict (`result`, `kind`, `message`) changes 0. For the
+  forbidden-bearing files other than `examples/agentic_rag/agentic_rag_requirements.fsl`
+  (20 files whose `forbidden` starts a line), `scenarios --depth 8 --deadlock ignore` and
+  the self-diff `diff <file> <file> --depth 2 --forbid forbidden_relaxed,unknown` were
+  compared as whole JSON (with `cache` and the three wall-clock fields removed) and exit
+  status: differences 0. For `agentic_rag` only the self-diff was run (identical,
+  `no_semantic_change`, exit 0 on both); its `scenarios --depth 8` exceeded 14 minutes on
+  the loaded machine and was not compared, but it changes only if a forbidden final step
+  has a wrong-kind argument, which `check` (unchanged) would already report. No corpus
+  forbidden has a wrong-kind final step, and a self-diff cannot reach the #1239 case
+  (OLD and NEW enable the same setup steps), so neither transition set of §2 is
+  inhabited by the corpus.
