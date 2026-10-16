@@ -2628,8 +2628,9 @@ is the same located `error` (exit 2) under `verify` too; a preservation
 refinement that fails internally is `error`/`internal` (exit 3) under both.
 Consumers of the `check`/`verify` envelope read the folded verdict: a
 `fslc chain` spec layer fails, `fslc ledger`, `fslc html`, and `fslc mutate`
-exit 1 from the same baseline, and the browser Worker folds `check` and
-`verify` the same way. This changed exit codes: before 4.11 a failed
+exit 1 from the same baseline (the ledger body also states that verdict and
+lists every preservation with its result, failing ones marked), and the
+browser Worker folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
 preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
 `verify` reported no `governance` section at all (and answered `verified` even
 for a contract `check` rejected). A CI that gated on the exit

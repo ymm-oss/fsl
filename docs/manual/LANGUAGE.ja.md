@@ -2531,7 +2531,8 @@ governance 契約のエラー(委譲先の business ファイル、control、`sa
 `verify` でも同じ位置付きの `error`(exit 2)です。preservation の refinement が内部で
 失敗した場合は、どちらでも `error`/`internal`(exit 3)です。`check`/`verify` の封筒を読む側は
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
-`fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し、ブラウザの Worker も
+`fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
+すべての preservation とその結果を、失敗したものに印を付けて示します)、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
 exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が

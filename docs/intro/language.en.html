@@ -2675,8 +2675,9 @@ is the same located <code>error</code> (exit 2) under <code>verify</code> too; a
 refinement that fails internally is <code>error</code>/<code>internal</code> (exit 3) under both.
 Consumers of the <code>check</code>/<code>verify</code> envelope read the folded verdict: a
 <code>fslc chain</code> spec layer fails, <code>fslc ledger</code>, <code>fslc html</code>, and <code>fslc mutate</code>
-exit 1 from the same baseline, and the browser Worker folds <code>check</code> and
-<code>verify</code> the same way. This changed exit codes: before 4.11 a failed
+exit 1 from the same baseline (the ledger body also states that verdict and
+lists every preservation with its result, failing ones marked), and the
+browser Worker folds <code>check</code> and <code>verify</code> the same way. This changed exit codes: before 4.11 a failed
 preservation left <code>check</code> at <code>ok</code> and <code>verify</code> at <code>verified</code>, both exit 0, and
 <code>verify</code> reported no <code>governance</code> section at all (and answered <code>verified</code> even
 for a contract <code>check</code> rejected). A CI that gated on the exit

@@ -200,6 +200,36 @@ fn verification_baseline_consumers_inherit_the_folded_verdict() {
     }
 }
 
+/// Issue #1316: the ledger's exit already carried the folded verdict, but its
+/// Markdown body showed neither that verdict nor any preservation result. The
+/// body now agrees with the exit: it names the verdict and every preservation
+/// with its result, for a passing governance document too.
+#[test]
+fn ledger_body_shows_the_verdict_and_the_preservations_its_exit_reflects() {
+    let dir = scratch("ledger-body");
+
+    let (failing, failing_status) = fslc(&dir, &["ledger", "governance.fsl", "-o", "failing.md"]);
+    assert_eq!(failing_status, 1, "{failing:#}");
+    let body = fs::read_to_string(dir.join("failing.md")).expect("read ledger");
+    assert!(body.contains("- 検証判定: `refinement_failed`\n"), "{body}");
+    assert!(
+        body.contains("| `P` | `A` → `I` | `CTRL-1` | 🔴 `refinement_failed` |\n"),
+        "{body}"
+    );
+
+    let (passing, passing_status) = fslc(
+        &dir,
+        &["ledger", "governance_refines.fsl", "-o", "passing.md"],
+    );
+    assert_eq!(passing_status, 0, "{passing:#}");
+    let body = fs::read_to_string(dir.join("passing.md")).expect("read ledger");
+    assert!(body.contains("- 検証判定: `verified`\n"), "{body}");
+    assert!(
+        body.contains("| `P` | `A` → `I` | `CTRL-1` | 🟢 `refines` |\n"),
+        "{body}"
+    );
+}
+
 /// A preservation `verify` cannot evaluate is the same located `error` (exit
 /// 2) `check` reports, not `verified` over the document's trivial kernel.
 #[test]

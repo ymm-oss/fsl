@@ -62,6 +62,14 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 1. **Header** — the guarantee limit in positive form ("BMC: depth N までの全実行を
    網羅" / "k帰納法で全実行を証明") + the honesty line ("保証するのは内部整合;
    intent fidelity is borne by the per-row 判断").
+   - **governance preservation** (governance documents only, issue #1316) —
+     when the verification envelope carries a `governance` section, the
+     top-level verdict (`検証判定`, the verify `result` after the #1303 fold)
+     and one row per `preservation` in declaration order: name, `before` →
+     `after`, preserved controls, and its own `result`, 🟢 for `refines` and
+     🔴 for anything else (the fold's own predicate). Every preservation is
+     listed, passing ones included, so the body agrees with the exit code. A
+     ledger without a `governance` section is unchanged.
 2. **未決定一覧** — when `undecided:` metadata exists, declaration / reason /
    state-dependency-derived affected requirement IDs. The marker is explicitly
    identified as metadata, not a verification condition.
