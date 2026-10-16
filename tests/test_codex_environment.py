@@ -134,6 +134,7 @@ def test_canonical_fsl_skills_are_discoverable_without_copies() -> None:
         "fsl-design-review",
         "fsl-from-code",
         "fsl-requirements",
+        "fsl-verify",
     ]
     for name in names:
         link = AGENT_SKILLS / name
