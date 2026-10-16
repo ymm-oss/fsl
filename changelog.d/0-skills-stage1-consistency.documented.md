@@ -12,4 +12,6 @@ the current rule is kept. The skills no longer point at repository-only paths (`
 `docs/`, `specs/`, `schemas/`) that a mise or install.sh user does not
 have; the needed gist is stated in the skill instead. The business, requirements, and design check loops now include `fslc
 lint`, and `--requirements` is taught as a file of IDs (one per line), not a
-comma list.
+comma list. The `examples/e2e` IDs follow the built-in ID policy (`POL-EXPENSE-001`,
+`REQ-EXPENSE-001`, `AC-EXPENSE-001`, `MODEL-EXPENSE-001`, ...): the business
+and requirements layers are lint-clean, and every verdict is unchanged.

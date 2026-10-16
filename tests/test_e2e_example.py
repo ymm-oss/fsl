@@ -35,8 +35,8 @@ def _run(args, cwd=ROOT, check=True):
 def test_e2e_chain_verifies_refines_and_implementation_passes():
     business = run_verify(str(E2E / "1_business.fsl"), 8, "ignore", engine="induction")
     assert business["result"] == "proved"
-    assert "CTRL-1" in business["leads_to"]
-    assert "CTRL-2" in business["leads_to"]
+    assert "POL-EXPENSE-001" in business["leads_to"]
+    assert "POL-EXPENSE-002" in business["leads_to"]
 
     requirements = run_verify(str(E2E / "2_requirements.fsl"), 8, "ignore")
     assert requirements["result"] == "verified"
@@ -54,7 +54,7 @@ def test_e2e_chain_verifies_refines_and_implementation_passes():
         for scenario in scenarios["scenarios"]
         if scenario["kind"] == "acceptance"
     }
-    assert {"acceptance_AC-1", "acceptance_AC-2"} <= acceptance_names
+    assert {"acceptance_AC-EXPENSE-001", "acceptance_AC-EXPENSE-002"} <= acceptance_names
 
     design = run_verify(str(E2E / "3_design.fsl"), 8, "ignore", engine="induction")
     assert design["result"] == "proved"

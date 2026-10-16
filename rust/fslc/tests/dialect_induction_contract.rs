@@ -124,15 +124,15 @@ fn business_requirements_and_governance_pin_native_induction_contracts() {
         match case.path {
             "examples/e2e/1_business.fsl" => {
                 assert_eq!(
-                    output["leads_to"]["CTRL-1"]["checked_to_depth"], 8,
+                    output["leads_to"]["POL-EXPENSE-001"]["checked_to_depth"], 8,
                     "{output:#}"
                 );
                 assert_eq!(
-                    output["leads_to"]["CTRL-2"]["checked_to_depth"], 8,
+                    output["leads_to"]["POL-EXPENSE-002"]["checked_to_depth"], 8,
                     "{output:#}"
                 );
                 assert_eq!(
-                    output["reachables"]["CanPay"]["witnessed_at_step"], 3,
+                    output["reachables"]["GOAL-EXPENSE-001"]["witnessed_at_step"], 3,
                     "{output:#}"
                 );
             }
