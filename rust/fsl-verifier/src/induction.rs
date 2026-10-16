@@ -407,39 +407,6 @@ fn key_domain_sites(model: &KernelModel) -> BTreeSet<Site> {
         .collect()
 }
 
-/// The `not_covered` entry of a `proved` k-induction verdict whose proof
-/// leaves i64 overflow unchecked (#1263).
-pub const NOT_COVERED_INT_OVERFLOW: &str = "int_overflow";
-
-/// What a `proved` k-induction verdict on `model` does not cover, as the
-/// stable spellings of the envelope's `not_covered` array (#1263).
-///
-/// The step case and the step obligation (§2.6 of
-/// `docs/design/DESIGN-induction.md`) reason over unbounded integers and do
-/// not ask checked i64 overflow; only the bounded base case does. So a
-/// `proved` verdict says nothing about overflow in a state beyond the base
-/// depth. [`NOT_COVERED_INT_OVERFLOW`] is listed when some site the proof
-/// covers -- an invariant, `trans`, `leadsTo` trigger/goal/measure,
-/// `terminal`, guard, body or `ensures` -- holds an operator that can
-/// overflow (the obligation catalog's non-vacuous `NoOverflow` rows: `+ - *
-/// / %`, unary `-`, `abs`, `sum`). It is syntactic, so a spec whose
-/// arithmetic only ever sees small bounded values carries it too; a spec
-/// with no such operator at those sites gets an empty list. `init` is not a
-/// proof site: the base case evaluates it with overflow checked (#1258).
-#[must_use]
-pub fn induction_not_covered(model: &KernelModel) -> Vec<&'static str> {
-    let overflow = catalog(model).obligations.iter().any(|row| {
-        row.id.kind == ObligationKind::NoOverflow
-            && !row.statically_vacuous
-            && !matches!(row.id.site, Site::Init)
-    });
-    if overflow {
-        vec![NOT_COVERED_INT_OVERFLOW]
-    } else {
-        Vec::new()
-    }
-}
-
 fn site_ref(name: &str, span: fsl_core::Span) -> SiteRef {
     SiteRef {
         name: name.to_owned(),
