@@ -137,9 +137,13 @@ skill produced.
    machine-applicable `@requirement(...)` replacement for every non-canonical
    form, and with `non_canonical_id` for an ID outside the active policy.
    Not done until `fslc lint` also reports no findings.
-   Then `fslc verify`, and for stable requirements
-   `fslc verify --engine induction`. Run `fslc scenarios` to hand development the
-   acceptance/forbidden skeletons.
+   `--strict-tags` findings are warnings on an exit-0 `ok` result, so read
+   `warnings[]`, not only the exit code.
+   Then `fslc verify --depth 8` (read `implements.result`), and for stable
+   requirements `fslc verify --engine induction`. Run `fslc scenarios` to hand
+   development the acceptance/forbidden skeletons. Reading those results,
+   repairing from them, measuring strength with `mutate`, and the completion
+   report format are in `../fsl-verify/SKILL.md`.
 
 ## Guardrails
 

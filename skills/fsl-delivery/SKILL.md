@@ -71,6 +71,9 @@ rules in this skill.
    - `fslc lint <file>` (no findings)
    - `fslc verify <file> --depth 8`
    - `fslc verify <file> --engine induction`
+   Read the results with `../fsl-verify/SKILL.md`: several outcomes exit 0
+   without passing (warnings, `not_evaluated` seams, `diff` findings, `mutate`
+   survivors).
 5. Connect layers downward. Each handoff is a **refinement seam (a contract), not a
    plain baton pass** — the seam itself is verified, and a green chain is exactly as
    strong as the soundness of these seams:
@@ -93,6 +96,7 @@ rules in this skill.
      sound refinement (see `../fsl/references/impl.md` §9).
 6. Report proof categories separately. Never collapse "model is verified",
    "design refines requirements", and "implementation conforms" into one claim.
+   Use the completion report format in `../fsl-verify/SKILL.md`.
 
 ## Stage Gates
 

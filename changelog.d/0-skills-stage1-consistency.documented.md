@@ -15,3 +15,18 @@ lint`, and `--requirements` is taught as a file of IDs (one per line), not a
 comma list. The `examples/e2e` IDs follow the built-in ID policy (`POL-EXPENSE-001`,
 `REQ-EXPENSE-001`, `AC-EXPENSE-001`, `MODEL-EXPENSE-001`, ...): the business
 and requirements layers are lint-clean, and every verdict is unchanged.
+A new distributed skill, `fsl-verify`, owns verification. It
+gives the command sequence per layer and change kind (`check
+--strict-tags --requirements` → `lint` → `verify --depth 8` → `--engine
+induction` → `refine` / `implements.result` → `diff --forbid` → `mutate
+--by-requirement` → `chain`), a table of results that exit 0 or look green
+without passing (bounded `verified`; `proved` only at the run's
+`instances` / `values`; `deadlock`, `no_user_invariants`, and
+`unreferenced_requirement` warnings; `unknown_cti`, `unknown_budget`,
+`not_evaluated` from `--property`, `not_run`, `closure: false`; `diff`
+without `--forbid`; `mutate` survivors), the fix loop that never weakens
+the upper layer, prohibited shortcuts (lower depth or scope, deleted
+properties, ignore flags or `--property` in the completion run), how to
+read `kill_rate` and `--by-requirement`, and a fixed completion-report
+table with proof classes. The business, requirements, design, and
+delivery skills keep their minimal check loop and point to it.

@@ -104,13 +104,11 @@ for a contract decision.
    (a file with one requirement ID per line, not a comma list).
    A bounded `verified` says nothing past the depth and the domain sizes it
    ran at, and a design with many interleavings can hold its first violation
-   beyond the default depth. If induction returns `unknown_cti`, follow
-   `../fsl/references/commands.md`: try `--engine explicit` for closure before
-   hunting lemmas. If neither closes within the budget, raise `--depth` as far
-   as the budget allows and report the deepest depth that returned `verified`
-   as the bound of the claim. For properties about interactions between
+   beyond the default depth. For properties about interactions between
    entities, see "Domain sizing" in `../fsl/references/practices.md`: a result
    at a smaller size, even a closed `proved`, does not cover a larger one.
+   What to do with `unknown_cti` / `unknown_budget`, how to repair, and the
+   completion report format are in `../fsl-verify/SKILL.md`.
 5. Write the mapping file:
    - `map abs_var = expr` or `map abs_var[x: T] = expr`
    - `action impl_action(...) -> abs_action(...)` for visible effects
@@ -141,7 +139,8 @@ for a contract decision.
 - When you change an existing design spec, re-run `fslc verify` on the changed
   design and `fslc refine` against the unchanged requirements, and, when the
   old and new design share state and action names, also run
-  `fslc diff old_design.fsl new_design.fsl --forbid behavior_removed`.
+  `fslc diff old_design.fsl new_design.fsl --forbid behavior_removed,unknown`
+  (add the other kinds your change policy rejects; see `../fsl-verify/SKILL.md`).
   `refine` passes a change that only makes the design refuse more (a
   strengthened guard); `diff` reports it as `behavior_removed`. Decide whether
   that refusal is intended before accepting or reverting the change (see

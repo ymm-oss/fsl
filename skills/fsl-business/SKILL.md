@@ -55,8 +55,11 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
    - `goal G "..." all Case can be Target or OtherTarget`
 4. Run `fslc check`, then `fslc lint <file>` (exit 1 with `non_canonical_id` on a
    policy/goal/control ID outside the ID policy — use `POL-SCOPE-001`,
-   `GOAL-SCOPE-001`, `CTRL-SCOPE-001`), then `fslc verify --engine induction`.
-   Done means lint reports no findings as well as a clean verify. A pure stage-graph
+   `GOAL-SCOPE-001`, `CTRL-SCOPE-001`), then `fslc verify --depth 8` and
+   `fslc verify --engine induction`.
+   Done means lint reports no findings as well as a clean verify. Which result
+   counts as clean, what to do with `unknown_cti`, and the completion report
+   format are in `../fsl-verify/SKILL.md`. A pure stage-graph
    business spec needs no flag for intentional stops: `terminal { }` is derived
    automatically from each process's sink stages (stages with no outgoing
    `transition`), so a spec that ends cleanly at those stages verifies with no

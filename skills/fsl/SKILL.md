@@ -1,6 +1,6 @@
 ---
 name: fsl
-description: Shared FSL language and verifier reference for writing, checking, verifying, repairing, explaining, mutating, refining, replaying, generating scenarios/test scaffolds, and interpreting fslc JSON results. Use directly for FSL syntax, kernel specs, verifier errors, repair loops, and command usage. For role-specific authoring, prefer fsl-business for business flows, fsl-requirements for PM requirements/acceptance/NFR specs, and fsl-design for engineering design/refinement work.
+description: Shared FSL language and verifier reference for writing, checking, verifying, repairing, explaining, mutating, refining, replaying, generating scenarios/test scaffolds, and interpreting fslc JSON results. Use directly for FSL syntax, kernel specs, verifier errors, repair loops, and command usage. For role-specific authoring, prefer fsl-business for business flows, fsl-requirements for PM requirements/acceptance/NFR specs, and fsl-design for engineering design/refinement work; for choosing the verification run, reading results without over-claiming, and the completion report, use fsl-verify.
 ---
 
 # FSL Core — Language, Verifier, and Repair Loop
@@ -29,6 +29,7 @@ language, use the narrow role skill first and return here for syntax and repair:
 | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `fsl-requirements` | `requirements` spec and scenarios |
 | Engineering design, internal state/actions, mapping to requirements | `fsl-design` | kernel `spec`, mapping, refine/testgen handoff |
 | Design review, variants, SOLID/LSP/OCP/substitutability | `fsl-design-review` | contract-conformance judgment |
+| Verify / prove / gate a spec, judge if it is ready to hand over, measure its strength | `fsl-verify` | command sequence, result reading, completion report |
 
 If a PM asks for a requirements specification, do not continue into design
 artifacts unless explicitly asked. If a consultant asks for business controls, do
@@ -204,6 +205,10 @@ reference.
 
 ## Standard workflow (single spec; treat proved as the standard)
 
+This is the short form. Which commands each layer and change needs, the
+results that exit 0 without passing, the repair loop, and the completion
+report format are in `../fsl-verify/SKILL.md`.
+
 1. Write the spec → `fslc check file.fsl` (syntax and types only, fast; fix
    following the error's `loc`/`expected`/`hint`).
    When checking requirement traceability strictly, add `--strict-tags`
@@ -351,6 +356,7 @@ mixed in one spec.
 | Consultant (business flows, regulations, As-Is/To-Be) | `fsl-business` | `business` ([layers](references/layers.md)) |
 | PM / PdM (requirement definition, acceptance criteria) | `fsl-requirements` | `requirements` and NFR ([layers](references/layers.md)) |
 | Engineer (design, implementation connection) | `fsl-design` | kernel `spec` + refine mapping + Adapter ([impl](references/impl.md)) |
+| Anyone verifying, gating, or reporting on a spec | `fsl-verify` | the run sequence and the completion report (no new constructs) |
 
 ## Reference index
 
