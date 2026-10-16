@@ -156,4 +156,4 @@ for a contract decision.
   with `@requirement("ID", "intent")` as in step 3 (prefix verification-only
   invariants `MODEL-`/`ASSUME-`), and
   prefer `forall x in coll { … }` over index quantifiers in invariant bodies. See
-  `skills/fsl/references/layers.md` → "Authoring specs as readable documentation".
+  `../fsl/references/layers.md` → "Authoring specs as readable documentation".

@@ -159,6 +159,6 @@ natural-language rendering is an option for high-stakes specs, too costly to man
   as separate claims; make the second only after the harness ran green against the
   real implementation.
 - **Author the extracted spec as documentation, not just a checkable model.** See
-  `skills/fsl/references/layers.md` → "Authoring specs as readable documentation" for the
+  `../fsl/references/layers.md` → "Authoring specs as readable documentation" for the
   tagging, ID-prefix, and quantifier conventions that keep it readable, not just
   passing.
