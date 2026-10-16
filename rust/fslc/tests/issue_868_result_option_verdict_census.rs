@@ -315,6 +315,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
+        "rust/fsl-verifier/src/induction.rs",
+        482,
+        "key_domain_obligation_cti",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
         "rust/fsl-verifier/src/vacuity.rs",
         617,
         "urgency_freeze",
