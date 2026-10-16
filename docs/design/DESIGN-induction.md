@@ -291,7 +291,9 @@ division total while sequence access stays partial. So `d != 0 and x / d <
 100` is defined, `x / d < 100` alone is not. Only expressions with a static
 partial-operation candidate are queried, so specs without one issue no new
 solver checks. Checked i64 overflow is *not* part of this obligation (step
-states are unbounded integers); it remains a base-case fail-closed error.
+states are unbounded integers); it remains a base-case fail-closed error
+(#1263). A finite `Map` index outside its key domain is asked by the
+obligation's key-domain half (§2.6.1).
 
 Soundness: every reachable state satisfies the proved invariants, and every
 real (defined) step is a step of the totalized `T`, so `unsat` for every
@@ -319,9 +321,54 @@ selected invariant, so a division that only a dropped invariant protects is
 reported as `_partial_<action>` there — a sound-side change, since the
 narrowed run claims nothing the dropped invariant would have to carry.
 Selecting a `trans` keeps every invariant as hypothesis
-(`selected_transition_induction_model`). Non-partial undefinedness BMC fails
-closed on (checked i64 overflow, a finite `Map` read outside its key domain)
-is not part of this obligation.
+(`selected_transition_induction_model`). Of the non-partial undefinedness BMC
+fails closed on, a finite `Map` index outside its key domain is asked by
+§2.6.1; checked i64 overflow is not asked (#1263).
+
+#### 2.6.1 Key-domain half (#1221)
+
+BMC and the explicit engine stop with an error (`map index outside finite key
+domain`, or `map assignment index outside key domain` for an indexed
+assignment) when a reachable state indexes a finite-key `Map` outside its key
+domain. Before #1221 the step case never asked it, so `m[cur + 1]` with
+`cur` reaching the top key beyond `--depth` was `proved`. When the
+partial-operation questions above find nothing, the same questions are asked
+again over fresh free states `s`, `s'` under the same premises, with the
+first reached failure classified as a key-domain miss instead of a partial
+operation:
+
+```
+Inv(s) ∧ first_key_miss(P, s)                             P: each invariant, leadsTo trigger/goal
+Inv(s) ∧ first_key_miss(guards_a, s)                      each action instance a
+Inv(s) ∧ enabled_a(s) ∧ first_key_miss(body_a, s)          reads and indexed assignments
+Inv(s) ∧ T(s,s') ∧ Inv(s') ∧ Trans(s,s') ∧ first_key_miss(R, s, s')
+                                                          R: each trans; each ensures reached
+```
+
+`first_key_miss` is `first_partial` with a different classified class
+(`eval::FailureClass::KeyDomain`): the completion condition and its
+short-circuit/guard-order reachability are the same, so `cur < 5 => m[cur +
+1] >= 0` and `requires cur < 5` before `y = m[cur + 1]` stay defined. A
+failure reached before the miss on the same path (a partial operation, or an
+overflow) is not a key miss. Only sites whose `KeyInDomain` row in the
+obligation catalog ([`DESIGN-obligation-catalog.md`](DESIGN-obligation-catalog.md))
+is not statically vacuous are asked: a `Map` read whose index type lies in
+the key type (`forall k: K { m[k] >= 0 }`) issues no query, and a spec
+without such a site declares no terms, so its solver session and output are
+unchanged. The catalog's vacuity premise (the read state satisfies its type
+bounds) holds here because the type bounds are among the premises.
+
+Soundness is the §2.6 argument. `sat` is `unknown_cti` with
+`violation_kind: "key_domain"` and `invariant: "_key_domain_<action>"`
+(guard, body, or reached `ensures`; also `last_action`) or
+`"_key_domain_property_<name>"` (invariant, `leadsTo`, `trans`). When the
+miss is within `--depth`, the base case reports BMC's error first, so the
+three engines agree: an error once the miss is within depth, never `proved`
+while a state satisfying the invariants reaches it. An unreachable CTI start
+is excluded with an auxiliary invariant as usual. The classification leaves
+room for #1263: overflow would be a third `FailureClass`, asked the same way.
+It is not asked (decision: overflow of unbounded `Int` stays outside the step
+obligation).
 
 ### 2.7 Ensures obligation (#1217)
 

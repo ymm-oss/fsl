@@ -865,6 +865,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   The CTI start satisfies every proved invariant and reaches a partial operation;
   guard it with a short-circuit `and`/`=>`/`or`/`if`, or exclude an unreachable
   start with an auxiliary invariant. Never `proved` while such a state exists.
+- Key-domain failure (#1221): `unknown_cti` / `violation_kind:"key_domain"` with
+  `invariant` = `_key_domain_<action>` (also `last_action`) or
+  `_key_domain_property_<name>`. The CTI start satisfies every proved invariant
+  and indexes a finite-key `Map` outside its key domain (read or indexed
+  assignment), which BMC/explicit report as `result:"error"` once within depth.
+  Guard the index or exclude an unreachable start with an auxiliary invariant.
 - Ensures failure (#1217): `unknown_cti` / `violation_kind:"ensures"` with
   `invariant` = the action name and `last_action`; a two-state CTI between
   invariant states whose last step falsifies the reached `ensures`.

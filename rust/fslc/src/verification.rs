@@ -520,10 +520,11 @@ fn insert_action_cti_last_action(
     cti: &fsl_verifier::InductionCti,
 ) {
     let action_context = cti.kind == fsl_verifier::violation_kind::ENSURES
-        || cti
-            .name
-            .strip_prefix("_partial_")
-            .is_some_and(|rest| !rest.starts_with("property_"));
+        || ["_partial_", "_key_domain_"].into_iter().any(|prefix| {
+            cti.name
+                .strip_prefix(prefix)
+                .is_some_and(|rest| !rest.starts_with("property_"))
+        });
     let Some(action) = action_context
         .then(|| cti.trace.last())
         .flatten()
@@ -561,7 +562,8 @@ fn render_induction_cti(
     let mut output = envelope();
     output.insert("spec".to_owned(), json!(model.name));
     output.insert("result".to_owned(), json!("unknown_cti"));
-    let partial = cti.kind == fsl_verifier::violation_kind::PARTIAL_OP;
+    let key_domain = cti.kind == fsl_verifier::violation_kind::KEY_DOMAIN;
+    let partial = cti.kind == fsl_verifier::violation_kind::PARTIAL_OP || key_domain;
     let ensures = cti.kind == fsl_verifier::violation_kind::ENSURES;
     let property_kind = if cti.kind == "trans" {
         "trans"
@@ -570,7 +572,8 @@ fn render_induction_cti(
     };
     let name = if partial || ensures {
         // `_partial_<action>` / `_partial_property_<name>`: the same synthetic
-        // names BMC's `partial_op` violations carry (#1196).
+        // names BMC's `partial_op` violations carry (#1196); a key-domain CTI
+        // is `_key_domain_<action>` / `_key_domain_property_<name>` (#1221).
         model.action_scoped_display_name(&cti.name, trace_last_action(&cti.trace))
     } else {
         origin_aware_property_name(&mut output, model, property_kind, &cti.name)
@@ -598,6 +601,8 @@ fn render_induction_cti(
     );
     let mut hint = if ensures {
         "this step starts and ends in states that satisfy every proved invariant, but the action's ensures is false after it (BMC reports the same step as violated ensures if it is reachable); fix the action body or the ensures, or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
+    } else if key_domain {
+        "this state satisfies every proved invariant but indexes a finite-key Map outside its key domain, which BMC and the explicit engine report as an error (map index outside finite key domain, or map assignment index outside key domain) if it is reachable; guard the index (e.g. requires i < 3 before m[i + 1]), or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
     } else if partial {
         "this state satisfies every proved invariant but reaches a partial operation (division or remainder by zero, or head/pop/at/index outside a sequence) that BMC and the explicit engine report as partial_op; guard the operation (e.g. requires d != 0 and x / d < 100), or, if the start state is unreachable, add an auxiliary invariant that excludes it, then re-run".to_owned()
     } else {
