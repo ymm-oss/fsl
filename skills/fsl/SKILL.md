@@ -241,7 +241,7 @@ element types of Map/Option/Seq are all declared as domain types — **every typ
 you use must be declared with `type ... = lo..hi` or `enum`**; an undeclared type
 becomes an `unknown type` error):
 
-```fsl
+```fsl check
 spec Cart {
   const CAP = 3
   type ItemId = 0..1

@@ -198,7 +198,7 @@ properties) as a structured digest — a view of the source, not a separate docu
 
 ### business (the consulting layer)
 
-```fsl
+```fsl check
 business ReturnHandling {
   actor Customer, Manager            // roster (validates `by`)
   entity Return                      // identity sort; size set by verify below
