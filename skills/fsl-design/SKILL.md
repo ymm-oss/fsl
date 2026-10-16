@@ -48,10 +48,14 @@ for a contract decision.
    verifier checks. `fslc verify` and `fslc refine` report a design error
    when it breaks something they evaluate, within the depth and domain sizes
    of the run. For `fslc verify` that includes declared properties
-   (`invariant`, `trans`, `leadsTo`, `ensures`, `reachable`), `acceptance`
-   and `forbidden` scenarios, and automatic checks (type bounds, partial
-   operations, deadlock detection); `fslc refine` adds the correspondence to
-   the upper contract. This list is illustrative, not complete:
+   (`invariant`, `trans`, `leadsTo`, `ensures`, `reachable`) and automatic
+   checks (type bounds, partial operations, deadlock detection); `fslc refine`
+   adds the correspondence to the upper contract. `acceptance` and `forbidden`
+   scenarios belong to the requirements layer — a kernel `spec` that declares
+   them is a parse error. They run when the requirements spec is checked; the
+   design reaches that contract through `refine`, which carries safety only and
+   does not replay an acceptance trace on the design. This list is
+   illustrative, not complete:
    `../fsl/references/commands.md` is the reference for what each command
    checks and returns. An error that breaks nothing they evaluate is not
    reported, so an intent that no declaration states is checked only where
@@ -142,6 +146,7 @@ for a contract decision.
   or `replay` has been anchored to real code/logs.
 - Author the design spec as documentation: declare domains with `entity`/`number`
   (sizes in the `verify` block, not in `type X = 0..N`), tag every action/invariant
-  with `"ID: intent"` (prefix verification-only invariants `MODEL-`/`ASSUME-`), and
+  with `@requirement("ID", "intent")` as in step 3 (prefix verification-only
+  invariants `MODEL-`/`ASSUME-`), and
   prefer `forall x in coll { … }` over index quantifiers in invariant bodies. See
   `skills/fsl/references/layers.md` → "Authoring specs as readable documentation".

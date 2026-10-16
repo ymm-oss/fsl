@@ -51,7 +51,7 @@ fslc <subcommand> ...            # authoritative native Rust CLI
 
 The Python implementation is a frozen compatibility reference. New language/CLI
 features are not backported to it. Use the native `fslc` binary for
-`undecided:` syntax and its ledger/HTML/analyze output; do not route new work
+`@undecided` and its ledger/HTML/analyze output; do not route new work
 through `python -m fslc`.
 
 External compilers and generators must use `fslc kernel <spec>` rather than the
@@ -170,22 +170,25 @@ This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
 "unfounded fabrications (untagged)."
 
-### Preserve intentionally deferred decisions with `undecided:`
+### Preserve intentionally deferred decisions with `@undecided`
 
 When the specification owner has explicitly decided to leave a choice open,
 record that review decision on the declaration instead of inventing a guard or
 property:
 
 ```fsl
-init "undecided: initial operating mode will be selected at rollout" {
+@undecided("initial operating mode will be selected at rollout")
+init {
   mode = Manual
 }
-action route() "undecided: routing policy is pending owner approval" {
+@requirement("REQ-ROUTE-001", "every request is routed")
+@undecided("routing policy is pending owner approval")
+action route() {
   ...
 }
 ```
 
-`undecided:` is metadata, not a verification condition. Verification still
+`@undecided` is metadata, not a verification condition. Verification still
 checks every behavior allowed by the spec. `fslc ledger` and `fslc html` list
 the declaration, reason, and state-dependency-derived affected requirement IDs.
 `analyze --profile ai-review` keeps matching `divergent_choice` /
@@ -195,11 +198,13 @@ in the unresolved review queue.
 
 Use this marker only after a human owner deliberately accepts the deferral. Do
 not use it to hide an agent's uncertainty, a missing source requirement, or a
-failed formalization guess. The declaration has one tag slot, so an
-`undecided:` declaration cannot simultaneously carry an `ID: text` tag; reports
-derive affected IDs from state dependencies. Full syntax and limits are in
-the [syntax reference](references/syntax.md) and `docs/design/DESIGN-undecided.md`. This feature belongs to the
-native Rust CLI and is intentionally not added to the frozen Python reference.
+failed formalization guess. `@undecided` stacks with `@requirement` on the same
+declaration, in any order; reports also derive affected IDs from state
+dependencies. The older string slot (`action route() "undecided: ..." { ... }`)
+still works but is linted as `legacy_string_metadata`. Full syntax and limits
+are in the [syntax reference](references/syntax.md). This feature belongs to
+the native Rust CLI and is intentionally not added to the frozen Python
+reference.
 
 ## Standard workflow (single spec; treat proved as the standard)
 
@@ -330,9 +335,10 @@ domain truth. See [layers](references/layers.md), "Authoring specs as readable d
   stopping is correct) would become a deadlock warning → declare it with
   `terminal { <predicate> }` (applying `--deadlock ignore` globally hides even
   unintended deadlocks). Stops not included in terminal continue to be detected.
-  `terminal { }` also passes through unchanged at the `requirements` layer (write
-  it against the synthesized `<entity>_stage` map when using `process`, e.g.
-  `terminal { forall c: Case { case_stage[c] == Closed } }`); the `business`
+  `terminal { }` also passes through unchanged at the `requirements` layer (with
+  `process`, write it with `stage(c)`, e.g.
+  `terminal { forall c: Case { stage(c) == Closed } }`; the generated
+  `case_stage` map is not requirements source vocabulary); the `business`
   dialect needs no `terminal` syntax at all — it derives the predicate
   automatically from each process's sink stages (stages with no outgoing
   `transition`).

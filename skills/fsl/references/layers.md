@@ -63,7 +63,9 @@ Treat the layer boundary as part of the contract — it is the refinement seam t
 lower layer must honor. Do not move to the lower layer unless the user asks for it or
 the relevant role skill directs it.
 
-- `business Name { process/control/policy/kpi/goal }` — the consulting layer. For
+- `business Name { actor/entity/process/control/policy/kpi/goal }` — the
+  consulting layer. Each `process X` needs a matching `entity X`, and each `by`
+  actor needs an `actor` declaration (both are check errors otherwise). For
   PM/consulting-facing files, prefer the readable stage syntax for common rules:
   `policy ... every Case in Source must eventually be Target [or Target ...]`,
   `policy ... every Case reaching Target [or Target ...] must have passed
@@ -110,7 +112,9 @@ the relevant role skill directs it.
   separate agent writes positive/negative traces from NL)
 - The design layer is an ordinary `spec` (the main subject of this guide). Connect
   it to the requirements layer with `fslc refine`
-- **Traceability**: a `"ID: source"` tag immediately before a declaration's `{`.
+- **Traceability**: a typed `@requirement("ID", "text")` annotation on the line
+  before a declaration (see "Declaration tags" below; the older `"ID: source"`
+  string slot is linted as `legacy_string_metadata`).
   `requirement: {id, text}` appears in violated / CTI / coverage / scenarios — when
   you read a counterexample, always look at the requirement and repair in line with
   that requirement's intent
@@ -119,7 +123,7 @@ the relevant role skill directs it.
 
 The layers chain via refinement: business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay). Every dialect expands as AST into the kernel, so all the commands
-in §7 work as-is.
+in [commands](commands.md) work as-is.
 
 ### Declaration tags (common to all layers)
 
@@ -133,19 +137,17 @@ declaration to an owned ID, and process `covers` is canonical dialect sugar for
 the same relation. The older `"ID: source"` slot is migration input and linted
 as `legacy_string_metadata`.
 
-Reserved intentional-undecided metadata uses the same single tag slot:
-`init "undecided: initial mode pending" { ... }` or
-`action choose() "undecided: selection policy pending" { ... }`. It is not a
+Intentional-undecided metadata is the typed annotation
+`@undecided("selection policy pending")` on the line before an `init` or
+`action` (the older `action choose() "undecided: ..." { ... }` string slot is
+linted as `legacy_string_metadata`). It is not a
 verification condition or requirement ID. `ledger` / `html` list the marker and
 state-dependency-derived affected requirement IDs; `analyze --profile ai-review`
-retains matching underspecification findings with `acknowledged:true`. The
-source slot remains singular, but native lowering converts it, requirement
-blocks, process `covers`, acceptance, and forbidden IDs into the shared typed
-annotation carrier — the same carrier the `@...` syntax in §1 populates
-directly, at both the document and the declaration level. An outer
-requirement can therefore coexist with an inner `undecided` marker, whether
-written as legacy strings, `@...` syntax, or a mix of both on one declaration.
-Explicit `covers` and requirement-block annotations retain their own spans;
+retains matching underspecification findings with `acknowledged:true`.
+`@undecided` stacks with `@requirement` on one declaration (see the annotation
+section of [syntax](syntax.md)); requirement blocks, process `covers`,
+acceptance, and forbidden IDs lower to the same annotation carrier, so an outer
+requirement coexists with an inner `undecided` marker. Explicit `covers` and requirement-block annotations retain their own spans;
 `undecided` is reserved and cannot be an explicit requirement ID.
 Multiple-relation JSON outputs use `requirements` and preserve singular fields
 as lexical compatibility projections. See `docs/design/DESIGN-undecided.md`,
@@ -423,7 +425,7 @@ verify {
 
 ### Drawing the layer boundary
 
-The majority of NFRs are handled (§11). What stays outside FSL: probabilities,
+The majority of NFRs are handled ([impl](impl.md#11-non-functional-requirements-nfr)). What stays outside FSL: probabilities,
 percentiles, real time (wall-clock ms), usability, evaluator truth judgments,
 statistical AI quality claims, and prose rationale (write those in each layer's
 documents).

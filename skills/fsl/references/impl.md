@@ -198,7 +198,7 @@ tests" above.
   already exists`). It advances age counters only and auto-maps to `stutter` under
   refinement; reference it as `tick()` (e.g. to advance time in an `acceptance`
   scenario). Modeling tick-side work (service time, etc.) needs the kernel-wrapper
-  form (§10).
+  form ([layers](layers.md#requirements-the-requirements-layer)).
 - **a `deadline` does not refine across a clock boundary**: a `deadline` is a
   safety property of the clock that owns it, so a design refines a *timed*
   requirements spec only when it **shares that clock** — its `tick` must mirror

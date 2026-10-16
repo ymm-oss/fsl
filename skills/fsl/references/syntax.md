@@ -29,8 +29,10 @@ invariant PaidLedger { ... }
 
 Multiple annotations may stack in any order without changing the checked
 result; comments/blank lines between them or before the target do not break
-attachment. They coexist with (and desugar to the same relation as) the legacy
-`"ID: text"` string slot and `covers`/`requirement` block relations — see §13.1.
+attachment. They desugar to the same relation as `covers`/`requirement` block
+relations and the legacy `"ID: text"` string slot (which `fslc lint` reports as
+`legacy_string_metadata`) — see "Declaration tags" in
+[layers](layers.md#declaration-tags-common-to-all-layers).
 An annotation with nothing supported to attach to reports
 `FSL-ANNOTATION-TARGET`. `domain`/`dbsystem`/`ai_component` nested
 declarations also accept `@...` (issue #281): `domain` aggregate `command`,
@@ -59,7 +61,8 @@ do not assume those public consumers can query a rationale without a separate
 projection contract.
 
 ```fsl
-spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
+[@requirement("<ID>", "<intent>")]       // optional document annotation (line before `spec`); never verified
+spec <Name> {                             // the older `spec <Name> "<kind>: <intent>"` slot is legacy_string_metadata
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
   type  <Name> = <lo>..<hi>               // domain type (bounded integer)
   symmetric type <Name> = <lo>..<hi>      // interchangeable entity identities
@@ -69,7 +72,8 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive predicate, frontend-inlined
 
   state { <var>: <type> [= <deterministic expr>], ... }
-  init  ["undecided: reason"] { <stmt>... } // assign exactly once per variable/Map-key (deterministic)
+  [@undecided("<reason>")]                 // optional, line before init/action: an owner-accepted open choice
+  init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                        // 0 or more. conjunction. enabled condition
@@ -108,7 +112,9 @@ a sibling top-level `verify` block instead of inline ranges:
 
 ```fsl
 business <Name> {
+  actor <Actor>, ...                       // roster; every transition `by` must name one
   entity <Entity>                          // identity sort; size set by verify.instances
+  process <Entity> { ... }                 // needs the matching `entity`; no `with` fields, no `number`
   control <ID> "<text>"                    // optional governance/control metadata
   policy <ID> "<text>" satisfies <ID> ...  // optional control traceability
                                            // `satisfies` of an undeclared control is a
@@ -428,7 +434,7 @@ truth, groundedness, evaluator judgment, probability, confidence intervals, or
 prompt/model sampling distributions in the kernel. No field on `ai_component`,
 `tool`, `authority`, `fallback`, or `check` accepts a `"description text"` /
 `"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
-convention (§10), every field here is a bare identifier or number.
+convention ([layers](layers.md#declaration-tags-common-to-all-layers)), every field here is a bare identifier or number.
 `check hard { rule <Name>; ... }` selects which of the 5 named rules above get
 an explicit, separately-reported invariant/finding in `fslc ai check`; an
 unlisted name is a check-time error (`kind:"semantics"`, hint lists the 5).
@@ -526,29 +532,19 @@ formal proof and does not model LLM truth or statistical/evaluator quality.
 
 Stochastic / migration / drift evidence declarations (project-level fsl-ai;
 dialect tag `fsl-ai-project.v0`). These blocks are read by a deliberately
-lenient separate parser, not the kernel Lark grammar; they may sit alongside
-`ai_component` in one file, and `fslc ai check` (or `fslc check`) on such a
-file returns `ai_project_analyzed` — a declaration listing, not verification:
+lenient line scanner separate from the kernel parser; they may sit alongside
+`ai_component` in one file. `fslc ai check` on such a file returns
+`ai_project_analyzed` (`fslc check` returns `ok` with
+`ai_analysis_result:"ai_project_analyzed"`) — a declaration listing, not
+verification. The example shows only the lines the scanner reads; any other
+line in these bodies is skipped without validation, so it constrains nothing:
 
 ```fsl
 dataset <Name> {
-  source "<path/to/eval.jsonl>"
-  population {
-    <field> in ["<a>", "<b>"]
-  }
-  slice <SliceName> {
-    <field> == "<a>"
-  }
+  source "<path/to/eval.jsonl>"          // the only line read
 }
 
-evaluator <Name> {
-  input <name>: <Type>
-  output <name>: <Type>
-  calibration {
-    dataset <GoldLabelDataset>
-    require agreement_with_human >= 0.90
-  }
-}
+evaluator <Name> { }                       // only the name is read and listed
 
 statistical_property <Name> {
   target <AiComponentName>
@@ -562,19 +558,8 @@ statistical_property <Name> {
   }
 }
 
-ai_migration <Name> {
-  from <Component> {
-    model <id>
-    prompt <id>
-    retriever <id>
-  }
-  to <Component> {
-    model <id>
-    prompt <id>
-    retriever <id>
-  }
+ai_migration <Name> {                      // only preserve { no_regression { .. } } is read
   preserve {
-    hard_contract <Contract>.hard
     no_regression {
       dataset <DatasetName>
       metric <metric> drop <= 0.05
@@ -601,8 +586,8 @@ because `check` must not accept a project `eval`/`drift` cannot execute.
 `failure_mode <Name> { condition ...; severity ...; }` is parsed and listed by
 name under `ai_project_analyzed`'s `failure_modes`, but no command yet checks
 its content against evidence — it is tracked metadata, not a verified claim.
-**`ai_action`, `retriever` (as a standalone block), `trust_boundary`, and a
-top-level named `authority { target ... }` are recognized only as block
+**`ai_action`, `ai_contract`, `retriever` (as a standalone block),
+`trust_boundary`, and a top-level named `authority { target ... }` are recognized only as block
 *boundaries*: the parser does not descend into their body at all, so any text
 inside — even garbage — passes `check`. They are echoed as bare `{kind, name}`
 entries under `raw_blocks`, not validated.** Do not author one expecting it to
@@ -732,8 +717,8 @@ implementation Map (for example `Column -> DesignColumn`).
 | Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
 | Inline state initializer | `state { qty: Qty = 0 }` | Deterministic sugar for the equivalent root assignment in `init`; may not read state |
 | symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
-| entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements; bound by `verify { instances Claim = N }` |
-| number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements; bound by `verify { values Amount = lo..hi }` |
+| entity kind | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements (also kernel `spec`); bound by `verify { instances Claim = N }` |
+| number kind | `number Amount` | Finite numeric sort for requirements (also kernel `spec`); bound by `verify { values Amount = lo..hi }`. **`business` does not accept `number`** (parse error `expected business declaration`) |
 | enum | `enum St { A, B }` | members are referenced and displayed by bare name |
 | symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
 | struct | `struct S { f: Qty, o: Option<Option<K>> }` | field = scalar or nested Option<scalar> only |
@@ -891,9 +876,9 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
    `decreases`, leadsTo remains bounded to `--depth`.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
-     Nesting it inside the forall body is a **parse error**
-     (`fslc` reports `unexpected 'decreases' here` with a placement hint),
-     not "ranking doesn't work under forall".
+     Nesting it inside the forall body is a **parse error** — `fslc`
+     reports `expected '}'` at the `decreases` token, with no placement
+     hint — not "ranking doesn't work under forall".
    - **Per-entity measure under interleaving**: use
      `helpful step(c) decreases level[c]`. Without `helpful`, an action advancing
      a different entity still reports `rank_failure:"non_decreasing_action"`.
@@ -982,8 +967,9 @@ requires stock[i] > 0
 // queue processing (two forms that prevent partial_op)
 action take()  { requires q.size() > 0  x = q.head()  q = q.pop() }
 action drain() { if q.size() > 0 { x = q.head()  q = q.pop() } }
-// invariant talking about a Seq (index guard, range derived from const)
-invariant I { forall i in 0..CAP-1 { i < q.size() => jobs[q.at(i)].st == Queued } }
+// element-wise invariant over a Seq (member quantification; no index arithmetic)
+invariant I { forall j in q { jobs[j].st == Queued } }
+// position, order, or no-duplicates need the index (guarded, range from the const): see NoDup below
 // folding a Seq (index domain type)
 type Idx = 0..3
 invariant B { balance == sum(i: Idx of log.at(i) where i < log.size()) }
