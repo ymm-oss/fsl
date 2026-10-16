@@ -536,16 +536,20 @@ fn declared_entity_number_names(document: &SurfaceDocument) -> (HashSet<String>,
         }
         SurfaceDocument::Requirements(requirements) => {
             for item in &requirements.items {
-                if let RequirementsItem::Common(spec_item) = item {
-                    match spec_item {
-                        SpecItem::Entity(name, _) => {
-                            entities.insert(name.clone());
-                        }
-                        SpecItem::Number(name, _) => {
-                            numbers.insert(name.clone());
-                        }
-                        _ => {}
+                match item {
+                    RequirementsItem::Common(SpecItem::Entity(name, _)) => {
+                        entities.insert(name.clone());
                     }
+                    RequirementsItem::Common(SpecItem::Number(name, _)) => {
+                        numbers.insert(name.clone());
+                    }
+                    // #1252: `lower_requirements` declares an entity for every
+                    // process (`dialect_scope_override_names` accepts it), so a
+                    // process-only abstract must receive `--instances` too.
+                    RequirementsItem::Process(BusinessItem::Process { name, .. }) => {
+                        entities.insert(name.name().to_owned());
+                    }
+                    _ => {}
                 }
             }
         }

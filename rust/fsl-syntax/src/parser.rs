@@ -504,6 +504,14 @@ impl<'a> Parser<'a> {
             if self.peek_ident("impl") || self.peek_ident("abs") {
                 return Err(self.error("impl and abs are not valid inside implements"));
             }
+            if self.peek_ident("preserve") {
+                // #1275: the inline seam checks safety refinement only; accepting
+                // `preserve progress` here would report `refines` for a mapping
+                // whose progress obligation was never checked.
+                return Err(self.error(
+                    "preserve progress is not valid inside implements (the inline seam does not check it); move the mapping and its preserve progress into a standalone refinement file and run `fslc refine <impl> <abs> <refinement>`",
+                ));
+            }
             items.push(self.refinement_item(CorrespondenceOrigin::ImplementsBlock)?);
         }
         Ok(RequirementsItem::Implements {

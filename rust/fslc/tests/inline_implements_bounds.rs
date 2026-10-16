@@ -159,6 +159,26 @@ fn instances_override_propagates_to_business_abstract() {
     assert_eq!(output["implements"]["result"], "refines");
 }
 
+/// detector (#1252: requirements abstract declaring only a `process`, whose
+/// name `lower_requirements` turns into the entity the override bounds)
+#[test]
+fn instances_override_propagates_to_process_only_requirements_abstract() {
+    for count in ["1", "2"] {
+        let instances = format!("Claim={count}");
+        let (output, status) = run_verify(&[
+            "verify",
+            &fixture("impl_requirements_process.fsl"),
+            "--depth",
+            "4",
+            "--no-cache",
+            "--instances",
+            &instances,
+        ]);
+        assert_eq!(status, 0, "{instances}: {output:#}");
+        assert_eq!(output["implements"]["result"], "refines", "{instances}");
+    }
+}
+
 /// detector (business abstract × impl-only number values)
 #[test]
 fn impl_only_number_values_do_not_reach_business_abstract() {

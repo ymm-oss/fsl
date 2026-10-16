@@ -1,0 +1,25 @@
+requirements DesignDropsLiveness {
+  implements ClaimPolicy from "policy.fsl" {
+    map s = if d == DSubmitted then Submitted
+            else if d == DAutoReview then Submitted
+            else if d == DApproved then Approved
+            else if d == DRejected then Rejected
+            else Paid
+    action route()     -> stutter
+    action heartbeat() -> stutter
+    action approve()   -> approve()
+    action reject()    -> reject()
+    action pay()       -> pay()
+  }
+  enum DSt { DSubmitted, DAutoReview, DApproved, DRejected, DPaid }
+  type Phase = 0..1
+  state { d: DSt, phase: Phase }
+  init { d = DSubmitted   phase = 0 }
+  requirement REQ-1 "claims are adjudicated" {
+    action route() { requires d == DSubmitted   d = DAutoReview }
+    action heartbeat() { requires d == DAutoReview   phase = 1 - phase }
+    action approve() { requires d == DAutoReview   d = DApproved }
+    action reject()  { requires d == DAutoReview   d = DRejected }
+    fair action pay() { requires d == DApproved    d = DPaid }
+  }
+}
