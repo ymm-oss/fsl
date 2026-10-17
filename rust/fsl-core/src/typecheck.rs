@@ -542,6 +542,38 @@ fn extend_pattern_binding_inner(
     Ok(())
 }
 
+/// `x is some(v)` may only introduce a fresh name (#1157, #1259).
+///
+/// A colliding `v` is ambiguous between a binding and a reference: the
+/// evaluators keep an enclosing binding (#1153) but let a state variable,
+/// constant or enum member be shadowed, and only where the match succeeds, so
+/// the same text means different things depending on what it collides with and
+/// on whether the operand is present. `DESIGN-pattern-binding-scope.md` item 4
+/// asks for an explicit rename instead of a silent change of meaning.
+fn reject_colliding_pattern_binding(
+    binding: &str,
+    env: &TypeEnv,
+    model: &KernelModel,
+    span: Span,
+) -> Result<(), TypecheckError> {
+    let collides_with = if model.state.iter().any(|(name, _)| name == binding) {
+        "a state variable"
+    } else if model.consts.contains_key(binding) {
+        "a constant"
+    } else if model.enum_members.contains_key(binding) {
+        "an enum member"
+    } else if env.contains_key(binding) {
+        "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)"
+    } else {
+        return Ok(());
+    };
+    Err(error(format!(
+        "pattern binding '{binding}' in 'is some({binding})' shadows {collides_with} of the same name; \
+         rename the pattern variable"
+    ))
+    .with_span(span))
+}
+
 pub(crate) fn lvalue_type(
     target: &LValue,
     _env: &TypeEnv,
@@ -906,7 +938,13 @@ fn validate_expression_inner(
             validate_expression(then_expr, env, model, spans.then_expr, Some(&ty))?;
             validate_expression(else_expr, env, model, spans.else_expr, Some(&ty))?;
         }
-        Expr::Is { expr, .. } | Expr::UnaryNamed { expr, .. } => {
+        Expr::Is { expr, pattern } => {
+            if let Pattern::Some(binding) = pattern {
+                reject_colliding_pattern_binding(binding, env, model, span)?;
+            }
+            validate_expression(expr, env, model, span, None)?;
+        }
+        Expr::UnaryNamed { expr, .. } => {
             validate_expression(expr, env, model, span, None)?;
         }
         Expr::Quantified { binder, body, .. } => {

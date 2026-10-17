@@ -162,7 +162,7 @@ fn eval_inner<S: SmtSolver>(
         }
         Expr::Is { expr, pattern } => {
             let value = eval(solver, model, expr, state, bindings, old_state)?;
-            eval_pattern(solver, value, pattern, bindings)
+            eval_pattern(solver, model, value, pattern, state, bindings)
         }
         Expr::Quantified {
             quantifier,
@@ -1557,8 +1557,10 @@ pub(crate) fn eval_expected<S: SmtSolver>(
 
 fn eval_pattern<S: SmtSolver>(
     solver: &S,
+    model: &KernelModel,
     value: SymbolicValue<S::Term>,
     pattern: &Pattern,
+    state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     match (value, pattern) {
@@ -1570,7 +1572,20 @@ fn eval_pattern<S: SmtSolver>(
         (SymbolicValue::Option { present, value, .. }, Pattern::Some(name)) => {
             // Never overwrite a name already in scope (#1153); see the concrete
             // evaluator. A new name still reaches the action body.
-            bindings.entry(name.clone()).or_insert(*value);
+            if !bindings.contains_key(name) {
+                // The concrete evaluator binds only when the operand is
+                // present (#1259): where it is absent, a name that also
+                // resolves to a state variable, constant or enum member keeps
+                // that meaning. `check` rejects such a collision, so this only
+                // keeps the engines agreeing on a model that bypassed it.
+                let bound = match lookup(solver, model, name, state, bindings) {
+                    Ok(outer) if outer.ty() == value.ty() => {
+                        ite_value(solver, model, &present, &value, &outer)?
+                    }
+                    _ => *value,
+                };
+                bindings.insert(name.clone(), bound);
+            }
             Ok(bool_value(solver, present))
         }
         _ => Err(VerifyError::new("is pattern requires an Option value")),

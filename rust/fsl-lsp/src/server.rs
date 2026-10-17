@@ -407,7 +407,7 @@ fn publish_diagnostics(
         items.extend(
             fsl_tools::structural_review_findings(&fsl_tools::build_tsg(&model))
                 .into_iter()
-                .map(|finding| analysis_diagnostic(index.as_ref(), &finding)),
+                .map(|finding| analysis_diagnostic(&source, index.as_ref(), &finding)),
         );
     }
     sender.send(
@@ -429,7 +429,11 @@ fn analysis_diagnostics_enabled() -> bool {
     })
 }
 
-fn analysis_diagnostic(index: Option<&DocumentIndex>, finding: &serde_json::Value) -> Diagnostic {
+fn analysis_diagnostic(
+    source: &str,
+    index: Option<&DocumentIndex>,
+    finding: &serde_json::Value,
+) -> Diagnostic {
     let range = finding["involved_nodes"]
         .as_array()
         .into_iter()
@@ -444,9 +448,18 @@ fn analysis_diagnostic(index: Option<&DocumentIndex>, finding: &serde_json::Valu
                 .map(|symbol| symbol.selection_range)
         })
         .or_else(|| {
-            let line = finding["loc"]["line"].as_u64()?.saturating_sub(1);
-            let column = finding["loc"]["column"].as_u64()?.saturating_sub(1);
-            let start = Position::new(u32::try_from(line).ok()?, u32::try_from(column).ok()?);
+            let line = usize::try_from(finding["loc"]["line"].as_u64()?.saturating_sub(1)).ok()?;
+            let column =
+                usize::try_from(finding["loc"]["column"].as_u64()?.saturating_sub(1)).ok()?;
+            // `loc.column` counts characters; an LSP position counts UTF-16
+            // code units, which differ past an astral character.
+            let character = source.split('\n').nth(line).map_or(column, |text| {
+                text.chars()
+                    .take(column)
+                    .map(char::len_utf16)
+                    .sum::<usize>()
+            });
+            let start = Position::new(u32::try_from(line).ok()?, u32::try_from(character).ok()?);
             Some(lsp_types::Range::new(
                 start,
                 Position::new(start.line, start.character.saturating_add(1)),
@@ -1474,10 +1487,29 @@ mod tests {
             "candidate_repairs":[],
             "do_not_assume":[]
         });
-        let diagnostic = analysis_diagnostic(Some(&index), &finding);
+        let diagnostic = analysis_diagnostic(
+            "spec Review { state { ready: Bool } init { ready = false } }",
+            Some(&index),
+            &finding,
+        );
         assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::INFORMATION));
         assert_eq!(diagnostic.source.as_deref(), Some("fslc analyze"));
         assert_eq!(diagnostic.range.start, Position::new(0, 22));
+    }
+
+    /// The `loc` fallback converts the finding's character column to UTF-16
+    /// code units: the emoji before the token counts twice.
+    #[test]
+    fn structural_finding_loc_fallback_counts_utf16_units() {
+        let source = "spec Review {\n  invariant I \"😀\" { true }\n}";
+        let finding = serde_json::json!({
+            "finding_type":"unwritten_state",
+            "involved_nodes":["state:absent"],
+            "loc":{"line":2,"column":21},
+            "why_it_matters":"No action writes this state."
+        });
+        let diagnostic = analysis_diagnostic(source, None, &finding);
+        assert_eq!(diagnostic.range.start, Position::new(1, 21));
     }
 
     #[test]

@@ -154,7 +154,9 @@ different thing, and it is what confinement removes.
 
 - Restore the parameter protection in the Rust port (runtime, verifier, and
   the type checker's `extend_pattern_binding`) so it agrees with Python.
-- Add the located `check`-time shadowing error (point 4).
+- Add the located `check`-time shadowing error (point 4). Done in #1259: the
+  error also covers state variables, constants, enum members and an earlier
+  pattern binding of the same name, not only enclosing binders.
 - Then write points 1–4 into `docs/manual/LANGUAGE.md`'s Option bullet.
 
 These are behaviour changes to the semantics and were deliberately left out
