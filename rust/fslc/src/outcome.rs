@@ -638,6 +638,7 @@ pub const INTERNAL_EXIT: i32 = 3;
 /// (`expected_verify_exit`), which compares itself against this table, so a
 /// mutation of one entry turns both the product and the test red.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
 pub enum Verdict {
     /// `verified`: bounded verification passed.
     Verified,
