@@ -1315,9 +1315,19 @@ records why, and why <code>fslc document check</code>'s <code>document_drifted</
 <td><strong>Read the CTI and add an auxiliary invariant</strong> (§8), or try <code>--engine explicit</code> (closure proves without lemmas)</td>
 </tr>
 <tr>
+<td><code>proved</code> + <code>not_covered: ["int_overflow"]</code></td>
+<td><code>--engine induction</code> proved the properties over unbounded integers; i64 overflow is checked only by the base case to <code>checked_to_depth</code>. Present when a proof site uses <code>+ - * / %</code>, unary <code>-</code>, <code>abs</code> or <code>sum</code>; absent otherwise. The verdict and exit code are unchanged</td>
+<td>Bound the value (range type or a guard) or run <code>--engine bmc</code>/<code>explicit</code> at a depth that reaches the overflow if it matters</td>
+</tr>
+<tr>
 <td><code>unknown_cti</code> / <code>partial_op</code></td>
 <td>A state satisfying every proved invariant reaches a partial operation (§6) in a guard, body, property, or reached <code>ensures</code></td>
 <td>Guard the operation with a short-circuit <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code>, or add an auxiliary invariant that excludes the state if it is unreachable</td>
+</tr>
+<tr>
+<td><code>unknown_cti</code> / <code>key_domain</code></td>
+<td>A state satisfying every proved invariant indexes a finite-key <code>Map</code> outside its key domain (read or indexed assignment) in a guard, body, property, or reached <code>ensures</code>; BMC and explicit report it as an error once it is within depth</td>
+<td>Guard the index with a short-circuit <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code> or a <code>requires</code>, or add an auxiliary invariant that excludes the state if it is unreachable</td>
 </tr>
 <tr>
 <td><code>unknown_cti</code> / <code>ensures</code></td>
