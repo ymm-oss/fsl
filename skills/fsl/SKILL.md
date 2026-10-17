@@ -86,7 +86,7 @@ producing command.
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
-layer checked during `check`/`verify`. A `refines` verdict preserves the
+layer checked during `check`/`verify`/`scenarios`. A `refines` verdict preserves the
 command's ordinary top-level `result` and exit code. Any of the three failing
 nested values (`refinement_failed`, `impl_violated`, or `unknown_budget` — the
 correspondence search hit its fixed internal state-count budget before
@@ -97,8 +97,8 @@ while `implements.violation` (or `implements.states_explored` for
 `implements.result == "refines"` (the only passing value), or run
 `fslc chain`, which applies that gate for you.
 
-**Governance preservations are fail-closed the same way.** `check` and
-`verify` of a `governance` document run every `preservation` refinement at
+**Governance preservations are fail-closed the same way.** `check`,
+`verify`, and `scenarios` of a `governance` document run every `preservation` refinement at
 depth 8; the first one that is not `refines` becomes the top-level `result`
 (`refinement_failed`, `impl_violated` for a preservation `violated`, or
 `unknown_budget`) with exit 1, while `governance.preservations[].result`

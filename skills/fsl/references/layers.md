@@ -77,7 +77,8 @@ the relevant role skill directs it.
   `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
   then carry both the broken policy/goal and satisfied controls. A standalone
   `governance Name { ... }` catalog can require controls across business specs
-  and run preservation refinements during `fslc check` and `fslc verify`; a
+  and run preservation refinements during `fslc check`, `fslc verify`, and
+  `fslc scenarios`; a
   preservation that does not `refines` fails the command (exit 1).
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
@@ -260,7 +261,7 @@ catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8 (`fslc verify`
-runs it too, at depth 8 whatever its `--depth`). Each result stays under
+and `fslc scenarios` run it too, at depth 8 whatever their `--depth`). Each result stays under
 `governance.preservations[].result`; the first non-`refines` one in
 declaration order is also the command's verdict, fail-closed:
 `refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
