@@ -253,8 +253,9 @@ connect to the implementation via testgen/replay/Monitor (all implemented).
    inherited automatically** even when the design layer refines the business
    layer. Remedies: (a) `verify` liveness policies individually at each layer
    (put `fair` on the lower action that bears the progress), or (b) add
-   `preserve progress { respond <AbsLeadsTo> by <impl actions...> }` to the
-   refinement mapping. That opt-in pulls the upper `leadsTo` through the state
+   `preserve progress { respond <AbsLeadsTo> by <impl actions...> }` to a
+   standalone refinement mapping file (an inline `implements` block rejects it,
+   #1275, because the inline seam checks safety only). That opt-in pulls the upper `leadsTo` through the state
    mapping and reports `refinement_failed / progress_lost` if the lower layer can
    spin or stall while the upper response remains pending. This is a general
    property of forward simulation (safety is preserved, liveness is not), and is

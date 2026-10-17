@@ -373,7 +373,7 @@ fslc verify spec.fsl --values Amount=0..3
 エンベロープの `bounds_overrides` フィールドにエコーバックされます。
 
 spec がインラインの `implements` を持つ場合、上書きは抽象 spec にも伝播します —
-抽象側自身が宣言する entity/number 名に限定されます — ので、refinement 検査は両側
+抽象側自身が宣言する entity/number 名に限定されます(`requirements` の抽象では、lowering が entity を宣言する `process` 名も entity に数えます) — ので、refinement 検査は両側
 で同じ世界サイズで実行されます(refinement は同サイズの forward simulation です。
 これがないと、縮小した impl とフルサイズの抽象は `map_out_of_bounds` で失敗します)。
 impl 側だけの carried number(例: business の抽象には存在しない `Amount`)は impl
@@ -1744,8 +1744,8 @@ stutter)、bottom ⊒ top を検査します。成功時は合成された `acti
 ない)です。**liveness(`leadsTo`)は伝播しません** — refine は stutter を許すので、
 abs が `fair` で保証した進行を impl が落としても、結果は依然 `refines` になりえます
 (マッピングは fair アノテーションを要求しません)。抽象の応答を下位レイヤーで
-検査することにオプトインするには、refinement マッピングに `preserve progress` を
-書きます:
+検査することにオプトインするには、単独の refinement マッピングファイルに
+`preserve progress` を書きます(インラインの `implements { }` ブロックはこれを拒否します):
 
 ```fsl
 refinement DesignRefinesReq {
@@ -2329,11 +2329,17 @@ verify {
   いないことを示します。スコープ無しの `check` / `verify`、または `fslc chain` で
   ゲートしてください。この3つのオプションについての決定は「理由付きで抑止」です
   （`docs/design/DESIGN-refinement.md`、[#1008](https://github.com/ymm-oss/fsl/issues/1008)）。`implements { }` ブロックの内側には、状態の
-  `map` エントリ、`maps auto`、`preserve progress`、そして — #73 以降 —
+  `map` エントリ、`maps auto`、そして — #73 以降 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter` を書きます。これは
   別の refinement ファイルの `refinement_action`
   (`docs/design/DESIGN-refinement.md` §1)と同じ対応の構文で、impl と abs の action の
-  間のアリティ変更を含みます。action↔action の対応は、requirement レベルの action
+  間のアリティ変更を含みます。`preserve progress` はここには書けません。インラインの
+  seam は安全性の refinement しか検査しないので、`implements { }` の中の
+  `preserve progress` は、文書を読み込むすべてのコマンドで位置付きの
+  `kind: "parse"` エラー(exit 2)になります
+  ([#1275](https://github.com/ymm-oss/fsl/issues/1275))。上位の `leadsTo` をマッピング越しに
+  検査するには、マッピングとその `preserve progress` を単独の refinement ファイルに
+  書き、`fslc refine` を実行します。action↔action の対応は、requirement レベルの action
   の上の `maps <abs_act>(...)` 節としても引き続き書けます。`maps auto` は
   同名のカーネルラッパーの state/action をカバーし、明示の map はそれを上書き
   します。`maps` 節と、それに一致するインラインの `action ...` 項目の両方を持つ

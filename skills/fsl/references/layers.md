@@ -331,10 +331,14 @@ verify {
   `_kpi_*` invariant.
 - When `implements Abs from "file" { }` is present and process/action/stage names
   match, fslc synthesizes the identity refinement mapping. Inside the
-  `implements { }` block you write state `map` entries, `maps auto`,
-  `preserve progress`, and `action <impl>(<params>) -> <abs>(<args>) | stutter`
+  `implements { }` block you write state `map` entries, `maps auto`, and
+  `action <impl>(<params>) -> <abs>(<args>) | stutter`
   (same syntax as a separate refinement file's `action` item, including an
-  arity change between impl and abs params). Action↔action
+  arity change between impl and abs params). `preserve progress` is
+  **not** valid inside `implements { }`: the inline seam checks safety only, so
+  it is a check-time `kind: "parse"` error (exit 2). To carry an upper
+  `leadsTo` down, write the mapping with `preserve progress` in a standalone
+  refinement file and run `fslc refine`. Action↔action
   correspondence can also still be written as the `maps <abs_act>(...)` clause
   **on the requirement-level action** (auto-synthesized for matching names;
   `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`

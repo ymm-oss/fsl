@@ -1,0 +1,29 @@
+// ════════════════════════════════════════════════════════════════
+// Upper layer (business policy) = the frozen contract.
+//
+// What this example teaches:
+//   Refinement (fslc refine) propagates "safety" to lower layers but does not
+//   propagate "liveness". We first place two kinds of policy at the upper layer:
+//     - Safety:   payment only after approval (pay's requires = the control guard is the contract itself)
+//     - Liveness: a submitted claim is eventually decided (leadsTo)
+//   We confirm this contract is proved on its own, then look at design_*.fsl to
+//   see which of the two propagates when a lower layer refines it.
+// ════════════════════════════════════════════════════════════════
+spec ClaimPolicy {
+  enum St { Submitted, Approved, Rejected, Paid }
+  state { s: St }
+  init { s = Submitted }
+
+  // Both adjudications are fair. This secures the progress of the liveness policy.
+  fair action approve() { requires s == Submitted   s = Approved }
+  fair action reject()  { requires s == Submitted   s = Rejected }
+
+  // The body of the safety contract: payment only after approval (this guard is the "control").
+  fair action pay()     { requires s == Approved     s = Paid }
+
+  // Liveness policy: a submitted claim is eventually decided.
+  leadsTo EveryClaimDecided { s == Submitted ~> (s == Approved or s == Rejected) }
+
+  // Positive example: payment can actually be reached (confirming there is no over-constraint).
+  reachable CanPay { s == Paid }
+}

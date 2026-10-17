@@ -400,7 +400,7 @@ fslc verify spec.fsl --values Amount=0..3
 不正な値(<code>Case=abc</code>, <code>N=5..1</code>)も同様です。実効の上書き後の境界は、JSON
 エンベロープの <code>bounds_overrides</code> フィールドにエコーバックされます。</p>
 <p>spec がインラインの <code>implements</code> を持つ場合、上書きは抽象 spec にも伝播します —
-抽象側自身が宣言する entity/number 名に限定されます — ので、refinement 検査は両側
+抽象側自身が宣言する entity/number 名に限定されます(<code>requirements</code> の抽象では、lowering が entity を宣言する <code>process</code> 名も entity に数えます) — ので、refinement 検査は両側
 で同じ世界サイズで実行されます(refinement は同サイズの forward simulation です。
 これがないと、縮小した impl とフルサイズの抽象は <code>map_out_of_bounds</code> で失敗します)。
 impl 側だけの carried number(例: business の抽象には存在しない <code>Amount</code>)は impl
@@ -1802,8 +1802,8 @@ stutter)、bottom ⊒ top を検査します。成功時は合成された <code
 ない)です。<strong>liveness(<code>leadsTo</code>)は伝播しません</strong> — refine は stutter を許すので、
 abs が <code>fair</code> で保証した進行を impl が落としても、結果は依然 <code>refines</code> になりえます
 (マッピングは fair アノテーションを要求しません)。抽象の応答を下位レイヤーで
-検査することにオプトインするには、refinement マッピングに <code>preserve progress</code> を
-書きます:</p>
+検査することにオプトインするには、単独の refinement マッピングファイルに
+<code>preserve progress</code> を書きます(インラインの <code>implements { }</code> ブロックはこれを拒否します):</p>
 <pre><code class="language-fsl">refinement DesignRefinesReq {
   impl Design
   abs  Req
@@ -2381,11 +2381,17 @@ verify {
   いないことを示します。スコープ無しの <code>check</code> / <code>verify</code>、または <code>fslc chain</code> で
   ゲートしてください。この3つのオプションについての決定は「理由付きで抑止」です
   （<code>docs/design/DESIGN-refinement.md</code>、<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>）。<code>implements { }</code> ブロックの内側には、状態の
-  <code>map</code> エントリ、<code>maps auto</code>、<code>preserve progress</code>、そして — #73 以降 —
+  <code>map</code> エントリ、<code>maps auto</code>、そして — #73 以降 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code> を書きます。これは
   別の refinement ファイルの <code>refinement_action</code>
   (<code>docs/design/DESIGN-refinement.md</code> §1)と同じ対応の構文で、impl と abs の action の
-  間のアリティ変更を含みます。action↔action の対応は、requirement レベルの action
+  間のアリティ変更を含みます。<code>preserve progress</code> はここには書けません。インラインの
+  seam は安全性の refinement しか検査しないので、<code>implements { }</code> の中の
+  <code>preserve progress</code> は、文書を読み込むすべてのコマンドで位置付きの
+  <code>kind: "parse"</code> エラー(exit 2)になります
+  (<a href="https://github.com/ymm-oss/fsl/issues/1275">#1275</a>)。上位の <code>leadsTo</code> をマッピング越しに
+  検査するには、マッピングとその <code>preserve progress</code> を単独の refinement ファイルに
+  書き、<code>fslc refine</code> を実行します。action↔action の対応は、requirement レベルの action
   の上の <code>maps &lt;abs_act&gt;(...)</code> 節としても引き続き書けます。<code>maps auto</code> は
   同名のカーネルラッパーの state/action をカバーし、明示の map はそれを上書き
   します。<code>maps</code> 節と、それに一致するインラインの <code>action ...</code> 項目の両方を持つ

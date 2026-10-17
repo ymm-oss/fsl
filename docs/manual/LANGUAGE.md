@@ -386,7 +386,8 @@ effective overridden bounds are echoed back in the JSON envelope's
 
 When the spec has an inline `implements`, the override also propagates into the
 abstract spec — restricted to the entity/number names the abstract itself
-declares — so the refinement check runs at the same world size on both sides
+declares (in a `requirements` abstract a `process` name counts as an entity,
+since lowering declares one for it) — so the refinement check runs at the same world size on both sides
 (refinement is a same-size forward simulation; without this, a shrunken impl
 and a full-size abstract would fail with `map_out_of_bounds`). An impl-only
 carried number (e.g. `Amount`, absent from a business abstract) applies to the
@@ -1822,7 +1823,8 @@ guards/invariants of abs). **Liveness (`leadsTo`) does not propagate** — since
 refine allows stutter, even if impl drops the progress that abs guaranteed with
 `fair`, the result can still be `refines` (the mapping does not require fair
 annotations). To opt into checking the abstract response on the lower layer,
-write `preserve progress` in the refinement mapping:
+write `preserve progress` in a standalone refinement mapping file (an inline
+`implements { }` block rejects it — see §13.2):
 
 ```fsl
 refinement DesignRefinesReq {
@@ -2423,11 +2425,16 @@ verify {
   unscoped `check`/`verify`, or on `fslc chain`. The decision for these three options is
   suppress-with-reason (`docs/design/DESIGN-refinement.md`,
   [#1008](https://github.com/ymm-oss/fsl/issues/1008)). Inside the `implements { }` block you write
-  state `map` entries, `maps auto`, `preserve progress`, and — since #73 —
+  state `map` entries, `maps auto`, and — since #73 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter`, the same
   correspondence syntax as a separate refinement file's `refinement_action`
   (`docs/design/DESIGN-refinement.md` §1), including an arity change between the impl
-  and abs action. Action↔action correspondence can also still be written as the
+  and abs action. `preserve progress` is not accepted there: the inline seam checks
+  safety refinement only, so a `preserve progress` item inside `implements { }` is a
+  located `kind: "parse"` error (exit 2) in every command that loads the document
+  ([#1275](https://github.com/ymm-oss/fsl/issues/1275)). To check an upper `leadsTo`
+  through the mapping, put the mapping and its `preserve progress` in a standalone
+  refinement file and run `fslc refine`. Action↔action correspondence can also still be written as the
   `maps <abs_act>(...)` clause on the requirement-level action; `maps auto`
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
   An impl action with both a `maps` clause and a matching inline `action ...`
