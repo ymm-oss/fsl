@@ -46,7 +46,7 @@ fn valid_corpus_is_parsed_and_every_identifier_is_indexed() {
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).expect("read corpus source");
-        match DocumentIndex::build(&source, path.to_str()) {
+        match DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable()) {
             Ok(index) => {
                 let missing = index.unindexed_identifiers();
                 if !missing.is_empty() {

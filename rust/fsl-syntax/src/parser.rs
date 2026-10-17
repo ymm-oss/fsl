@@ -110,7 +110,19 @@ pub fn parse_surface_spec(source: &str) -> Result<SurfaceSpec, ParseError> {
 /// Returns [`ParseError`] for invalid syntax or a top-level dialect that has
 /// not yet reached the Phase-0 parser gate.
 pub fn parse_surface_document(source: &str) -> Result<SurfaceDocument, ParseError> {
-    crate::parse_document(crate::SourceFile::new(source)).map(|parsed| parsed.surface)
+    parse_surface_document_with(source, &crate::ParseOptions::stable())
+}
+
+/// [`parse_surface_document`] under explicit [`crate::ParseOptions`].
+///
+/// # Errors
+///
+/// Returns [`ParseError`] for invalid syntax.
+pub fn parse_surface_document_with(
+    source: &str,
+    options: &crate::ParseOptions,
+) -> Result<SurfaceDocument, ParseError> {
+    crate::parse_document_with(crate::SourceFile::new(source), options).map(|parsed| parsed.surface)
 }
 
 pub(crate) fn parse_shared_tokens(

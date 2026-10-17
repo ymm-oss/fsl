@@ -24,6 +24,7 @@ mod parser;
 pub mod recursion;
 mod surface;
 mod syntax_expr;
+mod unstable;
 
 pub use ai::{
     AiAgentContract, AiAgentGrant, AiAgentOutput, AiAuthority, AiAuthorityRule, AiCheckRule,
@@ -55,7 +56,7 @@ pub use db::{
 };
 pub use dispatch::{
     DIALECT_KEYWORDS, ParsedDocument, SourceFile, declaration_keyword, dialect_keyword,
-    parse_document, validate_frontend_registry,
+    dialect_keyword_with, parse_document, parse_document_with, validate_frontend_registry,
 };
 pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,
@@ -63,14 +64,16 @@ pub use domain::{
     DomainProjection, DomainReject, DomainRetry, DomainSaga, DomainSagaCompensation,
     DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
-pub use lexer::{LexError, Token, TokenKind, lex};
+pub use lexer::{LexError, Token, TokenKind, lex, lex_with};
 pub use literate::extract_literate_fsl;
 pub use lossless::{
     CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,
     LosslessKind, LosslessNode, SourceEdit, apply_source_edits, canonical_rewrites, format_source,
     lossless_document, source_position, source_span,
 };
-pub use parser::{ParseError, parse_expr, parse_surface_document, parse_surface_spec};
+pub use parser::{
+    ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,
+};
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, CorrespondenceOrigin,
@@ -86,3 +89,4 @@ pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,
     SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
 };
+pub use unstable::{ParseOptions, UnstableFeature, UnstableFeatures};
