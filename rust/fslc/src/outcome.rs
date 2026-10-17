@@ -356,7 +356,7 @@ pub fn verify_cache_admits(output: &Value) -> bool {
 /// and its author will not know to look at the other two (#612).
 #[must_use]
 pub fn is_definitive_kernel_verdict(status: i32) -> bool {
-    status == 0 || status == 1
+    status == SUCCESS_EXIT || status == FAILURE_EXIT
 }
 
 /// Fate of one top-level key of a nested `verify` kernel envelope when
@@ -608,6 +608,148 @@ pub fn project_kernel(kernel: Value) -> Value {
     Value::Object(projected)
 }
 
+/// Exit status of a passing verdict.
+pub const SUCCESS_EXIT: i32 = 0;
+/// Exit status of a definitive or inconclusive non-passing verdict about the
+/// spec (`violated`, `unknown_cti`, ...).
+pub const FAILURE_EXIT: i32 = 1;
+/// Exit status of a spec, usage, or input error.
+pub const SPEC_ERROR_EXIT: i32 = 2;
+/// Exit status of an internal inconsistency.
+pub const INTERNAL_EXIT: i32 = 3;
+
+/// The one owner of the result class <-> process exit correspondence for the
+/// verdict vocabulary `verify`, `check`, `chain`, and the commands that re-emit
+/// a verification baseline share (issue #901).
+///
+/// Before this table each consumer re-mapped the same classes to the same
+/// codes on its own: the verify-cache replay (`verification.rs`
+/// `cached_output_status`), the process-exit normalization (`main.rs`
+/// `normalized_exit_status`), `chain`'s layer and run status, the nested
+/// refinement fold (`verification_output.rs` `fold_refinement_verdict`), and
+/// [`exit_status`]. Each now asks [`Verdict::exit_code`].
+///
+/// Adding a variant without an exit code does not compile: [`Verdict::exit_code`]
+/// is an exhaustive `match` with no wildcard. Adding one without registering it
+/// in [`Verdict::ALL`] fails `verdict_table_census_is_exhaustive`, and a code
+/// that contradicts [`outcome_class`] fails
+/// `verdict_exit_codes_agree_with_outcome_class`. The public exit contract is
+/// restated independently in `tests/corpus_check_sweep.rs`
+/// (`expected_verify_exit`), which compares itself against this table, so a
+/// mutation of one entry turns both the product and the test red.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// `verified`: bounded verification passed.
+    Verified,
+    /// `proved`: unbounded verification passed.
+    Proved,
+    /// `violated`: a counterexample was found.
+    Violated,
+    /// `reachable_failed`: a `reachable` property was not reached.
+    ReachableFailed,
+    /// `unknown_cti`: induction found a counterexample to induction.
+    UnknownCti,
+    /// `unknown_budget`: a search budget ran out before a verdict.
+    UnknownBudget,
+    /// `refinement_failed`: a nested refinement seam failed.
+    RefinementFailed,
+    /// `impl_violated`: the implementation side violated its own contract.
+    ImplViolated,
+    /// `indeterminate`: a `chain` whose only failures executed no test (#1200).
+    Indeterminate,
+    /// `error` with any `kind` other than `internal`.
+    SpecError,
+    /// `error` with `kind: "internal"`.
+    InternalError,
+}
+
+impl Verdict {
+    /// Every variant, in declaration order.
+    pub const ALL: [Self; 11] = [
+        Self::Verified,
+        Self::Proved,
+        Self::Violated,
+        Self::ReachableFailed,
+        Self::UnknownCti,
+        Self::UnknownBudget,
+        Self::RefinementFailed,
+        Self::ImplViolated,
+        Self::Indeterminate,
+        Self::SpecError,
+        Self::InternalError,
+    ];
+
+    /// The process exit status of this verdict. Never add a wildcard arm.
+    #[must_use]
+    pub const fn exit_code(self) -> i32 {
+        match self {
+            Self::Verified | Self::Proved => SUCCESS_EXIT,
+            Self::Violated
+            | Self::ReachableFailed
+            | Self::UnknownCti
+            | Self::UnknownBudget
+            | Self::RefinementFailed
+            | Self::ImplViolated
+            | Self::Indeterminate => FAILURE_EXIT,
+            Self::SpecError => SPEC_ERROR_EXIT,
+            Self::InternalError => INTERNAL_EXIT,
+        }
+    }
+
+    /// The envelope `result` string of this verdict.
+    #[must_use]
+    pub const fn result(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Proved => "proved",
+            Self::Violated => "violated",
+            Self::ReachableFailed => "reachable_failed",
+            Self::UnknownCti => "unknown_cti",
+            Self::UnknownBudget => "unknown_budget",
+            Self::RefinementFailed => "refinement_failed",
+            Self::ImplViolated => "impl_violated",
+            Self::Indeterminate => "indeterminate",
+            Self::SpecError | Self::InternalError => "error",
+        }
+    }
+
+    /// Whether a top-level `verify`/`check` envelope (or a baseline a command
+    /// re-emits from one) may carry this verdict. `indeterminate` is `chain`'s
+    /// own run verdict.
+    #[must_use]
+    pub const fn is_verification_verdict(self) -> bool {
+        !matches!(self, Self::Indeterminate)
+    }
+
+    /// The verdict of a non-`error` `result` string, or `None` for a value
+    /// outside this table. `error` needs its `kind`; use [`Verdict::of`].
+    #[must_use]
+    pub fn from_result(result: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|verdict| {
+            !matches!(verdict, Self::SpecError | Self::InternalError) && verdict.result() == result
+        })
+    }
+
+    /// The verdict of an envelope, reading `kind` for an `error`.
+    #[must_use]
+    pub fn of(output: &Value) -> Option<Self> {
+        match output.get("result").and_then(Value::as_str)? {
+            "error" if output.get("kind").and_then(Value::as_str) == Some("internal") => {
+                Some(Self::InternalError)
+            }
+            "error" => Some(Self::SpecError),
+            result => Self::from_result(result),
+        }
+    }
+}
+
+/// Whether `status` is one of the error exits (spec error or internal), as
+/// opposed to a verdict about the spec.
+#[must_use]
+pub const fn is_error_exit(status: i32) -> bool {
+    status == Verdict::SpecError.exit_code() || status == Verdict::InternalError.exit_code()
+}
+
 /// `docs/manual/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
 /// function over [`outcome_class`].
 ///
@@ -633,18 +775,19 @@ pub fn exit_status(output: &Value, error_status: i32) -> i32 {
     }
     match output.get("result").and_then(Value::as_str) {
         Some("error") => error_status,
+        // A `mutated` run whose explicit gate failed (#1237).
+        Some("mutated") => FAILURE_EXIT,
         // Row 1: kernel verification verdicts plus inline `implements` failures
-        // folded into `check` / `verify` / `mutate` baselines, and a `mutated`
-        // run whose explicit gate failed (#1237). `nonconformant`,
-        // `sweep_failed`, and `observed_mismatch` still belong to other commands.
-        Some(
-            "violated" | "reachable_failed" | "unknown_cti" | "unknown_budget"
-            | "refinement_failed" | "impl_violated" | "mutated",
-        ) => 1,
-        // A failure-class value outside this command's vocabulary, or one
-        // nobody registered at all, is an internal inconsistency -- never a
-        // silent success.
-        _ => 3,
+        // folded into `check` / `verify` / `mutate` baselines, coded by the
+        // [`Verdict`] table. `nonconformant`, `sweep_failed`, and
+        // `observed_mismatch` still belong to other commands, and `chain`'s
+        // `indeterminate` is not a baseline verdict. A failure-class value
+        // outside this vocabulary, or one nobody registered at all, is an
+        // internal inconsistency -- never a silent success.
+        Some(result) => Verdict::from_result(result)
+            .filter(|verdict| verdict.is_verification_verdict())
+            .map_or(INTERNAL_EXIT, Verdict::exit_code),
+        None => INTERNAL_EXIT,
     }
 }
 
@@ -991,5 +1134,83 @@ mod tests {
         // A registered failure outside the baseline vocabulary folded here is
         // still an internal inconsistency when it reaches `mutate`.
         assert_eq!(exit_status(&json!({"result": "nonconformant"}), 2), 3);
+    }
+
+    /// Issue #901: every [`Verdict`] variant is registered in `ALL`, in
+    /// declaration order. The `match` is exhaustive with no wildcard, so a new
+    /// variant fails to compile here until it is given a position, and then
+    /// fails this test until `ALL` lists it.
+    #[test]
+    fn verdict_table_census_is_exhaustive() {
+        use super::Verdict;
+
+        fn position(verdict: Verdict) -> usize {
+            match verdict {
+                Verdict::Verified => 0,
+                Verdict::Proved => 1,
+                Verdict::Violated => 2,
+                Verdict::ReachableFailed => 3,
+                Verdict::UnknownCti => 4,
+                Verdict::UnknownBudget => 5,
+                Verdict::RefinementFailed => 6,
+                Verdict::ImplViolated => 7,
+                Verdict::Indeterminate => 8,
+                Verdict::SpecError => 9,
+                Verdict::InternalError => 10,
+            }
+        }
+        for (index, verdict) in Verdict::ALL.into_iter().enumerate() {
+            assert_eq!(
+                position(verdict),
+                index,
+                "{verdict:?} is out of place in ALL"
+            );
+        }
+    }
+
+    /// Issue #901: the exit code the table assigns agrees with the class
+    /// [`outcome_class`] assigns, every envelope round-trips through
+    /// [`Verdict::of`], and [`exit_status`] (the baseline re-emission path)
+    /// codes every verification verdict exactly as the table does.
+    #[test]
+    fn verdict_exit_codes_agree_with_outcome_class() {
+        use super::{INTERNAL_EXIT, SPEC_ERROR_EXIT, Verdict, is_error_exit};
+
+        for verdict in Verdict::ALL {
+            let envelope = match verdict {
+                Verdict::InternalError => json!({"result": "error", "kind": "internal"}),
+                Verdict::SpecError => json!({"result": "error", "kind": "semantics"}),
+                _ => json!({"result": verdict.result()}),
+            };
+            assert_eq!(Verdict::of(&envelope), Some(verdict));
+            assert_eq!(
+                outcome_class(&envelope).is_success(),
+                verdict.exit_code() == 0,
+                "{verdict:?}: exit {} contradicts outcome_class",
+                verdict.exit_code()
+            );
+            assert_eq!(
+                is_error_exit(verdict.exit_code()),
+                matches!(verdict, Verdict::SpecError | Verdict::InternalError),
+                "{verdict:?}"
+            );
+            let error_status = if verdict == Verdict::InternalError {
+                INTERNAL_EXIT
+            } else {
+                SPEC_ERROR_EXIT
+            };
+            let expected = if verdict.is_verification_verdict() {
+                verdict.exit_code()
+            } else {
+                INTERNAL_EXIT
+            };
+            assert_eq!(
+                exit_status(&envelope, error_status),
+                expected,
+                "{verdict:?}"
+            );
+        }
+        assert_eq!(Verdict::from_result("error"), None);
+        assert_eq!(Verdict::from_result("refines"), None);
     }
 }

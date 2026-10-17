@@ -452,7 +452,7 @@ pub fn check_requirements_implements(
 pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -487,39 +487,30 @@ fn fold_refinement_verdict(
     nested_result: Option<&str>,
     malformed_message: &str,
 ) -> Option<i32> {
-    match nested_result {
-        Some("refines") => None,
-        // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
-        // both encode the exit class of an inline `implements` failure, and
-        // changing that class means changing both. They are reached by
-        // independent paths -- `check`/`verify` fold here, while `mutate` and
-        // `ledger` re-emit a baseline envelope through `exit_status` -- so a
-        // mutation that breaks one does not make the other's tests fail
-        // (measured 2026-09-08: sending `exit_status`'s row 1 to 0 kills
-        // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
-        // leaves `check_folds_failed_inline_refinement_into_command_failure`
-        // green). Nothing here detects the two drifting apart.
-        Some(verdict @ ("refinement_failed" | "impl_violated")) => {
-            map.insert("result".to_owned(), json!(verdict));
-            Some(1)
-        }
+    use crate::outcome::Verdict;
+
+    // The exit code of each fold comes from the `outcome::Verdict` table, the
+    // same entry `outcome::exit_status` reads when `mutate` and `ledger`
+    // re-emit a baseline envelope (#901). Before the table this arm carried
+    // its own `1` that had to be kept in step with `exit_status` by hand.
+    let folded = match nested_result {
+        Some("refines") => return None,
+        Some("refinement_failed") => Verdict::RefinementFailed,
+        Some("impl_violated") => Verdict::ImplViolated,
         // The correspondence walk hit its state budget (issue #1041)
         // instead of deciding a verdict. `unknown_budget` is already a
-        // non-success, cacheable failure class (`outcome.rs`'s
-        // `exit_status` row 1 and `outcome_class`), so folding it here
-        // reuses that existing exit-1 vocabulary rather than adding a new
-        // verdict string.
-        Some("unknown_budget") => {
-            map.insert("result".to_owned(), json!("unknown_budget"));
-            Some(1)
-        }
+        // non-success, cacheable failure class, so folding it here reuses
+        // that existing vocabulary rather than adding a new verdict string.
+        Some("unknown_budget") => Verdict::UnknownBudget,
         _ => {
             map.insert("result".to_owned(), json!("error"));
             map.insert("kind".to_owned(), json!("internal"));
             map.insert("message".to_owned(), json!(malformed_message));
-            Some(3)
+            return Some(Verdict::InternalError.exit_code());
         }
-    }
+    };
+    map.insert("result".to_owned(), json!(folded.result()));
+    Some(folded.exit_code())
 }
 
 /// Attach a rendered `governance` section and, when the command envelope is
@@ -541,7 +532,7 @@ fn fold_refinement_verdict(
 pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
