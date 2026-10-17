@@ -5,6 +5,217 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [4.12.0] - 2026-10-17
+
+- Changed (#1263): a `proved` result from `fslc verify --engine induction` now
+  says what the proof does not cover. The step reasons over unbounded integers
+  and only the base case (BMC to `--depth`) checks i64 overflow, so a counter
+  that overflows beyond `--depth` stays `proved`; the envelope now carries
+  `not_covered: ["int_overflow"]` whenever an invariant, `trans`, `leadsTo`
+  trigger/goal/measure, `terminal`, guard, body or `ensures` uses an operator
+  that can overflow (`+ - * / %`, unary `-`, `abs`, `sum`). The test is
+  syntactic: arithmetic on small bounded values carries it too, and a proof
+  with no such operator omits the key (never an empty array). `--engine
+  explicit` checks overflow concretely and does not carry it. Additive output
+  only: no verdict, exit code or other field changes, and the envelope schema
+  documents the key. Migration: none required; a consumer that needs overflow
+  coverage should treat `int_overflow` in `not_covered` as "check with
+  `--engine bmc`/`explicit` at a depth that reaches it, or bound the value".
+- Fixed (#1197): a compose component's `until` / `unless` is now rewritten like
+  its other properties: the name is reported as `alias.name` and its operands
+  read the component's own state. Before, a compose using such a component
+  failed with exit 2 (`cannot type identifier`), two components declaring the
+  same `until` name collided (`duplicate property name`), and when the compose
+  declared state with the same name as the component's, the property silently
+  checked the compose's variable instead. Migration: a compose in that last
+  shape that reported `verified` can now report `violated` (exit 1) for a
+  component property that does not hold; the `until` / `unless` result keys
+  change from `U` to `alias.U`.
+- Fixed (#1221): `fslc verify --engine induction` no longer reports `proved`
+  for a spec that indexes a finite-key `Map` outside its key domain (for
+  example `m[cur + 1]` once `cur` reaches the top key) beyond `--depth`. The
+  step's definedness obligation now also asks, for every invariant, `leadsTo`
+  trigger/goal, `trans`, guard, body (reads and indexed assignments) and
+  reached `ensures`, whether a state satisfying the proved invariants reaches
+  such a miss; a `sat` answer is `unknown_cti` with the new
+  `violation_kind: "key_domain"` and `invariant: "_key_domain_<action>"` /
+  `"_key_domain_property_<name>"`. Within depth the base case reports the same
+  error as BMC and explicit (`map index outside finite key domain` /
+  `map assignment index outside key domain`), so the three engines agree.
+  Only sites the obligation catalog cannot place inside the key type are
+  asked; in-domain reads such as `forall k: K { m[k] >= 0 }` add no query.
+  Checked i64 overflow is still not part of the step obligation (#1263).
+  Migration: a spec that was `proved` (exit 0) can now be `unknown_cti`
+  (exit 1) when an invariant-satisfying state misses the key domain, or
+  `error` (exit 2) when the miss is reachable within `--depth`; guard the
+  index (`requires cur < 5`, `cur < 5 => m[cur + 1] > 0`) or, if the CTI start
+  is unreachable, add an auxiliary invariant that excludes it.
+- Fixed (#1239, breaking): `fslc diff` no longer reports an OLD `forbidden` as
+  preserved when a NEW guard disables one of its setup steps. NEW then never
+  runs the final step, so nothing shows that NEW still rejects it; the forbidden
+  is now `unknown` / `forbidden_replay_failed` with `step`, `action`, and
+  `detail: "NEW forbidden setup was not enabled"`, like a NEW setup step that
+  violates (#1213) and an OLD setup step that is not enabled. Only a NEW final
+  step that its guard disables preserves the OLD rejection. The same judgment
+  serves `diff`, `diff --git`, and `approval diff`; no other command changes.
+  Migration: a diff that passed `--forbid unknown` (or
+  `--forbid forbidden_relaxed,unknown`) may now exit 1 — for example, a NEW that
+  adds `requires amount != 10` to the setup `withdraw(10)` and drops the
+  overdraw guard the forbidden checks. `--forbid forbidden_relaxed` alone still
+  exits 0 on it (the final step was never run, so it is not a relaxation); list
+  `unknown` in the gate to catch it. Fix the forbidden's setup so NEW can run it,
+  or confirm the change and update the forbidden. Corpus sweep: no self-diff
+  changes (`docs/design/DESIGN-forbidden.md` §2.1 and §6).
+- Fixed (#1241, breaking): a `forbidden` last step whose argument is not of its
+  parameter's kind — an enum member or a Bool for an `entity`, `number`, or range
+  parameter (`respond(Waiting)` or `respond(true)` with `c: Case`,
+  `withdraw(Red)` with `amount: Amount`), or an integer, a Bool, or another
+  enum's member for an enum parameter — no longer satisfies the forbidden as
+  `bad_call`. It is a spec typo that no guard and no implementation boundary
+  decided, so it is now a `kind: "forbidden"` error (exit 2) with `failed_step`,
+  `step`, `step_results: []`, `message`, `wrong_kind_argument`
+  (`{parameter, value, type}`), a `loc` at that step, and a hint. A value of the
+  right kind outside a declared range stays `bad_call` (#1212), and one outside a
+  verify scope stays the #1229 error. One classifier serves `check`, `verify`
+  (every engine), `sweep`, `chain`, `scenarios`, `testgen`, `mutate`,
+  `counterexample export`, `html`, `ledger`, `approval`, `explain`, `fslc diff`,
+  and the Worker's `check` / `verify`; `fslc ledger` names the malformed
+  argument. Migration: such a spec used to pass `check`, and `scenarios` /
+  `testgen` emitted a test asserting `bad_call`; every command that runs the
+  forbidden gate now exits 2, except `explain` (exit 0, no witnesses; #1242),
+  `approval create --kind ledger` (exit 0, records the ledger listing the
+  error; #1243), and `approval check` of a ledger record created before
+  (`drifted`, exit 0); `approval check` of a `scenarios` or `html` record created
+  before exits 2. In `fslc diff` such an OLD final step is `unknown` /
+  `forbidden_replay_failed` where it was preserved, and an OLD `bad_call` whose
+  argument NEW's parameter type makes a wrong kind is `unknown` /
+  `forbidden_step_unrelatable`. Fix the step to a value of the parameter's type.
+  Corpus sweep: no corpus forbidden changes (`docs/design/DESIGN-forbidden.md`
+  §2.1 and §6).
+- Fixed (#1250, #1301): every native `fslc` subcommand now accepts its options before, between, or after its positionals, as the `--help` usage lines (`rust/fslc/cli-contract.json`) and the frozen Python CLI already did. `fslc verify --depth 3 spec.fsl` no longer fails with `unknown verify option '3'`, `fslc check --no-cache spec.fsl` is a `usage` error instead of an `io` error about a file named `--no-cache`, and `fslc refine --depth 3 impl abs map` runs the refinement instead of returning an `io` error with empty `chain` entries. A value-taking option always consumes its value, and a trailing value-taking option with no value or an unknown option stays a `usage` error (exit 2). The spec-first order is unchanged. Migration: a bare `--` now ends option parsing (argparse semantics), so `fslc verify -- -odd.fsl` names a spec that starts with `-`. Such a token without `--` is now read as an option, so it is reported as an unknown option instead of being opened as a file. `fslc analyze --focus`, `--profile`, and `--export` with no value are now `usage` errors instead of being silently ignored. Option errors are reported before spec-loading errors, and an unknown `approval`, `document`, `ai`, or `domain` subcommand is reported as such even when no spec follows.
+- Fixed (#1252): `fslc verify --instances` now reaches the abstract side of an
+  inline `implements` whose abstract is a `requirements` spec declaring only a
+  `process` (no `entity` of that name). The override was dropped for it, so a
+  shrunken impl was compared with the full-size abstract and failed with a
+  false `refinement_failed` / `map_out_of_bounds` (exit 1). No migration is
+  needed: runs that failed this way now report the seam's real verdict.
+- Fixed (#1254): a compose sync action now substitutes its arguments into the
+  component action with capture-avoiding scoping. A statement `forall`'s
+  `where` and range bounds are substituted (they used to reach the Kernel with
+  the unbound parameter name, exit 2), its binding shadows a same-named
+  parameter (exit 2 on write-index distinctness before), and neither a
+  `forall` binding nor a `let` captures an argument or sync parameter spelled
+  like it. Migration: a compose whose sync argument shared a name with a
+  component's `forall` / `let` binding, or whose `where` read a compose state
+  variable named like the component parameter, could report `verified` for an
+  action that breaks the component's invariant; it now reports `violated`
+  (exit 1).
+- Fixed (#1259): `x is some(v)` whose `v` repeats a state variable could make
+  bmc and induction disagree with explicit-state: the symbolic engines bound `v`
+  to the absent payload even when `x` was `none`, so `p is some(exact) or exact <= 2`
+  was `violated` (or "undefined") under bmc/induction and `proved` under
+  explicit. `check` now rejects a pattern variable that repeats a name already
+  in scope — a state variable, constant, enum member, action parameter,
+  quantifier binder, `let`, or an earlier pattern binding (#1157 item 1) — as a
+  located semantics error (exit 2), and the symbolic `is some` keeps the outer
+  meaning of the name where the operand is absent, matching the concrete
+  evaluator. Migration: a spec that used such a collision now fails `check` and
+  every `verify` with exit 2 and `pattern binding '<v>' ... rename the pattern
+  variable`; rename the pattern variable to a fresh name. No spec in this
+  repository's corpus is affected. The frozen Python reference still accepts
+  the collision at `check`.
+- Fixed (#1275): `preserve progress` inside an inline `implements { }` block is
+  now rejected instead of being accepted and silently unchecked. The inline
+  seam checks safety refinement only, so `check` / `verify` used to report
+  `implements.result: "refines"` (exit 0) for a mapping whose progress the
+  standalone `fslc refine` reports as `progress_lost`. Every command that loads
+  the document (`check`, `verify`, `scenarios`, `chain`, the LSP, the WASM
+  Worker) now fails with a located `kind: "parse"` error (exit 2) at the
+  `preserve` keyword. Migration: a requirements spec with `preserve progress`
+  in its `implements` block now exits 2; delete that item from the block, put
+  the mapping and its `preserve progress` in a standalone `refinement` file,
+  and run `fslc refine <impl> <abs> <refinement>` to check the upper `leadsTo`.
+  Inline `implements` blocks without `preserve progress` are unchanged.
+- Fixed (#1297): a compose-level `leadsTo`, `until`, or `unless` can now read
+  component state through `alias.var`, as compose-level `invariant`, `trans`,
+  and `reachable` already could. Before, every such compose stopped with exit 2
+  (`public Kernel cannot type identifier 'a'`); it now gets a verdict. No
+  migration is needed beyond expecting a verdict (including `violated`, exit 1)
+  where the error used to be.
+- Fixed (#1314): `fslc scenarios` now folds governance `preservation`
+  results and an inline `implements` seam into its envelope exactly as `fslc
+  verify` does, through the same mapping (#1303). Before this it answered from
+  its own bounded run without reading either one, so a document whose
+  preservation or seam failed got `result:"scenarios"` / exit 0; only when its
+  own kernel failed did it fall back to the `verify` envelope, which carried
+  them. A governance document never takes that fallback, so its preservations
+  were never read. Now a failing preservation or seam makes the top-level
+  `result` the folded verdict (`refinement_failed`, `impl_violated`, or
+  `unknown_budget`, exit 1), every run attaches the `governance` / `implements`
+  section `verify` attaches (also when everything `refines`), and a governance
+  contract error or inline `implements` error that `verify` reports is the
+  same located `error` (exit 2). `fslc approval create --kind scenarios` reads
+  the same envelope. Migration: this changes `scenarios` exit codes and output
+  for governance documents and requirements documents with an inline
+  `implements`, and nothing else. In this repository's corpus, exit 0 → 1:
+  `examples/refinement_liveness/governance_detects_safety_loss.fsl`,
+  `tests/fixtures/chain/requirements_broken_implements.fsl`, and four test
+  fixtures; exit 0 → 2: the three governance error examples under
+  `examples/gallery/` and two test fixtures; every other governance or
+  inline-`implements` document stays exit 0 and gains the section. Fix the
+  preservation or seam, or, to keep it advisory, run it as a separate `fslc
+  refine` step. A `scenarios` approval of such a document no longer matches its
+  recorded artifact digest (`fslc approval check` reports `drifted`, exit 0);
+  re-approve it. `testgen`, `explain`, `testplan`, `diff`, `analyze`, and
+  `kernel` are unchanged.
+- Fixed (#1316): `fslc ledger` on a governance document now states, in its
+  Markdown body, the verdict its exit code reflects. A new `## governance
+  preservation` section, between the header and the risk list, gives the
+  top-level verdict (`検証判定`, the `verify` result after the #1303 fold) and
+  every `preservation` in declaration order with its `before` → `after`, the
+  controls it preserves, and its own `result`, 🟢 for `refines` and 🔴 for
+  anything else. Before this, a failing preservation made `fslc ledger` exit 1
+  while the body showed neither the verdict nor any preservation result, so a
+  reader of the ledger alone saw no reason for the failure. Migration: only
+  ledgers of governance documents change; every other ledger is byte-identical.
+  A governance-document ledger approved with `fslc approval create --kind
+  ledger` before this release no longer matches its recorded artifact digest,
+  so `fslc approval check` reports it `drifted` (exit 0); review the new
+  section and re-approve it.
+- Fixed (#1353): an unlocated diagnostic after non-ASCII text on its line (for example an `undefined predicate` after a Japanese invariant title) no longer crashes the language server: its fallback span was a character column used as a byte offset. CRLF line ends no longer shift it either, and the structural-finding location fallback reports UTF-16 positions. No migration is needed.
+- Documented (#1361): the distributed FSL skills no longer contradict the parser or
+  each other. `number` is documented as requirements/kernel-only (a `business`
+  spec that declares one is a parse error); `if c then a else b` is valid in any
+  expression position; requirements `terminal` uses `stage(c)`; `@requirement`
+  and `@undecided` are the taught tag forms (the `"ID: text"` slot is
+  `legacy_string_metadata`); a kernel spec cannot declare `acceptance` or
+  `forbidden`; the `decreases`-inside-`forall` diagnostic is quoted as the
+  parser emits it; the AI-project examples show only the lines the scanner
+  reads; broken `§` cross-references now name the file. Release and issue history that no longer changes what a reader does
+  ("before #1229", "used to", "(issue #N)") was removed from the references;
+  the current rule is kept. The skills no longer point at repository-only paths (`examples/`,
+  `docs/`, `specs/`, `schemas/`) that a mise or install.sh user does not
+  have; the needed gist is stated in the skill instead. The business, requirements, and design check loops now include `fslc
+  lint`, and `--requirements` is taught as a file of IDs (one per line), not a
+  comma list. The `examples/e2e` IDs follow the built-in ID policy (`POL-EXPENSE-001`,
+  `REQ-EXPENSE-001`, `AC-EXPENSE-001`, `MODEL-EXPENSE-001`, ...): the business
+  and requirements layers are lint-clean, and every verdict is unchanged.
+  A new distributed skill, `fsl-verify`, owns verification. It
+  gives the command sequence per layer and change kind (`check
+  --strict-tags --requirements` → `lint` → `verify --depth 8` → `--engine
+  induction` → `refine` / `implements.result` → `diff --forbid` → `mutate
+  --by-requirement` → `chain`), a table of results that exit 0 or look green
+  without passing (bounded `verified`; `proved` only at the run's
+  `instances` / `values`; `deadlock`, `no_user_invariants`, and
+  `unreferenced_requirement` warnings; `unknown_cti`, `unknown_budget`,
+  `not_evaluated` from `--property`, `not_run`, `closure: false`; `diff`
+  without `--forbid`; `mutate` survivors), the fix loop that never weakens
+  the upper layer, prohibited shortcuts (lower depth or scope, deleted
+  properties, ignore flags or `--property` in the completion run), how to
+  read `kill_rate` and `--by-requirement`, and a fixed completion-report
+  table with proof classes. The business, requirements, design, and
+  delivery skills keep their minimal check loop and point to it.
+
 ## [4.11.0] - 2026-10-15
 
 - Changed (#1247, #1174): the concrete refinement check (the impl
@@ -7337,7 +7548,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.11.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.12.0...HEAD
+[4.12.0]: https://github.com/ymm-oss/fsl/compare/v4.11.0...v4.12.0
 [4.11.0]: https://github.com/ymm-oss/fsl/compare/v4.10.0...v4.11.0
 [4.10.0]: https://github.com/ymm-oss/fsl/compare/v4.9.0...v4.10.0
 [4.9.0]: https://github.com/ymm-oss/fsl/compare/v4.8.1...v4.9.0

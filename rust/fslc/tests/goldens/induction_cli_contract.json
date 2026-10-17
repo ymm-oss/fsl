@@ -140,7 +140,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -149,7 +149,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -262,7 +262,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -271,7 +271,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -406,7 +406,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -415,7 +415,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -592,7 +592,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -601,7 +601,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -769,7 +769,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -778,7 +778,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -891,7 +891,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -900,7 +900,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       }
     }
@@ -1012,7 +1012,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1021,7 +1021,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       }
     }
@@ -1151,7 +1151,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1160,7 +1160,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -1290,7 +1290,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1299,7 +1299,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1420,7 +1420,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1429,7 +1429,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1572,7 +1572,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1581,7 +1581,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "warnings": []
@@ -1722,7 +1722,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1731,7 +1731,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -1866,7 +1866,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -1875,7 +1875,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -2056,7 +2056,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -2065,7 +2065,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -2217,7 +2217,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -2226,7 +2226,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violation_kind": "leadsTo_rank"
@@ -2453,7 +2453,7 @@
       "versions": {
         "core": {
           "name": "fsl-core",
-          "version": "4.11.0"
+          "version": "4.12.0"
         },
         "solver": {
           "backend": "native-z3",
@@ -2462,7 +2462,7 @@
         },
         "verifier": {
           "name": "fslc-rust",
-          "version": "4.11.0"
+          "version": "4.12.0"
         }
       },
       "violated_at_step": 4,
