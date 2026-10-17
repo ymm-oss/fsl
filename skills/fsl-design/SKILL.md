@@ -13,10 +13,16 @@ requirements contract, and `fslc refine` verifies the seam. When a seam breaks,
 repair the design or the mapping — not the upper contract, unless a human revises it.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language and verifier detail. When working inside this
-repository, read `examples/e2e/3_design.fsl` and `examples/e2e/3_refines_2.fsl`
-for the main pattern, `examples/layers/` for a compact chain, and `examples/bank/`
-or `examples/refinement_liveness/` when the task is mostly refinement. Use
+load only the needed language and verifier detail. The main pattern: a kernel
+`spec` that declares `entity`/`number` domains (sizes in `verify`), tags each
+action and invariant with `@requirement(...)`, and adds internal detail the
+requirements do not have (review substages, payment submit/confirm, an outbox);
+plus a `refinement` file that maps it back — `map claim_stage[c: Claim] = if
+design[c].st == DesignAutoReview then Submitted else ...` collapses internal
+stages onto the requirements stage, `action pay_submit(c) -> pay(c)` names the
+visible step, and `action pay_confirm(c) -> stutter` hides an internal one.
+Refinement syntax is in `../fsl/references/syntax.md`; the seam rules are in
+`../fsl/references/layers.md`. Use
 `fsl-design-review` instead when the user asks for a design review, SOLID
 judgment, substitutability, or variant comparison.
 
@@ -48,10 +54,14 @@ for a contract decision.
    verifier checks. `fslc verify` and `fslc refine` report a design error
    when it breaks something they evaluate, within the depth and domain sizes
    of the run. For `fslc verify` that includes declared properties
-   (`invariant`, `trans`, `leadsTo`, `ensures`, `reachable`), `acceptance`
-   and `forbidden` scenarios, and automatic checks (type bounds, partial
-   operations, deadlock detection); `fslc refine` adds the correspondence to
-   the upper contract. This list is illustrative, not complete:
+   (`invariant`, `trans`, `leadsTo`, `ensures`, `reachable`) and automatic
+   checks (type bounds, partial operations, deadlock detection); `fslc refine`
+   adds the correspondence to the upper contract. `acceptance` and `forbidden`
+   scenarios belong to the requirements layer — a kernel `spec` that declares
+   them is a parse error. They run when the requirements spec is checked; the
+   design reaches that contract through `refine`, which carries safety only and
+   does not replay an acceptance trace on the design. This list is
+   illustrative, not complete:
    `../fsl/references/commands.md` is the reference for what each command
    checks and returns. An error that breaks nothing they evaluate is not
    reported, so an intent that no declaration states is checked only where
@@ -84,21 +94,21 @@ for a contract decision.
    requirements spec owns the ID (`requirement REQ-CHECKOUT-001`); the design
    spec only links to it. Use a `MODEL-`/`ASSUME-`prefixed id for a design
    choice the requirements do not state. **Never use the `"REQ-1: text"` string
-   slot** — `docs/design/DESIGN-id-policy.md` classifies it as non-canonical migration
-   input and `fslc lint` reports it as `legacy_string_metadata`.
-4. Verify the design itself with `fslc check`, `fslc verify`, and usually
-   `fslc verify --engine induction`. Run `fslc lint <file>` as the tagging
+   slot** — it is non-canonical migration input and `fslc lint` reports it as
+   `legacy_string_metadata`.
+4. Verify the design itself with `fslc check`, `fslc lint <file>`, `fslc verify`,
+   and usually `fslc verify --engine induction`. `fslc lint` is the tagging
    gate: it exits 1 on any non-canonical ID form, which `--strict-tags` accepts
-   silently.
+   silently; the design is not done until it reports no findings. For
+   traceability, add `fslc check <file> --strict-tags --requirements ids.txt`
+   (a file with one requirement ID per line, not a comma list).
    A bounded `verified` says nothing past the depth and the domain sizes it
    ran at, and a design with many interleavings can hold its first violation
-   beyond the default depth. If induction returns `unknown_cti`, follow
-   `../fsl/references/commands.md`: try `--engine explicit` for closure before
-   hunting lemmas. If neither closes within the budget, raise `--depth` as far
-   as the budget allows and report the deepest depth that returned `verified`
-   as the bound of the claim. For properties about interactions between
+   beyond the default depth. For properties about interactions between
    entities, see "Domain sizing" in `../fsl/references/practices.md`: a result
    at a smaller size, even a closed `proved`, does not cover a larger one.
+   What to do with `unknown_cti` / `unknown_budget`, how to repair, and the
+   completion report format are in `../fsl-verify/SKILL.md`.
 5. Write the mapping file:
    - `map abs_var = expr` or `map abs_var[x: T] = expr`
    - `action impl_action(...) -> abs_action(...)` for visible effects
@@ -129,7 +139,8 @@ for a contract decision.
 - When you change an existing design spec, re-run `fslc verify` on the changed
   design and `fslc refine` against the unchanged requirements, and, when the
   old and new design share state and action names, also run
-  `fslc diff old_design.fsl new_design.fsl --forbid behavior_removed`.
+  `fslc diff old_design.fsl new_design.fsl --forbid behavior_removed,unknown`
+  (add the other kinds your change policy rejects; see `../fsl-verify/SKILL.md`).
   `refine` passes a change that only makes the design refuse more (a
   strengthened guard); `diff` reports it as `behavior_removed`. Decide whether
   that refusal is intended before accepting or reverting the change (see
@@ -142,6 +153,7 @@ for a contract decision.
   or `replay` has been anchored to real code/logs.
 - Author the design spec as documentation: declare domains with `entity`/`number`
   (sizes in the `verify` block, not in `type X = 0..N`), tag every action/invariant
-  with `"ID: intent"` (prefix verification-only invariants `MODEL-`/`ASSUME-`), and
+  with `@requirement("ID", "intent")` as in step 3 (prefix verification-only
+  invariants `MODEL-`/`ASSUME-`), and
   prefer `forall x in coll { … }` over index quantifiers in invariant bodies. See
-  `skills/fsl/references/layers.md` → "Authoring specs as readable documentation".
+  `../fsl/references/layers.md` → "Authoring specs as readable documentation".

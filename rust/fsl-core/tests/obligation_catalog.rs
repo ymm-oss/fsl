@@ -19,7 +19,138 @@ use fsl_core::{
 
 fn model(source: &str) -> KernelModel {
     let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("fixture lowers");
-    build_model(kernel).expect("fixture builds")
+    let mut model = build_model(kernel).expect("fixture builds");
+    restore_shadowing_patterns(&mut model);
+    model
+}
+
+/// `check` rejects an `is some(v)` whose `v` collides with a name in scope
+/// (#1157, #1259), so a fixture that pins how the catalog types such a
+/// binding (#1258) cannot be built from source. It is written with a fresh
+/// placeholder `shadow_<name>` (or `shadow2_<name>`, ...) and renamed back
+/// after the build -- the hand-built model a non-source producer could still
+/// hand the catalog, as `unlowered_forms_reach_their_operands` does for calls.
+fn restore_shadowing_patterns(model: &mut KernelModel) {
+    for property in model
+        .invariants
+        .iter_mut()
+        .chain(&mut model.transitions)
+        .chain(&mut model.reachables)
+    {
+        restore_expr(&mut property.expr);
+    }
+    for action in &mut model.actions {
+        action.requires.iter_mut().for_each(restore_expr);
+        action.ensures.iter_mut().for_each(restore_expr);
+        for guard in &mut action.guards {
+            match guard {
+                fsl_core::ActionGuard::Requires(value) | fsl_core::ActionGuard::Let(_, value) => {
+                    restore_expr(value);
+                }
+            }
+        }
+        action.statements.iter_mut().for_each(restore_statement);
+    }
+    assert!(
+        !format!("{model:?}").contains("Some(\"shadow"),
+        "a shadow_ placeholder sits where restore_shadowing_patterns does not reach"
+    );
+}
+
+fn shadowed(name: &str) -> Option<String> {
+    let rest = name.strip_prefix("shadow")?;
+    let (digits, target) = rest.split_once('_')?;
+    digits
+        .chars()
+        .all(|c| c.is_ascii_digit())
+        .then(|| target.to_owned())
+}
+
+fn restore_binder(binder: &mut fsl_core::KernelBinder) {
+    use fsl_core::KernelBinder as B;
+    let where_expr = match binder {
+        B::Typed { where_expr, .. } => where_expr,
+        B::Range {
+            lo, hi, where_expr, ..
+        } => {
+            restore_expr(lo);
+            restore_expr(hi);
+            where_expr
+        }
+        B::Collection {
+            collection,
+            where_expr,
+            ..
+        } => {
+            restore_expr(collection);
+            where_expr
+        }
+    };
+    if let Some(value) = where_expr {
+        restore_expr(value);
+    }
+}
+
+fn restore_expr(value: &mut KernelExpr) {
+    match value {
+        KernelExpr::Is {
+            expr: item,
+            pattern,
+        } => {
+            if let fsl_core::Pattern::Some(name) = pattern
+                && let Some(target) = shadowed(name)
+            {
+                *name = target;
+            }
+            restore_expr(item);
+        }
+        KernelExpr::Some(item)
+        | KernelExpr::Neg(item)
+        | KernelExpr::Not(item)
+        | KernelExpr::Field(item, _) => restore_expr(item),
+        KernelExpr::Index(left, right) | KernelExpr::Binary { left, right, .. } => {
+            restore_expr(left);
+            restore_expr(right);
+        }
+        KernelExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            restore_expr(condition);
+            restore_expr(then_expr);
+            restore_expr(else_expr);
+        }
+        KernelExpr::Quantified { binder, body, .. } => {
+            restore_binder(binder);
+            restore_expr(body);
+        }
+        _ => {}
+    }
+}
+
+fn restore_statement(value: &mut fsl_core::KernelStatement) {
+    use fsl_core::KernelStatement as S;
+    match value {
+        S::Assign { value, .. } => restore_expr(value),
+        S::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            restore_expr(condition);
+            then_statements.iter_mut().for_each(restore_statement);
+            else_statements.iter_mut().for_each(restore_statement);
+        }
+        S::ForAll {
+            binder, statements, ..
+        } => {
+            restore_binder(binder);
+            statements.iter_mut().for_each(restore_statement);
+        }
+    }
 }
 
 fn site_text(site: &Site) -> String {
@@ -445,7 +576,7 @@ spec KeyDomains {
   action writeHigh() { m[high] = 1 }
   action writes() { m[high] = 1  w[low] = 1 }
   action lets() { let k = exact  requires m[k] >= 0  w[k] = 2 }
-  action opt() { requires o is some(high)  m[high] = 3 }
+  action opt() { requires o is some(shadow_high)  m[high] = 3 }
   action all() { forall k: K { m[k] = 0 } }
   action branch() { if b { m[high] = 1 } else { w[exact] = 1 } }
   invariant Exact { m[exact] >= 0 }
@@ -458,7 +589,7 @@ spec KeyDomains {
   invariant Flag { flag[b] >= 0 }
   invariant Bound { forall k: K { m[k] >= 0 } }
   invariant Shadow { forall high: K { m[high] >= 0 } }
-  invariant Pattern { o is some(high) => m[high] >= 0 }
+  invariant Pattern { o is some(shadow_high) => m[high] >= 0 }
   invariant Filtered { count(k: K where m[high] > 0) >= 0 }
   invariant Two { m[high] >= 0 and w[low] >= 0 }
   invariant SeqRead { q.size() == 0 or q[0] >= 0 }
@@ -620,17 +751,17 @@ spec FalseVacuity {
   invariant CondMap { (if b then m else n)[exact] >= 0 }
   invariant PushHead { m[q.push(high).head()] >= 0 }
   invariant AddBinder { forall x in s.add(high) { m[x] >= 0 } }
-  invariant CondPattern { (if o is some(exact) then m[exact] else 0) >= 0 }
-  invariant WherePattern { forall k: K where o is some(exact) { m[exact] >= 0 } }
-  invariant OrPattern { p is some(high) or m[high] >= 0 }
-  invariant TwicePattern { o is some(exact) and p is some(exact) and m[exact] >= 0 }
-  invariant BinderPattern { forall exact: W { p is some(exact) => m[exact] >= 0 } }
+  invariant CondPattern { (if o is some(shadow_exact) then m[exact] else 0) >= 0 }
+  invariant WherePattern { forall k: K where o is some(shadow_exact) { m[exact] >= 0 } }
+  invariant OrPattern { p is some(shadow_high) or m[high] >= 0 }
+  invariant TwicePattern { o is some(shadow_exact) and p is some(shadow2_exact) and m[exact] >= 0 }
+  invariant BinderPattern { forall exact: W { p is some(shadow_exact) => m[exact] >= 0 } }
   invariant CondJoin { m[if b then exact else 0] >= 0 }
   invariant FreshPattern { p is some(v) => m[v] >= 0 }
   action condLet() { let k = if b then exact else high  requires m[k] >= 0  b = not b }
-  action ifPattern() { if o is some(exact) { m[exact] = 1 } }
-  action paramPattern(exact: W) { requires p is some(exact)  m[exact] = 1 }
-  action paramKeeps(exact: K) { requires o is some(exact)  m[exact] = 1 }
+  action ifPattern() { if o is some(shadow_exact) { m[exact] = 1 } }
+  action paramPattern(exact: W) { requires p is some(shadow_exact)  m[exact] = 1 }
+  action paramKeeps(exact: K) { requires o is some(shadow_exact)  m[exact] = 1 }
 }
 ";
 
@@ -952,8 +1083,8 @@ spec PatternJoins {
     m: Map<K, V>, pp: Option<Option<W>>, o2: Option<K>, o: Option<W>, p: Option<K>, exact: K
   }
   init { forall k: K { m[k] = 0 }  pp = some(some(5))  o2 = none  o = some(5)  p = some(0)  exact = 0 }
-  action across() { requires o is some(exact)  if p is some(exact) { m[exact] = 1 } }
-  invariant Nested { pp is some(o2) and o2 is some(v) and m[v] >= 0 }
+  action across() { requires o is some(shadow_exact)  if p is some(shadow2_exact) { m[exact] = 1 } }
+  invariant Nested { pp is some(shadow_o2) and o2 is some(v) and m[v] >= 0 }
 }
 ";
 

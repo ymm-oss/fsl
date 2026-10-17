@@ -11,10 +11,12 @@ requirement IDs, source text, operations, guards, acceptance criteria, forbidden
 flows, and optional conformance to an upper business layer.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language and verifier detail. When working inside this
-repository, read `examples/pm/`, `examples/layers/return_system.fsl`, and
-`examples/e2e/2_requirements.fsl` for the requirements dialect. Read
-`examples/nfr/` only when SLA/deadline behavior is in scope.
+load only the needed language and verifier detail. The complete requirements
+example (process+data profile, `implements` of a business spec, `covers`
+traceability, `kpi`, `acceptance`, and the `verify { instances / values }`
+bound) is in `../fsl/references/layers.md`, section "requirements (the
+requirements layer)". Read the NFR section of `../fsl/references/impl.md` only
+when SLA/deadline behavior is in scope.
 
 ## Faithfulness gate (definition of done)
 
@@ -29,8 +31,8 @@ thin spec) and **inventing** a rule the source never stated. Hold both ends:
   `covers REQ-CHECKOUT-001 "..."` to source text, or the typed annotation
   `@requirement("REQ-CHECKOUT-001", "...")` on a declaration that links to an ID
   a `requirement` block owns, with a `MODEL-`/`ASSUME-`prefixed id for an
-  explicit modeling choice. Those two are the canonical forms
-  (`docs/design/DESIGN-id-policy.md`); the `"REQ-1: text"` string slot is non-canonical
+  explicit modeling choice. Those two are the canonical forms; the
+  `"REQ-1: text"` string slot is non-canonical
   migration input, so never write it. An untagged declaration is an ungrounded
   guess, not a style nit.
 - **Do not invent to reach green.** If `check`/`verify` needs a guard, bound,
@@ -38,8 +40,9 @@ thin spec) and **inventing** a rule the source never stated. Hold both ends:
   question for the human — not a default you may pick to reach `verified`.
 - **Make it mechanical.** `fslc check <file> --strict-tags` flags every `untagged`
   declaration (an invented rule) and every `unreferenced_requirement` (a
-  requirement nothing checks); **done = zero of both**. Add `--requirements <ids>`
-  (the memo's source-ID list) to also catch requirements omitted entirely. Keep
+  requirement nothing checks); **done = zero of both**. Add `--requirements ids.txt`
+  (the memo's source IDs in a file, one per line — not a comma list) to also
+  catch requirements omitted entirely. Keep
   provenance in the `.fsl` as tags, not a separate file.
 
 ## Boundary
@@ -127,14 +130,20 @@ skill produced.
      checking that a tighter deadline fails
 9. Run `fslc check --strict-tags` as the faithfulness gate — not done until it
    reports zero `untagged` and zero `unreferenced_requirement` (add
-   `--requirements <ids>` from the memo to also catch fully omitted requirements).
+   `--requirements ids.txt` — the memo's IDs in a file, one per line, not a comma
+   list — to also catch fully omitted requirements).
    `--strict-tags` counts a legacy `"REQ-1: text"` string as tagged, so also run
    `fslc lint <file>`: it exits 1 with `legacy_string_metadata` and a
    machine-applicable `@requirement(...)` replacement for every non-canonical
    form, and with `non_canonical_id` for an ID outside the active policy.
-   Then `fslc verify`, and for stable requirements
-   `fslc verify --engine induction`. Run `fslc scenarios` to hand development the
-   acceptance/forbidden skeletons.
+   Not done until `fslc lint` also reports no findings.
+   `--strict-tags` findings are warnings on an exit-0 `ok` result, so read
+   `warnings[]`, not only the exit code.
+   Then `fslc verify --depth 8` (read `implements.result`), and for stable
+   requirements `fslc verify --engine induction`. Run `fslc scenarios` to hand
+   development the acceptance/forbidden skeletons. Reading those results,
+   repairing from them, measuring strength with `mutate`, and the completion
+   report format are in `../fsl-verify/SKILL.md`.
 
 ## Guardrails
 

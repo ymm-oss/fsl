@@ -63,7 +63,9 @@ Treat the layer boundary as part of the contract — it is the refinement seam t
 lower layer must honor. Do not move to the lower layer unless the user asks for it or
 the relevant role skill directs it.
 
-- `business Name { process/control/policy/kpi/goal }` — the consulting layer. For
+- `business Name { actor/entity/process/control/policy/kpi/goal }` — the
+  consulting layer. Each `process X` needs a matching `entity X`, and each `by`
+  actor needs an `actor` declaration (both are check errors otherwise). For
   PM/consulting-facing files, prefer the readable stage syntax for common rules:
   `policy ... every Case in Source must eventually be Target [or Target ...]`,
   `policy ... every Case reaching Target [or Target ...] must have passed
@@ -77,7 +79,8 @@ the relevant role skill directs it.
   `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
   then carry both the broken policy/goal and satisfied controls. A standalone
   `governance Name { ... }` catalog can require controls across business specs
-  and run preservation refinements during `fslc check` and `fslc verify`; a
+  and run preservation refinements during `fslc check`, `fslc verify`, and
+  `fslc scenarios`; a
   preservation that does not `refines` fails the command (exit 1).
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
@@ -99,8 +102,8 @@ the relevant role skill directs it.
   accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
   verifies at check time that the last step is rejected (not enabled; neither a
-  runtime violation, since #1213, nor an argument outside the `entity` / `number`
-  verify scope, since #1229, counts) — otherwise `kind: "forbidden"`.
+  runtime violation nor an argument outside the `entity` / `number` verify scope
+  counts) — otherwise `kind: "forbidden"`.
   Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
   required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
   `branches`, and explicit `maps` only for hard cases such as multi-entity
@@ -110,7 +113,9 @@ the relevant role skill directs it.
   separate agent writes positive/negative traces from NL)
 - The design layer is an ordinary `spec` (the main subject of this guide). Connect
   it to the requirements layer with `fslc refine`
-- **Traceability**: a `"ID: source"` tag immediately before a declaration's `{`.
+- **Traceability**: a typed `@requirement("ID", "text")` annotation on the line
+  before a declaration (see "Declaration tags" below; the older `"ID: source"`
+  string slot is linted as `legacy_string_metadata`).
   `requirement: {id, text}` appears in violated / CTI / coverage / scenarios — when
   you read a counterexample, always look at the requirement and repair in line with
   that requirement's intent
@@ -119,7 +124,7 @@ the relevant role skill directs it.
 
 The layers chain via refinement: business ⊒ requirements ⊒ design ⊒ implementation
 (testgen/replay). Every dialect expands as AST into the kernel, so all the commands
-in §7 work as-is.
+in [commands](commands.md) work as-is.
 
 ### Declaration tags (common to all layers)
 
@@ -133,23 +138,20 @@ declaration to an owned ID, and process `covers` is canonical dialect sugar for
 the same relation. The older `"ID: source"` slot is migration input and linted
 as `legacy_string_metadata`.
 
-Reserved intentional-undecided metadata uses the same single tag slot:
-`init "undecided: initial mode pending" { ... }` or
-`action choose() "undecided: selection policy pending" { ... }`. It is not a
+Intentional-undecided metadata is the typed annotation
+`@undecided("selection policy pending")` on the line before an `init` or
+`action` (the older `action choose() "undecided: ..." { ... }` string slot is
+linted as `legacy_string_metadata`). It is not a
 verification condition or requirement ID. `ledger` / `html` list the marker and
 state-dependency-derived affected requirement IDs; `analyze --profile ai-review`
-retains matching underspecification findings with `acknowledged:true`. The
-source slot remains singular, but native lowering converts it, requirement
-blocks, process `covers`, acceptance, and forbidden IDs into the shared typed
-annotation carrier — the same carrier the `@...` syntax in §1 populates
-directly, at both the document and the declaration level. An outer
-requirement can therefore coexist with an inner `undecided` marker, whether
-written as legacy strings, `@...` syntax, or a mix of both on one declaration.
-Explicit `covers` and requirement-block annotations retain their own spans;
+retains matching underspecification findings with `acknowledged:true`.
+`@undecided` stacks with `@requirement` on one declaration (see the annotation
+section of [syntax](syntax.md)); requirement blocks, process `covers`,
+acceptance, and forbidden IDs lower to the same annotation carrier, so an outer
+requirement coexists with an inner `undecided` marker. Explicit `covers` and requirement-block annotations retain their own spans;
 `undecided` is reserved and cannot be an explicit requirement ID.
 Multiple-relation JSON outputs use `requirements` and preserve singular fields
-as lexical compatibility projections. See `docs/design/DESIGN-undecided.md`,
-`docs/design/DESIGN-annotations.md`, and `docs/design/DESIGN-dialect-dispatch.md`. This syntax and its
+as lexical compatibility projections. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
 
@@ -197,7 +199,7 @@ properties) as a structured digest — a view of the source, not a separate docu
 
 ### business (the consulting layer)
 
-```fsl
+```fsl check
 business ReturnHandling {
   actor Customer, Manager            // roster (validates `by`)
   entity Return                      // identity sort; size set by verify below
@@ -233,7 +235,7 @@ The natural business forms above are aliases for `responds { forall ... ~> ... }
 and `goal { forall/exists ... }`; the explicit expression forms remain available
 for policies that cannot be written as a simple stage progression.
 
-**No-bypass precedence** (#75): `policy CTRL-APPROVAL "..." every Return
+**No-bypass precedence**: `policy CTRL-APPROVAL "..." every Return
 reaching Refunded must have passed through Approved` synthesizes an invisible
 `Map<Return, Bool>` history flag (`return_stage_via_Approved`), sets it `true`
 on the transition landing on `Approved`, and compiles to `forall c: Return {
@@ -244,9 +246,9 @@ B`, `passed through X or Y`); two policies over the same `(process,
 waypoint-set)` share one history flag (dedup, name deterministic by the
 process's stage order). Alongside the flag, a `<PolicyId>_stability`
 auxiliary invariant is auto-synthesized from the process's stage graph
-(dominated-set of the waypoints; #85), so a **compliant** precedence policy
+(dominated-set of the waypoints), so a **compliant** precedence policy
 proves under `--engine induction` out of the box — no manual invariant, no
-ghost CTI. Design in `DESIGN-precedence-policy.md`. Limitation: the flag is
+ghost CTI. Limitation: the flag is
 business-layer-only synthesized state — a `requirements` spec refining it
 must map the flag explicitly or restate the rule at its own layer.
 
@@ -260,13 +262,12 @@ catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8 (`fslc verify`
-runs it too, at depth 8 whatever its `--depth`). Each result stays under
+and `fslc scenarios` run it too, at depth 8 whatever their `--depth`). Each result stays under
 `governance.preservations[].result`; the first non-`refines` one in
 declaration order is also the command's verdict, fail-closed:
 `refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
 breaks its own semantics) -> `impl_violated`, `unknown_budget` ->
 `unknown_budget`, all exit 1; any other value is `error`/`internal` (exit 3).
-Before 4.11 such a run reported `ok`/`verified` with exit 0.
 
 No `terminal` syntax exists in business — it is derived automatically. Each
 process's sink stages (stages with no outgoing `transition`, e.g.
@@ -333,7 +334,7 @@ verify {
   `implements { }` block you write state `map` entries, `maps auto`,
   `preserve progress`, and `action <impl>(<params>) -> <abs>(<args>) | stutter`
   (same syntax as a separate refinement file's `action` item, including an
-  arity change between impl and abs params — #73). Action↔action
+  arity change between impl and abs params). Action↔action
   correspondence can also still be written as the `maps <abs_act>(...)` clause
   **on the requirement-level action** (auto-synthesized for matching names;
   `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
@@ -372,37 +373,29 @@ verify {
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected**, i.e. not enabled. If accepted,
   `kind: "forbidden"` (detection of under-constraint = a missing guard that a safety
-  invariant stays silent about). Since #1213 an enabled last step that stops
-  with an invariant/trans/ensures/type_bound/partial_op violation is also
+  invariant stays silent about). An enabled last step that stops with an
+  invariant/trans/ensures/type_bound/partial_op violation is also
   `kind: "forbidden"` (with `violation`): a violation is not a rejection, so write
-  the `requires` that rejects the call; every command that runs this check then
-  exits 2, except `explain` (exit 0, no witnesses; known gap #1242), `approval
-  create --kind ledger` (exit 0, records a ledger that lists the error; #1243),
-  and `approval check` of a ledger record (`drifted`, exit 0)
-  (`docs/design/DESIGN-forbidden.md` §2.1). If the premise is not enabled,
+  the `requires` that rejects the call. If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
-  outside the parameter's declared range or enum type). Since #1229 a last step
-  whose argument is outside the `verify { instances / values }` scope of an
+  outside the parameter's declared range or enum type). A last step whose
+  argument is outside the `verify { instances / values }` scope of an
   `entity` / `number` parameter (a `process` counts as an `entity`), such as
   `accept(7)` under `instances Case = 3`, is not a rejection: no guard was
   evaluated and an implementation may accept it. It is a `kind: "forbidden"`
   error with `out_of_scope_argument` — widen the scope or move the argument
-  inside it. Under a `--instances` / `--values` override that alone removed the
-  argument, the forbidden is `forbidden_skipped` instead. Breaking: such a step
-  used to satisfy the forbidden (as `requires_failed` before #1212, `bad_call`
-  since), so `check` passed. A last
-  step naming no action or no variant of that arity is a `kind: "forbidden"`
-  error with a `message`, not a rejection (breaking after 4.8.1: `check` used to
-  pass, and what the other commands reported depended on the rest of the spec).
-  On either step every command that runs this check now exits 2 with no
-  verdict, scenario, or test, except `explain`, which exits 0 with no
-  witnesses (known gap #1242), `approval create --kind ledger`, which exits 0
-  and records a ledger that lists the error (#1243), and `approval check` of a
-  ledger record, which reports `drifted` (exit 0). `fslc diff` replays the
-  forbidden too but reports a finding whose exit status follows `--forbid`, and
-  an override that alone removed the argument gives `forbidden_skipped` as
-  above, with the exit status of the rest of the spec (0 when it verifies) — `docs/design/DESIGN-forbidden.md` §2.1.
+  inside it. A last step naming no action or no variant of that arity is a
+  `kind: "forbidden"` error with a `message`, not a rejection. On any of these
+  errors every command that runs this check exits 2 with no verdict, scenario,
+  or test, except `explain`, which exits 0 with no witnesses (known gap #1242),
+  `approval create --kind ledger`, which exits 0 and records a ledger that
+  lists the error, and `approval check` of a ledger record, which reports
+  `drifted` (exit 0). `fslc diff` replays the forbidden too but reports a
+  finding whose exit status follows `--forbid`. Under a `--instances` /
+  `--values` override that alone removed the argument, the forbidden is
+  `forbidden_skipped`, with the exit status of the rest of the spec (0 when it
+  verifies).
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use
@@ -423,7 +416,7 @@ verify {
 
 ### Drawing the layer boundary
 
-The majority of NFRs are handled (§11). What stays outside FSL: probabilities,
+The majority of NFRs are handled ([impl](impl.md#11-non-functional-requirements-nfr)). What stays outside FSL: probabilities,
 percentiles, real time (wall-clock ms), usability, evaluator truth judgments,
 statistical AI quality claims, and prose rationale (write those in each layer's
 documents).

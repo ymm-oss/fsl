@@ -456,3 +456,35 @@ fn other_verdict_reporting_commands_fail_closed_on_the_same_seam() {
     let (ledger, ledger_status) = run_raw("ledger", &[CHAIN_FIXTURE]);
     assert_eq!(ledger_status, 1, "ledger envelope: {ledger:?}");
 }
+
+/// Issue #1314: `scenarios` folded a failed inline seam only on its
+/// `run_verify_from_source` fallback, taken when the document's own kernel
+/// fails; on the kernel path it never read the seam and exited 0 with no
+/// `implements` section. Both paths now carry the section, and a failing seam
+/// on the kernel path folds exactly as `verify` does.
+#[test]
+fn scenarios_reads_the_seam_on_both_paths() {
+    // Kernel path: the document's own kernel passes, the seam fails.
+    let (verified, verify_status) = run("verify", &[CHAIN_FIXTURE]);
+    let (folded, folded_status) = run("scenarios", &[CHAIN_FIXTURE]);
+    assert_eq!(folded_status, 1, "{folded:#}");
+    assert_eq!(folded_status, verify_status, "{folded:#}");
+    assert_eq!(folded["result"], "refinement_failed", "{folded:#}");
+    assert_eq!(folded["implements"], verified["implements"], "{folded:#}");
+
+    // Kernel path, seam refines: still `scenarios` / exit 0, with the section.
+    let (refines, refines_status) = run("scenarios", &[CHAIN_REFINES_FIXTURE]);
+    assert_eq!(refines_status, 0, "{refines:#}");
+    assert_eq!(refines["result"], "scenarios", "{refines:#}");
+    assert_eq!(refines["implements"]["result"], "refines", "{refines:#}");
+
+    // Fallback path: the document's own violation stays the verdict and the
+    // seam rides along as evidence, as on `verify`.
+    let (fallback, fallback_status) = run("scenarios", &[&format!("{FIXTURE_DIR}/impl_iv.fsl")]);
+    assert_eq!(fallback_status, 1, "{fallback:#}");
+    assert_eq!(fallback["result"], "violated", "{fallback:#}");
+    assert_eq!(
+        fallback["implements"]["result"], "impl_violated",
+        "{fallback:#}"
+    );
+}
