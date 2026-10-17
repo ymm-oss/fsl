@@ -1115,8 +1115,11 @@ did, so such a forbidden now fails `--forbid unknown`. An OLD final step naming 
 `unknown` / `forbidden_replay_failed`. Since #1213 a NEW final step that is
 enabled and then stops with a runtime violation is `forbidden_relaxed`, and an
 OLD final step or a NEW setup step that violates is `unknown` /
-`forbidden_replay_failed` (known gap #1239: a guard-disabled NEW setup step is
-also reported as preserved; see
+`forbidden_replay_failed`. Since #1239 (breaking) so is a NEW setup step that
+its guard disables: NEW never runs the final step, so the forbidden is not
+preserved (it used to be), and a gate that must catch it lists `unknown`. An
+OLD final step whose argument is not of its parameter's kind (#1241) is
+`unknown` / `forbidden_replay_failed` too (see
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md), "Forbidden
 replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
@@ -3135,9 +3138,15 @@ DESIGN-*.md).
   The measured before/after of each command, exit status and output, is in
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1.
   The scenario's `rejected_by` (asserted by testgen) is
-  `requires_failed` for a guard refusal and `bad_call` for an argument outside
-  the declared range or enum type of its parameter (an implementation must
-  reject it at its decoding boundary). **Since #1229 (breaking)** an argument
+  `requires_failed` for a guard refusal and `bad_call` for an argument of the
+  parameter's kind outside its declared range type (an implementation must
+  reject it at its decoding boundary). **Since #1241 (breaking)** an argument
+  of another kind — an enum member or a Bool for an `entity`, `number`, or
+  range parameter, an integer or another enum's member for an enum parameter
+  (`respond(Waiting)` with `c: Case`) — is a malformed step, not a `bad_call`:
+  it is a `kind:"forbidden"` error with `wrong_kind_argument` (`{parameter,
+  value, type}`), on every command that runs the forbidden gate. To migrate,
+  write a value of the parameter's type. **Since #1229 (breaking)** an argument
   outside the verification scope of an `entity` (`verify { instances }`, which
   also bounds a `process`) or `number` (`verify { values }`) parameter is not a
   rejection: under `instances Case = 3`, a last step `accept(7)` evaluates no

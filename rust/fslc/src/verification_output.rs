@@ -882,6 +882,17 @@ pub enum UnenabledStep {
         type_name: String,
         scope: (i64, i64),
     },
+    /// A call whose argument is not of its parameter's kind in every
+    /// same-named action of that arity — a Bool or an enum member for an
+    /// integer parameter, a value of another enum, an integer for an enum
+    /// (#1241). It is a malformed step, not a rejection: no guard was
+    /// evaluated and no implementation boundary is tested. `expected` names
+    /// the declared type of the first such parameter.
+    WrongKind {
+        parameter: String,
+        value: FslValue,
+        expected: String,
+    },
     /// The step names no action.
     UnknownAction,
     /// The step names an action, but no variant of that arity.
@@ -896,7 +907,10 @@ impl UnenabledStep {
         match self {
             Self::RequiresFailed => Some("requires_failed"),
             Self::BadCall => Some("bad_call"),
-            Self::OutsideVerifyScope { .. } | Self::UnknownAction | Self::ArityMismatch => None,
+            Self::OutsideVerifyScope { .. }
+            | Self::WrongKind { .. }
+            | Self::UnknownAction
+            | Self::ArityMismatch => None,
         }
     }
 
@@ -919,6 +933,15 @@ impl UnenabledStep {
                 fsl_value_json(value),
                 step.name
             )),
+            Self::WrongKind {
+                parameter,
+                value,
+                expected,
+            } => Some(format!(
+                "argument {} for '{parameter}' of '{}' is not a value of type '{expected}' in forbidden, so no guard was evaluated",
+                fsl_value_json(value),
+                step.name
+            )),
             Self::RequiresFailed | Self::BadCall => None,
         }
     }
@@ -930,7 +953,52 @@ enum DomainFit<'a> {
     /// `entity` / `number` scope; the first such parameter, its type, and the
     /// value.
     OutsideScope(&'a ParamDef, &'a str, &'a FslValue),
+    /// An argument of its parameter's kind lies outside the declared type.
     OutsideType,
+    /// An argument is not of its parameter's kind (#1241); the first such
+    /// parameter and value.
+    WrongKind(&'a ParamDef, &'a FslValue),
+}
+
+/// Whether `value` is of `parameter`'s kind, its bounds aside: an integer
+/// for an integer parameter (a range, `entity`, `number`, or `Int`), a Bool
+/// for `Bool`, a member of the parameter's own enum for an enum.
+fn argument_kind_fits(
+    monitor: &fsl_runtime::Monitor,
+    parameter: &ParamDef,
+    value: &FslValue,
+) -> bool {
+    match parameter {
+        ParamDef::Range { .. } => matches!(value, FslValue::Int(_)),
+        ParamDef::Typed { ty, .. } => match ty {
+            TypeRef::Int | TypeRef::Range(..) => matches!(value, FslValue::Int(_)),
+            TypeRef::Bool => matches!(value, FslValue::Bool(_)),
+            TypeRef::Named(type_name) => match monitor.model.types.get(type_name) {
+                Some(TypeDef::Domain { .. }) => matches!(value, FslValue::Int(_)),
+                Some(TypeDef::Enum { .. }) => matches!(
+                    value,
+                    FslValue::Enum { type_name: value_type, .. } if value_type == type_name
+                ),
+                _ => false,
+            },
+            _ => false,
+        },
+    }
+}
+
+/// The declared type of `parameter` as the source spells it.
+fn parameter_type_text(parameter: &ParamDef) -> String {
+    let ty = match parameter {
+        ParamDef::Range { lo, hi, .. } => return format!("{lo}..{hi}"),
+        ParamDef::Typed { ty, .. } => ty,
+    };
+    match ty {
+        TypeRef::Range(lo, hi) => format!("{lo}..{hi}"),
+        TypeRef::Int => "Int".to_owned(),
+        TypeRef::Bool => "Bool".to_owned(),
+        TypeRef::Named(type_name) => type_name.clone(),
+        other => format!("{other:?}"),
+    }
 }
 
 fn arguments_domain_fit<'a>(
@@ -940,9 +1008,15 @@ fn arguments_domain_fit<'a>(
     scope_types: &BTreeSet<String>,
 ) -> Result<DomainFit<'a>, String> {
     let mut outside_scope = None;
+    let mut outside_type = false;
     for (parameter, value) in action.params.iter().zip(arguments) {
         if argument_in_checked_domain(monitor, parameter, value)? {
             continue;
+        }
+        // #1241: a value of another kind is a malformed call whatever the
+        // other arguments are, never a rejection at the decoding boundary.
+        if !argument_kind_fits(monitor, parameter, value) {
+            return Ok(DomainFit::WrongKind(parameter, value));
         }
         match (parameter, value) {
             (
@@ -954,8 +1028,11 @@ fn arguments_domain_fit<'a>(
             ) if scope_types.contains(type_name) => {
                 outside_scope.get_or_insert((parameter, type_name.as_str(), value));
             }
-            _ => return Ok(DomainFit::OutsideType),
+            _ => outside_type = true,
         }
+    }
+    if outside_type {
+        return Ok(DomainFit::OutsideType);
     }
     Ok(match outside_scope {
         Some((parameter, type_name, value)) => DomainFit::OutsideScope(parameter, type_name, value),
@@ -988,6 +1065,8 @@ pub fn requirement_unenabled_step(
     }
     let mut arity_matched = false;
     let mut outside_scope = None;
+    let mut outside_type = false;
+    let mut wrong_kind = None;
     for action in named
         .into_iter()
         .filter(|action| action.params.len() == arguments.len())
@@ -998,7 +1077,10 @@ pub fn requirement_unenabled_step(
             DomainFit::OutsideScope(parameter, type_name, value) => {
                 outside_scope.get_or_insert((parameter, type_name, value));
             }
-            DomainFit::OutsideType => {}
+            DomainFit::OutsideType => outside_type = true,
+            DomainFit::WrongKind(parameter, value) => {
+                wrong_kind.get_or_insert((parameter, value));
+            }
         }
     }
     if let Some((parameter, type_name, value)) = outside_scope {
@@ -1013,11 +1095,21 @@ pub fn requirement_unenabled_step(
             scope,
         });
     }
-    Ok(if arity_matched {
-        UnenabledStep::BadCall
-    } else {
-        UnenabledStep::ArityMismatch
-    })
+    if outside_type {
+        return Ok(UnenabledStep::BadCall);
+    }
+    if let Some((parameter, value)) = wrong_kind {
+        return Ok(UnenabledStep::WrongKind {
+            parameter: parameter.name().to_owned(),
+            value: value.clone(),
+            expected: parameter_type_text(parameter),
+        });
+    }
+    debug_assert!(
+        !arity_matched,
+        "an arity-matched unenabled step is classified above"
+    );
+    Ok(UnenabledStep::ArityMismatch)
 }
 
 /// Resolve a requirements trace step using arguments evaluated in its source model.
@@ -1244,6 +1336,28 @@ fn validate_requirement_trace_contract(
                             "hint".to_owned(),
                             json!(format!(
                                 "a forbidden case is satisfied only when a guard rejects the last step, or its argument is outside the declared parameter type (bad_call). '{type_name}' is bounded by the verify scope, not by its type, so an implementation may accept this call and no guard was tested. Widen the scope in verify {{ instances / values }} to include {}, or change the step to a value inside {lo}..{hi}.",
+                                fsl_value_json(value),
+                            )),
+                        );
+                    }
+                    if let UnenabledStep::WrongKind {
+                        parameter,
+                        value,
+                        expected,
+                    } = &unenabled
+                    {
+                        output.insert(
+                            "wrong_kind_argument".to_owned(),
+                            json!({
+                                "parameter": parameter,
+                                "value": fsl_value_json(value),
+                                "type": expected,
+                            }),
+                        );
+                        output.insert(
+                            "hint".to_owned(),
+                            json!(format!(
+                                "a forbidden case is satisfied only when a guard rejects the last step, or its argument is outside the declared parameter type (bad_call). {} is not a value of '{expected}' at all, so the step is malformed rather than rejected and no guard was tested. Change the step to a value of '{expected}'.",
                                 fsl_value_json(value),
                             )),
                         );

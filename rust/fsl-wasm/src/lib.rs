@@ -1607,6 +1607,42 @@ mod tests {
         assert_eq!(worker["result"], "ok", "{worker:#}");
     }
 
+    /// #1241: a last step whose argument is not of its parameter's kind is a
+    /// malformed step; the Worker reports the native error, not a `bad_call`
+    /// rejection.
+    #[test]
+    fn worker_reports_a_wrong_kind_forbidden_final_step_like_native() {
+        let source = |final_step: &str| {
+            format!(
+                "requirements Respond {{\n  entity Case\n  enum St {{ Waiting, Accepted, Responded }}\n  state {{ cases: Map<Case, St> }}\n  init {{ forall c: Case {{ cases[c] = Waiting }} }}\n  requirement REQ-1 \"respond\" {{\n    action respond(c: Case) {{ requires cases[c] == Accepted  cases[c] = Responded }}\n  }}\n  forbidden FB-1 \"cannot respond before accepting\" {{\n    {final_step}\n    expect rejected\n  }}\n}}\nverify {{ instances Case = 3 }}"
+            )
+        };
+        for command in ["check", "verify"] {
+            let request = Request {
+                cmd: command.to_owned(),
+                source: source("respond(Waiting)"),
+                source_file: "respond.fsl".to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+            };
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden final step of the wrong kind",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["wrong_kind_argument"],
+                json!({"parameter": "c", "value": "Waiting", "type": "Case"}),
+                "{command}: {worker:#}"
+            );
+        }
+    }
+
     /// Parity control for #1008 (mutation: the Worker gains a selection
     /// option that skips the trace replay the way native `--instances` does).
     /// A request carrying the native selection keys is still a full run: it

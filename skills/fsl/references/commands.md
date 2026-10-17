@@ -326,10 +326,12 @@ that only NEW's scope excludes is `unknown` / `forbidden_step_unrelatable`.
 A compose NEW, or a NEW
 of another dialect whose `entity` / `number` types are not in its source, never
 preserves an OLD `bad_call` (`unknown` / `forbidden_step_unrelatable`). An OLD
-final step that names no action, or no variant of that arity, is `unknown` /
-`forbidden_replay_failed`. Known gap (#1239): a NEW
-*setup* step that its guard disables is also reported as preserved, although NEW
-never runs the final step. A NEW final step that is enabled and then
+final step that names no action, or no variant of that arity, or whose argument
+is not of its parameter's kind (`respond(Waiting)` with `c: Case`), is `unknown` /
+`forbidden_replay_failed`. A NEW *setup* step that its guard disables is
+`unknown` / `forbidden_replay_failed` (`NEW forbidden setup was not enabled`):
+NEW never runs the final step, so the forbidden is not preserved. Gate it with
+`--forbid unknown` (`--forbid forbidden_relaxed` alone does not catch it). A NEW final step that is enabled and then
 stops with a runtime violation is `forbidden_relaxed` too (its witness carries
 `violation`): a violation is not a rejection. An OLD final step or a NEW setup
 step that violates is `unknown` / `forbidden_replay_failed`. A changed

@@ -383,8 +383,13 @@ verify {
   the `requires` that rejects the call. If the premise is not enabled,
   `kind: "forbidden_setup"`. Output to scenarios as `forbidden_<ID>` (with
   `rejected_by` — `requires_failed` is a guard refusal, `bad_call` an argument
-  outside the parameter's declared range or enum type). A last step whose
-  argument is outside the `verify { instances / values }` scope of an
+  of the parameter's kind outside its declared range type). An argument of
+  another kind — an enum member or Bool for an `entity` / `number` / range
+  parameter, an integer or another enum's member for an enum parameter, such as
+  `respond(Waiting)` with `c: Case` — is a malformed step, not a rejection: a
+  `kind: "forbidden"` error with `wrong_kind_argument`; write a value of the
+  parameter's type. A last step whose argument is outside the
+  `verify { instances / values }` scope of an
   `entity` / `number` parameter (a `process` counts as an `entity`), such as
   `accept(7)` under `instances Case = 3`, is not a rejection: no guard was
   evaluated and an implementation may accept it. It is a `kind: "forbidden"`
