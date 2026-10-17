@@ -22,7 +22,7 @@ the formalization memo.**
 | "once X has happened, it can never happen again" (history dependence) | ghost variable (`ever_*`) + invariant |
 | "X can be reached / X can end up being reached" (possibility) | `reachable` (witness, or detection of over-constraint) |
 | "A is linked to B" / graph reachability / acyclicity / functional relation | `state { r: relation A -> B }` plus `.contains/.add/.remove`, `reachable`, `acyclic`, `functional`, `injective`, `domain`, `range` |
-| "within K times / K ticks" (deadline) | kernel `leadsTo ... within K` for step deadlines, or requirements `time` + `deadline` for SLA/tick semantics ([layers](layers.md)) |
-| upper/lower bound or non-negativity of a number | kernel: `type T = lo..hi`; business/requirements dialects: `number T` plus `verify { values T = lo..hi }` (do not hand-write boundary invariants) |
+| "within K times / K ticks" (deadline) | kernel `leadsTo ... within K` for step deadlines, or requirements `time` + `deadline` for SLA/tick semantics ([impl](impl.md#11-non-functional-requirements-nfr)) |
+| upper/lower bound or non-negativity of a number | kernel: `type T = lo..hi`; requirements dialect (or kernel spec): `number T` plus `verify { values T = lo..hi }` (do not hand-write boundary invariants). `business` has no `number`: keep amounts out of the business layer or move them to requirements |
 | "at most / less than / at least / greater than" "before / after" | `<= / < / >= / >`. **Make boundary implications explicit in the memo** (the most frequent misreading) |
 | "the total equals X" / "the count is X" (aggregate consistency) | an invariant over `sum(...)` / `count(...)` |

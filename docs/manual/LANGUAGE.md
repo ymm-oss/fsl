@@ -706,7 +706,10 @@ variable capture instead of inventing internal binder names. See
   that binds `v`; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
-  not a global binding. Ordering is not defined.
+  not a global binding. `v` must be a fresh name: `check` rejects a `v` that is
+  already a state variable, constant, enum member, action parameter, quantifier
+  binder, `let`, or an earlier pattern binding in scope, and asks you to rename
+  it. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
@@ -1174,12 +1177,15 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
-governance `preservation` folds into `check`/`verify` through the same mapping (§13). The fold
+governance `preservation` folds into `check`/`verify`/`scenarios` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
 same exit from the folded verification envelope, and `sweep` reports `sweep_failed` for a true
-failure or `sweep_inconclusive` when some scope has only depth-limited cells. The same
+failure or `sweep_inconclusive` when some scope has only depth-limited cells. `scenarios`
+folds the seam and every preservation into its own envelope the same way (the folded
+`result`, exit 1, with the `implements` / `governance` section attached), whether it
+answered from its own bounded run or fell back to the `verify` envelope. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -2631,8 +2637,10 @@ is the same located `error` (exit 2) under `verify` too; a preservation
 refinement that fails internally is `error`/`internal` (exit 3) under both.
 Consumers of the `check`/`verify` envelope read the folded verdict: a
 `fslc chain` spec layer fails, `fslc ledger`, `fslc html`, and `fslc mutate`
-exit 1 from the same baseline, and the browser Worker folds `check` and
-`verify` the same way. This changed exit codes: before 4.11 a failed
+exit 1 from the same baseline (the ledger body also states that verdict and
+lists every preservation with its result, failing ones marked), `fslc
+scenarios` folds the preservations into its own envelope as `verify` does,
+and the browser Worker folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
 preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
 `verify` reported no `governance` section at all (and answered `verified` even
 for a contract `check` rejected). A CI that gated on the exit

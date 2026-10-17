@@ -1,15 +1,13 @@
 ---
 name: fsl
-description: Shared FSL language and verifier reference for writing, checking, verifying, repairing, explaining, mutating, refining, replaying, generating scenarios/test scaffolds, and interpreting fslc JSON results. Use directly for FSL syntax, kernel specs, verifier errors, repair loops, and command usage. For role-specific authoring, prefer fsl-business for business flows, fsl-requirements for PM requirements/acceptance/NFR specs, and fsl-design for engineering design/refinement work.
+description: Shared FSL language and verifier reference for writing, checking, verifying, repairing, explaining, mutating, refining, replaying, generating scenarios/test scaffolds, and interpreting fslc JSON results. Use directly for FSL syntax, kernel specs, verifier errors, repair loops, and command usage. For role-specific authoring, prefer fsl-business for business flows, fsl-requirements for PM requirements/acceptance/NFR specs, and fsl-design for engineering design/refinement work; for choosing the verification run, reading results without over-claiming, and the completion report, use fsl-verify.
 ---
 
 # FSL Core — Language, Verifier, and Repair Loop
 
 FSL is a language not present in training data. **Do not write from memory;
 follow this guide.** Use the reference index below to read only the topical
-material needed for the task. Within the repository, `docs/manual/LANGUAGE.md` is the
-complete reference and `specs/*.fsl` are working examples (cart_v1 is the basic
-form, mutex_queue is Seq+leadsTo, and bank_* are refinement+compose examples).
+material needed for the task.
 
 **What makes FSL different — connectivity, not just per-spec checking.** Classic
 formal methods describe one hard spot and verify it in isolation (the "island"
@@ -31,6 +29,7 @@ language, use the narrow role skill first and return here for syntax and repair:
 | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `fsl-requirements` | `requirements` spec and scenarios |
 | Engineering design, internal state/actions, mapping to requirements | `fsl-design` | kernel `spec`, mapping, refine/testgen handoff |
 | Design review, variants, SOLID/LSP/OCP/substitutability | `fsl-design-review` | contract-conformance judgment |
+| Verify / prove / gate a spec, judge if it is ready to hand over, measure its strength | `fsl-verify` | command sequence, result reading, completion report |
 
 If a PM asks for a requirements specification, do not continue into design
 artifacts unless explicitly asked. If a consultant asks for business controls, do
@@ -51,13 +50,12 @@ fslc <subcommand> ...            # authoritative native Rust CLI
 
 The Python implementation is a frozen compatibility reference. New language/CLI
 features are not backported to it. Use the native `fslc` binary for
-`undecided:` syntax and its ledger/HTML/analyze output; do not route new work
+`@undecided` and its ledger/HTML/analyze output; do not route new work
 through `python -m fslc`.
 
 External compilers and generators must use `fslc kernel <spec>` rather than the
 Python AST or source re-parsing. Validate independent implementations with
-`fslc conformance <spec> --depth N`; versioning and rollback semantics are in
-`docs/design/DESIGN-kernel-contract.md`.
+`fslc conformance <spec> --depth N`.
 
 Most commands print a single JSON document on stdout; `fslc ledger` and
 `fslc document generate` print Markdown instead, so gate on the exit code, not
@@ -81,12 +79,11 @@ failure to 1 instead. So branch on the exit code being non-zero, and read
 `indeterminate` (`chain`, when its `[impl]` layer has no evidence that a test executed),
 and the dialect commands add their own (`document check`'s
 `document_drifted`, `ai replay`'s `replay_nonconformant`, `ai eval`'s gate
-statuses). `docs/manual/LANGUAGE.md` lists the verify-family values with each one's
-producing command.
+statuses).
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
-layer checked during `check`/`verify`. A `refines` verdict preserves the
+layer checked during `check`/`verify`/`scenarios`. A `refines` verdict preserves the
 command's ordinary top-level `result` and exit code. Any of the three failing
 nested values (`refinement_failed`, `impl_violated`, or `unknown_budget` — the
 correspondence search hit its fixed internal state-count budget before
@@ -97,8 +94,8 @@ while `implements.violation` (or `implements.states_explored` for
 `implements.result == "refines"` (the only passing value), or run
 `fslc chain`, which applies that gate for you.
 
-**Governance preservations are fail-closed the same way.** `check` and
-`verify` of a `governance` document run every `preservation` refinement at
+**Governance preservations are fail-closed the same way.** `check`,
+`verify`, and `scenarios` of a `governance` document run every `preservation` refinement at
 depth 8; the first one that is not `refines` becomes the top-level `result`
 (`refinement_failed`, `impl_violated` for a preservation `violated`, or
 `unknown_budget`) with exit 1, while `governance.preservations[].result`
@@ -170,22 +167,25 @@ This way assumptions travel with the spec, are visible in PRs, and a future
 `--strict-tags` check can distinguish "intended assumptions (tagged)" from
 "unfounded fabrications (untagged)."
 
-### Preserve intentionally deferred decisions with `undecided:`
+### Preserve intentionally deferred decisions with `@undecided`
 
 When the specification owner has explicitly decided to leave a choice open,
 record that review decision on the declaration instead of inventing a guard or
 property:
 
 ```fsl
-init "undecided: initial operating mode will be selected at rollout" {
+@undecided("initial operating mode will be selected at rollout")
+init {
   mode = Manual
 }
-action route() "undecided: routing policy is pending owner approval" {
+@requirement("REQ-ROUTE-001", "every request is routed")
+@undecided("routing policy is pending owner approval")
+action route() {
   ...
 }
 ```
 
-`undecided:` is metadata, not a verification condition. Verification still
+`@undecided` is metadata, not a verification condition. Verification still
 checks every behavior allowed by the spec. `fslc ledger` and `fslc html` list
 the declaration, reason, and state-dependency-derived affected requirement IDs.
 `analyze --profile ai-review` keeps matching `divergent_choice` /
@@ -195,18 +195,25 @@ in the unresolved review queue.
 
 Use this marker only after a human owner deliberately accepts the deferral. Do
 not use it to hide an agent's uncertainty, a missing source requirement, or a
-failed formalization guess. The declaration has one tag slot, so an
-`undecided:` declaration cannot simultaneously carry an `ID: text` tag; reports
-derive affected IDs from state dependencies. Full syntax and limits are in
-the [syntax reference](references/syntax.md) and `docs/design/DESIGN-undecided.md`. This feature belongs to the
-native Rust CLI and is intentionally not added to the frozen Python reference.
+failed formalization guess. `@undecided` stacks with `@requirement` on the same
+declaration, in any order; reports also derive affected IDs from state
+dependencies. The older string slot (`action route() "undecided: ..." { ... }`)
+still works but is linted as `legacy_string_metadata`. Full syntax and limits
+are in the [syntax reference](references/syntax.md). This feature belongs to
+the native Rust CLI and is intentionally not added to the frozen Python
+reference.
 
 ## Standard workflow (single spec; treat proved as the standard)
+
+This is the short form. Which commands each layer and change needs, the
+results that exit 0 without passing, the repair loop, and the completion
+report format are in `../fsl-verify/SKILL.md`.
 
 1. Write the spec → `fslc check file.fsl` (syntax and types only, fast; fix
    following the error's `loc`/`expected`/`hint`).
    When checking requirement traceability strictly, add `--strict-tags`
-   (and `--requirements ids.txt` if needed). Only when the result is
+   (and `--requirements ids.txt`, a file with one requirement ID per line — not
+   a comma list — to catch requirements nothing references). Only when the result is
    ok/verified/proved do untagged declarations and unreferenced requirement IDs
    become warnings.
    **The one canonical way to link a declaration to a requirement ID** is the
@@ -215,7 +222,7 @@ native Rust CLI and is intentionally not added to the frozen Python reference.
    `covers REQ-SCOPE-001 "..."` as the equivalent dialect sugar, and a
    `MODEL-`/`ASSUME-`prefixed id for modeling intent rather than a source
    requirement. The `invariant X "REQ-1: text" { ... }` string slot is
-   non-canonical migration input (`docs/design/DESIGN-id-policy.md`); `--strict-tags`
+   non-canonical migration input; `--strict-tags`
    still counts it as tagged, so add `fslc lint file.fsl`, which exits 1 with
    `legacy_string_metadata` plus a machine-applicable replacement.
 2. `fslc verify file.fsl --depth 8` → see the [repair protocol](references/errors.md)
@@ -239,7 +246,7 @@ element types of Map/Option/Seq are all declared as domain types — **every typ
 you use must be declared with `type ... = lo..hi` or `enum`**; an undeclared type
 becomes an `unknown type` error):
 
-```fsl
+```fsl check
 spec Cart {
   const CAP = 3
   type ItemId = 0..1
@@ -330,9 +337,10 @@ domain truth. See [layers](references/layers.md), "Authoring specs as readable d
   stopping is correct) would become a deadlock warning → declare it with
   `terminal { <predicate> }` (applying `--deadlock ignore` globally hides even
   unintended deadlocks). Stops not included in terminal continue to be detected.
-  `terminal { }` also passes through unchanged at the `requirements` layer (write
-  it against the synthesized `<entity>_stage` map when using `process`, e.g.
-  `terminal { forall c: Case { case_stage[c] == Closed } }`); the `business`
+  `terminal { }` also passes through unchanged at the `requirements` layer (with
+  `process`, write it with `stage(c)`, e.g.
+  `terminal { forall c: Case { stage(c) == Closed } }`; the generated
+  `case_stage` map is not requirements source vocabulary); the `business`
   dialect needs no `terminal` syntax at all — it derives the predicate
   automatically from each process's sink stages (stages with no outgoing
   `transition`).
@@ -343,11 +351,12 @@ When the task starts from role language rather than raw FSL syntax, use the role
 skill first. This prevents business, requirements, and design decisions from being
 mixed in one spec.
 
-| Role / intent | Use skill | Examples to read | Constructs mainly written |
+| Role / intent | Use skill | Constructs mainly written |
 |---|---|---|
-| Consultant (business flows, regulations, As-Is/To-Be) | `fsl-business` | `examples/consulting/`, `examples/pm/cancel_flow.fsl` | `business` ([layers](references/layers.md)) |
-| PM / PdM (requirement definition, acceptance criteria) | `fsl-requirements` | `examples/pm/`, `examples/e2e/2_requirements.fsl` | `requirements` and NFR ([layers](references/layers.md)) |
-| Engineer (design, implementation connection) | `fsl-design` | `examples/e2e/`, `examples/bank/` | kernel `spec` + refine mapping + Adapter ([impl](references/impl.md)) |
+| Consultant (business flows, regulations, As-Is/To-Be) | `fsl-business` | `business` ([layers](references/layers.md)) |
+| PM / PdM (requirement definition, acceptance criteria) | `fsl-requirements` | `requirements` and NFR ([layers](references/layers.md)) |
+| Engineer (design, implementation connection) | `fsl-design` | kernel `spec` + refine mapping + Adapter ([impl](references/impl.md)) |
+| Anyone verifying, gating, or reporting on a spec | `fsl-verify` | the run sequence and the completion report (no new constructs) |
 
 ## Reference index
 
@@ -364,8 +373,6 @@ collection preemptively.
 - [practices](references/practices.md) — apply optional authoring practices appropriate to the task's risk.
 - [impl](references/impl.md) — connect specifications to implementations and perform causal review.
 
-The flagship example threading all three roles through one domain is
-`examples/e2e/` (expense reimbursement).
 
 Once a `requirements`/`spec` dialect file is authored and checked, generating a
 stakeholder-facing requirements document from it (rather than authoring or

@@ -100,6 +100,85 @@ fn required_option_value(
         .ok_or_else(|| format!("{option} requires a value"))
 }
 
+/// One subcommand's arguments, with options and positionals in any order
+/// (#1250, #1301).
+///
+/// Every usage line in `cli-contract.json` lists options before positionals,
+/// and the frozen Python CLI (argparse) accepts either order, so a native
+/// command must too. The command's own `match` arms stay the only owner of
+/// each option's arity: a value-taking arm pulls its value with
+/// `Iterator::next` (`--depth 3` never turns `3` into a positional, and
+/// `--depth` with nothing after it stays `--depth requires a value`). Every
+/// token the arms do not recognise goes through [`CommandArgs::positional`] —
+/// the shape `parse_migration_options` already had — so `-` (stdin) and any
+/// token not starting with `-` is a positional, while any other `-`-prefixed
+/// token stays that command's unknown-option usage error. A bare `--` ends
+/// option parsing as in argparse: every later token is a positional, which is
+/// how a path that starts with `-` is passed.
+struct CommandArgs<I: Iterator<Item = String>> {
+    args: std::iter::Fuse<I>,
+    positionals: Vec<String>,
+}
+
+impl<I: Iterator<Item = String>> CommandArgs<I> {
+    fn new(args: I) -> Self {
+        Self {
+            args: args.fuse(),
+            positionals: Vec::new(),
+        }
+    }
+
+    /// Keep `token` as a positional, or reject it with the command's
+    /// unknown-option message.
+    fn positional(
+        &mut self,
+        token: String,
+        unknown: impl FnOnce(&str) -> String,
+    ) -> Result<(), String> {
+        if token == "-" || !token.starts_with('-') {
+            self.positionals.push(token);
+            Ok(())
+        } else {
+            Err(unknown(&token))
+        }
+    }
+
+    /// The positionals in command-line order (those after `--` last).
+    fn into_positionals(mut self) -> std::vec::IntoIter<String> {
+        self.positionals.extend(self.args);
+        self.positionals.into_iter()
+    }
+
+    /// The single positional of a one-spec command. A missing one keeps the
+    /// command's own usage message; a second one is reported the way the
+    /// command reported a stray argument before #1250.
+    fn single_positional(
+        self,
+        missing: impl FnOnce() -> String,
+        extra: impl FnOnce(&str) -> String,
+    ) -> Result<PathBuf, String> {
+        let mut positionals = self.into_positionals();
+        let path = positionals.next().ok_or_else(missing)?;
+        if let Some(argument) = positionals.next() {
+            return Err(extra(&argument));
+        }
+        Ok(PathBuf::from(path))
+    }
+}
+
+impl<I: Iterator<Item = String>> Iterator for CommandArgs<I> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        let token = self.args.next()?;
+        if token == "--" {
+            self.positionals.extend(self.args.by_ref());
+            return None;
+        }
+        Some(token)
+    }
+}
+
 fn parse_instance_override(raw: &str) -> Result<(String, i64), String> {
     let (name, value) = raw
         .split_once('=')
@@ -116,7 +195,7 @@ fn parse_instance_override(raw: &str) -> Result<(String, i64), String> {
 }
 
 fn parse_verify_options(
-    args: &mut impl Iterator<Item = String>,
+    args: &mut CommandArgs<impl Iterator<Item = String>>,
 ) -> Result<CliVerifyOptions, String> {
     let mut options = CliVerifyOptions::default();
     while let Some(option) = args.next() {
@@ -191,7 +270,7 @@ fn parse_verify_options(
                     Some(PathBuf::from(required_option_value(args, "--from-state")?));
             }
             "--edition" => options.edition = parse_edition(args)?,
-            _ => return Err(format!("unknown verify option '{option}'")),
+            _ => args.positional(option, |option| format!("unknown verify option '{option}'"))?,
         }
     }
     Ok(options)
@@ -207,7 +286,7 @@ fn parse_edition(args: &mut impl Iterator<Item = String>) -> Result<String, Stri
 }
 
 fn parse_specialized_verify_options(
-    args: &mut impl Iterator<Item = String>,
+    args: &mut CommandArgs<impl Iterator<Item = String>>,
     allow_edition: bool,
 ) -> Result<(usize, String, String, String), String> {
     let mut depth = 8_usize;
@@ -237,29 +316,31 @@ fn parse_specialized_verify_options(
                 }
             }
             "--edition" if allow_edition => edition = parse_edition(args)?,
-            _ => return Err(format!("unknown specialized check option '{option}'")),
+            _ => args.positional(option, |option| {
+                format!("unknown specialized check option '{option}'")
+            })?,
         }
     }
     Ok((depth, deadlock, engine, edition))
 }
 
 fn parse_optional_output(
-    args: &mut impl Iterator<Item = String>,
+    args: &mut CommandArgs<impl Iterator<Item = String>>,
 ) -> Result<Option<PathBuf>, String> {
-    match args.next() {
-        None => Ok(None),
-        Some(option) if matches!(option.as_str(), "-o" | "--output") => {
-            let output = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "--output requires a path".to_owned())?,
-            );
-            if args.next().is_some() {
-                return Err("unexpected argument after --output".to_owned());
+    let mut output = None;
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "-o" | "--output" if output.is_none() => {
+                output = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "--output requires a path".to_owned())?,
+                ));
             }
-            Ok(Some(output))
+            "-o" | "--output" => return Err("unexpected argument after --output".to_owned()),
+            _ => args.positional(option, |option| format!("unknown output option '{option}'"))?,
         }
-        Some(option) => Err(format!("unknown output option '{option}'")),
     }
+    Ok(output)
 }
 
 /// The stack every `fslc` run gets, on every platform.
@@ -351,7 +432,7 @@ struct FmtOptions {
 }
 
 fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, String> {
-    let mut args = args.peekable();
+    let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
     let mut check = false;
     let mut edition = fsl_syntax::FormatEdition::Current;
@@ -370,6 +451,7 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
             path => paths.push(PathBuf::from(path)),
         }
     }
+    paths.extend(args.into_positionals().map(PathBuf::from));
     if paths.is_empty() {
         return Err("usage: fslc fmt FILE [--check] [--edition current|next]".to_owned());
     }
@@ -455,7 +537,7 @@ fn parse_migration_options(
     args: impl Iterator<Item = String>,
     migrate: bool,
 ) -> Result<MigrationOptions, String> {
-    let mut args = args.peekable();
+    let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
     let mut edition = if migrate {
         fslc_rust::migration::Edition::Next
@@ -488,6 +570,7 @@ fn parse_migration_options(
             path => paths.push(PathBuf::from(path)),
         }
     }
+    paths.extend(args.into_positionals().map(PathBuf::from));
     if paths.is_empty() {
         return Err(if migrate {
             "usage: fslc migrate FILE... [--edition current|next] [--write]".to_owned()
@@ -1040,10 +1123,29 @@ fn command() -> Result<(Value, i32), String> {
             std::process::exit(0);
         }
         "check" => {
-            let display_path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "usage: fslc check SPEC [options]".to_owned())?,
-            );
+            let arguments = args.collect::<Vec<_>>();
+            let mut args = CommandArgs::new(arguments.iter().cloned());
+            let mut strict_tags = false;
+            let mut requirements = None;
+            let mut edition = "current".to_owned();
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--strict-tags" => strict_tags = true,
+                    "--requirements" => {
+                        requirements = Some(PathBuf::from(required_option_value(
+                            &mut args,
+                            "--requirements",
+                        )?));
+                    }
+                    "--edition" => edition = parse_edition(&mut args)?,
+                    _ => args
+                        .positional(option, |option| format!("unknown check option '{option}'"))?,
+                }
+            }
+            let display_path = args.single_positional(
+                || "usage: fslc check SPEC [options]".to_owned(),
+                |argument| format!("unknown check option '{argument}'"),
+            )?;
             let literate_guard = match literate_access("check", &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
@@ -1058,29 +1160,13 @@ fn command() -> Result<(Value, i32), String> {
             // Standalone causal models are never kernel specs; route them to
             // the causal checker instead of failing dialect dispatch.
             if fsl_syntax::is_causal_source(&source) {
-                if args.next().is_some() {
+                if arguments.len() > 1 {
                     return Err(
                         "fslc check on a causal model accepts no options; use fslc causal check"
                             .to_owned(),
                     );
                 }
                 return Ok(run_causal_check(path));
-            }
-            let mut strict_tags = false;
-            let mut requirements = None;
-            let mut edition = "current".to_owned();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--strict-tags" => strict_tags = true,
-                    "--requirements" => {
-                        requirements = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--requirements",
-                        )?));
-                    }
-                    "--edition" => edition = parse_edition(&mut args)?,
-                    _ => return Err(format!("unknown check option '{option}'")),
-                }
             }
             Ok(with_version_metadata(run_check_with_tags_from_source(
                 path,
@@ -1110,7 +1196,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok(run_migrate(&options))
         }
         "kernel" => {
-            let mut path = None;
+            let mut args = CommandArgs::new(args);
             let mut version = fsl_core::PublicKernelVersion::V1;
             while let Some(argument) = args.next() {
                 match argument.as_str() {
@@ -1123,22 +1209,22 @@ fn command() -> Result<(Value, i32), String> {
                             }
                         };
                     }
-                    option if option.starts_with('-') => {
-                        return Err(format!("unknown kernel option '{option}'"));
-                    }
-                    value if path.is_none() => path = Some(PathBuf::from(value)),
-                    value => return Err(format!("unexpected kernel argument '{value}'")),
+                    _ => args.positional(argument, |option| {
+                        format!("unknown kernel option '{option}'")
+                    })?,
                 }
             }
-            let path =
-                path.ok_or_else(|| "usage: fslc kernel SPEC [--kernel-version MAJOR]".to_owned())?;
+            let path = args.single_positional(
+                || "usage: fslc kernel SPEC [--kernel-version MAJOR]".to_owned(),
+                |value| format!("unexpected kernel argument '{value}'"),
+            )?;
             if let Err(early_return) = literate_access("kernel", &path) {
                 return Ok(early_return);
             }
             Ok(run_kernel_contract(&path, version))
         }
         "conformance" => {
-            let mut path = None;
+            let mut args = CommandArgs::new(args);
             let mut depth = 4_usize;
             let mut version = fsl_core::PublicKernelVersion::V1;
             while let Some(argument) = args.next() {
@@ -1157,23 +1243,22 @@ fn command() -> Result<(Value, i32), String> {
                             }
                         };
                     }
-                    option if option.starts_with('-') => {
-                        return Err(format!("unknown conformance option '{option}'"));
-                    }
-                    value if path.is_none() => path = Some(PathBuf::from(value)),
-                    value => return Err(format!("unexpected conformance argument '{value}'")),
+                    _ => args.positional(argument, |option| {
+                        format!("unknown conformance option '{option}'")
+                    })?,
                 }
             }
-            let path = path.ok_or_else(|| {
-                "usage: fslc conformance SPEC [--depth N] [--kernel-version MAJOR]".to_owned()
-            })?;
+            let path = args.single_positional(
+                || "usage: fslc conformance SPEC [--depth N] [--kernel-version MAJOR]".to_owned(),
+                |value| format!("unexpected conformance argument '{value}'"),
+            )?;
             if let Err(early_return) = literate_access("conformance", &path) {
                 return Ok(early_return);
             }
             Ok(run_conformance(&path, depth, version))
         }
         "testplan" => {
-            let mut path = None;
+            let mut args = CommandArgs::new(args);
             let mut depth = 4_usize;
             while let Some(argument) = args.next() {
                 match argument.as_str() {
@@ -1182,14 +1267,15 @@ fn command() -> Result<(Value, i32), String> {
                             .parse()
                             .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
                     }
-                    option if option.starts_with('-') => {
-                        return Err(format!("unknown testplan option '{option}'"));
-                    }
-                    value if path.is_none() => path = Some(PathBuf::from(value)),
-                    value => return Err(format!("unexpected testplan argument '{value}'")),
+                    _ => args.positional(argument, |option| {
+                        format!("unknown testplan option '{option}'")
+                    })?,
                 }
             }
-            let path = path.ok_or_else(|| "usage: fslc testplan SPEC [--depth N]".to_owned())?;
+            let path = args.single_positional(
+                || "usage: fslc testplan SPEC [--depth N]".to_owned(),
+                |value| format!("unexpected testplan argument '{value}'"),
+            )?;
             if let Err(early_return) = literate_access("testplan", &path) {
                 return Ok(early_return);
             }
@@ -1203,18 +1289,23 @@ fn command() -> Result<(Value, i32), String> {
             if args.next().as_deref() != Some("check") {
                 return Err("usage: fslc compat check DBSYSTEM [--include-ai]".to_owned());
             }
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "compat check requires a dbsystem".to_owned())?,
-            );
+            let mut args = CommandArgs::new(args);
+            let mut include_ai = false;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--include-ai" => include_ai = true,
+                    _ => args.positional(option, |option| {
+                        format!("unknown compat check option '{option}'")
+                    })?,
+                }
+            }
+            let path = args.single_positional(
+                || "compat check requires a dbsystem".to_owned(),
+                |option| format!("unknown compat check option '{option}'"),
+            )?;
             if let Err(early_return) = literate_access("compat check", &path) {
                 return Ok(early_return);
             }
-            let include_ai = match args.next() {
-                None => false,
-                Some(option) if option == "--include-ai" => true,
-                Some(option) => return Err(format!("unknown compat check option '{option}'")),
-            };
             let (mut result, status) = run_db_check(&path, 8, "warn", "bmc");
             if include_ai && let Value::Object(result) = &mut result {
                 result.insert(
@@ -1228,13 +1319,7 @@ fn command() -> Result<(Value, i32), String> {
         "causal" => causal_command(args),
         "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| format!("fslc {command} requires a spec"))?,
-            );
-            if let Err(early_return) = literate_access(&command, &path) {
-                return Ok(early_return);
-            }
+            let mut args = CommandArgs::new(args);
             let mut depth = 8_usize;
             let mut readable = false;
             let mut max_mutants = DEFAULT_MAX_MUTANTS;
@@ -1288,8 +1373,17 @@ fn command() -> Result<(Value, i32), String> {
                         ));
                     }
                     "--ts" => typescript_only = true,
-                    _ => return Err(format!("unknown {command} option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown {command} option '{option}'")
+                    })?,
                 }
+            }
+            let path = args.single_positional(
+                || format!("fslc {command} requires a spec"),
+                |option| format!("unknown {command} option '{option}'"),
+            )?;
+            if let Err(early_return) = literate_access(&command, &path) {
+                return Ok(early_return);
             }
             let result = match command.as_str() {
                 "explain" => run_explain(&path, depth, readable),
@@ -1326,13 +1420,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "testgen" | "html" | "ledger" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| format!("fslc {command} requires a spec"))?,
-            );
-            if let Err(early_return) = literate_access(&command, &path) {
-                return Ok(early_return);
-            }
+            let mut args = CommandArgs::new(args);
             let mut depth = 8_usize;
             let mut output = None;
             let mut target = "pytest".to_owned();
@@ -1403,8 +1491,17 @@ fn command() -> Result<(Value, i32), String> {
                     "--allow-unwired" if command == "testgen" => {
                         unwired = fsl_tools::UnwiredAdapter::Skip;
                     }
-                    _ => return Err(format!("unknown {command} option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown {command} option '{option}'")
+                    })?,
                 }
+            }
+            let path = args.single_positional(
+                || format!("fslc {command} requires a spec"),
+                |option| format!("unknown {command} option '{option}'"),
+            )?;
+            if let Err(early_return) = literate_access(&command, &path) {
+                return Ok(early_return);
             }
             let result = match command.as_str() {
                 "testgen" => run_testgen(
@@ -1445,11 +1542,7 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "analyze" => {
-            let first_path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc analyze requires a spec".to_owned())?,
-            );
-            let mut paths = vec![first_path];
+            let mut args = CommandArgs::new(args);
             let mut projection = "tsg".to_owned();
             let mut focus = None;
             let mut output_format = "json".to_owned();
@@ -1463,20 +1556,30 @@ fn command() -> Result<(Value, i32), String> {
                             .next()
                             .ok_or_else(|| "--projection requires a value".to_owned())?;
                     }
-                    "--focus" => focus = args.next(),
+                    "--focus" => focus = Some(required_option_value(&mut args, "--focus")?),
                     "--format" => {
                         output_format = args
                             .next()
                             .ok_or_else(|| "--format requires a value".to_owned())?;
                     }
-                    "--profile" => profile = args.next(),
-                    "--export" => export_kind = args.next(),
+                    "--profile" => profile = Some(required_option_value(&mut args, "--profile")?),
+                    "--export" => {
+                        export_kind = Some(required_option_value(&mut args, "--export")?);
+                    }
                     "--code" => {
                         code = Some(PathBuf::from(required_option_value(&mut args, "--code")?));
                     }
-                    _ if !option.starts_with('-') => paths.push(PathBuf::from(option)),
-                    _ => return Err(format!("unknown analyze option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown analyze option '{option}'")
+                    })?,
                 }
+            }
+            let paths = args
+                .into_positionals()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
+            if paths.is_empty() {
+                return Err("fslc analyze requires a spec".to_owned());
             }
             for path in &paths {
                 if let Err(early_return) = literate_access("analyze", path) {
@@ -1515,11 +1618,11 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "diff" => {
+            let mut args = CommandArgs::new(args);
             let mut depth = 8_usize;
             let mut git_range = None;
             let mut mapping = None;
             let mut forbid = Vec::new();
-            let mut paths = Vec::new();
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--depth" => {
@@ -1547,10 +1650,17 @@ fn command() -> Result<(Value, i32), String> {
                                 .map(str::to_owned),
                         );
                     }
-                    _ if !option.starts_with('-') => paths.push(PathBuf::from(option)),
-                    _ => return Err(format!("unknown diff option '{option}'")),
+                    _ => {
+                        args.positional(option, |option| {
+                            format!("unknown diff option '{option}'")
+                        })?;
+                    }
                 }
             }
+            let paths = args
+                .into_positionals()
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
             for path in &paths {
                 if let Err(early_return) = literate_access("diff", path) {
                     return Ok(early_return);
@@ -1586,9 +1696,9 @@ fn command() -> Result<(Value, i32), String> {
             }
         }
         "chain" => {
+            let mut args = CommandArgs::new(args);
             let mut keep_going = false;
             let mut jobs = 1_usize;
-            let mut path = None;
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--keep-going" => keep_going = true,
@@ -1601,33 +1711,26 @@ fn command() -> Result<(Value, i32), String> {
                             .filter(|jobs| *jobs > 0)
                             .ok_or_else(|| "--jobs must be a positive integer".to_owned())?;
                     }
-                    _ if option.starts_with('-') => {
-                        return Err(format!("unknown chain option '{option}'"));
-                    }
-                    _ if path.is_none() => path = Some(PathBuf::from(option)),
-                    _ => return Err(format!("unexpected chain argument '{option}'")),
+                    _ => args
+                        .positional(option, |option| format!("unknown chain option '{option}'"))?,
                 }
             }
-            let path = path.unwrap_or_else(|| PathBuf::from("fsl-project.toml"));
+            let mut positionals = args.into_positionals();
+            let path = PathBuf::from(
+                positionals
+                    .next()
+                    .unwrap_or_else(|| "fsl-project.toml".to_owned()),
+            );
+            if let Some(argument) = positionals.next() {
+                return Err(format!("unexpected chain argument '{argument}'"));
+            }
             let result = run_project_chain(&path, keep_going, jobs);
             eprintln!("{}", format_chain_table(&result.0));
             Ok(result)
         }
         "refine" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())?,
-            );
-            let abstraction = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())?,
-            );
-            let mapping = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())?,
-            );
+            let mut args = CommandArgs::new(args);
             let mut depth = 8_usize;
-            let mut rest = Vec::new();
             while let Some(option) = args.next() {
                 match option.as_str() {
                     "--depth" => {
@@ -1637,12 +1740,20 @@ fn command() -> Result<(Value, i32), String> {
                             .parse()
                             .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
                     }
-                    _ if option.starts_with('-') => {
-                        return Err(format!("unknown refine option '{option}'"));
-                    }
-                    _ => rest.push(PathBuf::from(option)),
+                    _ => args
+                        .positional(option, |option| format!("unknown refine option '{option}'"))?,
                 }
             }
+            let mut positionals = args.into_positionals().map(PathBuf::from);
+            let mut operand = || {
+                positionals
+                    .next()
+                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())
+            };
+            let path = operand()?;
+            let abstraction = operand()?;
+            let mapping = operand()?;
+            let rest = positionals.collect::<Vec<_>>();
             for candidate in [&path, &abstraction, &mapping].into_iter().chain(&rest) {
                 if let Err(early_return) = literate_access("refine", candidate) {
                     return Ok(early_return);
@@ -1669,13 +1780,7 @@ fn command() -> Result<(Value, i32), String> {
             }
         }
         "replay" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "usage: fslc replay SPEC --trace TRACE.json".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("replay", &path) {
-                return Ok(early_return);
-            }
+            let mut args = CommandArgs::new(args);
             let mut trace = None;
             let mut from_log = None;
             let mut mapping = None;
@@ -1696,8 +1801,16 @@ fn command() -> Result<(Value, i32), String> {
                             "--mapping",
                         )?));
                     }
-                    _ => return Err(format!("unknown replay option '{option}'")),
+                    _ => args
+                        .positional(option, |option| format!("unknown replay option '{option}'"))?,
                 }
+            }
+            let path = args.single_positional(
+                || "usage: fslc replay SPEC --trace TRACE.json".to_owned(),
+                |option| format!("unknown replay option '{option}'"),
+            )?;
+            if let Err(early_return) = literate_access("replay", &path) {
+                return Ok(early_return);
             }
             if trace.is_some() && from_log.is_some() {
                 return Ok((
@@ -1729,13 +1842,7 @@ fn command() -> Result<(Value, i32), String> {
             }
         }
         "sweep" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "usage: fslc sweep SPEC [options]".to_owned())?,
-            );
-            if let Err(early_return) = literate_access("sweep", &path) {
-                return Ok(early_return);
-            }
+            let mut args = CommandArgs::new(args);
             let mut depth = "0..8".to_owned();
             let mut deadlock = "warn".to_owned();
             let mut engine = "bmc".to_owned();
@@ -1803,8 +1910,16 @@ fn command() -> Result<(Value, i32), String> {
                             "--requirements",
                         )?));
                     }
-                    _ => return Err(format!("unknown sweep option '{option}'")),
+                    _ => args
+                        .positional(option, |option| format!("unknown sweep option '{option}'"))?,
                 }
+            }
+            let path = args.single_positional(
+                || "usage: fslc sweep SPEC [options]".to_owned(),
+                |option| format!("unknown sweep option '{option}'"),
+            )?;
+            if let Err(early_return) = literate_access("sweep", &path) {
+                return Ok(early_return);
             }
             Ok(run_sweep(
                 &path,
@@ -1821,10 +1936,12 @@ fn command() -> Result<(Value, i32), String> {
             ))
         }
         "verify" | "scenarios" => {
-            let display_path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| format!("usage: fslc {command} SPEC [options]"))?,
-            );
+            let mut args = CommandArgs::new(args);
+            let options = parse_verify_options(&mut args)?;
+            let display_path = args.single_positional(
+                || format!("usage: fslc {command} SPEC [options]"),
+                |option| format!("unknown verify option '{option}'"),
+            )?;
             let literate_guard = match literate_access(&command, &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
@@ -1832,7 +1949,6 @@ fn command() -> Result<(Value, i32), String> {
             let path = literate_guard
                 .as_ref()
                 .map_or(&display_path, |state| &state.path);
-            let options = parse_verify_options(&mut args)?;
             Ok(if command == "verify" {
                 let source = match read_spec_source(path) {
                     Ok(source) => source,
@@ -1875,20 +1991,19 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
     let subcommand = args
         .next()
         .ok_or_else(|| "usage: fslc approval <create|check|diff> SPEC [options]".to_owned())?;
-    let path = PathBuf::from(
-        args.next()
-            .ok_or_else(|| format!("fslc approval {subcommand} requires a spec"))?,
-    );
     // The positional is always parsed as an FSL spec regardless of `--kind`
     // (`--kind requirements_document`'s legitimately `.md`-shaped input is
-    // `--artifact`, never the positional; #980). Gate immediately after
-    // resolving the positional and before any record is read, the same
-    // seam `document_command` uses.
-    if matches!(subcommand.as_str(), "create" | "check" | "diff")
-        && let Err(early_return) = literate_access(&format!("approval {subcommand}"), &path)
-    {
-        return Ok(early_return);
-    }
+    // `--artifact`, never the positional; #980). Each subcommand gates it
+    // immediately after resolving it (options may precede it, #1250) and
+    // before any record is read, the same seam `document_command` uses.
+    let spec = |args: CommandArgs<_>| -> Result<Result<PathBuf, (Value, i32)>, String> {
+        let path = args.single_positional(
+            || format!("fslc approval {subcommand} requires a spec"),
+            |option| format!("unknown approval {subcommand} option '{option}'"),
+        )?;
+        Ok(literate_access(&format!("approval {subcommand}"), &path).map(|_| path))
+    };
+    let mut args = CommandArgs::new(args);
     match subcommand.as_str() {
         "create" => {
             let mut kind = None;
@@ -1959,9 +2074,15 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
                     }
-                    _ => return Err(format!("unknown approval create option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown approval create option '{option}'")
+                    })?,
                 }
             }
+            let path = match spec(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             let kind = kind.ok_or_else(|| "approval create requires --kind".to_owned())?;
             let artifact =
                 artifact.ok_or_else(|| "approval create requires --artifact".to_owned())?;
@@ -2011,9 +2132,15 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         &mut args,
                         "--trust-key",
                     )?)),
-                    _ => return Err(format!("unknown approval check option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown approval check option '{option}'")
+                    })?,
                 }
             }
+            let path = match spec(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_approval_check(
                 &path,
                 &record.ok_or_else(|| "approval check requires --record".to_owned())?,
@@ -2038,9 +2165,15 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                         &mut args,
                         "--trust-key",
                     )?)),
-                    _ => return Err(format!("unknown approval diff option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown approval diff option '{option}'")
+                    })?,
                 }
             }
+            let path = match spec(args)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_approval_diff(
                 &path,
                 &record.ok_or_else(|| "approval diff requires --record".to_owned())?,
@@ -2057,20 +2190,15 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
     let subcommand = args
         .next()
         .ok_or_else(|| "usage: fslc document <generate|claims> SPEC [options]".to_owned())?;
-    let path = PathBuf::from(
-        args.next()
-            .ok_or_else(|| format!("fslc document {subcommand} requires a spec"))?,
-    );
     // Only the three known subcommands are registered
-    // (`literate_access.rs`'s `LITERATE_REGISTRY`); an unrecognized
-    // subcommand must still fall through to this match's own `_` arm and its
-    // `kind:"usage"` diagnostic rather than the registry's "unregistered
-    // command" internal-error fallback.
-    if matches!(subcommand.as_str(), "generate" | "claims" | "check")
-        && let Err(early_return) = literate_access(&format!("document {subcommand}"), &path)
-    {
-        return Ok(early_return);
-    }
+    // (`literate_access.rs`'s `LITERATE_REGISTRY`) and reach this gate; an
+    // unrecognized subcommand falls through to the match's own `_` arm and
+    // its `kind:"usage"` diagnostic rather than the registry's "unregistered
+    // command" internal-error fallback. Options may precede the spec (#1250),
+    // so each subcommand resolves it after its option loop.
+    let gate = |path: &Path| literate_access(&format!("document {subcommand}"), path);
+    let missing_spec = || format!("fslc document {subcommand} requires a spec");
+    let mut args = CommandArgs::new(args);
     match subcommand.as_str() {
         "generate" => {
             let mut locale = fsl_tools::Locale::Ja;
@@ -2129,8 +2257,16 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
                     }
-                    _ => return Err(format!("unknown document generate option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown document generate option '{option}'")
+                    })?,
                 }
+            }
+            let path = args.single_positional(missing_spec, |option| {
+                format!("unknown document generate option '{option}'")
+            })?;
+            if let Err(early_return) = gate(&path) {
+                return Ok(early_return);
             }
             let result = run_document_generate(
                 &path,
@@ -2180,8 +2316,16 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     "-o" | "--output" => {
                         output = Some(PathBuf::from(required_option_value(&mut args, "--output")?));
                     }
-                    _ => return Err(format!("unknown document claims option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown document claims option '{option}'")
+                    })?,
                 }
+            }
+            let path = args.single_positional(missing_spec, |option| {
+                format!("unknown document claims option '{option}'")
+            })?;
+            if let Err(early_return) = gate(&path) {
+                return Ok(early_return);
             }
             let result = run_document_claims(&path, output.as_deref());
             if output.is_none()
@@ -2195,10 +2339,6 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             Ok(result)
         }
         "check" => {
-            let artifact = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?,
-            );
             let mut glossary = None;
             let mut evidence_paths = Vec::new();
             let mut approval_paths = Vec::new();
@@ -2222,8 +2362,24 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             "--approval",
                         )?));
                     }
-                    _ => return Err(format!("unknown document check option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown document check option '{option}'")
+                    })?,
                 }
+            }
+            let mut positionals = args.into_positionals().map(PathBuf::from);
+            let path = positionals.next().ok_or_else(missing_spec)?;
+            if let Err(early_return) = gate(&path) {
+                return Ok(early_return);
+            }
+            let artifact = positionals
+                .next()
+                .ok_or_else(|| "fslc document check requires an artifact path".to_owned())?;
+            if let Some(option) = positionals.next() {
+                return Err(format!(
+                    "unknown document check option '{}'",
+                    option.display()
+                ));
             }
             Ok(run_document_check(
                 &path,
@@ -3056,12 +3212,7 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
         .ok_or_else(|| "usage: fslc db <check|observe|import> ...".to_owned())?;
     match subcommand.as_str() {
         "check" => {
-            let path = PathBuf::from(args.next().ok_or_else(|| {
-                "usage: fslc db check SPEC [--depth N] [--engine ENGINE]".to_owned()
-            })?);
-            if let Err(early_return) = literate_access("db check", &path) {
-                return Ok(early_return);
-            }
+            let mut args = CommandArgs::new(args);
             let mut depth = 8_usize;
             let mut deadlock = "warn".to_owned();
             let mut engine = "bmc".to_owned();
@@ -3087,35 +3238,49 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                             return Err("--engine must be bmc or induction".to_owned());
                         }
                     }
-                    _ => return Err(format!("unknown db check option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown db check option '{option}'")
+                    })?,
                 }
+            }
+            let path = args.single_positional(
+                || "usage: fslc db check SPEC [--depth N] [--engine ENGINE]".to_owned(),
+                |option| format!("unknown db check option '{option}'"),
+            )?;
+            if let Err(early_return) = literate_access("db check", &path) {
+                return Ok(early_return);
             }
             Ok(run_db_check(&path, depth, &deadlock, &engine))
         }
         "observe" => {
-            let path = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "usage: fslc db observe SPEC --trace EVENTS.json".to_owned())?,
-            );
+            let mut args = CommandArgs::new(args);
+            let mut trace = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--trace" if trace.is_none() => {
+                        trace = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--trace requires a path".to_owned())?,
+                        ));
+                    }
+                    _ => {
+                        args.positional(option, |_| "unexpected db observe argument".to_owned())?;
+                    }
+                }
+            }
+            let path = args.single_positional(
+                || "usage: fslc db observe SPEC --trace EVENTS.json".to_owned(),
+                |_| "unexpected db observe argument".to_owned(),
+            )?;
             if let Err(early_return) = literate_access("db observe", &path) {
                 return Ok(early_return);
             }
-            if args.next().as_deref() != Some("--trace") {
-                return Err("db observe requires --trace EVENTS.json".to_owned());
-            }
-            let trace = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "--trace requires a path".to_owned())?,
-            );
-            if args.next().is_some() {
-                return Err("unexpected db observe argument".to_owned());
-            }
+            let trace =
+                trace.ok_or_else(|| "db observe requires --trace EVENTS.json".to_owned())?;
             Ok(run_db_observe(&path, &trace))
         }
         "import" => {
-            let path = PathBuf::from(args.next().ok_or_else(|| {
-                "usage: fslc db import SOURCE [--name NAME] [--source FORMAT] [-o PATH]".to_owned()
-            })?);
+            let mut args = CommandArgs::new(args);
             let mut name = "ImportedDb".to_owned();
             let mut format = "auto".to_owned();
             let mut output = None;
@@ -3137,9 +3302,18 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                                 .ok_or_else(|| "--output requires a path".to_owned())?,
                         ));
                     }
-                    _ => return Err(format!("unknown db import option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown db import option '{option}'")
+                    })?,
                 }
             }
+            let path = args.single_positional(
+                || {
+                    "usage: fslc db import SOURCE [--name NAME] [--source FORMAT] [-o PATH]"
+                        .to_owned()
+                },
+                |option| format!("unknown db import option '{option}'"),
+            )?;
             let result = run_db_import(&path, &name, &format, output.as_deref());
             if output.is_none()
                 && raw_delivery_allowed(&result)
@@ -3191,22 +3365,26 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             to_label.as_deref(),
         ));
     }
-    let path = PathBuf::from(
-        args.next()
-            .ok_or_else(|| format!("fslc ai {subcommand} requires a file"))?,
-    );
+    // Options may precede the file (#1250): each subcommand resolves it after
+    // its option loop.
+    let file = |args: CommandArgs<_>| {
+        args.single_positional(
+            || format!("fslc ai {subcommand} requires a file"),
+            |option| format!("unknown ai {subcommand} option '{option}'"),
+        )
+    };
+    let unknown = |option: &str| format!("unknown ai {subcommand} option '{option}'");
+    let mut args = CommandArgs::new(args);
     match subcommand.as_str() {
         "check" => {
+            let (depth, deadlock, engine, _) = parse_specialized_verify_options(&mut args, false)?;
+            let path = file(args)?;
             if let Err(early_return) = literate_access("ai check", &path) {
                 return Ok(early_return);
             }
-            let (depth, deadlock, engine, _) = parse_specialized_verify_options(&mut args, false)?;
             Ok(run_ai_check(&path, depth, &deadlock, &engine))
         }
         "replay" => {
-            if let Err(early_return) = literate_access("ai replay", &path) {
-                return Ok(early_return);
-            }
             let mut logs = None;
             let mut component = None;
             while let Some(option) = args.next() {
@@ -3217,8 +3395,12 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                     "--component" => {
                         component = Some(required_option_value(&mut args, "--component")?);
                     }
-                    _ => return Err(format!("unknown ai replay option '{option}'")),
+                    _ => args.positional(option, unknown)?,
                 }
+            }
+            let path = file(args)?;
+            if let Err(early_return) = literate_access("ai replay", &path) {
+                return Ok(early_return);
             }
             Ok(run_ai_replay(
                 &path,
@@ -3232,17 +3414,17 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             let mut property = None;
             let mut slice = None;
             while let Some(option) = args.next() {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("{option} requires a value"))?;
                 match option.as_str() {
-                    "--records" => records = Some(PathBuf::from(value)),
-                    "--dataset" => dataset = Some(value),
-                    "--property" => property = Some(value),
-                    "--slice" => slice = Some(value),
-                    _ => return Err(format!("unknown ai eval option '{option}'")),
+                    "--records" => {
+                        records = Some(PathBuf::from(required_option_value(&mut args, &option)?));
+                    }
+                    "--dataset" => dataset = Some(required_option_value(&mut args, &option)?),
+                    "--property" => property = Some(required_option_value(&mut args, &option)?),
+                    "--slice" => slice = Some(required_option_value(&mut args, &option)?),
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = file(args)?;
             Ok(run_ai_eval(
                 &path,
                 records.as_deref(),
@@ -3257,17 +3439,19 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             let mut dataset = None;
             let mut migration = None;
             while let Some(option) = args.next() {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("{option} requires a value"))?;
                 match option.as_str() {
-                    "--before-records" => before = Some(PathBuf::from(value)),
-                    "--after-records" => after = Some(PathBuf::from(value)),
-                    "--dataset" => dataset = Some(value),
-                    "--migration" => migration = Some(value),
-                    _ => return Err(format!("unknown ai regress option '{option}'")),
+                    "--before-records" => {
+                        before = Some(PathBuf::from(required_option_value(&mut args, &option)?));
+                    }
+                    "--after-records" => {
+                        after = Some(PathBuf::from(required_option_value(&mut args, &option)?));
+                    }
+                    "--dataset" => dataset = Some(required_option_value(&mut args, &option)?),
+                    "--migration" => migration = Some(required_option_value(&mut args, &option)?),
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = file(args)?;
             Ok(run_ai_regress(
                 &path,
                 &before.ok_or_else(|| "ai regress requires --before-records".to_owned())?,
@@ -3283,18 +3467,22 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             let mut window = None;
             let mut baseline_label = None;
             while let Some(option) = args.next() {
-                let value = args
-                    .next()
-                    .ok_or_else(|| format!("{option} requires a value"))?;
                 match option.as_str() {
-                    "--logs" => logs = Some(PathBuf::from(value)),
-                    "--baseline-logs" => baseline = Some(PathBuf::from(value)),
-                    "--property" => property = Some(value),
-                    "--window" => window = Some(value),
-                    "--baseline" => baseline_label = Some(value),
-                    _ => return Err(format!("unknown ai drift option '{option}'")),
+                    "--logs" => {
+                        logs = Some(PathBuf::from(required_option_value(&mut args, &option)?));
+                    }
+                    "--baseline-logs" => {
+                        baseline = Some(PathBuf::from(required_option_value(&mut args, &option)?));
+                    }
+                    "--property" => property = Some(required_option_value(&mut args, &option)?),
+                    "--window" => window = Some(required_option_value(&mut args, &option)?),
+                    "--baseline" => {
+                        baseline_label = Some(required_option_value(&mut args, &option)?);
+                    }
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = file(args)?;
             Ok(run_ai_drift(
                 &path,
                 &logs.ok_or_else(|| "ai drift requires --logs".to_owned())?,
@@ -3305,34 +3493,25 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
             ))
         }
         "compat" => {
+            let mut environment = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--environment" if environment.is_none() => {
+                        environment = Some(
+                            args.next()
+                                .ok_or_else(|| "--environment requires a value".to_owned())?,
+                        );
+                    }
+                    _ => args.positional(option, unknown)?,
+                }
+            }
+            let path = file(args)?;
             if let Err(early_return) = literate_access("ai compat", &path) {
                 return Ok(early_return);
             }
-            let environment = match args.next() {
-                None => None,
-                Some(option) if option == "--environment" => Some(
-                    args.next()
-                        .ok_or_else(|| "--environment requires a value".to_owned())?,
-                ),
-                Some(option) => return Err(format!("unknown ai compat option '{option}'")),
-            };
             Ok(run_ai_compat(&path, environment.as_deref()))
         }
         _ => Err(format!("unknown ai subcommand '{subcommand}'")),
-    }
-}
-
-/// Reject a residual argument the way every other `domain` subcommand's own
-/// `while let Some(option) = args.next() { ... _ => return Err(...) }` loop
-/// already does, for the subcommands (`analyze`, `replay`) that take no
-/// options of their own and so have no such loop to fall through to.
-fn reject_extra_domain_args(
-    args: &mut impl Iterator<Item = String>,
-    subcommand: &str,
-) -> Result<(), String> {
-    match args.next() {
-        Some(option) => Err(format!("unknown domain {subcommand} option '{option}'")),
-        None => Ok(()),
     }
 }
 
@@ -3341,31 +3520,46 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
     let subcommand = args
         .next()
         .ok_or_else(|| "usage: fslc domain <check|analyze|expand|generate> ...".to_owned())?;
-    let path = PathBuf::from(
-        args.next()
-            .ok_or_else(|| format!("fslc domain {subcommand} requires a file"))?,
-    );
+    // Options may precede the file (#1250): each subcommand resolves it after
+    // its option loop, then gates it. A stray argument keeps the wording the
+    // subcommand used for it before.
+    let file = |args: CommandArgs<_>, extra: &dyn Fn(&str) -> String| {
+        let path = args.single_positional(
+            || format!("fslc domain {subcommand} requires a file"),
+            extra,
+        )?;
+        Ok::<_, String>(literate_access(&format!("domain {subcommand}"), &path).map(|_| path))
+    };
+    let unknown = |option: &str| format!("unknown domain {subcommand} option '{option}'");
+    let mut args = CommandArgs::new(args);
     match subcommand.as_str() {
         "check" => {
-            if let Err(early_return) = literate_access("domain check", &path) {
-                return Ok(early_return);
-            }
             let (depth, deadlock, engine, edition) =
                 parse_specialized_verify_options(&mut args, true)?;
+            let path = match file(args, &|option| {
+                format!("unknown specialized check option '{option}'")
+            })? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
         }
         "analyze" => {
-            if let Err(early_return) = literate_access("domain analyze", &path) {
-                return Ok(early_return);
+            while let Some(option) = args.next() {
+                args.positional(option, unknown)?;
             }
-            reject_extra_domain_args(&mut args, "analyze")?;
+            let path = match file(args, &unknown)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_domain_analyze(&path))
         }
         "expand" => {
-            if let Err(early_return) = literate_access("domain expand", &path) {
-                return Ok(early_return);
-            }
             let output = parse_optional_output(&mut args)?;
+            let path = match file(args, &|option| format!("unknown output option '{option}'"))? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             let result = run_domain_expand(&path, output.as_deref());
             if output.is_none()
                 && raw_delivery_allowed(&result)
@@ -3377,9 +3571,6 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             Ok(result)
         }
         "generate" => {
-            if let Err(early_return) = literate_access("domain generate", &path) {
-                return Ok(early_return);
-            }
             let mut target = "typescript".to_owned();
             let mut profile = "functional-ddd".to_owned();
             let mut output = None;
@@ -3404,9 +3595,13 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                                 .ok_or_else(|| "--output requires a path".to_owned())?,
                         ));
                     }
-                    _ => return Err(format!("unknown domain generate option '{option}'")),
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = match file(args, &unknown)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             Ok(run_domain_generate(
                 &path,
                 &profile,
@@ -3415,23 +3610,27 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
             ))
         }
         "replay" => {
-            if let Err(early_return) = literate_access("domain replay", &path) {
-                return Ok(early_return);
+            let mut logs = None;
+            while let Some(option) = args.next() {
+                match option.as_str() {
+                    "--logs" if logs.is_none() => {
+                        logs = Some(PathBuf::from(
+                            args.next()
+                                .ok_or_else(|| "--logs requires a path".to_owned())?,
+                        ));
+                    }
+                    _ => args.positional(option, unknown)?,
+                }
             }
-            if args.next().as_deref() != Some("--logs") {
-                return Err("domain replay requires --logs EVENTS.jsonl".to_owned());
-            }
-            let logs = PathBuf::from(
-                args.next()
-                    .ok_or_else(|| "--logs requires a path".to_owned())?,
-            );
-            reject_extra_domain_args(&mut args, "replay")?;
+            let path = match file(args, &unknown)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
+            let logs =
+                logs.ok_or_else(|| "domain replay requires --logs EVENTS.jsonl".to_owned())?;
             Ok(run_domain_replay(&path, &logs))
         }
         "testgen" => {
-            if let Err(early_return) = literate_access("domain testgen", &path) {
-                return Ok(early_return);
-            }
             let mut depth = 8_usize;
             let mut target = "vitest".to_owned();
             let mut unwired = fsl_tools::UnwiredAdapter::Fail;
@@ -3468,9 +3667,13 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                                 .ok_or_else(|| "--output requires a path".to_owned())?,
                         ));
                     }
-                    _ => return Err(format!("unknown domain testgen option '{option}'")),
+                    _ => args.positional(option, unknown)?,
                 }
             }
+            let path = match file(args, &unknown)? {
+                Ok(path) => path,
+                Err(early_return) => return Ok(early_return),
+            };
             let result = run_domain_testgen(
                 &path,
                 depth,
@@ -5889,7 +6092,51 @@ fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32)
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false)
+    let (output, status) =
+        run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false);
+    fold_scenarios_refinements(path, &source, depth, output, status)
+}
+
+/// Fold inline `implements` and governance preservations into a `scenarios`
+/// envelope exactly as `verify` does (issue #1314).
+///
+/// `run_scenarios_mode_from_source` answers from its own bounded run and falls
+/// back to `run_verify_from_source` only when the document's kernel fails;
+/// that fallback already attaches and folds both. Without this the kernel
+/// path ignored them, so the same document exited 0 or 1 depending on an
+/// unrelated path. Only the kernel path's own `result:"scenarios"` envelope
+/// is folded here, in `run_verify_from_source`'s order (seam, then
+/// preservations) and through the same owners, so there is no second
+/// mapping; any other envelope is an error or the already-folded fallback.
+/// The `testgen` / `explain` / `ledger` callers of the builder are not
+/// changed.
+fn fold_scenarios_refinements(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    mut output: Value,
+    status: i32,
+) -> (Value, i32) {
+    if output.get("result").and_then(Value::as_str) != Some("scenarios") {
+        return (output, status);
+    }
+    let model = match load_model_from_source(path, source) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let implements = match implements_result_from_source(path, source, &model, depth) {
+        Ok(implements) => implements,
+        Err(error) => return (implements_error_output(&error), 2),
+    };
+    let status = implements
+        .and_then(|implements| {
+            fslc_rust::verification_output::attach_requirements_implements(&mut output, implements)
+        })
+        .unwrap_or(status);
+    match fold_governance_from_source(path, source, &mut output) {
+        Ok(folded) => (output, folded.unwrap_or(status)),
+        Err(error) => error,
+    }
 }
 
 /// Build one scenarios envelope from one caller-owned root-source snapshot.
@@ -12797,12 +13044,7 @@ fn counterexample_command(mut args: impl Iterator<Item = String>) -> Result<(Val
         .ok_or_else(|| "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned())?;
     match subcommand.as_str() {
         "export" => {
-            let path = PathBuf::from(args.next().ok_or_else(|| {
-                "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned()
-            })?);
-            if let Err(early_return) = literate_access("counterexample export", &path) {
-                return Ok(early_return);
-            }
+            let mut args = CommandArgs::new(args);
             let mut depth = 8_usize;
             let mut output = None;
             let mut engine = "bmc".to_owned();
@@ -12840,8 +13082,17 @@ fn counterexample_command(mut args: impl Iterator<Item = String>) -> Result<(Val
                             return Err("--deadlock must be warn, error, or ignore".to_owned());
                         }
                     }
-                    _ => return Err(format!("unknown counterexample export option '{option}'")),
+                    _ => args.positional(option, |option| {
+                        format!("unknown counterexample export option '{option}'")
+                    })?,
                 }
+            }
+            let path = args.single_positional(
+                || "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned(),
+                |option| format!("unknown counterexample export option '{option}'"),
+            )?;
+            if let Err(early_return) = literate_access("counterexample export", &path) {
+                return Ok(early_return);
             }
             let output = output.ok_or_else(|| {
                 "usage: fslc counterexample export SPEC --depth K -o FILE".to_owned()

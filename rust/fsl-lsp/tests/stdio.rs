@@ -16,7 +16,11 @@ fn receive(stdout: &mut BufReader<ChildStdout>) -> Value {
     let mut content_length = None;
     loop {
         let mut header = String::new();
-        stdout.read_line(&mut header).expect("read LSP header");
+        let read = stdout.read_line(&mut header).expect("read LSP header");
+        assert!(
+            read > 0,
+            "fslc-lsp closed its output (did the server panic?)"
+        );
         if header == "\r\n" {
             break;
         }
@@ -135,6 +139,69 @@ fn stdio_lifecycle_uses_latest_buffer_and_serves_symbols() {
         &json!({"jsonrpc":"2.0","id":3,"method":"shutdown","params":null}),
     );
     assert_eq!(receive(&mut stdout)["id"], 3);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    );
+    drop(stdin);
+    assert!(child.wait().expect("wait for fslc-lsp").success());
+}
+
+/// A diagnostic whose fallback span sits after non-ASCII text on its line
+/// (an unlocated `undefined predicate` after a Japanese / emoji title) used
+/// to become a byte offset inside a character, and the server panicked
+/// slicing the source to convert it. It must publish the diagnostic at the
+/// token, in UTF-16 code units (the emoji counts twice).
+#[test]
+fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn fslc-lsp");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    send(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0","id":1,"method":"initialize",
+            "params":{"processId":null,"rootUri":null,"capabilities":{}}
+        }),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 1);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let text = "spec Probe {\n  state { x: Int }\n  init { x = 0 }\n  invariant I \"不変😀\" { undefinedPred(x) }\n}\n";
+    send(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+                "uri":"file:///tmp/fsl-lsp-utf16.fsl","languageId":"fsl","version":1,"text":text
+            }}
+        }),
+    );
+    let published = receive(&mut stdout);
+    assert_eq!(published["method"], "textDocument/publishDiagnostics");
+    let diagnostic = &published["params"]["diagnostics"][0];
+    assert!(
+        diagnostic["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("undefined predicate 'undefinedPred'")),
+        "{published:#}"
+    );
+    assert_eq!(
+        diagnostic["range"]["start"],
+        json!({"line":3,"character":23}),
+        "{published:#}"
+    );
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 2);
     send(
         &mut stdin,
         &json!({"jsonrpc":"2.0","method":"exit","params":null}),

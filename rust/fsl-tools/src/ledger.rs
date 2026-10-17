@@ -872,6 +872,61 @@ fn guarantee_line(verification: &Value) -> String {
     )
 }
 
+/// The verdict and preservation results of a governance document (#1316).
+///
+/// Since #1303 the first non-`refines` preservation folds into the
+/// verification `result` and the command's exit, so the body states that
+/// verdict and every preservation (declaration order) with its own result.
+/// Only `refines` passes, the same predicate the fold uses; any other value is
+/// marked failing. Rendered only when the verification envelope carries a
+/// `governance` section, so no other ledger changes.
+fn render_governance_section(output: &mut String, verification: &Value, governance: &Value) {
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .map_or_else(|| "—".to_owned(), escape)
+    };
+    let _ = write!(
+        output,
+        "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり（`violated` は `impl_violated`）、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
+        text(verification.get("result"))
+    );
+    for preservation in governance
+        .get("preservations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let preserve = preservation
+            .get("preserve")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(|control| format!("`{}`", escape(control)))
+            .collect::<Vec<_>>();
+        let result = preservation.get("result").and_then(Value::as_str);
+        let mark = if result == Some("refines") {
+            "🟢"
+        } else {
+            "🔴"
+        };
+        let _ = writeln!(
+            output,
+            "| `{}` | `{}` → `{}` | {} | {mark} `{}` |",
+            text(preservation.get("name")),
+            text(preservation.get("before")),
+            text(preservation.get("after")),
+            if preserve.is_empty() {
+                "—".to_owned()
+            } else {
+                preserve.join(", ")
+            },
+            text(preservation.get("result")),
+        );
+    }
+}
+
 fn approval_entry<'a>(approvals: Option<&'a Value>, requirement_id: &str) -> Option<&'a Value> {
     approvals?.get("requirements")?.get(requirement_id)
 }
@@ -1023,6 +1078,9 @@ pub fn render_ledger_with_approvals(
         output.push_str(
             "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n",
         );
+    }
+    if let Some(governance) = verification.get("governance") {
+        render_governance_section(&mut output, verification, governance);
     }
     if !undecided.is_empty() {
         output.push_str(

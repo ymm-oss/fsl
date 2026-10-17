@@ -30,6 +30,7 @@ re-verified as it changes (regression, drift, cross-layer change-impact via
 | [`fsl-requirements-document/`](fsl-requirements-document/) | generating a stakeholder-facing requirements document from an already-checked spec; editing only its non-normative slot | Markdown requirements document + drift check |
 | [`fsl-from-code/`](fsl-from-code/) | reverse-engineering a design spec from existing code, anchored by conformance back to that code | kernel `spec` + conformance harness |
 | [`fsl-delivery/`](fsl-delivery/) | end-to-end FSL delivery orchestration from planning through implementation conformance | lifecycle status and gated handoff |
+| [`fsl-verify/`](fsl-verify/) | choosing the verification commands per layer and change, reading results that exit 0 without passing, the fix loop, mutate strength, the completion report | verification report with proof classes |
 
 The shared `fsl/` reference also covers three cross-cutting dialects that sit
 outside the business/requirements/design progression:
@@ -50,7 +51,8 @@ outside the business/requirements/design progression:
 
 The role-specific skills delegate syntax and verifier details to `fsl/`. Use the
 narrowest role skill for authoring, then load `fsl/` when writing syntax or
-repairing verifier output.
+repairing verifier output. The role skills keep only a minimal check loop;
+`fsl-verify/` owns the full verification procedure and the report format.
 
 **Cross-layer alignment is one of FSL's primary uses.** When the value is in the
 *seams* — a requirement provably honored by the design, a control preserved across an
@@ -82,6 +84,9 @@ whole job; use `fsl-delivery/` whenever keeping the layers aligned is the delive
 - [`fsl-delivery/SKILL.md`](fsl-delivery/SKILL.md) — lifecycle orchestration
   across business, requirements, design, verification, and implementation
   conformance
+- [`fsl-verify/SKILL.md`](fsl-verify/SKILL.md) — the command decision table,
+  the results that look green but are not, the fix loop, prohibited shortcuts,
+  mutate strength, and the completion report format
 
 ## Installation
 

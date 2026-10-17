@@ -19,7 +19,7 @@ impl/expense.py         FSL-independent Python implementation
 
 ## How it looks per role
 
-The consultant writes the To-Be business flow of expense reimbursement in `1_business.fsl`. The subjects are `Draft -> Submitted -> Approved/Rejected`, `Approved -> Paid`, the two lanes of low-amount auto-approval and manager approval, controls `CTRL-1` / `CTRL-2`, the KPI projection `paid_claims`, and a completion-reachability goal. What is machine-guaranteed: goal reachability, bounded responsiveness of the controls, and inductive proof of the generated bounds and policies. When the PM or engineer changes something downstream, it shows up in the business layer's vocabulary as an `implements` / `refine` failure.
+The consultant writes the To-Be business flow of expense reimbursement in `1_business.fsl`. The subjects are `Draft -> Submitted -> Approved/Rejected`, `Approved -> Paid`, the two lanes of low-amount auto-approval and manager approval, control policies `POL-EXPENSE-001` / `POL-EXPENSE-002`, the KPI projection `paid_claims`, and a completion-reachability goal. What is machine-guaranteed: goal reachability, bounded responsiveness of the controls, and inductive proof of the generated bounds and policies. When the PM or engineer changes something downstream, it shows up in the business layer's vocabulary as an `implements` / `refine` failure.
 
 The PM writes system requirements that do not break the business in `2_requirements.fsl`. They use the readable process+data profile: `Claim` carries `amount`, `AUTO_LIMIT` defines the approval boundary, transitions carry guards and `covers REQ-...` traceability, `paid_claims` is a declarative KPI projection, and two acceptance criteria replay concrete flows. What is machine-guaranteed: no contradictions in the requirements alone, generated type bounds for `claim_stage` / `claim_amount`, replay of the acceptance criteria, and `implements: refines` against the business layer `ExpenseToBe`. When the consultant changes a control, `implements` fails; when the engineer changes the internal design, it shows up as a non-correspondence in `3_refines_2.fsl`.
 
@@ -89,7 +89,7 @@ The output actually obtained:
       "c": 0
     },
     "loc": {
-      "line": 91,
+      "line": 94,
       "column": 3
     }
   },
@@ -144,7 +144,7 @@ The output actually obtained:
           "c": 0
         },
         "loc": {
-          "line": 91,
+          "line": 94,
           "column": 3
         }
       },
