@@ -3,7 +3,7 @@
 # Copyright 2026 Ryoichi Izumita
 """Check the FSL in Markdown fences that are marked as complete specifications.
 
-Most ``fsl`` fences under ``docs/`` are fragments (a few lines of an action, a
+Most ``fsl`` fences under ``docs/`` and ``skills/`` are fragments (a few lines of an action, a
 snippet of a state block), so ``fslc check`` on the whole document exits 2.
 Inferring "complete" from "checks" is rejected (issue #1137): it cannot tell an
 intended fragment from a complete specification that is now broken.  Instead an
@@ -32,7 +32,7 @@ Rules the gate enforces and reports:
 
 Usage::
 
-    python3 tools/check-doc-fences.py check [PATH ...]   # default: docs/
+    python3 tools/check-doc-fences.py check [PATH ...]   # default: docs/ and skills/
     python3 tools/check-doc-fences.py selftest
 
 ``fslc`` is taken from ``--fslc``, then ``$FSLC``, then ``PATH``.  A missing
@@ -54,7 +54,9 @@ from pathlib import Path
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SCOPES = ("docs",)
+# ``skills/`` is the distributed skill bundle: a complete example there is
+# copied by agents as-is, so it is held to the same marked-fence rule.
+DEFAULT_SCOPES = ("docs", "skills")
 MARKER = "check"
 FRAGMENT_LANG = "fsl-fragment"
 

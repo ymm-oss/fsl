@@ -11,6 +11,8 @@
 //! condition in `fsl-runtime`, `fsl-verifier` and the type checker. The rule
 //! restored here: a pattern binding never overwrites a name already in scope,
 //! and a *new* name still reaches the action body (LANGUAGE.md section 9).
+//! Since #1259 the colliding shapes are rejected at `check` instead (#1157
+//! item 1); the new-name control below is unchanged.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -56,72 +58,46 @@ fn verify(path: &Path, engine: &str) -> (Value, i32) {
 
 const ENGINES: [&str; 4] = ["explicit", "bmc", "induction", "auto"];
 
-/// Every engine must report the same verdict; `violated` also pins the
-/// counterexample's parameter and the key that changed.
-fn assert_violated_at(tag: &str, text: &str, param: u64) {
+/// Since #1259 (item 1 of #1157) every shape below is a located `check`
+/// error, so no engine sees it and the verdicts above can no longer split.
+/// The evaluators keep their #1153 confinement for a model that bypasses
+/// `check`; `fsl-verifier/tests/issue_1259_absent_pattern_binding.rs` pins the
+/// engines' agreement on such a model for the state-variable collision.
+fn assert_rejected(tag: &str, text: &str) {
     let path = fixture(tag, text);
-    for engine in ENGINES {
-        let (report, code) = verify(&path, engine);
-        assert_eq!(report["result"], "violated", "{tag}/{engine}: {report:#}");
-        assert_eq!(code, 1, "{tag}/{engine}: {report:#}");
-        assert_eq!(
-            report["last_action"]["params"]["r"], param,
-            "{tag}/{engine}: {report:#}"
-        );
-        let step = &report["trace"][1];
-        let key = format!("w[{param}]");
+    for command in ["check", "verify"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args([command, &path.display().to_string()])
+            .output()
+            .expect("run native CLI");
+        let report: Value = serde_json::from_slice(&output.stdout).expect("JSON report");
+        assert_eq!(output.status.code(), Some(2), "{tag}/{command}: {report:#}");
+        assert_eq!(report["result"], "error", "{tag}/{command}: {report:#}");
+        let message = report["message"].as_str().unwrap_or_default();
         assert!(
-            step["changes"].get(&key).is_some(),
-            "{tag}/{engine} changed the wrong key (want {key}): {report:#}"
+            message.contains("pattern binding 'r'") && message.contains("rename"),
+            "{tag}/{command}: {report:#}"
         );
+        assert_eq!(report["loc"]["line"], 5, "{tag}/{command}: {report:#}");
     }
 }
 
-fn assert_verified(tag: &str, text: &str) {
-    let path = fixture(tag, text);
-    for engine in ["explicit", "bmc", "induction"] {
-        let (report, code) = verify(&path, engine);
-        assert!(
-            matches!(report["result"].as_str(), Some("verified" | "proved")),
-            "{tag}/{engine}: {report:#}"
-        );
-        assert_eq!(code, 0, "{tag}/{engine}: {report:#}");
-    }
-}
-
-/// The issue's calibration spec. `o = some(1)` but the guard's `r` is the
-/// parameter, so `act(r=0)` writes `w[0]`: `not w[0]` is violated, and
-/// `not w[1]` holds. Python answers exactly this; the port answered the
-/// opposite.
+/// The issue's calibration spec (`act(r=0)` wrote `w[1]` natively, `w[0]` in
+/// Python), its flipped conjunct order (the ordering #1157 item 2 recorded as
+/// diverging from Python), the `Option<Bool>` payload that retyped `r`, and the
+/// failed match that crashed bmc/induction: each pattern `r` collides with
+/// the action parameter `r`.
 #[test]
-fn shadowing_pattern_binding_keeps_the_action_parameter() {
-    let guard = "r == 0 and (o is some(r))";
-    assert_violated_at("main-w0", &spec_text(guard, "not w[0]", "R", "some(1)"), 0);
-    assert_verified("main-w1", &spec_text(guard, "not w[1]", "R", "some(1)"));
-}
-
-/// `and` is commutative for this shape: the pattern binding is invisible to
-/// its sibling operand whichever side it is written on.
-#[test]
-fn and_is_commutative_over_a_shadowing_pattern_binding() {
-    let flipped = "(o is some(r)) and r == 0";
-    assert_violated_at(
-        "flipped-w0",
-        &spec_text(flipped, "not w[0]", "R", "some(1)"),
-        0,
+fn a_pattern_binding_that_shadows_an_action_parameter_is_rejected() {
+    assert_rejected(
+        "main",
+        &spec_text("r == 0 and (o is some(r))", "not w[0]", "R", "some(1)"),
     );
-    assert_verified(
-        "flipped-w1",
-        &spec_text(flipped, "not w[1]", "R", "some(1)"),
+    assert_rejected(
+        "flipped",
+        &spec_text("(o is some(r)) and r == 0", "not w[0]", "R", "some(1)"),
     );
-}
-
-/// Type-checker disagreement: matching an `Option<Bool>` into the parameter
-/// `r: R` used to rewrite `r`'s type to `Bool`, so the body's `w[r]` was
-/// rejected. Python accepts this spec.
-#[test]
-fn shadowing_pattern_binding_does_not_retype_the_parameter() {
-    assert_violated_at(
+    assert_rejected(
         "retype",
         &spec_text(
             "r == 0 and (o is some(r))",
@@ -129,21 +105,10 @@ fn shadowing_pattern_binding_does_not_retype_the_parameter() {
             "Bool",
             "some(true)",
         ),
-        0,
     );
-}
-
-/// Internal error on a failed match: `o = none`, so `o is some(r)` is false
-/// and its negation holds for every `r`. The symbolic path used to insert the
-/// binding anyway (rewriting `r` to the absent payload), so `act(r=1)` wrote
-/// `w[0]` there; bmc/induction died with `trace state mismatch at step 1`
-/// while explicit answered `violated`.
-#[test]
-fn failed_shadowing_match_agrees_across_engines() {
-    assert_violated_at(
+    assert_rejected(
         "failed-match",
         &spec_text("not (o is some(r))", "not w[1]", "R", "none"),
-        1,
     );
 }
 

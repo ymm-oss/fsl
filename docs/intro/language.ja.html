@@ -732,6 +732,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
   論理的な後続部分だけです。例えば <code>(x is some(v)) =&gt; ...</code> や
   <code>(x is some(v)) and ...</code> の右辺では使えますが、グローバルな束縛にはなりません。
+  <code>v</code> は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
+  引数・量化子の束縛変数・<code>let</code>・それより前のパターン束縛と同じ名前の <code>v</code> は
+  <code>check</code> が拒否し、名前を変えるよう求めます。
   順序は定義されません。</li>
 <li>struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
   <code>==</code> はフィールドごとの等値</li>
@@ -1199,11 +1202,14 @@ indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが�
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
 <code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
 inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。失敗した governance の
-<code>preservation</code> も同じ対応付けで <code>check</code> / <code>verify</code> に畳み込まれます(§13)。畳み込みは検証封筒を
+<code>preservation</code> も同じ対応付けで <code>check</code> / <code>verify</code> / <code>scenarios</code> に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
 baseline の verdict をそのまま返し(baseline が <code>verified</code> でなくなるため変異を1つも生成しません)、
 <code>ledger</code> と <code>fslc html</code> は畳み込まれた検証封筒から同じ exit を引き継ぎ、<code>sweep</code> は
-真の失敗なら <code>sweep_failed</code>、深さ不足のセルしかないスコープがあれば <code>sweep_inconclusive</code> を返します。同じ <code>2</code> の
+真の失敗なら <code>sweep_failed</code>、深さ不足のセルしかないスコープがあれば <code>sweep_inconclusive</code> を返します。
+<code>scenarios</code> も、自身の有界実行で答えた場合と <code>verify</code> の封筒へフォールバックした場合のどちらでも、
+seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた <code>result</code>、exit 1、
+<code>implements</code> / <code>governance</code> セクション付き)。同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/design/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -2585,7 +2591,9 @@ governance 契約のエラー(委譲先の business ファイル、control、<co
 <code>verify</code> でも同じ位置付きの <code>error</code>(exit 2)です。preservation の refinement が内部で
 失敗した場合は、どちらでも <code>error</code>/<code>internal</code>(exit 3)です。<code>check</code>/<code>verify</code> の封筒を読む側は
 畳み込まれた判定を読みます: <code>fslc chain</code> の spec レイヤーは失敗し、<code>fslc ledger</code>、
-<code>fslc html</code>、<code>fslc mutate</code> は同じ baseline から exit 1 を返し、ブラウザの Worker も
+<code>fslc html</code>、<code>fslc mutate</code> は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
+すべての preservation とその結果を、失敗したものに印を付けて示します)、<code>fslc scenarios</code> は
+<code>verify</code> と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
 <code>check</code> と <code>verify</code> を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても <code>check</code> は <code>ok</code>、<code>verify</code> は <code>verified</code> で、どちらも
 exit 0 であり、<code>verify</code> は <code>governance</code> セクション自体を報告していませんでした(<code>check</code> が

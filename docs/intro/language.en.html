@@ -761,7 +761,10 @@ variable capture instead of inventing internal binder names. See
   that binds <code>v</code>; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of <code>(x is some(v)) =&gt; ...</code> or <code>(x is some(v)) and ...</code>; it is
-  not a global binding. Ordering is not defined.</li>
+  not a global binding. <code>v</code> must be a fresh name: <code>check</code> rejects a <code>v</code> that is
+  already a state variable, constant, enum member, action parameter, quantifier
+  binder, <code>let</code>, or an earlier pattern binding in scope, and asks you to rename
+  it. Ordering is not defined.</li>
 <li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
   <code>==</code> is field-by-field equality</li>
 <li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code></li>
@@ -1247,12 +1250,15 @@ indeterminate (<code>chain</code> when its <code>[impl]</code> layer has no evid
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
 because inline <code>implements</code> propagates that seam verdict to the top-level <code>result</code>; a failed
-governance <code>preservation</code> folds into <code>check</code>/<code>verify</code> through the same mapping (§13). The fold
+governance <code>preservation</code> folds into <code>check</code>/<code>verify</code>/<code>scenarios</code> through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to <code>check</code> and
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
 same exit from the folded verification envelope, and <code>sweep</code> reports <code>sweep_failed</code> for a true
-failure or <code>sweep_inconclusive</code> when some scope has only depth-limited cells. The same
+failure or <code>sweep_inconclusive</code> when some scope has only depth-limited cells. <code>scenarios</code>
+folds the seam and every preservation into its own envelope the same way (the folded
+<code>result</code>, exit 1, with the <code>implements</code> / <code>governance</code> section attached), whether it
+answered from its own bounded run or fell back to the <code>verify</code> envelope. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
 <code>docs/design/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
@@ -2682,8 +2688,10 @@ is the same located <code>error</code> (exit 2) under <code>verify</code> too; a
 refinement that fails internally is <code>error</code>/<code>internal</code> (exit 3) under both.
 Consumers of the <code>check</code>/<code>verify</code> envelope read the folded verdict: a
 <code>fslc chain</code> spec layer fails, <code>fslc ledger</code>, <code>fslc html</code>, and <code>fslc mutate</code>
-exit 1 from the same baseline, and the browser Worker folds <code>check</code> and
-<code>verify</code> the same way. This changed exit codes: before 4.11 a failed
+exit 1 from the same baseline (the ledger body also states that verdict and
+lists every preservation with its result, failing ones marked), <code>fslc
+scenarios</code> folds the preservations into its own envelope as <code>verify</code> does,
+and the browser Worker folds <code>check</code> and <code>verify</code> the same way. This changed exit codes: before 4.11 a failed
 preservation left <code>check</code> at <code>ok</code> and <code>verify</code> at <code>verified</code>, both exit 0, and
 <code>verify</code> reported no <code>governance</code> section at all (and answered <code>verified</code> even
 for a contract <code>check</code> rejected). A CI that gated on the exit

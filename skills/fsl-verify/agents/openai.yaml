@@ -1,0 +1,4 @@
+interface:
+  display_name: "FSL Verify"
+  short_description: "Run, read, and report fslc verification."
+  default_prompt: "Use $fsl-verify to verify this FSL spec and report what is proved, bounded, and still open."

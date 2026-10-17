@@ -29,11 +29,13 @@ invariant PaidLedger { ... }
 
 Multiple annotations may stack in any order without changing the checked
 result; comments/blank lines between them or before the target do not break
-attachment. They coexist with (and desugar to the same relation as) the legacy
-`"ID: text"` string slot and `covers`/`requirement` block relations — see §13.1.
+attachment. They desugar to the same relation as `covers`/`requirement` block
+relations and the legacy `"ID: text"` string slot (which `fslc lint` reports as
+`legacy_string_metadata`) — see "Declaration tags" in
+[layers](layers.md#declaration-tags-common-to-all-layers).
 An annotation with nothing supported to attach to reports
 `FSL-ANNOTATION-TARGET`. `domain`/`dbsystem`/`ai_component` nested
-declarations also accept `@...` (issue #281): `domain` aggregate `command`,
+declarations also accept `@...`: `domain` aggregate `command`,
 `decide`, `evolve`, `invariant`, `projection`, `effect`, and saga `step`;
 `ai_component` `tool`, the `tools [a, b];` shorthand, `authority` (and each
 rule line), `fallback` (and each `when` item), `check`; `dbsystem`
@@ -59,7 +61,8 @@ do not assume those public consumers can query a rationale without a separate
 projection contract.
 
 ```fsl
-spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadata badge (explain/html); never verified
+[@requirement("<ID>", "<intent>")]       // optional document annotation (line before `spec`); never verified
+spec <Name> {                             // the older `spec <Name> "<kind>: <intent>"` slot is legacy_string_metadata
   const <NAME> = <const expr>             // integer constant (expressions allowed: CAP - 1, etc.)
   type  <Name> = <lo>..<hi>               // domain type (bounded integer)
   symmetric type <Name> = <lo>..<hi>      // interchangeable entity identities
@@ -69,7 +72,8 @@ spec <Name> ["<kind>: <intent>"] {        // optional spec-level tag → metadat
   def <name>(<p>: <type name>, ...) = <expr> // non-recursive predicate, frontend-inlined
 
   state { <var>: <type> [= <deterministic expr>], ... }
-  init  ["undecided: reason"] { <stmt>... } // assign exactly once per variable/Map-key (deterministic)
+  [@undecided("<reason>")]                 // optional, line before init/action: an owner-accepted open choice
+  init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                        // 0 or more. conjunction. enabled condition
@@ -108,12 +112,14 @@ a sibling top-level `verify` block instead of inline ranges:
 
 ```fsl
 business <Name> {
+  actor <Actor>, ...                       // roster; every transition `by` must name one
   entity <Entity>                          // identity sort; size set by verify.instances
+  process <Entity> { ... }                 // needs the matching `entity`; no `with` fields, no `number`
   control <ID> "<text>"                    // optional governance/control metadata
   policy <ID> "<text>" satisfies <ID> ...  // optional control traceability
                                            // `satisfies` of an undeclared control is a
                                            // located error; a control nothing satisfies
-                                           // is an `unused_control` warning (#1134)
+                                           // is an `unused_control` warning
 }
 requirements <Name> {
   entity <Entity>                          // optional explicit identity sort
@@ -219,11 +225,11 @@ artifact profiles into the same snapshot model; missing providers report
 (`verified_under_assumptions` on success). Use `fslc db observe` for runtime
 evidence only (`observed_mismatch`, not formal violation) and `fslc db import`
 for SQL DDL or minimal Prisma schema importers. Production-data preservation and
-DB-engine evidence use JSON schemas under `schemas/fslc/db/` with
+DB-engine evidence use versioned JSON schemas with
 `formal_result: "not_run"`, not `verified`/`proved`. An unrecognized `check
 compatibility` rule name and an environment schema window the migration plan
 never reaches both fail validation with exit 2. `fslc db observe` validates its
-event envelope against `schemas/fslc/db/observation.v0.schema.json`
+event envelope against the `observation.v0` schema
 (exit 2 on a malformed record) and honors each event's `flags` snapshot the same
 way `fslc db check` does.
 
@@ -325,11 +331,10 @@ path for semantically invalid domain input. `domain generate`, `domain replay`,
 `domain testgen`, and `domain check` extend the same single-snapshot contract
 through checked-kernel scaffolding, Monitor replay, generic and adapter test
 generation, and edition postprocessing.
-The accepted #662 design keeps `event_*` flags one-hot/current-step and will add
-a dedicated `Map<Correlation,SagaPhase>` in a follow-up; do not make global
-event flags sticky or treat one effect's status map as a general saga history.
+`event_*` flags are one-hot/current-step; do not make global event flags sticky
+or treat one effect's status map as a general saga history.
 A saga `compensation { when Trigger after After { ... } }` block is guarded by
-BOTH event flags (#713); because flags are one-hot, a compensation whose
+BOTH event flags; because flags are one-hot, a compensation whose
 trigger and after events differ is structurally disabled today and surfaces
 as a `fslc verify` never-enabled action warning — do not suppress that
 warning or weaken the guard to make it disappear.
@@ -339,7 +344,7 @@ lowering cannot publish. Versions, dialect, duplicate Kernel members, and
 missing lowered type/state/action counterparts fail closed; source expressions
 and effect/saga topology are authoritative in the companion because v1 has no
 equivalent nodes. Emitters never receive `DomainSpec`, never reparse source
-text, and the five targets preserve their pre-migration bytes.
+text.
 
 Effect completion classification first honors explicit roles:
 `success_event` -> `Succeeded`, `failure_event` -> `Failed`, and `timeout_event`
@@ -356,8 +361,7 @@ Kernel names only as machine detail, preserve primary/secondary origins and
 expansion steps (`can()`, membership, legacy operators), and represent
 source-less nodes as generated-only. Requirement tags are a separate
 traceability relation, not origin identities. Public Kernel v1 remains
-byte-compatible and does not expose the internal chain; publication belongs to
-v2 (#256).
+byte-compatible and does not expose the internal chain.
 
 Omitted domain aggregate initializers retain the current Bool `false`, Int
 `0`, enum first-member (rendered bare, as domain source itself accepts, no
@@ -366,7 +370,7 @@ value -- never `domain_kernel_source`'s kernel-mangled identifier), range
 lower-bound, external-placeholder `0`, `value_object` struct-literal,
 `Option<T>` -> `none`, `Set<T>` -> `Set {}`, or top-level `Map<K, V>` ->
 dense per-key `forall k: K { field[k] = <value default> }` behavior, and
-every one of those shapes emits `implicit_initial_value` (#731) -- the
+every one of those shapes emits `implicit_initial_value` -- the
 warning's dispatch matches the renderer's total dispatch
 (`fsl_core::domain_type_default`, the single owner of both the selected
 value and how any enum member within it is spelled). The warning carries the
@@ -374,10 +378,10 @@ selected value, reason, edition severities, source span, and -- where a safe
 insertion exists -- a machine-applicable edit. A top-level `Map<K, V>` field
 (no whole-field default exists at all) and a `Set<T>`/`value_object` field
 whose brace-literal default cannot yet round-trip through `fslc fmt`'s
-reformat-and-reparse pass (issue #770) omit the insertion and keep
+reformat-and-reparse pass omit the insertion and keep
 `edition_severity.next` at `warning`: `migrate --write` is fail-closed and
 would not write a corrupted file, but offering the insertion would trip
-#770's reformat failure and fail migration for the whole file, dropping
+that reformat failure and fail migration for the whole file, dropping
 every other edit in it too. An explicit whole-`Map` default and a `Map`
 nested as another `Map`'s value are both rejected ("whole-Map domain
 defaults are not supported" / "Map state requires explicit initialization
@@ -428,7 +432,7 @@ truth, groundedness, evaluator judgment, probability, confidence intervals, or
 prompt/model sampling distributions in the kernel. No field on `ai_component`,
 `tool`, `authority`, `fallback`, or `check` accepts a `"description text"` /
 `"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
-convention (§10), every field here is a bare identifier or number.
+convention ([layers](layers.md#declaration-tags-common-to-all-layers)), every field here is a bare identifier or number.
 `check hard { rule <Name>; ... }` selects which of the 5 named rules above get
 an explicit, separately-reported invariant/finding in `fslc ai check`; an
 unlisted name is a check-time error (`kind:"semantics"`, hint lists the 5).
@@ -451,7 +455,7 @@ file), Wilson intervals, and `formal_result:"not_run"`. An unknown
 non-`statistically_supported` gate status (`dataset_invalid`,
 `evaluator_untrusted`, `slice_missing`, `insufficient_samples`,
 `inconclusive`, `statistically_unsupported`) exits 1, and the result carries
-the full `schemas/fslc/ai/statistical-result.v0.schema.json` field set
+the full `statistical-result.v0` field set
 (`schema_version`/`status`/`slice`/`metric`/`n`/`estimate`/`threshold`/
 `evaluator`/`assumptions` included, not just `result`/`interval`/`checks`).
 `fslc ai regress` checks the selected `ai_migration`'s declared aggregate
@@ -526,29 +530,19 @@ formal proof and does not model LLM truth or statistical/evaluator quality.
 
 Stochastic / migration / drift evidence declarations (project-level fsl-ai;
 dialect tag `fsl-ai-project.v0`). These blocks are read by a deliberately
-lenient separate parser, not the kernel Lark grammar; they may sit alongside
-`ai_component` in one file, and `fslc ai check` (or `fslc check`) on such a
-file returns `ai_project_analyzed` — a declaration listing, not verification:
+lenient line scanner separate from the kernel parser; they may sit alongside
+`ai_component` in one file. `fslc ai check` on such a file returns
+`ai_project_analyzed` (`fslc check` returns `ok` with
+`ai_analysis_result:"ai_project_analyzed"`) — a declaration listing, not
+verification. The example shows only the lines the scanner reads; any other
+line in these bodies is skipped without validation, so it constrains nothing:
 
 ```fsl
 dataset <Name> {
-  source "<path/to/eval.jsonl>"
-  population {
-    <field> in ["<a>", "<b>"]
-  }
-  slice <SliceName> {
-    <field> == "<a>"
-  }
+  source "<path/to/eval.jsonl>"          // the only line read
 }
 
-evaluator <Name> {
-  input <name>: <Type>
-  output <name>: <Type>
-  calibration {
-    dataset <GoldLabelDataset>
-    require agreement_with_human >= 0.90
-  }
-}
+evaluator <Name> { }                       // only the name is read and listed
 
 statistical_property <Name> {
   target <AiComponentName>
@@ -562,19 +556,8 @@ statistical_property <Name> {
   }
 }
 
-ai_migration <Name> {
-  from <Component> {
-    model <id>
-    prompt <id>
-    retriever <id>
-  }
-  to <Component> {
-    model <id>
-    prompt <id>
-    retriever <id>
-  }
+ai_migration <Name> {                      // only preserve { no_regression { .. } } is read
   preserve {
-    hard_contract <Contract>.hard
     no_regression {
       dataset <DatasetName>
       metric <metric> drop <= 0.05
@@ -601,8 +584,8 @@ because `check` must not accept a project `eval`/`drift` cannot execute.
 `failure_mode <Name> { condition ...; severity ...; }` is parsed and listed by
 name under `ai_project_analyzed`'s `failure_modes`, but no command yet checks
 its content against evidence — it is tracked metadata, not a verified claim.
-**`ai_action`, `retriever` (as a standalone block), `trust_boundary`, and a
-top-level named `authority { target ... }` are recognized only as block
+**`ai_action`, `ai_contract`, `retriever` (as a standalone block),
+`trust_boundary`, and a top-level named `authority { target ... }` are recognized only as block
 *boundaries*: the parser does not descend into their body at all, so any text
 inside — even garbage — passes `check`. They are echoed as bare `{kind, name}`
 entries under `raw_blocks`, not validated.** Do not author one expecting it to
@@ -621,11 +604,10 @@ and drift over runtime telemetry (`observed_supported` / `observed_mismatch`);
 Hard boundary: every result carries `formal_result:"not_run"` and must never
 be displayed as `proved`/`verified`; a point-estimate-only requirement
 (`require accuracy >= 0.92` with no `ci_lower`/`ci_upper`) is rejected at eval
-time (`inconclusive`, exit 1), not warned past. Eval statuses are
+time (`inconclusive`, exit 1), not warned past. Eval statuses, in the
+order a result is decided (the first that applies wins), are
 `dataset_invalid`, `evaluator_untrusted`, `insufficient_samples`,
-`inconclusive`, `statistically_unsupported`, `statistically_supported`; the
-priority order and the eval-record JSONL schema live in
-`docs/design/DESIGN-stochastic.md`.
+`inconclusive`, `statistically_unsupported`, `statistically_supported`.
 
 Composite spec (a separate top-level form):
 
@@ -682,7 +664,7 @@ refinement <Name> {
   // formal params may be bare names or name: Type annotations matching the impl action
   // explicit map/action entries override maps auto; auto matches action params BY NAME
   // only (never position) — a different arity, a surplus/renamed impl param, or an
-  // unmatched abs param is a type error, never a positional guess (#494)
+  // unmatched abs param is a type error, never a positional guess
   preserve progress {                            // optional, only when upper leadsTo must be preserved
     respond <AbsLeadsTo> by <impl_act>, ...
   }
@@ -732,8 +714,8 @@ implementation Map (for example `Column -> DesignColumn`).
 | Inline state domain | `state { qty: 0..5 }` | Shorthand for a named domain type in a state-variable declaration |
 | Inline state initializer | `state { qty: Qty = 0 }` | Deterministic sugar for the equivalent root assignment in `init`; may not read state |
 | symmetric domain | `symmetric type TaskId = 0..2` | Same as a domain type, plus liveness symmetry reduction |
-| entity kind (dialects) | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements; bound by `verify { instances Claim = N }` |
-| number kind (dialects) | `number Amount` | Finite numeric sort for business/requirements; bound by `verify { values Amount = lo..hi }` |
+| entity kind | `entity Claim` / `process Claim ...` | Finite identity sort for business/requirements (also kernel `spec`); bound by `verify { instances Claim = N }` |
+| number kind | `number Amount` | Finite numeric sort for requirements (also kernel `spec`); bound by `verify { values Amount = lo..hi }`. **`business` does not accept `number`** (parse error `expected business declaration`) |
 | enum | `enum St { A, B }` | members are referenced and displayed by bare name |
 | symmetric enum | `symmetric enum Worker { A, B }` | Same as enum, plus liveness symmetry reduction |
 | struct | `struct S { f: Qty, o: Option<Option<K>> }` | field = scalar or nested Option<scalar> only |
@@ -772,9 +754,8 @@ specification, const, `def` or its parameters, type, enum or its members, struct
 or its fields, state variable, action or its parameters, property, quantifier or
 aggregate binder, or an `is some(x)` pattern binding. They always resolve to the
 literal, so such a declaration is unreadable from every expression and the
-misreading is silent: `state { true: Bool }` with `invariant AlwaysHolds { true }`
-used to return `proved` while `init { true = false }` wrote a variable nothing
-could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
+misreading would be silent (`invariant AlwaysHolds { true }` reads the literal,
+never a state variable named `true`), so the declaration is rejected. No other word is reserved — `count`, `sum`, `stage`, `in`,
 `is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a,b)` `max(a,b)` `abs(a)`
@@ -795,6 +776,9 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
   required when `v` must be bound for the rest of the formula; equality creates
   no binding. The binding is scoped to the logical continuation where the match
   is true, such as the guarded RHS of `=>` or `and`, and is not global.
+  `v` must be fresh: `check` rejects a `v` that names a state variable,
+  constant, enum member, action parameter, binder, `let`, or an earlier pattern
+  binding in scope.
   Arithmetic and ordering on Option are type errors.
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)
@@ -891,9 +875,9 @@ could read (#570). No other word is reserved — `count`, `sum`, `stage`, `in`,
    `decreases`, leadsTo remains bounded to `--depth`.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
-     Nesting it inside the forall body is a **parse error**
-     (`fslc` reports `unexpected 'decreases' here` with a placement hint),
-     not "ranking doesn't work under forall".
+     Nesting it inside the forall body is a **parse error** — `fslc`
+     reports `expected '}'` at the `decreases` token, with no placement
+     hint — not "ranking doesn't work under forall".
    - **Per-entity measure under interleaving**: use
      `helpful step(c) decreases level[c]`. Without `helpful`, an action advancing
      a different entity still reports `rank_failure:"non_decreasing_action"`.
@@ -982,8 +966,9 @@ requires stock[i] > 0
 // queue processing (two forms that prevent partial_op)
 action take()  { requires q.size() > 0  x = q.head()  q = q.pop() }
 action drain() { if q.size() > 0 { x = q.head()  q = q.pop() } }
-// invariant talking about a Seq (index guard, range derived from const)
-invariant I { forall i in 0..CAP-1 { i < q.size() => jobs[q.at(i)].st == Queued } }
+// element-wise invariant over a Seq (member quantification; no index arithmetic)
+invariant I { forall j in q { jobs[j].st == Queued } }
+// position, order, or no-duplicates need the index (guarded, range from the const): see NoDup below
 // folding a Seq (index domain type)
 type Idx = 0..3
 invariant B { balance == sum(i: Idx of log.at(i) where i < log.size()) }

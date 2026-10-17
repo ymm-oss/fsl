@@ -188,15 +188,27 @@ fn migration_diagnostics(source: &str) -> Vec<SourceDiagnostic> {
     )
 }
 
+/// A zero-width span at a 1-based `line` / `column` as the lexer counts them:
+/// lines end at `\n` only, and `column` counts characters, not bytes. The
+/// offset is a byte offset on a character boundary, clamped to the line, so
+/// the LSP's UTF-16 conversion can slice the source there.
 fn point_span(source: &str, line: u32, column: u32) -> Span {
-    let offset = source
-        .lines()
-        .take(usize::try_from(line.saturating_sub(1)).expect("line fits usize"))
-        .map(|line| line.len() + 1)
-        .sum::<usize>()
-        + usize::try_from(column.saturating_sub(1)).expect("column fits usize");
+    let line_index = usize::try_from(line.saturating_sub(1)).expect("line fits usize");
+    let column_index = usize::try_from(column.saturating_sub(1)).expect("column fits usize");
+    let line_start = source
+        .split_inclusive('\n')
+        .take(line_index)
+        .map(str::len)
+        .sum::<usize>();
+    let rest = &source[line_start..];
+    let line_text = rest.split_once('\n').map_or(rest, |(text, _)| text);
+    let offset = line_start
+        + line_text
+            .char_indices()
+            .nth(column_index)
+            .map_or(line_text.len(), |(offset, _)| offset);
     let point = SourcePos {
-        offset: offset.min(source.len()),
+        offset,
         line,
         column,
     };
@@ -232,6 +244,37 @@ mod tests {
         assert_eq!(found[0].kind, "type");
         assert!(found[0].message.contains("unknown type 'Missing'"));
         assert_eq!(found[0].span.start.line, 2);
+    }
+
+    /// An unlocated core error carries a character column; its fallback span
+    /// must land on the reported token as a byte offset, after non-ASCII text
+    /// on the same line and after CRLF line ends.
+    #[test]
+    fn unlocated_core_error_offset_counts_characters_and_crlf() {
+        for newline in ["\n", "\r\n"] {
+            let source = [
+                "spec Probe {",
+                "  state { x: Int }",
+                "  init { x = 0 }",
+                "  invariant I \"不変条件😀\" { undefinedPred(x) }",
+                "}",
+            ]
+            .join(newline);
+            let found = diagnostics(&source, "probe.fsl", &fsl_core::FsResolver::new("."));
+            let diagnostic = found
+                .iter()
+                .find(|item| item.message.contains("undefined predicate"))
+                .unwrap_or_else(|| panic!("{newline:?}: {found:?}"));
+            assert!(!diagnostic.located, "{newline:?}: {diagnostic:?}");
+            let start = diagnostic.span.start;
+            assert_eq!((start.line, start.column), (4, 25), "{newline:?}");
+            assert_eq!(
+                source.get(start.offset..start.offset + "undefinedPred".len()),
+                Some("undefinedPred"),
+                "{newline:?}: offset {}",
+                start.offset
+            );
+        }
     }
 
     #[test]

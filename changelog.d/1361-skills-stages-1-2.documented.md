@@ -1,0 +1,32 @@
+Documented (#1361): the distributed FSL skills no longer contradict the parser or
+each other. `number` is documented as requirements/kernel-only (a `business`
+spec that declares one is a parse error); `if c then a else b` is valid in any
+expression position; requirements `terminal` uses `stage(c)`; `@requirement`
+and `@undecided` are the taught tag forms (the `"ID: text"` slot is
+`legacy_string_metadata`); a kernel spec cannot declare `acceptance` or
+`forbidden`; the `decreases`-inside-`forall` diagnostic is quoted as the
+parser emits it; the AI-project examples show only the lines the scanner
+reads; broken `§` cross-references now name the file. Release and issue history that no longer changes what a reader does
+("before #1229", "used to", "(issue #N)") was removed from the references;
+the current rule is kept. The skills no longer point at repository-only paths (`examples/`,
+`docs/`, `specs/`, `schemas/`) that a mise or install.sh user does not
+have; the needed gist is stated in the skill instead. The business, requirements, and design check loops now include `fslc
+lint`, and `--requirements` is taught as a file of IDs (one per line), not a
+comma list. The `examples/e2e` IDs follow the built-in ID policy (`POL-EXPENSE-001`,
+`REQ-EXPENSE-001`, `AC-EXPENSE-001`, `MODEL-EXPENSE-001`, ...): the business
+and requirements layers are lint-clean, and every verdict is unchanged.
+A new distributed skill, `fsl-verify`, owns verification. It
+gives the command sequence per layer and change kind (`check
+--strict-tags --requirements` → `lint` → `verify --depth 8` → `--engine
+induction` → `refine` / `implements.result` → `diff --forbid` → `mutate
+--by-requirement` → `chain`), a table of results that exit 0 or look green
+without passing (bounded `verified`; `proved` only at the run's
+`instances` / `values`; `deadlock`, `no_user_invariants`, and
+`unreferenced_requirement` warnings; `unknown_cti`, `unknown_budget`,
+`not_evaluated` from `--property`, `not_run`, `closure: false`; `diff`
+without `--forbid`; `mutate` survivors), the fix loop that never weakens
+the upper layer, prohibited shortcuts (lower depth or scope, deleted
+properties, ignore flags or `--property` in the completion run), how to
+read `kill_rate` and `--by-requirement`, and a fixed completion-report
+table with proof classes. The business, requirements, design, and
+delivery skills keep their minimal check loop and point to it.
