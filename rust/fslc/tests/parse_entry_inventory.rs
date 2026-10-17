@@ -538,6 +538,9 @@ fn scanner_resolves_paths_aliases_macros_and_shadowing() {
     );
 }
 
+/// `(file, entry)` -> the functions referencing it. Signatures spell the map
+/// out instead of returning this alias, so the #868 census reads them as plain
+/// maps rather than unresolved aliases.
 type Observed = BTreeMap<(String, String), Vec<String>>;
 
 fn workspace_rust_root() -> PathBuf {
@@ -547,7 +550,7 @@ fn workspace_rust_root() -> PathBuf {
         .to_owned()
 }
 
-fn observe_workspace() -> Observed {
+fn observe_workspace() -> BTreeMap<(String, String), Vec<String>> {
     let root = workspace_rust_root();
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&root).expect("read rust workspace") {
@@ -593,7 +596,11 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 /// defines it (the entry's own module) or imports it through `crate`,
 /// `super`, or `self`; elsewhere a bare name counts only when imported from
 /// `fsl_syntax`.
-fn scan_source(relative: &str, source: &str, in_syntax_crate: bool) -> Observed {
+fn scan_source(
+    relative: &str,
+    source: &str,
+    in_syntax_crate: bool,
+) -> BTreeMap<(String, String), Vec<String>> {
     let file = syn::parse_file(source)
         .unwrap_or_else(|error| panic!("{relative}: not parseable as Rust: {error}"));
     let mut imports = Imports::default();
