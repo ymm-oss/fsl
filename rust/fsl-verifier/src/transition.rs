@@ -10,8 +10,8 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{
-    EvaluationStatus, binder_values, binder_where, eval, eval_expected, evaluation_status,
-    index_accessible, partial_operation_index_accessible, sequence_statuses,
+    EvaluationStatus, FailureClass, binder_values, binder_where, classified_evaluation_status,
+    eval, eval_expected, index_access_status, index_accessible, sequence_statuses,
 };
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
@@ -117,6 +117,26 @@ pub(crate) fn action_guard_definedness<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     params: &Bindings<S::Term>,
 ) -> Result<ActionGuardDefinedness<S::Term>, VerifyError> {
+    classified_action_guard_definedness(
+        solver,
+        model,
+        action,
+        state,
+        params,
+        FailureClass::PartialOperation,
+    )
+}
+
+/// [`action_guard_definedness`] with `first_partial` classifying `class`
+/// (#1221: [`FailureClass::KeyDomain`] for the induction step obligation).
+pub(crate) fn classified_action_guard_definedness<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    params: &Bindings<S::Term>,
+    class: FailureClass,
+) -> Result<ActionGuardDefinedness<S::Term>, VerifyError> {
     let mut bindings = params.clone();
     let mut reaches_guard = solver.bool_value(true);
     let mut fully_defined = solver.bool_value(true);
@@ -126,7 +146,8 @@ pub(crate) fn action_guard_definedness<S: SmtSolver>(
         let expression = match guard {
             ActionGuard::Let(_, expression) | ActionGuard::Requires(expression) => expression,
         };
-        let status = evaluation_status(solver, model, expression, state, &bindings, None)?;
+        let status =
+            classified_evaluation_status(solver, model, expression, state, &bindings, None, class)?;
         has_partial_operation |= status.has_partial_operation;
         first_partial = solver.or(&[
             first_partial,
@@ -177,12 +198,33 @@ pub(crate) fn action_statements_evaluation_status<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    classified_action_statements_evaluation_status(
+        solver,
+        model,
+        action,
+        state,
+        bindings,
+        FailureClass::PartialOperation,
+    )
+}
+
+/// [`action_statements_evaluation_status`] with `first_partial` classifying
+/// `class` (#1221).
+pub(crate) fn classified_action_statements_evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    class: FailureClass,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     statements_evaluation_status(
         solver,
         model,
         &action.statements,
         state,
         &mut bindings.clone(),
+        class,
     )
 }
 
@@ -192,11 +234,12 @@ fn statements_evaluation_status<S: SmtSolver>(
     statements: &[Statement],
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
+    class: FailureClass,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let statuses = statements
         .iter()
         .map(|statement| {
-            statement_evaluation_status(solver, model, statement, read_state, bindings)
+            statement_evaluation_status(solver, model, statement, read_state, bindings, class)
         })
         .collect::<Result<Vec<_>, _>>()?;
     sequence_statuses(solver, statuses)
@@ -209,16 +252,19 @@ fn statement_evaluation_status<S: SmtSolver>(
     statement: &Statement,
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
+    class: FailureClass,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
-            let value_status = evaluation_status(solver, model, value, read_state, bindings, None)?;
+            let value_status = classified_evaluation_status(
+                solver, model, value, read_state, bindings, None, class,
+            )?;
             let target_ty = model
                 .state_lvalue_type(target)
                 .map_err(|error| VerifyError::new(error.message))?;
             let _ = eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
             let target_status =
-                lvalue_evaluation_status(solver, model, target, read_state, bindings)?;
+                lvalue_evaluation_status(solver, model, target, read_state, bindings, class)?;
             sequence_statuses(solver, [value_status, target_status])
         }
         Statement::If {
@@ -227,8 +273,9 @@ fn statement_evaluation_status<S: SmtSolver>(
             else_statements,
             ..
         } => {
-            let condition_status =
-                evaluation_status(solver, model, condition, read_state, bindings, None)?;
+            let condition_status = classified_evaluation_status(
+                solver, model, condition, read_state, bindings, None, class,
+            )?;
             let condition = eval(solver, model, condition, read_state, bindings, None)?;
             let then_status = statements_evaluation_status(
                 solver,
@@ -236,6 +283,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                 then_statements,
                 read_state,
                 &mut bindings.clone(),
+                class,
             )?;
             let else_status = statements_evaluation_status(
                 solver,
@@ -243,6 +291,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                 else_statements,
                 read_state,
                 &mut bindings.clone(),
+                class,
             )?;
             let branch_defined = solver.ite(
                 bool_term(&condition)?,
@@ -289,8 +338,8 @@ fn statement_evaluation_status<S: SmtSolver>(
                                 })
                             },
                             |expression| {
-                                evaluation_status(
-                                    solver, model, expression, read_state, &local, None,
+                                classified_evaluation_status(
+                                    solver, model, expression, read_state, &local, None, class,
                                 )
                             },
                         )?
@@ -309,7 +358,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                     where_term,
                 ])?;
                 let body_status = statements_evaluation_status(
-                    solver, model, statements, read_state, &mut local,
+                    solver, model, statements, read_state, &mut local, class,
                 )?;
                 has_partial_operation |= body_status.has_partial_operation;
                 first_partial = solver.or(&[
@@ -338,6 +387,7 @@ fn lvalue_evaluation_status<S: SmtSolver>(
     target: &LValue,
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
+    class: FailureClass,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match target {
         LValue::Var(_) => Ok(EvaluationStatus {
@@ -346,28 +396,19 @@ fn lvalue_evaluation_status<S: SmtSolver>(
             has_partial_operation: false,
         }),
         LValue::Index(name, index) => {
-            let index_status = evaluation_status(solver, model, index, read_state, bindings, None)?;
+            let index_status = classified_evaluation_status(
+                solver, model, index, read_state, bindings, None, class,
+            )?;
             let index_value = eval(solver, model, index, read_state, bindings, None)?;
             let root = read_state
                 .get(name)
                 .ok_or_else(|| VerifyError::new(format!("unknown state variable '{name}'")))?;
             let fully_accessible = index_accessible(solver, model, root, &index_value)?;
-            let partial_accessible =
-                partial_operation_index_accessible(solver, root, &index_value)?;
-            sequence_statuses(
-                solver,
-                [
-                    index_status,
-                    EvaluationStatus {
-                        fully_defined: fully_accessible,
-                        first_partial: solver.not(&partial_accessible)?,
-                        has_partial_operation: matches!(root, SymbolicValue::Seq { .. }),
-                    },
-                ],
-            )
+            let access = index_access_status(solver, root, &index_value, fully_accessible, class)?;
+            sequence_statuses(solver, [index_status, access])
         }
         LValue::Field(base, _) => {
-            lvalue_evaluation_status(solver, model, base, read_state, bindings)
+            lvalue_evaluation_status(solver, model, base, read_state, bindings, class)
         }
     }
 }
@@ -380,7 +421,14 @@ pub(crate) fn init_evaluation_status<S: SmtSolver>(
     model: &KernelModel,
     state: &SymbolicState<S::Term>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
-    statements_evaluation_status(solver, model, &model.init, state, &mut Bindings::new())
+    statements_evaluation_status(
+        solver,
+        model,
+        &model.init,
+        state,
+        &mut Bindings::new(),
+        FailureClass::PartialOperation,
+    )
 }
 
 pub(crate) fn init_constraints<S: SmtSolver>(

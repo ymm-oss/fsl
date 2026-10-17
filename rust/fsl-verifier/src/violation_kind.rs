@@ -58,6 +58,14 @@ pub const TRANS: &str = "trans";
 /// but are emitted by `bmc.rs`'s out-of-Slice-1 `make_violation` sites.
 pub const PARTIAL_OP: &str = "partial_op";
 
+/// A k-induction key-domain obligation (#1221) found a state (or one step)
+/// that satisfies every proved invariant but indexes a finite-key `Map`
+/// outside its key domain in a guard, body, invariant, `leadsTo` expression,
+/// `transition` property, or reached `ensures` -- the failure BMC and the
+/// explicit engine stop on with an error. `InductionCti.kind`,
+/// `induction.rs`.
+pub const KEY_DOMAIN: &str = "key_domain";
+
 /// A k-induction step obligation (#1217) found one step between states that
 /// satisfy every proved invariant on which an action's reached, defined
 /// `ensures` is false. `InductionCti.kind`, `induction.rs`. BMC's own
@@ -124,6 +132,7 @@ pub const ALL: &[&str] = &[
     INVARIANT,
     TRANS,
     PARTIAL_OP,
+    KEY_DOMAIN,
     ENSURES,
     UNBOUNDED_BELOW,
     PROGRESS_ACTION_NOT_FAIR,

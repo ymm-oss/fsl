@@ -8,6 +8,13 @@
     "fsl": { "const": "1.0" },
     "result": { "type": "string", "minLength": 1 },
     "cost": { "$ref": "#/$defs/verificationCost" },
+    "not_covered": {
+      "description": "What a `proved` --engine induction verdict does not cover (#1263). `int_overflow`: the step reasons over unbounded integers and does not check i64 overflow, which only the bounded base case checks; present when a proof site holds an operator that can overflow (`+ - * / %`, unary `-`, `abs`, `sum`). Absent when nothing is left uncovered. The verdict and exit code are unchanged.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["int_overflow"] }
+    },
     "action_profile": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/actionProfile" }

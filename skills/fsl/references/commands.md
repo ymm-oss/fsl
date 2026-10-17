@@ -733,7 +733,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   first witnesses a reachable/vacuity/coverage fact during normal exploration.
 - `proved`: `completeness:"unbounded"`, `checked_to_depth` (the base BMC depth),
   `cost`, and `k_used` (the k used per invariant); reachables/coverage come from
-  the base case. Ranked leadsTo entries add
+  the base case. `not_covered: ["int_overflow"]` means the proof does not
+  cover i64 overflow: the step reasons over unbounded integers and only the base
+  case to `checked_to_depth` checks overflow. It is present whenever an invariant,
+  `trans`, `leadsTo`, guard, body or `ensures` uses `+ - * / %`, unary `-`, `abs`
+  or `sum` (syntactic, so small bounded arithmetic carries it too) and absent
+  otherwise; the verdict is still `proved`. To rule overflow out, bound the
+  value (a range type, or a guard such as `requires x < 1000`) or check it with
+  `--engine bmc`/`explicit` at a depth that reaches it; the key is syntactic, so
+  it stays after such a fix. Ranked leadsTo entries add
   `{proved: true, completeness: "unbounded", proof: "ranking", decreases: ...}`.
   From `--engine explicit`, `proved` instead carries `closure: true` plus
   exploration stats (`states_explored`, `max_frontier_width`, `depth_reached`)
@@ -846,6 +854,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   The CTI start satisfies every proved invariant and reaches a partial operation;
   guard it with a short-circuit `and`/`=>`/`or`/`if`, or exclude an unreachable
   start with an auxiliary invariant. Never `proved` while such a state exists.
+- Key-domain failure: `unknown_cti` / `violation_kind:"key_domain"` with
+  `invariant` = `_key_domain_<action>` (also `last_action`) or
+  `_key_domain_property_<name>`. The CTI start satisfies every proved invariant
+  and indexes a finite-key `Map` outside its key domain (read or indexed
+  assignment), which BMC/explicit report as `result:"error"` once within depth.
+  Guard the index or exclude an unreachable start with an auxiliary invariant.
 - Ensures failure: `unknown_cti` / `violation_kind:"ensures"` with
   `invariant` = the action name and `last_action`; a two-state CTI between
   invariant states whose last step falsifies the reached `ensures`.

@@ -1273,9 +1273,19 @@ seam とすべての preservation を同じように自身の封筒へ畳み込�
 <td><strong>CTI を読んで補助 invariant を追加する</strong>(§8)か、<code>--engine explicit</code> を試す(closure はレンマなしで証明する)</td>
 </tr>
 <tr>
+<td><code>proved</code> + <code>not_covered: ["int_overflow"]</code></td>
+<td><code>--engine induction</code> は無界の整数の上で性質を証明した。i64 overflow を検査するのは <code>checked_to_depth</code> までの base case だけである。証明の対象箇所が <code>+ - * / %</code>・単項 <code>-</code>・<code>abs</code>・<code>sum</code> を使うときに付き、使わないときは付かない。結果と終了コードは変わらない</td>
+<td>overflow が問題なら値を有界にする(範囲型か guard)か、overflow に届く深さで <code>--engine bmc</code>/<code>explicit</code> を実行する</td>
+</tr>
+<tr>
 <td><code>unknown_cti</code> / <code>partial_op</code></td>
 <td>証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した <code>ensures</code> が部分演算(§6)に達する</td>
 <td>短絡する <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code> で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す</td>
+</tr>
+<tr>
+<td><code>unknown_cti</code> / <code>key_domain</code></td>
+<td>証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した <code>ensures</code> が有限キーの <code>Map</code> をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する</td>
+<td>短絡する <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code> か <code>requires</code> で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す</td>
 </tr>
 <tr>
 <td><code>unknown_cti</code> / <code>ensures</code></td>

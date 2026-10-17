@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! `violation_kind` axis: the 14-value `fsl_verifier::violation_kind::ALL`
+//! `violation_kind` axis: the 15-value `fsl_verifier::violation_kind::ALL`
 //! vocabulary (issue #646, #537 C3 slice 1). Rows are *referenced* from
 //! `fsl_verifier::violation_kind::ALL`, not re-owned.
 //!
@@ -10,7 +10,7 @@
 //! for `deadlock`, the BMC-only deadlock probe). Every cell is filled:
 //! `leadsTo`/`deadlock` are BMC-only, `invariant`/`trans`/the 8 ranked-leadsTo
 //! kinds are induction-only, so exactly half of this 12x2 matrix is
-//! `NotApplicable` by construction (`partial_op` and `ensures` are induction-only in
+//! `NotApplicable` by construction (`partial_op`, `key_domain` and `ensures` are induction-only in
 //! this registry: BMC's same-spelled kinds are plain `make_violation` sites) -- each with a citation to where that
 //! structural fact is codified (see this module's `SLICE1_BOUNDARY` and
 //! `INDUCTION_ONLY_RANKING` bases, and `docs/design/DESIGN-assurance-matrix.md`'s
@@ -125,6 +125,23 @@ pub fn axis() -> Axis {
         (vk::PARTIAL_OP, "BMC"),
         Claim::NotApplicable {
             reason: "same boundary as `invariant`: the plain BMC engine's partial_op violations are emitted by bmc.rs's out-of-Slice-1-scope make_violation sites, which mirror fsl_runtime::Monitor's own registered outcome.kind spelling",
+            basis: SLICE1_BOUNDARY,
+        },
+    );
+
+    cells.insert(
+        (vk::KEY_DOMAIN, "induction"),
+        Claim::Exercised {
+            by: Citation {
+                path: "rust/fslc/tests/issue_1221_induction_key_domain.rs",
+                anchor: "fn map_read_past_the_key_domain_is_never_proved_at_any_depth()",
+            },
+        },
+    );
+    cells.insert(
+        (vk::KEY_DOMAIN, "BMC"),
+        Claim::NotApplicable {
+            reason: "BMC stops on a reached key-domain miss with an error (a non-partial failure), never a violation: the kind exists only for the induction step obligation, whose witness may be unreachable",
             basis: SLICE1_BOUNDARY,
         },
     );
@@ -321,6 +338,18 @@ spec AssuranceProbePartialOpCti {
     d = 0
   }
   invariant NonNeg { x >= 0 }
+}
+";
+
+const KEY_DOMAIN_CTI_SRC: &str = r"
+spec AssuranceProbeKeyDomainCti {
+  type K = 0..3
+  state { m: Map<K, Int>, cur: K, y: Int }
+  init { forall k: K { m[k] = 0 }  cur = 0  y = 0 }
+  action advance() { requires cur < 3  cur = cur + 1 }
+  action peek_next() { y = m[cur + 1] }
+  invariant MapNonNeg { forall k: K { m[k] >= 0 } }
+  invariant YNonNeg { y >= 0 }
 }
 ";
 
@@ -578,6 +607,15 @@ fn every_violation_kind_the_probe_corpus_emits_is_exactly_the_registered_set() {
     ))
     .expect("induction partial_op probe");
     observed.insert(partial.cti.expect("expected a partial_op CTI").kind);
+
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    let key_domain = block_on(fsl_verifier::prove_induction(
+        &model(KEY_DOMAIN_CTI_SRC),
+        &mut solver,
+        1,
+    ))
+    .expect("induction key_domain probe");
+    observed.insert(key_domain.cti.expect("expected a key_domain CTI").kind);
 
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
     let ensures = block_on(fsl_verifier::prove_induction(
