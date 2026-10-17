@@ -521,13 +521,13 @@ fn fold_refinement_verdict(
 /// nothing; a failure-class envelope gains the section as evidence and keeps
 /// its own verdict; a success-class envelope (`ok`, `verified`, ...) takes the
 /// first failing preservation in declaration order through
-/// [`fold_refinement_verdict`]. A preservation's `result` keeps its own
-/// published vocabulary (`refines` / `refinement_failed` / `violated` /
-/// `unknown_budget`); its `violated` is the `after` spec breaking its own
-/// semantics, which the top level spells `impl_violated` exactly as an inline
-/// `implements` seam reports the same condition -- a top-level `violated`
-/// would claim a counterexample (`trace`, `violated_at_step`) of the checked
-/// document itself. Any other value fails closed (`error` / `internal`,
+/// [`fold_refinement_verdict`]. A preservation's `result` is `fslc refine`'s
+/// (`refines` / `refinement_failed` / `impl_violated` / `unknown_budget`);
+/// `impl_violated` is the `after` spec breaking its own semantics, the same
+/// word an inline `implements` seam and the top level use for that condition
+/// (#1315) -- a top-level `violated` would claim a counterexample (`trace`,
+/// `violated_at_step`) of the checked document itself. Any other value,
+/// including the pre-#1315 `violated`, fails closed (`error` / `internal`,
 /// exit 3).
 pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
@@ -555,13 +555,9 @@ pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32>
     }
     // Every preservation `refines` (or there is none): the verdict stands.
     let failing = failing?;
-    let nested_result = match failing.as_deref() {
-        Some("violated") => Some("impl_violated".to_owned()),
-        other => other.map(str::to_owned),
-    };
     fold_refinement_verdict(
         map,
-        nested_result.as_deref(),
+        failing.as_deref(),
         "malformed governance preservation verdict",
     )
 }
@@ -3686,16 +3682,16 @@ mod tests {
     }
 
     /// Issue #1303: every published preservation value, and what it makes of
-    /// a success-class envelope. `violated` (the `after` spec breaks its own
-    /// semantics) is spelled `impl_violated` at the top level, as an inline
-    /// `implements` seam spells it; anything outside the vocabulary fails
-    /// closed.
+    /// a success-class envelope. `impl_violated` (the `after` spec breaks its
+    /// own semantics) is the same word at both levels (#1315); anything
+    /// outside the vocabulary, including the retired `violated`, fails closed.
     #[test]
     fn attach_governance_folds_each_preservation_value() {
         for (preservation, expected_result, expected_exit) in [
             (json!("refines"), "ok", None),
             (json!("refinement_failed"), "refinement_failed", Some(1)),
-            (json!("violated"), "impl_violated", Some(1)),
+            (json!("impl_violated"), "impl_violated", Some(1)),
+            (json!("violated"), "error", Some(3)),
             (json!("unknown_budget"), "unknown_budget", Some(1)),
             (json!("error"), "error", Some(3)),
             (json!("who_knows"), "error", Some(3)),

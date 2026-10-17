@@ -17675,10 +17675,12 @@ fn mismatch_paths(
 /// violates a type bound, invariant, `trans`, or `ensures` within `depth`,
 /// discovered before any refinement correspondence was even attempted. Not
 /// `refines` and not `refinement_failed` (#466) — this is a property of the
-/// refinement *input*, so it is reported with the same shape `fslc verify`
-/// uses for a `violated` result plus an explanatory `note`, matching the
-/// frozen Python reference's `refine()` (`src/fslc/refine.py`, accepted as
-/// [1.2.9] in CHANGELOG.md).
+/// refinement *input*, so it is reported with the evidence shape `fslc verify`
+/// uses for a violation plus an explanatory `note`, matching the frozen
+/// Python reference's `refine()` (`src/fslc/refine.py`, accepted as [1.2.9]
+/// in CHANGELOG.md). The `result` is `impl_violated`, the one word inline
+/// `implements` and governance preservations use for the same outcome
+/// (#1315); the Python reference still spells it `violated`.
 fn impl_self_violation_output(
     implementation: &KernelModel,
     violation: &fsl_runtime::Violation,
@@ -17687,7 +17689,7 @@ fn impl_self_violation_output(
 ) -> Map<String, Value> {
     let mut output = envelope();
     output.insert("impl".to_owned(), json!(implementation.name));
-    output.insert("result".to_owned(), json!("violated"));
+    output.insert("result".to_owned(), json!(Verdict::ImplViolated.result()));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
     let name = implementation.action_scoped_display_name(&violation.name, trace_last_action(trace));
     if violation.kind == "trans" {
@@ -17777,7 +17779,7 @@ fn run_refine(
                     trace,
                     checked.depth(),
                 )),
-                1,
+                Verdict::ImplViolated.exit_code(),
             );
         }
         fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {

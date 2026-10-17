@@ -265,7 +265,7 @@ an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 and `fslc scenarios` run it too, at depth 8 whatever their `--depth`). Each result stays under
 `governance.preservations[].result`; the first non-`refines` one in
 declaration order is also the command's verdict, fail-closed:
-`refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
+`refinement_failed` -> `refinement_failed`, `impl_violated` (the `after` spec
 breaks its own semantics) -> `impl_violated`, `unknown_budget` ->
 `unknown_budget`, all exit 1; any other value is `error`/`internal` (exit 3).
 

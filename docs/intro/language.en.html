@@ -1783,9 +1783,11 @@ so).</p>
 spec is internally consistent on its own — does not violate its own type
 bounds or invariants — within <code>--depth</code>. A refinement mapping cannot make a
 broken impl meaningful, so this is checked independently of the abstraction
-and the mapping: <code>result: "violated"</code> (exit 1) with <code>violation_kind</code> and a
-<code>note</code> explaining this is a property of the refinement <em>input</em>, not a
-fidelity failure. It is never reported <code>refines</code>, and never folded into
+and the mapping: <code>result: "impl_violated"</code> (exit 1) with <code>violation_kind</code> and
+a <code>note</code> explaining this is a property of the refinement <em>input</em>, not a
+fidelity failure. <code>impl_violated</code> is the one word for this outcome wherever it
+appears: <code>refine</code>, an inline <code>implements</code> seam, and a governance
+<code>preservation</code> (§13). It is never reported <code>refines</code>, and never folded into
 <code>refinement_failed</code> (whose <code>kind</code>s above describe a mismatch <em>between</em> impl
 and abs, not a defect in the impl alone). <code>fslc diff</code> surfaces the same
 condition as an <code>impl_violated</code> finding and fails its gate unconditionally
@@ -2647,7 +2649,7 @@ for a control that was never written.</p>
 <p><code>fslc check governance.fsl</code> validates all referenced controls, business files,
 policies/goals, and preservation files. Preservation blocks also run the declared
 refinement at depth 8 and report results under <code>governance.preservations</code>:
-<code>refines</code>, <code>refinement_failed</code>, <code>violated</code> (the <code>after</code> spec breaks its own
+<code>refines</code>, <code>refinement_failed</code>, <code>impl_violated</code> (the <code>after</code> spec breaks its own
 semantics, §10), or <code>unknown_budget</code> (the correspondence check reached its
 state budget, §10). The browser Worker reports the same values.</p>
 <p>A preservation that does not <code>refines</code> is the command's verdict, fail-closed,
@@ -2676,8 +2678,8 @@ top-level <code>result</code>; every preservation keeps its own value under
 <td>1</td>
 </tr>
 <tr>
-<td><code>violated</code></td>
-<td><code>impl_violated</code> (the spelling an inline <code>implements</code> seam uses for the same condition)</td>
+<td><code>impl_violated</code></td>
+<td><code>impl_violated</code> (the same word an inline <code>implements</code> seam uses for the same condition)</td>
 <td>1</td>
 </tr>
 <tr>

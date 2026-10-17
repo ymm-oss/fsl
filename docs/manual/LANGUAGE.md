@@ -1715,9 +1715,11 @@ Before any correspondence is checked, `refine` first verifies that the impl
 spec is internally consistent on its own — does not violate its own type
 bounds or invariants — within `--depth`. A refinement mapping cannot make a
 broken impl meaningful, so this is checked independently of the abstraction
-and the mapping: `result: "violated"` (exit 1) with `violation_kind` and a
-`note` explaining this is a property of the refinement *input*, not a
-fidelity failure. It is never reported `refines`, and never folded into
+and the mapping: `result: "impl_violated"` (exit 1) with `violation_kind` and
+a `note` explaining this is a property of the refinement *input*, not a
+fidelity failure. `impl_violated` is the one word for this outcome wherever it
+appears: `refine`, an inline `implements` seam, and a governance
+`preservation` (§13). It is never reported `refines`, and never folded into
 `refinement_failed` (whose `kind`s above describe a mismatch *between* impl
 and abs, not a defect in the impl alone). `fslc diff` surfaces the same
 condition as an `impl_violated` finding and fails its gate unconditionally
@@ -2618,7 +2620,7 @@ governance EnterpriseReturnControls {
 `fslc check governance.fsl` validates all referenced controls, business files,
 policies/goals, and preservation files. Preservation blocks also run the declared
 refinement at depth 8 and report results under `governance.preservations`:
-`refines`, `refinement_failed`, `violated` (the `after` spec breaks its own
+`refines`, `refinement_failed`, `impl_violated` (the `after` spec breaks its own
 semantics, §10), or `unknown_budget` (the correspondence check reached its
 state budget, §10). The browser Worker reports the same values.
 
@@ -2633,7 +2635,7 @@ top-level `result`; every preservation keeps its own value under
 |---|---|---|
 | `refines` (every preservation) | unchanged (`ok` / `verified` / `proved`) | unchanged (0) |
 | `refinement_failed` | `refinement_failed` | 1 |
-| `violated` | `impl_violated` (the spelling an inline `implements` seam uses for the same condition) | 1 |
+| `impl_violated` | `impl_violated` (the same word an inline `implements` seam uses for the same condition) | 1 |
 | `unknown_budget` | `unknown_budget` | 1 |
 | anything else | `error`, `kind: "internal"` | 3 |
 

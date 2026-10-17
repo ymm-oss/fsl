@@ -287,7 +287,7 @@ fn first_self_violation_stays_under_a_calibrated_ceiling_for_the_branching_repro
             String::from_utf8_lossy(&output.stderr)
         )
     });
-    assert_eq!(value["verdict"], "impl_violation", "{value:#}");
+    assert_eq!(value["verdict"], "impl_violated", "{value:#}");
     assert_eq!(value["kind"], "type_bound", "{value:#}");
 }
 

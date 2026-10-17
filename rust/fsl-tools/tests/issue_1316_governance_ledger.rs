@@ -80,7 +80,7 @@ fn a_failed_preservation_and_the_folded_verdict_are_in_the_body() {
 
 #[test]
 fn every_non_refines_preservation_result_is_marked_failing() {
-    for result in ["violated", "unknown_budget", "not_a_verdict"] {
+    for result in ["impl_violated", "unknown_budget", "not_a_verdict"] {
         let rendered = render(&verification(
             "impl_violated",
             &[preservation("P", "I", result)],

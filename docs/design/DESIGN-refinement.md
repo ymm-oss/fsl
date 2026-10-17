@@ -181,8 +181,9 @@ Two consequences fall out of reusing the same merge, not from new logic:
    invariant, `trans`, or `ensures` violation, independent of the mapping and
    the abstraction entirely. This is a property of the refinement *input*
    (the impl spec is broken on its own), not a refinement fidelity verdict:
-   `result:"violated"` with the impl's own `violation_kind`/trace and an
-   explanatory `note`, never `result:"refines"` and never folded into
+   `result:"impl_violated"` (issue #1315; formerly `violated`) with the
+   impl's own `violation_kind`/trace and an explanatory `note`, never
+   `result:"refines"` and never folded into
    `refinement_failed` (whose `kind`s below describe a mismatch *between*
    impl and abs, not a defect in the impl alone). If this precondition finds
    a violation, steps 1-4 do not run. It visits at most
@@ -713,7 +714,7 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 9. **impl self-violation (precondition, issue #466)**: an impl whose own
    guard/type-bound weakening lets it violate itself within depth K (e.g. a
    dropped `requires` that lets a state variable step outside its declared
-   type bound) → `result:"violated"` with the impl's own `violation_kind`,
+   type bound) → `result:"impl_violated"` with the impl's own `violation_kind`,
    never `refines`. `docs/design/DESIGN-refinement.md` §2 step 0. Rust coverage:
    `rust/fsl-runtime/tests/refinement.rs` (the `check_refinement` contract
    directly, plus a regression control distinguishing this from a pure
@@ -988,7 +989,8 @@ those consumers match on it. `fslc refine` reports `unknown_budget` / exit 1
 with `states_explored`, the inline seam's vocabulary; a chain stops at that
 link; a governance preservation reports `unknown_budget`. The Worker
 governance path also stopped reporting a self-violating `after` spec as
-`refines` and now reports `violated`, as native does. `fslc diff`'s direction
+`refines` and now reports `violated`, as native does (both spell it
+`impl_violated` since #1315). `fslc diff`'s direction
 check and `fslc mutate`'s implements oracle still read the outcome fields
 themselves at first. #1262 made every `RefinementCheck` field private, so the
 outcome can only be read through `verdict()` (the bypass no longer compiles),

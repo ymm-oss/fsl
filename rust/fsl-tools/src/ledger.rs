@@ -888,7 +888,7 @@ fn render_governance_section(output: &mut String, verification: &Value, governan
     };
     let _ = write!(
         output,
-        "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり（`violated` は `impl_violated`）、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
+        "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
         text(verification.get("result"))
     );
     for preservation in governance
