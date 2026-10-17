@@ -1681,7 +1681,7 @@ fn collect_bound_vars(expr: &Expr, out: &mut HashSet<String>) {
     });
 }
 
-fn free_vars(expr: &Expr) -> HashSet<String> {
+pub(crate) fn free_vars(expr: &Expr) -> HashSet<String> {
     free_vars_bound(expr, &HashSet::new())
 }
 
@@ -1968,6 +1968,26 @@ fn capture_avoiding_binding<S: std::hash::BuildHasher>(
     HashMap<String, Expr>,
     IndexedReplacements,
 ) {
+    capture_avoiding_binding_with_names(binder, contents, replacements, indexed, &HashSet::new())
+}
+
+/// [`capture_avoiding_binding`] for a binder whose scope also holds content
+/// that is not an [`Expr`] (a statement-level `forall` body): `extra_names`
+/// are the names occurring there, so the fresh name avoids them too. When the
+/// binder is renamed, the caller renames the binding inside that content
+/// itself (the returned binder carries the new name).
+pub(crate) fn capture_avoiding_binding_with_names<S: std::hash::BuildHasher>(
+    binder: Binder,
+    contents: Vec<Expr>,
+    replacements: &HashMap<String, Expr, S>,
+    indexed: &IndexedReplacements,
+    extra_names: &HashSet<String>,
+) -> (
+    Binder,
+    Vec<Expr>,
+    HashMap<String, Expr>,
+    IndexedReplacements,
+) {
     let binding = binder_name(&binder).to_owned();
     let scoped = without_replacement(replacements, &binding);
     let scoped_indexed = without_indexed_replacement(indexed, &binding);
@@ -1982,6 +2002,7 @@ fn capture_avoiding_binding<S: std::hash::BuildHasher>(
     }
 
     let mut names = HashSet::from([binding.clone()]);
+    names.extend(extra_names.iter().cloned());
     names.extend(scoped.keys().cloned());
     for replacement in scoped.values() {
         collect_names(replacement, &mut names);
@@ -1993,16 +2014,7 @@ fn capture_avoiding_binding<S: std::hash::BuildHasher>(
     for content in &contents {
         collect_names(content, &mut names);
     }
-    let mut index = 0_u64;
-    let fresh = loop {
-        let candidate = format!("__{binding}_substitution_{index}");
-        if !names.contains(&candidate) {
-            break candidate;
-        }
-        index = index
-            .checked_add(1)
-            .expect("the identifier space is unbounded");
-    };
+    let fresh = fresh_binding_name(&binding, &names);
     let rename = HashMap::from([(binding, Expr::Var(fresh.clone()))]);
     let binder = rename_binder_binding(binder, fresh, &rename);
     let contents = contents
@@ -2010,6 +2022,21 @@ fn capture_avoiding_binding<S: std::hash::BuildHasher>(
         .map(|content| substitute(content, &rename, &IndexedReplacements::new()))
         .collect();
     (binder, contents, scoped, scoped_indexed)
+}
+
+/// A name for `binding` that occurs nowhere in `names`, in the
+/// `__<binding>_substitution_<n>` family capture-avoiding substitution uses.
+pub(crate) fn fresh_binding_name(binding: &str, names: &HashSet<String>) -> String {
+    let mut index = 0_u64;
+    loop {
+        let candidate = format!("__{binding}_substitution_{index}");
+        if !names.contains(&candidate) {
+            return candidate;
+        }
+        index = index
+            .checked_add(1)
+            .expect("the identifier space is unbounded");
+    }
 }
 
 fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String, Expr>) -> Binder {
@@ -2046,7 +2073,7 @@ fn rename_binder_binding(binder: Binder, fresh: String, rename: &HashMap<String,
     }
 }
 
-fn collect_binder_names(binder: &Binder, names: &mut HashSet<String>) {
+pub(crate) fn collect_binder_names(binder: &Binder, names: &mut HashSet<String>) {
     names.insert(binder_name(binder).to_owned());
     match binder {
         Binder::Typed { where_expr, .. } => {
@@ -2076,7 +2103,7 @@ fn collect_binder_names(binder: &Binder, names: &mut HashSet<String>) {
     }
 }
 
-fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
+pub(crate) fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
     if let Expr::Var(name) = expr {
         names.insert(name.clone());
     }
