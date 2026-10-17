@@ -1,4 +1,4 @@
-Documented: the distributed FSL skills no longer contradict the parser or
+Documented (#1361): the distributed FSL skills no longer contradict the parser or
 each other. `number` is documented as requirements/kernel-only (a `business`
 spec that declares one is a parse error); `if c then a else b` is valid in any
 expression position; requirements `terminal` uses `stage(c)`; `@requirement`
