@@ -411,7 +411,8 @@ effective overridden bounds are echoed back in the JSON envelope's
 <code>bounds_overrides</code> field.</p>
 <p>When the spec has an inline <code>implements</code>, the override also propagates into the
 abstract spec — restricted to the entity/number names the abstract itself
-declares — so the refinement check runs at the same world size on both sides
+declares (in a <code>requirements</code> abstract a <code>process</code> name counts as an entity,
+since lowering declares one for it) — so the refinement check runs at the same world size on both sides
 (refinement is a same-size forward simulation; without this, a shrunken impl
 and a full-size abstract would fail with <code>map_out_of_bounds</code>). An impl-only
 carried number (e.g. <code>Amount</code>, absent from a business abstract) applies to the
@@ -1863,7 +1864,8 @@ guards/invariants of abs). <strong>Liveness (<code>leadsTo</code>) does not prop
 refine allows stutter, even if impl drops the progress that abs guaranteed with
 <code>fair</code>, the result can still be <code>refines</code> (the mapping does not require fair
 annotations). To opt into checking the abstract response on the lower layer,
-write <code>preserve progress</code> in the refinement mapping:</p>
+write <code>preserve progress</code> in a standalone refinement mapping file (an inline
+<code>implements { }</code> block rejects it — see §13.2):</p>
 <pre><code class="language-fsl">refinement DesignRefinesReq {
   impl Design
   abs  Req
@@ -2458,11 +2460,16 @@ verify {
   unscoped <code>check</code>/<code>verify</code>, or on <code>fslc chain</code>. The decision for these three options is
   suppress-with-reason (<code>docs/design/DESIGN-refinement.md</code>,
   <a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>). Inside the <code>implements { }</code> block you write
-  state <code>map</code> entries, <code>maps auto</code>, <code>preserve progress</code>, and — since #73 —
+  state <code>map</code> entries, <code>maps auto</code>, and — since #73 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code>, the same
   correspondence syntax as a separate refinement file's <code>refinement_action</code>
   (<code>docs/design/DESIGN-refinement.md</code> §1), including an arity change between the impl
-  and abs action. Action↔action correspondence can also still be written as the
+  and abs action. <code>preserve progress</code> is not accepted there: the inline seam checks
+  safety refinement only, so a <code>preserve progress</code> item inside <code>implements { }</code> is a
+  located <code>kind: "parse"</code> error (exit 2) in every command that loads the document
+  (<a href="https://github.com/ymm-oss/fsl/issues/1275">#1275</a>). To check an upper <code>leadsTo</code>
+  through the mapping, put the mapping and its <code>preserve progress</code> in a standalone
+  refinement file and run <code>fslc refine</code>. Action↔action correspondence can also still be written as the
   <code>maps &lt;abs_act&gt;(...)</code> clause on the requirement-level action; <code>maps auto</code>
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
   An impl action with both a <code>maps</code> clause and a matching inline <code>action ...</code>
