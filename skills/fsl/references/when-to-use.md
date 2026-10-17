@@ -84,5 +84,5 @@ source of truth, re-verified on every change (CI regression, drift detection, an
 cross-layer change-impact via `refine`), and read directly — by humans and by AI — as
 onboarding context for the flow it documents.
 
-Full rationale, plus the per-feature vs per-project distinction, is the manual's
-"When to Use FSL" chapter (`docs/intro/when-to-use.{ja,en}.html`).
+Full rationale, plus the per-feature vs per-project distinction, is the FSL
+manual's "When to Use FSL" chapter.

@@ -16,11 +16,12 @@ contract, building that *upward* refinement seam is `fsl-design`'s job, not this
 skill's.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language rules, verifier workflow, and repair detail. Inside this
-repository, study the canonical triple **in reverse**: `examples/e2e/impl/expense.py`
-(plain code) → `examples/e2e/3_design.fsl` (the spec) → `examples/e2e/impl/test_conformance.py`
-(the generated Adapter + random-walk Monitor). That triple is exactly the artifact
-this skill produces, read backwards.
+load only the needed language rules, verifier workflow, and repair detail. The
+artifact this skill produces is the usual spec-first triple read **in reverse**:
+plain code → a kernel spec whose actions and invariants each carry a
+`// SRC: file:line` witness (and `// ASSUME-n:` for every bound or modeling
+choice) → the `fslc testgen` Adapter + random-walk Monitor harness that checks
+the code against the spec.
 
 ## Boundary
 
@@ -51,8 +52,9 @@ levels, and conflating them is what produces a worthless spec:
   code.
 - **Zone B — NOT present in the code; the actual value, and the trap.** Cross-action
   invariants (conservation laws), forbidden interaction sequences, and `leadsTo`
-  responses. `3_design.fsl`'s `CountsMatchSubmittedOrPaid` appears on no line of
-  `expense.py` — it is a rule a human recognizes. These must be **discovered and
+  responses. A payment count that must equal the number of claims that entered
+  payment appears on no line of an expense-claim implementation — it is a rule
+  a human recognizes. These must be **discovered and
   confirmed**, never read off and never fabricated.
 - **Zone C — mechanical truth-check.** `fslc mutate` (do the invariants have teeth?)
   and the conformance harness (does the modeled behavior match the code?).
@@ -157,6 +159,6 @@ natural-language rendering is an option for high-stakes specs, too costly to man
   as separate claims; make the second only after the harness ran green against the
   real implementation.
 - **Author the extracted spec as documentation, not just a checkable model.** See
-  `skills/fsl/references/layers.md` → "Authoring specs as readable documentation" for the
+  `../fsl/references/layers.md` → "Authoring specs as readable documentation" for the
   tagging, ID-prefix, and quantifier conventions that keep it readable, not just
   passing.

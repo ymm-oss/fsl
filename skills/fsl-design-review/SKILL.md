@@ -15,9 +15,6 @@ the fsl skill and its topic-specific references. This skill supplies only the
 procedure and the interpretation of results.
 If the user needs a new design-layer `.fsl` written before review, use
 `fsl-design` for authoring and return here for review/proposal judgment.
-Working examples: `specs/bank.fsl` + `bank_impl.fsl` + `bank_refines.fsl`
-(refinement), `seat_booking_*` (state-tag-dependent mappings),
-`specs/bank_system.fsl` (compose).
 
 ## Procedure
 
@@ -79,8 +76,8 @@ abstract invariants. Abstract postconditions therefore carry over **once the abs
 spec is verified on its own** (refine does not re-check abstract `ensures`). That is
 only **half** of LSP. Refinement deliberately permits the detail layer to
 **strengthen a guard** (refuse in more states than the abstract contract does):
-`specs/bank_impl.fsl` withdraws only against cleared funds, a stronger guard than the
-abstract one, and refine succeeds. A caller that relies on the abstract precondition
+a bank implementation that withdraws only against cleared funds has a stronger guard
+than the abstract one, and refine succeeds. A caller that relies on the abstract precondition
 can then be refused, which LSP forbids ("do not strengthen preconditions"). refine
 does not report this. To see it, check enabledness separately:
 - A `never_enabled_action` warning from `fslc verify` on the detail spec (no instance

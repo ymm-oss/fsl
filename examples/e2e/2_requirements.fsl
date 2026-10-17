@@ -31,7 +31,7 @@ requirements ExpenseRequirements {
   number Amount
   const AUTO_LIMIT = 1
 
-  process Claim with amount: Amount {
+  process Claim with amount: Amount = 0 {
     stages Draft, Submitted, Approved, Rejected, Paid
     initial Draft
 
@@ -39,31 +39,31 @@ requirements ExpenseRequirements {
       with a: Amount
       when a > 0
       set amount = a
-      covers REQ-1 "The applicant submits an expense claim by entering an amount"
+      covers REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount"
 
     transition auto_approve Submitted -> Approved  by System
       when amount <= AUTO_LIMIT
-      covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+      covers REQ-EXPENSE-002 "Claims at or below AUTO_LIMIT are auto-approved by the system"
 
     transition mgr_approve  Submitted -> Approved  by Manager
       when amount >  AUTO_LIMIT
-      covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+      covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT are approved by a manager"
 
     transition reject       Submitted -> Rejected  by Manager
       when amount >  AUTO_LIMIT
-      covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+      covers REQ-EXPENSE-003 "Claims above AUTO_LIMIT may be rejected by a manager"
 
     transition pay          Approved  -> Paid      by Finance
-      covers REQ-4 "Only approved claims are paid"
+      covers REQ-EXPENSE-004 "Only approved claims are paid"
   }
 
   kpi paid_claims = count Claim in Paid
 
-  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+  acceptance AC-EXPENSE-001 "Approval flow: a low-amount claim is auto-approved and paid" {
     submit(0, 1) auto_approve(0) pay(0)
     expect Claim 0 in Paid
   }
-  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+  acceptance AC-EXPENSE-002 "Rejection flow: a high-amount claim ends in manager rejection" {
     submit(1, 2) reject(1)
     expect Claim 1 in Rejected
   }

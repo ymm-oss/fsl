@@ -19,18 +19,18 @@ legitimately refined lower layer may add intermediate states or guards that make
 an upper-layer positive trace unrealizable without violating the refinement
 contract.
 
-**Example:** In `examples/refinement_chain/top.fsl`, `ChainTop` starts in `TOpen`
+**Example:** An upper spec `ChainTop` starts in `TOpen`
 with `finish` enabled immediately (`fair action finish` requires only
-`st[c] == TOpen`). In `examples/refinement_chain/mid.fsl`, `ChainMid` requires
+`st[c] == TOpen`). Its refinement `ChainMid` requires
 `MOpen → MReview` before `finish` (`finish` requires `st[c] == MReview`). Running
 `ChainTop`'s positive `finish` trace against a `ChainMid` implementation falsely
 fails a sound refinement — the implementation correctly requires the review step
 the abstract top layer omitted.
 
-This matches `docs/design/DESIGN-layers.md`: the refinement chain ends with
-implementation conforming to the **design** layer via testgen/replay (§1); the
-requirements layer's `acceptance` flows into scenarios/testgen for **that layer's**
-conformance anchor (§5), not as a substitute for design-layer positive tests.
+So the refinement chain ends with implementation conforming to the **design**
+layer via testgen/replay; the requirements layer's `acceptance` flows into
+scenarios/testgen for **that layer's** conformance anchor, not as a substitute
+for design-layer positive tests.
 
 Wire the generated file's `Adapter` to the implementation:
 - `reset()`: bring the implementation to the same initial state as init
@@ -120,14 +120,13 @@ emit the same scenarios:
   (`markTestSkipped` under `--allow-unwired`). Output defaults to
   `<SpecName>ConformanceTest.php`.
 
-**Unwired = fail, on every target (issue #1200, breaking).** Until the Adapter
+**Unwired = fail, on every target.** Until the Adapter
 is wired, every generated test fails with a message starting `adapter not
 wired`. Do not treat a green run of a generated suite as conformance evidence
 until you have seen it execute tests against the implementation: a suite that
 never calls the implementation proves nothing. `fslc testgen --allow-unwired`
 (also `fslc domain testgen`) is the explicit opt-in that restores
-skip-until-wired; its output is byte-identical to the pre-#1200 scaffold, and
-Kotlin rejects it. An `--allow-unwired` suite exits 0 with every test skipped,
+skip-until-wired; Kotlin rejects it. An `--allow-unwired` suite exits 0 with every test skipped,
 so in `fslc chain` give `[impl]` a JUnit `report` (see `commands.md`, `chain`):
 then zero executed tests is `indeterminate`, never `passed`. An `[impl]` with
 neither `report` nor `evidence = "exit_code"` is `indeterminate` on exit 0, and
@@ -176,7 +175,7 @@ tests" above.
 | NFR | How to write it |
 |---|---|
 | Permissions | role check in requires + ghost invariant |
-| Audit completeness | cross-cutting invariant (the bank_system pattern) |
+| Audit completeness | cross-cutting invariant (e.g. an append-only audit log accounts for every balance movement) |
 | Capacity | bounded types, Seq capacity, count invariant |
 | Reliability behavior | fault-injection action + mode state + fair recover + recovery leadsTo |
 | SLA/timeout | requirements `time { urgent ...  age m[x: T] while P }` + `deadline m <= K` |
@@ -198,7 +197,7 @@ tests" above.
   already exists`). It advances age counters only and auto-maps to `stutter` under
   refinement; reference it as `tick()` (e.g. to advance time in an `acceptance`
   scenario). Modeling tick-side work (service time, etc.) needs the kernel-wrapper
-  form (§10).
+  form ([layers](layers.md#requirements-the-requirements-layer)).
 - **a `deadline` does not refine across a clock boundary**: a `deadline` is a
   safety property of the clock that owns it, so a design refines a *timed*
   requirements spec only when it **shares that clock** — its `tick` must mirror
@@ -207,10 +206,9 @@ tests" above.
   ticks while the generated `tick` is urgency-disabled) has no abstract image for
   those steps and fails `fslc refine` with `abs_requires_failed` — the same
   non-propagation as liveness, not a defect. Then verify the SLA at the design
-  layer and keep the upper contract time-less (`tick → stutter`). Worked example:
-  `examples/nfr/sla_worker_design.fsl` (shared clock, refines) vs
-  `examples/nfr/sla_worker_kernel.fsl` (finer clock, cannot); see
-  `examples/validation/order_refund_windowed.fsl` for the time-less-upper idiom.
+  layer and keep the upper contract time-less (`tick → stutter`): a design
+  whose `tick` mirrors the generated one refines; one whose `tick` also
+  consumes service time cannot.
 
 ### ⚠ The vacuous-SLA trap and the deadline-urgency pattern
 
@@ -241,7 +239,7 @@ How to confirm non-vacuity: change to `deadline <= K-1` and confirm it becomes
 violated (evidence the boundary bites exactly). Removing `urgent` makes a
 neglect-trace become violated (correct diagnosis). BMC works immediately. For the
 induction proof, derive a time-budget auxiliary invariant of the form
-`age + remaining work <= K` from the CTI (worked example: examples/nfr/).
+`age + remaining work <= K` from the CTI.
 
 ## 12. The causal profile (review-only)
 
@@ -327,7 +325,7 @@ from log content. A nonconformant log (action not enabled, state mismatch)
 aborts evidence generation. **Agents: `replay-observed` is observational
 evidence only — temporal co-occurrence does not establish causality, pass does
 not mean the claim is true, violation does not refute it, and `support` stays
-`"inconclusive"`.** See `docs/design/DESIGN-causal.md` §16.
+`"inconclusive"`.**
 
 Portfolio ledger: `fslc causal ledger model.fsl [--plans plan.json ...]
 [--evidence ev.json ...] [--lifecycle lc.json ...] [--as-of YYYY-MM-DD]`
@@ -343,5 +341,4 @@ appear but have no attention reasons. **Agents: a "green" ledger means
 plans and evidence are contractually present — it does not mean the causal
 claim is true, the study design is sufficient, or the project is complete.
 `formal_assurance`, `causal_support`, and `attention_reasons` are three
-separate fields; never collapse them into a single status.** See
-`docs/design/DESIGN-causal.md` §17.
+separate fields; never collapse them into a single status.**

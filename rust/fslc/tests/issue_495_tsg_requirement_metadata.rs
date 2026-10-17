@@ -123,7 +123,7 @@ fn focus_on_a_requirement_node_resolves() {
         "--projection",
         "impact_graph",
         "--focus",
-        "requirement:REQ-1",
+        "requirement:REQ-EXPENSE-001",
     ]);
     assert_eq!(status, 0, "{output:#}");
     assert_ne!(output["kind"], "name");
@@ -201,7 +201,7 @@ fn scenario_step_edges_use_the_frozen_reference_direction_and_split() {
         .filter(|edge| matches!(edge["kind"].as_str(), Some("starts_with" | "precedes")))
         .collect::<Vec<_>>();
     assert!(!steps.is_empty(), "{output:#}");
-    // `acceptance AC-1 { submit(0, 1) auto_approve(0) pay(0) }`.
+    // `acceptance AC-EXPENSE-001 { submit(0, 1) auto_approve(0) pay(0) }`.
     let expected = [
         ("starts_with", "action:submit", 0),
         ("precedes", "action:auto_approve", 1),
@@ -211,7 +211,7 @@ fn scenario_step_edges_use_the_frozen_reference_direction_and_split() {
         assert!(
             steps.iter().any(|edge| {
                 edge["kind"] == kind
-                    && edge["from"] == "acceptance:AC-1"
+                    && edge["from"] == "acceptance:AC-EXPENSE-001"
                     && edge["to"] == action
                     && edge["step"] == serde_json::json!(step)
             }),

@@ -10,10 +10,10 @@ FSL file. Keep the output at the business/consulting level: process stages,
 business transitions, policies, KPIs, goals, and control preservation evidence.
 
 Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language and verifier detail. When working inside this
-repository, read `examples/consulting/` for As-Is/To-Be work,
-`examples/pm/cancel_flow.fsl` for a PM-friendly business flow, and
-`examples/e2e/1_business.fsl` when this business layer will be chained downstream.
+load only the needed language and verifier detail. The complete business example
+to start from (actor roster, `entity` + `process`, `kpi`, `control`, stage-form
+`policy`/`goal`, and the `verify { instances }` bound) is in
+`../fsl/references/layers.md`, section "business (the consulting layer)".
 
 ## Boundary
 
@@ -53,7 +53,13 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
      flag plus a kernel invariant, without descending to `requirements`
    - `goal G "..." some Case can reach Target`
    - `goal G "..." all Case can be Target or OtherTarget`
-4. Run `fslc check`, then `fslc verify --engine induction`. A pure stage-graph
+4. Run `fslc check`, then `fslc lint <file>` (exit 1 with `non_canonical_id` on a
+   policy/goal/control ID outside the ID policy — use `POL-SCOPE-001`,
+   `GOAL-SCOPE-001`, `CTRL-SCOPE-001`), then `fslc verify --depth 8` and
+   `fslc verify --engine induction`.
+   Done means lint reports no findings as well as a clean verify. Which result
+   counts as clean, what to do with `unknown_cti`, and the completion report
+   format are in `../fsl-verify/SKILL.md`. A pure stage-graph
    business spec needs no flag for intentional stops: `terminal { }` is derived
    automatically from each process's sink stages (stages with no outgoing
    `transition`), so a spec that ends cleanly at those stages verifies with no
@@ -86,5 +92,5 @@ the work to `fsl-requirements` or `fsl-design` after the business layer is agree
   that only a later weakening could satisfy.
 - The business spec is the readable, verified process document — consultants and
   reviewers read the `.fsl` (or its `fslc explain --readable` rendering) directly
-  instead of a separate prose write-up. See `skills/fsl/references/layers.md` → "Authoring
+  instead of a separate prose write-up. See `../fsl/references/layers.md` → "Authoring
   specs as readable documentation" for the shared tagging/ID conventions.
