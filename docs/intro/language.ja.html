@@ -400,7 +400,7 @@ fslc verify spec.fsl --values Amount=0..3
 不正な値(<code>Case=abc</code>, <code>N=5..1</code>)も同様です。実効の上書き後の境界は、JSON
 エンベロープの <code>bounds_overrides</code> フィールドにエコーバックされます。</p>
 <p>spec がインラインの <code>implements</code> を持つ場合、上書きは抽象 spec にも伝播します —
-抽象側自身が宣言する entity/number 名に限定されます — ので、refinement 検査は両側
+抽象側自身が宣言する entity/number 名に限定されます(<code>requirements</code> の抽象では、lowering が entity を宣言する <code>process</code> 名も entity に数えます) — ので、refinement 検査は両側
 で同じ世界サイズで実行されます(refinement は同サイズの forward simulation です。
 これがないと、縮小した impl とフルサイズの抽象は <code>map_out_of_bounds</code> で失敗します)。
 impl 側だけの carried number(例: business の抽象には存在しない <code>Amount</code>)は impl
@@ -732,6 +732,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
   論理的な後続部分だけです。例えば <code>(x is some(v)) =&gt; ...</code> や
   <code>(x is some(v)) and ...</code> の右辺では使えますが、グローバルな束縛にはなりません。
+  <code>v</code> は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
+  引数・量化子の束縛変数・<code>let</code>・それより前のパターン束縛と同じ名前の <code>v</code> は
+  <code>check</code> が拒否し、名前を変えるよう求めます。
   順序は定義されません。</li>
 <li>struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
   <code>==</code> はフィールドごとの等値</li>
@@ -1146,8 +1149,11 @@ NEW に対して replay します(<code>forbidden_relaxed</code>)。NEW の最�
 forbidden は今は <code>--forbid unknown</code> に落ちます。どの action も arity も指さない OLD の最後のステップは
 <code>unknown</code> / <code>forbidden_replay_failed</code> です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
 ステップは <code>forbidden_relaxed</code>、違反する OLD の最後のステップや NEW のセットアップの
-ステップは <code>unknown</code> / <code>forbidden_replay_failed</code> です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
-ステップも保たれたと報告されます。
+ステップは <code>unknown</code> / <code>forbidden_replay_failed</code> です。#1239 から(破壊的変更)、ガードで無効な
+NEW のセットアップのステップも同じです。NEW は最後のステップを実行しないので、forbidden は
+保たれたことになりません(以前は保たれたと報告されていました)。これを落とす gate は <code>unknown</code>
+を指定します。引数の種類が違う OLD の最後のステップ(#1241)も <code>unknown</code> /
+<code>forbidden_replay_failed</code> です(
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-semantic-diff.md"><code>DESIGN-semantic-diff.md</code></a> の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
@@ -1199,11 +1205,14 @@ indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが�
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
 <code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
 inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。失敗した governance の
-<code>preservation</code> も同じ対応付けで <code>check</code> / <code>verify</code> に畳み込まれます(§13)。畳み込みは検証封筒を
+<code>preservation</code> も同じ対応付けで <code>check</code> / <code>verify</code> / <code>scenarios</code> に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
 baseline の verdict をそのまま返し(baseline が <code>verified</code> でなくなるため変異を1つも生成しません)、
 <code>ledger</code> と <code>fslc html</code> は畳み込まれた検証封筒から同じ exit を引き継ぎ、<code>sweep</code> は
-真の失敗なら <code>sweep_failed</code>、深さ不足のセルしかないスコープがあれば <code>sweep_inconclusive</code> を返します。同じ <code>2</code> の
+真の失敗なら <code>sweep_failed</code>、深さ不足のセルしかないスコープがあれば <code>sweep_inconclusive</code> を返します。
+<code>scenarios</code> も、自身の有界実行で答えた場合と <code>verify</code> の封筒へフォールバックした場合のどちらでも、
+seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた <code>result</code>、exit 1、
+<code>implements</code> / <code>governance</code> セクション付き)。同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/design/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1267,9 +1276,19 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 <td><strong>CTI を読んで補助 invariant を追加する</strong>(§8)か、<code>--engine explicit</code> を試す(closure はレンマなしで証明する)</td>
 </tr>
 <tr>
+<td><code>proved</code> + <code>not_covered: ["int_overflow"]</code></td>
+<td><code>--engine induction</code> は無界の整数の上で性質を証明した。i64 overflow を検査するのは <code>checked_to_depth</code> までの base case だけである。証明の対象箇所が <code>+ - * / %</code>・単項 <code>-</code>・<code>abs</code>・<code>sum</code> を使うときに付き、使わないときは付かない。結果と終了コードは変わらない</td>
+<td>overflow が問題なら値を有界にする(範囲型か guard)か、overflow に届く深さで <code>--engine bmc</code>/<code>explicit</code> を実行する</td>
+</tr>
+<tr>
 <td><code>unknown_cti</code> / <code>partial_op</code></td>
 <td>証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した <code>ensures</code> が部分演算(§6)に達する</td>
 <td>短絡する <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code> で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す</td>
+</tr>
+<tr>
+<td><code>unknown_cti</code> / <code>key_domain</code></td>
+<td>証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した <code>ensures</code> が有限キーの <code>Map</code> をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する</td>
+<td>短絡する <code>and</code>/<code>=&gt;</code>/<code>or</code>/<code>if</code> か <code>requires</code> で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す</td>
 </tr>
 <tr>
 <td><code>unknown_cti</code> / <code>ensures</code></td>
@@ -1786,8 +1805,8 @@ stutter)、bottom ⊒ top を検査します。成功時は合成された <code
 ない)です。<strong>liveness(<code>leadsTo</code>)は伝播しません</strong> — refine は stutter を許すので、
 abs が <code>fair</code> で保証した進行を impl が落としても、結果は依然 <code>refines</code> になりえます
 (マッピングは fair アノテーションを要求しません)。抽象の応答を下位レイヤーで
-検査することにオプトインするには、refinement マッピングに <code>preserve progress</code> を
-書きます:</p>
+検査することにオプトインするには、単独の refinement マッピングファイルに
+<code>preserve progress</code> を書きます(インラインの <code>implements { }</code> ブロックはこれを拒否します):</p>
 <pre><code class="language-fsl">refinement DesignRefinesReq {
   impl Design
   abs  Req
@@ -2365,11 +2384,17 @@ verify {
   いないことを示します。スコープ無しの <code>check</code> / <code>verify</code>、または <code>fslc chain</code> で
   ゲートしてください。この3つのオプションについての決定は「理由付きで抑止」です
   （<code>docs/design/DESIGN-refinement.md</code>、<a href="https://github.com/ymm-oss/fsl/issues/1008">#1008</a>）。<code>implements { }</code> ブロックの内側には、状態の
-  <code>map</code> エントリ、<code>maps auto</code>、<code>preserve progress</code>、そして — #73 以降 —
+  <code>map</code> エントリ、<code>maps auto</code>、そして — #73 以降 —
   <code>action &lt;impl_act&gt;(&lt;params&gt;) -&gt; &lt;abs_act&gt;(&lt;args&gt;) | stutter</code> を書きます。これは
   別の refinement ファイルの <code>refinement_action</code>
   (<code>docs/design/DESIGN-refinement.md</code> §1)と同じ対応の構文で、impl と abs の action の
-  間のアリティ変更を含みます。action↔action の対応は、requirement レベルの action
+  間のアリティ変更を含みます。<code>preserve progress</code> はここには書けません。インラインの
+  seam は安全性の refinement しか検査しないので、<code>implements { }</code> の中の
+  <code>preserve progress</code> は、文書を読み込むすべてのコマンドで位置付きの
+  <code>kind: "parse"</code> エラー(exit 2)になります
+  (<a href="https://github.com/ymm-oss/fsl/issues/1275">#1275</a>)。上位の <code>leadsTo</code> をマッピング越しに
+  検査するには、マッピングとその <code>preserve progress</code> を単独の refinement ファイルに
+  書き、<code>fslc refine</code> を実行します。action↔action の対応は、requirement レベルの action
   の上の <code>maps &lt;abs_act&gt;(...)</code> 節としても引き続き書けます。<code>maps auto</code> は
   同名のカーネルラッパーの state/action をカバーし、明示の map はそれを上書き
   します。<code>maps</code> 節と、それに一致するインラインの <code>action ...</code> 項目の両方を持つ
@@ -2579,7 +2604,9 @@ governance 契約のエラー(委譲先の business ファイル、control、<co
 <code>verify</code> でも同じ位置付きの <code>error</code>(exit 2)です。preservation の refinement が内部で
 失敗した場合は、どちらでも <code>error</code>/<code>internal</code>(exit 3)です。<code>check</code>/<code>verify</code> の封筒を読む側は
 畳み込まれた判定を読みます: <code>fslc chain</code> の spec レイヤーは失敗し、<code>fslc ledger</code>、
-<code>fslc html</code>、<code>fslc mutate</code> は同じ baseline から exit 1 を返し、ブラウザの Worker も
+<code>fslc html</code>、<code>fslc mutate</code> は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
+すべての preservation とその結果を、失敗したものに印を付けて示します)、<code>fslc scenarios</code> は
+<code>verify</code> と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
 <code>check</code> と <code>verify</code> を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても <code>check</code> は <code>ok</code>、<code>verify</code> は <code>verified</code> で、どちらも
 exit 0 であり、<code>verify</code> は <code>governance</code> セクション自体を報告していませんでした(<code>check</code> が
@@ -3044,8 +3071,14 @@ DESIGN-*.md があります)。</p>
   出力の実測は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1 にあります。
   scenario の <code>rejected_by</code>(testgen が assert します)は、
-  ガードによる拒否なら <code>requires_failed</code>、パラメータの宣言された範囲型や enum の
+  ガードによる拒否なら <code>requires_failed</code>、パラメータと同じ種類の値で宣言された範囲型の
   外の引数なら <code>bad_call</code> です(実装はデコードの境界でそれを拒否すべきです)。
+  <strong>#1241 から(破壊的変更)</strong>、種類の違う引数(<code>entity</code>・<code>number</code>・範囲型のパラメータに
+  enum のメンバーや Bool、enum のパラメータに整数や別の enum のメンバー。例:
+  <code>c: Case</code> に <code>respond(Waiting)</code>)は <code>bad_call</code> ではなく書き誤りのステップです。
+  forbidden の gate を走らせるすべてのコマンドで、<code>wrong_kind_argument</code>
+  (<code>{parameter, value, type}</code>)付きの <code>kind:"forbidden"</code> エラーになります。移行するには、
+  パラメータの型の値を書きます。
   <strong>#1229 から(破壊的変更)</strong>、<code>entity</code>(<code>verify { instances }</code>。<code>process</code> もこれで
   範囲が決まります)や <code>number</code>(<code>verify { values }</code>)のパラメータの検証の範囲の外の
   引数は拒否ではありません。<code>instances Case = 3</code> の下で最後のステップ <code>accept(7)</code> は

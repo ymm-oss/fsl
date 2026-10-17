@@ -2,17 +2,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use fsl_core::obligation::{ObligationKind, Site, SiteRef, catalog};
 use fsl_core::recursion;
 use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::{eval, evaluation_status, property_evaluation_status};
+use crate::eval::{
+    FailureClass, classified_evaluation_status, classified_property_evaluation_status, eval,
+    evaluation_status, property_evaluation_status,
+};
 use crate::liveness::{leadsto_bindings, leadsto_condition};
 use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guard_definedness, action_has_partial_operation_candidate,
-    action_instances, action_statements_evaluation_status, transition_constraint,
+    action_instances, action_statements_evaluation_status, classified_action_guard_definedness,
+    classified_action_statements_evaluation_status, transition_constraint,
 };
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, i64_index, int_term, symbolic_state_with_suffix,
@@ -170,7 +175,8 @@ fn attributed_property_condition<S: SmtSolver>(
 }
 
 /// Prove kernel invariants and transitions by k-induction after a successful
-/// bounded base case, then discharge the definedness obligation (#1196).
+/// bounded base case, then discharge the definedness obligation (#1196), and
+/// then its key-domain half (#1221).
 ///
 /// The k-induction premises (the invariant/transition chain over `ind*`
 /// states) live in a solver scope that is popped before the definedness
@@ -191,7 +197,10 @@ pub async fn prove_induction<S: SmtSolver>(
         return Ok(result);
     }
     let instances = action_instances(solver, model)?;
-    let cti = step_obligation_cti(solver, model, &instances).await?;
+    let mut cti = step_obligation_cti(solver, model, &instances).await?;
+    if cti.is_none() {
+        cti = key_domain_obligation_cti(solver, model, &instances).await?;
+    }
     Ok(InductionResult {
         k_used: result.k_used,
         cti,
@@ -359,6 +368,416 @@ async fn partial_witness<S: SmtSolver>(
     };
     solver.pop(1)?;
     outcome
+}
+
+fn key_domain_cti(name: String, k: usize, trace: Vec<fsl_core::TraceStep>) -> InductionCti {
+    InductionCti {
+        kind: violation_kind::KEY_DOMAIN.to_owned(),
+        name,
+        k,
+        trace,
+    }
+}
+
+/// The sites [`key_domain_obligation_cti`] asks whose `KeyInDomain` row the
+/// obligation catalog does not mark statically vacuous: some `Map` index
+/// there may miss its finite key domain. The catalog's vacuity premise (every
+/// state the site reads satisfies its type bound) holds here, because the
+/// key-domain obligation assumes every `Holds@TypeBound` property on each
+/// state it reasons about. `init` is the base case's (#1258); `reachable`,
+/// `terminal` and a ranking measure are not step-obligation sites (§2.6).
+fn key_domain_sites(model: &KernelModel) -> BTreeSet<Site> {
+    catalog(model)
+        .obligations
+        .into_iter()
+        .filter(|row| row.id.kind == ObligationKind::KeyInDomain && !row.statically_vacuous)
+        .map(|row| row.id.site)
+        .filter(|site| {
+            matches!(
+                site,
+                Site::Invariant(_)
+                    | Site::Trans(_)
+                    | Site::Trigger(_)
+                    | Site::Goal(_)
+                    | Site::Guard(_)
+                    | Site::Body(_)
+                    | Site::Ensures { .. }
+            )
+        })
+        .collect()
+}
+
+/// The `not_covered` entry of a `proved` k-induction verdict whose proof
+/// leaves i64 overflow unchecked (#1263).
+pub const NOT_COVERED_INT_OVERFLOW: &str = "int_overflow";
+
+/// What a `proved` k-induction verdict on `model` does not cover, as the
+/// stable spellings of the envelope's `not_covered` array (#1263).
+///
+/// The step case and the step obligation (§2.6 of
+/// `docs/design/DESIGN-induction.md`) reason over unbounded integers and do
+/// not ask checked i64 overflow; only the bounded base case does. So a
+/// `proved` verdict says nothing about overflow in a state beyond the base
+/// depth. [`NOT_COVERED_INT_OVERFLOW`] is listed when some site the proof
+/// covers -- an invariant, `trans`, `leadsTo` trigger/goal/measure,
+/// `terminal`, guard, body or `ensures` -- holds an operator that can
+/// overflow (the obligation catalog's non-vacuous `NoOverflow` rows: `+ - *
+/// / %`, unary `-`, `abs`, `sum`). It is syntactic, so a spec whose
+/// arithmetic only ever sees small bounded values carries it too; a spec
+/// with no such operator at those sites gets an empty list. `init` is not a
+/// proof site: the base case evaluates it with overflow checked (#1258).
+#[must_use]
+pub fn induction_not_covered(model: &KernelModel) -> Vec<&'static str> {
+    let overflow = catalog(model).obligations.iter().any(|row| {
+        row.id.kind == ObligationKind::NoOverflow
+            && !row.statically_vacuous
+            && !matches!(row.id.site, Site::Init)
+    });
+    if overflow {
+        vec![NOT_COVERED_INT_OVERFLOW]
+    } else {
+        Vec::new()
+    }
+}
+
+fn site_ref(name: &str, span: fsl_core::Span) -> SiteRef {
+    SiteRef {
+        name: name.to_owned(),
+        start: span.start.offset,
+        end: span.end.offset,
+    }
+}
+
+/// Key-domain obligation of the induction step (#1221).
+///
+/// BMC and the explicit engine stop with an error when a reachable state
+/// indexes a finite-key `Map` outside its key domain (a read: "map index
+/// outside finite key domain"; an indexed assignment: "map assignment index
+/// outside key domain"). The step case evaluates with the totalizing symbolic
+/// evaluator, and [`step_obligation_cti`] asks only the six partial
+/// operations, so before #1221 such a miss beyond the base depth was
+/// reported `proved`. This asks the same questions as
+/// [`step_obligation_cti`], over the same free states and premises (the
+/// proved invariants and type bounds, no `init`), with the first reached
+/// failure classified as a key-domain miss ([`FailureClass::KeyDomain`]):
+///
+/// - `Inv(s) ∧ first_key_miss(P, s)` for every invariant and every `leadsTo`
+///   trigger/goal;
+/// - `Inv(s) ∧ first_key_miss(guards_a, s)` and
+///   `Inv(s) ∧ enabled_a(s) ∧ first_key_miss(body_a, s)` for every action
+///   instance;
+/// - `Inv(s) ∧ T(s, s') ∧ Inv(s') ∧ Trans(s, s') ∧ first_key_miss(Q, s, s')`
+///   for every `transition` property and every reached `ensures`.
+///
+/// `sat` is an `unknown_cti` of kind [`violation_kind::KEY_DOMAIN`] named
+/// like the `partial_op` CTIs (`_key_domain_<action>`,
+/// `_key_domain_property_<name>`); like any CTI its start state may be
+/// unreachable. Checked i64 overflow, the other non-partial failure, is not
+/// asked (#1263).
+///
+/// Only sites whose `KeyInDomain` catalog row is not statically vacuous are
+/// asked; a spec without one declares no terms and issues no queries, so the
+/// solver session later engines share is untouched.
+#[allow(clippy::too_many_lines)]
+async fn key_domain_obligation_cti<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    instances: &[ActionInstance<S::Term>],
+) -> Result<Option<InductionCti>, VerifyError> {
+    let sites = key_domain_sites(model);
+    if sites.is_empty() {
+        return Ok(None);
+    }
+    let class = FailureClass::KeyDomain;
+    let properties = properties(model);
+    let key_states = vec![
+        symbolic_state_with_suffix(solver, model, "key0")?,
+        symbolic_state_with_suffix(solver, model, "key1")?,
+    ];
+    let choice = solver.constant("__key_choice@0", &fsl_solver::Sort::Int)?;
+    let choices = vec![choice.clone()];
+
+    solver.push();
+    let result = async {
+        for property in &properties {
+            let assumption = property_condition(solver, model, *property, &key_states[0], None)?;
+            solver.assert(&assumption)?;
+        }
+
+        for property in &model.invariants {
+            if !sites.contains(&Site::Invariant(site_ref(&property.name, property.span))) {
+                continue;
+            }
+            let status = classified_property_evaluation_status(
+                solver,
+                model,
+                &property.expr,
+                &key_states[0],
+                &Bindings::new(),
+                None,
+                class,
+            )?;
+            if !status.has_partial_operation {
+                continue;
+            }
+            solver.set_query_context("key_domain", &property.name);
+            if let Some(trace) = partial_witness(
+                solver,
+                model,
+                &status.first_partial,
+                &key_states,
+                &choices,
+                instances,
+                0,
+            )
+            .await?
+            {
+                return Ok(Some(key_domain_cti(
+                    format!("_key_domain_property_{}", property.name),
+                    0,
+                    trace,
+                )));
+            }
+        }
+        for property in &model.leadstos {
+            let at = site_ref(&property.name, property.span);
+            let asked = [
+                sites.contains(&Site::Trigger(at.clone())),
+                sites.contains(&Site::Goal(at)),
+            ];
+            if !asked.contains(&true) {
+                continue;
+            }
+            for binding in leadsto_bindings(solver, model, property)? {
+                for (expression, asked) in
+                    [&property.before, &property.after].into_iter().zip(asked)
+                {
+                    if !asked {
+                        continue;
+                    }
+                    let status = classified_property_evaluation_status(
+                        solver,
+                        model,
+                        expression,
+                        &key_states[0],
+                        &binding.symbolic,
+                        None,
+                        class,
+                    )?;
+                    if !status.has_partial_operation {
+                        continue;
+                    }
+                    solver.set_query_context("key_domain", &property.name);
+                    if let Some(trace) = partial_witness(
+                        solver,
+                        model,
+                        &status.first_partial,
+                        &key_states,
+                        &choices,
+                        instances,
+                        0,
+                    )
+                    .await?
+                    {
+                        return Ok(Some(key_domain_cti(
+                            format!("_key_domain_property_{}", property.name),
+                            0,
+                            trace,
+                        )));
+                    }
+                }
+            }
+        }
+
+        for instance in instances {
+            let action = &model.actions[instance.action_index];
+            let at = site_ref(&action.name, action.span);
+            if !sites.contains(&Site::Guard(at.clone())) && !sites.contains(&Site::Body(at)) {
+                continue;
+            }
+            let guard = classified_action_guard_definedness(
+                solver,
+                model,
+                action,
+                &key_states[0],
+                &instance.params,
+                class,
+            )?;
+            let body = classified_action_statements_evaluation_status(
+                solver,
+                model,
+                action,
+                &key_states[0],
+                &guard.bindings,
+                class,
+            )?;
+            if !guard.has_partial_operation && !body.has_partial_operation {
+                continue;
+            }
+            solver.set_query_context("key_domain", &action.name);
+            let body_failure = solver.and(&[guard.enabled.clone(), body.first_partial])?;
+            for failure in [guard.first_partial, body_failure] {
+                if let Some(trace) =
+                    partial_witness(solver, model, &failure, &key_states, &choices, instances, 0)
+                        .await?
+                {
+                    return Ok(Some(key_domain_cti(
+                        format!("_key_domain_{}", action.name),
+                        1,
+                        with_attempted_action(trace, instance),
+                    )));
+                }
+            }
+        }
+
+        let transitions = model
+            .transitions
+            .iter()
+            .filter(|property| {
+                sites.contains(&Site::Trans(site_ref(&property.name, property.span)))
+            })
+            .collect::<Vec<_>>();
+        let ensures_asked = model.actions.iter().any(|action| {
+            (0..action.ensures.len()).any(|index| {
+                sites.contains(&Site::Ensures {
+                    action: site_ref(&action.name, action.span),
+                    index,
+                })
+            })
+        });
+        if transitions.is_empty() && !ensures_asked {
+            return Ok(None);
+        }
+        solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
+        solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
+        solver.assert(&transition_constraint(
+            solver,
+            model,
+            instances,
+            &key_states[0],
+            &key_states[1],
+            &choice,
+        )?)?;
+        for property in &properties {
+            let assumption = property_condition(solver, model, *property, &key_states[1], None)?;
+            solver.assert(&assumption)?;
+        }
+        for transition in &model.transitions {
+            let value = eval(
+                solver,
+                model,
+                &transition.expr,
+                &key_states[1],
+                &mut Bindings::new(),
+                Some(&key_states[0]),
+            )?;
+            solver.assert(bool_term(&value)?)?;
+        }
+        for property in transitions {
+            let status = classified_property_evaluation_status(
+                solver,
+                model,
+                &property.expr,
+                &key_states[1],
+                &Bindings::new(),
+                Some(&key_states[0]),
+                class,
+            )?;
+            if !status.has_partial_operation {
+                continue;
+            }
+            solver.set_query_context("key_domain", &property.name);
+            if let Some(trace) = partial_witness(
+                solver,
+                model,
+                &status.first_partial,
+                &key_states,
+                &choices,
+                instances,
+                1,
+            )
+            .await?
+            {
+                return Ok(Some(key_domain_cti(
+                    format!("_key_domain_property_{}", property.name),
+                    1,
+                    trace,
+                )));
+            }
+        }
+        if !ensures_asked {
+            return Ok(None);
+        }
+        for (instance_index, instance) in instances.iter().enumerate() {
+            let action = &model.actions[instance.action_index];
+            let at = site_ref(&action.name, action.span);
+            if !(0..action.ensures.len()).any(|index| {
+                sites.contains(&Site::Ensures {
+                    action: at.clone(),
+                    index,
+                })
+            }) {
+                continue;
+            }
+            let guard =
+                action_guard_definedness(solver, model, action, &key_states[0], &instance.params)?;
+            let mut bindings = guard.bindings;
+            let body = action_statements_evaluation_status(
+                solver,
+                model,
+                action,
+                &key_states[0],
+                &bindings,
+            )?;
+            let selected = solver.equal(&choice, &solver.int_value(i64_index(instance_index)?))?;
+            // `reached` is BMC's: an earlier ensures that fails or is false
+            // stops the evaluation of the later ones.
+            let mut reached = solver.and(&[selected, guard.enabled, body.fully_defined])?;
+            for (index, ensure) in action.ensures.iter().enumerate() {
+                let status = classified_evaluation_status(
+                    solver,
+                    model,
+                    ensure,
+                    &key_states[1],
+                    &bindings,
+                    Some(&key_states[0]),
+                    class,
+                )?;
+                let asked = sites.contains(&Site::Ensures {
+                    action: at.clone(),
+                    index,
+                });
+                if asked && status.has_partial_operation {
+                    solver.set_query_context("key_domain", &action.name);
+                    let miss = solver.and(&[reached.clone(), status.first_partial])?;
+                    if let Some(trace) =
+                        partial_witness(solver, model, &miss, &key_states, &choices, instances, 1)
+                            .await?
+                    {
+                        return Ok(Some(key_domain_cti(
+                            format!("_key_domain_{}", action.name),
+                            1,
+                            trace,
+                        )));
+                    }
+                }
+                let value = eval(
+                    solver,
+                    model,
+                    ensure,
+                    &key_states[1],
+                    &mut bindings,
+                    Some(&key_states[0]),
+                )?;
+                reached =
+                    solver.and(&[reached, status.fully_defined, bool_term(&value)?.clone()])?;
+            }
+        }
+        Ok(None)
+    }
+    .await;
+    solver.pop(1)?;
+    result
 }
 
 fn partial_cti(name: String, k: usize, trace: Vec<fsl_core::TraceStep>) -> InductionCti {

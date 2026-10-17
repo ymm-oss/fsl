@@ -373,7 +373,7 @@ fslc verify spec.fsl --values Amount=0..3
 エンベロープの `bounds_overrides` フィールドにエコーバックされます。
 
 spec がインラインの `implements` を持つ場合、上書きは抽象 spec にも伝播します —
-抽象側自身が宣言する entity/number 名に限定されます — ので、refinement 検査は両側
+抽象側自身が宣言する entity/number 名に限定されます(`requirements` の抽象では、lowering が entity を宣言する `process` 名も entity に数えます) — ので、refinement 検査は両側
 で同じ世界サイズで実行されます(refinement は同サイズの forward simulation です。
 これがないと、縮小した impl とフルサイズの抽象は `map_out_of_bounds` で失敗します)。
 impl 側だけの carried number(例: business の抽象には存在しない `Amount`)は impl
@@ -677,6 +677,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
   論理的な後続部分だけです。例えば `(x is some(v)) => ...` や
   `(x is some(v)) and ...` の右辺では使えますが、グローバルな束縛にはなりません。
+  `v` は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
+  引数・量化子の束縛変数・`let`・それより前のパターン束縛と同じ名前の `v` は
+  `check` が拒否し、名前を変えるよう求めます。
   順序は定義されません。
 - struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
   `==` はフィールドごとの等値
@@ -1065,8 +1068,11 @@ NEW に対して replay します(`forbidden_relaxed`)。NEW の最後のステ�
 forbidden は今は `--forbid unknown` に落ちます。どの action も arity も指さない OLD の最後のステップは
 `unknown` / `forbidden_replay_failed` です。#1213 から、enabled で実行時の違反で止まる NEW の最後の
 ステップは `forbidden_relaxed`、違反する OLD の最後のステップや NEW のセットアップの
-ステップは `unknown` / `forbidden_replay_failed` です(既知の欠落 #1239: ガードで無効な NEW のセットアップの
-ステップも保たれたと報告されます。
+ステップは `unknown` / `forbidden_replay_failed` です。#1239 から(破壊的変更)、ガードで無効な
+NEW のセットアップのステップも同じです。NEW は最後のステップを実行しないので、forbidden は
+保たれたことになりません(以前は保たれたと報告されていました)。これを落とす gate は `unknown`
+を指定します。引数の種類が違う OLD の最後のステップ(#1241)も `unknown` /
+`forbidden_replay_failed` です(
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md) の "Forbidden replay"
 を参照)。方向性のある失敗は反例の
 witness を含みます。同名で互換な state/action は自動でマッピングされ、名前の
@@ -1123,11 +1129,14 @@ indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
-`preservation` も同じ対応付けで `check` / `verify` に畳み込まれます(§13)。畳み込みは検証封筒を
+`preservation` も同じ対応付けで `check` / `verify` / `scenarios` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
-真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。同じ `2` の
+真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。
+`scenarios` も、自身の有界実行で答えた場合と `verify` の封筒へフォールバックした場合のどちらでも、
+seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた `result`、exit 1、
+`implements` / `governance` セクション付き)。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1154,7 +1163,9 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 | `sweep_inconclusive` | 真の失敗はないが、`insufficient_depth` だけを持つ `reachable_failed` のセルしかない `--instances`/`--values` スコープが1つ以上ある。そのスコープは `sweep.inconclusive_scopes` に列挙され、`minimal_counterexample` は null | 列挙されたスコープの `--depth` を上げるか sweep 境界を調整して再実行する |
 | `sweep_failed` | sweep セルに反例、またはフェイルクローズドな reachable classification がある | `sweep.minimal_counterexample` を調べて報告された問題を直す |
 | `unknown_cti` | invariant は違反されないが帰納的でない | **CTI を読んで補助 invariant を追加する**(§8)か、`--engine explicit` を試す(closure はレンマなしで証明する) |
+| `proved` + `not_covered: ["int_overflow"]` | `--engine induction` は無界の整数の上で性質を証明した。i64 overflow を検査するのは `checked_to_depth` までの base case だけである。証明の対象箇所が `+ - * / %`・単項 `-`・`abs`・`sum` を使うときに付き、使わないときは付かない。結果と終了コードは変わらない | overflow が問題なら値を有界にする(範囲型か guard)か、overflow に届く深さで `--engine bmc`/`explicit` を実行する |
 | `unknown_cti` / `partial_op` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が部分演算(§6)に達する | 短絡する `and`/`=>`/`or`/`if` で部分演算を守るか、その状態が到達不能なら除外する補助 invariant を足す |
+| `unknown_cti` / `key_domain` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が有限キーの `Map` をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する | 短絡する `and`/`=>`/`or`/`if` か `requires` で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` は打ち切られた方向を `unknown_budget` と報告し、gate を無条件に落とす(finding `unknown_budget`、exit 1)。`fslc mutate` はその mutant を `inconclusive` と報告し、`kill_rate` から外し、要求された gate を落とす |
 | `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
@@ -1736,8 +1747,8 @@ stutter)、bottom ⊒ top を検査します。成功時は合成された `acti
 ない)です。**liveness(`leadsTo`)は伝播しません** — refine は stutter を許すので、
 abs が `fair` で保証した進行を impl が落としても、結果は依然 `refines` になりえます
 (マッピングは fair アノテーションを要求しません)。抽象の応答を下位レイヤーで
-検査することにオプトインするには、refinement マッピングに `preserve progress` を
-書きます:
+検査することにオプトインするには、単独の refinement マッピングファイルに
+`preserve progress` を書きます(インラインの `implements { }` ブロックはこれを拒否します):
 
 ```fsl
 refinement DesignRefinesReq {
@@ -2321,11 +2332,17 @@ verify {
   いないことを示します。スコープ無しの `check` / `verify`、または `fslc chain` で
   ゲートしてください。この3つのオプションについての決定は「理由付きで抑止」です
   （`docs/design/DESIGN-refinement.md`、[#1008](https://github.com/ymm-oss/fsl/issues/1008)）。`implements { }` ブロックの内側には、状態の
-  `map` エントリ、`maps auto`、`preserve progress`、そして — #73 以降 —
+  `map` エントリ、`maps auto`、そして — #73 以降 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter` を書きます。これは
   別の refinement ファイルの `refinement_action`
   (`docs/design/DESIGN-refinement.md` §1)と同じ対応の構文で、impl と abs の action の
-  間のアリティ変更を含みます。action↔action の対応は、requirement レベルの action
+  間のアリティ変更を含みます。`preserve progress` はここには書けません。インラインの
+  seam は安全性の refinement しか検査しないので、`implements { }` の中の
+  `preserve progress` は、文書を読み込むすべてのコマンドで位置付きの
+  `kind: "parse"` エラー(exit 2)になります
+  ([#1275](https://github.com/ymm-oss/fsl/issues/1275))。上位の `leadsTo` をマッピング越しに
+  検査するには、マッピングとその `preserve progress` を単独の refinement ファイルに
+  書き、`fslc refine` を実行します。action↔action の対応は、requirement レベルの action
   の上の `maps <abs_act>(...)` 節としても引き続き書けます。`maps auto` は
   同名のカーネルラッパーの state/action をカバーし、明示の map はそれを上書き
   します。`maps` 節と、それに一致するインラインの `action ...` 項目の両方を持つ
@@ -2531,7 +2548,9 @@ governance 契約のエラー(委譲先の business ファイル、control、`sa
 `verify` でも同じ位置付きの `error`(exit 2)です。preservation の refinement が内部で
 失敗した場合は、どちらでも `error`/`internal`(exit 3)です。`check`/`verify` の封筒を読む側は
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
-`fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し、ブラウザの Worker も
+`fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
+すべての preservation とその結果を、失敗したものに印を付けて示します)、`fslc scenarios` は
+`verify` と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
 exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が
@@ -3018,8 +3037,14 @@ DESIGN-*.md があります)。
   出力の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
   scenario の `rejected_by`(testgen が assert します)は、
-  ガードによる拒否なら `requires_failed`、パラメータの宣言された範囲型や enum の
+  ガードによる拒否なら `requires_failed`、パラメータと同じ種類の値で宣言された範囲型の
   外の引数なら `bad_call` です(実装はデコードの境界でそれを拒否すべきです)。
+  **#1241 から(破壊的変更)**、種類の違う引数(`entity`・`number`・範囲型のパラメータに
+  enum のメンバーや Bool、enum のパラメータに整数や別の enum のメンバー。例:
+  `c: Case` に `respond(Waiting)`)は `bad_call` ではなく書き誤りのステップです。
+  forbidden の gate を走らせるすべてのコマンドで、`wrong_kind_argument`
+  (`{parameter, value, type}`)付きの `kind:"forbidden"` エラーになります。移行するには、
+  パラメータの型の値を書きます。
   **#1229 から(破壊的変更)**、`entity`(`verify { instances }`。`process` もこれで
   範囲が決まります)や `number`(`verify { values }`)のパラメータの検証の範囲の外の
   引数は拒否ではありません。`instances Case = 3` の下で最後のステップ `accept(7)` は

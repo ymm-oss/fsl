@@ -162,7 +162,7 @@ fn eval_inner<S: SmtSolver>(
         }
         Expr::Is { expr, pattern } => {
             let value = eval(solver, model, expr, state, bindings, old_state)?;
-            eval_pattern(solver, value, pattern, bindings)
+            eval_pattern(solver, model, value, pattern, state, bindings)
         }
         Expr::Quantified {
             quantifier,
@@ -409,16 +409,41 @@ pub(crate) struct EvaluationStatus<T> {
     pub has_partial_operation: bool,
 }
 
+/// Which failure an [`EvaluationStatus`]'s `first_partial` classifies: the
+/// condition that evaluation completes (`fully_defined`) is the same for
+/// every class, but `first_partial` (and `has_partial_operation`) answer
+/// "is the first reached failure one of this class?".
+///
+/// The six partial operations of LANGUAGE.md §6 are what BMC and the explicit
+/// engine report as `partial_op`, and what every caller asked before #1221.
+/// A finite `Map` key outside its domain is the class the k-induction step
+/// obligation asks separately (#1221). Checked i64 overflow, the remaining
+/// non-partial failure, is deliberately not a class here: the induction step
+/// obligation does not ask it (#1263, `docs/design/DESIGN-induction.md`
+/// §2.6); a class for it would be added next to `KeyDomain`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FailureClass {
+    /// LANGUAGE.md §6: `head`/`pop`/`at`, a `Seq` index, `/` and `%` (the
+    /// last two in action context only).
+    PartialOperation,
+    /// A `Map` index (read or indexed assignment) outside the map's finite
+    /// key domain.
+    KeyDomain,
+}
+
 #[derive(Clone, Copy)]
 struct EvaluationPolicy {
     total_division: bool,
+    classify: FailureClass,
 }
 
 const ACTION_EVALUATION: EvaluationPolicy = EvaluationPolicy {
     total_division: false,
+    classify: FailureClass::PartialOperation,
 };
 const PROPERTY_EVALUATION: EvaluationPolicy = EvaluationPolicy {
     total_division: true,
+    classify: FailureClass::PartialOperation,
 };
 
 fn safe_status<S: SmtSolver>(solver: &S) -> EvaluationStatus<S::Term> {
@@ -471,6 +496,56 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
         bindings,
         old_state,
         ACTION_EVALUATION,
+    )
+}
+
+/// [`evaluation_status`] (action context: `/` and `%` are partial) with
+/// `first_partial` classifying `class` instead of the partial operations.
+pub(crate) fn classified_evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    class: FailureClass,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    evaluation_status_with_policy(
+        solver,
+        model,
+        expr,
+        state,
+        bindings,
+        old_state,
+        EvaluationPolicy {
+            classify: class,
+            ..ACTION_EVALUATION
+        },
+    )
+}
+
+/// [`property_evaluation_status`] (property context: `/` and `%` are total)
+/// with `first_partial` classifying `class`.
+pub(crate) fn classified_property_evaluation_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    class: FailureClass,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    evaluation_status_with_policy(
+        solver,
+        model,
+        expr,
+        state,
+        bindings,
+        old_state,
+        EvaluationPolicy {
+            classify: class,
+            ..PROPERTY_EVALUATION
+        },
     )
 }
 
@@ -639,20 +714,14 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             )?;
             let index_value = eval(solver, model, index, state, &mut local, old_state)?;
             let fully_accessible = index_accessible(solver, model, &base_value, &index_value)?;
-            let partial_accessible =
-                partial_operation_index_accessible(solver, &base_value, &index_value)?;
-            sequence_statuses(
+            let access = index_access_status(
                 solver,
-                [
-                    base_status,
-                    index_status,
-                    EvaluationStatus {
-                        fully_defined: fully_accessible,
-                        first_partial: solver.not(&partial_accessible)?,
-                        has_partial_operation: matches!(base_value, SymbolicValue::Seq { .. }),
-                    },
-                ],
-            )
+                &base_value,
+                &index_value,
+                fully_accessible,
+                policy.classify,
+            )?;
+            sequence_statuses(solver, [base_status, index_status, access])
         }
         Expr::Method {
             receiver,
@@ -672,6 +741,7 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 .collect::<Result<Vec<_>, _>>()?;
             let operation_defined =
                 method_definedness(solver, name, &receiver_value, argument_values.as_slice())?;
+            let classified = policy.classify == FailureClass::PartialOperation;
             sequence_statuses(
                 solver,
                 [
@@ -679,12 +749,17 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                     arguments_status,
                     EvaluationStatus {
                         fully_defined: operation_defined.clone(),
-                        first_partial: solver.not(&operation_defined)?,
-                        has_partial_operation: matches!(
-                            (&receiver_value, name.as_str(), argument_values.as_slice()),
-                            (SymbolicValue::Seq { .. }, "head" | "pop", [])
-                                | (SymbolicValue::Seq { .. }, "at", [_])
-                        ),
+                        first_partial: if classified {
+                            solver.not(&operation_defined)?
+                        } else {
+                            solver.bool_value(false)
+                        },
+                        has_partial_operation: classified
+                            && matches!(
+                                (&receiver_value, name.as_str(), argument_values.as_slice()),
+                                (SymbolicValue::Seq { .. }, "head" | "pop", [])
+                                    | (SymbolicValue::Seq { .. }, "at", [_])
+                            ),
                     },
                 ],
             )
@@ -728,7 +803,9 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 let zero = solver.equal(int_term(&right_value)?, &solver.int_value(0))?;
                 if !policy.total_division {
                     parts.push(solver.not(&zero)?);
-                    operation_partial = solver.and(&[operands_defined.clone(), zero])?;
+                    if policy.classify == FailureClass::PartialOperation {
+                        operation_partial = solver.and(&[operands_defined.clone(), zero])?;
+                    }
                 }
                 let overflow = solver.and(&[
                     solver.equal(int_term(&left_value)?, &solver.int_value(i64::MIN))?,
@@ -751,7 +828,9 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 first_partial: solver.or(&[first_partial, operation_partial])?,
                 has_partial_operation: left_status.has_partial_operation
                     || right_status.has_partial_operation
-                    || (matches!(op.as_str(), "/" | "%") && !policy.total_division),
+                    || (matches!(op.as_str(), "/" | "%")
+                        && !policy.total_division
+                        && policy.classify == FailureClass::PartialOperation),
             })
         }
         Expr::Conditional {
@@ -879,6 +958,40 @@ fn ordered_evaluation_status_refs<S: SmtSolver>(
         )?);
     }
     sequence_statuses(solver, statuses)
+}
+
+/// The status of one index access (`base[index]`, read or indexed
+/// assignment) whose completion condition is `fully_accessible`
+/// ([`index_accessible`]), with `first_partial` classifying `class`: a `Seq`
+/// index outside the live prefix is a partial operation, a `Map` index
+/// outside the finite key domain is a key-domain miss.
+pub(crate) fn index_access_status<S: SmtSolver>(
+    solver: &S,
+    base: &SymbolicValue<S::Term>,
+    index: &SymbolicValue<S::Term>,
+    fully_accessible: S::Term,
+    class: FailureClass,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    Ok(match (class, base) {
+        (FailureClass::PartialOperation, _) => {
+            let partial_accessible = partial_operation_index_accessible(solver, base, index)?;
+            EvaluationStatus {
+                fully_defined: fully_accessible,
+                first_partial: solver.not(&partial_accessible)?,
+                has_partial_operation: matches!(base, SymbolicValue::Seq { .. }),
+            }
+        }
+        (FailureClass::KeyDomain, SymbolicValue::Map { .. }) => EvaluationStatus {
+            first_partial: solver.not(&fully_accessible)?,
+            fully_defined: fully_accessible,
+            has_partial_operation: true,
+        },
+        (FailureClass::KeyDomain, _) => EvaluationStatus {
+            fully_defined: fully_accessible,
+            first_partial: solver.bool_value(false),
+            has_partial_operation: false,
+        },
+    })
 }
 
 pub(crate) fn partial_operation_index_accessible<S: SmtSolver>(
@@ -1557,8 +1670,10 @@ pub(crate) fn eval_expected<S: SmtSolver>(
 
 fn eval_pattern<S: SmtSolver>(
     solver: &S,
+    model: &KernelModel,
     value: SymbolicValue<S::Term>,
     pattern: &Pattern,
+    state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     match (value, pattern) {
@@ -1570,7 +1685,20 @@ fn eval_pattern<S: SmtSolver>(
         (SymbolicValue::Option { present, value, .. }, Pattern::Some(name)) => {
             // Never overwrite a name already in scope (#1153); see the concrete
             // evaluator. A new name still reaches the action body.
-            bindings.entry(name.clone()).or_insert(*value);
+            if !bindings.contains_key(name) {
+                // The concrete evaluator binds only when the operand is
+                // present (#1259): where it is absent, a name that also
+                // resolves to a state variable, constant or enum member keeps
+                // that meaning. `check` rejects such a collision, so this only
+                // keeps the engines agreeing on a model that bypassed it.
+                let bound = match lookup(solver, model, name, state, bindings) {
+                    Ok(outer) if outer.ty() == value.ty() => {
+                        ite_value(solver, model, &present, &value, &outer)?
+                    }
+                    _ => *value,
+                };
+                bindings.insert(name.clone(), bound);
+            }
             Ok(bool_value(solver, present))
         }
         _ => Err(VerifyError::new("is pattern requires an Option value")),

@@ -1400,6 +1400,47 @@ mod tests {
         assert_worker_verify_surface_parse_error_matches_native(&request, "surface parse");
     }
 
+    /// #1275: the Worker rejects inline `preserve progress` like native
+    /// `check`/`verify`, instead of reporting the unchecked seam as `refines`.
+    #[test]
+    fn inline_preserve_progress_is_rejected_with_native_parity() {
+        let files = BTreeMap::from([(
+            "policy.fsl".to_owned(),
+            include_str!(
+                "../../fslc/tests/fixtures/inline_implements_preserve_progress/policy.fsl"
+            )
+            .to_owned(),
+        )]);
+        for cmd in ["check", "verify"] {
+            let request = Request {
+                cmd: cmd.to_owned(),
+                source: include_str!(
+                    "../../fslc/tests/fixtures/inline_implements_preserve_progress/req_inline_progress.fsl"
+                )
+                .to_owned(),
+                source_file: "req_inline_progress.fsl".to_owned(),
+                files: files.clone(),
+                options: Options::default(),
+            };
+            let worker = match cmd {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "parse", "{cmd}: {worker:#}");
+            assert!(
+                worker["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("preserve progress")),
+                "{cmd}: {worker:#}"
+            );
+            assert_eq!(
+                worker,
+                native_verify_surface_parse_error(&request, TEST_SOLVER_VERSION),
+                "Worker/native {cmd} envelope diverged for inline preserve progress"
+            );
+        }
+    }
+
     #[test]
     fn check_requirement_trace_error_envelope_matches_native() {
         let request = Request {
@@ -1564,6 +1605,42 @@ mod tests {
         // Control: a guard refusal inside the scope satisfies the forbidden.
         let worker = block_on(check(&request("check", "respond(2)"), TEST_SOLVER_VERSION));
         assert_eq!(worker["result"], "ok", "{worker:#}");
+    }
+
+    /// #1241: a last step whose argument is not of its parameter's kind is a
+    /// malformed step; the Worker reports the native error, not a `bad_call`
+    /// rejection.
+    #[test]
+    fn worker_reports_a_wrong_kind_forbidden_final_step_like_native() {
+        let source = |final_step: &str| {
+            format!(
+                "requirements Respond {{\n  entity Case\n  enum St {{ Waiting, Accepted, Responded }}\n  state {{ cases: Map<Case, St> }}\n  init {{ forall c: Case {{ cases[c] = Waiting }} }}\n  requirement REQ-1 \"respond\" {{\n    action respond(c: Case) {{ requires cases[c] == Accepted  cases[c] = Responded }}\n  }}\n  forbidden FB-1 \"cannot respond before accepting\" {{\n    {final_step}\n    expect rejected\n  }}\n}}\nverify {{ instances Case = 3 }}"
+            )
+        };
+        for command in ["check", "verify"] {
+            let request = Request {
+                cmd: command.to_owned(),
+                source: source("respond(Waiting)"),
+                source_file: "respond.fsl".to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+            };
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "forbidden final step of the wrong kind",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["kind"], "forbidden", "{command}: {worker:#}");
+            assert_eq!(
+                worker["wrong_kind_argument"],
+                json!({"parameter": "c", "value": "Waiting", "type": "Case"}),
+                "{command}: {worker:#}"
+            );
+        }
     }
 
     /// Parity control for #1008 (mutation: the Worker gains a selection

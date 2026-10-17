@@ -386,7 +386,8 @@ effective overridden bounds are echoed back in the JSON envelope's
 
 When the spec has an inline `implements`, the override also propagates into the
 abstract spec — restricted to the entity/number names the abstract itself
-declares — so the refinement check runs at the same world size on both sides
+declares (in a `requirements` abstract a `process` name counts as an entity,
+since lowering declares one for it) — so the refinement check runs at the same world size on both sides
 (refinement is a same-size forward simulation; without this, a shrunken impl
 and a full-size abstract would fail with `map_out_of_bounds`). An impl-only
 carried number (e.g. `Amount`, absent from a business abstract) applies to the
@@ -706,7 +707,10 @@ variable capture instead of inventing internal binder names. See
   that binds `v`; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
-  not a global binding. Ordering is not defined.
+  not a global binding. `v` must be a fresh name: `check` rejects a `v` that is
+  already a state variable, constant, enum member, action parameter, quantifier
+  binder, `let`, or an earlier pattern binding in scope, and asks you to rename
+  it. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
@@ -1111,8 +1115,11 @@ did, so such a forbidden now fails `--forbid unknown`. An OLD final step naming 
 `unknown` / `forbidden_replay_failed`. Since #1213 a NEW final step that is
 enabled and then stops with a runtime violation is `forbidden_relaxed`, and an
 OLD final step or a NEW setup step that violates is `unknown` /
-`forbidden_replay_failed` (known gap #1239: a guard-disabled NEW setup step is
-also reported as preserved; see
+`forbidden_replay_failed`. Since #1239 (breaking) so is a NEW setup step that
+its guard disables: NEW never runs the final step, so the forbidden is not
+preserved (it used to be), and a gate that must catch it lists `unknown`. An
+OLD final step whose argument is not of its parameter's kind (#1241) is
+`unknown` / `forbidden_replay_failed` too (see
 [`DESIGN-semantic-diff.md`](../design/DESIGN-semantic-diff.md), "Forbidden
 replay"). Directional failures include counterexample witnesses.
 Same-named compatible state/actions are mapped automatically; name mismatches
@@ -1171,12 +1178,15 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
-governance `preservation` folds into `check`/`verify` through the same mapping (§13). The fold
+governance `preservation` folds into `check`/`verify`/`scenarios` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
 same exit from the folded verification envelope, and `sweep` reports `sweep_failed` for a true
-failure or `sweep_inconclusive` when some scope has only depth-limited cells. The same
+failure or `sweep_inconclusive` when some scope has only depth-limited cells. `scenarios`
+folds the seam and every preservation into its own envelope the same way (the folded
+`result`, exit 1, with the `implements` / `governance` section attached), whether it
+answered from its own bounded run or fell back to the `verify` envelope. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -1203,7 +1213,9 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `sweep_inconclusive` | No true failure, but at least one `--instances`/`--values` scope has only `reachable_failed` cells with only `insufficient_depth` classifications; those scopes are listed in `sweep.inconclusive_scopes` and `minimal_counterexample` is null | Raise `--depth` for the listed scopes or adjust the sweep bounds, then rerun |
 | `sweep_failed` | A sweep cell has a counterexample or a fail-closed reachability classification | Inspect `sweep.minimal_counterexample` and fix the reported problem |
 | `unknown_cti` | The invariant is not violated but is not inductive | **Read the CTI and add an auxiliary invariant** (§8), or try `--engine explicit` (closure proves without lemmas) |
+| `proved` + `not_covered: ["int_overflow"]` | `--engine induction` proved the properties over unbounded integers; i64 overflow is checked only by the base case to `checked_to_depth`. Present when a proof site uses `+ - * / %`, unary `-`, `abs` or `sum`; absent otherwise. The verdict and exit code are unchanged | Bound the value (range type or a guard) or run `--engine bmc`/`explicit` at a depth that reaches the overflow if it matters |
 | `unknown_cti` / `partial_op` | A state satisfying every proved invariant reaches a partial operation (§6) in a guard, body, property, or reached `ensures` | Guard the operation with a short-circuit `and`/`=>`/`or`/`if`, or add an auxiliary invariant that excludes the state if it is unreachable |
+| `unknown_cti` / `key_domain` | A state satisfying every proved invariant indexes a finite-key `Map` outside its key domain (read or indexed assignment) in a guard, body, property, or reached `ensures`; BMC and explicit report it as an error once it is within depth | Guard the index with a short-circuit `and`/`=>`/`or`/`if` or a `requires`, or add an auxiliary invariant that excludes the state if it is unreachable |
 | `unknown_cti` / `ensures` | An action's reached `ensures` is false on a step between states that satisfy every proved invariant | Fix the body or the `ensures`; if the start state is unreachable, add an auxiliary invariant that excludes it |
 | `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` reports a cut-off direction as `unknown_budget` and fails its gate unconditionally (an `unknown_budget` finding, exit 1); `fslc mutate` reports the mutant as `inconclusive`, outside `kill_rate`, and fails a requested gate |
 | `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
@@ -1814,7 +1826,8 @@ guards/invariants of abs). **Liveness (`leadsTo`) does not propagate** — since
 refine allows stutter, even if impl drops the progress that abs guaranteed with
 `fair`, the result can still be `refines` (the mapping does not require fair
 annotations). To opt into checking the abstract response on the lower layer,
-write `preserve progress` in the refinement mapping:
+write `preserve progress` in a standalone refinement mapping file (an inline
+`implements { }` block rejects it — see §13.2):
 
 ```fsl
 refinement DesignRefinesReq {
@@ -2415,11 +2428,16 @@ verify {
   unscoped `check`/`verify`, or on `fslc chain`. The decision for these three options is
   suppress-with-reason (`docs/design/DESIGN-refinement.md`,
   [#1008](https://github.com/ymm-oss/fsl/issues/1008)). Inside the `implements { }` block you write
-  state `map` entries, `maps auto`, `preserve progress`, and — since #73 —
+  state `map` entries, `maps auto`, and — since #73 —
   `action <impl_act>(<params>) -> <abs_act>(<args>) | stutter`, the same
   correspondence syntax as a separate refinement file's `refinement_action`
   (`docs/design/DESIGN-refinement.md` §1), including an arity change between the impl
-  and abs action. Action↔action correspondence can also still be written as the
+  and abs action. `preserve progress` is not accepted there: the inline seam checks
+  safety refinement only, so a `preserve progress` item inside `implements { }` is a
+  located `kind: "parse"` error (exit 2) in every command that loads the document
+  ([#1275](https://github.com/ymm-oss/fsl/issues/1275)). To check an upper `leadsTo`
+  through the mapping, put the mapping and its `preserve progress` in a standalone
+  refinement file and run `fslc refine`. Action↔action correspondence can also still be written as the
   `maps <abs_act>(...)` clause on the requirement-level action; `maps auto`
   covers same-name kernel-wrapper state/actions, and explicit maps override it.
   An impl action with both a `maps` clause and a matching inline `action ...`
@@ -2628,8 +2646,10 @@ is the same located `error` (exit 2) under `verify` too; a preservation
 refinement that fails internally is `error`/`internal` (exit 3) under both.
 Consumers of the `check`/`verify` envelope read the folded verdict: a
 `fslc chain` spec layer fails, `fslc ledger`, `fslc html`, and `fslc mutate`
-exit 1 from the same baseline, and the browser Worker folds `check` and
-`verify` the same way. This changed exit codes: before 4.11 a failed
+exit 1 from the same baseline (the ledger body also states that verdict and
+lists every preservation with its result, failing ones marked), `fslc
+scenarios` folds the preservations into its own envelope as `verify` does,
+and the browser Worker folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
 preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
 `verify` reported no `governance` section at all (and answered `verified` even
 for a contract `check` rejected). A CI that gated on the exit
@@ -3118,9 +3138,15 @@ DESIGN-*.md).
   The measured before/after of each command, exit status and output, is in
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1.
   The scenario's `rejected_by` (asserted by testgen) is
-  `requires_failed` for a guard refusal and `bad_call` for an argument outside
-  the declared range or enum type of its parameter (an implementation must
-  reject it at its decoding boundary). **Since #1229 (breaking)** an argument
+  `requires_failed` for a guard refusal and `bad_call` for an argument of the
+  parameter's kind outside its declared range type (an implementation must
+  reject it at its decoding boundary). **Since #1241 (breaking)** an argument
+  of another kind — an enum member or a Bool for an `entity`, `number`, or
+  range parameter, an integer or another enum's member for an enum parameter
+  (`respond(Waiting)` with `c: Case`) — is a malformed step, not a `bad_call`:
+  it is a `kind:"forbidden"` error with `wrong_kind_argument` (`{parameter,
+  value, type}`), on every command that runs the forbidden gate. To migrate,
+  write a value of the parameter's type. **Since #1229 (breaking)** an argument
   outside the verification scope of an `entity` (`verify { instances }`, which
   also bounds a `process`) or `number` (`verify { values }`) parameter is not a
   rejection: under `instances Case = 3`, a last step `accept(7)` evaluates no

@@ -68,8 +68,12 @@ rules in this skill.
    externally observable behavior; design speaks in internal mechanics.
 4. Verify each layer before depending on it:
    - `fslc check <file>`
+   - `fslc lint <file>` (no findings)
    - `fslc verify <file> --depth 8`
    - `fslc verify <file> --engine induction`
+   Read the results with `../fsl-verify/SKILL.md`: several outcomes exit 0
+   without passing (warnings, `not_evaluated` seams, `diff` findings, `mutate`
+   survivors).
 5. Connect layers downward. Each handoff is a **refinement seam (a contract), not a
    plain baton pass** — the seam itself is verified, and a green chain is exactly as
    strong as the soundness of these seams:
@@ -89,10 +93,10 @@ rules in this skill.
      layer granularity as the implementation** (design `spec` for design-aligned
      code). From upper layers, reuse **`forbidden` negatives only** — they stay
      sound under refinement; upper **positive** scenarios can falsely fail a
-     sound refinement (see `../fsl/references/impl.md` §9 and
-     `examples/refinement_chain/{top,mid}.fsl`).
+     sound refinement (see `../fsl/references/impl.md` §9).
 6. Report proof categories separately. Never collapse "model is verified",
    "design refines requirements", and "implementation conforms" into one claim.
+   Use the completion report format in `../fsl-verify/SKILL.md`.
 
 ## Stage Gates
 
@@ -106,8 +110,9 @@ rules in this skill.
 
 For every layer, also run:
 
-- `fslc verify <file> --strict-tags` (traceability — untagged declarations and
-  unreferenced requirement IDs)
+- `fslc verify <file> --strict-tags --requirements ids.txt` (traceability —
+  untagged declarations and unreferenced requirement IDs; `ids.txt` holds one
+  requirement ID per line, not a comma list)
 - `fslc lint <file>` (ID form — exits 1 on a non-canonical `"REQ-1: text"`
   string tag, which `--strict-tags` accepts silently, and on an ID outside the
   active policy. The canonical link is `@requirement("REQ-SCOPE-001", "text")`,

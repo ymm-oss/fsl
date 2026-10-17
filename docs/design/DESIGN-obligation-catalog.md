@@ -173,8 +173,10 @@ key-domain miss. The P1-c fold must keep that order.
   engine discharges that row; the catalog lists what the model owes, and how
   each engine covers a row is the per-engine support table of P1-b.
 - `TotalDefined` is split into `NoOverflow` and `KeyInDomain` because engines
-  support them differently: `--engine induction` asks neither today, and #1221
-  is the key-domain half.
+  support them differently: `--engine induction` asks `KeyInDomain` in its
+  step obligation (#1221, [`DESIGN-induction.md`](DESIGN-induction.md)
+  §2.6.1, only at sites whose row is not statically vacuous) and does not ask
+  `NoOverflow` (#1263).
 - `init` owes the three definedness rows at `Init`, generated as for an action
   body: its statements are evaluated in action context, so `/` and `%` are
   partial operations. Every engine reports an `init` that reaches a failing

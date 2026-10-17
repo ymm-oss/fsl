@@ -317,6 +317,9 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                     ForbiddenFailure::OutsideScope(message) => format!(
                         "禁止フローの最後の step の引数が検証の範囲の外にあり、ガードを試していない（拒否ではない。{message}）"
                     ),
+                    ForbiddenFailure::WrongKind(message) => format!(
+                        "禁止フローの最後の step の引数が宣言した型の値ではなく、step が書き誤りでガードを試していない（拒否ではない。{message}）"
+                    ),
                     ForbiddenFailure::Setup(step) => {
                         format!("禁止フローの前提 step {step} が実行できない（trace が壊れている）")
                     }
@@ -419,6 +422,10 @@ enum ForbiddenFailure<'a> {
     /// An argument of the final step is outside an `entity` / `number`
     /// verify scope, so no guard decided it (#1229).
     OutsideScope(&'a str),
+    /// An argument of the final step is not of its parameter's kind (a Bool
+    /// or an enum member for an integer, another enum), so the step is
+    /// malformed and no guard decided it (#1241).
+    WrongKind(&'a str),
     /// A setup step is not enabled or not ok (`forbidden_setup`).
     Setup(String),
     Other,
@@ -437,6 +444,9 @@ fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
         Some("forbidden") if raw.get("accepted_step").is_some() => ForbiddenFailure::Accepted,
         Some("forbidden") if raw.get("out_of_scope_argument").is_some() => {
             ForbiddenFailure::OutsideScope(raw.get("message").and_then(Value::as_str).unwrap_or(""))
+        }
+        Some("forbidden") if raw.get("wrong_kind_argument").is_some() => {
+            ForbiddenFailure::WrongKind(raw.get("message").and_then(Value::as_str).unwrap_or(""))
         }
         Some("forbidden") => raw
             .get("message")
@@ -471,6 +481,10 @@ fn translate(finding: &Finding) -> String {
             ),
             ForbiddenFailure::OutsideScope(_) => format!(
                 "禁止フロー『{}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。",
+                finding.name
+            ),
+            ForbiddenFailure::WrongKind(_) => format!(
+                "禁止フロー『{}』の最後の手順の引数が宣言した型の値ではなく（種類が違う）、ガードを試していないので禁止の証拠にならない。引数をその型の値に直す。",
                 finding.name
             ),
             ForbiddenFailure::Setup(_) => format!(
@@ -528,6 +542,7 @@ fn next_action(finding: &Finding) -> String {
                 ForbiddenFailure::OutsideScope(_) => {
                     "検証の範囲を広げる / step の引数を範囲内に直す"
                 }
+                ForbiddenFailure::WrongKind(_) => "step の引数を宣言した型の値に直す",
                 ForbiddenFailure::Setup(_) => "禁止フローの前提手順を修正",
                 ForbiddenFailure::Other => "付録の生 JSON を確認",
             },
@@ -857,6 +872,61 @@ fn guarantee_line(verification: &Value) -> String {
     )
 }
 
+/// The verdict and preservation results of a governance document (#1316).
+///
+/// Since #1303 the first non-`refines` preservation folds into the
+/// verification `result` and the command's exit, so the body states that
+/// verdict and every preservation (declaration order) with its own result.
+/// Only `refines` passes, the same predicate the fold uses; any other value is
+/// marked failing. Rendered only when the verification envelope carries a
+/// `governance` section, so no other ledger changes.
+fn render_governance_section(output: &mut String, verification: &Value, governance: &Value) {
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .map_or_else(|| "—".to_owned(), escape)
+    };
+    let _ = write!(
+        output,
+        "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり（`violated` は `impl_violated`）、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
+        text(verification.get("result"))
+    );
+    for preservation in governance
+        .get("preservations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let preserve = preservation
+            .get("preserve")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(|control| format!("`{}`", escape(control)))
+            .collect::<Vec<_>>();
+        let result = preservation.get("result").and_then(Value::as_str);
+        let mark = if result == Some("refines") {
+            "🟢"
+        } else {
+            "🔴"
+        };
+        let _ = writeln!(
+            output,
+            "| `{}` | `{}` → `{}` | {} | {mark} `{}` |",
+            text(preservation.get("name")),
+            text(preservation.get("before")),
+            text(preservation.get("after")),
+            if preserve.is_empty() {
+                "—".to_owned()
+            } else {
+                preserve.join(", ")
+            },
+            text(preservation.get("result")),
+        );
+    }
+}
+
 fn approval_entry<'a>(approvals: Option<&'a Value>, requirement_id: &str) -> Option<&'a Value> {
     approvals?.get("requirements")?.get(requirement_id)
 }
@@ -1008,6 +1078,9 @@ pub fn render_ledger_with_approvals(
         output.push_str(
             "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n",
         );
+    }
+    if let Some(governance) = verification.get("governance") {
+        render_governance_section(&mut output, verification, governance);
     }
     if !undecided.is_empty() {
         output.push_str(
