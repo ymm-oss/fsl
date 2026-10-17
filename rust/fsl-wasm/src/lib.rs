@@ -83,7 +83,8 @@ impl FileResolver for MemoryResolver {
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: fsl_core::CoreErrorKind::Semantics,
+            diagnostic_code: None,
         })
     }
 }
@@ -129,7 +130,7 @@ fn verifier_error(solver_version: &str, failure: &impl std::fmt::Display) -> Val
         envelope(solver_version),
         &failure.to_string(),
         None,
-        false,
+        &fslc_rust::verification_output::DiagnosticClass::Message,
         None,
         None,
     )
@@ -165,7 +166,7 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
             envelope(solver_version),
             &diagnostic.message,
             diagnostic.loc,
-            diagnostic.name_resolution,
+            &diagnostic.class,
             diagnostic.diagnostic_code,
             diagnostic.hint.as_deref(),
         )
@@ -425,7 +426,7 @@ async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
             envelope(solver_version),
             &failure,
             None,
-            false,
+            &fslc_rust::verification_output::DiagnosticClass::Message,
             None,
             None,
         );
@@ -1049,7 +1050,7 @@ mod tests {
             envelope(solver_version),
             &diagnostic.message,
             diagnostic.located.then(|| diagnostic.span.python_loc()),
-            diagnostic.kind == "name",
+            &diagnostic.class,
             Some(diagnostic.code.as_str()).filter(|code| {
                 *code != "FSL-SEMANTIC" && *code != "FSL-TYPE" && *code != "FSL-NAME"
             }),
@@ -2054,7 +2055,7 @@ mod tests {
                 envelope(TEST_SOLVER_VERSION),
                 message,
                 None,
-                false,
+                &fslc_rust::verification_output::DiagnosticClass::Message,
                 None,
                 None,
             );

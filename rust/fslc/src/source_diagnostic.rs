@@ -2,6 +2,8 @@
 
 use fsl_syntax::{CanonicalRewriteKind, SourcePos, Span, SurfaceDocument};
 
+use crate::verification_output::DiagnosticClass;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceDiagnostic {
     pub kind: &'static str,
@@ -16,6 +18,10 @@ pub struct SourceDiagnostic {
     pub located: bool,
     pub hint: Option<String>,
     pub quick_fix: Option<fsl_core::DiagnosticEdit>,
+    /// The typed classification [`Self::kind`] was derived from, so a surface
+    /// that renders this diagnostic again classifies it from the type rather
+    /// than from [`Self::message`] (issue 1167).
+    pub class: DiagnosticClass,
 }
 
 /// Run the authoritative syntax and typed-model gates and return editor diagnostics.
@@ -52,6 +58,7 @@ pub fn diagnostics_with_model(
                     located: true,
                     hint: None,
                     quick_fix: None,
+                    class: DiagnosticClass::Message,
                 }],
                 None,
             ),
@@ -69,6 +76,7 @@ pub fn diagnostics_with_model(
                     located: true,
                     hint: None,
                     quick_fix: None,
+                    class: DiagnosticClass::Message,
                 }],
                 None,
             );
@@ -93,11 +101,8 @@ pub fn diagnostics_with_model(
 fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnostic {
     let diagnostic = crate::spec_load::SemanticDiagnostic::from_core_error(error);
     SourceDiagnostic {
-        kind: crate::verification_output::diagnostic_kind(
-            &diagnostic.message,
-            diagnostic.name_resolution,
-        ),
-        code: "FSL-SEMANTIC".to_owned(),
+        kind: crate::verification_output::diagnostic_kind(&diagnostic.message, &diagnostic.class),
+        code: error.diagnostic_code.unwrap_or("FSL-SEMANTIC").to_owned(),
         message: diagnostic.message,
         span: error
             .origin
@@ -110,12 +115,14 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
         located: diagnostic.loc.is_some(),
         hint: None,
         quick_fix: None,
+        class: diagnostic.class,
     }
 }
 
 fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnostic {
     let message = error.to_string();
-    let kind = crate::verification_output::diagnostic_kind(&message, error.name_resolution);
+    let class = DiagnosticClass::model(error.name_resolution);
+    let kind = crate::verification_output::diagnostic_kind(&message, &class);
     let located = error
         .span
         .or_else(|| {
@@ -141,6 +148,7 @@ fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnos
         located: located.is_some(),
         hint: error.hint.as_deref().cloned(),
         quick_fix: error.quick_fix.as_deref().cloned(),
+        class,
     }
 }
 
@@ -181,6 +189,7 @@ fn migration_diagnostics(source: &str) -> Vec<SourceDiagnostic> {
                         located: true,
                         hint: None,
                         quick_fix: None,
+                        class: DiagnosticClass::Message,
                     }
                 })
                 .collect()

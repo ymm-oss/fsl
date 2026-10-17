@@ -593,7 +593,7 @@ pub struct ModelError {
     /// that `docs/design/DESIGN-v1.md` §7.2 guarantees (issue 555).
     pub span: Option<Span>,
     /// Whether this is a name-resolution failure. See
-    /// [`crate::CoreError::name_resolution`] (issue 565).
+    /// [`crate::CoreErrorKind::NameResolution`] (issue 565).
     pub name_resolution: bool,
     /// Stable machine-readable classification when the frontend knows it.
     pub diagnostic_code: Option<&'static str>,

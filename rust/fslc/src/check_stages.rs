@@ -92,7 +92,7 @@ pub fn run_check_stages(
                 envelope(),
                 &diagnostic.message,
                 diagnostic.located.then(|| diagnostic.span.python_loc()),
-                diagnostic.kind == "name",
+                &diagnostic.class,
                 Some(diagnostic.code.as_str()).filter(|code| {
                     *code != "FSL-SEMANTIC" && *code != "FSL-TYPE" && *code != "FSL-NAME"
                 }),
@@ -211,5 +211,12 @@ pub fn agent_error_output(mut output: Map<String, Value>, error: &fsl_tools::Age
 }
 
 fn semantic_error(output: Map<String, Value>, message: &str) -> Value {
-    render_semantic_error(output, message, None, false, None, None)
+    render_semantic_error(
+        output,
+        message,
+        None,
+        &crate::verification_output::DiagnosticClass::Message,
+        None,
+        None,
+    )
 }
