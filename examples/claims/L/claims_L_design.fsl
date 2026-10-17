@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Insurance claim design layer (L tier) — two-phase payment; refinement mapping
+// is in claims_L_design_refines_requirements.fsl (keeps check RSS small).
+requirements InsuranceClaimDesignL {
+  type Claim = 0..1
+  type Amount = 0..3
+  type Day = 0..3
+  type LedgerCount = 0..2
+  const LAPSE_AFTER = 3
+
+  enum DSt {
+    DIntake, DAssessment, DReturned, DReassessment,
+    DApproved, DPaySubmitted, DPayConfirmed,
+    DWithdrawn, DLapsed
+  }
+
+  struct DClaim { st: DSt, amount: Amount, days: Day }
+
+  state {
+    d: Map<Claim, DClaim>,
+    paid_ghost: LedgerCount,
+    posted_ghost: LedgerCount,
+  }
+
+  init {
+    forall c: Claim { d[c] = DClaim { st: DIntake, amount: 0, days: 0 } }
+    paid_ghost = 0
+    posted_ghost = 0
+  }
+
+  fair action receive(c: Claim, a: Amount) {
+    requires d[c].st == DIntake
+    requires a > 0
+    d[c] = DClaim { st: DAssessment, amount: a, days: d[c].days }
+  }
+
+  fair action assess(c: Claim) {
+    requires d[c].st == DAssessment or d[c].st == DReassessment
+    d[c].st = DApproved
+  }
+
+  fair action return_to_claimant(c: Claim) {
+    requires d[c].st == DAssessment or d[c].st == DReassessment
+    d[c].st = DReturned
+  }
+
+  fair action resubmit(c: Claim) {
+    requires d[c].st == DReturned
+    d[c].st = DReassessment
+  }
+
+  fair action pay_submit(c: Claim) {
+    requires d[c].st == DApproved
+    requires paid_ghost < 2
+    d[c].st = DPaySubmitted
+    paid_ghost = paid_ghost + 1
+  }
+
+  fair action pay_confirm(c: Claim) {
+    requires d[c].st == DPaySubmitted
+    requires posted_ghost < 2
+    d[c].st = DPayConfirmed
+    posted_ghost = posted_ghost + 1
+  }
+
+  fair action withdraw(c: Claim) {
+    requires d[c].st == DIntake or d[c].st == DAssessment
+      or d[c].st == DReturned or d[c].st == DReassessment
+    d[c].st = DWithdrawn
+  }
+
+  fair action advance_day(c: Claim) {
+    requires d[c].st != DPaySubmitted and d[c].st != DPayConfirmed
+      and d[c].st != DWithdrawn and d[c].st != DLapsed
+    requires d[c].days < LAPSE_AFTER
+    d[c].days = d[c].days + 1
+  }
+
+  fair action lapse(c: Claim) {
+    requires d[c].st == DIntake or d[c].st == DAssessment
+      or d[c].st == DReturned or d[c].st == DReassessment
+    requires d[c].days >= LAPSE_AFTER
+    d[c].st = DLapsed
+  }
+
+  invariant PaidGhostConsistent {
+    paid_ghost == count(c: Claim where d[c].st == DPaySubmitted or d[c].st == DPayConfirmed)
+  }
+
+  invariant PostedGhostConsistent {
+    posted_ghost == count(c: Claim where d[c].st == DPayConfirmed)
+  }
+
+  acceptance AC-1 "Two-phase payment through ledger posting" {
+    receive(0, 1)
+    assess(0)
+    pay_submit(0)
+    pay_confirm(0)
+    expect d[0].st == DPayConfirmed and posted_ghost == 1
+  }
+}
