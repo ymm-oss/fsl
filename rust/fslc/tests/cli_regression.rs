@@ -1087,7 +1087,7 @@ fn strict_tags_check_reports_empty_requirement_block_without_requirements_flag()
 
 /// #1020 case B: the same collection must run from `fslc verify`, which parses
 /// `--strict-tags`/`--requirements` through an independent option-parsing path
-/// (`parse_verify_options`, not `check`'s inline loop). Case A alone would still
+/// (`CliVerifyOptions::parse`, not `CheckOptions::parse`). Case A alone would still
 /// pass an implementation that only wires the collection into `check`; this proves
 /// the fix is not flag- or subcommand-dependent.
 #[test]

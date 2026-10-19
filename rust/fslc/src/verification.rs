@@ -1763,7 +1763,7 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
         "values": options.scope.values,
         "strict_tags": options.strict_tags,
         "lemmas": options.lemmas,
-        "edition": options.edition,
+        "edition": options.shared.edition,
     })
 }
 

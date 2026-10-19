@@ -38,7 +38,10 @@ mod verification;
 
 use causal::{causal_command, run_causal_check};
 use cli_options::{
-    CliVerifyOptions, CommandArgs, DEFAULT_EXPLICIT_BUDGET, ScopeBounds, required_option_value,
+    AnalyzeOptions, ChainOptions, CheckOptions, CliVerifyOptions, CommandArgs, CompatCheckOptions,
+    ConformanceOptions, DEFAULT_EXPLICIT_BUDGET, DiffOptions, KernelOptions, MutationFamilyOptions,
+    RefineOptions, ReplayOptions, ReportOptions, ScopeBounds, SharedOptions, SweepOptions,
+    TestplanOptions, VerifyCommandOptions, parse_edition, parse_sweep_range, required_option_value,
 };
 use cli_output::{
     analysis_display_path, display_binding, envelope, error_output, located_error_output,
@@ -68,121 +71,6 @@ use verification::{
 };
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
-
-/// `mutate`'s built-in mutant cap when `--max-mutants` is omitted. Must equal
-/// the `max_mutants` default the published CLI contract advertises
-/// (`rust/fslc/cli-contract.json`), which `docs/design/DESIGN-mutate.md`,
-/// `skills/fsl/references/commands.md`, and the frozen `src/fslc/mutate.py`
-/// (`DEFAULT_MAX_MUTANTS`) all fix at 200: a smaller runtime default silently
-/// evaluates a different mutant set and reports a different kill rate
-/// (issue #524).
-const DEFAULT_MAX_MUTANTS: usize = 200;
-
-fn parse_instance_override(raw: &str) -> Result<(String, i64), String> {
-    let (name, value) = raw
-        .split_once('=')
-        .ok_or_else(|| format!("invalid --instances value '{raw}': expected NAME=N"))?;
-    let value = value
-        .parse::<i64>()
-        .map_err(|_| format!("invalid --instances value '{raw}': N must be an integer"))?;
-    if name.trim().is_empty() || value < 1 {
-        return Err(format!(
-            "invalid --instances value '{raw}': expected a non-empty NAME and N >= 1"
-        ));
-    }
-    Ok((name.trim().to_owned(), value))
-}
-
-fn parse_verify_options(
-    args: &mut CommandArgs<impl Iterator<Item = String>>,
-) -> Result<CliVerifyOptions, String> {
-    let mut options = CliVerifyOptions::default();
-    while let Some(option) = args.next() {
-        match option.as_str() {
-            "--depth" => {
-                options.depth = required_option_value(args, "--depth")?
-                    .parse()
-                    .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-            }
-            "--deadlock" => {
-                options.deadlock = required_option_value(args, "--deadlock")?;
-                if !matches!(options.deadlock.as_str(), "warn" | "error" | "ignore") {
-                    return Err("--deadlock must be warn, error, or ignore".to_owned());
-                }
-            }
-            "--engine" => {
-                options.engine = required_option_value(args, "--engine")?;
-                if !matches!(
-                    options.engine.as_str(),
-                    "bmc" | "induction" | "explicit" | "auto"
-                ) {
-                    return Err("--engine must be bmc, induction, explicit, or auto".to_owned());
-                }
-            }
-            "--explicit-budget" => {
-                options.explicit_budget = required_option_value(args, "--explicit-budget")?
-                    .parse()
-                    .map_err(|_| "--explicit-budget must be a positive integer".to_owned())?;
-                if options.explicit_budget == 0 {
-                    return Err("--explicit-budget must be a positive integer".to_owned());
-                }
-            }
-            "--k" => {
-                options.k_ind = required_option_value(args, "--k")?
-                    .parse()
-                    .map_err(|_| "--k must be a positive integer".to_owned())?;
-                if options.k_ind == 0 {
-                    return Err("--k must be a positive integer".to_owned());
-                }
-            }
-            "--vacuity" => {
-                options.vacuity = required_option_value(args, "--vacuity")?;
-                if !matches!(options.vacuity.as_str(), "warn" | "error" | "ignore") {
-                    return Err("--vacuity must be warn, error, or ignore".to_owned());
-                }
-            }
-            "--property" => options.property = Some(required_option_value(args, "--property")?),
-            "--exclude-property" => options
-                .exclude_properties
-                .push(required_option_value(args, "--exclude-property")?),
-            "--instances" => {
-                let raw = required_option_value(args, "--instances")?;
-                let (name, value) = parse_instance_override(&raw)?;
-                options.scope.instances.insert(name, value);
-            }
-            "--values" => {
-                let raw = required_option_value(args, "--values")?;
-                let (name, value) = parse_sweep_range(&raw, "--values")?;
-                options.scope.values.insert(name, value);
-            }
-            "--strict-tags" => options.strict_tags = true,
-            "--requirements" => {
-                options.requirements = Some(PathBuf::from(required_option_value(
-                    args,
-                    "--requirements",
-                )?));
-            }
-            "--no-cache" => options.use_cache = false,
-            "--lemma" => options.lemmas.push(required_option_value(args, "--lemma")?),
-            "--from-state" => {
-                options.from_state =
-                    Some(PathBuf::from(required_option_value(args, "--from-state")?));
-            }
-            "--edition" => options.edition = parse_edition(args)?,
-            _ => args.positional(option, |option| format!("unknown verify option '{option}'"))?,
-        }
-    }
-    Ok(options)
-}
-
-fn parse_edition(args: &mut impl Iterator<Item = String>) -> Result<String, String> {
-    let edition = required_option_value(args, "--edition")?;
-    if matches!(edition.as_str(), "current" | "next") {
-        Ok(edition)
-    } else {
-        Err("--edition must be current or next".to_owned())
-    }
-}
 
 fn parse_specialized_verify_options(
     args: &mut CommandArgs<impl Iterator<Item = String>>,
@@ -994,7 +882,7 @@ fn print_cli_metadata() -> bool {
     true
 }
 
-#[allow(clippy::too_many_lines, clippy::while_let_on_iterator)]
+#[allow(clippy::too_many_lines)]
 fn command() -> Result<(Value, i32), String> {
     let mut args = std::env::args().skip(1);
     let command = args
@@ -1006,29 +894,8 @@ fn command() -> Result<(Value, i32), String> {
             std::process::exit(0);
         }
         "check" => {
-            let arguments = args.collect::<Vec<_>>();
-            let mut args = CommandArgs::new(arguments.iter().cloned());
-            let mut strict_tags = false;
-            let mut requirements = None;
-            let mut edition = "current".to_owned();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--strict-tags" => strict_tags = true,
-                    "--requirements" => {
-                        requirements = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--requirements",
-                        )?));
-                    }
-                    "--edition" => edition = parse_edition(&mut args)?,
-                    _ => args
-                        .positional(option, |option| format!("unknown check option '{option}'"))?,
-                }
-            }
-            let display_path = args.single_positional(
-                || "usage: fslc check SPEC [options]".to_owned(),
-                |argument| format!("unknown check option '{argument}'"),
-            )?;
+            let options = CheckOptions::parse(args)?;
+            let display_path = options.display_path;
             let literate_guard = match literate_access("check", &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
@@ -1043,7 +910,7 @@ fn command() -> Result<(Value, i32), String> {
             // Standalone causal models are never kernel specs; route them to
             // the causal checker instead of failing dialect dispatch.
             if fsl_syntax::is_causal_source(&source) {
-                if arguments.len() > 1 {
+                if options.argument_count > 1 {
                     return Err(
                         "fslc check on a causal model accepts no options; use fslc causal check"
                             .to_owned(),
@@ -1055,9 +922,9 @@ fn command() -> Result<(Value, i32), String> {
                 path,
                 &display_path,
                 &source,
-                strict_tags,
-                requirements.as_deref(),
-                &edition,
+                options.strict_tags,
+                options.requirements.as_deref(),
+                &options.shared.edition,
             )))
         }
         "lint" => {
@@ -1079,118 +946,49 @@ fn command() -> Result<(Value, i32), String> {
             Ok(run_migrate(&options))
         }
         "kernel" => {
-            let mut args = CommandArgs::new(args);
-            let mut version = fsl_core::PublicKernelVersion::V1;
-            while let Some(argument) = args.next() {
-                match argument.as_str() {
-                    "--kernel-version" => {
-                        let value = required_option_value(&mut args, "--kernel-version")?;
-                        version = match fsl_core::PublicKernelVersion::parse(&value) {
-                            Ok(version) => version,
-                            Err(error) => {
-                                return Ok((semantic_error_output(&error.to_string()), 2));
-                            }
-                        };
-                    }
-                    _ => args.positional(argument, |option| {
-                        format!("unknown kernel option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc kernel SPEC [--kernel-version MAJOR]".to_owned(),
-                |value| format!("unexpected kernel argument '{value}'"),
-            )?;
-            if let Err(early_return) = literate_access("kernel", &path) {
+            let options = match KernelOptions::parse(args)? {
+                Ok(options) => options,
+                Err(early_return) => return Ok(early_return),
+            };
+            if let Err(early_return) = literate_access("kernel", &options.path) {
                 return Ok(early_return);
             }
-            Ok(run_kernel_contract(&path, version))
+            Ok(run_kernel_contract(&options.path, options.version))
         }
         "conformance" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 4_usize;
-            let mut version = fsl_core::PublicKernelVersion::V1;
-            while let Some(argument) = args.next() {
-                match argument.as_str() {
-                    "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    "--kernel-version" => {
-                        let value = required_option_value(&mut args, "--kernel-version")?;
-                        version = match fsl_core::PublicKernelVersion::parse(&value) {
-                            Ok(version) => version,
-                            Err(error) => {
-                                return Ok((semantic_error_output(&error.to_string()), 2));
-                            }
-                        };
-                    }
-                    _ => args.positional(argument, |option| {
-                        format!("unknown conformance option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc conformance SPEC [--depth N] [--kernel-version MAJOR]".to_owned(),
-                |value| format!("unexpected conformance argument '{value}'"),
-            )?;
-            if let Err(early_return) = literate_access("conformance", &path) {
+            let options = match ConformanceOptions::parse(args)? {
+                Ok(options) => options,
+                Err(early_return) => return Ok(early_return),
+            };
+            if let Err(early_return) = literate_access("conformance", &options.path) {
                 return Ok(early_return);
             }
-            Ok(run_conformance(&path, depth, version))
+            Ok(run_conformance(
+                &options.path,
+                options.depth,
+                options.version,
+            ))
         }
         "testplan" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 4_usize;
-            while let Some(argument) = args.next() {
-                match argument.as_str() {
-                    "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    _ => args.positional(argument, |option| {
-                        format!("unknown testplan option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc testplan SPEC [--depth N]".to_owned(),
-                |value| format!("unexpected testplan argument '{value}'"),
-            )?;
-            if let Err(early_return) = literate_access("testplan", &path) {
+            let options = TestplanOptions::parse(args)?;
+            if let Err(early_return) = literate_access("testplan", &options.path) {
                 return Ok(early_return);
             }
-            Ok(run_testplan(&path, depth))
+            Ok(run_testplan(&options.path, options.depth))
         }
         "counterexample" => counterexample_command(args),
         "approval" => approval_command(args),
         "document" => document_command(args),
         "db" => db_command(args),
         "compat" => {
-            if args.next().as_deref() != Some("check") {
-                return Err("usage: fslc compat check DBSYSTEM [--include-ai]".to_owned());
-            }
-            let mut args = CommandArgs::new(args);
-            let mut include_ai = false;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--include-ai" => include_ai = true,
-                    _ => args.positional(option, |option| {
-                        format!("unknown compat check option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "compat check requires a dbsystem".to_owned(),
-                |option| format!("unknown compat check option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access("compat check", &path) {
+            let options = CompatCheckOptions::parse(args)?;
+            if let Err(early_return) = literate_access("compat check", &options.path) {
                 return Ok(early_return);
             }
-            let (mut result, status) = run_db_check(&path, 8, "warn", "bmc");
-            if include_ai && let Value::Object(result) = &mut result {
+            let (mut result, status) = run_db_check(&options.path, 8, "warn", "bmc");
+            if options.include_ai
+                && let Value::Object(result) = &mut result
+            {
                 result.insert(
                     "compat".to_owned(),
                     json!({"include_ai":true,"source":"dbsystem artifact capability model"}),
@@ -1202,94 +1000,36 @@ fn command() -> Result<(Value, i32), String> {
         "causal" => causal_command(args),
         "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            let mut readable = false;
-            let mut max_mutants = DEFAULT_MAX_MUTANTS;
-            let mut by_requirement = false;
-            let mut oracle_attribution = false;
-            let mut typescript_only = false;
-            let mut external_mutants = None;
-            let mut gate = MutationGate::default();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    // Issue #1237: the opt-in mutation gate belongs to `mutate`
-                    // alone; the other two commands sharing this loop reject it
-                    // instead of silently accepting a flag that cannot apply.
-                    "--fail-on-survivors" | "--min-kill-rate" if command != "mutate" => {
-                        return Err(format!("unknown {command} option '{option}'"));
-                    }
-                    "--fail-on-survivors" => gate.fail_on_survivors = true,
-                    "--min-kill-rate" => {
-                        let rate = args
-                            .next()
-                            .ok_or_else(|| "--min-kill-rate requires a value".to_owned())?
-                            .parse::<f64>()
-                            .ok()
-                            .filter(|rate| rate.is_finite() && (0.0..=1.0).contains(rate))
-                            .ok_or_else(|| {
-                                "--min-kill-rate must be a number between 0 and 1".to_owned()
-                            })?;
-                        gate.min_kill_rate = Some(rate);
-                    }
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    "--readable" => readable = true,
-                    "--max-mutants" => {
-                        max_mutants = args
-                            .next()
-                            .ok_or_else(|| "--max-mutants requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--max-mutants must be an integer".to_owned())?;
-                    }
-                    "--by-requirement" => by_requirement = true,
-                    "--oracle-attribution" => oracle_attribution = true,
-                    "--from" => {
-                        external_mutants = Some(PathBuf::from(
-                            args.next()
-                                .ok_or_else(|| "--from requires a JSONL path".to_owned())?,
-                        ));
-                    }
-                    "--ts" => typescript_only = true,
-                    _ => args.positional(option, |option| {
-                        format!("unknown {command} option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || format!("fslc {command} requires a spec"),
-                |option| format!("unknown {command} option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access(&command, &path) {
+            let options = MutationFamilyOptions::parse(&command, args)?;
+            let path = &options.path;
+            if let Err(early_return) = literate_access(&command, path) {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
-                "explain" => run_explain(&path, depth, readable),
+                "explain" => run_explain(path, options.depth, options.readable),
                 "mutate" => run_mutate(
-                    &path,
-                    depth,
-                    max_mutants,
-                    by_requirement,
-                    oracle_attribution,
-                    external_mutants.as_deref(),
-                    gate,
+                    path,
+                    options.depth,
+                    options.max_mutants,
+                    options.by_requirement,
+                    options.oracle_attribution,
+                    options.external_mutants.as_deref(),
+                    MutationGate {
+                        fail_on_survivors: options.fail_on_survivors,
+                        min_kill_rate: options.min_kill_rate,
+                    },
                 ),
-                "typestate" => run_typestate(&path),
+                "typestate" => run_typestate(path),
                 _ => unreachable!(),
             };
-            if readable
+            if options.readable
                 && raw_delivery_allowed(&result)
                 && let Some(text) = result.0.get("readable").and_then(Value::as_str)
             {
                 println!("{text}");
                 std::process::exit(result.1);
             }
-            if typescript_only
+            if options.typescript_only
                 && raw_delivery_allowed(&result)
                 && let Some(entities) = result.0.get("entities").and_then(Value::as_array)
             {
@@ -1303,118 +1043,46 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "testgen" | "html" | "ledger" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            let mut output = None;
-            let mut target = "pytest".to_owned();
-            let mut unwired = fsl_tools::UnwiredAdapter::Fail;
-            let mut engine = "bmc".to_owned();
-            let mut impl_log = None;
-            let mut evidence = Vec::new();
-            let mut approval_records = Vec::new();
-            let mut trust_keys = Vec::new();
-            let mut deadlock = if command == "ledger" {
-                "ignore".to_owned()
-            } else {
-                "warn".to_owned()
-            };
-            let mut strict = false;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    "-o" | "--output" => {
-                        output = Some(PathBuf::from(
-                            args.next()
-                                .ok_or_else(|| "--output requires a path".to_owned())?,
-                        ));
-                    }
-                    "--target" => {
-                        target = args
-                            .next()
-                            .ok_or_else(|| "--target requires a value".to_owned())?;
-                    }
-                    "--engine" => {
-                        engine = args
-                            .next()
-                            .ok_or_else(|| "--engine requires a value".to_owned())?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
-                            return Err("--engine must be bmc or induction".to_owned());
-                        }
-                    }
-                    "--deadlock" => {
-                        deadlock = args
-                            .next()
-                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--deadlock must be warn, error, or ignore".to_owned());
-                        }
-                    }
-                    "--impl-log" if command == "ledger" => {
-                        impl_log = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--impl-log",
-                        )?));
-                    }
-                    "--evidence" if command == "ledger" => evidence.push(PathBuf::from(
-                        required_option_value(&mut args, "--evidence")?,
-                    )),
-                    "--approval" if command == "ledger" => approval_records.push(PathBuf::from(
-                        required_option_value(&mut args, "--approval")?,
-                    )),
-                    "--trust-key" if command == "ledger" => trust_keys.push(PathBuf::from(
-                        required_option_value(&mut args, "--trust-key")?,
-                    )),
-                    "--strict" => strict = true,
-                    "--allow-unwired" if command == "testgen" => {
-                        unwired = fsl_tools::UnwiredAdapter::Skip;
-                    }
-                    _ => args.positional(option, |option| {
-                        format!("unknown {command} option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || format!("fslc {command} requires a spec"),
-                |option| format!("unknown {command} option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access(&command, &path) {
+            let options = ReportOptions::parse(&command, args)?;
+            let path = &options.path;
+            if let Err(early_return) = literate_access(&command, path) {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
                 "testgen" => run_testgen(
-                    &path,
-                    depth,
+                    path,
+                    options.depth,
                     TestgenTarget {
-                        name: &target,
-                        unwired,
+                        name: &options.target,
+                        unwired: options.unwired,
                     },
-                    &deadlock,
-                    strict,
-                    output.as_deref(),
+                    &options.deadlock,
+                    options.strict,
+                    options.output.as_deref(),
                 ),
-                "html" => run_html_report(&path, depth, &deadlock, &engine, output.as_deref()),
+                "html" => run_html_report(
+                    path,
+                    options.depth,
+                    &options.deadlock,
+                    &options.engine,
+                    options.output.as_deref(),
+                ),
                 "ledger" => run_ledger_report(
                     &LedgerReportRequest {
-                        path: &path,
-                        depth,
-                        deadlock_mode: &deadlock,
-                        engine: &engine,
-                        impl_log: impl_log.as_deref(),
-                        evidence_paths: &evidence,
-                        output_path: output.as_deref(),
+                        path,
+                        depth: options.depth,
+                        deadlock_mode: &options.deadlock,
+                        engine: &options.engine,
+                        impl_log: options.impl_log.as_deref(),
+                        evidence_paths: &options.evidence,
+                        output_path: options.output.as_deref(),
                     },
-                    &approval_records,
-                    &trust_keys,
+                    &options.approval_records,
+                    &options.trust_keys,
                 ),
                 _ => unreachable!(),
             };
-            if output.is_none()
+            if options.output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
@@ -1425,72 +1093,35 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "analyze" => {
-            let mut args = CommandArgs::new(args);
-            let mut projection = "tsg".to_owned();
-            let mut focus = None;
-            let mut output_format = "json".to_owned();
-            let mut profile = None;
-            let mut export_kind = None;
-            let mut code = None;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--projection" => {
-                        projection = args
-                            .next()
-                            .ok_or_else(|| "--projection requires a value".to_owned())?;
-                    }
-                    "--focus" => focus = Some(required_option_value(&mut args, "--focus")?),
-                    "--format" => {
-                        output_format = args
-                            .next()
-                            .ok_or_else(|| "--format requires a value".to_owned())?;
-                    }
-                    "--profile" => profile = Some(required_option_value(&mut args, "--profile")?),
-                    "--export" => {
-                        export_kind = Some(required_option_value(&mut args, "--export")?);
-                    }
-                    "--code" => {
-                        code = Some(PathBuf::from(required_option_value(&mut args, "--code")?));
-                    }
-                    _ => args.positional(option, |option| {
-                        format!("unknown analyze option '{option}'")
-                    })?,
-                }
-            }
-            let paths = args
-                .into_positionals()
-                .map(PathBuf::from)
-                .collect::<Vec<_>>();
-            if paths.is_empty() {
-                return Err("fslc analyze requires a spec".to_owned());
-            }
-            for path in &paths {
+            let options = AnalyzeOptions::parse(args)?;
+            let paths = &options.paths;
+            for path in paths {
                 if let Err(early_return) = literate_access("analyze", path) {
                     return Ok(early_return);
                 }
             }
             let result = if paths.len() != 1 || paths[0].is_dir() {
                 run_analyze_batch(
-                    &paths,
-                    &projection,
-                    focus.as_deref(),
-                    &output_format,
-                    profile.as_deref(),
-                    export_kind.as_deref(),
-                    code.as_deref(),
+                    paths,
+                    &options.projection,
+                    options.focus.as_deref(),
+                    &options.output_format,
+                    options.profile.as_deref(),
+                    options.export_kind.as_deref(),
+                    options.code.as_deref(),
                 )
             } else {
                 run_analyze(
                     &paths[0],
-                    &projection,
-                    focus.as_deref(),
-                    &output_format,
-                    profile.as_deref(),
-                    export_kind.as_deref(),
-                    code.as_deref(),
+                    &options.projection,
+                    options.focus.as_deref(),
+                    &options.output_format,
+                    options.profile.as_deref(),
+                    options.export_kind.as_deref(),
+                    options.code.as_deref(),
                 )
             };
-            if output_format != "json"
+            if options.output_format != "json"
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("analyzed")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
@@ -1501,55 +1132,14 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "diff" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            let mut git_range = None;
-            let mut mapping = None;
-            let mut forbid = Vec::new();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be an integer".to_owned())?;
-                    }
-                    "--git" => {
-                        git_range = Some(required_option_value(&mut args, "--git")?);
-                    }
-                    "--mapping" => {
-                        mapping = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--mapping",
-                        )?));
-                    }
-                    "--forbid" => {
-                        forbid.extend(
-                            required_option_value(&mut args, "--forbid")?
-                                .split(',')
-                                .map(str::trim)
-                                .filter(|item| !item.is_empty())
-                                .map(str::to_owned),
-                        );
-                    }
-                    _ => {
-                        args.positional(option, |option| {
-                            format!("unknown diff option '{option}'")
-                        })?;
-                    }
-                }
-            }
-            let paths = args
-                .into_positionals()
-                .map(PathBuf::from)
-                .collect::<Vec<_>>();
-            for path in &paths {
+            let options = DiffOptions::parse(args)?;
+            let paths = &options.paths;
+            for path in paths {
                 if let Err(early_return) = literate_access("diff", path) {
                     return Ok(early_return);
                 }
             }
-            if let Some(range) = git_range {
+            if let Some(range) = &options.git_range {
                 if paths.len() > 1 {
                     return Ok((
                         error_output("usage", "--git accepts at most one spec path"),
@@ -1557,19 +1147,19 @@ fn command() -> Result<(Value, i32), String> {
                     ));
                 }
                 Ok(run_diff_git(
-                    &range,
+                    range,
                     paths.first().map(PathBuf::as_path),
-                    depth,
-                    mapping.as_deref(),
-                    &forbid,
+                    options.depth,
+                    options.mapping.as_deref(),
+                    &options.forbid,
                 ))
             } else if paths.len() == 2 {
                 Ok(run_diff(
                     &paths[0],
                     &paths[1],
-                    depth,
-                    mapping.as_deref(),
-                    &forbid,
+                    options.depth,
+                    options.mapping.as_deref(),
+                    &options.forbid,
                 ))
             } else {
                 Ok((
@@ -1579,72 +1169,29 @@ fn command() -> Result<(Value, i32), String> {
             }
         }
         "chain" => {
-            let mut args = CommandArgs::new(args);
-            let mut keep_going = false;
-            let mut jobs = 1_usize;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--keep-going" => keep_going = true,
-                    "--jobs" => {
-                        jobs = args
-                            .next()
-                            .ok_or_else(|| "--jobs requires a value".to_owned())?
-                            .parse()
-                            .ok()
-                            .filter(|jobs| *jobs > 0)
-                            .ok_or_else(|| "--jobs must be a positive integer".to_owned())?;
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown chain option '{option}'"))?,
-                }
-            }
-            let mut positionals = args.into_positionals();
-            let path = PathBuf::from(
-                positionals
-                    .next()
-                    .unwrap_or_else(|| "fsl-project.toml".to_owned()),
-            );
-            if let Some(argument) = positionals.next() {
-                return Err(format!("unexpected chain argument '{argument}'"));
-            }
-            let result = run_project_chain(&path, keep_going, jobs);
+            let options = ChainOptions::parse(args)?;
+            let result = run_project_chain(&options.path, options.keep_going, options.jobs);
             eprintln!("{}", format_chain_table(&result.0));
             Ok(result)
         }
         "refine" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown refine option '{option}'"))?,
-                }
-            }
-            let mut positionals = args.into_positionals().map(PathBuf::from);
-            let mut operand = || {
-                positionals
-                    .next()
-                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())
-            };
-            let path = operand()?;
-            let abstraction = operand()?;
-            let mapping = operand()?;
-            let rest = positionals.collect::<Vec<_>>();
-            for candidate in [&path, &abstraction, &mapping].into_iter().chain(&rest) {
+            let options = RefineOptions::parse(args)?;
+            for candidate in [&options.path, &options.abstraction, &options.mapping]
+                .into_iter()
+                .chain(&options.rest)
+            {
                 if let Err(early_return) = literate_access("refine", candidate) {
                     return Ok(early_return);
                 }
             }
-            if rest.is_empty() {
-                Ok(run_refine(&path, &abstraction, &mapping, depth))
-            } else if rest.len() % 2 != 0 {
+            if options.rest.is_empty() {
+                Ok(run_refine(
+                    &options.path,
+                    &options.abstraction,
+                    &options.mapping,
+                    options.depth,
+                ))
+            } else if options.rest.len() % 2 != 0 {
                 Ok((
                     error_output(
                         "io",
@@ -1654,69 +1201,42 @@ fn command() -> Result<(Value, i32), String> {
                 ))
             } else {
                 Ok(run_refine_chain(
-                    &path,
-                    &abstraction,
-                    &mapping,
-                    &rest,
-                    depth,
+                    &options.path,
+                    &options.abstraction,
+                    &options.mapping,
+                    &options.rest,
+                    options.depth,
                 ))
             }
         }
         "replay" => {
-            let mut args = CommandArgs::new(args);
-            let mut trace = None;
-            let mut from_log = None;
-            let mut mapping = None;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--trace" => {
-                        trace = Some(PathBuf::from(required_option_value(&mut args, "--trace")?));
-                    }
-                    "--from-log" => {
-                        from_log = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--from-log",
-                        )?));
-                    }
-                    "--mapping" => {
-                        mapping = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--mapping",
-                        )?));
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown replay option '{option}'"))?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc replay SPEC --trace TRACE.json".to_owned(),
-                |option| format!("unknown replay option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access("replay", &path) {
+            let options = ReplayOptions::parse(args)?;
+            let path = &options.path;
+            if let Err(early_return) = literate_access("replay", path) {
                 return Ok(early_return);
             }
-            if trace.is_some() && from_log.is_some() {
+            if options.trace.is_some() && options.from_log.is_some() {
                 return Ok((
                     error_output("usage", "--trace and --from-log are mutually exclusive"),
                     2,
                 ));
             }
-            if let Some(log) = from_log {
-                let Some(mapping) = mapping else {
+            if let Some(log) = &options.from_log {
+                let Some(mapping) = &options.mapping else {
                     return Ok((
                         error_output("usage", "--mapping is required with --from-log"),
                         2,
                     ));
                 };
-                Ok(run_log_replay(&path, &log, &mapping))
-            } else if let Some(trace) = trace {
-                if mapping.is_some() {
+                Ok(run_log_replay(path, log, mapping))
+            } else if let Some(trace) = &options.trace {
+                if options.mapping.is_some() {
                     return Ok((
                         error_output("usage", "--mapping is only valid with --from-log"),
                         2,
                     ));
                 }
-                Ok(run_replay(&path, &trace))
+                Ok(run_replay(path, trace))
             } else {
                 Ok((
                     error_output("usage", "one of --trace or --from-log is required"),
@@ -1725,106 +1245,29 @@ fn command() -> Result<(Value, i32), String> {
             }
         }
         "sweep" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = "0..8".to_owned();
-            let mut deadlock = "warn".to_owned();
-            let mut engine = "bmc".to_owned();
-            let mut k_ind = 1_usize;
-            let mut vacuity = "warn".to_owned();
-            let mut property = None;
-            let mut strict_tags = false;
-            let mut requirements = None;
-            let mut instances = Vec::new();
-            let mut values = Vec::new();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?;
-                    }
-                    "--deadlock" => {
-                        deadlock = args
-                            .next()
-                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--deadlock must be warn, error, or ignore".to_owned());
-                        }
-                    }
-                    "--engine" => {
-                        engine = args
-                            .next()
-                            .ok_or_else(|| "--engine requires a value".to_owned())?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
-                            return Err("--engine must be bmc or induction".to_owned());
-                        }
-                    }
-                    "--k" => {
-                        k_ind = args
-                            .next()
-                            .ok_or_else(|| "--k requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--k must be a positive integer".to_owned())?;
-                        if k_ind == 0 {
-                            return Err("--k must be a positive integer".to_owned());
-                        }
-                    }
-                    "--instances" => instances.push(
-                        args.next()
-                            .ok_or_else(|| "--instances requires a value".to_owned())?,
-                    ),
-                    "--values" => values.push(
-                        args.next()
-                            .ok_or_else(|| "--values requires a value".to_owned())?,
-                    ),
-                    "--property" => {
-                        property = Some(required_option_value(&mut args, "--property")?);
-                    }
-                    "--vacuity" => {
-                        vacuity = required_option_value(&mut args, "--vacuity")?;
-                        if !matches!(vacuity.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--vacuity must be warn, error, or ignore".to_owned());
-                        }
-                    }
-                    "--strict-tags" => strict_tags = true,
-                    "--requirements" => {
-                        requirements = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--requirements",
-                        )?));
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown sweep option '{option}'"))?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc sweep SPEC [options]".to_owned(),
-                |option| format!("unknown sweep option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access("sweep", &path) {
+            let options = SweepOptions::parse(args)?;
+            if let Err(early_return) = literate_access("sweep", &options.path) {
                 return Ok(early_return);
             }
             Ok(run_sweep(
-                &path,
-                &depth,
-                &deadlock,
-                &engine,
-                k_ind,
-                &vacuity,
-                property.as_deref(),
-                strict_tags,
-                requirements.as_deref(),
-                &instances,
-                &values,
+                &options.path,
+                &options.depth,
+                &options.deadlock,
+                &options.engine,
+                options.k_ind,
+                &options.vacuity,
+                options.property.as_deref(),
+                options.strict_tags,
+                options.requirements.as_deref(),
+                &options.instances,
+                &options.values,
             ))
         }
         "verify" | "scenarios" => {
-            let mut args = CommandArgs::new(args);
-            let options = parse_verify_options(&mut args)?;
-            let display_path = args.single_positional(
-                || format!("usage: fslc {command} SPEC [options]"),
-                |option| format!("unknown verify option '{option}'"),
-            )?;
+            let VerifyCommandOptions {
+                display_path,
+                verify: options,
+            } = VerifyCommandOptions::parse(&command, args)?;
             let literate_guard = match literate_access(&command, &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
@@ -1842,24 +1285,10 @@ fn command() -> Result<(Value, i32), String> {
                     result,
                     &source,
                     &display_path,
-                    &options.edition,
+                    &options.shared.edition,
                 ))
             } else {
-                if options.engine != "bmc"
-                    || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
-                    || options.k_ind != 1
-                    || options.vacuity != "warn"
-                    || options.property.is_some()
-                    || !options.exclude_properties.is_empty()
-                    || !options.scope.instances.is_empty()
-                    || !options.scope.values.is_empty()
-                    || options.strict_tags
-                    || options.requirements.is_some()
-                    || !options.use_cache
-                    || !options.lemmas.is_empty()
-                    || options.from_state.is_some()
-                    || options.edition != "current"
-                {
+                if !options.only_depth_and_deadlock() {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
                 run_scenarios(path, options.depth, &options.deadlock)
@@ -3582,29 +3011,6 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
     }
 }
 
-fn parse_sweep_range(raw: &str, flag: &str) -> Result<(String, (i64, i64)), String> {
-    let (name, range) = raw
-        .split_once('=')
-        .ok_or_else(|| format!("invalid {flag} value '{raw}': expected NAME=LO..HI"))?;
-    let (lo, hi) = range
-        .split_once("..")
-        .ok_or_else(|| format!("invalid {flag} value '{raw}': expected NAME=LO..HI"))?;
-    let lo = lo
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| format!("invalid {flag} value '{raw}': bounds must be integers"))?;
-    let hi = hi
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| format!("invalid {flag} value '{raw}': bounds must be integers"))?;
-    if name.trim().is_empty() || lo > hi {
-        return Err(format!(
-            "invalid {flag} value '{raw}': lower bound must be <= upper bound"
-        ));
-    }
-    Ok((name.trim().to_owned(), (lo, hi)))
-}
-
 fn integer_combinations(
     ranges: &std::collections::BTreeMap<String, (i64, i64)>,
 ) -> Vec<std::collections::BTreeMap<String, i64>> {
@@ -3743,7 +3149,7 @@ fn run_sweep(
                     use_cache: true,
                     lemmas: Vec::new(),
                     from_state: None,
-                    edition: "current".to_owned(),
+                    shared: SharedOptions::default(),
                 };
                 let (mut verification, status) = run_verify_cli(path, path, &options);
                 if verification.get("result").and_then(Value::as_str) == Some("error") {
