@@ -365,7 +365,18 @@ fn parse_optional_output(
 /// that reports `kind:"internal"` instead of aborting.
 const STACK_SIZE: usize = 8 * 1024 * 1024;
 
+/// Parse options for this process, fixed once in [`main`] before any parse.
+static PARSE_OPTIONS: std::sync::OnceLock<fsl_syntax::ParseOptions> = std::sync::OnceLock::new();
+
+/// The process's parse options. Every document parse in this binary's own
+/// modules receives them (`docs/design/parse-entry-inventory.md`).
+fn parse_options() -> &'static fsl_syntax::ParseOptions {
+    PARSE_OPTIONS.get_or_init(fslc_rust::unstable_gate::from_environment)
+}
+
 fn main() {
+    // Read the unstable gate once, before the worker thread parses anything.
+    parse_options();
     // `run` on an explicitly sized thread rather than the process's main
     // thread, whose size the OS picks.
     let worker = std::thread::Builder::new()
@@ -843,7 +854,7 @@ fn load_migration_plan(
 /// block"; neither `check` nor `fmt --check` nor this pre-flight treats
 /// that as a `lint`/`migrate` defect).
 fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), Value> {
-    let dialect = fsl_syntax::dialect_keyword(source)
+    let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     if matches!(dialect, "refinement" | "agent") {
         return Ok(());
@@ -854,7 +865,7 @@ fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), V
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
     if matches!(
-        fsl_syntax::parse_surface_document(source),
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
         fsl_core::requirements_implements(source, &resolver, &model).map_err(|error| {
@@ -887,7 +898,7 @@ fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String>
         .map_err(|error| error.to_string())?;
     let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
     if matches!(
-        fsl_syntax::parse_surface_document(source),
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
         fsl_core::requirements_implements(source, &resolver, &model)
@@ -984,7 +995,7 @@ fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
 }
 
 fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
-    let mut output = match fsl_syntax::parse_surface_document(source) {
+    let mut output = match fsl_syntax::parse_surface_document_with(source, crate::parse_options()) {
         Err(error) => surface_parse_error_output(&error),
         Ok(_) => semantic_error_output(message),
     };
@@ -1059,7 +1070,8 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
 }
 
 fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
-    let dialect = fsl_syntax::dialect_keyword(source).map_err(|error| error.to_string())?;
+    let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
+        .map_err(|error| error.to_string())?;
     if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
         return Ok(());
     }
@@ -5780,11 +5792,12 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let mapping = match fsl_syntax::parse_surface_document(&mapping_source) {
-        Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-        Err(error) => return (error_output("parse", &error.to_string()), 2),
-    };
+    let mapping =
+        match fsl_syntax::parse_surface_document_with(&mapping_source, crate::parse_options()) {
+            Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
+            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
+            Err(error) => return (error_output("parse", &error.to_string()), 2),
+        };
     if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
             located_error_output(
@@ -6837,7 +6850,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
 }
 
 fn source_dialect(source: &str) -> &str {
-    match fsl_syntax::dialect_keyword(source) {
+    match fsl_syntax::dialect_keyword_with(source, crate::parse_options()) {
         Ok("spec") => "kernel",
         Ok("dbsystem") => "db",
         Ok("ai_component") => "ai-component",
@@ -7165,7 +7178,7 @@ fn parse_surface_document_from_source(
     path: &Path,
     source: &str,
 ) -> Result<fsl_syntax::SurfaceDocument, String> {
-    fsl_syntax::parse_surface_document(source).map_err(|error| {
+    fsl_syntax::parse_surface_document_with(source, crate::parse_options()).map_err(|error| {
         format!(
             "{} at {}:{}:{}",
             error.message,
@@ -7210,7 +7223,7 @@ fn load_surface_document_from_source(
         return parse_surface_document_from_source(path, source)
             .map_err(SpecLoadError::unlocated_semantic);
     }
-    fsl_syntax::parse_surface_document(source)
+    fsl_syntax::parse_surface_document_with(source, crate::parse_options())
         .map_err(|error| SpecLoadError::Parse(Box::new(error)))
 }
 
@@ -12271,13 +12284,14 @@ fn external_mutation_model(
     base: &Path,
     expected_name: &str,
 ) -> Result<KernelModel, Value> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| {
-        if error.span.start.offset >= source.len() {
-            invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
-        } else {
-            invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
-        }
-    })?;
+    let document = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+        .map_err(|error| {
+            if error.span.start.offset >= source.len() {
+                invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
+            } else {
+                invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
+            }
+        })?;
     let Some(name) = surface_document_name(&document) else {
         return Err(invalid_mutation_detail(
             "semantics",
@@ -12504,7 +12518,7 @@ fn run_mutate_with(
                 Err(error) => return mutate_error(core_error_output(&error)),
             };
             let Ok(fsl_syntax::SurfaceDocument::Spec(rendered_spec)) =
-                fsl_syntax::parse_surface_document(&rendered)
+                fsl_syntax::parse_surface_document_with(&rendered, crate::parse_options())
             else {
                 return mutate_error(error_output(
                     "internal",
@@ -15211,7 +15225,8 @@ fn add_control_items(
     node_additions: &mut Vec<Value>,
     edge_additions: &mut Vec<Value>,
 ) {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
         return;
     };
     let controls: Vec<&String> = match &document {
@@ -16749,7 +16764,8 @@ fn add_verify_items(scope: &mut RawScope, items: &[fsl_syntax::VerifyItem]) {
 }
 
 fn declared_raw_scope(source: &str) -> RawScope {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
         return RawScope::default();
     };
     let mut scope = RawScope::default();
@@ -16908,7 +16924,8 @@ fn run_diff(
     };
     let mut explicit_direction = None;
     if let Some(source) = mapping_source.as_deref() {
-        let surface = match fsl_syntax::parse_surface_document(source) {
+        let surface = match fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+        {
             Ok(fsl_syntax::SurfaceDocument::Refinement(surface)) => surface,
             Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
             Err(error) => return (error_output("parse", &error.to_string()), 2),
@@ -18258,7 +18275,10 @@ fn run_verify_from_source(
     {
         return causal::causal_parse_error_output(&error, false);
     }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
+    match fsl_syntax::parse_document_with(
+        fsl_syntax::SourceFile::new(source),
+        crate::parse_options(),
+    ) {
         Err(error) => return (surface_parse_error_output(&error), 2),
         Ok(fsl_syntax::ParsedDocument {
             surface: fsl_syntax::SurfaceDocument::Agent(_),

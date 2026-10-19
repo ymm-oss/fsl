@@ -45,6 +45,16 @@ impl std::error::Error for LexError {}
 /// Returns [`LexError`] for an unsupported character, an unterminated string,
 /// or an integer literal outside the accepted `i64` representation.
 pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
+    lex_with(source, &crate::ParseOptions::stable())
+}
+
+/// [`lex`] under explicit [`crate::ParseOptions`]. No unstable feature changes
+/// the lexer yet.
+///
+/// # Errors
+///
+/// Returns [`LexError`] for characters or literals the lexer rejects.
+pub fn lex_with(source: &str, _options: &crate::ParseOptions) -> Result<Vec<Token>, LexError> {
     Lexer::new(source).lex_all()
 }
 
