@@ -256,7 +256,7 @@ pub fn verify_explicit_selected(
                             trace: reconstruct_trace(state, &parents),
                             violation: Violation {
                                 kind: "partial_op".to_owned(),
-                                name: "_partial_property_terminal".to_owned(),
+                                name: fsl_core::SyntheticName::PartialTerminal.internal(),
                                 step: level,
                             },
                         });
@@ -362,7 +362,10 @@ fn record_reachables(
                 Err(error) if super::is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
-                        name: format!("_partial_property_{}", property.name),
+                        name: fsl_core::SyntheticName::PartialProperty {
+                            property: &property.name,
+                        }
+                        .internal(),
                         step: level,
                     }));
                 }

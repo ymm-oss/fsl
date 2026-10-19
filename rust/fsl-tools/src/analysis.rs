@@ -348,10 +348,6 @@ pub fn structural_review_findings(tsg: &Value) -> Vec<Value> {
     findings
 }
 
-fn display(name: &str) -> String {
-    fsl_core::display_name(name)
-}
-
 /// TSG node ID of an action, `action:<key>`: every graph, review finding, and
 /// acknowledgement that refers to an action node builds the ID here, so a
 /// compose component action is `action:alias.action` everywhere.
@@ -366,7 +362,10 @@ fn node(id: String, kind: &str, name: Option<String>, loc: Option<Value>) -> Map
     result.insert("id".to_owned(), json!(id));
     result.insert("kind".to_owned(), json!(kind));
     if let Some(name) = name {
-        result.insert("label".to_owned(), json!(display(&name)));
+        result.insert(
+            "label".to_owned(),
+            json!(fsl_core::unmapped_public_spelling(&name)),
+        );
         result.insert("name".to_owned(), json!(name));
     }
     if let Some(loc) = loc {
@@ -421,9 +420,11 @@ fn public_type(model: &KernelModel, ty: &TypeRef) -> Value {
         TypeRef::Range(lo, hi) => json!(["domain", lo, hi]),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain { lo, hi, .. }) => json!(["domain", lo, hi]),
-            Some(TypeDef::Enum { .. }) => json!(["enum", display(name)]),
-            Some(TypeDef::Struct { .. }) => json!(["struct", display(name)]),
-            None => json!(["named", display(name)]),
+            Some(TypeDef::Enum { .. }) => json!(["enum", model.names().public_type(name).as_str()]),
+            Some(TypeDef::Struct { .. }) => {
+                json!(["struct", model.names().public_type(name).as_str()])
+            }
+            None => json!(["named", model.names().public_type(name).as_str()]),
         },
         TypeRef::Map(key, value) => {
             json!(["map", public_type(model, key), public_type(model, value)])

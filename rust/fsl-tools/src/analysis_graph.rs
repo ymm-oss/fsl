@@ -517,7 +517,7 @@ fn impact(tsg: &Value, focus: &str) -> Result<(Vec<Value>, Vec<Value>), String> 
     // Node ids keep their raw, guaranteed-unique form (a db-dialect id embeds
     // the `QqDbSepqQ` separator sentinel; a compose component action's id
     // embeds its `alias.action` name, unique because an alias has no `.`), but `--focus` also
-    // accepts the canonical *displayed* form `verify`/`fsl_core::display_name`
+    // accepts the canonical *displayed* form `verify`/`fsl_core::unmapped_public_spelling`
     // report for the same target, so a caller who only has the display name
     // (e.g. copied from a `verify` violation) does not have to know the
     // internal sentinel to reference the same node.
@@ -525,7 +525,7 @@ fn impact(tsg: &Value, focus: &str) -> Result<(Vec<Value>, Vec<Value>), String> 
         focus.to_owned()
     } else {
         all.iter()
-            .find(|id| fsl_core::display_name(id) == focus)
+            .find(|id| fsl_core::unmapped_public_spelling(id) == focus)
             .cloned()
             .ok_or_else(|| format!("unknown analyze focus node: {focus}"))?
     };

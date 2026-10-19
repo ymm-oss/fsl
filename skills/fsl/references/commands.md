@@ -394,7 +394,7 @@ that analyzed nothing never reports `result:"analyzed"`/exit 0. Standalone
 refinement mappings use `--projection
 refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
-node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
+node's TSG `label` is its `fsl_core::unmapped_public_spelling` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
 reports); `--focus` accepts either a node's raw id or its displayed name. A
 compose component action and its clauses use the action's public name in both

@@ -12,8 +12,8 @@ use fsl_core::{
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
     PartialOperation, Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
-    display_name, insert_requirement_metadata, internal_origin_json, model_warnings,
-    origin_display_name, state_summary, static_leadsto_bindings,
+    insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
+    state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
@@ -1226,7 +1226,10 @@ impl Monitor {
                     action_name,
                     params,
                     "requires_failed",
-                    format!("_requires_failed_{action_name}"),
+                    fsl_core::SyntheticName::RequiresFailed {
+                        action: action_name,
+                    }
+                    .internal(),
                     None,
                 ));
             }
@@ -1237,7 +1240,10 @@ impl Monitor {
                     action_name,
                     params,
                     "partial_op",
-                    format!("_partial_{action_name}"),
+                    fsl_core::SyntheticName::PartialAction {
+                        action: action_name,
+                    }
+                    .internal(),
                     None,
                 ));
             }
@@ -1356,7 +1362,10 @@ impl Monitor {
                         attempted_state: None,
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
-                            name: format!("_partial_{}", action.name),
+                            name: fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             step: *step,
                         }),
                     });
@@ -1378,7 +1387,10 @@ impl Monitor {
                         attempted_state: Some(next),
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
-                            name: format!("_partial_{}", action.name),
+                            name: fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             step: *step,
                         }),
                     });
@@ -1406,7 +1418,10 @@ impl Monitor {
                         attempted_state: Some(next),
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
-                            name: format!("_partial_{}", action.name),
+                            name: fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             step: *step,
                         }),
                     });
@@ -1469,7 +1484,10 @@ fn guard_partial_result(instance: &EnabledAction, state: State, step: usize) -> 
         attempted_state: None,
         violation: Some(Violation {
             kind: "partial_op".to_owned(),
-            name: format!("_partial_{}", instance.action),
+            name: fsl_core::SyntheticName::PartialAction {
+                action: &instance.action,
+            }
+            .internal(),
             step,
         }),
     }
@@ -2766,7 +2784,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 Err(error) if is_partial_operation_error(&error) => {
                     let violation = Violation {
                         kind: "partial_op".to_owned(),
-                        name: "_partial_property_terminal".to_owned(),
+                        name: fsl_core::SyntheticName::PartialTerminal.internal(),
                         step,
                     };
                     if result
@@ -3389,7 +3407,7 @@ pub fn verification_warnings(
                 .unwrap_or_default();
         for (candidate_index, (property_index, _)) in implication_candidates.iter().enumerate() {
             let property = &model.invariants[*property_index];
-            let name = display_name(&property.name);
+            let name = model.names().public_property(&property.name).into_string();
             let mut warning = match probe_results.get(candidate_index) {
                 Some(Reachability::Unreachable) => vacuity_reachability_warning(
                     "vacuous_implication",
@@ -3420,7 +3438,7 @@ pub fn verification_warnings(
         }
         let leadsto_offset = implication_candidates.len();
         for (offset, property) in model.leadstos.iter().enumerate() {
-            let name = display_name(&property.name);
+            let name = model.names().public_property(&property.name).into_string();
             let mut warning = match probe_results.get(leadsto_offset + offset) {
                 Some(Reachability::Unreachable) => vacuity_reachability_warning(
                     "vacuous_leadsto",
@@ -3979,7 +3997,10 @@ fn record_reachables(
                 Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
-                        name: format!("_partial_property_{}", property.name),
+                        name: fsl_core::SyntheticName::PartialProperty {
+                            property: &property.name,
+                        }
+                        .internal(),
                         step,
                     }));
                 }
@@ -4024,7 +4045,7 @@ fn check_state_selected_inner(
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<Option<Violation>, RuntimeError> {
     for (name, ty) in &model.state {
-        let property_name = format!("_bounds_{name}");
+        let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
         if checked_bounds.is_some_and(|selected| !selected.contains(&property_name)) {
             continue;
         }
@@ -4049,7 +4070,10 @@ fn check_state_selected_inner(
             Err(error) if is_partial_operation_error(&error) => {
                 return Ok(Some(Violation {
                     kind: "partial_op".to_owned(),
-                    name: format!("_partial_property_{}", property.name),
+                    name: fsl_core::SyntheticName::PartialProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     step,
                 }));
             }
@@ -4071,7 +4095,10 @@ fn check_state_selected_inner(
                 Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
-                        name: format!("_partial_property_{}", property.name),
+                        name: fsl_core::SyntheticName::PartialProperty {
+                            property: &property.name,
+                        }
+                        .internal(),
                         step,
                     }));
                 }

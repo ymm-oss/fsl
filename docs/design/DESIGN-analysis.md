@@ -84,7 +84,7 @@ Single-file success is `result: "analyzed"` and exits 0. Parse, name, type,
 semantics, io, and internal failures reuse the normal fslc error envelope.
 `impact_graph` requires `--focus <node-id>` where the id comes from the TSG
 (`state:x`, `action:checkout`, `requirement:REQ-3`, etc.). A node's TSG `label`
-is its display name (`fsl_core::display_name`: the internal `__` logical/physical
+is its display name (`fsl_core::unmapped_public_spelling`: the internal `__` logical/physical
 marker becomes `.`, and a db-dialect internal separator sentinel is restored to
 `__`) — `--focus` accepts that displayed name too, resolving it to the matching
 node's raw id, so a caller does not need to know the internal sentinel form to

@@ -50,7 +50,7 @@ fn invariant_name(parts: &[&str]) -> String {
         // `__` is reserved for composed-name display (`component__name` ->
         // `component.name`). Keep the database dialect's public double
         // underscores through parsing and restore them at presentation time.
-        .join("QqDbSepqQ")
+        .join(crate::naming::DB_SEPARATOR)
 }
 
 fn entry_name_parts(entry: &DbEnvironmentArtifact) -> Vec<String> {

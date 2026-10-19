@@ -14,7 +14,7 @@ use std::fmt::Write as _;
 use fsl_syntax::{AggregateKind, Binder, Expr, Pattern};
 
 use crate::recursion;
-use crate::{KernelModel, display_name};
+use crate::{KernelModel, unmapped_public_spelling};
 
 #[must_use]
 #[allow(clippy::too_many_lines)]
@@ -84,7 +84,7 @@ fn binder_base_text(model: Option<&KernelModel>, binder: &Binder) -> String {
     match binder {
         Binder::Typed {
             name, type_name, ..
-        } => format!("{name}: {}", display_name(&type_name.name)),
+        } => format!("{name}: {}", unmapped_public_spelling(&type_name.name)),
         Binder::Range { name, lo, hi, .. } => {
             format!(
                 "{name} in {}..{}",
@@ -139,7 +139,7 @@ fn expr_text_with_origins_inner(model: Option<&KernelModel>, expr: &Expr) -> Str
         ),
         Expr::Struct { name, fields } => format!(
             "{} {{ {} }}",
-            display_name(name),
+            unmapped_public_spelling(name),
             {
                 let mut fields = fields.iter().collect::<Vec<_>>();
                 fields.sort_by_key(|(name, _)| name.as_str());
@@ -150,13 +150,17 @@ fn expr_text_with_origins_inner(model: Option<&KernelModel>, expr: &Expr) -> Str
             .collect::<Vec<_>>()
             .join(", ")
         ),
-        Expr::Var(name) => display_name(name),
+        Expr::Var(name) => unmapped_public_spelling(name),
         Expr::EnumMember { type_name, member } => {
-            format!("{}.{}", display_name(type_name), display_name(member))
+            format!(
+                "{}.{}",
+                unmapped_public_spelling(type_name),
+                unmapped_public_spelling(member)
+            )
         }
         Expr::Call { name, args, .. } => format!(
             "{}({})",
-            display_name(name),
+            unmapped_public_spelling(name),
             args.iter()
                 .map(|argument| expr_text_with_origins(model, argument))
                 .collect::<Vec<_>>()

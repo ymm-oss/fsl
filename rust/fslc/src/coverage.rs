@@ -654,7 +654,7 @@ fn value_kind_evidence(fixtures: &[FixtureRun]) -> BTreeMap<&'static str, Vec<Ev
                 continue;
             };
             for (name, ty) in &fixture.model.state {
-                let key = crate::display_name(name);
+                let key = fixture.model.names().public_state(name).into_string();
                 let Some(value) = state_obj.get(&key) else {
                     continue;
                 };

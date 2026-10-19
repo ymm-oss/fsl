@@ -162,7 +162,7 @@ pub struct KernelModel {
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     traceability: TraceabilityRegistry,
-    compose_names: crate::compose::ComposeNames,
+    names: crate::NameMap,
 }
 
 impl KernelModel {
@@ -323,125 +323,89 @@ impl KernelModel {
         self.origins.primary_for(&action_target(name))
     }
 
+    /// The owner of this model's internal-to-public name mapping.
+    #[must_use]
+    pub fn names(&self) -> &crate::NameMap {
+        &self.names
+    }
+
     /// Structural compose identity of an action, or `None` when the action is
     /// not a compose component action (a direct spec action or a sync action).
     #[must_use]
     pub fn compose_action(&self, name: &str) -> Option<&crate::ComposeName> {
-        self.compose_names.actions.get(name)
+        self.names.compose_action(name)
     }
 
-    /// Public spelling of `name` when it is, or was built from, the compose
-    /// component action `action`; `None` for every other name.
-    ///
-    /// This is the only place a component action's public spelling is
-    /// produced; [`Self::action_display_name`], [`Self::action_key`], and
-    /// [`Self::action_scoped_display_name`] differ only in how they render a
-    /// name no component owns. [`crate::display_name`] parses the
-    /// non-injective internal name and misspells an alias that contains `__`.
-    ///
-    /// `name` is either the action itself or a name the Monitor or the
-    /// verifier built while `action` stepped: a kind prefix followed by the
-    /// internal action name (`_requires_failed_<action>`,
-    /// `_partial_<action>`). The prefix is kept and the
-    /// action suffix is respelled from the structural table, so no list of
-    /// prefixes has to track the builders.
+    /// See [`crate::NameMap::component_public_name`].
     #[must_use]
     pub fn component_public_name(&self, name: &str, action: &str) -> Option<String> {
-        let component = self.compose_action(action)?;
-        let prefix = name.strip_suffix(action)?;
-        (prefix.is_empty() || prefix.starts_with('_') && prefix.ends_with('_'))
-            .then(|| format!("{prefix}{}", component.display()))
+        self.names
+            .component_public_name(name, action)
+            .map(crate::PublicName::into_string)
     }
 
-    /// Public name of an action in a human-facing field: `alias.action` for a
-    /// compose component action, the [`crate::display_name`] rendering
-    /// otherwise.
+    /// See [`crate::NameMap::public_action`].
     #[must_use]
     pub fn action_display_name(&self, name: &str) -> String {
-        self.component_public_name(name, name)
-            .unwrap_or_else(|| crate::display_name(name))
+        self.names.public_action(name).into_string()
     }
 
-    /// Public name of an action in an identifier field (a replay echo, a
-    /// graph node ID, a claim key, a mutation target): `alias.action` for a
-    /// compose component action, the exact Kernel name otherwise.
+    /// See [`crate::NameMap::public_action_key`].
     #[must_use]
     pub fn action_key(&self, name: &str) -> String {
-        self.component_public_name(name, name)
-            .unwrap_or_else(|| name.to_owned())
+        self.names.public_action_key(name).into_string()
     }
 
-    /// Public spelling of a violation, CTI, or mutation-kill name produced
-    /// while `action` stepped (see [`Self::component_public_name`]), or the
-    /// [`crate::display_name`] rendering of any other name.
+    /// See [`crate::NameMap::public_violation`].
     #[must_use]
     pub fn action_scoped_display_name(&self, name: &str, action: Option<&str>) -> String {
-        action
-            .and_then(|action| self.component_public_name(name, action))
-            .unwrap_or_else(|| crate::display_name(name))
+        self.names.public_violation(name, action).into_string()
     }
 
-    /// Public spelling of a name derived from a compose component
-    /// declaration: an action, a state variable, a property, or the
-    /// `_bounds_<state>` name built from a state variable. `None` for every
-    /// other name.
-    ///
-    /// Actions use their structural `alias.action`; state and property names
-    /// keep the [`crate::display_name`] rendering every other output uses.
+    /// See [`crate::NameMap::compose_public_name`].
     #[must_use]
     pub fn compose_public_name(&self, name: &str) -> Option<String> {
-        let declared = |name: &str| self.compose_names.declarations.contains(name);
-        self.component_public_name(name, name)
-            .or_else(|| declared(name).then(|| crate::display_name(name)))
-            .or_else(|| {
-                let state = name.strip_prefix("_bounds_")?;
-                declared(state).then(|| format!("_bounds_{}", crate::display_name(state)))
-            })
+        self.names
+            .compose_public_name(name)
+            .map(crate::PublicName::into_string)
     }
 
     /// Give a model rebuilt from this model's lowered surface spec (a mutant
     /// or a counterfactual candidate) the compose component names of
     /// `original`; the surface spec does not carry them.
     pub fn inherit_compose_names(&mut self, original: &Self) {
-        self.compose_names.clone_from(&original.compose_names);
+        self.names.clone_from(&original.names);
     }
 
-    /// Resolve an action name written in a v1 replay trace.
-    ///
-    /// A compose component action matches its canonical `alias.action` or its
-    /// pre-#1234 `alias__action` spelling, both looked up from the structural
-    /// table; every other action matches only its exact Kernel name.
+    /// Resolve an action name written in a v1 replay trace (see
+    /// [`crate::NameMap::resolve_action`]).
     ///
     /// # Errors
     ///
     /// Returns a message naming every candidate when the spelling matches more
     /// than one action, so the caller fails closed instead of picking one.
     pub fn resolve_replay_action(&self, spelling: &str) -> Result<Option<&ActionDef>, String> {
-        let candidates = self
-            .actions
-            .iter()
-            .filter(|action| match self.compose_action(&action.name) {
-                Some(component) => {
-                    component.display() == spelling || component.legacy() == spelling
-                }
-                None => action.name == spelling,
-            })
-            .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [] => Ok(None),
-            [action] => Ok(Some(action)),
-            many => Err(format!(
-                "action '{spelling}' is ambiguous: it matches {}",
-                many.iter()
-                    .map(|action| format!(
-                        "'{}' (internal '{}')",
-                        self.action_display_name(&action.name),
-                        action.name
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
-        }
+        let resolved = self
+            .names
+            .resolve_action(
+                spelling,
+                self.actions.iter().map(|action| action.name.as_str()),
+            )
+            .map_err(|ambiguous| {
+                format!(
+                    "action '{spelling}' is ambiguous: it matches {}",
+                    ambiguous
+                        .candidates
+                        .iter()
+                        .map(|name| format!(
+                            "'{}' (internal '{name}')",
+                            self.action_display_name(name)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
+        Ok(resolved.and_then(|name| self.actions.iter().find(|action| action.name == name)))
     }
 
     #[must_use]
@@ -712,7 +676,7 @@ struct ModelBuilder {
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
-    compose_names: crate::compose::ComposeNames,
+    names: crate::NameMap,
     consts: BTreeMap<String, Value>,
     types: BTreeMap<String, TypeDef>,
     enum_members: BTreeMap<String, Value>,
@@ -726,14 +690,14 @@ impl ModelBuilder {
             annotations,
             projections,
             diagnostics: _,
-            compose_names,
+            names,
         } = kernel;
         Self {
             spec,
             origins,
             annotations,
             projections,
-            compose_names,
+            names,
             consts: BTreeMap::new(),
             types: BTreeMap::new(),
             enum_members: BTreeMap::new(),
@@ -1100,7 +1064,7 @@ impl ModelBuilder {
             origins: self.origins,
             annotations: self.annotations,
             traceability,
-            compose_names: self.compose_names,
+            names: self.names,
         };
         let inline_initializers = inline_initializers
             .into_iter()
@@ -2613,8 +2577,8 @@ mod compose_name_tests {
         let mut model = model();
         // A checked model cannot hold this table (the internal names would be
         // duplicate actions); inject it to pin the fail-closed branch.
-        model.compose_names.actions.insert(
-            "right__go".to_owned(),
+        model.names.insert_action_identity(
+            "right__go",
             ComposeName {
                 alias: "left".to_owned(),
                 name: "go".to_owned(),

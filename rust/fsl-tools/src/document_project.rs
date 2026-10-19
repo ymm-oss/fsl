@@ -14,7 +14,7 @@ use fsl_core::{
     ActionDef, ActionGuard, Annotation, Annotations, FsResolver, INIT_TARGET, KernelModel,
     KernelSpec, OriginChain, ParamDef, PublicKernelVersion, RequirementLink, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TERMINAL_TARGET, TypeDef, TypeRef,
-    action_target, build_model, display_name, parse_kernel_source, property_target,
+    action_target, build_model, parse_kernel_source, property_target,
     public_kernel_contract_for_version, public_kernel_expression, requirements_trace_contract,
 };
 use fsl_syntax::{
@@ -559,7 +559,10 @@ fn push_property_claim(
             id: claim_id,
             kind: claim_kind,
             requirements: requirement_ids,
-            subject: json!({"property": name, "display_name": display_name(name)}),
+            subject: json!({
+                "property": name,
+                "display_name": model.names().public_property(name).as_str(),
+            }),
             enablement: None,
             effects: None,
             postconditions: None,
@@ -975,7 +978,10 @@ fn project_requirement_claims_with_trace(
                 id: claim_id,
                 kind: ClaimKind::ProgressRule,
                 requirements: requirement_ids,
-                subject: json!({"property": property.name, "display_name": display_name(&property.name)}),
+                subject: json!({
+                    "property": property.name,
+                    "display_name": model.names().public_property(&property.name).as_str(),
+                }),
                 enablement: None,
                 effects: None,
                 postconditions: None,

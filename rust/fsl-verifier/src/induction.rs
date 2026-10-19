@@ -96,7 +96,7 @@ enum Property<'a> {
 impl Property<'_> {
     fn name(self, model: &KernelModel) -> String {
         match self {
-            Self::Bound(name) => format!("_bounds_{name}"),
+            Self::Bound(name) => fsl_core::SyntheticName::Bounds { state: name }.internal(),
             Self::Invariant(index) => model.invariants[index].name.clone(),
         }
     }
@@ -533,7 +533,10 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
             .await?
             {
                 return Ok(Some(key_domain_cti(
-                    format!("_key_domain_property_{}", property.name),
+                    fsl_core::SyntheticName::KeyDomainProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     0,
                     trace,
                 )));
@@ -580,7 +583,10 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                     .await?
                     {
                         return Ok(Some(key_domain_cti(
-                            format!("_key_domain_property_{}", property.name),
+                            fsl_core::SyntheticName::KeyDomainProperty {
+                                property: &property.name,
+                            }
+                            .internal(),
                             0,
                             trace,
                         )));
@@ -622,7 +628,10 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                         .await?
                 {
                     return Ok(Some(key_domain_cti(
-                        format!("_key_domain_{}", action.name),
+                        fsl_core::SyntheticName::KeyDomainAction {
+                            action: &action.name,
+                        }
+                        .internal(),
                         1,
                         with_attempted_action(trace, instance),
                     )));
@@ -699,7 +708,10 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
             .await?
             {
                 return Ok(Some(key_domain_cti(
-                    format!("_key_domain_property_{}", property.name),
+                    fsl_core::SyntheticName::KeyDomainProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     1,
                     trace,
                 )));
@@ -755,7 +767,10 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                             .await?
                     {
                         return Ok(Some(key_domain_cti(
-                            format!("_key_domain_{}", action.name),
+                            fsl_core::SyntheticName::KeyDomainAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             1,
                             trace,
                         )));
@@ -913,7 +928,10 @@ async fn step_obligation_cti<S: SmtSolver>(
             .await?
             {
                 return Ok(Some(partial_cti(
-                    format!("_partial_property_{}", property.name),
+                    fsl_core::SyntheticName::PartialProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     0,
                     trace,
                 )));
@@ -946,7 +964,10 @@ async fn step_obligation_cti<S: SmtSolver>(
                     .await?
                     {
                         return Ok(Some(partial_cti(
-                            format!("_partial_property_{}", property.name),
+                            fsl_core::SyntheticName::PartialProperty {
+                                property: &property.name,
+                            }
+                            .internal(),
                             0,
                             trace,
                         )));
@@ -991,7 +1012,10 @@ async fn step_obligation_cti<S: SmtSolver>(
                     .await?
                     {
                         return Ok(Some(partial_cti(
-                            format!("_partial_{}", action.name),
+                            fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             1,
                             with_attempted_action(trace, instance),
                         )));
@@ -1058,7 +1082,7 @@ async fn step_obligation_cti<S: SmtSolver>(
             .await?
             {
                 return Ok(Some(partial_cti(
-                    format!("_partial_property_{name}"),
+                    fsl_core::SyntheticName::PartialProperty { property: &name }.internal(),
                     1,
                     trace,
                 )));
@@ -1108,7 +1132,10 @@ async fn step_obligation_cti<S: SmtSolver>(
                     .await?
                     {
                         return Ok(Some(partial_cti(
-                            format!("_partial_{}", action.name),
+                            fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             1,
                             trace,
                         )));
