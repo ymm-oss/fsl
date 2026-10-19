@@ -1900,7 +1900,9 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
   表示されます(凍結した Python 参照実装では <code>a__b.n</code>)。
   v1 の <code>replay</code> トレースでは、コンポーネントの action を <code>alias.action</code> と書いても
   旧来の <code>alias__action</code> と書いてもかまいません。どちらも同じ action を指します
-  (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。</li>
+  (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。ネイティブ実装では、これらの
+  綴りと、<code>_partial_&lt;action&gt;</code>・<code>_bounds_&lt;state&gt;</code> のようにエンジンが作る名前を、
+  1 つのモジュール <code>rust/fsl-core/src/naming.rs</code> が持ちます。</li>
 </ul>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8
