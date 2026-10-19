@@ -59,6 +59,7 @@ pub struct ImportBinding {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DocumentIndex {
     source: String,
+    parse_options: fsl_syntax::ParseOptions,
     refinement: bool,
     pub symbols: Vec<Symbol>,
     pub references: Vec<Reference>,
@@ -100,20 +101,25 @@ impl DocumentIndex {
     ///
     /// Returns the compiler parse diagnostic for invalid source.
     #[allow(clippy::too_many_lines)]
-    pub fn build(source: &str, _path: Option<&str>) -> Result<Self, IndexError> {
+    pub fn build(
+        source: &str,
+        _path: Option<&str>,
+        parse_options: &fsl_syntax::ParseOptions,
+    ) -> Result<Self, IndexError> {
         let refinement = if fslc_rust::frontend_output::is_ai_project(source)
             || fsl_syntax::is_causal_source(source)
         {
             false
         } else {
             matches!(
-                fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source))
+                fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), parse_options)
                     .map_err(|error| IndexError(error.to_string()))?
                     .surface,
                 fsl_syntax::SurfaceDocument::Refinement(_)
             )
         };
-        let tokens = fsl_syntax::lex(source).map_err(|error| IndexError(error.to_string()))?;
+        let tokens = fsl_syntax::lex_with(source, parse_options)
+            .map_err(|error| IndexError(error.to_string()))?;
         let mut symbols = Vec::new();
         let mut references = Vec::new();
         let mut contexts: Vec<(Context, Option<String>)> = Vec::new();
@@ -302,6 +308,7 @@ impl DocumentIndex {
         let imports = import_bindings(source, &tokens);
         Ok(Self {
             source: source.to_owned(),
+            parse_options: *parse_options,
             refinement,
             symbols,
             references,
@@ -408,7 +415,7 @@ impl DocumentIndex {
                 )
             })
             .collect::<HashSet<_>>();
-        fsl_syntax::lex(&self.source).map_or_else(
+        fsl_syntax::lex_with(&self.source, &self.parse_options).map_or_else(
             |_| Vec::new(),
             |tokens| {
                 tokens
@@ -458,7 +465,7 @@ impl DocumentIndex {
                     .map(|reference| (reference.range.start.line, reference.range.start.character)),
             )
             .collect::<HashSet<_>>();
-        fsl_syntax::lex(&self.source).map_or_else(
+        fsl_syntax::lex_with(&self.source, &self.parse_options).map_or_else(
             |_| Vec::new(),
             |tokens| {
                 tokens
@@ -1379,7 +1386,12 @@ mod tests {
   action add(item: Item) { stock = stock + 1 }
   invariant NonNegative { stock >= 0 }
 }";
-        let index = DocumentIndex::build(source, Some("cart.fsl")).expect("valid index");
+        let index = DocumentIndex::build(
+            source,
+            Some("cart.fsl"),
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .expect("valid index");
         assert!(index.symbols.iter().any(|symbol| symbol.name == "Cart"));
         assert!(index.symbols.iter().any(|symbol| symbol.name == "stock"));
         assert!(
@@ -1394,8 +1406,12 @@ mod tests {
 
     #[test]
     fn rejects_source_rejected_by_the_authoritative_parser() {
-        let error = DocumentIndex::build("spec Broken { state {", Some("broken.fsl"))
-            .expect_err("invalid syntax must not be indexed");
+        let error = DocumentIndex::build(
+            "spec Broken { state {",
+            Some("broken.fsl"),
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .expect_err("invalid syntax must not be indexed");
         assert!(!error.0.is_empty());
     }
 
@@ -1421,7 +1437,8 @@ mod tests {
   action first(value: Int) { value = value }
   action second(value: Int) { value = value }
 }";
-        let index = DocumentIndex::build(source, None).expect("valid source");
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid source");
         let second_reference = index
             .references
             .iter()
@@ -1461,7 +1478,12 @@ mod tests {
     /// declaration to resolve to (`definition_at` returned `None`).
     #[test]
     fn def_declares_a_function_symbol_with_a_scoped_parameter() {
-        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let index = DocumentIndex::build(
+            ISSUE_504_PROBE,
+            Some("probe.fsl"),
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .expect("valid index");
         let call_site = Position::new(4, 22); // `eligible(0)` inside UsesDef
         let definition = index
             .definition_at(call_site)
@@ -1487,7 +1509,12 @@ mod tests {
     /// indexed as a plain reference with no declaration.
     #[test]
     fn aggregate_binder_declares_a_scoped_variable() {
-        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let index = DocumentIndex::build(
+            ISSUE_504_PROBE,
+            Some("probe.fsl"),
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .expect("valid index");
         let binder_use = Position::new(5, 36); // `c` inside `where c == 0`
         let definition = index
             .definition_at(binder_use)
@@ -1511,7 +1538,8 @@ mod tests {
   invariant Every { forall i: Id { seen.contains(i) } }
   invariant Any { exists j: Id { seen.contains(j) } }
 }";
-        let index = DocumentIndex::build(source, None).expect("valid index");
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid index");
         for (name, owner) in [("i", "Every"), ("j", "Any")] {
             let binder = index
                 .symbols
@@ -1538,7 +1566,12 @@ mod tests {
     /// recognized as a binder position at all.
     #[test]
     fn is_some_pattern_binder_declares_a_scoped_variable() {
-        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let index = DocumentIndex::build(
+            ISSUE_504_PROBE,
+            Some("probe.fsl"),
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .expect("valid index");
         let binder_use = Position::new(6, 43); // `v` inside `v == 0`
         let definition = index
             .definition_at(binder_use)
@@ -1561,7 +1594,12 @@ mod tests {
     /// keywords and own no index entry, like every other builtin.
     #[test]
     fn reachable_and_domain_builtin_calls_do_not_shadow_the_relation_declaration() {
-        let index = DocumentIndex::build(ISSUE_504_PROBE, Some("probe.fsl")).expect("valid index");
+        let index = DocumentIndex::build(
+            ISSUE_504_PROBE,
+            Some("probe.fsl"),
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .expect("valid index");
         let edge_symbols = index
             .symbols
             .iter()
@@ -1596,7 +1634,8 @@ mod tests {
     #[test]
     fn named_preservation_block_declares_a_symbol() {
         let source = r#"governance Controls { control CTRL "control" preservation Reform { preserve CTRL } }"#;
-        let index = DocumentIndex::build(source, None).expect("valid governance");
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid governance");
         let reform = index
             .symbols
             .iter()
@@ -1614,7 +1653,8 @@ mod tests {
     fn comma_separated_actor_list_declares_every_name() {
         let source = "business Actors { actor Customer, Manager entity Case }\n\
              verify { instances Case = 1 }";
-        let index = DocumentIndex::build(source, None).expect("valid business");
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid business");
         for name in ["Customer", "Manager"] {
             let symbol = index
                 .symbols
@@ -1635,7 +1675,8 @@ mod tests {
     fn actor_list_terminated_by_a_trailing_comma_does_not_consume_the_next_keyword() {
         let source = "business Actors { actor Customer, entity Case }\n\
              verify { instances Case = 1 }";
-        let index = DocumentIndex::build(source, None).expect("valid business");
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid business");
         assert!(
             !index.symbols.iter().any(|symbol| symbol.name == "entity"),
             "{:?}",
@@ -1685,7 +1726,9 @@ mod tests {
     /// `Place` was left with no declaration at all.
     #[test]
     fn annotation_named_like_a_declaration_keyword_does_not_swallow_the_declaration() {
-        let index = DocumentIndex::build(ISSUE_551_PROBE, None).expect("valid domain");
+        let index =
+            DocumentIndex::build(ISSUE_551_PROBE, None, &fsl_syntax::ParseOptions::stable())
+                .expect("valid domain");
         assert!(
             !index.symbols.iter().any(|symbol| symbol.name == "command"),
             "{:?}",
@@ -1716,7 +1759,8 @@ mod tests {
     }
   }
 }"#;
-        let index = DocumentIndex::build(source, None).expect("valid requirements");
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid requirements");
         let requirement = index
             .symbols
             .iter()
@@ -1739,7 +1783,8 @@ mod tests {
             r#"@requirement("REQ-COMMAND", "placing an order is traceable")"#,
             "@doc.control()",
         );
-        let index = DocumentIndex::build(&source, None).expect("valid domain");
+        let index = DocumentIndex::build(&source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid domain");
         let place = index
             .symbols
             .iter()
@@ -1760,7 +1805,8 @@ mod tests {
             r#"@requirement("REQ-COMMAND", "placing an order is traceable")"#,
             "@count(swallowed, alsoSwallowed)",
         );
-        let index = DocumentIndex::build(&source, None).expect("valid domain");
+        let index = DocumentIndex::build(&source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid domain");
         for argument in ["swallowed", "alsoSwallowed"] {
             assert!(
                 !index.symbols.iter().any(|symbol| symbol.name == argument),

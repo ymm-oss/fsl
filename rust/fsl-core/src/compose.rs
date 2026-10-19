@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::naming::NameMap;
 use crate::{
-    CoreError, IndexedReplacements, KernelSpec, PredicateExpander,
+    CoreError, CoreErrorKind, IndexedReplacements, KernelSpec, PredicateExpander,
     capture_avoiding_binding_with_names, collect_binder_names, collect_names, expand_spec_domains,
     free_vars, fresh_binding_name, substitute, substitute_binder,
 };
@@ -68,7 +68,8 @@ pub fn parse_kernel_source(
         SurfaceDocument::Compose(compose) => lower_compose(compose, resolver),
         SurfaceDocument::Refinement(_) | SurfaceDocument::Agent(_) => Err(CoreError::unlocated(
             "top-level document has not reached the kernel lowering gate",
-        )),
+        )
+        .with_kind(CoreErrorKind::NotKernelLowerable)),
     }?;
     kernel
         .annotations
@@ -173,14 +174,16 @@ fn component_error(
         },
         line: use_span.start.line,
         column: use_span.start.column,
-        // Not propagated from `error`. What this value reports is a compose-level
+        // Not adopted from `error`. What this value reports is a compose-level
         // failure to load a component, anchored at the parent's `use`
         // declaration — it is not itself a name-resolution failure, and
         // `docs/design/DESIGN-v1.md` §8's repair branch for `name` ("add a declaration
         // or change a type") would be wrong advice at that location. The
-        // component's own classification survives inside the message, together
-        // with its path and position (issue 565's flag, issue 567's anchoring).
-        name_resolution: false,
+        // component's own classification is kept as the cause, and its message,
+        // path and position survive inside this message (issue 565's flag,
+        // issue 567's anchoring, issue 1167's typed kind).
+        kind: CoreErrorKind::ComponentLoad(Box::new(error.kind.clone())),
+        diagnostic_code: None,
         // The origin's span is the `use` declaration, which really is in the
         // parent, so `with_source_file` stamps the parent path onto a position
         // that exists there. Carrying the component's span here is what let the
@@ -400,7 +403,8 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
             lowering_steps: Vec::new(),
             generated: false,
         })),
-        name_resolution: false,
+        kind: CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
@@ -1302,7 +1306,7 @@ fn resolve_alias_qualified_name(
             .ok_or_else(|| error_at(format!("unknown alias '{alias}'"), span))?;
         if !component.names.types.contains(&qualified.name) {
             let message = format!("unknown type '{alias}.{}'", qualified.name);
-            return Err(error_at(message, span));
+            return Err(error_at(message, span).with_kind(CoreErrorKind::UnknownType));
         }
         Ok(QualifiedName {
             namespace: None,

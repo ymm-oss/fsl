@@ -43,6 +43,11 @@ sha2.workspace = true
 [dev-dependencies]
 jsonschema = { version = "0.48.0", default-features = false }
 libc = "0.2"
+# `parse_entry_inventory.rs` reads the workspace's Rust sources as syntax
+# trees, not text, so an alias, a function pointer, or a call inside a macro
+# cannot hide a parse entry from the inventory.
+proc-macro2 = { version = "1", default-features = false }
+syn = { version = "2.0.119", default-features = false, features = ["full", "parsing", "visit"] }
 
 [lints]
 workspace = true

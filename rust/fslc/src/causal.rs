@@ -717,11 +717,12 @@ fn run_causal_observe_expectations(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let mapping = match fsl_syntax::parse_surface_document(&mapping_source) {
-        Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-        Err(error) => return (error_output("parse", &error.to_string()), 2),
-    };
+    let mapping =
+        match fsl_syntax::parse_surface_document_with(&mapping_source, crate::parse_options()) {
+            Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
+            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
+            Err(error) => return (error_output("parse", &error.to_string()), 2),
+        };
     if let Some(span) = crate::untyped_replay_enum_mapping_span(&mapping) {
         return (
             crate::located_error_output(

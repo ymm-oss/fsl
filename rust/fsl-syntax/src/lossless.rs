@@ -115,11 +115,35 @@ impl FormatEdition {
     }
 }
 
+/// Why a formatter rewrite was refused as unsafe, independent of its wording.
+///
+/// Consumers that classify the refusal (`fslc migrate`'s diagnostic code)
+/// match on this exhaustively instead of searching the message (issue 1167).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UnsafeFormatKind {
+    /// An `agent` body, which has no native pretty-printer.
+    AgentBody,
+    /// A legacy colon quantifier whose unbraced body has no determinable end.
+    UnbracedQuantifierEnd,
+    /// A quantifier with neither braces nor a separator colon.
+    QuantifierWithoutBody,
+    /// A legacy domain enum whose interior comments a rewrite would move.
+    DomainEnumInteriorComment,
+    /// An edit that does not fall on UTF-8 source boundaries.
+    EditOutsideUtf8Boundary,
+    /// Edits whose spans overlap.
+    OverlappingEdits,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormatError {
     Lex(LexError),
     Parse(ParseError),
-    Unsafe { message: String, span: Span },
+    Unsafe {
+        kind: UnsafeFormatKind,
+        message: String,
+        span: Span,
+    },
 }
 
 impl FormatError {
@@ -138,7 +162,7 @@ impl fmt::Display for FormatError {
         match self {
             Self::Lex(error) => error.fmt(formatter),
             Self::Parse(error) => error.fmt(formatter),
-            Self::Unsafe { message, span } => write!(
+            Self::Unsafe { message, span, .. } => write!(
                 formatter,
                 "{message} at {}:{}",
                 span.start.line, span.start.column
@@ -383,6 +407,7 @@ fn refuse_opaque_agent(tree: &LosslessDocument, dialect: &str) -> Result<(), For
         && close > open + 1
     {
         return Err(FormatError::Unsafe {
+            kind: UnsafeFormatKind::AgentBody,
             message: "cannot format an agent body: no native pretty-printer exists for the \
                       recursive agent grammar yet"
                 .to_owned(),
@@ -442,6 +467,7 @@ fn plan_quantifiers(tree: &LosslessDocument) -> Result<Vec<CanonicalRewrite>, Fo
             let body_start = separator + 1;
             let Some(body_end) = quantifier_body_end(&tokens, body_start) else {
                 return Err(FormatError::Unsafe {
+                    kind: UnsafeFormatKind::UnbracedQuantifierEnd,
                     message: "cannot determine the end of an unbraced quantifier".to_owned(),
                     span: token.span,
                 });
@@ -466,6 +492,7 @@ fn plan_quantifiers(tree: &LosslessDocument) -> Result<Vec<CanonicalRewrite>, Fo
             });
         } else if brace.is_none() {
             return Err(FormatError::Unsafe {
+                kind: UnsafeFormatKind::QuantifierWithoutBody,
                 message: "cannot canonicalize a quantifier without braces or a separator colon"
                     .to_owned(),
                 span: token.span,
@@ -509,6 +536,7 @@ pub fn apply_source_edits(source: &str, mut edits: Vec<SourceEdit>) -> Result<St
             || !source.is_char_boundary(edit.span.end.offset)
     }) {
         return Err(FormatError::Unsafe {
+            kind: UnsafeFormatKind::EditOutsideUtf8Boundary,
             message: "formatter edit is outside a UTF-8 source boundary".to_owned(),
             span: edit.span,
         });
@@ -519,6 +547,7 @@ pub fn apply_source_edits(source: &str, mut edits: Vec<SourceEdit>) -> Result<St
             && pair[0].span.start.offset != pair[0].span.end.offset
     }) {
         return Err(FormatError::Unsafe {
+            kind: UnsafeFormatKind::OverlappingEdits,
             message: "overlapping formatter edits are not safe".to_owned(),
             span: Span {
                 start: edits[0].span.start,
@@ -583,6 +612,7 @@ fn plan_domain_enum(
         let original = &tree.source()[span.start.offset..span.end.offset];
         if original.contains("//") {
             return Err(FormatError::Unsafe {
+                kind: UnsafeFormatKind::DomainEnumInteriorComment,
                 message: "cannot canonicalize a legacy domain enum with interior comments"
                     .to_owned(),
                 span,
