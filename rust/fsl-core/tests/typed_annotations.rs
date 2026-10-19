@@ -335,11 +335,19 @@ requirements TraceCases {
     .expect("parse trace contract")
     .expect("requirements trace contract");
     assert_eq!(
-        contract.acceptance[0].annotations.requirements().unwrap()[0].id,
+        contract.unchecked_acceptance()[0]
+            .annotations
+            .requirements()
+            .unwrap()[0]
+            .id,
         "AC-1"
     );
     assert_eq!(
-        contract.forbidden[0].annotations.requirements().unwrap()[0].id,
+        contract.unchecked_forbidden()[0]
+            .annotations
+            .requirements()
+            .unwrap()[0]
+            .id,
         "NEG-1"
     );
 }
@@ -686,15 +694,19 @@ requirements TraceAnnotations {
         .expect("parse trace contract")
         .expect("requirements trace contract");
     assert_eq!(
-        contract.acceptance[0].annotations.undecided()[0].0,
+        contract.unchecked_acceptance()[0].annotations.undecided()[0].0,
         "acceptance owner is pending"
     );
     assert_eq!(
-        contract.acceptance[0].annotations.requirements().unwrap()[0].id,
+        contract.unchecked_acceptance()[0]
+            .annotations
+            .requirements()
+            .unwrap()[0]
+            .id,
         "AC-1"
     );
     assert_eq!(
-        contract.forbidden[0].annotations.undecided()[0].0,
+        contract.unchecked_forbidden()[0].annotations.undecided()[0].0,
         "forbidden owner is pending"
     );
 }

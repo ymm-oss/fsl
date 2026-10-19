@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fsl_core::{FslValue, KernelExpr, KernelModel};
+use fslc_rust::verification_output::TraceGate;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -2351,8 +2352,8 @@ fn prepare_cli_verification_from_source(
     };
     if !has_scope && let Ok(model) = &snapshot_model {
         match validate_requirement_traces_from_source(path, source, model) {
-            Ok((Some(failure), _)) => return Err((failure, 2)),
-            Ok((None, _)) => {}
+            Ok(TraceGate::Rejected { failure, .. }) => return Err((failure, 2)),
+            Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
             Err(error) => return Err((semantic_error_output(&error), 2)),
         }
     }

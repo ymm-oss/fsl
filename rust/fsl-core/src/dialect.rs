@@ -153,12 +153,79 @@ pub struct RequirementsTraceCase {
     pub annotations: Annotations,
 }
 
+/// The acceptance and forbidden traces of a requirements document, as parsed.
+///
+/// Parsing does not replay a trace against the model, so these cases are not
+/// yet evidence: the requirement-trace gate (`fslc_rust::verification_output::
+/// validate_requirement_trace_source`) replays them and hands out a checked
+/// contract. Only [`requirements_trace_contract`] builds this value, and its
+/// cases are readable only through the `unchecked_` accessors, so a consumer
+/// that reads them without the gate says so at the call site (#1285).
+///
+/// ```compile_fail,E0451
+/// let contract = fsl_core::RequirementsTraceContract {
+///     acceptance: Vec::new(),
+///     forbidden: Vec::new(),
+///     scope_types: Default::default(),
+/// };
+/// ```
+///
+/// ```compile_fail,E0616
+/// fn read(contract: &fsl_core::RequirementsTraceContract) -> usize {
+///     contract.forbidden.len()
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequirementsTraceContract {
-    pub acceptance: Vec<RequirementsTraceCase>,
-    pub forbidden: Vec<RequirementsTraceCase>,
+    acceptance: Vec<RequirementsTraceCase>,
+    forbidden: Vec<RequirementsTraceCase>,
+    scope_types: BTreeSet<String>,
+}
+
+impl RequirementsTraceContract {
+    /// The acceptance cases, in declaration order, not replayed by any gate.
+    #[must_use]
+    pub fn unchecked_acceptance(&self) -> &[RequirementsTraceCase] {
+        &self.acceptance
+    }
+
+    /// The forbidden cases, in declaration order, not replayed by any gate.
+    #[must_use]
+    pub fn unchecked_forbidden(&self) -> &[RequirementsTraceCase] {
+        &self.forbidden
+    }
+
     /// The source's [`verify_scope_type_names`].
-    pub scope_types: BTreeSet<String>,
+    #[must_use]
+    pub fn scope_types(&self) -> &BTreeSet<String> {
+        &self.scope_types
+    }
+
+    /// Every case as `(kind, case, one-case contract)`, acceptance first and
+    /// then forbidden, each in declaration order. `kind` is `"acceptance"` or
+    /// `"forbidden"`; the one-case contract keeps this contract's scope types.
+    #[must_use]
+    pub fn split_cases(&self) -> Vec<(&'static str, &RequirementsTraceCase, Self)> {
+        let single = |kind: &'static str, case: &RequirementsTraceCase| Self {
+            acceptance: if kind == "acceptance" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            forbidden: if kind == "forbidden" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            scope_types: self.scope_types.clone(),
+        };
+        self.acceptance
+            .iter()
+            .map(|case| ("acceptance", case))
+            .chain(self.forbidden.iter().map(|case| ("forbidden", case)))
+            .map(|(kind, case)| (kind, case, single(kind, case)))
+            .collect()
+    }
 }
 
 fn qualified(name: &str) -> QualifiedName {

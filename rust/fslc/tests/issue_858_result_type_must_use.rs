@@ -21,12 +21,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The 29 public type names this change annotates: #858's enumeration minus
+/// The 30 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
-/// curated table missed, `RefinementVerdict` (#1245), and `Verdict` (#901). Each must carry `#[must_use]` on the TYPE, because on
+/// curated table missed, `RefinementVerdict` (#1245), `Verdict` (#901), and
+/// `TraceGate` (#1285). Each must carry `#[must_use]` on the TYPE, because on
 /// the function it is redundant against `Result` and closes nothing.
-const ANNOTATED: [&str; 29] = [
+const ANNOTATED: [&str; 30] = [
     // fsl-runtime
     "Violation",
     "StepResult",
@@ -61,12 +62,13 @@ const ANNOTATED: [&str; 29] = [
     // fslc
     "OutcomeClass",
     "Verdict",
+    "TraceGate",
 ];
 
-/// `ANNOTATED` holds 29 distinct names but 30 declarations: `ReachableWitness`
+/// `ANNOTATED` holds 30 distinct names but 31 declarations: `ReachableWitness`
 /// is declared once in `fsl-runtime` and once in `fsl-verifier`, and both must
 /// carry the attribute.
-const ANNOTATED_DECLARATIONS: usize = 30;
+const ANNOTATED_DECLARATIONS: usize = 31;
 
 /// Types deliberately left un-annotated, each with the reason. A type moved
 /// off this list must gain the attribute; a type added to it must state why.

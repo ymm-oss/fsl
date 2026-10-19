@@ -21,8 +21,9 @@ use fslc_rust::outcome::{
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
-use fslc_rust::verification_output::DiagnosticClass;
-use fslc_rust::verification_output::UnenabledStep;
+use fslc_rust::verification_output::{
+    CheckedTraceContract, DiagnosticClass, TraceGate, UnenabledStep,
+};
 use serde_json::{Map, Value, json};
 
 mod approval;
@@ -6177,11 +6178,12 @@ fn run_scenarios_mode_from_source(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    match validate_requirement_traces_from_source(path, source, &model) {
-        Ok((Some(failure), _)) => return (failure, 2),
-        Ok((None, _)) => {}
+    let trace_contract = match validate_requirement_traces_from_source(path, source, &model) {
+        Ok(TraceGate::Rejected { failure, .. }) => return (failure, 2),
+        Ok(TraceGate::Passed(contract)) => Some(contract),
+        Ok(TraceGate::NotRequirements) => None,
         Err(error) => return (semantic_error_output(&error), 2),
-    }
+    };
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
@@ -6409,7 +6411,7 @@ fn run_scenarios_mode_from_source(
         );
         scenarios.push(Value::Object(scenario));
     }
-    match requirement_trace_scenarios_from_source(source, &model) {
+    match requirement_trace_scenarios(trace_contract.as_ref(), &model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
         Err(error) => return (semantic_error_output(&error), 2),
     }
@@ -6426,18 +6428,29 @@ fn run_scenarios_mode_from_source(
     (Value::Object(output), 0)
 }
 
-#[allow(clippy::too_many_lines)]
-fn requirement_trace_scenarios_from_source(
+/// The scenarios envelope without its exit status, for a consumer that embeds
+/// the envelope even when it is a requirement-trace gate failure (#1242).
+fn scenarios_discarding_gate_status(
+    path: &Path,
     source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+) -> Value {
+    let (scenarios, _discarded_status) =
+        run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
+    scenarios
+}
+
+#[allow(clippy::too_many_lines)]
+fn requirement_trace_scenarios(
+    contract: Option<&CheckedTraceContract>,
     model: &KernelModel,
 ) -> Result<Vec<Value>, String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
-    else {
+    let Some(contract) = contract else {
         return Ok(Vec::new());
     };
     let mut scenarios = Vec::new();
-    for case in &contract.acceptance {
+    for case in contract.acceptance() {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         let initial = fslc_rust::state_json(&monitor.state);
         let mut steps = Vec::new();
@@ -6491,7 +6504,7 @@ fn requirement_trace_scenarios_from_source(
             "expected_states":states,
         }));
     }
-    for case in &contract.forbidden {
+    for case in contract.forbidden() {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         let initial = fslc_rust::state_json(&monitor.state);
         let mut steps = Vec::new();
@@ -6587,7 +6600,7 @@ fn requirement_trace_scenarios_from_source(
             &monitor,
             final_step,
             &arguments,
-            &contract.scope_types,
+            contract.scope_types(),
         )?
         .rejected_by()
         .ok_or_else(|| {
@@ -6938,8 +6951,14 @@ fn referenced_requirement_ids(
                 .map(|requirement| requirement.id),
         );
     }
+    // Ungated (#1243): a parse failure adds nothing, and a case the gate would
+    // reject still counts as referencing its requirements.
     if let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) {
-        for case in contract.acceptance.into_iter().chain(contract.forbidden) {
+        for case in contract
+            .unchecked_acceptance()
+            .iter()
+            .chain(contract.unchecked_forbidden())
+        {
             referenced.extend(
                 case.annotations
                     .requirements()
@@ -10885,7 +10904,7 @@ fn run_explain_from_source(
     };
     let spec_kind = source_dialect(source);
     let skeleton = model_skeleton(&model, spec_kind);
-    let (scenarios, _) = run_scenarios_mode_from_source(path, source, depth, "warn", false);
+    let scenarios = scenarios_discarding_gate_status(path, source, depth, "warn");
     let mut output = envelope();
     output.insert("result".to_owned(), json!("explained"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -11623,8 +11642,10 @@ fn aggregate_by_obligation(mutants: &[Value]) -> Map<String, Value> {
         .collect()
 }
 
+/// The requirements of the case of the rejected `contract` that `failure`
+/// reports.
 fn requirement_trace_failure_requirements(
-    source: &str,
+    contract: &fsl_core::RequirementsTraceContract,
     failure: &Value,
 ) -> Result<Vec<String>, String> {
     let id = failure
@@ -11635,12 +11656,9 @@ fn requirement_trace_failure_requirements(
         .get("kind")
         .and_then(Value::as_str)
         .ok_or_else(|| "requirement trace failure has no kind".to_owned())?;
-    let contract = fsl_core::requirements_trace_contract(source)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "requirement trace failure has no trace contract".to_owned())?;
     let cases = match kind {
-        "acceptance" => &contract.acceptance,
-        "forbidden" | "forbidden_setup" => &contract.forbidden,
+        "acceptance" => contract.unchecked_acceptance(),
+        "forbidden" | "forbidden_setup" => contract.unchecked_forbidden(),
         _ => return Err(format!("unknown requirement trace failure kind '{kind}'")),
     };
     let case = cases.iter().find(|case| case.id == id).ok_or_else(|| {
@@ -11657,7 +11675,9 @@ fn apply_requirement_mutation_oracle(
     if !outcome.is_clean() {
         return Ok(());
     }
-    if let (Some(failure), _) = validate_requirement_trace_source(source, model)? {
+    if let TraceGate::Rejected { failure, contract } =
+        validate_requirement_trace_source(source, model)?
+    {
         let kind = failure
             .get("kind")
             .and_then(Value::as_str)
@@ -11668,7 +11688,7 @@ fn apply_requirement_mutation_oracle(
             } else {
                 "acceptance"
             },
-            requirement_trace_failure_requirements(source, &failure)?,
+            requirement_trace_failure_requirements(&contract, &failure)?,
         );
     }
     Ok(())
@@ -11896,7 +11916,7 @@ fn with_undecided_counts(mut object: Value, errored: usize, inconclusive: usize)
 
 fn requirement_kill_index(
     model: &KernelModel,
-    trace_contract: Option<&fsl_core::RequirementsTraceContract>,
+    trace_contract: Option<&CheckedTraceContract>,
 ) -> Map<String, Value> {
     let mut result = Map::new();
     for annotations in model
@@ -11919,9 +11939,9 @@ fn requirement_kill_index(
     }
     if let Some(contract) = trace_contract {
         for requirement in contract
-            .acceptance
+            .acceptance()
             .iter()
-            .chain(&contract.forbidden)
+            .chain(contract.forbidden())
             .flat_map(trace_case_requirement_ids)
         {
             result.entry(requirement).or_insert(json!({"kills":0}));
@@ -12550,9 +12570,13 @@ fn run_mutate_with(
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
     };
-    let trace_contract = match fsl_core::requirements_trace_contract(&source) {
-        Ok(contract) => contract,
-        Err(error) => return mutate_error(core_error_output(&error)),
+    // The `verified` baseline already passed this gate on the same source and
+    // model; it runs again because only the gate hands out the checked cases.
+    let trace_contract = match validate_requirement_trace_source(&source, &model) {
+        Ok(TraceGate::Passed(contract)) => Some(contract),
+        Ok(TraceGate::NotRequirements) => None,
+        Ok(TraceGate::Rejected { failure, .. }) => return mutate_error(failure),
+        Err(error) => return mutate_error(semantic_error_output(&error)),
     };
     let document = match parse_surface_document_from_source(path, &source) {
         Ok(document) => document,
@@ -14188,12 +14212,11 @@ fn prepare_ledger_report_from_source(
             Ok((evidence_path.clone(), value))
         })
         .collect::<Result<Vec<_>, Value>>()?;
-    let (scenarios, _) = run_scenarios_mode_from_source(
+    let scenarios = scenarios_discarding_gate_status(
         request.path,
         source,
         request.depth,
         request.deadlock_mode,
-        false,
     );
     let evidence = evidence
         .into_iter()
@@ -15228,12 +15251,14 @@ fn add_scenario_items(
     node_additions: &mut Vec<Value>,
     edge_additions: &mut Vec<Value>,
 ) {
+    // Ungated (#1243): a parse failure projects no case, and a case the gate
+    // would reject is projected like any other.
     let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) else {
         return;
     };
     for (kind, cases) in [
-        ("acceptance", &contract.acceptance),
-        ("forbidden", &contract.forbidden),
+        ("acceptance", contract.unchecked_acceptance()),
+        ("forbidden", contract.unchecked_forbidden()),
     ] {
         for case in cases {
             let id = format!("{kind}:{}", case.id);
@@ -16790,12 +16815,14 @@ fn forbidden_diff_findings(
     (old_source, old): (&str, &KernelModel),
     (new_source, new): (&str, &KernelModel),
 ) -> Result<Vec<Value>, String> {
+    // Ungated (#1239): OLD's forbidden cases are replayed by
+    // `forbidden_case_finding`, not by the requirement-trace gate.
     let Some(contract) =
         fsl_core::requirements_trace_contract(old_source).map_err(|error| error.to_string())?
     else {
         return Ok(Vec::new());
     };
-    for case in &contract.forbidden {
+    for case in contract.unchecked_forbidden() {
         if case.steps.is_empty() {
             return Err(format!(
                 "forbidden '{}' must have at least one step",
@@ -16808,12 +16835,12 @@ fn forbidden_diff_findings(
     let new_scope_types =
         fsl_core::verify_scope_type_names(new_source).map_err(|error| error.to_string())?;
     Ok(contract
-        .forbidden
+        .unchecked_forbidden()
         .iter()
         .filter_map(|case| {
             forbidden_case_finding(
                 case,
-                (old, &contract.scope_types),
+                (old, contract.scope_types()),
                 (new, new_scope_types.as_ref()),
             )
         })
@@ -17526,7 +17553,7 @@ fn validate_requirement_traces_from_source(
     _path: &Path,
     source: &str,
     model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
+) -> Result<TraceGate, String> {
     validate_requirement_trace_source(source, model)
 }
 
@@ -17540,7 +17567,7 @@ fn requirement_step_match(
 fn validate_requirement_trace_source(
     source: &str,
     model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
+) -> Result<TraceGate, String> {
     fslc_rust::verification_output::validate_requirement_trace_source(&envelope(), source, model)
 }
 
@@ -18414,8 +18441,8 @@ fn run_verify_from_source(
     let (implements, compose_warnings) = match &loaded_model {
         Ok((kernel, model)) => {
             match validate_requirement_traces_from_source(path, source, model) {
-                Ok((Some(failure), _)) => return (failure, 2),
-                Ok((None, _)) => {}
+                Ok(TraceGate::Rejected { failure, .. }) => return (failure, 2),
+                Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
                 Err(error) => return (semantic_error_output(&error), 2),
             }
             let implements = match implements_result_from_source(path, source, model, depth) {
@@ -19785,7 +19812,7 @@ spec InitTraceability {
         assert_eq!(
             validate_requirement_traces_from_source(&fixture.path, &captured, &model)
                 .expect("validate source A requirement traces"),
-            (None, false)
+            TraceGate::NotRequirements
         );
         assert_eq!(
             implements_result_from_source(&fixture.path, &captured, &model, 4)

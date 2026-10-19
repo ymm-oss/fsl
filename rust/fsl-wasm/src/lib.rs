@@ -456,8 +456,13 @@ async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
                 &request.source,
                 model,
             ) {
-                Ok((Some(failure), _)) => return failure,
-                Ok((None, _)) => {}
+                Ok(fslc_rust::verification_output::TraceGate::Rejected { failure, .. }) => {
+                    return failure;
+                }
+                Ok(
+                    fslc_rust::verification_output::TraceGate::Passed(_)
+                    | fslc_rust::verification_output::TraceGate::NotRequirements,
+                ) => {}
                 Err(failure) => return error(solver_version, "semantics", failure),
             }
             match implements_output(request, model, request.options.depth) {
@@ -1095,14 +1100,16 @@ mod tests {
         )
         .expect("fixture must lower before its requirement trace failure");
         let model = fsl_core::build_model(kernel).expect("fixture must build before trace failure");
-        fslc_rust::verification_output::validate_requirement_trace_source(
+        match fslc_rust::verification_output::validate_requirement_trace_source(
             &envelope(solver_version),
             &request.source,
             &model,
         )
         .expect("fixture trace validation must run")
-        .0
-        .expect("fixture must fail native requirement trace validation")
+        {
+            fslc_rust::verification_output::TraceGate::Rejected { failure, .. } => failure,
+            other => panic!("fixture must fail native requirement trace validation: {other:?}"),
+        }
     }
 
     fn assert_worker_requirement_trace_error_matches_native(

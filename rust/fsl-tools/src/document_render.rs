@@ -107,6 +107,8 @@ pub fn render_requirements_document(
     evidence: Option<&AppliedEvidence<'_>>,
     approvals: Option<&AppliedApprovals<'_>>,
 ) -> Result<RenderedDocument, String> {
+    // Ungated (#1243): the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on.
     let trace = requirements_trace_contract(source).map_err(|error| error.to_string())?;
     validate_render_inputs(claims, kernel, model, source, trace.as_ref())?;
     let mut ctx = Ctx {
@@ -1757,9 +1759,9 @@ fn find_case<'a>(
 ) -> Option<&'a RequirementsTraceCase> {
     let trace = trace?;
     let cases = if is_acceptance {
-        &trace.acceptance
+        trace.unchecked_acceptance()
     } else {
-        &trace.forbidden
+        trace.unchecked_forbidden()
     };
     cases.iter().find(|case| case.id == id)
 }

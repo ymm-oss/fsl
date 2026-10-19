@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 
 use crate::spec_load::{SemanticDiagnostic, SpecLoadError, kernel_load_error};
 use crate::verification_output::{
-    render_runtime_error, render_semantic_error, validate_requirement_trace_source,
+    TraceGate, render_runtime_error, render_semantic_error, validate_requirement_trace_source,
 };
 
 /// A spec that passed every validity stage of `check`.
@@ -113,8 +113,8 @@ pub fn run_check_stages(
         return Err((render_runtime_error(envelope(), &error), 2));
     }
     match validate_requirement_trace_source(&envelope(), source, &model) {
-        Ok((Some(failure), _)) => return Err((failure, 2)),
-        Ok((None, _)) => {}
+        Ok(TraceGate::Rejected { failure, .. }) => return Err((failure, 2)),
+        Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
         Err(error) => return Err((semantic_error(envelope(), &error), 2)),
     }
     Ok(CheckedSpec { kernel, model })
