@@ -214,12 +214,13 @@ which is truthful but not useful. `provenance_for` therefore prefers the origin
 registry when it has a chain for a target (it is the richer signal where present,
 distinguishing `generated_from_source` from `generated_only`), and falls back to
 the claim's own checked-model span (`ActionDef::span`, `PropertyDef::span`,
-`LeadsToDef::span`) as `source_backed` when the registry has nothing — this is not
-a guess, it is the same span the parser already attached to the authored
-declaration. Only a claim with *neither* signal reports `unknown`; in v1 that is
-exactly `terminal_rule` (`KernelModel::terminal` is a bare `Expr` with no span of
-its own) when the registry has no `terminal` entry, and it is exactly what
-`build_surface_model` (an empty-registry `KernelModel`) demonstrates. Trace claims
+`LeadsToDef::span`, `KernelModel::terminal_span`) as `source_backed` when the
+registry has nothing — this is not a guess, it is the same span the parser
+already attached to the authored declaration. Only a claim with *neither* signal
+reports `unknown`. Every v1 claim kind carries such a span (the `terminal_rule`
+span since #1091), so `unknown` is observable only on a model that has neither,
+such as a `build_surface_model` (empty-registry) `KernelModel` whose
+`terminal_span` is cleared. Trace claims
 (`acceptance_trace`/`forbidden_trace`) always report `source_backed`: their
 `line`/`column` come from a direct, independent reparse of the real source text,
 never from the origin registry, so they carry a genuine position regardless of the
@@ -362,9 +363,9 @@ detector for the revert and for one mutation per independent assertion):
   `claim_set_digest` moves;
 - digest stability under comment/formatting-only edits and under a
   requirement-text-only edit (claim digests unchanged, `claim_set_digest` moved);
-- provenance (`source_backed` in the ordinary case; `unknown` only for
-  `terminal_rule` under a stripped origin registry, never for claims with a real
-  declared span);
+- provenance (`source_backed` in the ordinary case, including `terminal_rule` at
+  its `terminal` block (#1091); `unknown` only for a claim with neither an origin
+  nor a declared span, never for claims with a real declared span);
 - undecided/analysis-scope separation from claims;
 - compile-time const `verify { values ... }` bounds project as evaluated
   integers, and a `values` bound naming a number the spec never declares is not

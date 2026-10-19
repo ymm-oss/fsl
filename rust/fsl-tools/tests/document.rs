@@ -666,17 +666,17 @@ fn requirements_dialect_claims_are_source_backed() {
 #[test]
 fn unknown_provenance_is_reported_not_guessed() {
     // The internal origin registry is currently sparse outside the domain
-    // dialect (docs/design/DESIGN-kernel-origin-v2.md), so most claims fall back to
+    // dialect (docs/design/DESIGN-kernel-origin-v2.md), so claims fall back to
     // their checked declaration's own span (a real, non-guessed signal — see
-    // `provenance_for`). `terminal` is the one claim kind with no span of its
-    // own (`KernelModel::terminal` is a bare `Expr`), so stripping the origin
-    // registry is the only way to observe genuinely unknown provenance
-    // without fabricating a location for it.
+    // `provenance_for`). Every claim kind has such a span, so genuinely
+    // unknown provenance is observable only on a model that has neither:
+    // the origin registry stripped and the terminal's span cleared.
     let (source, root) = claims_fixture();
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
-    let stripped_model =
+    let mut stripped_model =
         fsl_core::build_surface_model(kernel.syntax().clone()).expect("build surface model");
+    stripped_model.terminal_span = None;
 
     let input = fsl_tools::DocumentInput {
         kernel: &kernel,
@@ -708,6 +708,42 @@ fn unknown_provenance_is_reported_not_guessed() {
             .all(|claim| claim.provenance.assurance == ProvenanceAssurance::SourceBacked)
     );
     assert_eq!(claims.provenance.completeness, Completeness::Partial);
+}
+
+/// #1091: a terminal claim is attributed to its `terminal` block, so a
+/// requirements document that declares one keeps complete provenance.
+#[test]
+fn terminal_claim_is_source_backed_at_its_declaration() {
+    let (source, root) = claims_fixture();
+    let (line, column) = source
+        .lines()
+        .zip(1u32..)
+        .find_map(|(text, line)| {
+            let trimmed = text.trim_start();
+            let indent = u32::try_from(text.len() - trimmed.len()).expect("indent fits u32");
+            trimmed
+                .starts_with("terminal {")
+                .then_some((line, indent + 1))
+        })
+        .expect("the fixture declares terminal");
+    let expected = fsl_tools::SourceRef {
+        path: Some("document_claims_fixture.fsl".to_owned()),
+        line,
+        column,
+    };
+    let claims = project(&source, "document_claims_fixture.fsl", &root);
+    let terminal = claims
+        .claims
+        .iter()
+        .find(|claim| claim.kind.as_str() == "terminal_rule")
+        .expect("a terminal claim exists");
+    assert_eq!(
+        terminal.provenance.assurance,
+        ProvenanceAssurance::SourceBacked
+    );
+    assert_eq!(terminal.provenance.sources, vec![expected.clone()]);
+    assert_eq!(terminal.source, Some(expected));
+    assert_eq!(claims.provenance.completeness, Completeness::Complete);
 }
 
 // --- Undecided / analysis scope separation -------------------------------------

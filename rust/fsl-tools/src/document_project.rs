@@ -600,8 +600,17 @@ fn push_terminal_claim(
         "semantic_targets": [&target],
     });
     let claim_digest = framed_digest(CLAIM_DIGEST_ALGORITHM, &core);
-    let provenance = provenance_for(model, std::slice::from_ref(&target), None, source_path);
-    let source = source_from_origin(model, &target, source_path);
+    let provenance = provenance_for(
+        model,
+        std::slice::from_ref(&target),
+        model.terminal_span,
+        source_path,
+    );
+    let source = source_from_origin(model, &target, source_path).or_else(|| {
+        model
+            .terminal_span
+            .map(|span| source_ref_span(source_path, span))
+    });
 
     built.push(BuiltClaim {
         claim: Claim {
