@@ -81,8 +81,8 @@ Monitor, and replay output — including `state_mismatch.action` — all use it,
 `use X as a__b` with action `c` is `a__b.c`. A v1 trace may name a component
 action as `alias.action` or as the pre-#1234 `alias__action`. Both are looked up
 in the checked model's table of component actions, built from the alias and
-action pairs that compose lowering recorded; neither spelling is rewritten
-into the other. A spelling that matched more than one action would be an input
+action pairs that compose lowering recorded (`NameMap::resolve_action` in
+`rust/fsl-core/src/naming.rs`); neither spelling is rewritten into the other. A spelling that matched more than one action would be an input
 error (exit 2) rather than a choice. A checked model cannot reach that case,
 because the two structures sharing an `alias__action` spelling would be
 duplicate actions. Sync and glue actions, and every action of a non-compose

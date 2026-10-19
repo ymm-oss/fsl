@@ -36,6 +36,7 @@ mod domain;
 mod domain_lowering;
 mod expr_text;
 mod model;
+mod naming;
 pub mod obligation;
 mod origin;
 mod partial_operation;
@@ -47,8 +48,7 @@ mod trace_json;
 mod typecheck;
 
 pub use compose::{
-    ComposeName, FileResolver, FsResolver, lower_compose, parse_kernel_source,
-    parse_kernel_source_with_file,
+    FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
@@ -71,6 +71,9 @@ pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
     build_model, static_leadsto_bindings,
+};
+pub use naming::{
+    AmbiguousName, ComposeName, NameMap, PublicName, SyntheticName, unmapped_public_spelling,
 };
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
@@ -100,8 +103,8 @@ pub use refinement::{
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
-    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json,
-    state_summary, trace_json,
+    fsl_value_json, internal_origin_json, origin_display_name, state_json, state_summary,
+    trace_json,
 };
 
 /// What a core frontend or lowering failure is, independent of its wording.
@@ -288,7 +291,7 @@ pub struct KernelSpec {
     /// them (per-component `fair` markers) does not survive expansion.
     /// `check`/`verify` merge these with [`model_warnings`].
     diagnostics: Vec<Value>,
-    compose_names: compose::ComposeNames,
+    names: naming::NameMap,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -315,7 +318,7 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
-        compose_names: compose::ComposeNames::default(),
+        names: naming::NameMap::default(),
     })
 }
 
@@ -797,7 +800,7 @@ fn lower_direct_spec_with_origins(
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
-        compose_names: compose::ComposeNames::default(),
+        names: naming::NameMap::default(),
     })
 }
 

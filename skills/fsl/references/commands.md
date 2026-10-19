@@ -124,7 +124,7 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
+fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | impl_violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report; impl_violated and
@@ -394,7 +394,7 @@ that analyzed nothing never reports `result:"analyzed"`/exit 0. Standalone
 refinement mappings use `--projection
 refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
-node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
+node's TSG `label` is its `fsl_core::unmapped_public_spelling` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
 reports); `--focus` accepts either a node's raw id or its displayed name. A
 compose component action and its clauses use the action's public name in both

@@ -5,7 +5,7 @@ use fsl_syntax::{Annotations, MetaTag};
 use serde_json::{Map, Value, json};
 
 use crate::dialect::{requirements_has_implements, requirements_trace_contract};
-use crate::{CoreError, KernelModel, TypeRef, display_name};
+use crate::{CoreError, KernelModel, TypeRef};
 
 /// Typed `kind` for the model-level "no user invariants" warning.
 pub const NO_USER_INVARIANTS_KIND: &str = "no_user_invariants";
@@ -113,7 +113,7 @@ pub fn model_warnings(model: &KernelModel) -> Vec<Value> {
         })
         .map(|(name, _)| {
             json!({
-                "message": format!("Map<Int, ...> on '{}' is deprecated; use a bounded domain type as key", display_name(name)),
+                "message": format!("Map<Int, ...> on '{}' is deprecated; use a bounded domain type as key", model.names().public_state(name)),
                 "hint": "declare `type K = 0..<max>` and use `Map<K, ...>`",
             })
         })

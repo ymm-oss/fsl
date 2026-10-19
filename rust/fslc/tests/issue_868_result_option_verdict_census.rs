@@ -365,8 +365,43 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/model.rs",
-        419,
+        387,
         "resolve_replay_action",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        461,
+        "resolve_action",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        483,
+        "resolve_state",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        501,
+        "resolve_property",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        519,
+        "resolve_synthetic",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        531,
+        "unique",
         ResultOption
     ),
     entry!(

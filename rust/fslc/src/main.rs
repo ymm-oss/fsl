@@ -14,7 +14,10 @@ use fsl_core::{
     finalize_model_warnings, insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use fslc_rust::literate_access::literate_access;
-use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell_class};
+use fslc_rust::outcome::{
+    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, is_error_exit,
+    outcome_class, sweep_cell_class,
+};
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
@@ -4279,7 +4282,8 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         layer
             .get("exit_code")
             .and_then(Value::as_i64)
-            .is_some_and(|code| matches!(code, 2 | 3))
+            .and_then(|code| i32::try_from(code).ok())
+            .is_some_and(is_error_exit)
     });
     // A run whose only failures are `indeterminate` layers (an `[impl]`
     // report that records no executed test, issue #1200) did not find a
@@ -4288,17 +4292,17 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         .iter()
         .filter(|layer| layer.get("status").and_then(Value::as_str) == Some("failed"))
         .all(|layer| layer.get("result").and_then(Value::as_str) == Some("indeterminate"));
-    let result = if failed_layers.is_empty() {
-        "verified"
+    let verdict = if failed_layers.is_empty() {
+        Verdict::Verified
     } else if has_error {
-        "error"
+        Verdict::SpecError
     } else if all_indeterminate {
-        "indeterminate"
+        Verdict::Indeterminate
     } else {
-        "violated"
+        Verdict::Violated
     };
     let mut output = envelope();
-    output.insert("result".to_owned(), json!(result));
+    output.insert("result".to_owned(), json!(verdict.result()));
     output.insert("manifest".to_owned(), json!(path.display().to_string()));
     output.insert("keep_going".to_owned(), json!(keep_going));
     // An `[impl]` layer that opted into exit-code evidence passed or failed on
@@ -4331,14 +4335,8 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
             );
         }
     }
-    let status = if failed_layers.is_empty() {
-        0
-    } else if has_error {
-        2
-    } else {
-        1
-    };
-    (Value::Object(output), status)
+    // The run's exit code is its verdict's, from the one table (#901).
+    (Value::Object(output), verdict.exit_code())
 }
 
 /// The result slot of each planned chain step, in manifest order. `None` is a
@@ -4622,7 +4620,11 @@ fn run_chain_step(
             let passed = chain_layer_passes(&detail, status);
             let layer_status = if passed { "passed" } else { "failed" };
             let result = detail.get("result").cloned().unwrap_or(Value::Null);
-            let effective_status = if passed { 0 } else { status.max(1) };
+            let effective_status = if passed {
+                SUCCESS_EXIT
+            } else {
+                status.max(FAILURE_EXIT)
+            };
             let mut entry = json!({
                 "layer": layer,
                 "kind": check_kind,
@@ -4716,7 +4718,7 @@ fn run_chain_step(
                             "depth": depth,
                             "status": if passed { "passed" } else { "failed" },
                             "result": detail.get("result").cloned().unwrap_or(Value::Null),
-                            "exit_code": if passed { 0 } else { status.max(1) },
+                            "exit_code": if passed { SUCCESS_EXIT } else { status.max(FAILURE_EXIT) },
                             "detail": detail,
                         }),
                         !passed,
@@ -5223,7 +5225,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     json!({
                         "kind":violation.kind,
                         "check":"safety",
-                        "name":display(&violation.name),
+                        "name":model.names().public_violation(&violation.name, None).into_string(),
                         "tick":0,
                     }),
                     expected,
@@ -5260,7 +5262,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                             json!({
                                 "kind":violation.kind,
                                 "check":"safety",
-                                "name":display(&violation.name),
+                                "name":model.names().public_violation(&violation.name, None).into_string(),
                                 "action":Value::Null,
                                 "params":{},
                                 "transition":"stutter",
@@ -5283,10 +5285,13 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                 let Some(action) = resolved.or_else(|| {
                     (!versioned)
                         .then(|| {
-                            model
-                                .actions
-                                .iter()
-                                .find(|action| display(&action.name) == *action_name)
+                            model.actions.iter().find(|action| {
+                                model
+                                    .names()
+                                    .legacy_action_spelling(&action.name)
+                                    .into_string()
+                                    == *action_name
+                            })
                         })
                         .flatten()
                 }) else {
@@ -5930,7 +5935,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
             }
             let mut observed = Map::new();
             for (name, ty) in &model.state {
-                let display_name = display(name);
+                let display_name = model.names().public_state(name).into_string();
                 let value = if let Some((binder, expression)) = state_maps.get(name.as_str()) {
                     if binder.is_some() {
                         let TypeRef::Map(key_ty, _) = ty else {
@@ -6211,7 +6216,9 @@ fn run_scenarios_mode_from_source(
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
     let reachables =
-        fslc_rust::verification_output::sorted_by_published(&result.reachables, display);
+        fslc_rust::verification_output::sorted_by_published(&result.reachables, |name| {
+            model.names().public_property(name)
+        });
     let mut scenario_warnings = reachables
         .iter()
         .filter(|(_, _, witness)| witness.is_none())
@@ -6248,8 +6255,8 @@ fn run_scenarios_mode_from_source(
         let mut scenario = scenario_from_trace(&model, &witness.trace);
         scenario.insert("name".to_owned(), json!(format!("reach_{published}")));
         scenario.insert("kind".to_owned(), json!("reachable"));
-        scenario.insert("property".to_owned(), json!(published));
-        scenario.insert("final_check".to_owned(), json!(published));
+        scenario.insert("property".to_owned(), json!(published.as_str()));
+        scenario.insert("final_check".to_owned(), json!(published.as_str()));
         if let Some(property) = model
             .reachables
             .iter()
@@ -6280,10 +6287,12 @@ fn run_scenarios_mode_from_source(
             .push(response);
     }
     let responses =
-        fslc_rust::verification_output::sorted_by_published(&responses_by_property, display)
-            .into_iter()
-            .flat_map(|(_, _, responses)| responses)
-            .collect::<Vec<_>>();
+        fslc_rust::verification_output::sorted_by_published(&responses_by_property, |name| {
+            model.names().public_property(name)
+        })
+        .into_iter()
+        .flat_map(|(_, _, responses)| responses)
+        .collect::<Vec<_>>();
     let mut missing_by_property = std::collections::BTreeMap::<String, Vec<_>>::new();
     for (property, binding, triggered) in missing_responses {
         missing_by_property
@@ -6292,10 +6301,12 @@ fn run_scenarios_mode_from_source(
             .push((property, binding, triggered));
     }
     let missing_responses =
-        fslc_rust::verification_output::sorted_by_published(&missing_by_property, display)
-            .into_iter()
-            .flat_map(|(_, _, missing)| missing)
-            .collect::<Vec<_>>();
+        fslc_rust::verification_output::sorted_by_published(&missing_by_property, |name| {
+            model.names().public_property(name)
+        })
+        .into_iter()
+        .flat_map(|(_, _, missing)| missing)
+        .collect::<Vec<_>>();
     // One warning per (property, binding) with no response witness —
     // collapsing to one warning per property would hide every binding but
     // the first with a trace (issue #526). Word the two causes differently:
@@ -6307,14 +6318,14 @@ fn run_scenarios_mode_from_source(
             json!({
                 "message": format!(
                     "leadsTo {} has no response scenario within depth {depth} for binding {{{binding_text}}}",
-                    display(property)
+                    model.names().public_property(property).into_string()
                 ),
             })
         } else {
             json!({
                 "message": format!(
                     "leadsTo {} binding {{{binding_text}}}: antecedent never holds within depth {depth}",
-                    display(property)
+                    model.names().public_property(property).into_string()
                 ),
                 "hint": "the antecedent is unreachable for this binding within the bound; check the property or increase --depth",
             })
@@ -6330,10 +6341,24 @@ fn run_scenarios_mode_from_source(
         }
         scenario.insert(
             "name".to_owned(),
-            json!(format!("respond_{}{suffix}", display(&response.property))),
+            json!(format!(
+                "respond_{}{suffix}",
+                model
+                    .names()
+                    .public_property(&response.property)
+                    .into_string()
+            )),
         );
         scenario.insert("kind".to_owned(), json!("leadsTo"));
-        scenario.insert("property".to_owned(), json!(display(&response.property)));
+        scenario.insert(
+            "property".to_owned(),
+            json!(
+                model
+                    .names()
+                    .public_property(&response.property)
+                    .into_string()
+            ),
+        );
         if let Some(property) = model
             .leadstos
             .iter()
@@ -6458,7 +6483,10 @@ fn requirement_trace_scenarios(
                     case.id,
                     steps.len(),
                     violation.kind,
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                 ));
             }
             steps.push(
@@ -6509,7 +6537,10 @@ fn requirement_trace_scenarios(
                     case.id,
                     steps.len(),
                     violation.kind,
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                 ));
             }
             steps.push(
@@ -6527,7 +6558,11 @@ fn requirement_trace_scenarios(
             .iter()
             .find(|action| {
                 action.name == final_step.name
-                    || display(&action.name) == final_step.name
+                    || model
+                        .names()
+                        .legacy_action_spelling(&action.name)
+                        .into_string()
+                        == final_step.name
                     || action.name.starts_with(&format!("{}__b", final_step.name))
             })
             .ok_or_else(|| format!("unknown forbidden action '{}'", final_step.name))?;
@@ -6549,7 +6584,10 @@ fn requirement_trace_scenarios(
                     "forbidden '{}' final step violated {} '{}' after validation",
                     case.id,
                     violation.kind,
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                 ),
                 None => format!(
                     "forbidden '{}' final step was accepted after validation",
@@ -6985,7 +7023,7 @@ fn strict_tag_warnings_from_source(
                 "name": if element == "action" {
                     model.action_display_name(name)
                 } else {
-                    display(name)
+                    model.names().public_identifier(name).into_string()
                 },
                 "loc": span.python_loc(),
                 "hint": hint,
@@ -9422,9 +9460,13 @@ fn public_type(model: &KernelModel, ty: &TypeRef) -> Value {
         TypeRef::Bool => json!(["bool"]),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain { lo, hi, .. }) => json!(["domain", lo, hi]),
-            Some(TypeDef::Enum { .. }) => json!(["enum", fslc_rust::display_name(name)]),
-            Some(TypeDef::Struct { .. }) => json!(["struct", fslc_rust::display_name(name)]),
-            None => json!(["named", fslc_rust::display_name(name)]),
+            Some(TypeDef::Enum { .. }) => {
+                json!(["enum", model.names().public_type(name).into_string()])
+            }
+            Some(TypeDef::Struct { .. }) => {
+                json!(["struct", model.names().public_type(name).into_string()])
+            }
+            None => json!(["named", model.names().public_type(name).into_string()]),
         },
         TypeRef::Range(lo, hi) => json!(["domain", lo, hi]),
         TypeRef::Map(key, value) => {
@@ -9453,7 +9495,7 @@ fn statement_writes(statements: &[KernelStatement]) -> Vec<String> {
         for statement in statements {
             match statement {
                 KernelStatement::Assign { target, .. } => {
-                    writes.insert(fslc_rust::display_name(statement_root(target)));
+                    writes.insert(fsl_core::unmapped_public_spelling(statement_root(target)));
                 }
                 KernelStatement::If {
                     then_statements,
@@ -9485,14 +9527,14 @@ fn param_skeleton(model: &KernelModel, param: &ParamDef) -> Value {
             let (type_name, lo, hi) = match ty {
                 TypeRef::Named(type_name) => match model.types.get(type_name) {
                     Some(TypeDef::Domain { lo, hi, .. }) => {
-                        (fslc_rust::display_name(type_name), *lo, *hi)
+                        (model.names().public_type(type_name).into_string(), *lo, *hi)
                     }
                     Some(TypeDef::Enum { members, .. }) => (
-                        fslc_rust::display_name(type_name),
+                        model.names().public_type(type_name).into_string(),
                         0,
                         i64::try_from(members.len()).unwrap_or_default() - 1,
                     ),
-                    _ => (fslc_rust::display_name(type_name), 0, 0),
+                    _ => (model.names().public_type(type_name).into_string(), 0, 0),
                 },
                 TypeRef::Range(lo, hi) => ("Int".to_owned(), *lo, *hi),
                 TypeRef::Bool => ("Bool".to_owned(), 0, 1),
@@ -9547,7 +9589,9 @@ fn enum_member(expr: &KernelExpr, members: &[String]) -> Option<String> {
     let KernelExpr::Var(name) = expr else {
         return None;
     };
-    members.contains(name).then(|| display(name))
+    members
+        .contains(name)
+        .then(|| fsl_core::unmapped_public_spelling(name))
 }
 
 fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
@@ -9594,9 +9638,9 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
         }
         if !transitions.is_empty() {
             flows.push(json!({
-                "state": display(state),
-                "type": display(type_name),
-                "stages": members.iter().map(|member| display(member)).collect::<Vec<_>>(),
+                "state": model.names().public_state(state).into_string(),
+                "type": model.names().public_type(type_name).into_string(),
+                "stages": members.iter().map(|member| model.names().public_identifier(member).into_string()).collect::<Vec<_>>(),
                 "transitions": transitions,
             }));
         }
@@ -9683,7 +9727,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             let mut value = json!({
                 "name": origin
                     .and_then(fslc_rust::origin_display_name)
-                    .map_or_else(|| fslc_rust::display_name(&property.name), str::to_owned),
+                    .map_or_else(|| model.names().public_property(&property.name).into_string(), str::to_owned),
                 "kind":kind,
                 "body_text":fslc_rust::source_expr_text(model,&property.expr),
                 "requirement":Value::Null
@@ -9696,7 +9740,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             {
                 value.insert(
                     "generated_name".to_owned(),
-                    json!(fslc_rust::display_name(&property.name)),
+                    json!(model.names().public_property(&property.name).into_string()),
                 );
                 value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
             }
@@ -9704,7 +9748,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
         }));
     }
     for property in &model.leadstos {
-        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
+        let mut value = json!({"name":model.names().public_property(&property.name).into_string(),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
         if let Value::Object(value) = &mut value {
             insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
             // Present only for a `leadsTo ... within`, never as a null filler:
@@ -9730,12 +9774,12 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
                 Some(if entity_domains.contains(name) {
                     format!(
                         "{}: {count} instances ({lo}..{hi})",
-                        fslc_rust::display_name(name)
+                        model.names().public_type(name).into_string()
                     )
                 } else {
                     format!(
                         "{}: values {lo}..{hi} ({count} values)",
-                        fslc_rust::display_name(name)
+                        model.names().public_type(name).into_string()
                     )
                 })
             }
@@ -9747,15 +9791,16 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
         .iter()
         .filter(|(_, ty)| !matches!(ty, TypeRef::Int | TypeRef::Bool))
         .map(|(name, _)| {
-            let target = fslc_rust::display_name(name);
-            json!({"kind":"type_bound","name":format!("_bounds_{target}"),"target":target,"requirement":Value::Null})
+            let target = model.names().public_state(name).into_string();
+            let bound = model.names().public_synthetic(&fsl_core::SyntheticName::Bounds { state: name });
+            json!({"kind":"type_bound","name":bound.as_str(),"target":target,"requirement":Value::Null})
         })
         .collect::<Vec<_>>();
     for action in &model.actions {
         for (span, text) in action_partial_op_sites(model, action) {
             let mut entry = json!({
                 "kind":"partial_op",
-                "name":model.action_scoped_display_name(&format!("_partial_{}", action.name), Some(&action.name)),
+                "name":model.action_scoped_display_name(&fsl_core::SyntheticName::PartialAction { action: &action.name }.internal(), Some(&action.name)),
                 "action":model.action_display_name(&action.name),
                 "loc":span.python_loc(),
                 "text":text,
@@ -9769,14 +9814,14 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
     }
     json!({
         "spec_kind":spec_kind,
-        "state":model.state.iter().map(|(name,ty)|(fslc_rust::display_name(name),public_type(model,ty))).collect::<Map<_,_>>(),
+        "state":model.state.iter().map(|(name,ty)|(model.names().public_state(name).into_string(),public_type(model,ty))).collect::<Map<_,_>>(),
         "actions":actions,"properties":properties,"auto_checks":auto_checks,
         "domains":domains,
         "enums":model.types.iter().filter_map(|(name,ty)| {
             if let TypeDef::Enum{members,..}=ty {
                 Some((
-                    fslc_rust::display_name(name),
-                    json!(members.iter().map(|member|fslc_rust::display_name(member)).collect::<Vec<_>>()),
+                    model.names().public_type(name).into_string(),
+                    json!(members.iter().map(|member|model.names().public_identifier(member).into_string()).collect::<Vec<_>>()),
                 ))
             } else {
                 None
@@ -9831,7 +9876,8 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                                     .chain(model.invariants.iter())
                                     .chain(model.transitions.iter())
                                     .find(|property| {
-                                        fslc_rust::display_name(&property.name) == name
+                                        model.names().public_property(&property.name).into_string()
+                                            == name
                                     })
                                     .map(|property| {
                                         requirement_metadata(
@@ -9895,7 +9941,12 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
     let order = model
         .reachables
         .iter()
-        .map(|property| format!("reach_{}", fslc_rust::display_name(&property.name)))
+        .map(|property| {
+            format!(
+                "reach_{}",
+                model.names().public_property(&property.name).into_string()
+            )
+        })
         .chain(
             model
                 .actions
@@ -10211,7 +10262,7 @@ fn reachable_counterfactuals_from_source(
             value.insert("label".to_owned(), json!("init weakening"));
         }
         let mut item = json!({
-            "property":fslc_rust::display_name(&property.name),
+            "property":model.names().public_property(&property.name).into_string(),
             "weakening":weakening,
             "result":"reachable_failed",
             "requirement":Value::Null,
@@ -10421,7 +10472,7 @@ fn trace_blame_json(
                 continue;
             }
             effects.push(json!({
-                "target": display(root),
+                "target": model.names().public_state(root).into_string(),
                 "text": format!("{} = {}", tag_lvalue_text(target), fslc_rust::expr_text(value)),
                 "loc": span.python_loc(),
             }));
@@ -10597,13 +10648,11 @@ fn invariant_violation_explanation(
     let mut explanation = Map::new();
     explanation.insert("violation_kind".to_owned(), json!(violation.kind));
     let origin = model.property_origin("invariant", &violation.name);
+    let public_name = model.names().public_violation(&violation.name, None);
+    let invariant = origin.and_then(fslc_rust::origin_display_name);
     explanation.insert(
         "invariant".to_owned(),
-        json!(
-            origin
-                .and_then(fslc_rust::origin_display_name)
-                .map_or_else(|| display(&violation.name), str::to_owned)
-        ),
+        json!(invariant.unwrap_or(public_name.as_str())),
     );
     explanation.insert(
         "loc".to_owned(),
@@ -10616,7 +10665,7 @@ fn invariant_violation_explanation(
             ),
     );
     if let Some(origin) = origin {
-        explanation.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        explanation.insert("generated_name".to_owned(), json!(public_name.as_str()));
         explanation.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
     }
     explanation.insert("violated_at_step".to_owned(), json!(violation.step));
@@ -10733,7 +10782,10 @@ fn invariant_counterfactuals_from_source(
         let mut weakening = json!({
             "op": op,
             "loc": span.python_loc(),
-            "target": public_mutant_target(names, &candidate.target, candidate.action.as_deref()),
+            "target": names
+                .names()
+                .public_action_target(&candidate.target, candidate.action.as_deref())
+                .as_str(),
             "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
         });
         if candidate.action.as_deref() == Some("init")
@@ -10754,7 +10806,7 @@ fn invariant_counterfactuals_from_source(
             .iter()
             .find(|property| property.name == violation.name);
         let mut item = json!({
-            "invariant": display(&violation.name),
+            "invariant": model.names().public_violation(&violation.name, None).into_string(),
             "weakening": weakening,
             "trace": trace,
             "requirement": Value::Null,
@@ -10780,7 +10832,7 @@ fn invariant_counterfactuals_from_source(
                 found.get(&property.name).map_or_else(
                     || {
                         let mut item = json!({
-                            "invariant": display(&property.name),
+                            "invariant": original.names().public_property(&property.name).into_string(),
                             "weakening": null,
                             "trace": null,
                             "requirement": Value::Null,
@@ -10914,9 +10966,14 @@ fn run_explain_from_source(
         }
         text.push_str("\nState:\n");
         let mut state = model.state.iter().collect::<Vec<_>>();
-        state.sort_by_key(|(name, _)| display(name));
+        state.sort_by_key(|(name, _)| model.names().public_state(name).into_string());
         for (name, ty) in state {
-            let _ = writeln!(text, "  - {}: {}", display(name), type_ref_text(ty));
+            let _ = writeln!(
+                text,
+                "  - {}: {}",
+                model.names().public_state(name).into_string(),
+                type_ref_text(ty)
+            );
         }
         if let Some(implements) = readable_implements_text_from_source(path, source, &model, depth)
         {
@@ -11011,7 +11068,11 @@ fn run_explain_from_source(
         if !properties.is_empty() {
             text.push_str("\nProperties:\n");
             for (kind, name, body) in properties {
-                let _ = writeln!(text, "  - {kind} {}", display(name));
+                let _ = writeln!(
+                    text,
+                    "  - {kind} {}",
+                    model.names().public_property(name).into_string()
+                );
                 let _ = writeln!(text, "    body: {body}");
             }
         }
@@ -11026,7 +11087,7 @@ fn run_explain_from_source(
                 let _ = writeln!(
                     text,
                     "  - type_bound: {} (implicit bounded-domain check)",
-                    display(name)
+                    model.names().public_state(name).into_string()
                 );
             }
         }
@@ -11228,7 +11289,7 @@ fn mutation_model_verdict(
         }) {
             return (
                 MutationOracle::killed(
-                    display(&property.name),
+                    model.names().public_property(&property.name).into_string(),
                     annotation_requirement_ids(&property.annotations),
                 ),
                 None,
@@ -11237,7 +11298,10 @@ fn mutation_model_verdict(
         if let Some(violation) = result.leadsto_violation {
             return (
                 MutationOracle::killed(
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                     property_requirements(&model, &violation.name),
                 ),
                 None,
@@ -11464,7 +11528,7 @@ fn collect_oracle_killers(
         killers.insert(killer.label(model));
     }
     for property in &model.invariants {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_invariant(model, &property.name),
             depth,
@@ -11475,7 +11539,7 @@ fn collect_oracle_killers(
         }
     }
     for property in &model.reachables {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_reachable(model, &property.name),
             depth,
@@ -11486,7 +11550,7 @@ fn collect_oracle_killers(
         }
     }
     for property in &model.transitions {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_transition(model, &property.name),
             depth,
@@ -11497,7 +11561,7 @@ fn collect_oracle_killers(
         }
     }
     for property in &model.leadstos {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_leadsto(model, &property.name),
             depth,
@@ -11960,9 +12024,10 @@ fn removed_init_assignment_root(
 /// that failure into a type-bound kill and hide it (#1251, #1283).
 fn apply_init_bounds_override(outcome: MutationOracle, root: &str) -> MutationOracle {
     match outcome {
-        MutationOracle::Clean | MutationOracle::Killed { .. } => {
-            MutationOracle::killed(format!("_bounds_{root}"), Vec::new())
-        }
+        MutationOracle::Clean | MutationOracle::Killed { .. } => MutationOracle::killed(
+            fsl_core::SyntheticName::Bounds { state: root }.internal(),
+            Vec::new(),
+        ),
         MutationOracle::Error(_) | MutationOracle::Invalid(_) => outcome,
     }
 }
@@ -11985,18 +12050,6 @@ fn type_has_symbolic_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
 
 /// A built-in mutant's `target` (`<action> assignment`, `<action> requires
 /// #1`, ...) with its leading action spelled the way identifier fields spell it.
-fn public_mutant_target(model: &KernelModel, target: &str, action: Option<&str>) -> String {
-    action
-        .and_then(|action| {
-            let rest = target.strip_prefix(action)?;
-            Some(format!(
-                "{}{rest}",
-                model.component_public_name(action, action)?
-            ))
-        })
-        .unwrap_or_else(|| target.to_owned())
-}
-
 fn mutation_action_labels(
     document: &fsl_syntax::SurfaceDocument,
 ) -> std::collections::BTreeMap<String, String> {
@@ -12644,7 +12697,12 @@ fn run_mutate_with(
             .as_ref()
             .and_then(|action| action_labels.get(action).map(|label| (action, label)))
             .map_or_else(
-                || public_mutant_target(&model, &mutant.target, mutant.action.as_deref()),
+                || {
+                    model
+                        .names()
+                        .public_action_target(&mutant.target, mutant.action.as_deref())
+                        .into_string()
+                },
                 |(action, label)| mutant.target.replacen(action, label, 1),
             );
         let mut public = json!({
@@ -12692,9 +12750,7 @@ fn run_mutate_with(
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
             && let Ok(mutated_model) = fsl_core::build_model(kernel)
         {
-            let bounds_override = outcome
-                .killed_by()
-                .filter(|killer| killer.starts_with("_bounds_"));
+            let bounds_override = outcome.killed_by().filter(|killer| is_bounds_name(killer));
             let killers = collect_oracle_killers(
                 &mutated_model,
                 depth,
@@ -12811,7 +12867,7 @@ fn run_mutate_with(
                         depth,
                         mutated_source,
                         base,
-                        Some(killed_by.as_str()).filter(|killer| killer.starts_with("_bounds_")),
+                        Some(killed_by.as_str()).filter(|killer| is_bounds_name(killer)),
                         &main,
                         bmc,
                     );
@@ -13310,7 +13366,7 @@ fn run_testgen_from_source(
             model
                 .state
                 .iter()
-                .map(|(name, _)| fsl_core::display_name(name))
+                .map(|(name, _)| model.names().public_state(name).into_string())
                 .collect(),
             model
                 .actions
@@ -16276,12 +16332,12 @@ fn diff_shape_mismatch(implementation: &KernelModel, abstraction: &KernelModel) 
     let implementation_state = implementation
         .state
         .iter()
-        .map(|(name, _)| display(name))
+        .map(|(name, _)| implementation.names().public_state(name).into_string())
         .collect::<std::collections::BTreeSet<_>>();
     let abstraction_state = abstraction
         .state
         .iter()
-        .map(|(name, _)| display(name))
+        .map(|(name, _)| abstraction.names().public_state(name).into_string())
         .collect::<std::collections::BTreeSet<_>>();
     let implementation_actions = implementation
         .actions
@@ -16724,13 +16780,17 @@ fn forbidden_violation_finding(
             &format!(
                 "NEW forbidden setup violated {} '{}'",
                 violation.kind,
-                display(&violation.name)
+                monitor
+                    .model
+                    .names()
+                    .public_violation(&violation.name, None)
+                    .into_string()
             ),
         );
     }
     // #1213: NEW enables the final step the OLD guard rejected; that it then
     // stops with a violation is not a rejection.
-    let violation = json!({"kind":violation.kind,"name":display(&violation.name)});
+    let violation = json!({"kind":violation.kind,"name":monitor.model.names().public_violation(&violation.name, None).into_string()});
     forbidden_relaxed(case, accepted_trace, monitor, Some(violation))
 }
 
@@ -17730,7 +17790,7 @@ fn mismatch_paths(
             ty,
             expected.and_then(|state| state.get(name)),
             actual.and_then(|state| state.get(name)),
-            &display(name),
+            &model.names().public_state(name).into_string(),
             &mut paths,
         );
     }
@@ -17741,10 +17801,12 @@ fn mismatch_paths(
 /// violates a type bound, invariant, `trans`, or `ensures` within `depth`,
 /// discovered before any refinement correspondence was even attempted. Not
 /// `refines` and not `refinement_failed` (#466) — this is a property of the
-/// refinement *input*, so it is reported with the same shape `fslc verify`
-/// uses for a `violated` result plus an explanatory `note`, matching the
-/// frozen Python reference's `refine()` (`src/fslc/refine.py`, accepted as
-/// [1.2.9] in CHANGELOG.md).
+/// refinement *input*, so it is reported with the evidence shape `fslc verify`
+/// uses for a violation plus an explanatory `note`, matching the frozen
+/// Python reference's `refine()` (`src/fslc/refine.py`, accepted as [1.2.9]
+/// in CHANGELOG.md). The `result` is `impl_violated`, the one word inline
+/// `implements` and governance preservations use for the same outcome
+/// (#1315); the Python reference still spells it `violated`.
 fn impl_self_violation_output(
     implementation: &KernelModel,
     violation: &fsl_runtime::Violation,
@@ -17753,7 +17815,7 @@ fn impl_self_violation_output(
 ) -> Map<String, Value> {
     let mut output = envelope();
     output.insert("impl".to_owned(), json!(implementation.name));
-    output.insert("result".to_owned(), json!("violated"));
+    output.insert("result".to_owned(), json!(Verdict::ImplViolated.result()));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
     let name = implementation.action_scoped_display_name(&violation.name, trace_last_action(trace));
     if violation.kind == "trans" {
@@ -17843,7 +17905,7 @@ fn run_refine(
                     trace,
                     checked.depth(),
                 )),
-                1,
+                Verdict::ImplViolated.exit_code(),
             );
         }
         fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
@@ -17982,7 +18044,15 @@ fn run_refine(
             }),
         );
         output.insert("violation_kind".to_owned(), json!("leadsTo"));
-        output.insert("invariant".to_owned(), json!(display(&violation.name)));
+        output.insert(
+            "invariant".to_owned(),
+            json!(
+                abstraction
+                    .names()
+                    .public_violation(&violation.name, None)
+                    .into_string()
+            ),
+        );
         output.insert(
             "bindings".to_owned(),
             Value::Object(
@@ -18002,7 +18072,7 @@ fn run_refine(
         output.insert(
             "progress".to_owned(),
             json!({
-                "leadsTo": display(&violation.name),
+                "leadsTo": abstraction.names().public_violation(&violation.name, None).into_string(),
                 "actions": declaration
                     .map(|item| item.actions.iter().map(|action| action.0.clone()).collect::<Vec<_>>())
                     .unwrap_or_default(),
@@ -18037,10 +18107,15 @@ fn run_refine(
         "action_map".to_owned(),
         Value::Object(
             fslc_rust::verification_output::sorted_by_published(checked.action_map(), |name| {
-                implementation.action_display_name(name)
+                implementation.names().public_action(name)
             })
             .into_iter()
-            .map(|(name, _, target)| (name, json!(abstraction.action_display_name(target))))
+            .map(|(name, _, target)| {
+                (
+                    name.into_string(),
+                    json!(abstraction.action_display_name(target)),
+                )
+            })
             .collect(),
         ),
     );
@@ -18056,21 +18131,23 @@ fn run_refine(
         output.insert(
             "progress".to_owned(),
             Value::Object(
-                fslc_rust::verification_output::sorted_by_published(&progress.checked, display)
-                    .into_iter()
-                    .map(|(name, _, actions)| {
-                        (
-                            name,
-                            json!({
-                                "checked_to_depth": depth,
-                                "actions": actions
-                                    .iter()
-                                    .map(|action| implementation.action_key(action))
-                                    .collect::<Vec<_>>(),
-                            }),
-                        )
-                    })
-                    .collect(),
+                fslc_rust::verification_output::sorted_by_published(&progress.checked, |name| {
+                    implementation.names().public_property(name)
+                })
+                .into_iter()
+                .map(|(name, _, actions)| {
+                    (
+                        name.into_string(),
+                        json!({
+                            "checked_to_depth": depth,
+                            "actions": actions
+                                .iter()
+                                .map(|action| implementation.action_key(action))
+                                .collect::<Vec<_>>(),
+                        }),
+                    )
+                })
+                .collect(),
             ),
         );
     }
@@ -18127,7 +18204,7 @@ fn run_refine_chain(
                     "kind": link.get("kind").cloned().unwrap_or(Value::Null),
                 }),
             );
-            return (Value::Object(failed), status.max(1));
+            return (Value::Object(failed), status.max(FAILURE_EXIT));
         }
         let action_map = link
             .get("action_map")
@@ -18180,20 +18257,30 @@ fn run_refine_chain(
     (Value::Object(output), 0)
 }
 
+fn is_bounds_name(name: &str) -> bool {
+    fsl_core::SyntheticName::parse_internal(name)
+        .is_some_and(|synthetic| synthetic.bounds_state().is_some())
+}
+
 fn select_properties(
     model: &mut KernelModel,
     selected: Option<&str>,
     excluded: &[String],
 ) -> Result<(), String> {
+    let names = model.names().clone();
+    let public = |name: &str| names.public_property(name).into_string();
     let available = model
         .state
         .iter()
         .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{}", display(name)))
-        .chain(model.invariants.iter().map(|item| display(&item.name)))
-        .chain(model.transitions.iter().map(|item| display(&item.name)))
-        .chain(model.leadstos.iter().map(|item| display(&item.name)))
-        .chain(model.reachables.iter().map(|item| display(&item.name)))
+        .map(|(name, _)| {
+            let bound = fsl_core::SyntheticName::Bounds { state: name };
+            names.public_synthetic(&bound).into_string()
+        })
+        .chain(model.invariants.iter().map(|item| public(&item.name)))
+        .chain(model.transitions.iter().map(|item| public(&item.name)))
+        .chain(model.leadstos.iter().map(|item| public(&item.name)))
+        .chain(model.reachables.iter().map(|item| public(&item.name)))
         .collect::<Vec<_>>();
     if let Some(name) = selected {
         if !available.iter().any(|candidate| candidate == name) {
@@ -18205,19 +18292,19 @@ fn select_properties(
                 display_available.join(", ")
             ));
         }
-        model.invariants.retain(|item| display(&item.name) == name);
-        model.transitions.retain(|item| display(&item.name) == name);
-        model.leadstos.retain(|item| display(&item.name) == name);
-        model.reachables.retain(|item| display(&item.name) == name);
+        model.invariants.retain(|item| public(&item.name) == name);
+        model.transitions.retain(|item| public(&item.name) == name);
+        model.leadstos.retain(|item| public(&item.name) == name);
+        model.reachables.retain(|item| public(&item.name) == name);
     }
     if !excluded.is_empty() {
         let selected_available = model
             .invariants
             .iter()
-            .map(|item| display(&item.name))
-            .chain(model.transitions.iter().map(|item| display(&item.name)))
-            .chain(model.leadstos.iter().map(|item| display(&item.name)))
-            .chain(model.reachables.iter().map(|item| display(&item.name)))
+            .map(|item| public(&item.name))
+            .chain(model.transitions.iter().map(|item| public(&item.name)))
+            .chain(model.leadstos.iter().map(|item| public(&item.name)))
+            .chain(model.reachables.iter().map(|item| public(&item.name)))
             .collect::<Vec<_>>();
         let mut missing = excluded
             .iter()
@@ -18239,16 +18326,16 @@ fn select_properties(
         }
         model
             .invariants
-            .retain(|item| !excluded.contains(&display(&item.name)));
+            .retain(|item| !excluded.contains(&public(&item.name)));
         model
             .transitions
-            .retain(|item| !excluded.contains(&display(&item.name)));
+            .retain(|item| !excluded.contains(&public(&item.name)));
         model
             .leadstos
-            .retain(|item| !excluded.contains(&display(&item.name)));
+            .retain(|item| !excluded.contains(&public(&item.name)));
         model
             .reachables
-            .retain(|item| !excluded.contains(&display(&item.name)));
+            .retain(|item| !excluded.contains(&public(&item.name)));
     }
     Ok(())
 }
@@ -18258,19 +18345,21 @@ fn selected_implicit_bounds(
     selected: Option<&str>,
     excluded: &[String],
 ) -> Option<std::collections::BTreeSet<String>> {
-    if selected.is_none() && !excluded.iter().any(|name| name.starts_with("_bounds_")) {
+    if selected.is_none() && !excluded.iter().any(|name| is_bounds_name(name)) {
         return None;
     }
     let mut bounds = model
         .state
         .iter()
         .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
+        .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
         .collect::<std::collections::BTreeSet<_>>();
     if let Some(selected) = selected {
-        bounds.retain(|name| display(name) == selected);
+        bounds.retain(|name| model.names().public_violation(name, None).into_string() == selected);
     }
-    bounds.retain(|name| !excluded.contains(&display(name)));
+    bounds.retain(|name| {
+        !excluded.contains(&model.names().public_violation(name, None).into_string())
+    });
     Some(bounds)
 }
 
@@ -18520,15 +18609,15 @@ fn invariant_names_selected(
         .state
         .iter()
         .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
+        .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
         .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
-        .map(|name| display(&name))
+        .map(|name| model.names().public_violation(&name, None).into_string())
         .collect::<Vec<_>>();
     names.extend(
         model
             .invariants
             .iter()
-            .map(|property| display(&property.name)),
+            .map(|property| model.names().public_property(&property.name).into_string()),
     );
     names
 }
@@ -18560,7 +18649,9 @@ fn violation_bindings_json(
         return Value::Null;
     };
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = fsl_core::SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         let Some((_, TypeRef::Map(_, value_ty))) = model
             .state
             .iter()
@@ -18605,11 +18696,13 @@ fn violation_blame_json(
     violating_bindings: Value,
 ) -> Value {
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = fsl_core::SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         return json!({
             "conjuncts": [{
                 "index": 0,
-                "text": format!("{} stays within its declared type bounds", display(state_name)),
+                "text": format!("{} stays within its declared type bounds", model.names().public_state(state_name).into_string()),
                 "holds": false,
             }]
         });
@@ -18657,7 +18750,12 @@ struct ValidatedReplayEvent {
 /// Whether a JSONL log action selects `action` under `maps auto`: its public
 /// name, or the [`display`] spelling `maps auto` matched before #1234.
 fn log_action_matches(model: &KernelModel, action: &fsl_core::ActionDef, source: &str) -> bool {
-    model.action_display_name(&action.name) == source || display(&action.name) == source
+    model.action_display_name(&action.name) == source
+        || model
+            .names()
+            .legacy_action_spelling(&action.name)
+            .into_string()
+            == source
 }
 
 fn validate_versioned_replay_events(
@@ -19072,7 +19170,11 @@ fn load_snapshot_value_object(
     model: &KernelModel,
 ) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
     for key in object.keys() {
-        if !model.state.iter().any(|(name, _)| display(name) == *key) {
+        if !model
+            .state
+            .iter()
+            .any(|(name, _)| model.names().public_state(name).into_string() == *key)
+        {
             return Err(format!("unknown state variable '{key}'"));
         }
     }
@@ -19080,7 +19182,7 @@ fn load_snapshot_value_object(
         .state
         .iter()
         .map(|(name, ty)| {
-            let display_name = display(name);
+            let display_name = model.names().public_state(name).into_string();
             let value = object
                 .get(&display_name)
                 .ok_or_else(|| format!("missing state variable '{display_name}'"))?;
@@ -19170,10 +19272,8 @@ fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
 }
 
 fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
-    if output.get("result").and_then(Value::as_str) == Some("error")
-        && output.get("kind").and_then(Value::as_str) == Some("internal")
-    {
-        3
+    if Verdict::of(output) == Some(Verdict::InternalError) {
+        Verdict::InternalError.exit_code()
     } else {
         reported_status
     }
@@ -19282,10 +19382,6 @@ fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
         "cost".to_owned(),
         json!({"elapsed_s": started.elapsed().as_secs_f64()}),
     );
-}
-
-fn display(name: &str) -> String {
-    fslc_rust::display_name(name)
 }
 
 /// Internal name of the action that took the last step of `trace`: the action
@@ -19724,10 +19820,11 @@ spec InitTraceability {
             None
         );
         assert!(
-            model
-                .leadstos
-                .iter()
-                .any(|property| display(&property.name) == "Served"),
+            model.leadstos.iter().any(|property| model
+                .names()
+                .public_property(&property.name)
+                .into_string()
+                == "Served"),
             "source A must retain its liveness property"
         );
 
@@ -19985,12 +20082,16 @@ spec InitTraceability {
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
         let model = load_model_from_source(&fixture.path, &captured).expect("lower source A");
-        assert_eq!(display(&model.name), "CleanDiagnosticDomain");
+        assert_eq!(
+            model.names().public_identifier(&model.name).into_string(),
+            "CleanDiagnosticDomain"
+        );
         assert!(
-            model
-                .actions
-                .iter()
-                .any(|action| display(&action.name) == "doc_close_doc"),
+            model.actions.iter().any(|action| model
+                .names()
+                .legacy_action_spelling(&action.name)
+                .into_string()
+                == "doc_close_doc"),
             "replay model must retain source A's lowered CloseDoc action"
         );
     }
@@ -20301,10 +20402,11 @@ spec GrowFixture {
         // The exact model load `run_mutate` makes.
         let model = load_model_from_source(&fixture.path, &captured).expect("lower source A");
         assert!(
-            model
-                .invariants
-                .iter()
-                .any(|invariant| display(&invariant.name) == "NonNegative"),
+            model.invariants.iter().any(|invariant| model
+                .names()
+                .public_property(&invariant.name)
+                .into_string()
+                == "NonNegative"),
             "model must retain source A's invariant"
         );
 

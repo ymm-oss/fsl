@@ -7,9 +7,9 @@ use std::fmt;
 use std::future::Future;
 
 use fsl_core::{
-    ActionDef, FslValue, KernelExpr, KernelModel, ParamDef, TypeDef, TypeRef, display_name,
-    fsl_value_json, insert_requirement_metadata, internal_origin_json, origin_display_name,
-    state_json, trace_json,
+    ActionDef, FslValue, KernelExpr, KernelModel, ParamDef, PublicName, SyntheticName, TypeDef,
+    TypeRef, fsl_value_json, insert_requirement_metadata, internal_origin_json,
+    origin_display_name, state_json, trace_json,
 };
 use fsl_solver::VerificationStatistics;
 use fsl_verifier::{BmcResult, BmcViolation, VacuityFinding, violation_kind};
@@ -536,7 +536,7 @@ pub fn check_requirements_implements(
 pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -571,39 +571,30 @@ fn fold_refinement_verdict(
     nested_result: Option<&str>,
     malformed_message: &str,
 ) -> Option<i32> {
-    match nested_result {
-        Some("refines") => None,
-        // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
-        // both encode the exit class of an inline `implements` failure, and
-        // changing that class means changing both. They are reached by
-        // independent paths -- `check`/`verify` fold here, while `mutate` and
-        // `ledger` re-emit a baseline envelope through `exit_status` -- so a
-        // mutation that breaks one does not make the other's tests fail
-        // (measured 2026-09-08: sending `exit_status`'s row 1 to 0 kills
-        // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
-        // leaves `check_folds_failed_inline_refinement_into_command_failure`
-        // green). Nothing here detects the two drifting apart.
-        Some(verdict @ ("refinement_failed" | "impl_violated")) => {
-            map.insert("result".to_owned(), json!(verdict));
-            Some(1)
-        }
+    use crate::outcome::Verdict;
+
+    // The exit code of each fold comes from the `outcome::Verdict` table, the
+    // same entry `outcome::exit_status` reads when `mutate` and `ledger`
+    // re-emit a baseline envelope (#901). Before the table this arm carried
+    // its own `1` that had to be kept in step with `exit_status` by hand.
+    let folded = match nested_result {
+        Some("refines") => return None,
+        Some("refinement_failed") => Verdict::RefinementFailed,
+        Some("impl_violated") => Verdict::ImplViolated,
         // The correspondence walk hit its state budget (issue #1041)
         // instead of deciding a verdict. `unknown_budget` is already a
-        // non-success, cacheable failure class (`outcome.rs`'s
-        // `exit_status` row 1 and `outcome_class`), so folding it here
-        // reuses that existing exit-1 vocabulary rather than adding a new
-        // verdict string.
-        Some("unknown_budget") => {
-            map.insert("result".to_owned(), json!("unknown_budget"));
-            Some(1)
-        }
+        // non-success, cacheable failure class, so folding it here reuses
+        // that existing vocabulary rather than adding a new verdict string.
+        Some("unknown_budget") => Verdict::UnknownBudget,
         _ => {
             map.insert("result".to_owned(), json!("error"));
             map.insert("kind".to_owned(), json!("internal"));
             map.insert("message".to_owned(), json!(malformed_message));
-            Some(3)
+            return Some(Verdict::InternalError.exit_code());
         }
-    }
+    };
+    map.insert("result".to_owned(), json!(folded.result()));
+    Some(folded.exit_code())
 }
 
 /// Attach a rendered `governance` section and, when the command envelope is
@@ -614,18 +605,18 @@ fn fold_refinement_verdict(
 /// nothing; a failure-class envelope gains the section as evidence and keeps
 /// its own verdict; a success-class envelope (`ok`, `verified`, ...) takes the
 /// first failing preservation in declaration order through
-/// [`fold_refinement_verdict`]. A preservation's `result` keeps its own
-/// published vocabulary (`refines` / `refinement_failed` / `violated` /
-/// `unknown_budget`); its `violated` is the `after` spec breaking its own
-/// semantics, which the top level spells `impl_violated` exactly as an inline
-/// `implements` seam reports the same condition -- a top-level `violated`
-/// would claim a counterexample (`trace`, `violated_at_step`) of the checked
-/// document itself. Any other value fails closed (`error` / `internal`,
+/// [`fold_refinement_verdict`]. A preservation's `result` is `fslc refine`'s
+/// (`refines` / `refinement_failed` / `impl_violated` / `unknown_budget`);
+/// `impl_violated` is the `after` spec breaking its own semantics, the same
+/// word an inline `implements` seam and the top level use for that condition
+/// (#1315) -- a top-level `violated` would claim a counterexample (`trace`,
+/// `violated_at_step`) of the checked document itself. Any other value,
+/// including the pre-#1315 `violated`, fails closed (`error` / `internal`,
 /// exit 3).
 pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -648,13 +639,9 @@ pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32>
     }
     // Every preservation `refines` (or there is none): the verdict stands.
     let failing = failing?;
-    let nested_result = match failing.as_deref() {
-        Some("violated") => Some("impl_violated".to_owned()),
-        other => other.map(str::to_owned),
-    };
     fold_refinement_verdict(
         map,
-        nested_result.as_deref(),
+        failing.as_deref(),
         "malformed governance preservation verdict",
     )
 }
@@ -1555,8 +1542,8 @@ fn validate_requirement_trace_contract(
                         "violation".to_owned(),
                         json!({
                             "kind": violation.kind,
-                            "name": display_name(&violation.name),
-                            "action": display_name(&instance.action),
+                            "name": model.names().public_violation(&violation.name, None).into_string(),
+                            "action": model.names().legacy_action_spelling(&instance.action).into_string(),
                             "params": params,
                         }),
                     );
@@ -1571,7 +1558,7 @@ fn validate_requirement_trace_contract(
                         json!(format!(
                             "the last step was enabled and stopped with a runtime violation ({} '{}'), which is not a rejection: a forbidden case is satisfied only when the last step is not enabled (requires_failed / bad_call). If this call must be rejected, add a requires that rejects it. If the call should be allowed, the forbidden is wrong: fix the violation the step reaches and revise or remove the forbidden.",
                             violation.kind,
-                            display_name(&violation.name),
+                            model.names().public_violation(&violation.name, None).into_string(),
                         )),
                     );
                     output.insert("trace_type".to_owned(), json!("forbidden"));
@@ -2072,7 +2059,7 @@ pub fn render_boundary_output(
             .find(|definition| definition.name == action.name)
     });
     let partial_property_name = (violation.kind == "partial_op")
-        .then(|| violation.name.strip_prefix("_partial_property_"))
+        .then(|| SyntheticName::parse_internal(&violation.name)?.partial_property())
         .flatten();
     let partial_property = partial_property_name.and_then(|name| {
         model
@@ -2094,9 +2081,8 @@ pub fn render_boundary_output(
     let origin = match violation.kind.as_str() {
         "invariant" => model.property_origin("invariant", &violation.name),
         "trans" => model.property_origin("trans", &violation.name),
-        "type_bound" => violation
-            .name
-            .strip_prefix("_bounds_")
+        "type_bound" => SyntheticName::parse_internal(&violation.name)
+            .and_then(|synthetic| synthetic.bounds_state())
             .and_then(|name| model.state_origin(name)),
         "partial_op" => partial_property
             .and_then(|(kind, property)| model.property_origin(kind, &property.name))
@@ -2596,12 +2582,12 @@ fn add_explicit_metadata(
         "action_profile".to_owned(),
         Value::Object(
             sorted_by_published(&result.action_profile, |name| {
-                model.action_display_name(name)
+                model.names().public_action(name)
             })
             .into_iter()
             .map(|(name, _, stats)| {
                 (
-                    name,
+                    name.into_string(),
                     json!({
                         "enabled": stats.enabled,
                         "fired": stats.fired,
@@ -2778,15 +2764,15 @@ fn render_reachable_failure(
                     let mut item = json!({
                         "name": origin
                             .and_then(origin_display_name)
-                            .map_or_else(|| display_name(&property.name), str::to_owned),
+                            .map_or_else(|| model.names().public_property(&property.name).into_string(), str::to_owned),
                         "loc": property.span.python_loc(),
                         "classification": if diagnosis.is_some() { "over_constrained" } else { "insufficient_depth" },
                         "hint": if let Some(diagnosis) = diagnosis {
                             let names = diagnosis.blocking.iter()
-                                .map(|blocker| display_name(&blocker.name))
+                                .map(|blocker| model.names().public_property(&blocker.name).into_string())
                                 .collect::<Vec<_>>();
                             let names = if names.is_empty() {
-                                display_name(&property.name)
+                                model.names().public_property(&property.name).into_string()
                             } else {
                                 names.join(", ")
                             };
@@ -2811,7 +2797,7 @@ fn render_reachable_failure(
                             if blocking.is_empty() {
                                 blocking.push(json!({
                                     "kind": "reachable",
-                                    "name": display_name(&property.name),
+                                    "name": model.names().public_property(&property.name).into_string(),
                                     "loc": property.span.python_loc(),
                                 }));
                             }
@@ -2825,7 +2811,7 @@ fn render_reachable_failure(
                         if let Some(origin) = origin {
                             item.insert(
                                 "generated_name".to_owned(),
-                                json!(display_name(&property.name)),
+                                json!(model.names().public_property(&property.name).into_string()),
                             );
                             item.insert("origin".to_owned(), internal_origin_json(origin));
                         }
@@ -2869,7 +2855,7 @@ fn render_reachable_failure(
 fn reachable_blocker_json(model: &KernelModel, blocker: &fsl_verifier::ReachableBlocker) -> Value {
     let mut rendered = json!({
         "kind": blocker.kind,
-        "name": display_name(&blocker.name),
+        "name": model.names().public_property(&blocker.name).into_string(),
     });
     if blocker.kind == "invariant"
         && let Some(property) = model
@@ -2989,7 +2975,10 @@ fn render_success(
                         {
                             entry.insert("within".to_owned(), json!(within));
                         }
-                        (display_name(&property.name), checked)
+                        (
+                            model.names().public_property(&property.name).into_string(),
+                            checked,
+                        )
                     })
                     .collect(),
             ),
@@ -3057,37 +3046,41 @@ fn add_common(
             model
                 .transitions
                 .iter()
-                .map(|property| Value::String(display_name(&property.name)))
+                .map(|property| {
+                    Value::String(model.names().public_property(&property.name).into_string())
+                })
                 .collect(),
         ),
     );
     output.insert(
         "reachables".to_owned(),
         Value::Object(
-            sorted_by_published(&result.reachables, display_name)
-                .into_iter()
-                .filter_map(|(name, _, witness)| {
-                    witness.as_ref().map(|witness| {
-                        (
-                            name,
-                            json!({
-                                "witnessed_at_step": witness.step,
-                                "witness": trace_json(model, &witness.trace),
-                            }),
-                        )
-                    })
+            sorted_by_published(&result.reachables, |name| {
+                model.names().public_property(name)
+            })
+            .into_iter()
+            .filter_map(|(name, _, witness)| {
+                witness.as_ref().map(|witness| {
+                    (
+                        name.into_string(),
+                        json!({
+                            "witnessed_at_step": witness.step,
+                            "witness": trace_json(model, &witness.trace),
+                        }),
+                    )
                 })
-                .collect(),
+            })
+            .collect(),
         ),
     );
     output.insert(
         "action_coverage".to_owned(),
         Value::Object(
-            sorted_by_published(&result.action_coverage, |name| model.action_display_name(name))
+            sorted_by_published(&result.action_coverage, |name| model.names().public_action(name))
                 .into_iter()
                 .map(|(published, name, covered)| {
                     (
-                        published,
+                        published.into_string(),
                         if *covered {
                             json!(true)
                         } else {
@@ -3174,7 +3167,7 @@ fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
         VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
             let names = frozen_vars
                 .iter()
-                .map(|name| display_name(name))
+                .map(|name| model.names().public_state(name).into_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             (
@@ -3197,7 +3190,7 @@ fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
             };
             let deadline_text = deadlines
                 .iter()
-                .map(|name| format!("'{}'", display_name(name)))
+                .map(|name| format!("'{}'", model.names().public_property(name).into_string()))
                 .collect::<Vec<_>>()
                 .join(", ");
             (
@@ -3210,7 +3203,7 @@ fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
         VacuityFinding::DeadlineNeverAdvances { age_vars, .. } => {
             let names = age_vars
                 .iter()
-                .map(|name| display_name(name))
+                .map(|name| model.names().public_state(name).into_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             (
@@ -3315,8 +3308,8 @@ fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
 #[must_use]
 pub fn sorted_by_published<V>(
     entries: &BTreeMap<String, V>,
-    publish: impl Fn(&str) -> String,
-) -> Vec<(String, &String, &V)> {
+    publish: impl Fn(&str) -> PublicName,
+) -> Vec<(PublicName, &String, &V)> {
     let mut entries = entries
         .iter()
         .map(|(name, value)| (publish(name), name, value))
@@ -3333,15 +3326,15 @@ fn invariant_names_selected(
         .state
         .iter()
         .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
+        .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
         .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
-        .map(|name| display_name(&name))
+        .map(|name| model.names().public_violation(&name, None).into_string())
         .collect::<Vec<_>>();
     names.extend(
         model
             .invariants
             .iter()
-            .map(|property| display_name(&property.name)),
+            .map(|property| model.names().public_property(&property.name).into_string()),
     );
     names
 }
@@ -3396,7 +3389,9 @@ fn violation_bindings_json(
         return Value::Null;
     };
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         let Some((_, TypeRef::Map(_, value_ty))) = model
             .state
             .iter()
@@ -3441,11 +3436,13 @@ fn violation_blame_json(
     violating_bindings: Value,
 ) -> Value {
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         return json!({
             "conjuncts": [{
                 "index": 0,
-                "text": format!("{} stays within its declared type bounds", display_name(state_name)),
+                "text": format!("{} stays within its declared type bounds", model.names().public_state(state_name).into_string()),
                 "holds": false,
             }]
         });
@@ -3509,14 +3506,20 @@ fn origin_aware_property_name(
     name: &str,
 ) -> String {
     let Some(origin) = model.property_origin(kind, name) else {
-        return display_name(name);
+        return model.names().public_property(name).into_string();
     };
-    output.insert("generated_name".to_owned(), json!(display_name(name)));
+    output.insert(
+        "generated_name".to_owned(),
+        json!(model.names().public_property(name).into_string()),
+    );
     output.insert("origin".to_owned(), internal_origin_json(origin));
     if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
         output.insert("loc".to_owned(), span.python_loc());
     }
-    origin_display_name(origin).map_or_else(|| display_name(name), str::to_owned)
+    origin_display_name(origin).map_or_else(
+        || model.names().public_property(name).into_string(),
+        str::to_owned,
+    )
 }
 
 #[cfg(test)]
@@ -3932,16 +3935,16 @@ mod tests {
     }
 
     /// Issue #1303: every published preservation value, and what it makes of
-    /// a success-class envelope. `violated` (the `after` spec breaks its own
-    /// semantics) is spelled `impl_violated` at the top level, as an inline
-    /// `implements` seam spells it; anything outside the vocabulary fails
-    /// closed.
+    /// a success-class envelope. `impl_violated` (the `after` spec breaks its
+    /// own semantics) is the same word at both levels (#1315); anything
+    /// outside the vocabulary, including the retired `violated`, fails closed.
     #[test]
     fn attach_governance_folds_each_preservation_value() {
         for (preservation, expected_result, expected_exit) in [
             (json!("refines"), "ok", None),
             (json!("refinement_failed"), "refinement_failed", Some(1)),
-            (json!("violated"), "impl_violated", Some(1)),
+            (json!("impl_violated"), "impl_violated", Some(1)),
+            (json!("violated"), "error", Some(3)),
             (json!("unknown_budget"), "unknown_budget", Some(1)),
             (json!("error"), "error", Some(3)),
             (json!("who_knows"), "error", Some(3)),

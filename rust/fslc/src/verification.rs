@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
-    block_on_native, display, envelope, error_output, implements_error_output,
+    block_on_native, envelope, error_output, implements_error_output,
     implements_result_from_source_with_bounds, invariant_names,
     load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
@@ -92,9 +92,12 @@ fn origin_aware_property_name(
     name: &str,
 ) -> String {
     let Some(origin) = model.property_origin(kind, name) else {
-        return display(name);
+        return model.names().public_property(name).into_string();
     };
-    output.insert("generated_name".to_owned(), json!(display(name)));
+    output.insert(
+        "generated_name".to_owned(),
+        json!(model.names().public_property(name).into_string()),
+    );
     output.insert(
         "origin".to_owned(),
         ::fslc_rust::internal_origin_json(origin),
@@ -102,7 +105,10 @@ fn origin_aware_property_name(
     if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
         output.insert("loc".to_owned(), span.python_loc());
     }
-    ::fslc_rust::origin_display_name(origin).map_or_else(|| display(name), str::to_owned)
+    ::fslc_rust::origin_display_name(origin).map_or_else(
+        || model.names().public_property(name).into_string(),
+        str::to_owned,
+    )
 }
 
 fn origin_aware_action_json(
@@ -184,7 +190,7 @@ fn selected_transition_induction_model(
     if !model
         .transitions
         .iter()
-        .any(|property| display(&property.name) == selected)
+        .any(|property| model.names().public_property(&property.name).into_string() == selected)
     {
         return Ok(None);
     }
@@ -388,6 +394,7 @@ fn monotone_suggestion(
 }
 
 fn scalar_suggestion(
+    model: &KernelModel,
     initial_state: &std::collections::BTreeMap<String, FslValue>,
     trace: &[fsl_core::TraceStep],
     name: &str,
@@ -403,7 +410,7 @@ fn scalar_suggestion(
         })
         .collect::<Option<Vec<_>>>()?;
     let direction = monotone_direction(&values).ok()??;
-    let public_name = display(name);
+    let public_name = model.names().public_state(name).into_string();
     let operator = if direction == std::cmp::Ordering::Greater {
         ">="
     } else {
@@ -480,11 +487,11 @@ fn map_suggestion(
     } else {
         "<="
     };
-    let public_name = display(name);
+    let public_name = model.names().public_state(name).into_string();
     let binder = if public_name == "k" { "key" } else { "k" };
     let expression = format!(
         "forall {binder}: {} {{ {public_name}[{binder}] {operator} {initial} }}",
-        display(key_name)
+        model.names().public_state(key_name).into_string()
     );
     monotone_suggestion(&public_name, direction, start, *initial, &expression)
 }
@@ -504,7 +511,7 @@ fn suggested_invariants(
         .iter()
         .filter_map(|(name, ty)| {
             if integer_state_type(model, ty) {
-                scalar_suggestion(&initial_state, trace, name)
+                scalar_suggestion(model, &initial_state, trace, name)
             } else {
                 map_suggestion(model, &initial_state, trace, name, ty)
             }
@@ -521,10 +528,12 @@ fn insert_action_cti_last_action(
     cti: &fsl_verifier::InductionCti,
 ) {
     let action_context = cti.kind == fsl_verifier::violation_kind::ENSURES
-        || ["_partial_", "_key_domain_"].into_iter().any(|prefix| {
-            cti.name
-                .strip_prefix(prefix)
-                .is_some_and(|rest| !rest.starts_with("property_"))
+        || fsl_core::SyntheticName::parse_internal(&cti.name).is_some_and(|synthetic| {
+            matches!(
+                synthetic,
+                fsl_core::SyntheticName::PartialAction { .. }
+                    | fsl_core::SyntheticName::KeyDomainAction { .. }
+            )
         });
     let Some(action) = action_context
         .then(|| cti.trace.last())
@@ -644,7 +653,9 @@ fn render_induction_cti(
                 model
                     .transitions
                     .iter()
-                    .map(|property| Value::String(display(&property.name)))
+                    .map(|property| {
+                        Value::String(model.names().public_property(&property.name).into_string())
+                    })
                     .collect(),
             ),
         );
@@ -770,10 +781,12 @@ fn render_induction_success(
     output.insert(
         "k_used".to_owned(),
         Value::Object(
-            ::fslc_rust::verification_output::sorted_by_published(&induction.k_used, display)
-                .into_iter()
-                .map(|(name, _, k)| (name, json!(k)))
-                .collect(),
+            ::fslc_rust::verification_output::sorted_by_published(&induction.k_used, |name| {
+                model.names().public_property(name)
+            })
+            .into_iter()
+            .map(|(name, _, k)| (name.into_string(), json!(k)))
+            .collect(),
         ),
     );
     output.insert("base_depth".to_owned(), json!(depth));
@@ -792,7 +805,9 @@ fn render_induction_success(
             model
                 .transitions
                 .iter()
-                .map(|property| Value::String(display(&property.name)))
+                .map(|property| {
+                    Value::String(model.names().public_property(&property.name).into_string())
+                })
                 .collect(),
         ),
     );
@@ -812,7 +827,7 @@ fn render_induction_success(
         let mut leads_to = leads_to.as_object().cloned().unwrap_or_default();
         for proof in &ranked.proofs {
             let entry = leads_to
-                .entry(display(&proof.name))
+                .entry(model.names().public_property(&proof.name).into_string())
                 .or_insert_with(|| json!({"checked_to_depth": depth}));
             if let Value::Object(entry) = entry {
                 entry.insert("proved".to_owned(), json!(true));
@@ -2397,13 +2412,13 @@ fn validate_cli_property_selection(
         && let Some(kind) = model
             .leadstos
             .iter()
-            .any(|item| display(&item.name) == name)
+            .any(|item| model.names().public_property(&item.name).into_string() == name)
             .then_some("leadsTo")
             .or_else(|| {
                 model
                     .reachables
                     .iter()
-                    .any(|item| display(&item.name) == name)
+                    .any(|item| model.names().public_property(&item.name).into_string() == name)
                     .then_some("reachable")
             })
     {
@@ -2439,6 +2454,8 @@ fn cached_verification(
 }
 
 fn cached_output_status(output: &Value) -> Option<i32> {
+    use fslc_rust::outcome::Verdict;
+
     let output = output.as_object()?;
     if output.get("fsl").and_then(Value::as_str) != Some("1.0")
         || output.get("spec").and_then(Value::as_str)?.is_empty()
@@ -2446,33 +2463,37 @@ fn cached_output_status(output: &Value) -> Option<i32> {
         return None;
     }
     let completeness = output.get("completeness").and_then(Value::as_str);
-    match output.get("result").and_then(Value::as_str) {
-        Some("verified") if completeness == Some("bounded") => Some(0),
-        Some("proved") if completeness == Some("unbounded") => Some(0),
-        Some("violated") if valid_cached_violation(output, completeness) => Some(1),
-        Some("reachable_failed")
-            if matches!(completeness, Some("bounded" | "unbounded"))
-                && output.get("unreached").and_then(Value::as_array).is_some() =>
-        {
-            Some(1)
+    // The shape each replayable verdict must carry is this function's own
+    // question; the exit code it then implies is the `Verdict` table's (#901).
+    let verdict = Verdict::from_result(output.get("result").and_then(Value::as_str)?)?;
+    let replayable = match verdict {
+        Verdict::Verified => completeness == Some("bounded"),
+        Verdict::Proved => completeness == Some("unbounded"),
+        Verdict::Violated => valid_cached_violation(output, completeness),
+        Verdict::ReachableFailed => {
+            matches!(completeness, Some("bounded" | "unbounded"))
+                && output.get("unreached").and_then(Value::as_array).is_some()
         }
-        Some("unknown_cti")
-            if completeness == Some("bounded")
-                && output.get("cti").and_then(Value::as_object).is_some() =>
-        {
-            Some(1)
+        Verdict::UnknownCti => {
+            completeness == Some("bounded")
+                && output.get("cti").and_then(Value::as_object).is_some()
         }
-        Some("unknown_budget")
-            if completeness == Some("unknown")
+        Verdict::UnknownBudget => {
+            completeness == Some("unknown")
                 && output
                     .get("states_explored")
                     .and_then(Value::as_u64)
-                    .is_some() =>
-        {
-            Some(1)
+                    .is_some()
         }
-        _ => None,
-    }
+        // Not admitted to the cache (`outcome::verify_cache_admits`, #1022),
+        // or not a `verify` verdict at all.
+        Verdict::RefinementFailed
+        | Verdict::ImplViolated
+        | Verdict::Indeterminate
+        | Verdict::SpecError
+        | Verdict::InternalError => false,
+    };
+    replayable.then(|| verdict.exit_code())
 }
 
 fn valid_cached_violation(output: &Map<String, Value>, completeness: Option<&str>) -> bool {

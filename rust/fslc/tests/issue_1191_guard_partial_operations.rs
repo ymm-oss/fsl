@@ -544,7 +544,7 @@ refinement ImplRefinesAbs {
 
 /// `fslc refine` explores the impl for self-violations before checking the
 /// refinement (`first_self_violation`). A partial operation reached in an impl
-/// action's `requires` is the impl's own `partial_op`, reported as `violated`
+/// action's `requires` is the impl's own `partial_op`, reported as `impl_violated`
 /// with the impl trace — not a raw `error` that aborts the search.
 #[test]
 fn refine_reports_an_impl_guard_partial_op_as_a_self_violation() {
@@ -569,7 +569,7 @@ fn refine_reports_an_impl_guard_partial_op_as_a_self_violation() {
         )
     });
     assert_eq!(output.status.code(), Some(1), "{value:#}");
-    assert_eq!(value["result"], "violated", "{value:#}");
+    assert_eq!(value["result"], "impl_violated", "{value:#}");
     assert_eq!(value["violation_kind"], "partial_op", "{value:#}");
     assert_eq!(value["invariant"], "_partial_a", "{value:#}");
     assert_eq!(value["violated_at_step"], 1, "{value:#}");

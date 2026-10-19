@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use fsl_syntax::{
@@ -11,6 +11,7 @@ use fsl_syntax::{
 };
 use serde_json::{Value, json};
 
+use crate::naming::NameMap;
 use crate::{
     CoreError, CoreErrorKind, IndexedReplacements, KernelSpec, PredicateExpander,
     capture_avoiding_binding_with_names, collect_binder_names, collect_names, expand_spec_domains,
@@ -92,50 +93,6 @@ pub fn parse_kernel_source_with_file(
     parse_kernel_source(source, resolver)
         .map(|kernel| kernel.with_source_file(source_file))
         .map_err(|error| error.with_source_file(source_file))
-}
-
-/// Structural identity of one compose component declaration: the `use` alias
-/// and the name declared by the component spec.
-///
-/// The internal Kernel name `alias__name` is not injective (alias `a__b` with
-/// name `c` and alias `a` with name `b__c` share it), so public spellings are
-/// built from these two parts rather than parsed back out of the internal name.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ComposeName {
-    pub alias: String,
-    pub name: String,
-}
-
-impl ComposeName {
-    fn new(alias: &str, name: &str) -> Self {
-        Self {
-            alias: alias.to_owned(),
-            name: name.to_owned(),
-        }
-    }
-
-    /// The canonical public spelling, `alias.name`.
-    #[must_use]
-    pub fn display(&self) -> String {
-        format!("{}.{}", self.alias, self.name)
-    }
-
-    /// The internal spelling `alias__name`, which v1 replay traces written
-    /// before #1234 use for component actions.
-    #[must_use]
-    pub fn legacy(&self) -> String {
-        prefix(&self.alias, &self.name)
-    }
-}
-
-/// Compose component names that survive into the composed Kernel. Empty for
-/// any other document.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct ComposeNames {
-    /// Component actions keyed by internal name.
-    pub(crate) actions: BTreeMap<String, ComposeName>,
-    /// Internal names of component state variables and properties.
-    pub(crate) declarations: BTreeSet<String>,
 }
 
 #[derive(Clone)]
@@ -285,7 +242,7 @@ fn composed_kernel(
         annotations: fsl_syntax::AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics,
-        compose_names: ComposeNames::default(),
+        names: NameMap::default(),
     };
     kernel.annotations.extend(crate::SPEC_TARGET, annotations);
     kernel
@@ -348,17 +305,15 @@ pub fn lower_compose(
     let mut init_meta = None;
     let mut init_annotations = Annotations::default();
     let mut actions = Vec::new();
-    let mut names = ComposeNames::default();
+    let mut names = NameMap::default();
     for alias in &order {
         let component = &components[alias];
-        names.declarations.extend(
-            component
-                .names
-                .state
-                .iter()
-                .chain(&component.names.properties)
-                .map(|name| prefix(alias, name)),
-        );
+        for state in &component.names.state {
+            names.insert_state(alias, state);
+        }
+        for property in &component.names.properties {
+            names.insert_property(alias, property);
+        }
         for item in &component.spec.items {
             match item {
                 SpecItem::Init {
@@ -378,9 +333,7 @@ pub fn lower_compose(
                 }
                 SpecItem::Action { name, .. } => {
                     if !internal.contains(&(alias.clone(), name.clone())) {
-                        names
-                            .actions
-                            .insert(prefix(alias, name), ComposeName::new(alias, name));
+                        names.insert_action(alias, name);
                         actions.push(rewrite_component_item(item.clone(), component));
                     }
                 }
@@ -421,12 +374,12 @@ pub fn lower_compose(
     });
     static_items.extend(actions);
     let mut kernel = composed_kernel(compose.name, static_items, component_annotations, warnings);
-    kernel.compose_names = names;
+    kernel.names = names;
     Ok(kernel)
 }
 
 fn prefix(alias: &str, name: &str) -> String {
-    format!("{alias}__{name}")
+    crate::naming::compose_internal(alias, name)
 }
 
 fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {

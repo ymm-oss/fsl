@@ -401,6 +401,31 @@ fn verify_result_classes_map_to_exact_public_exit_codes() {
     );
 }
 
+/// Issue #901: the production table (`fslc_rust::outcome::Verdict`) and the
+/// independent public contract above agree on every verification verdict.
+/// The two are written separately on purpose, so a mutation of one table
+/// entry turns this test red as well as the product's corpus sweep.
+#[test]
+fn production_verdict_table_matches_the_public_exit_contract() {
+    use fslc_rust::outcome::Verdict;
+
+    for verdict in Verdict::ALL {
+        if !verdict.is_verification_verdict() {
+            continue;
+        }
+        let envelope = match verdict {
+            Verdict::InternalError => serde_json::json!({"result": "error", "kind": "internal"}),
+            Verdict::SpecError => serde_json::json!({"result": "error", "kind": "semantics"}),
+            _ => serde_json::json!({"result": verdict.result()}),
+        };
+        assert_eq!(
+            verdict.exit_code(),
+            expected_verify_exit(&envelope),
+            "{verdict:?}: production exit table disagrees with the public exact-exit contract"
+        );
+    }
+}
+
 /// Runs `fslc` with `args` and returns only its exit status -- `ledger`
 /// prints rendered Markdown (not JSON) to stdout when `-o` is omitted, so
 /// unlike `run_check` there is no envelope here to parse.
