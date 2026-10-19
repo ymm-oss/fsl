@@ -553,8 +553,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        14937,
+        "rust/fslc/src/refinement.rs",
+        21,
         "governance_result_from_source",
         ResultOption
     ),
@@ -562,8 +562,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     // into the envelope (#1303); discarding it reports the old exit.
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        17136,
+        "rust/fslc/src/refinement.rs",
+        78,
         "fold_governance_from_source",
         ResultOption
     ),
@@ -576,8 +576,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        15592,
+        "rust/fslc/src/refinement.rs",
+        98,
         "implements_result_from_source_with_bounds",
         ResultOption
     ),
@@ -1365,17 +1365,64 @@ fn qualified_verification_output_call(tokens: &[Token], function: usize) -> bool
         .any(|token| token.text == "verification_output")
 }
 
+/// Every `use` item in `tokens`, as the token range from `use` to its `;`.
+fn use_items(tokens: &[Token]) -> Vec<(usize, usize)> {
+    let mut items = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if tokens[index].text == "use"
+            && let Some(end) = (index..tokens.len()).find(|&end| tokens[end].text == ";")
+        {
+            items.push((index, end));
+            index = end + 1;
+        } else {
+            index += 1;
+        }
+    }
+    items
+}
+
+/// Whether `path` imports `name` from a module that defines it: a `use` item
+/// naming both the defining file's module and `name`, in a file of the same
+/// source directory (a sibling module of the same crate).
+fn imports_definition(
+    path: &str,
+    tokens: &[Token],
+    uses: &[(usize, usize)],
+    name: &str,
+    definitions: &BTreeSet<String>,
+) -> bool {
+    let directory = |file: &str| {
+        file.rsplit_once('/')
+            .map(|(directory, _)| directory.to_owned())
+    };
+    definitions.iter().any(|definition| {
+        let module = definition
+            .rsplit('/')
+            .next()
+            .and_then(|file| file.strip_suffix(".rs"));
+        directory(definition) == directory(path)
+            && module.is_some_and(|module| {
+                uses.iter().any(|&(start, end)| {
+                    let item = &tokens[start..=end];
+                    item.iter().any(|token| token.text == module)
+                        && item.iter().any(|token| token.text == name)
+                })
+            })
+    })
+}
+
 fn can_resolve_verdict_call(
     path: &str,
     tokens: &[Token],
+    uses: &[(usize, usize)],
     function: usize,
     verdict_definitions: &BTreeMap<String, BTreeSet<String>>,
 ) -> bool {
     let name = &tokens[function].text;
-    if verdict_definitions
-        .get(name)
-        .is_some_and(|paths| paths.contains(path))
-    {
+    if verdict_definitions.get(name).is_some_and(|paths| {
+        paths.contains(path) || imports_definition(path, tokens, uses, name, paths)
+    }) {
         return true;
     }
     match name.as_str() {
@@ -1397,16 +1444,20 @@ fn consumer_findings(
     verdict_definitions: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<ConsumerFinding> {
     let tokens = tokenize(source);
+    let uses = use_items(&tokens);
     let mut findings = Vec::new();
     for (index, token) in tokens.iter().enumerate() {
         if !verdict_definitions.contains_key(&token.text)
             || tokens
                 .get(index.wrapping_sub(1))
                 .is_some_and(|previous| previous.text == "fn")
+            || uses
+                .iter()
+                .any(|&(start, end)| (start..=end).contains(&index))
         {
             continue;
         }
-        if !can_resolve_verdict_call(path, &tokens, index, verdict_definitions) {
+        if !can_resolve_verdict_call(path, &tokens, &uses, index, verdict_definitions) {
             continue;
         }
         if generic_call_open(&tokens, index).is_none() {
@@ -1804,6 +1855,48 @@ fn normalized_windows_consumer_path_detects_a_discarded_verdict() {
             function: "synthetic_probe".to_owned(),
             kind: ConsumerFindingKind::DiscardedStatement,
         }]
+    );
+}
+
+/// A verdict function a sibling module defines is checked at every call site
+/// of a file that imports it (#1171 moved such helpers out of `main.rs`); the
+/// import itself is not a reference, and a file that does not import it, or
+/// imports a same-named module of another crate, is not resolved.
+#[test]
+fn imported_verdict_call_sites_are_checked() {
+    let verdict_definitions = BTreeMap::from([(
+        "synthetic_probe".to_owned(),
+        BTreeSet::from(["rust/fslc/src/refinement.rs".to_owned()]),
+    )]);
+    let source = "use refinement::{other, synthetic_probe};\n\
+                  fn consumer() -> Result<(), Error> { synthetic_probe()?; Ok(()) }\n\
+                  fn pointer() { let probe = synthetic_probe; }\n\
+                  fn checked() { match synthetic_probe() { _ => {} } }\n";
+    assert_eq!(
+        consumer_findings("rust/fslc/src/main.rs", source, &verdict_definitions),
+        vec![
+            ConsumerFinding {
+                path: "rust/fslc/src/main.rs".to_owned(),
+                line: 2,
+                function: "synthetic_probe".to_owned(),
+                kind: ConsumerFindingKind::DiscardedStatement,
+            },
+            ConsumerFinding {
+                path: "rust/fslc/src/main.rs".to_owned(),
+                line: 3,
+                function: "synthetic_probe".to_owned(),
+                kind: ConsumerFindingKind::IndirectReference,
+            },
+        ]
+    );
+    let unimported = "fn consumer() -> Result<(), Error> { synthetic_probe()?; Ok(()) }\n";
+    assert_eq!(
+        consumer_findings("rust/fslc/src/main.rs", unimported, &verdict_definitions),
+        Vec::new()
+    );
+    assert_eq!(
+        consumer_findings("rust/fsl-wasm/src/lib.rs", source, &verdict_definitions),
+        Vec::new()
     );
 }
 

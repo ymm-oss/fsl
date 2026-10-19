@@ -4,20 +4,30 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fsl_core::{FslValue, KernelExpr, KernelModel};
+use fslc_rust::spec_load::SpecLoadError;
 use fslc_rust::verification_output::TraceGate;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use super::{
-    CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
-    block_on_native, envelope, error_output, implements_error_output,
-    implements_result_from_source_with_bounds, invariant_names,
+use crate::cli_options::{CliVerifyOptions, ScopeBounds};
+use crate::cli_output::{
+    envelope, error_output, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, trace_last_action,
+};
+use crate::process::{STACK_SIZE, block_on_native, parse_options};
+use crate::property_selection::{
+    apply_vacuity_mode, invariant_names, select_properties, selected_implicit_bounds,
+};
+use crate::refinement::{
+    fold_governance_from_source, implements_error_output, implements_result_from_source_with_bounds,
+};
+use crate::spec_loading::{
     load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
-    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
-    validate_requirement_traces_from_source, validate_specialized_document_from_source,
+    load_state_snapshot, read_spec_source, validate_requirement_traces_from_source,
+    validate_specialized_document_from_source,
 };
+use crate::strict_tags::add_strict_tag_warnings;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum VerificationEngine {
@@ -1245,7 +1255,7 @@ fn ranked_lasso_discharges(
 ) {
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
-            .stack_size(super::STACK_SIZE)
+            .stack_size(STACK_SIZE)
             .name("fslc-ranking".to_owned())
             .spawn_scoped(scope, || {
                 let Ok(mut solver) =
@@ -2133,7 +2143,7 @@ pub(super) fn run_verify_cli_from_source(
     // the preservations' current files. Every `verify`-shaped caller --
     // `verify` (including `--lemma`), `sweep` cells, and a `chain` spec layer
     // with a `depth` -- goes through this one point.
-    match super::fold_governance_from_source(path, source, &mut output) {
+    match fold_governance_from_source(path, source, &mut output) {
         Ok(folded) => (output, folded.unwrap_or(status)),
         Err(error) => error,
     }
@@ -2170,7 +2180,7 @@ fn run_verify_cli_kernel_from_source(
     if fsl_syntax::is_causal_source(source)
         && let Err(error) = fsl_syntax::parse_causal(source)
     {
-        return super::causal::causal_parse_error_output(&error, false);
+        return crate::causal::causal_parse_error_output(&error, false);
     }
     let recorder = RecordingResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     let prepared = match prepare_cli_verification_from_source(path, source, options, &recorder) {
@@ -2295,12 +2305,11 @@ fn prepare_cli_verification_from_source(
     options: &CliVerifyOptions,
     recorder: &RecordingResolver,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let is_agent_document =
-        match fsl_syntax::parse_surface_document_with(source, crate::parse_options()) {
-            Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
-            Ok(_) => false,
-            Err(error) => return Err((surface_parse_error_output(&error), 2)),
-        };
+    let is_agent_document = match fsl_syntax::parse_surface_document_with(source, parse_options()) {
+        Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
+        Ok(_) => false,
+        Err(error) => return Err((surface_parse_error_output(&error), 2)),
+    };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document_from_source(path, source) {
         return Err((semantic_error_output(&error), 2));
