@@ -840,6 +840,8 @@ pub(crate) fn project_trace_case_payload(
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
 ) -> Result<RequirementClaimSet, String> {
+    // Ungated (#1243): the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on.
     let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(input, trace.as_ref())
 }
@@ -999,15 +1001,15 @@ fn project_requirement_claims_with_trace(
     }
 
     if let Some(contract) = trace_contract {
-        for case in &contract.acceptance {
+        for case in contract.unchecked_acceptance() {
             universe.push(format!("acceptance:{}", case.id));
         }
-        for case in &contract.forbidden {
+        for case in contract.unchecked_forbidden() {
             universe.push(format!("forbidden:{}", case.id));
         }
         push_trace_claims(
             TraceCaseKind::Acceptance,
-            &contract.acceptance,
+            contract.unchecked_acceptance(),
             model,
             source_path,
             &mut agg,
@@ -1016,7 +1018,7 @@ fn project_requirement_claims_with_trace(
         )?;
         push_trace_claims(
             TraceCaseKind::Forbidden,
-            &contract.forbidden,
+            contract.unchecked_forbidden(),
             model,
             source_path,
             &mut agg,

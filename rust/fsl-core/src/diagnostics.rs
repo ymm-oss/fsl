@@ -28,8 +28,10 @@ impl<'a> ModelWarningContext<'a> {
     ///
     /// Returns [`CoreError`] when the source cannot be parsed as requirements metadata.
     pub fn from_source(model: &'a KernelModel, source: &str) -> Result<Self, CoreError> {
+        // Ungated: a forbidden the gate would reject still suppresses the
+        // warning; `check` reports that rejection separately.
         let has_forbidden = requirements_trace_contract(source)?
-            .is_some_and(|contract| !contract.forbidden.is_empty());
+            .is_some_and(|contract| !contract.unchecked_forbidden().is_empty());
         let has_implements = requirements_has_implements(source)?;
         Ok(Self {
             model,

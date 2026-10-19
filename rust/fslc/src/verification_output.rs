@@ -1199,6 +1199,62 @@ fn requirement_failure_base(
     output
 }
 
+/// Acceptance and forbidden traces that [`validate_requirement_trace_source`]
+/// replayed against a model without a failure.
+///
+/// The gate is the only constructor, so a consumer that takes this type can
+/// only be reached through it (#1285).
+///
+/// ```compile_fail,E0451
+/// fn forge(
+///     contract: fsl_core::RequirementsTraceContract,
+/// ) -> fslc_rust::verification_output::CheckedTraceContract {
+///     fslc_rust::verification_output::CheckedTraceContract { contract }
+/// }
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckedTraceContract {
+    contract: fsl_core::RequirementsTraceContract,
+}
+
+impl CheckedTraceContract {
+    /// The acceptance cases, in declaration order.
+    #[must_use]
+    pub fn acceptance(&self) -> &[fsl_core::RequirementsTraceCase] {
+        self.contract.unchecked_acceptance()
+    }
+
+    /// The forbidden cases, in declaration order.
+    #[must_use]
+    pub fn forbidden(&self) -> &[fsl_core::RequirementsTraceCase] {
+        self.contract.unchecked_forbidden()
+    }
+
+    /// The source's `verify` scope type names
+    /// ([`fsl_core::verify_scope_type_names`]).
+    #[must_use]
+    pub fn scope_types(&self) -> &std::collections::BTreeSet<String> {
+        self.contract.scope_types()
+    }
+}
+
+/// The verdict of [`validate_requirement_trace_source`].
+#[derive(Clone, Debug, PartialEq)]
+#[must_use = "a TraceGate may carry a rejected requirement trace"]
+pub enum TraceGate {
+    /// The source is not a requirements document, so it declares no traces.
+    NotRequirements,
+    /// Every acceptance and forbidden trace replayed as declared.
+    Passed(CheckedTraceContract),
+    /// The first trace that did not replay as declared.
+    Rejected {
+        /// The error envelope reporting the failing trace.
+        failure: Value,
+        /// The rejected contract, for attributing `failure` to its case.
+        contract: fsl_core::RequirementsTraceContract,
+    },
+}
+
 /// Validate requirements-layer acceptance and forbidden traces before proof.
 ///
 /// # Errors
@@ -1213,13 +1269,18 @@ pub fn validate_requirement_trace_source(
     envelope: &Map<String, Value>,
     source: &str,
     model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
+) -> Result<TraceGate, String> {
     let Some(contract) =
         fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
     else {
-        return Ok((None, false));
+        return Ok(TraceGate::NotRequirements);
     };
-    validate_requirement_trace_contract(envelope, &contract, model)
+    Ok(
+        match validate_requirement_trace_contract(envelope, &contract, model)? {
+            Some(failure) => TraceGate::Rejected { failure, contract },
+            None => TraceGate::Passed(CheckedTraceContract { contract }),
+        },
+    )
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1227,9 +1288,8 @@ fn validate_requirement_trace_contract(
     envelope: &Map<String, Value>,
     contract: &fsl_core::RequirementsTraceContract,
     model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
-    let has_contract = !contract.acceptance.is_empty() || !contract.forbidden.is_empty();
-    for case in &contract.acceptance {
+) -> Result<Option<Value>, String> {
+    for case in contract.unchecked_acceptance() {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         for (index, step) in case.steps.iter().enumerate() {
             let (arguments, instance) = requirement_step_match(&monitor, step)?;
@@ -1243,7 +1303,7 @@ fn validate_requirement_trace_contract(
                     json!({"line": step.line, "column": step.column}),
                 );
                 output.insert("trace_type".to_owned(), json!("acceptance"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             };
             let result = monitor.step(&instance).map_err(|error| error.to_string())?;
             if result.violation.is_some() {
@@ -1256,7 +1316,7 @@ fn validate_requirement_trace_contract(
                     json!({"line": step.line, "column": step.column}),
                 );
                 output.insert("trace_type".to_owned(), json!("acceptance"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             }
         }
         let expectation = case
@@ -1282,10 +1342,10 @@ fn validate_requirement_trace_contract(
                 json!({"line": case.line, "column": case.column}),
             );
             output.insert("trace_type".to_owned(), json!("acceptance"));
-            return Ok((Some(Value::Object(output)), has_contract));
+            return Ok(Some(Value::Object(output)));
         }
     }
-    for case in &contract.forbidden {
+    for case in contract.unchecked_forbidden() {
         if case.steps.is_empty() {
             return Err(format!(
                 "forbidden '{}' must have at least one step",
@@ -1305,7 +1365,7 @@ fn validate_requirement_trace_contract(
                         &monitor,
                         step,
                         &arguments,
-                        &contract.scope_types,
+                        contract.scope_types(),
                     )?;
                     let Some(message) = unenabled.non_rejection_message(step) else {
                         break;
@@ -1371,7 +1431,7 @@ fn validate_requirement_trace_contract(
                     );
                     output.insert("message".to_owned(), json!(message));
                     output.insert("trace_type".to_owned(), json!("forbidden"));
-                    return Ok((Some(Value::Object(output)), has_contract));
+                    return Ok(Some(Value::Object(output)));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));
@@ -1386,7 +1446,7 @@ fn validate_requirement_trace_contract(
                     json!("the setup steps of a forbidden case must be enabled and ok (the trace is broken)."),
                 );
                 output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             };
             let params = Value::Object(
                 instance
@@ -1431,7 +1491,7 @@ fn validate_requirement_trace_contract(
                         )),
                     );
                     output.insert("trace_type".to_owned(), json!("forbidden"));
-                    return Ok((Some(Value::Object(output)), has_contract));
+                    return Ok(Some(Value::Object(output)));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));
@@ -1442,7 +1502,7 @@ fn validate_requirement_trace_contract(
                     json!({"line": step.line, "column": step.column}),
                 );
                 output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             }
             accepted_trace.push(json!({
                 "action": model.action_display_name(&instance.action),
@@ -1463,11 +1523,11 @@ fn validate_requirement_trace_contract(
                     json!("this operation should have been rejected but was accepted. A guard or invariant may be missing."),
                 );
                 output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             }
         }
     }
-    Ok((None, has_contract))
+    Ok(None)
 }
 
 fn requirement_expectation_expr(
@@ -1571,44 +1631,24 @@ pub fn validate_requirement_trace_source_scoped(
         return Ok((None, Vec::new()));
     };
     let mut skipped = Vec::new();
-    let cases = contract
-        .acceptance
-        .iter()
-        .map(|case| ("acceptance", case))
-        .chain(contract.forbidden.iter().map(|case| ("forbidden", case)));
-    for (kind, case) in cases {
-        let single = fsl_core::RequirementsTraceContract {
-            acceptance: if kind == "acceptance" {
-                vec![case.clone()]
-            } else {
-                Vec::new()
-            },
-            forbidden: if kind == "forbidden" {
-                vec![case.clone()]
-            } else {
-                Vec::new()
-            },
-            scope_types: contract.scope_types.clone(),
-        };
+    for (kind, case, single) in contract.split_cases() {
         let outcome = validate_requirement_trace_contract(envelope, &single, model);
         // Without the declared model nothing can be attributed to the
         // override, so every failure stays hard (fail closed).
         let Some(declared) = declared else {
-            if matches!(outcome, Ok((None, _))) {
+            if matches!(outcome, Ok(None)) {
                 continue;
             }
-            let (failure, _) = outcome?;
-            return Ok((failure, skipped));
+            return Ok((outcome?, skipped));
         };
-        let reference = if matches!(outcome, Ok((None, _))) {
+        let reference = if matches!(outcome, Ok(None)) {
             continue;
         } else if let Some(reference) =
             out_of_scope_reference(envelope, &single, model, declared, kind, case)
         {
             reference
         } else {
-            let (failure, _) = outcome?;
-            return Ok((failure, skipped));
+            return Ok((outcome?, skipped));
         };
         skipped.push(SkippedRequirementTrace {
             kind,
@@ -1686,12 +1726,12 @@ fn expectation_evaluates(
     single: &fsl_core::RequirementsTraceContract,
     model: &KernelModel,
 ) -> bool {
-    let Some(case) = single.acceptance.first() else {
+    let Some(case) = single.unchecked_acceptance().first() else {
         return false;
     };
     match validate_requirement_trace_contract(envelope, single, model) {
-        Ok((None, _)) => true,
-        Ok((Some(failure), _)) => {
+        Ok(None) => true,
+        Ok(Some(failure)) => {
             failure.get("expect").is_some()
                 && failure.get("failed_step") == Some(&json!(case.steps.len()))
         }
