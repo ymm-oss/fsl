@@ -1,0 +1,38 @@
+// lowered.fsl（impl） ⊑ original_renamed.fsl（abs）。original.fsl は名前が衝突するので改名した写しを使う
+// 原文の counter（paid_count / refund_count）は、lowering では count の式として組み直す。
+refinement LoweredRefinesOriginal {
+  impl OrderWorkflow
+  abs  GalleryLargeOrderWorkflow
+
+  enum conversion st OrderStage -> OSt {
+    Empty -> OEmpty
+    Placed -> OPlaced
+    Approved -> OApproved
+    Paid -> OPaid
+    Packed -> OPacked
+    Shipped -> OShipped
+    Delivered -> ODelivered
+    ReturnRequested -> OReturnRequested
+    Refunded -> ORefunded
+  }
+
+  map orders[o: OrderId] = OrderRec {
+    st: convert(st, order_stage[o]),
+    qty: order_qty[o],
+    buyer: order_buyer[o]
+  }
+  map stock = stock
+  map paid_count = count(o: Order where
+      order_stage[o] == Paid or order_stage[o] == Packed or order_stage[o] == Shipped
+      or order_stage[o] == Delivered or order_stage[o] == ReturnRequested or order_stage[o] == Refunded)
+  map refund_count = count(o: Order where order_stage[o] == Refunded)
+
+  action place(o, u, qty)     -> place(o, u, qty)
+  action approve(o)           -> approve(o)
+  action pay(o)               -> pay(o)
+  action pack(o)              -> pack(o)
+  action ship(o)              -> ship(o)
+  action deliver(o)           -> deliver(o)
+  action request_return(o)    -> request_return(o)
+  action refund(o)            -> refund(o)
+}

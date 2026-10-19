@@ -23,7 +23,7 @@ fn lsp_consumes_the_same_raw_dispatch_manifest() {
         let id = case["id"].as_str().expect("case id");
         let source = case["source"].as_str().expect("case source");
         let accepted = case["accepted"].as_bool().expect("accepted flag");
-        let observed = DocumentIndex::build(source, Some(id));
+        let observed = DocumentIndex::build(source, Some(id), &fsl_syntax::ParseOptions::stable());
         if accepted {
             observed.unwrap_or_else(|error| panic!("{id}: LSP rejected accepted source: {error}"));
         } else {

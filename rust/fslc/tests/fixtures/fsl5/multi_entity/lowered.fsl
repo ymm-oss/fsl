@@ -1,0 +1,81 @@
+// deadlock-ignore-rationale: 原文と同じく Refunded で止まる。
+// ════════════════════════════════════════════════════════════════
+// multi_entity/fsl3_*.fsl が「意図する lowering」を今の構文（2.x requirements、
+// kernel-wrapper form）で書き下したもの。
+//
+//   entity User                          -> type User = 0..1（lifecycle の無い entity は ID の領域だけ）
+//   entity Order { qty  lifecycle ... }  -> enum OrderStage、order_stage / order_qty
+//   Order belongs to User as buyer via place
+//                                        -> order_buyer: Map<Order, Option<User>> = none、
+//                                           place の中で order_buyer[o] = some(u)
+//   resource stock: Qty = 2              -> state stock（entity に属さない全体の量）
+//   event place = User places Order with qty ...
+//                                        -> fair action place(o: Order, u: User, qty: Qty)
+//                                           （actor が entity でもあるとき、actor のインスタンスが引数になる）
+//   measure paid_count = count Order in Paid..Refunded
+//                                        -> 状態を持たない（projection）。原文の counter と
+//                                           PaidLedger / RefundLedger は「定義により成り立つ」ので消える
+// ════════════════════════════════════════════════════════════════
+requirements OrderWorkflow {
+  type Order = 0..1
+  type User = 0..1
+  type Qty = 0..2
+  enum OrderStage { Empty, Placed, Approved, Paid, Packed, Shipped, Delivered, ReturnRequested, Refunded }
+
+  state {
+    order_stage: Map<Order, OrderStage>,
+    order_qty: Map<Order, Qty>,
+    order_buyer: Map<Order, Option<User>>,
+    stock: Qty
+  }
+
+  init {
+    forall o: Order {
+      order_stage[o] = Empty
+      order_qty[o] = 0
+      order_buyer[o] = none
+    }
+    stock = 2
+  }
+
+  requirement REQ-PLACE "A user places an order for an in-stock quantity" {
+    // event place = User places Order with qty   Empty -> Placed   set stock = stock - qty
+    // rule: allow User places Order only when qty > 0 and stock >= qty
+    fair action place(o: Order, u: User, qty: Qty) {
+      requires order_stage[o] == Empty
+      requires qty > 0 and stock >= qty
+      order_stage[o] = Placed
+      order_qty[o] = qty
+      order_buyer[o] = some(u)
+      stock = stock - qty
+    }
+  }
+
+  requirement REQ-FLOW "An order is approved, paid, packed, shipped and delivered in order" {
+    fair action approve(o: Order) { requires order_stage[o] == Placed     order_stage[o] = Approved }
+    fair action pay(o: Order)     { requires order_stage[o] == Approved   order_stage[o] = Paid }
+    fair action pack(o: Order)    { requires order_stage[o] == Paid       order_stage[o] = Packed }
+    fair action ship(o: Order)    { requires order_stage[o] == Packed     order_stage[o] = Shipped }
+    fair action deliver(o: Order) { requires order_stage[o] == Shipped    order_stage[o] = Delivered }
+  }
+
+  requirement REQ-RETURN "A delivered order can be returned and refunded; the stock comes back" {
+    fair action request_return(o: Order) { requires order_stage[o] == Delivered  order_stage[o] = ReturnRequested }
+    // event refund = Shop refunds Order  ReturnRequested -> Refunded  set stock = stock + qty
+    fair action refund(o: Order) {
+      requires order_stage[o] == ReturnRequested
+      order_stage[o] = Refunded
+      stock = stock + order_qty[o]
+    }
+  }
+
+  // rule: always Order not in Empty has buyer
+  invariant BuyerKnownAfterPlace {
+    forall o: Order { order_stage[o] != Empty => order_buyer[o] != none }
+  }
+
+  // goal RefundedOne: some Order can reach Refunded
+  reachable RefundedOne {
+    exists o: Order { order_stage[o] == Refunded }
+  }
+}

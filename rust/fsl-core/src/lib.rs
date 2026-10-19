@@ -104,20 +104,61 @@ pub use trace_json::{
     state_summary, trace_json,
 };
 
+/// What a core frontend or lowering failure is, independent of its wording.
+///
+/// Delivery surfaces derive the public envelope (`kind`, `hint`) from this
+/// type through an exhaustive `match` with no wildcard arm, so adding a kind
+/// fails to compile until every surface states how it is reported. The message
+/// stays free to change without silently reclassifying the diagnostic, which
+/// message-text matching could not guarantee (issues 565, 1167).
+///
+/// `docs/design/DESIGN-v1.md` §7.2 fixes the public `kind` as a closed set;
+/// these kinds are finer than that set and map onto it, they do not extend it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum CoreErrorKind {
+    /// A semantic failure with no narrower classification.
+    #[default]
+    Semantics,
+    /// A declaration that is duplicated, missing, or shadowed — the failures
+    /// `docs/design/DESIGN-v1.md` §7.2's `name` member covers (issue 565).
+    NameResolution,
+    /// A type reference that names no declared type.
+    UnknownType,
+    /// Lowering reached a declaration whose type it could not resolve, so it
+    /// cannot choose a default value for it.
+    UnresolvedTypeDefault,
+    /// A `check hard { rule ... }` clause names a rule outside the registered
+    /// hard-contract rules.
+    UnknownAiHardContractRule,
+    /// A domain expression names a symbol the domain does not declare.
+    UnknownDomainSymbol,
+    /// `--instances` / `--values` were given for a document that declares no
+    /// `entity` or `number` they could bound: a CLI argument defect rather than
+    /// a construct in the document.
+    ScopeOverrideWithoutBounds,
+    /// The top-level document is a kind the kernel lowering does not accept.
+    NotKernelLowerable,
+    /// A compose component could not be read, parsed, or lowered. Carries the
+    /// component's own kind, which the compose-level diagnostic does not adopt
+    /// (see `component_error` in `compose.rs`).
+    ComponentLoad(Box<CoreErrorKind>),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoreError {
     pub message: String,
     pub line: u32,
     pub column: u32,
     pub origin: Option<Box<OriginChain>>,
-    /// Whether this is a name-resolution failure — a declaration that is
-    /// duplicated, missing, or shadowed.
+    /// The classification the frontend determined for this failure.
     ///
-    /// `docs/design/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
-    /// member covers exactly these. Carrying the classification on the error
-    /// keeps it out of message-string matching, which cannot survive a message
-    /// edit (issue 565, the direction issue 484 established).
-    pub name_resolution: bool,
+    /// Carrying it on the error keeps it out of message-string matching, which
+    /// cannot survive a message edit (issues 565, 1167).
+    pub kind: CoreErrorKind,
+    /// Stable machine-readable code for delivery surfaces that publish one
+    /// (`diagnostic_code`), when the frontend assigns it. `None` publishes no
+    /// code, which is what every pre-existing core diagnostic reports.
+    pub diagnostic_code: Option<&'static str>,
 }
 
 impl CoreError {
@@ -133,7 +174,8 @@ impl CoreError {
             line: 0,
             column: 0,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         }
     }
 
@@ -145,9 +187,28 @@ impl CoreError {
 
     /// Classify this diagnostic as a name-resolution failure.
     #[must_use]
-    pub fn into_name_resolution(mut self) -> Self {
-        self.name_resolution = true;
+    pub fn into_name_resolution(self) -> Self {
+        self.with_kind(CoreErrorKind::NameResolution)
+    }
+
+    /// Classify this diagnostic.
+    #[must_use]
+    pub fn with_kind(mut self, kind: CoreErrorKind) -> Self {
+        self.kind = kind;
         self
+    }
+
+    /// Attach the stable code delivery surfaces publish as `diagnostic_code`.
+    #[must_use]
+    pub fn with_diagnostic_code(mut self, code: &'static str) -> Self {
+        self.diagnostic_code = Some(code);
+        self
+    }
+
+    /// Whether this is a name-resolution failure.
+    #[must_use]
+    pub fn is_name_resolution(&self) -> bool {
+        self.kind == CoreErrorKind::NameResolution
     }
 
     #[must_use]
@@ -209,7 +270,8 @@ impl From<ParseError> for CoreError {
                 lowering_steps: Vec::new(),
                 generated: false,
             })),
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         }
     }
 }
@@ -327,7 +389,8 @@ pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         });
     };
     let mut kernel = lower_direct_spec(spec)?;
@@ -353,7 +416,8 @@ fn validate_scope_override_names(
         line: 1,
         column: 1,
         origin: None,
-        name_resolution: false,
+        kind: CoreErrorKind::Semantics,
+        diagnostic_code: None,
     };
     if let Some(name) = instances
         .keys()
@@ -398,7 +462,8 @@ fn validate_direct_scope_overrides(
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::ScopeOverrideWithoutBounds,
+            diagnostic_code: None,
         });
     }
     validate_scope_override_names(&entities, &numbers, instances, values)
@@ -703,7 +768,8 @@ pub fn parse_kernel_source_with_bounds(
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         }),
     }?;
     kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
@@ -950,7 +1016,8 @@ impl PredicateExpander {
                 line: definition.line,
                 column: definition.column,
                 origin: None,
-                name_resolution: false,
+                kind: CoreErrorKind::Semantics,
+                diagnostic_code: None,
             });
         }
         stack.push(name.to_owned());
@@ -1537,7 +1604,8 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
-        name_resolution: false,
+        kind: CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 

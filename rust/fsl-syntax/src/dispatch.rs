@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::{Annotations, ParseError, SurfaceDocument, Token, TokenKind, lex};
+use crate::{Annotations, ParseError, ParseOptions, SurfaceDocument, Token, TokenKind, lex_with};
 
 /// Original source passed beside the shared token stream to a dialect frontend.
 #[derive(Clone, Copy, Debug)]
@@ -97,7 +97,19 @@ fn validate_registry(registry: &[FrontendRegistration]) -> Result<(), String> {
 ///
 /// Returns a coded parse error for empty, annotation-only, or unknown documents.
 pub fn dialect_keyword(source: &str) -> Result<&'static str, ParseError> {
-    let tokens = lex(source).map_err(ParseError::from)?;
+    dialect_keyword_with(source, &ParseOptions::stable())
+}
+
+/// [`dialect_keyword`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// Returns a coded parse error for empty, annotation-only, or unknown documents.
+pub fn dialect_keyword_with(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<&'static str, ParseError> {
+    let tokens = lex_with(source, options).map_err(ParseError::from)?;
     let mut cursor = 0;
     leading_annotations(&tokens, &mut cursor)?;
     select_frontend(&tokens, cursor).map(|registration| registration.keyword)
@@ -118,12 +130,31 @@ pub fn declaration_keyword(source: &str) -> Result<String, ParseError> {
 
 /// Lex once, select a registered frontend, and parse using that same token stream.
 ///
+/// This is the published language: it is [`parse_document_with`] under
+/// [`ParseOptions::stable`].
+///
 /// # Errors
 ///
 /// Returns lexical, annotation, dispatch, or frontend syntax errors.
 pub fn parse_document(source: SourceFile<'_>) -> Result<ParsedDocument, ParseError> {
+    parse_document_with(source, &ParseOptions::stable())
+}
+
+/// [`parse_document`] under explicit [`ParseOptions`]. Every registered
+/// frontend is reached only through this function.
+///
+/// No unstable feature changes parsing yet, so the options do not affect the
+/// result; later stages attach syntax to them.
+///
+/// # Errors
+///
+/// Returns lexical, annotation, dispatch, or frontend syntax errors.
+pub fn parse_document_with(
+    source: SourceFile<'_>,
+    options: &ParseOptions,
+) -> Result<ParsedDocument, ParseError> {
     LazyLock::force(&VALID_REGISTRY);
-    let tokens = lex(source.source()).map_err(ParseError::from)?;
+    let tokens = lex_with(source.source(), options).map_err(ParseError::from)?;
     let mut cursor = 0;
     let annotations = leading_annotations(&tokens, &mut cursor)?;
     let registration = select_frontend(&tokens, cursor)?;
@@ -304,6 +335,48 @@ mod tests {
         assert_eq!(unknown.code(), "FSL-DIALECT-UNKNOWN");
         assert_eq!(unknown.span.start.column, 1);
         assert!(unknown.message.contains("spec, refinement, compose"));
+    }
+
+    /// decisions/049 D2: a document that declares a syntax edition in its
+    /// first line is never read as the published language. Under stable
+    /// options every document entry rejects the header with the same
+    /// unknown-declaration error a user sees today, and the gate adds no
+    /// syntax yet, so enabling it does not change any of these results.
+    #[test]
+    fn edition_header_fails_closed_under_stable_options() {
+        let gated = ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
+        );
+        for source in [
+            "fsl 5\nrequirements R {}\n",
+            "fsl 4\nspec S { state { x: Int } }\n",
+            "\u{feff}// header after trivia\nfsl 5\nrequirements R {}\n",
+        ] {
+            let error = parse_document(SourceFile::new(source)).unwrap_err();
+            assert_eq!(error.code(), "FSL-DIALECT-UNKNOWN", "{source:?}");
+            assert!(error.message.contains("'fsl'"), "{}", error.message);
+            assert_eq!(
+                crate::parse_surface_document(source).unwrap_err(),
+                error,
+                "{source:?}"
+            );
+            assert_eq!(dialect_keyword(source).unwrap_err(), error, "{source:?}");
+
+            assert_eq!(
+                parse_document_with(SourceFile::new(source), &gated).unwrap_err(),
+                error,
+                "{source:?}"
+            );
+            assert_eq!(
+                dialect_keyword_with(source, &gated).unwrap_err(),
+                error,
+                "{source:?}"
+            );
+            assert_eq!(
+                crate::lex_with(source, &gated).unwrap(),
+                crate::lex(source).unwrap()
+            );
+        }
     }
 
     #[test]

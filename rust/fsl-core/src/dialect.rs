@@ -1649,7 +1649,8 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
-        name_resolution: false,
+        kind: crate::CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
@@ -2889,7 +2890,8 @@ fn ai_rule_set(component: &fsl_syntax::AiComponent) -> Result<BTreeSet<String>, 
             return Err(core_error(
                 format!("unknown ai hard-contract rule '{name}'"),
                 ai_span(loc),
-            ));
+            )
+            .with_kind(crate::CoreErrorKind::UnknownAiHardContractRule));
         }
     }
     Ok(names.into_iter().collect())

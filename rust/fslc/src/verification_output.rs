@@ -145,23 +145,97 @@ pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
     )
 }
 
+/// How a delivery surface knows a diagnostic's public classification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DiagnosticClass {
+    /// A core frontend or lowering failure, classified by its type through
+    /// [`core_error_class`]. The message is never consulted (issue 1167).
+    Core(fsl_core::CoreErrorKind),
+    /// A typed-model diagnostic the frontend marked as name resolution
+    /// (issue 565).
+    Name,
+    /// A diagnostic that reaches the renderer without a typed classification
+    /// (a typed-model error other than name resolution, a runtime or verifier
+    /// error, or a message already flattened to a `String`). Classified by
+    /// [`semantic_error_kind`] and the message hint rules below until those
+    /// sources carry a kind of their own.
+    Message,
+}
+
+impl DiagnosticClass {
+    /// The class of a typed-model diagnostic.
+    #[must_use]
+    pub const fn model(name_resolution: bool) -> Self {
+        if name_resolution {
+            Self::Name
+        } else {
+            Self::Message
+        }
+    }
+}
+
+/// The public envelope fields a core diagnostic kind determines.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoreErrorClass {
+    /// The `kind` member of `docs/design/DESIGN-v1.md` §7.2's closed set.
+    pub kind: &'static str,
+    /// The repair hint reported when the diagnostic supplies none of its own.
+    pub hint: Option<&'static str>,
+}
+
+const AI_HARD_CONTRACT_RULE_HINT: &str = "supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared";
+
+/// The public classification of a core diagnostic kind.
+///
+/// Deliberately an exhaustive `match` with no wildcard arm: a new
+/// [`fsl_core::CoreErrorKind`] does not compile until it states here how the
+/// CLI reports it (issue 1167). Every kind maps onto the closed `kind` set of
+/// `docs/design/DESIGN-v1.md` §7.2; none extends it.
+#[must_use]
+pub fn core_error_class(kind: &fsl_core::CoreErrorKind) -> CoreErrorClass {
+    use fsl_core::CoreErrorKind;
+    let (kind, hint) = match kind {
+        CoreErrorKind::NameResolution => ("name", None),
+        CoreErrorKind::UnknownType => ("type", None),
+        CoreErrorKind::UnknownAiHardContractRule => ("semantics", Some(AI_HARD_CONTRACT_RULE_HINT)),
+        // A component failure is reported against the parent's `use`
+        // declaration, where the component's own class would be wrong advice
+        // (see `component_error` in `fsl-core/src/compose.rs`).
+        CoreErrorKind::ComponentLoad(_)
+        | CoreErrorKind::Semantics
+        | CoreErrorKind::UnresolvedTypeDefault
+        | CoreErrorKind::UnknownDomainSymbol
+        | CoreErrorKind::ScopeOverrideWithoutBounds
+        | CoreErrorKind::NotKernelLowerable => ("semantics", None),
+    };
+    CoreErrorClass { kind, hint }
+}
+
 /// Render a model-construction error using the public semantic classification.
 ///
 /// `docs/design/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
 /// `semantics` and fixes `kind` as a closed set including `name`. This is the
 /// single dispatch point for that whole half of the set, so both the location
-/// (issue 555) and the classification (issue 565) travel with the diagnostic
-/// instead of being reconstructed per command.
+/// (issue 555) and the classification (issues 565, 1167) travel with the
+/// diagnostic instead of being reconstructed per command.
 #[must_use]
 pub fn render_semantic_error(
     mut output: Map<String, Value>,
     message: &str,
     loc: Option<Value>,
-    name_resolution: bool,
+    class: &DiagnosticClass,
     diagnostic_code: Option<&str>,
     hint: Option<&str>,
 ) -> Value {
-    let kind = diagnostic_kind(message, name_resolution);
+    let core = match class {
+        DiagnosticClass::Core(kind) => Some(core_error_class(kind)),
+        DiagnosticClass::Name | DiagnosticClass::Message => None,
+    };
+    let kind = match (class, core) {
+        (_, Some(core)) => core.kind,
+        (DiagnosticClass::Name, None) => "name",
+        (_, None) => semantic_error_kind(message),
+    };
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
@@ -171,6 +245,19 @@ pub fn render_semantic_error(
     if let Some(code) = diagnostic_code {
         output.insert("diagnostic_code".to_owned(), json!(code));
     }
+    if let Some(core) = core {
+        if let Some(hint) = hint.or(core.hint) {
+            output.insert("hint".to_owned(), json!(hint));
+        }
+    } else {
+        insert_message_hint(&mut output, message, hint);
+    }
+    Value::Object(output)
+}
+
+/// The hint rules for a diagnostic without a typed classification
+/// ([`DiagnosticClass::Name`] and [`DiagnosticClass::Message`]).
+fn insert_message_hint(output: &mut Map<String, Value>, message: &str, hint: Option<&str>) {
     if let Some(hint) = hint {
         output.insert("hint".to_owned(), json!(hint));
     } else if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
@@ -185,15 +272,12 @@ pub fn render_semantic_error(
             json!("state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"),
         );
     }
+    // A core error flattened to a `String` before it reaches a renderer (for
+    // example `check_stages::validate_specialized_document`) has lost its
+    // `CoreErrorKind`, so this rule still covers that path.
     if message.starts_with("unknown ai hard-contract rule '") {
-        output.insert(
-            "hint".to_owned(),
-            json!(
-                "supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"
-            ),
-        );
+        output.insert("hint".to_owned(), json!(AI_HARD_CONTRACT_RULE_HINT));
     }
-    Value::Object(output)
 }
 
 /// Render a runtime diagnostic without discarding an authored statement span.
@@ -206,7 +290,7 @@ pub fn render_runtime_error(
         output,
         &error.message,
         error.span.map(fsl_syntax::Span::python_loc),
-        false,
+        &DiagnosticClass::Message,
         None,
         None,
     )
@@ -277,7 +361,7 @@ pub fn render_governance_error(
     Value::Object(output)
 }
 
-/// The classification for a typed diagnostic, preferring the class the frontend
+/// The public `kind` for a diagnostic, preferring the class the frontend
 /// determined over matching on the message text.
 ///
 /// `docs/design/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
@@ -285,13 +369,13 @@ pub fn render_governance_error(
 /// `duplicate enum member 'B'` and `undefined predicate 'p'` share no prefix or
 /// suffix, and a classifier keyed on message text silently reclassifies a
 /// diagnostic whenever its wording changes. The frontend already knows, so it
-/// says so (issue 565).
+/// says so (issues 565, 1167).
 #[must_use]
-pub fn diagnostic_kind(message: &str, name_resolution: bool) -> &'static str {
-    if name_resolution {
-        "name"
-    } else {
-        semantic_error_kind(message)
+pub fn diagnostic_kind(message: &str, class: &DiagnosticClass) -> &'static str {
+    match class {
+        DiagnosticClass::Core(kind) => core_error_class(kind).kind,
+        DiagnosticClass::Name => "name",
+        DiagnosticClass::Message => semantic_error_kind(message),
     }
 }
 
@@ -3449,13 +3533,126 @@ mod tests {
         Map::from_iter([("fsl".to_owned(), json!("1.0"))])
     }
 
+    /// The public envelope for one core kind: `(kind, hint)`.
+    ///
+    /// An exhaustive `match` with no wildcard arm, like the production
+    /// mapping: a new `CoreErrorKind` fails to compile here until the test
+    /// states the envelope it must produce (issue 1167).
+    fn expected_core_envelope(
+        kind: &fsl_core::CoreErrorKind,
+    ) -> (&'static str, Option<&'static str>) {
+        use fsl_core::CoreErrorKind;
+        match kind {
+            CoreErrorKind::NameResolution => ("name", None),
+            CoreErrorKind::UnknownType => ("type", None),
+            CoreErrorKind::UnknownAiHardContractRule => {
+                ("semantics", Some(AI_HARD_CONTRACT_RULE_HINT))
+            }
+            CoreErrorKind::Semantics
+            | CoreErrorKind::UnresolvedTypeDefault
+            | CoreErrorKind::UnknownDomainSymbol
+            | CoreErrorKind::ScopeOverrideWithoutBounds
+            | CoreErrorKind::NotKernelLowerable
+            | CoreErrorKind::ComponentLoad(_) => ("semantics", None),
+        }
+    }
+
+    fn every_core_error_kind() -> Vec<fsl_core::CoreErrorKind> {
+        use fsl_core::CoreErrorKind;
+        let leaves = [
+            CoreErrorKind::Semantics,
+            CoreErrorKind::NameResolution,
+            CoreErrorKind::UnknownType,
+            CoreErrorKind::UnresolvedTypeDefault,
+            CoreErrorKind::UnknownAiHardContractRule,
+            CoreErrorKind::UnknownDomainSymbol,
+            CoreErrorKind::ScopeOverrideWithoutBounds,
+            CoreErrorKind::NotKernelLowerable,
+        ];
+        let components = leaves
+            .iter()
+            .map(|cause| CoreErrorKind::ComponentLoad(Box::new(cause.clone())));
+        leaves.iter().cloned().chain(components).collect()
+    }
+
+    /// Render a core error through the same path every spec-loading command
+    /// uses: `SemanticDiagnostic::from_core_error` into the envelope renderer.
+    fn render_core_error(error: &fsl_core::CoreError) -> Value {
+        crate::spec_load::render_spec_load_error(
+            Map::new(),
+            &crate::spec_load::SpecLoadError::Semantic(Box::new(
+                crate::spec_load::SemanticDiagnostic::from_core_error(error),
+            )),
+        )
+    }
+
+    #[test]
+    fn every_core_error_kind_maps_onto_the_closed_public_kind_set() {
+        // `docs/design/DESIGN-v1.md` §7.2's closed set; a core kind may refine
+        // it but never extend it.
+        const CLOSED_KINDS: &[&str] = &["parse", "name", "type", "semantics", "io", "internal"];
+        for kind in every_core_error_kind() {
+            let class = core_error_class(&kind);
+            let (expected_kind, expected_hint) = expected_core_envelope(&kind);
+            assert!(CLOSED_KINDS.contains(&class.kind), "{kind:?}: {class:?}");
+            assert_eq!(class.kind, expected_kind, "{kind:?}");
+            assert_eq!(class.hint, expected_hint, "{kind:?}");
+
+            let output = render_core_error(
+                &fsl_core::CoreError::unlocated("reworded diagnostic").with_kind(kind.clone()),
+            );
+            assert_eq!(output["kind"], expected_kind, "{kind:?}: {output}");
+            assert_eq!(
+                output.get("hint").and_then(Value::as_str),
+                expected_hint,
+                "{kind:?}: {output}"
+            );
+        }
+    }
+
+    /// The classification follows the type in both directions: rewording a
+    /// typed diagnostic keeps its class and hint, and wording that used to
+    /// trigger a class does not confer it on a diagnostic of another kind.
+    #[test]
+    fn a_core_diagnostic_is_classified_by_its_kind_not_its_message() {
+        use fsl_core::{CoreError, CoreErrorKind};
+
+        let reworded_type = render_core_error(
+            &CoreError::unlocated("type 'core.Missing' is not declared")
+                .with_kind(CoreErrorKind::UnknownType),
+        );
+        assert_eq!(reworded_type["kind"], "type", "{reworded_type}");
+
+        let untyped_wording = render_core_error(&CoreError::unlocated("unknown type 'Missing'"));
+        assert_eq!(untyped_wording["kind"], "semantics", "{untyped_wording}");
+
+        let reworded_rule = render_core_error(
+            &CoreError::unlocated("hard-contract rule 'bogus' is not registered")
+                .with_kind(CoreErrorKind::UnknownAiHardContractRule),
+        );
+        assert_eq!(
+            reworded_rule["hint"], AI_HARD_CONTRACT_RULE_HINT,
+            "{reworded_rule}"
+        );
+
+        let untyped_rule = render_core_error(&CoreError::unlocated(
+            "unknown ai hard-contract rule 'bogus'",
+        ));
+        assert!(untyped_rule.get("hint").is_none(), "{untyped_rule}");
+
+        let coded = render_core_error(
+            &CoreError::unlocated("reworded diagnostic").with_diagnostic_code("fsl5_example_code"),
+        );
+        assert_eq!(coded["diagnostic_code"], "fsl5_example_code", "{coded}");
+    }
+
     #[test]
     fn state_shape_errors_are_located_type_diagnostics() {
         let output = render_semantic_error(
             Map::new(),
             "state variable 'x' has unsupported state type",
             Some(json!({"line": 3, "column": 3})),
-            false,
+            &DiagnosticClass::Message,
             None,
             None,
         );
@@ -3474,7 +3671,7 @@ mod tests {
             Map::new(),
             "struct field 'Record.nested' has non-scalar type",
             Some(json!({"line": 3, "column": 3})),
-            false,
+            &DiagnosticClass::Message,
             None,
             None,
         );

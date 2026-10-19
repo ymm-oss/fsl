@@ -26,7 +26,8 @@ impl FileResolver for MemoryResolver {
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: fsl_core::CoreErrorKind::Semantics,
+            diagnostic_code: None,
         })
     }
 }

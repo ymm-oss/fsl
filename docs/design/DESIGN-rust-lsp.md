@@ -85,8 +85,8 @@ contextual walk (`declaration_keyword`, the quantifier/aggregate/pattern binder 
 (`textDocument/definition`, `references`, `rename`, `documentSymbol`) without a parse failure to
 surface the gap. A language feature's coupled change (grammar/lowering, typed model, semantics,
 docs) therefore also covers `rust/fsl-lsp/src/index.rs`. A new declaration or binder form still
-needs its own targeted unit test, because the corpus gate below asserts contract properties rather
-than per-construct roles (issue #504).
+needs its own targeted unit test, because the corpus gate below checks roles and scopes only for the
+dialects its AST projection covers (issue #504).
 
 The walk is keyword-driven, so a construct keyword may only start a declaration where the grammar
 puts one. Two positions in `rust/fsl-syntax` reuse those same words and stay excluded:
@@ -106,6 +106,17 @@ that a declaration keyword owning a name has actually declared that name, and fa
 construct keyword is consumed in a name position it does not occupy. It skips positions where the
 next token is not an identifier (builtin calls, annotations, block-opening `until`/`leadsTo`) and
 `action` inside a `refinement` document, where `action impl(args) -> abs` maps rather than declares.
+
+A third property compares the index with the parser instead of with the index's own keyword table
+(issue #552, option B). `rust/fsl-lsp/src/ast_projection.rs` reads each accepted declaration's
+name, role, and owning scope (the action or `def` for its parameters and `let` bindings) from the
+surface AST, and `role_scope_mismatches` requires the index to declare each one with the same role
+and owner. It covers the `spec`, `requirements`, and `compose` dialects, which share `SpecItem`;
+other dialects are not projected yet. One known limitation is tolerated by rule, not by site: FSL
+reserves no words, but the token walk skips identifiers spelled like its keywords (`status`,
+`count`, `age`, ...) everywhere except directly after a declaration keyword, so a state variable,
+struct field, enum member, parameter, or `let` binding so spelled has no declaration. Repairing
+that changes index output and belongs to deriving declarations from this projection (option C).
 
 Open buffers take precedence over files on disk. Imports and workspace references load through a
 document resolver that first consults the store and then the filesystem relative to the owning

@@ -2280,11 +2280,12 @@ fn prepare_cli_verification_from_source(
     options: &CliVerifyOptions,
     recorder: &RecordingResolver,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let is_agent_document = match fsl_syntax::parse_surface_document(source) {
-        Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
-        Ok(_) => false,
-        Err(error) => return Err((surface_parse_error_output(&error), 2)),
-    };
+    let is_agent_document =
+        match fsl_syntax::parse_surface_document_with(source, crate::parse_options()) {
+            Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
+            Ok(_) => false,
+            Err(error) => return Err((surface_parse_error_output(&error), 2)),
+        };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document_from_source(path, source) {
         return Err((semantic_error_output(&error), 2));

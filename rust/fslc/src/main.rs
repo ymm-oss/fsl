@@ -18,7 +18,9 @@ use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
-use fslc_rust::verification_output::{CheckedTraceContract, TraceGate, UnenabledStep};
+use fslc_rust::verification_output::{
+    CheckedTraceContract, DiagnosticClass, TraceGate, UnenabledStep,
+};
 use serde_json::{Map, Value, json};
 
 mod approval;
@@ -362,7 +364,18 @@ fn parse_optional_output(
 /// that reports `kind:"internal"` instead of aborting.
 const STACK_SIZE: usize = 8 * 1024 * 1024;
 
+/// Parse options for this process, fixed once in [`main`] before any parse.
+static PARSE_OPTIONS: std::sync::OnceLock<fsl_syntax::ParseOptions> = std::sync::OnceLock::new();
+
+/// The process's parse options. Every document parse in this binary's own
+/// modules receives them (`docs/design/parse-entry-inventory.md`).
+fn parse_options() -> &'static fsl_syntax::ParseOptions {
+    PARSE_OPTIONS.get_or_init(fslc_rust::unstable_gate::from_environment)
+}
+
 fn main() {
+    // Read the unstable gate once, before the worker thread parses anything.
+    parse_options();
     // `run` on an explicitly sized thread rather than the process's main
     // thread, whose size the OS picks.
     let worker = std::thread::Builder::new()
@@ -840,7 +853,7 @@ fn load_migration_plan(
 /// block"; neither `check` nor `fmt --check` nor this pre-flight treats
 /// that as a `lint`/`migrate` defect).
 fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), Value> {
-    let dialect = fsl_syntax::dialect_keyword(source)
+    let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     if matches!(dialect, "refinement" | "agent") {
         return Ok(());
@@ -851,7 +864,7 @@ fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), V
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
     if matches!(
-        fsl_syntax::parse_surface_document(source),
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
         fsl_core::requirements_implements(source, &resolver, &model).map_err(|error| {
@@ -884,7 +897,7 @@ fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String>
         .map_err(|error| error.to_string())?;
     let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
     if matches!(
-        fsl_syntax::parse_surface_document(source),
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
         fsl_core::requirements_implements(source, &resolver, &model)
@@ -981,7 +994,7 @@ fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
 }
 
 fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
-    let mut output = match fsl_syntax::parse_surface_document(source) {
+    let mut output = match fsl_syntax::parse_surface_document_with(source, crate::parse_options()) {
         Err(error) => surface_parse_error_output(&error),
         Ok(_) => semantic_error_output(message),
     };
@@ -1056,7 +1069,8 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
 }
 
 fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
-    let dialect = fsl_syntax::dialect_keyword(source).map_err(|error| error.to_string())?;
+    let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
+        .map_err(|error| error.to_string())?;
     if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
         return Ok(());
     }
@@ -5778,11 +5792,12 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let mapping = match fsl_syntax::parse_surface_document(&mapping_source) {
-        Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-        Err(error) => return (error_output("parse", &error.to_string()), 2),
-    };
+    let mapping =
+        match fsl_syntax::parse_surface_document_with(&mapping_source, crate::parse_options()) {
+            Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
+            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
+            Err(error) => return (error_output("parse", &error.to_string()), 2),
+        };
     if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
             located_error_output(
@@ -6732,7 +6747,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         parse_surface_document_from_source(path, &source)
         && let Err(error) = fsl_core::validate_ai_component(&component)
     {
-        return (semantic_error_output(&error.to_string()), 2);
+        return (unlocated_core_error_output(&error), 2);
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
@@ -6847,7 +6862,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
 }
 
 fn source_dialect(source: &str) -> &str {
-    match fsl_syntax::dialect_keyword(source) {
+    match fsl_syntax::dialect_keyword_with(source, crate::parse_options()) {
         Ok("spec") => "kernel",
         Ok("dbsystem") => "db",
         Ok("ai_component") => "ai-component",
@@ -7181,7 +7196,7 @@ fn parse_surface_document_from_source(
     path: &Path,
     source: &str,
 ) -> Result<fsl_syntax::SurfaceDocument, String> {
-    fsl_syntax::parse_surface_document(source).map_err(|error| {
+    fsl_syntax::parse_surface_document_with(source, crate::parse_options()).map_err(|error| {
         format!(
             "{} at {}:{}:{}",
             error.message,
@@ -7226,7 +7241,7 @@ fn load_surface_document_from_source(
         return parse_surface_document_from_source(path, source)
             .map_err(SpecLoadError::unlocated_semantic);
     }
-    fsl_syntax::parse_surface_document(source)
+    fsl_syntax::parse_surface_document_with(source, crate::parse_options())
         .map_err(|error| SpecLoadError::Parse(Box::new(error)))
 }
 
@@ -12288,13 +12303,14 @@ fn external_mutation_model(
     base: &Path,
     expected_name: &str,
 ) -> Result<KernelModel, Value> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| {
-        if error.span.start.offset >= source.len() {
-            invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
-        } else {
-            invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
-        }
-    })?;
+    let document = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+        .map_err(|error| {
+            if error.span.start.offset >= source.len() {
+                invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
+            } else {
+                invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
+            }
+        })?;
     let Some(name) = surface_document_name(&document) else {
         return Err(invalid_mutation_detail(
             "semantics",
@@ -12311,13 +12327,11 @@ fn external_mutation_model(
     }
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = fsl_core::parse_kernel_source(source, &resolver).map_err(|error| {
-        let message = error.to_string();
-        let kind = if message.contains("unknown type") {
-            "type"
-        } else {
-            "semantics"
-        };
-        invalid_mutation_detail(kind, message, None)
+        invalid_mutation_detail(
+            external_mutant_core_error_kind(&error.kind),
+            error.to_string(),
+            None,
+        )
     })?;
     fsl_core::build_model(kernel).map_err(|error| {
         let message = error.to_string();
@@ -12328,6 +12342,31 @@ fn external_mutation_model(
         };
         invalid_mutation_detail(kind, message, None)
     })
+}
+
+/// The `kind` an external mutant's lowering failure reports in its
+/// `invalid` detail.
+///
+/// This is the classification the detail has always reported, now read from
+/// the type instead of searching the rendered message for "unknown type"
+/// (issue 1167). It intentionally differs from `check`'s for two kinds — a
+/// component that failed on an unresolved type is `type` here, `semantics`
+/// there, and a name-resolution failure is `semantics` here — because the
+/// published detail must not change in a refactor. Exhaustive like
+/// [`fslc_rust::verification_output::core_error_class`], so a new kind must
+/// state its class here too.
+fn external_mutant_core_error_kind(kind: &fsl_core::CoreErrorKind) -> &'static str {
+    use fsl_core::CoreErrorKind;
+    match kind {
+        CoreErrorKind::UnknownType | CoreErrorKind::UnresolvedTypeDefault => "type",
+        CoreErrorKind::ComponentLoad(cause) => external_mutant_core_error_kind(cause),
+        CoreErrorKind::Semantics
+        | CoreErrorKind::NameResolution
+        | CoreErrorKind::UnknownAiHardContractRule
+        | CoreErrorKind::UnknownDomainSymbol
+        | CoreErrorKind::ScopeOverrideWithoutBounds
+        | CoreErrorKind::NotKernelLowerable => "semantics",
+    }
 }
 
 /// The opt-in `fslc mutate` gate (issue #1237). With neither flag set the
@@ -12525,7 +12564,7 @@ fn run_mutate_with(
                 Err(error) => return mutate_error(core_error_output(&error)),
             };
             let Ok(fsl_syntax::SurfaceDocument::Spec(rendered_spec)) =
-                fsl_syntax::parse_surface_document(&rendered)
+                fsl_syntax::parse_surface_document_with(&rendered, crate::parse_options())
             else {
                 return mutate_error(error_output(
                     "internal",
@@ -15233,7 +15272,8 @@ fn add_control_items(
     node_additions: &mut Vec<Value>,
     edge_additions: &mut Vec<Value>,
 ) {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
         return;
     };
     let controls: Vec<&String> = match &document {
@@ -16773,7 +16813,8 @@ fn add_verify_items(scope: &mut RawScope, items: &[fsl_syntax::VerifyItem]) {
 }
 
 fn declared_raw_scope(source: &str) -> RawScope {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
         return RawScope::default();
     };
     let mut scope = RawScope::default();
@@ -16932,7 +16973,8 @@ fn run_diff(
     };
     let mut explicit_direction = None;
     if let Some(source) = mapping_source.as_deref() {
-        let surface = match fsl_syntax::parse_surface_document(source) {
+        let surface = match fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+        {
             Ok(fsl_syntax::SurfaceDocument::Refinement(surface)) => surface,
             Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
             Err(error) => return (error_output("parse", &error.to_string()), 2),
@@ -18280,7 +18322,10 @@ fn run_verify_from_source(
     {
         return causal::causal_parse_error_output(&error, false);
     }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
+    match fsl_syntax::parse_document_with(
+        fsl_syntax::SourceFile::new(source),
+        crate::parse_options(),
+    ) {
         Err(error) => return (surface_parse_error_output(&error), 2),
         Ok(fsl_syntax::ParsedDocument {
             surface: fsl_syntax::SurfaceDocument::Agent(_),
@@ -19062,10 +19107,12 @@ fn load_model_scoped_from_source(
             Ok(kernel) => kernel,
             // A rejected `--instances`/`--values` bound is a CLI argument
             // defect, not a construct in the spec, so it owns no location.
-            Err(error) if error.message.starts_with("--instances/--values") => {
-                return Err(SpecLoadError::Semantic(Box::new(
-                    SemanticDiagnostic::unlocated(error.message),
-                )));
+            Err(error) if error.kind == fsl_core::CoreErrorKind::ScopeOverrideWithoutBounds => {
+                return Err(SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
+                    class: DiagnosticClass::Core(error.kind),
+                    diagnostic_code: error.diagnostic_code,
+                    ..SemanticDiagnostic::unlocated(error.message)
+                })));
             }
             Err(error) => return Err(kernel_load_error(source, &error)),
         };
@@ -19137,23 +19184,37 @@ fn semantic_error_output(message: &str) -> Value {
         envelope(),
         message,
         None,
-        false,
+        &DiagnosticClass::Message,
         None,
         None,
     )
 }
 
 /// Render a core frontend/lowering diagnostic without discarding its typed
-/// location or name-resolution classification at a command boundary.
+/// location or classification at a command boundary.
 fn core_error_output(error: &fsl_core::CoreError) -> Value {
     let diagnostic = SemanticDiagnostic::from_core_error(error);
     fslc_rust::verification_output::render_semantic_error(
         envelope(),
         &diagnostic.message,
         diagnostic.loc,
-        diagnostic.name_resolution,
+        &diagnostic.class,
         diagnostic.diagnostic_code,
         diagnostic.hint.as_deref(),
+    )
+}
+
+/// Render a core diagnostic's rendered message without a location, classified
+/// by its type: the envelope these command paths have always produced, with
+/// the classification no longer read back from the message (issue 1167).
+fn unlocated_core_error_output(error: &fsl_core::CoreError) -> Value {
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(),
+        &error.to_string(),
+        None,
+        &DiagnosticClass::Core(error.kind.clone()),
+        error.diagnostic_code,
+        None,
     )
 }
 
@@ -19164,7 +19225,7 @@ fn core_error_output(error: &fsl_core::CoreError) -> Value {
 /// historical `at line:column` message shape established by
 /// `domain_origin_diagnostics`.
 fn domain_projection_error_output(path: &Path, error: &fsl_core::CoreError) -> Value {
-    if error.message.starts_with("unknown domain symbol") {
+    if error.kind == fsl_core::CoreErrorKind::UnknownDomainSymbol {
         core_error_output(&error.clone().with_source_file(path.display().to_string()))
     } else {
         core_error_output(error)
@@ -19183,7 +19244,7 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
         envelope(),
         &error.to_string(),
         fslc_rust::verification_output::model_error_loc(error),
-        error.name_resolution,
+        &DiagnosticClass::model(error.name_resolution),
         error.diagnostic_code,
         error.hint.as_deref().map(String::as_str),
     )
