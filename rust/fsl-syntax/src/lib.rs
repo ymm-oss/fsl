@@ -68,8 +68,8 @@ pub use lexer::{LexError, Token, TokenKind, lex, lex_with};
 pub use literate::extract_literate_fsl;
 pub use lossless::{
     CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,
-    LosslessKind, LosslessNode, SourceEdit, apply_source_edits, canonical_rewrites, format_source,
-    lossless_document, source_position, source_span,
+    LosslessKind, LosslessNode, SourceEdit, UnsafeFormatKind, apply_source_edits,
+    canonical_rewrites, format_source, lossless_document, source_position, source_span,
 };
 pub use parser::{
     ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,

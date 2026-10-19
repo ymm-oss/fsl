@@ -44,7 +44,8 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
             }],
             generated: false,
         })),
-        name_resolution: false,
+        kind: crate::CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
@@ -468,7 +469,8 @@ impl<'a> Context<'a> {
             });
         }
         let Some(candidates) = self.enum_candidates.get(name) else {
-            return Err(error_at(format!("unknown domain symbol '{name}'"), span));
+            return Err(error_at(format!("unknown domain symbol '{name}'"), span)
+                .with_kind(crate::CoreErrorKind::UnknownDomainSymbol));
         };
         if candidates.len() != 1 {
             return Err(error_at(

@@ -96,7 +96,9 @@ fn valid_corpus_declarations_match_the_authoritative_ast_role_and_scope() {
             continue;
         };
         covered += 1;
-        let index = DocumentIndex::build(&source, path.to_str()).expect("index valid source");
+        let index =
+            DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
+                .expect("index valid source");
         for mismatch in index.role_scope_mismatches(&expected) {
             // FSL reserves no words, but the token walk skips identifiers
             // spelled like its keywords outside the name slot of a
