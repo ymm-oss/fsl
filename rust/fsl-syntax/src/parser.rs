@@ -55,7 +55,7 @@ impl ParseError {
 
 impl From<crate::LexError> for ParseError {
     fn from(error: crate::LexError) -> Self {
-        Self::new(error.message, error.span)
+        Self::coded(error.code(), error.message, error.span)
     }
 }
 
@@ -2222,6 +2222,7 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+        let mut end = token.span.end;
         while self.peek_symbol("-") {
             let component = match &self.peek_n(1).kind {
                 TokenKind::Ident(component) => component.clone(),
@@ -2231,9 +2232,21 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             self.bump();
-            self.bump();
+            end = self.bump().span.end;
             value.push('-');
             value.push_str(&component);
+        }
+        if !value.is_ascii() {
+            return Err(ParseError::coded(
+                crate::identifier::NON_ASCII_REQUIREMENT_ID,
+                format!(
+                    "requirement identifier '{value}' must be ASCII (letters, digits, '_' and '-')"
+                ),
+                Span {
+                    start: token.span.start,
+                    end,
+                },
+            ));
         }
         Ok(value)
     }
