@@ -1929,7 +1929,9 @@ compose OrderSystem {
   `use X as a__b` is shown as `a.b__n` (the frozen Python reference shows
   `a__b.n`). A v1 `replay` trace may write a component action as `alias.action` or as
   the older `alias__action`; both name the same action (see
-  `docs/design/DESIGN-replay-trace.md`).
+  `docs/design/DESIGN-replay-trace.md`). The native implementation owns all of
+  these spellings, and the names the engines build such as `_partial_<action>`
+  and `_bounds_<state>`, in one module, `rust/fsl-core/src/naming.rs`.
 
 ```bash
 fslc check  specs/order_system.fsl

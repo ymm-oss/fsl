@@ -88,9 +88,13 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    (a display-name map in logical_state_values. Traces, witnesses, CTIs, scenarios, and
    the Monitor state all follow).
 7. Component action names (#1234): lowering records, for every surviving
-   component action, its `(alias, name)` pair keyed by the physical name, and for
-   component state variables and properties only the physical name (so that
-   `cost.properties` can tell a component declaration from a glue one). The
+   component action, state variable, and property, its `(alias, name)` pair
+   keyed by the physical name (#1284; before it, state variables and properties
+   kept only the physical name, enough for `cost.properties` to tell a
+   component declaration from a glue one). The table is the model's
+   `fsl_core::NameMap` (`rust/fsl-core/src/naming.rs`), which is also the only
+   place that spells the `alias__name` physical name and the names the engines
+   build (`fsl_core::SyntheticName`). The
    physical name `alias__name` is not injective (`a__b` + `c` and `a` + `b__c`
    both give `a__b__c`; the two cannot coexist because the physical names would be
    duplicate actions), so the public action name `alias.name` is built from this

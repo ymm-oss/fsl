@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use fsl_core::{
     KERNEL_SCHEMA_VERSION, TESTGEN_TRACE_V1_SCHEMA_ID, TESTGEN_TRACE_V1_SCHEMA_VERSION,
-    display_name,
+    unmapped_public_spelling,
 };
 use serde_json::{Map, Value};
 
@@ -523,7 +523,7 @@ pub fn public_kernel_testgen_input(
     state.sort_by_key(|(order, _)| *order);
     let mut state_order = state
         .into_iter()
-        .map(|(_, name)| display_name(&name))
+        .map(|(_, name)| unmapped_public_spelling(&name))
         .collect::<Vec<_>>();
     if let Some(initial) = walk.get("initial").and_then(Value::as_object)
         && !initial.is_empty()
@@ -549,7 +549,7 @@ pub fn public_kernel_testgen_input(
             Ok((
                 source_order(value, index),
                 TestgenAction {
-                    name: display_name(required_str(object, "name", &context)?),
+                    name: unmapped_public_spelling(required_str(object, "name", &context)?),
                     params,
                 },
             ))

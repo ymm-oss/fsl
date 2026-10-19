@@ -20,7 +20,7 @@ use std::fmt::Write as _;
 
 use fsl_core::{
     ActionGuard, KernelModel, KernelSpec, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target, display_name,
+    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target,
     requirements_trace_contract,
 };
 use serde_json::Value;
@@ -1096,7 +1096,7 @@ fn type_ref_text(ty: &TypeRef) -> String {
     match ty {
         TypeRef::Int => "Int".to_owned(),
         TypeRef::Bool => "Bool".to_owned(),
-        TypeRef::Named(name) => display_name(name),
+        TypeRef::Named(name) => fsl_core::unmapped_public_spelling(name),
         TypeRef::Range(lo, hi) => format!("{lo}..{hi}"),
         TypeRef::Map(key, value) => {
             format!("Map<{}, {}>", type_ref_text(key), type_ref_text(value))
@@ -1123,7 +1123,7 @@ fn render_operation(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .iter()
         .find(|action| ctx.model.action_key(&action.name) == key);
     let name = action.map_or_else(
-        || display_name(key),
+        || ctx.model.names().public_action(key).into_string(),
         |action| ctx.model.action_display_name(&action.name),
     );
     let label = ctx
@@ -1423,9 +1423,19 @@ fn render_state_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.invariants, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => {
             "初期化後、および成功した各操作のコミット後に、次の条件が成立しなければならない。"
@@ -1452,9 +1462,19 @@ fn render_transition_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.transitions, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => {
             "成功する各遷移について、遷移前の状態と遷移後の状態は次の関係を満たさなければならない。以下で「遷移前の `x`」は遷移前の値を指し、それ以外の読み取りは遷移後の値を指す。"
@@ -1479,9 +1499,19 @@ fn render_reachability_goal(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.reachables, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => "次の状態に到達する実行例が存在しなければならない（到達目標）。",
         Locale::En => {
@@ -1506,9 +1536,19 @@ fn render_deadline_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.invariants, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => {
             "次の条件は期限条件（deadline）である。初期化後、および成功した各操作のコミット後に成立しなければならない。"
@@ -1569,14 +1609,24 @@ fn render_progress_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = ctx.model.leadstos.iter().find(|p| p.name == name).cloned() else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
     render_leadsto(claim, &property, ctx)
 }
 
 #[allow(clippy::too_many_lines)]
 fn render_leadsto(claim: &Claim, property: &LeadsToDef, ctx: &mut Ctx<'_>) -> String {
-    let head = metadata_header(claim, &display_name(&property.name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&property.name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => "次の進行条件（liveness）が、FSL 上の要求として宣言されている。",
         Locale::En => "The following progress rule (liveness) is declared as a demand in the FSL.",
@@ -1720,7 +1770,7 @@ fn step_text(model: &KernelModel, name: &str, args: &[fsl_core::KernelExpr]) -> 
         .map(|arg| fsl_core::source_expr_text(model, arg))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("`{}({args_text})`", display_name(name))
+    format!("`{}({args_text})`", model.names().public_identifier(name))
 }
 
 fn render_acceptance(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<'_>) -> String {

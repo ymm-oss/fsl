@@ -534,13 +534,9 @@ fn adapt_public_kernel(kernel: &Value) -> Result<PublicKernelView, String> {
     })
 }
 
-fn display_name(name: &str) -> String {
-    fsl_core::display_name(name)
-}
-
 fn expr_source(expr: &Expr) -> String {
     match expr {
-        Expr::Var(name) => display_name(name),
+        Expr::Var(name) => fsl_core::unmapped_public_spelling(name),
         Expr::Num(value) => value.to_string(),
         Expr::Bool(value) => value.to_string(),
         Expr::None => "none".to_owned(),
@@ -570,8 +566,12 @@ fn expr_source(expr: &Expr) -> String {
 
 fn lvalue_source(value: &LValue) -> String {
     match value {
-        LValue::Var(name) => display_name(name),
-        LValue::Index(name, index) => format!("{}[{}]", display_name(name), expr_source(index)),
+        LValue::Var(name) => fsl_core::unmapped_public_spelling(name),
+        LValue::Index(name, index) => format!(
+            "{}[{}]",
+            fsl_core::unmapped_public_spelling(name),
+            expr_source(index)
+        ),
         LValue::Field(base, field, _) => format!("{}.{field}", lvalue_source(base)),
     }
 }
@@ -1002,7 +1002,10 @@ fn classify_action(
     }
 
     let mut output = Map::new();
-    output.insert("action".to_owned(), json!(display_name(&action.name)));
+    output.insert(
+        "action".to_owned(),
+        json!(fsl_core::unmapped_public_spelling(&action.name)),
+    );
     output.insert("verdict".to_owned(), json!(verdict));
     output.insert("params".to_owned(), json!(action.params));
     output.insert("transitions".to_owned(), Value::Array(transitions));
@@ -1035,7 +1038,9 @@ fn ts_type(model: &PublicKernelView, ty: &TypeRef) -> String {
         TypeRef::Bool => "boolean".to_owned(),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain) => "number".to_owned(),
-            Some(TypeDef::Enum { .. } | TypeDef::Struct { .. }) => display_name(name),
+            Some(TypeDef::Enum { .. } | TypeDef::Struct { .. }) => {
+                fsl_core::unmapped_public_spelling(name)
+            }
             None => "unknown".to_owned(),
         },
         TypeRef::Option(inner) => format!("{} | null", ts_type(model, inner)),
@@ -1056,7 +1061,7 @@ fn emit_typescript(
         format!(
             "// Typestate skeleton for `{}` from spec `{}`.",
             entity.type_name,
-            display_name(&model.name)
+            fsl_core::unmapped_public_spelling(&model.name)
         ),
         format!("// {note}"),
         "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic."
@@ -1212,10 +1217,10 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
             entities.push(Entity {
                 kind: "enum",
                 type_key: type_name.clone(),
-                type_name: display_name(type_name),
+                type_name: fsl_core::unmapped_public_spelling(type_name),
                 field: Some(field.clone()),
                 var: None,
-                enum_name: Some(display_name(enum_name)),
+                enum_name: Some(fsl_core::unmapped_public_spelling(enum_name)),
                 states: members.clone(),
                 data_fields: fields
                     .iter()
@@ -1247,10 +1252,10 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
             entities.push(Entity {
                 kind: "enum",
                 type_key: String::new(),
-                type_name: camel(&display_name(var)),
+                type_name: camel(&fsl_core::unmapped_public_spelling(var)),
                 field: None,
                 var: Some(var.clone()),
-                enum_name: Some(display_name(enum_name)),
+                enum_name: Some(fsl_core::unmapped_public_spelling(enum_name)),
                 states: members.clone(),
                 data_fields: Vec::new(),
             });
@@ -1267,7 +1272,7 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
             _ => None,
         };
         if let Some(inner) = inner {
-            let public_var = display_name(var);
+            let public_var = fsl_core::unmapped_public_spelling(var);
             let mut chars = public_var.chars();
             let type_name = chars.next().map_or_else(String::new, |first| {
                 first.to_uppercase().chain(chars).collect()
@@ -1328,7 +1333,9 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
                 || {
                     format!(
                         "{} ({})",
-                        display_name(entity.var.as_deref().unwrap_or_default()),
+                        fsl_core::unmapped_public_spelling(
+                            entity.var.as_deref().unwrap_or_default()
+                        ),
                         entity.enum_name.as_deref().unwrap_or_default()
                     )
                 },
@@ -1352,10 +1359,10 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
                 .collect::<Vec<_>>();
             (
                 actions,
-                format!("{} (Option)", display_name(var)),
+                format!("{} (Option)", fsl_core::unmapped_public_spelling(var)),
                 format!(
                     "`{}` is an Option slot; states are Empty (none) / Filled (some).",
-                    display_name(var)
+                    fsl_core::unmapped_public_spelling(var)
                 ),
             )
         };
@@ -1407,7 +1414,10 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
         .count();
     let mut report = Map::new();
     report.insert("result".to_owned(), json!("typestate"));
-    report.insert("spec".to_owned(), json!(display_name(&model.name)));
+    report.insert(
+        "spec".to_owned(),
+        json!(fsl_core::unmapped_public_spelling(&model.name)),
+    );
     report.insert("entities".to_owned(), Value::Array(report_entities));
     report.insert(
         "summary".to_owned(),

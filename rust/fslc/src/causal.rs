@@ -7,7 +7,7 @@ use fslc_rust::literate_access::literate_access;
 use serde_json::{Map, Value, json};
 
 use super::{
-    CommandArgs, block_on_native, display, envelope, error_output, json_mismatches,
+    CommandArgs, block_on_native, envelope, error_output, json_mismatches,
     load_snapshot_value_object, log_action_matches, mapping_json_expr, parse_params,
     read_jsonl_records, required_option_value,
 };
@@ -977,7 +977,7 @@ fn run_causal_observe_expectations(
             }
             let mut observed = Map::new();
             for (name, ty) in &spec_model.state {
-                let display_name = display(name);
+                let display_name = spec_model.names().public_state(name).into_string();
                 let value = if let Some((binder, expression)) = state_maps.get::<str>(name) {
                     if binder.is_some() {
                         let TypeRef::Map(key_ty, _) = ty else {

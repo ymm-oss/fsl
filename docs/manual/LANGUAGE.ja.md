@@ -1850,7 +1850,9 @@ compose OrderSystem {
   表示されます(凍結した Python 参照実装では `a__b.n`)。
   v1 の `replay` トレースでは、コンポーネントの action を `alias.action` と書いても
   旧来の `alias__action` と書いてもかまいません。どちらも同じ action を指します
-  (`docs/design/DESIGN-replay-trace.md` を参照)。
+  (`docs/design/DESIGN-replay-trace.md` を参照)。ネイティブ実装では、これらの
+  綴りと、`_partial_<action>`・`_bounds_<state>` のようにエンジンが作る名前を、
+  1 つのモジュール `rust/fsl-core/src/naming.rs` が持ちます。
 
 ```bash
 fslc check  specs/order_system.fsl

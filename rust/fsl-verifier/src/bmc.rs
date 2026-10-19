@@ -121,7 +121,7 @@ pub async fn diagnose_reachables<S: SmtSolver>(
         constraints.push(StaticReachableConstraint {
             blocker: ReachableBlocker {
                 kind: "type_bound".to_owned(),
-                name: format!("_bounds_{name}"),
+                name: fsl_core::SyntheticName::Bounds { state: name }.internal(),
             },
             term: bounds(
                 solver,
@@ -487,7 +487,9 @@ fn assert_state_bounds<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
 ) -> Result<(), VerifyError> {
     for (name, _) in &model.state {
-        if checked_bounds.is_some_and(|selected| !selected.contains(&format!("_bounds_{name}"))) {
+        if checked_bounds.is_some_and(|selected| {
+            !selected.contains(&fsl_core::SyntheticName::Bounds { state: name }.internal())
+        }) {
             continue;
         }
         let valid = bounds(
@@ -721,7 +723,7 @@ async fn verify_bounded_config<S: SmtSolver>(
                             solver,
                             model,
                             "partial_op",
-                            "_partial_property_terminal".to_owned(),
+                            fsl_core::SyntheticName::PartialTerminal.internal(),
                             &partial,
                             &states,
                             &choices,
@@ -826,7 +828,7 @@ async fn check_state_properties<S: SmtSolver>(
     checks: StatePropertyChecks<'_>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     for (name, _) in &model.state {
-        let property_name = format!("_bounds_{name}");
+        let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
         if checks
             .checked_bounds
             .is_some_and(|selected| !selected.contains(&property_name))
@@ -877,7 +879,10 @@ async fn check_state_properties<S: SmtSolver>(
                     solver,
                     model,
                     "partial_op",
-                    format!("_partial_property_{}", property.name),
+                    fsl_core::SyntheticName::PartialProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     &evaluation.first_partial,
                     states,
                     choices,
@@ -943,7 +948,10 @@ async fn check_state_properties<S: SmtSolver>(
                     solver,
                     model,
                     "partial_op",
-                    format!("_partial_property_{}", property.name),
+                    fsl_core::SyntheticName::PartialProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     &evaluation.first_partial,
                     states,
                     choices,
@@ -981,7 +989,10 @@ async fn check_state_properties<S: SmtSolver>(
                             solver,
                             model,
                             "partial_op",
-                            format!("_partial_property_{}", property.name),
+                            fsl_core::SyntheticName::PartialProperty {
+                                property: &property.name,
+                            }
+                            .internal(),
                             &evaluation.first_partial,
                             states,
                             choices,
@@ -1021,7 +1032,10 @@ async fn check_state_properties<S: SmtSolver>(
                     solver,
                     model,
                     "partial_op",
-                    format!("_partial_property_{}", property.name),
+                    fsl_core::SyntheticName::PartialProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     &evaluation.first_partial,
                     states,
                     choices,
@@ -1105,7 +1119,10 @@ async fn check_state_properties<S: SmtSolver>(
                         solver,
                         model,
                         "partial_op",
-                        format!("_partial_{}", action.name),
+                        fsl_core::SyntheticName::PartialAction {
+                            action: &action.name,
+                        }
+                        .internal(),
                         &partial,
                         states,
                         choices,
@@ -1412,7 +1429,10 @@ async fn make_action_partial_operation_violation<S: SmtSolver>(
     });
     Ok(BmcViolation {
         kind: "partial_op".to_owned(),
-        name: format!("_partial_{}", action.name),
+        name: fsl_core::SyntheticName::PartialAction {
+            action: &action.name,
+        }
+        .internal(),
         step: step + 1,
         last_action: Some(action.name.clone()),
         trace,
