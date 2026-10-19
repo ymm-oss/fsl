@@ -347,7 +347,8 @@ mod tests {
             fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)).expect("valid source");
         (
             ast_declarations(&parsed.surface).expect("spec family"),
-            DocumentIndex::build(source, None).expect("valid index"),
+            DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+                .expect("valid index"),
         )
     }
 
