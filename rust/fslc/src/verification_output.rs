@@ -536,7 +536,7 @@ pub fn check_requirements_implements(
 pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -571,39 +571,30 @@ fn fold_refinement_verdict(
     nested_result: Option<&str>,
     malformed_message: &str,
 ) -> Option<i32> {
-    match nested_result {
-        Some("refines") => None,
-        // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
-        // both encode the exit class of an inline `implements` failure, and
-        // changing that class means changing both. They are reached by
-        // independent paths -- `check`/`verify` fold here, while `mutate` and
-        // `ledger` re-emit a baseline envelope through `exit_status` -- so a
-        // mutation that breaks one does not make the other's tests fail
-        // (measured 2026-09-08: sending `exit_status`'s row 1 to 0 kills
-        // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
-        // leaves `check_folds_failed_inline_refinement_into_command_failure`
-        // green). Nothing here detects the two drifting apart.
-        Some(verdict @ ("refinement_failed" | "impl_violated")) => {
-            map.insert("result".to_owned(), json!(verdict));
-            Some(1)
-        }
+    use crate::outcome::Verdict;
+
+    // The exit code of each fold comes from the `outcome::Verdict` table, the
+    // same entry `outcome::exit_status` reads when `mutate` and `ledger`
+    // re-emit a baseline envelope (#901). Before the table this arm carried
+    // its own `1` that had to be kept in step with `exit_status` by hand.
+    let folded = match nested_result {
+        Some("refines") => return None,
+        Some("refinement_failed") => Verdict::RefinementFailed,
+        Some("impl_violated") => Verdict::ImplViolated,
         // The correspondence walk hit its state budget (issue #1041)
         // instead of deciding a verdict. `unknown_budget` is already a
-        // non-success, cacheable failure class (`outcome.rs`'s
-        // `exit_status` row 1 and `outcome_class`), so folding it here
-        // reuses that existing exit-1 vocabulary rather than adding a new
-        // verdict string.
-        Some("unknown_budget") => {
-            map.insert("result".to_owned(), json!("unknown_budget"));
-            Some(1)
-        }
+        // non-success, cacheable failure class, so folding it here reuses
+        // that existing vocabulary rather than adding a new verdict string.
+        Some("unknown_budget") => Verdict::UnknownBudget,
         _ => {
             map.insert("result".to_owned(), json!("error"));
             map.insert("kind".to_owned(), json!("internal"));
             map.insert("message".to_owned(), json!(malformed_message));
-            Some(3)
+            return Some(Verdict::InternalError.exit_code());
         }
-    }
+    };
+    map.insert("result".to_owned(), json!(folded.result()));
+    Some(folded.exit_code())
 }
 
 /// Attach a rendered `governance` section and, when the command envelope is
@@ -614,18 +605,18 @@ fn fold_refinement_verdict(
 /// nothing; a failure-class envelope gains the section as evidence and keeps
 /// its own verdict; a success-class envelope (`ok`, `verified`, ...) takes the
 /// first failing preservation in declaration order through
-/// [`fold_refinement_verdict`]. A preservation's `result` keeps its own
-/// published vocabulary (`refines` / `refinement_failed` / `violated` /
-/// `unknown_budget`); its `violated` is the `after` spec breaking its own
-/// semantics, which the top level spells `impl_violated` exactly as an inline
-/// `implements` seam reports the same condition -- a top-level `violated`
-/// would claim a counterexample (`trace`, `violated_at_step`) of the checked
-/// document itself. Any other value fails closed (`error` / `internal`,
+/// [`fold_refinement_verdict`]. A preservation's `result` is `fslc refine`'s
+/// (`refines` / `refinement_failed` / `impl_violated` / `unknown_budget`);
+/// `impl_violated` is the `after` spec breaking its own semantics, the same
+/// word an inline `implements` seam and the top level use for that condition
+/// (#1315) -- a top-level `violated` would claim a counterexample (`trace`,
+/// `violated_at_step`) of the checked document itself. Any other value,
+/// including the pre-#1315 `violated`, fails closed (`error` / `internal`,
 /// exit 3).
 pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -648,13 +639,9 @@ pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32>
     }
     // Every preservation `refines` (or there is none): the verdict stands.
     let failing = failing?;
-    let nested_result = match failing.as_deref() {
-        Some("violated") => Some("impl_violated".to_owned()),
-        other => other.map(str::to_owned),
-    };
     fold_refinement_verdict(
         map,
-        nested_result.as_deref(),
+        failing.as_deref(),
         "malformed governance preservation verdict",
     )
 }
@@ -3908,16 +3895,16 @@ mod tests {
     }
 
     /// Issue #1303: every published preservation value, and what it makes of
-    /// a success-class envelope. `violated` (the `after` spec breaks its own
-    /// semantics) is spelled `impl_violated` at the top level, as an inline
-    /// `implements` seam spells it; anything outside the vocabulary fails
-    /// closed.
+    /// a success-class envelope. `impl_violated` (the `after` spec breaks its
+    /// own semantics) is the same word at both levels (#1315); anything
+    /// outside the vocabulary, including the retired `violated`, fails closed.
     #[test]
     fn attach_governance_folds_each_preservation_value() {
         for (preservation, expected_result, expected_exit) in [
             (json!("refines"), "ok", None),
             (json!("refinement_failed"), "refinement_failed", Some(1)),
-            (json!("violated"), "impl_violated", Some(1)),
+            (json!("impl_violated"), "impl_violated", Some(1)),
+            (json!("violated"), "error", Some(3)),
             (json!("unknown_budget"), "unknown_budget", Some(1)),
             (json!("error"), "error", Some(3)),
             (json!("who_knows"), "error", Some(3)),

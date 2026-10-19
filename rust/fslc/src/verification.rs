@@ -2453,6 +2453,8 @@ fn cached_verification(
 }
 
 fn cached_output_status(output: &Value) -> Option<i32> {
+    use fslc_rust::outcome::Verdict;
+
     let output = output.as_object()?;
     if output.get("fsl").and_then(Value::as_str) != Some("1.0")
         || output.get("spec").and_then(Value::as_str)?.is_empty()
@@ -2460,33 +2462,37 @@ fn cached_output_status(output: &Value) -> Option<i32> {
         return None;
     }
     let completeness = output.get("completeness").and_then(Value::as_str);
-    match output.get("result").and_then(Value::as_str) {
-        Some("verified") if completeness == Some("bounded") => Some(0),
-        Some("proved") if completeness == Some("unbounded") => Some(0),
-        Some("violated") if valid_cached_violation(output, completeness) => Some(1),
-        Some("reachable_failed")
-            if matches!(completeness, Some("bounded" | "unbounded"))
-                && output.get("unreached").and_then(Value::as_array).is_some() =>
-        {
-            Some(1)
+    // The shape each replayable verdict must carry is this function's own
+    // question; the exit code it then implies is the `Verdict` table's (#901).
+    let verdict = Verdict::from_result(output.get("result").and_then(Value::as_str)?)?;
+    let replayable = match verdict {
+        Verdict::Verified => completeness == Some("bounded"),
+        Verdict::Proved => completeness == Some("unbounded"),
+        Verdict::Violated => valid_cached_violation(output, completeness),
+        Verdict::ReachableFailed => {
+            matches!(completeness, Some("bounded" | "unbounded"))
+                && output.get("unreached").and_then(Value::as_array).is_some()
         }
-        Some("unknown_cti")
-            if completeness == Some("bounded")
-                && output.get("cti").and_then(Value::as_object).is_some() =>
-        {
-            Some(1)
+        Verdict::UnknownCti => {
+            completeness == Some("bounded")
+                && output.get("cti").and_then(Value::as_object).is_some()
         }
-        Some("unknown_budget")
-            if completeness == Some("unknown")
+        Verdict::UnknownBudget => {
+            completeness == Some("unknown")
                 && output
                     .get("states_explored")
                     .and_then(Value::as_u64)
-                    .is_some() =>
-        {
-            Some(1)
+                    .is_some()
         }
-        _ => None,
-    }
+        // Not admitted to the cache (`outcome::verify_cache_admits`, #1022),
+        // or not a `verify` verdict at all.
+        Verdict::RefinementFailed
+        | Verdict::ImplViolated
+        | Verdict::Indeterminate
+        | Verdict::SpecError
+        | Verdict::InternalError => false,
+    };
+    replayable.then(|| verdict.exit_code())
 }
 
 fn valid_cached_violation(output: &Map<String, Value>, completeness: Option<&str>) -> bool {

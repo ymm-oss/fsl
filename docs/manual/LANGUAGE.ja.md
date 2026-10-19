@@ -1652,9 +1652,11 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 `refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
 す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、
-これは abstraction や mapping とは独立に検査されます: `result: "violated"`
+これは abstraction や mapping とは独立に検査されます: `result: "impl_violated"`
 (exit 1)に `violation_kind` と、これが fidelity の失敗ではなく refinement
-*入力*自体の性質であることを説明する `note` を伴います。`refines` として報告さ
+*入力*自体の性質であることを説明する `note` を伴います。この結果の語は、`refine`、
+inline `implements` seam、governance の `preservation`(§13)のどこでも
+`impl_violated` の 1 つです。`refines` として報告さ
 れることはなく、`refinement_failed`(上記の `kind` 群は impl と abs の**間**の
 不一致を表すものであり、impl 単独の欠陥ではありません)に畳み込まれることもあり
 ません。`fslc diff` は同じ条件を `impl_violated` の finding として表面化させ、
@@ -2525,7 +2527,7 @@ governance EnterpriseReturnControls {
 `fslc check governance.fsl` は、参照されるすべてのコントロール、business ファイル、
 policy/goal、preservation ファイルを検証します。preservation ブロックはさらに、
 宣言された refinement を深さ 8 で実行し、結果を `governance.preservations` の下で
-報告します: `refines`、`refinement_failed`、`violated`(`after` の spec がそれ自身の
+報告します: `refines`、`refinement_failed`、`impl_violated`(`after` の spec がそれ自身の
 意味論を破る、§10)、`unknown_budget`(対応検査が状態の上限に達した、§10)のいずれか
 です。ブラウザの Worker も同じ値を報告します。
 
@@ -2539,7 +2541,7 @@ top-level の `result` を決め、各 preservation 自身の値は `governance.
 |---|---|---|
 | `refines`(すべての preservation) | 変わらない(`ok` / `verified` / `proved`) | 変わらない(0) |
 | `refinement_failed` | `refinement_failed` | 1 |
-| `violated` | `impl_violated`(同じ条件に inline `implements` seam が使う綴り) | 1 |
+| `impl_violated` | `impl_violated`(同じ条件に inline `implements` seam が使う語と同じ) | 1 |
 | `unknown_budget` | `unknown_budget` | 1 |
 | それ以外 | `error`、`kind: "internal"` | 3 |
 

@@ -21,12 +21,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The 28 public type names this change annotates: #858's enumeration minus
+/// The 29 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
-/// curated table missed, and `RefinementVerdict` (#1245). Each must carry `#[must_use]` on the TYPE, because on
+/// curated table missed, `RefinementVerdict` (#1245), and `Verdict` (#901). Each must carry `#[must_use]` on the TYPE, because on
 /// the function it is redundant against `Result` and closes nothing.
-const ANNOTATED: [&str; 28] = [
+const ANNOTATED: [&str; 29] = [
     // fsl-runtime
     "Violation",
     "StepResult",
@@ -60,12 +60,13 @@ const ANNOTATED: [&str; 28] = [
     "SupportOverlay",
     // fslc
     "OutcomeClass",
+    "Verdict",
 ];
 
-/// `ANNOTATED` holds 28 distinct names but 29 declarations: `ReachableWitness`
+/// `ANNOTATED` holds 29 distinct names but 30 declarations: `ReachableWitness`
 /// is declared once in `fsl-runtime` and once in `fsl-verifier`, and both must
 /// carry the attribute.
-const ANNOTATED_DECLARATIONS: usize = 29;
+const ANNOTATED_DECLARATIONS: usize = 30;
 
 /// Types deliberately left un-annotated, each with the reason. A type moved
 /// off this list must gain the attribute; a type added to it must state why.
@@ -101,9 +102,9 @@ fn read_source(path: &Path) -> String {
 
 /// What the rule below actually matches today. #858 reports 33 types from a
 /// hand-curated table; this rule -- #858's, extended with the `*Violation`
-/// suffix -- selects 17, all of which are in `ANNOTATED`. Both numbers are pinned so
+/// suffix -- selects 18, all of which are in `ANNOTATED`. Both numbers are pinned so
 /// neither the curated decision nor the detector can drift unnoticed.
-const DISCOVERED: [&str; 17] = [
+const DISCOVERED: [&str; 18] = [
     "BfsResult",
     "BmcResult",
     "BmcViolation",
@@ -120,6 +121,7 @@ const DISCOVERED: [&str; 17] = [
     "SatResult",
     "StepResult",
     "VacuityFinding",
+    "Verdict",
     "Violation",
 ];
 

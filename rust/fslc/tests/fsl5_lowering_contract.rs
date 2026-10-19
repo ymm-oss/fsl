@@ -67,7 +67,7 @@ const EXAMPLES: &[Example] = &[
         original: "original_renamed.fsl",
         // `only when ... stock >= qty` dropped: stock can leave its range.
         weakening: ("requires qty > 0 and stock >= qty", "requires qty > 0"),
-        weakened_result: "violated",
+        weakened_result: "impl_violated",
     },
 ];
 

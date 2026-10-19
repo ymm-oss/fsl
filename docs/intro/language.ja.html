@@ -1721,9 +1721,11 @@ action など)は <code>kind: "type"</code>(exit 2)です。<code>map_partial_op
 <p><code>refine</code> はどの対応関係も検査する前に、まず impl spec が <code>--depth</code> の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
 す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、
-これは abstraction や mapping とは独立に検査されます: <code>result: "violated"</code>
+これは abstraction や mapping とは独立に検査されます: <code>result: "impl_violated"</code>
 (exit 1)に <code>violation_kind</code> と、これが fidelity の失敗ではなく refinement
-<em>入力</em>自体の性質であることを説明する <code>note</code> を伴います。<code>refines</code> として報告さ
+<em>入力</em>自体の性質であることを説明する <code>note</code> を伴います。この結果の語は、<code>refine</code>、
+inline <code>implements</code> seam、governance の <code>preservation</code>(§13)のどこでも
+<code>impl_violated</code> の 1 つです。<code>refines</code> として報告さ
 れることはなく、<code>refinement_failed</code>(上記の <code>kind</code> 群は impl と abs の<strong>間</strong>の
 不一致を表すものであり、impl 単独の欠陥ではありません)に畳み込まれることもあり
 ません。<code>fslc diff</code> は同じ条件を <code>impl_violated</code> の finding として表面化させ、
@@ -2555,7 +2557,7 @@ or Rejected</code> — そして、同じ <code>(process, waypoint-set)</code> �
 <p><code>fslc check governance.fsl</code> は、参照されるすべてのコントロール、business ファイル、
 policy/goal、preservation ファイルを検証します。preservation ブロックはさらに、
 宣言された refinement を深さ 8 で実行し、結果を <code>governance.preservations</code> の下で
-報告します: <code>refines</code>、<code>refinement_failed</code>、<code>violated</code>(<code>after</code> の spec がそれ自身の
+報告します: <code>refines</code>、<code>refinement_failed</code>、<code>impl_violated</code>(<code>after</code> の spec がそれ自身の
 意味論を破る、§10)、<code>unknown_budget</code>(対応検査が状態の上限に達した、§10)のいずれか
 です。ブラウザの Worker も同じ値を報告します。</p>
 <p><code>refines</code> でない preservation は、<code>fslc check</code> でも <code>fslc verify</code> でもコマンドの判定に
@@ -2583,8 +2585,8 @@ top-level の <code>result</code> を決め、各 preservation 自身の値は <
 <td>1</td>
 </tr>
 <tr>
-<td><code>violated</code></td>
-<td><code>impl_violated</code>(同じ条件に inline <code>implements</code> seam が使う綴り)</td>
+<td><code>impl_violated</code></td>
+<td><code>impl_violated</code>(同じ条件に inline <code>implements</code> seam が使う語と同じ)</td>
 <td>1</td>
 </tr>
 <tr>

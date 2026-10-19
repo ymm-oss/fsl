@@ -96,7 +96,7 @@ Each row was reproduced with `fslc 4.11.0`; the field is what you must read.
 
 1. Branch on `result`, not on the exit code alone (§2, §3).
 2. `error`: fix at `loc` using `expected` / `hint`. Re-run `check` before anything else.
-3. `violated` or `refinement_failed`: from the trace, decide which of the
+3. `violated`, `refinement_failed`, or `impl_violated`: from the trace, decide which of the
    following it is: **a missing requirement, a wrong interpretation, or an
    intended exception.** If the source does not decide it, stop and ask the
    human — do not pick a guard to reach green.

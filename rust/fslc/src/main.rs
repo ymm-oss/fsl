@@ -14,7 +14,10 @@ use fsl_core::{
     finalize_model_warnings, insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use fslc_rust::literate_access::literate_access;
-use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell_class};
+use fslc_rust::outcome::{
+    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, is_error_exit,
+    outcome_class, sweep_cell_class,
+};
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
@@ -4278,7 +4281,8 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         layer
             .get("exit_code")
             .and_then(Value::as_i64)
-            .is_some_and(|code| matches!(code, 2 | 3))
+            .and_then(|code| i32::try_from(code).ok())
+            .is_some_and(is_error_exit)
     });
     // A run whose only failures are `indeterminate` layers (an `[impl]`
     // report that records no executed test, issue #1200) did not find a
@@ -4287,17 +4291,17 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         .iter()
         .filter(|layer| layer.get("status").and_then(Value::as_str) == Some("failed"))
         .all(|layer| layer.get("result").and_then(Value::as_str) == Some("indeterminate"));
-    let result = if failed_layers.is_empty() {
-        "verified"
+    let verdict = if failed_layers.is_empty() {
+        Verdict::Verified
     } else if has_error {
-        "error"
+        Verdict::SpecError
     } else if all_indeterminate {
-        "indeterminate"
+        Verdict::Indeterminate
     } else {
-        "violated"
+        Verdict::Violated
     };
     let mut output = envelope();
-    output.insert("result".to_owned(), json!(result));
+    output.insert("result".to_owned(), json!(verdict.result()));
     output.insert("manifest".to_owned(), json!(path.display().to_string()));
     output.insert("keep_going".to_owned(), json!(keep_going));
     // An `[impl]` layer that opted into exit-code evidence passed or failed on
@@ -4330,14 +4334,8 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
             );
         }
     }
-    let status = if failed_layers.is_empty() {
-        0
-    } else if has_error {
-        2
-    } else {
-        1
-    };
-    (Value::Object(output), status)
+    // The run's exit code is its verdict's, from the one table (#901).
+    (Value::Object(output), verdict.exit_code())
 }
 
 /// The result slot of each planned chain step, in manifest order. `None` is a
@@ -4621,7 +4619,11 @@ fn run_chain_step(
             let passed = chain_layer_passes(&detail, status);
             let layer_status = if passed { "passed" } else { "failed" };
             let result = detail.get("result").cloned().unwrap_or(Value::Null);
-            let effective_status = if passed { 0 } else { status.max(1) };
+            let effective_status = if passed {
+                SUCCESS_EXIT
+            } else {
+                status.max(FAILURE_EXIT)
+            };
             let mut entry = json!({
                 "layer": layer,
                 "kind": check_kind,
@@ -4715,7 +4717,7 @@ fn run_chain_step(
                             "depth": depth,
                             "status": if passed { "passed" } else { "failed" },
                             "result": detail.get("result").cloned().unwrap_or(Value::Null),
-                            "exit_code": if passed { 0 } else { status.max(1) },
+                            "exit_code": if passed { SUCCESS_EXIT } else { status.max(FAILURE_EXIT) },
                             "detail": detail,
                         }),
                         !passed,
@@ -17772,10 +17774,12 @@ fn mismatch_paths(
 /// violates a type bound, invariant, `trans`, or `ensures` within `depth`,
 /// discovered before any refinement correspondence was even attempted. Not
 /// `refines` and not `refinement_failed` (#466) — this is a property of the
-/// refinement *input*, so it is reported with the same shape `fslc verify`
-/// uses for a `violated` result plus an explanatory `note`, matching the
-/// frozen Python reference's `refine()` (`src/fslc/refine.py`, accepted as
-/// [1.2.9] in CHANGELOG.md).
+/// refinement *input*, so it is reported with the evidence shape `fslc verify`
+/// uses for a violation plus an explanatory `note`, matching the frozen
+/// Python reference's `refine()` (`src/fslc/refine.py`, accepted as [1.2.9]
+/// in CHANGELOG.md). The `result` is `impl_violated`, the one word inline
+/// `implements` and governance preservations use for the same outcome
+/// (#1315); the Python reference still spells it `violated`.
 fn impl_self_violation_output(
     implementation: &KernelModel,
     violation: &fsl_runtime::Violation,
@@ -17784,7 +17788,7 @@ fn impl_self_violation_output(
 ) -> Map<String, Value> {
     let mut output = envelope();
     output.insert("impl".to_owned(), json!(implementation.name));
-    output.insert("result".to_owned(), json!("violated"));
+    output.insert("result".to_owned(), json!(Verdict::ImplViolated.result()));
     output.insert("violation_kind".to_owned(), json!(violation.kind));
     let name = implementation.action_scoped_display_name(&violation.name, trace_last_action(trace));
     if violation.kind == "trans" {
@@ -17874,7 +17878,7 @@ fn run_refine(
                     trace,
                     checked.depth(),
                 )),
-                1,
+                Verdict::ImplViolated.exit_code(),
             );
         }
         fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
@@ -18173,7 +18177,7 @@ fn run_refine_chain(
                     "kind": link.get("kind").cloned().unwrap_or(Value::Null),
                 }),
             );
-            return (Value::Object(failed), status.max(1));
+            return (Value::Object(failed), status.max(FAILURE_EXIT));
         }
         let action_map = link
             .get("action_map")
@@ -19241,10 +19245,8 @@ fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
 }
 
 fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
-    if output.get("result").and_then(Value::as_str) == Some("error")
-        && output.get("kind").and_then(Value::as_str) == Some("internal")
-    {
-        3
+    if Verdict::of(output) == Some(Verdict::InternalError) {
+        Verdict::InternalError.exit_code()
     } else {
         reported_status
     }

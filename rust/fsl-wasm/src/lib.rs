@@ -303,15 +303,15 @@ async fn governance_output(
                         })?;
                 // The same verdicts, in the same order, native governance
                 // reads off `run_refine`'s `result`: `unknown_budget` for a
-                // walk cut off by its state budget, `violated` for an impl
-                // that breaks its own semantics, and no progress stage for
-                // either.
+                // walk cut off by its state budget, `impl_violated` for an
+                // impl that breaks its own semantics (#1315), and no progress
+                // stage for either.
                 match checked.verdict() {
                     fsl_runtime::RefinementVerdict::BudgetExhausted { .. } => {
                         return Ok(json!("unknown_budget"));
                     }
                     fsl_runtime::RefinementVerdict::ImplViolated { .. } => {
-                        return Ok(json!("violated"));
+                        return Ok(json!("impl_violated"));
                     }
                     fsl_runtime::RefinementVerdict::Failed(_) => {
                         return Ok(json!("refinement_failed"));
@@ -1837,17 +1837,18 @@ mod tests {
         );
     }
 
-    /// An `after` spec that breaks its own type bound is `violated`, as native
-    /// reports -- the Worker used to read only `failure` and say `refines`.
+    /// An `after` spec that breaks its own type bound is `impl_violated`, as
+    /// native reports (#1315) -- the Worker used to read only `failure` and say
+    /// `refines`.
     #[test]
-    fn governance_reports_violated_for_a_self_violating_after_spec() {
+    fn governance_reports_impl_violated_for_a_self_violating_after_spec() {
         let request = governance_request(
             "SmallBroken",
             "spec SmallBroken { type IQty = 0..3 state { n: IQty } \
              init { n = 0 } action bump() { n = n + 1 } }\n",
         );
 
-        assert_eq!(worker_preservation_result(&request), json!("violated"));
+        assert_eq!(worker_preservation_result(&request), json!("impl_violated"));
     }
 
     /// Issue #1303's reproducer, from the same fixture files native

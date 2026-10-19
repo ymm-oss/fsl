@@ -43,10 +43,11 @@ const IMPL_SELF_VIOLATING: &str =
 const MAPPING_AUTO: &str = "refinement M { impl MinImpl abs MinAbs maps auto }";
 
 /// `fslc refine` on an impl that breaks its own type bound within `--depth`
-/// must report `result:"violated"`/exit 1 with a `note` explaining this is
-/// a property of the refinement input — never `refines`/exit 0.
+/// must report `result:"impl_violated"`/exit 1 with a `note` explaining this is
+/// a property of the refinement input — never `refines`/exit 0. The word is
+/// the one inline `implements` and governance use for the same outcome (#1315).
 #[test]
-fn refine_reports_violated_not_refines_when_impl_breaks_its_own_bound() {
+fn refine_reports_impl_violated_not_refines_when_impl_breaks_its_own_bound() {
     let dir = scratch("refine");
     let implementation = dir.join("impl.fsl");
     let abstraction = dir.join("abs.fsl");
@@ -64,7 +65,7 @@ fn refine_reports_violated_not_refines_when_impl_breaks_its_own_bound() {
         "4".to_owned(),
     ]);
     assert_eq!(status, 1, "{output:#}");
-    assert_eq!(output["result"], "violated");
+    assert_eq!(output["result"], "impl_violated");
     assert_eq!(output["violation_kind"], "type_bound");
     assert_ne!(output["result"], "refines");
     assert!(

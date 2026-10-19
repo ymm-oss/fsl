@@ -124,7 +124,7 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
+fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | impl_violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report; impl_violated and

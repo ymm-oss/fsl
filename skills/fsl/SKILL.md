@@ -97,8 +97,7 @@ while `implements.violation` (or `implements.states_explored` for
 **Governance preservations are fail-closed the same way.** `check`,
 `verify`, and `scenarios` of a `governance` document run every `preservation` refinement at
 depth 8; the first one that is not `refines` becomes the top-level `result`
-(`refinement_failed`, `impl_violated` for a preservation `violated`, or
-`unknown_budget`) with exit 1, while `governance.preservations[].result`
+(`refinement_failed`, `impl_violated`, or `unknown_budget`) with exit 1, while `governance.preservations[].result`
 keeps each one's own value.
 
 ## Before writing a spec: source fidelity and the formalization memo
