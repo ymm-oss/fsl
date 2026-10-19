@@ -76,6 +76,8 @@ struct OpenDocument {
 struct ServerState {
     documents: HashMap<Url, OpenDocument>,
     roots: Vec<PathBuf>,
+    /// Read once when the server starts (`docs/design/parse-entry-inventory.md`).
+    parse_options: fsl_syntax::ParseOptions,
 }
 
 struct StoreResolver<'a> {
@@ -111,6 +113,7 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     let params: InitializeParams = serde_json::from_value(initialize)?;
     let mut state = ServerState {
         roots: workspace_roots(&params),
+        parse_options: fslc_rust::unstable_gate::from_environment(),
         ..ServerState::default()
     };
 
@@ -403,7 +406,7 @@ fn publish_diagnostics(
     if analysis_diagnostics_enabled()
         && let Some(model) = model
     {
-        let index = DocumentIndex::build(&source, Some(source_file)).ok();
+        let index = DocumentIndex::build(&source, Some(source_file), &state.parse_options).ok();
         items.extend(
             fsl_tools::structural_review_findings(&fsl_tools::build_tsg(&model))
                 .into_iter()
@@ -510,7 +513,12 @@ fn to_lsp_diagnostic(source: &str, item: SourceDiagnostic) -> Diagnostic {
 fn index_for_uri(state: &ServerState, uri: &Url) -> Option<DocumentIndex> {
     let source = source_for_uri(state, uri)?;
     let path = uri.to_file_path().ok();
-    DocumentIndex::build(&source, path.as_deref().and_then(Path::to_str)).ok()
+    DocumentIndex::build(
+        &source,
+        path.as_deref().and_then(Path::to_str),
+        &state.parse_options,
+    )
+    .ok()
 }
 
 fn source_for_uri(state: &ServerState, uri: &Url) -> Option<String> {
@@ -1281,6 +1289,7 @@ mod tests {
                 ),
             ]),
             roots: Vec::new(),
+            ..ServerState::default()
         };
         let main_index = index_for_uri(&state, &main_uri).expect("main index");
         let bump = main_index
@@ -1351,6 +1360,7 @@ mod tests {
                 },
             )]),
             roots: Vec::new(),
+            ..ServerState::default()
         };
 
         let external_uris = workspace_uris(&state, &current);
@@ -1390,8 +1400,10 @@ mod tests {
                 ),
             ]),
             roots: Vec::new(),
+            ..ServerState::default()
         };
-        DocumentIndex::build(source, None).expect("query source must parse");
+        DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("query source must parse");
         let document = serde_json::json!({"textDocument":{"uri":uri}});
         let symbols = request(&state, "textDocument/documentSymbol", document.clone());
         assert!(
@@ -1476,6 +1488,7 @@ mod tests {
         let index = DocumentIndex::build(
             "spec Review { state { ready: Bool } init { ready = false } }",
             None,
+            &fsl_syntax::ParseOptions::stable(),
         )
         .expect("index");
         let finding = serde_json::json!({
@@ -1529,6 +1542,7 @@ mod tests {
                 },
             )]),
             roots: Vec::new(),
+            ..ServerState::default()
         };
         let result = request(
             &state,
@@ -1554,6 +1568,7 @@ mod tests {
         let state = ServerState {
             documents: HashMap::new(),
             roots: vec![root],
+            ..ServerState::default()
         };
         let index = index_for_uri(&state, &uri).expect("refinement index");
 
@@ -1599,6 +1614,7 @@ mod tests {
         let state = ServerState {
             documents: HashMap::new(),
             roots: vec![root],
+            ..ServerState::default()
         };
         let index = index_for_uri(&state, &uri).expect("refinement index");
 

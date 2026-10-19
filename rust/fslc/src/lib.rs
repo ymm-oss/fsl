@@ -43,6 +43,9 @@ pub mod replay_trace;
 pub mod reproducer;
 pub mod source_diagnostic;
 pub mod spec_load;
+// The unstable gate's environment reading, shared by the native CLI and the
+// language server (`docs/design/parse-entry-inventory.md`).
+pub mod unstable_gate;
 pub mod verification_output;
 
 pub use fsl_core::{

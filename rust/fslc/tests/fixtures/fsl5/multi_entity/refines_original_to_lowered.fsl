@@ -1,0 +1,31 @@
+// original_renamed.fsl（impl） ⊑ lowered.fsl（abs）。原文の counter は抽象側に無いので捨てる。
+refinement OriginalRefinesLowered {
+  impl GalleryLargeOrderWorkflow
+  abs  OrderWorkflow
+
+  enum conversion st OSt -> OrderStage {
+    OEmpty -> Empty
+    OPlaced -> Placed
+    OApproved -> Approved
+    OPaid -> Paid
+    OPacked -> Packed
+    OShipped -> Shipped
+    ODelivered -> Delivered
+    OReturnRequested -> ReturnRequested
+    ORefunded -> Refunded
+  }
+
+  map order_stage[o: Order] = convert(st, orders[o].st)
+  map order_qty[o: Order] = orders[o].qty
+  map order_buyer[o: Order] = orders[o].buyer
+  map stock = stock
+
+  action place(o, u, q)       -> place(o, u, q)
+  action approve(o)           -> approve(o)
+  action pay(o)               -> pay(o)
+  action pack(o)              -> pack(o)
+  action ship(o)              -> ship(o)
+  action deliver(o)           -> deliver(o)
+  action request_return(o)    -> request_return(o)
+  action refund(o)            -> refund(o)
+}

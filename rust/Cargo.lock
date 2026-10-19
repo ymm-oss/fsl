@@ -459,9 +459,11 @@ dependencies = [
  "fsl-verifier",
  "jsonschema",
  "libc",
+ "proc-macro2",
  "serde",
  "serde_json",
  "sha2",
+ "syn",
 ]
 
 [[package]]
