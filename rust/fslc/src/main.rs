@@ -18,6 +18,7 @@ use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell
 use fslc_rust::spec_load::{
     SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
 };
+use fslc_rust::verification_output::DiagnosticClass;
 use fslc_rust::verification_output::UnenabledStep;
 use serde_json::{Map, Value, json};
 
@@ -6733,7 +6734,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         parse_surface_document_from_source(path, &source)
         && let Err(error) = fsl_core::validate_ai_component(&component)
     {
-        return (semantic_error_output(&error.to_string()), 2);
+        return (unlocated_core_error_output(&error), 2);
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
@@ -12306,13 +12307,11 @@ fn external_mutation_model(
     }
     let resolver = fsl_core::FsResolver::new(base);
     let kernel = fsl_core::parse_kernel_source(source, &resolver).map_err(|error| {
-        let message = error.to_string();
-        let kind = if message.contains("unknown type") {
-            "type"
-        } else {
-            "semantics"
-        };
-        invalid_mutation_detail(kind, message, None)
+        invalid_mutation_detail(
+            external_mutant_core_error_kind(&error.kind),
+            error.to_string(),
+            None,
+        )
     })?;
     fsl_core::build_model(kernel).map_err(|error| {
         let message = error.to_string();
@@ -12323,6 +12322,31 @@ fn external_mutation_model(
         };
         invalid_mutation_detail(kind, message, None)
     })
+}
+
+/// The `kind` an external mutant's lowering failure reports in its
+/// `invalid` detail.
+///
+/// This is the classification the detail has always reported, now read from
+/// the type instead of searching the rendered message for "unknown type"
+/// (issue 1167). It intentionally differs from `check`'s for two kinds — a
+/// component that failed on an unresolved type is `type` here, `semantics`
+/// there, and a name-resolution failure is `semantics` here — because the
+/// published detail must not change in a refactor. Exhaustive like
+/// [`fslc_rust::verification_output::core_error_class`], so a new kind must
+/// state its class here too.
+fn external_mutant_core_error_kind(kind: &fsl_core::CoreErrorKind) -> &'static str {
+    use fsl_core::CoreErrorKind;
+    match kind {
+        CoreErrorKind::UnknownType | CoreErrorKind::UnresolvedTypeDefault => "type",
+        CoreErrorKind::ComponentLoad(cause) => external_mutant_core_error_kind(cause),
+        CoreErrorKind::Semantics
+        | CoreErrorKind::NameResolution
+        | CoreErrorKind::UnknownAiHardContractRule
+        | CoreErrorKind::UnknownDomainSymbol
+        | CoreErrorKind::ScopeOverrideWithoutBounds
+        | CoreErrorKind::NotKernelLowerable => "semantics",
+    }
 }
 
 /// The opt-in `fslc mutate` gate (issue #1237). With neither flag set the
@@ -19056,10 +19080,12 @@ fn load_model_scoped_from_source(
             Ok(kernel) => kernel,
             // A rejected `--instances`/`--values` bound is a CLI argument
             // defect, not a construct in the spec, so it owns no location.
-            Err(error) if error.message.starts_with("--instances/--values") => {
-                return Err(SpecLoadError::Semantic(Box::new(
-                    SemanticDiagnostic::unlocated(error.message),
-                )));
+            Err(error) if error.kind == fsl_core::CoreErrorKind::ScopeOverrideWithoutBounds => {
+                return Err(SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
+                    class: DiagnosticClass::Core(error.kind),
+                    diagnostic_code: error.diagnostic_code,
+                    ..SemanticDiagnostic::unlocated(error.message)
+                })));
             }
             Err(error) => return Err(kernel_load_error(source, &error)),
         };
@@ -19131,23 +19157,37 @@ fn semantic_error_output(message: &str) -> Value {
         envelope(),
         message,
         None,
-        false,
+        &DiagnosticClass::Message,
         None,
         None,
     )
 }
 
 /// Render a core frontend/lowering diagnostic without discarding its typed
-/// location or name-resolution classification at a command boundary.
+/// location or classification at a command boundary.
 fn core_error_output(error: &fsl_core::CoreError) -> Value {
     let diagnostic = SemanticDiagnostic::from_core_error(error);
     fslc_rust::verification_output::render_semantic_error(
         envelope(),
         &diagnostic.message,
         diagnostic.loc,
-        diagnostic.name_resolution,
+        &diagnostic.class,
         diagnostic.diagnostic_code,
         diagnostic.hint.as_deref(),
+    )
+}
+
+/// Render a core diagnostic's rendered message without a location, classified
+/// by its type: the envelope these command paths have always produced, with
+/// the classification no longer read back from the message (issue 1167).
+fn unlocated_core_error_output(error: &fsl_core::CoreError) -> Value {
+    fslc_rust::verification_output::render_semantic_error(
+        envelope(),
+        &error.to_string(),
+        None,
+        &DiagnosticClass::Core(error.kind.clone()),
+        error.diagnostic_code,
+        None,
     )
 }
 
@@ -19158,7 +19198,7 @@ fn core_error_output(error: &fsl_core::CoreError) -> Value {
 /// historical `at line:column` message shape established by
 /// `domain_origin_diagnostics`.
 fn domain_projection_error_output(path: &Path, error: &fsl_core::CoreError) -> Value {
-    if error.message.starts_with("unknown domain symbol") {
+    if error.kind == fsl_core::CoreErrorKind::UnknownDomainSymbol {
         core_error_output(&error.clone().with_source_file(path.display().to_string()))
     } else {
         core_error_output(error)
@@ -19177,7 +19217,7 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
         envelope(),
         &error.to_string(),
         fslc_rust::verification_output::model_error_loc(error),
-        error.name_resolution,
+        &DiagnosticClass::model(error.name_resolution),
         error.diagnostic_code,
         error.hint.as_deref().map(String::as_str),
     )

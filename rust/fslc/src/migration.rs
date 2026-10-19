@@ -485,22 +485,29 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
                 edits: rewrite.edits,
             }
         })),
-        Err(fsl_syntax::FormatError::Unsafe { message, span }) => {
-            let (code, canonical_replacement) = if message.contains("domain enum") {
-                (
+        Err(fsl_syntax::FormatError::Unsafe {
+            kind,
+            message,
+            span,
+        }) => {
+            // Exhaustive, so a new refusal kind states its code here rather
+            // than inheriting one from a word in its message (issue 1167).
+            let (code, canonical_replacement) = match kind {
+                fsl_syntax::UnsafeFormatKind::DomainEnumInteriorComment => (
                     "deprecated_domain_enum_union",
                     "move the interior comment, then use `enum Name { ... }`".to_owned(),
-                )
-            } else if message.contains("quantifier") {
-                (
+                ),
+                fsl_syntax::UnsafeFormatKind::UnbracedQuantifierEnd
+                | fsl_syntax::UnsafeFormatKind::QuantifierWithoutBody => (
                     "legacy_quantifier_colon",
                     "add an explicit brace-delimited quantifier body".to_owned(),
-                )
-            } else {
-                (
+                ),
+                fsl_syntax::UnsafeFormatKind::AgentBody
+                | fsl_syntax::UnsafeFormatKind::EditOutsideUtf8Boundary
+                | fsl_syntax::UnsafeFormatKind::OverlappingEdits => (
                     "unsafe_source_attachment",
                     "move the comment, then rerun migrate".to_owned(),
-                )
+                ),
             };
             diagnostics.push(MigrationDiagnostic {
                 code,

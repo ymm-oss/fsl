@@ -67,7 +67,8 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
             }],
             generated: false,
         })),
-        name_resolution: false,
+        kind: crate::CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
@@ -641,7 +642,8 @@ impl<'a> Resolver<'a> {
         if let Some(value) = self.enum_value(name, expected, span)? {
             return Ok(value);
         }
-        Err(error_at(format!("unknown domain symbol '{name}'"), span))
+        Err(error_at(format!("unknown domain symbol '{name}'"), span)
+            .with_kind(crate::CoreErrorKind::UnknownDomainSymbol))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1787,10 +1789,10 @@ impl<'a> Resolver<'a> {
                 ));
             }
             LogicalType::Unknown => {
-                return Err(error_at(
-                    "cannot choose a default for an unknown type",
-                    span,
-                ));
+                return Err(
+                    error_at("cannot choose a default for an unknown type", span)
+                        .with_kind(crate::CoreErrorKind::UnresolvedTypeDefault),
+                );
             }
         })
     }
