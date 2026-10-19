@@ -61,14 +61,26 @@ const INVENTORY: &[(&str, &str, usize, &str)] = &[
     (
         "fslc/src/main.rs",
         PARSE,
-        3,
-        "check --strict-tags referenced ids, analyze project graph (#1243), diff OLD forbidden replay (#1239)",
+        2,
+        "analyze project graph (#1243), diff OLD forbidden replay (#1239)",
     ),
     (
         "fslc/src/main.rs",
         "unchecked",
-        8,
-        "the three ungated consumers above, and mutate attributing a gate rejection to its case's requirements",
+        6,
+        "the two ungated consumers above, and mutate attributing a gate rejection to its case's requirements",
+    ),
+    (
+        "fslc/src/strict_tags.rs",
+        PARSE,
+        1,
+        "check --strict-tags referenced ids",
+    ),
+    (
+        "fslc/src/strict_tags.rs",
+        "unchecked",
+        2,
+        "the --strict-tags consumer above",
     ),
     (
         "fslc/src/verification_output.rs",

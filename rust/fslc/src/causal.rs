@@ -6,11 +6,14 @@ use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
 use fslc_rust::literate_access::literate_access;
 use serde_json::{Map, Value, json};
 
-use super::{
-    CommandArgs, block_on_native, envelope, error_output, json_mismatches,
-    load_snapshot_value_object, log_action_matches, mapping_json_expr, parse_params,
-    read_jsonl_records, required_option_value,
+use crate::cli_options::{CommandArgs, required_option_value};
+use crate::cli_output::{envelope, error_output, located_error_output};
+use crate::log_replay::{
+    json_mismatches, log_action_matches, mapping_json_expr, parse_params, read_jsonl_records,
+    untyped_replay_enum_mapping_span,
 };
+use crate::process::{block_on_native, parse_options};
+use crate::spec_loading::load_snapshot_value_object;
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn causal_command(
@@ -717,15 +720,14 @@ fn run_causal_observe_expectations(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let mapping =
-        match fsl_syntax::parse_surface_document_with(&mapping_source, crate::parse_options()) {
-            Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-            Err(error) => return (error_output("parse", &error.to_string()), 2),
-        };
-    if let Some(span) = crate::untyped_replay_enum_mapping_span(&mapping) {
+    let mapping = match fsl_syntax::parse_surface_document_with(&mapping_source, parse_options()) {
+        Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
+        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
+        Err(error) => return (error_output("parse", &error.to_string()), 2),
+    };
+    if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
-            crate::located_error_output(
+            located_error_output(
                 "type",
                 "enum conversion or abstraction requires a typed impl model and is not supported by causal --from-log mappings",
                 span,
