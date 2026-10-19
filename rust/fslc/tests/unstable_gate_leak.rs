@@ -90,7 +90,16 @@ fn published_material_does_not_mention_the_unstable_gate() {
         assert!(path.exists(), "published path {published} is missing");
         collect(&root, &path, &mut files);
     }
-    assert!(files.len() > 100, "scan floor: only {} files", files.len());
+    // A release folds changelog.d/ into CHANGELOG.md and empties it.
+    let changelog_d = root.join("changelog.d");
+    let lasting = files
+        .iter()
+        .filter(|file| !file.starts_with(&changelog_d))
+        .count();
+    assert!(
+        lasting > 80,
+        "scan floor: only {lasting} files outside changelog.d/"
+    );
 
     let mut failures = Vec::new();
     for file in files {
