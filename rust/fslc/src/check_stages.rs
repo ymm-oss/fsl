@@ -50,6 +50,7 @@ pub fn run_check_stages(
     display_path: &str,
     resolver: &dyn FileResolver,
     envelope: &dyn Fn() -> Map<String, Value>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<CheckedSpec, (Value, i32)> {
     // The fsl-ai project gate carries its own exit code: an unexecutable
     // `require` clause is a spec error (issue #542), so this may not be
@@ -59,7 +60,7 @@ pub fn run_check_stages(
     {
         return Err(result);
     }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
+    match fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), options) {
         Ok(fsl_syntax::ParsedDocument {
             surface: fsl_syntax::SurfaceDocument::Agent(agent),
             ..
@@ -76,12 +77,13 @@ pub fn run_check_stages(
     // Validate specialized documents first, so an invalid AI authority name
     // cannot reach `lower_ai_component`'s generated-member lookup. Surface
     // parsing stays ahead of this validation to retain parse-error envelopes.
-    if let Err(error) = validate_specialized_document(source, source_path) {
+    if let Err(error) = validate_specialized_document(source, source_path, options) {
         return Err((semantic_error(envelope(), &error), 2));
     }
-    if let Some(diagnostic) = crate::source_diagnostic::diagnostics(source, display_path, resolver)
-        .into_iter()
-        .find(|diagnostic| diagnostic.kind != "migration")
+    if let Some(diagnostic) =
+        crate::source_diagnostic::diagnostics(source, display_path, resolver, options)
+            .into_iter()
+            .find(|diagnostic| diagnostic.kind != "migration")
     {
         // `check` returns here before it reaches the Kernel load, so the
         // location and classification have to travel through this branch too,
@@ -101,18 +103,19 @@ pub fn run_check_stages(
             2,
         ));
     }
-    let (kernel, model) = load_kernel_model(source, source_path, resolver).map_err(|error| {
-        (
-            crate::spec_load::render_spec_load_error(envelope(), &error),
-            2,
-        )
-    })?;
+    let (kernel, model) =
+        load_kernel_model(source, source_path, resolver, options).map_err(|error| {
+            (
+                crate::spec_load::render_spec_load_error(envelope(), &error),
+                2,
+            )
+        })?;
     // `build_model` does not check init assign-once ownership; without this
     // stage an init that writes one variable from two `forall`s is accepted.
     if let Err(error) = fsl_runtime::check_init_write_ownership(&model) {
         return Err((render_runtime_error(envelope(), &error), 2));
     }
-    match validate_requirement_trace_source(&envelope(), source, &model) {
+    match validate_requirement_trace_source(&envelope(), source, &model, options) {
         Ok(TraceGate::Rejected { failure, .. }) => return Err((failure, 2)),
         Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
         Err(error) => return Err((semantic_error(envelope(), &error), 2)),
@@ -127,8 +130,12 @@ pub fn run_check_stages(
 ///
 /// Returns the validation (or surface-parse) message; a parse message names
 /// `source_path` as its file.
-pub fn validate_specialized_document(source: &str, source_path: &str) -> Result<(), String> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| {
+pub fn validate_specialized_document(
+    source: &str,
+    source_path: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<(), String> {
+    let document = fsl_syntax::parse_surface_document_with(source, options).map_err(|error| {
         format!(
             "{} at {}:{}:{}",
             error.message, source_path, error.span.start.line, error.span.start.column
@@ -154,9 +161,15 @@ pub fn load_kernel_model(
     source: &str,
     source_path: &str,
     resolver: &dyn FileResolver,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    let kernel = fsl_core::parse_kernel_source_with_file(source, resolver, source_path)
-        .map_err(|error| kernel_load_error(source, &error))?;
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        resolver,
+        source_path,
+        options,
+    )
+    .map_err(|error| kernel_load_error(source, &error, options))?;
     let model = fsl_core::build_model(kernel.clone()).map_err(|error| {
         SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
     })?;

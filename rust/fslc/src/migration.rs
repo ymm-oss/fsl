@@ -2,11 +2,11 @@
 // Copyright 2026 Ryoichi Izumita
 
 use fsl_syntax::{
-    Annotation, CanonicalRewriteKind, CorrespondenceOrigin, LosslessKind, RequirementActionItem,
-    RequirementsItem, SourceEdit, Span, SurfaceDocument, TokenKind, canonical_rewrites,
-    lossless_document, source_position, source_span,
+    Annotation, CanonicalRewriteKind, CorrespondenceOrigin, Edition, LosslessKind, ParseOptions,
+    RequirementActionItem, RequirementsItem, SourceEdit, Span, SurfaceDocument, TokenKind,
+    canonical_rewrites_with, lossless_document_with, source_position, source_span,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IdKind {
@@ -319,35 +319,6 @@ fn placeholder_matches(part: &IdTemplatePart, value: &str) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Edition {
-    Current,
-    Next,
-}
-
-impl Edition {
-    /// Parse the public edition spelling.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an edition without a migration policy.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "current" => Ok(Self::Current),
-            "next" => Ok(Self::Next),
-            _ => Err("--edition must be current or next".to_owned()),
-        }
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Next => "next",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Taxonomy {
     Deprecated,
     NonCanonical,
@@ -384,7 +355,13 @@ impl MigrationDiagnostic {
             "code": self.code,
             "kind": self.code,
             "taxonomy": self.taxonomy.as_str(),
-            "severity": if edition == Edition::Next { "error" } else { "warning" },
+            "severity": if self.code == fsl_syntax::MISSING_EDITION_HEADER {
+                "info"
+            } else if edition == Edition::Fsl5 {
+                "error"
+            } else {
+                "warning"
+            },
             "edition": edition.as_str(),
             "message": self.message,
             "loc": {
@@ -439,7 +416,12 @@ impl MigrationPlan {
 /// Returns a parse or edit error. Unsupported-but-recognizable legacy syntax
 /// is represented as a non-machine-applicable diagnostic instead.
 #[allow(clippy::too_many_lines)]
-pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<MigrationPlan, String> {
+pub fn plan_migration(
+    source: &str,
+    path: &str,
+    edition: Edition,
+    options: &ParseOptions,
+) -> Result<MigrationPlan, String> {
     let unsupported = unsupported_double_ampersands(source);
     if !unsupported.is_empty() {
         return Ok(MigrationPlan {
@@ -448,7 +430,8 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         });
     }
 
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| error.to_string())?;
+    let document = fsl_syntax::parse_surface_document_with(source, options)
+        .map_err(|error| error.to_string())?;
     if matches!(document, SurfaceDocument::Agent(_)) {
         return Ok(MigrationPlan {
             diagnostics: Vec::new(),
@@ -456,7 +439,7 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         });
     }
     let mut diagnostics = Vec::new();
-    match canonical_rewrites(source) {
+    match canonical_rewrites_with(source, options) {
         Ok(rewrites) => diagnostics.extend(rewrites.into_iter().map(|rewrite| {
             let (code, taxonomy, message) = match rewrite.kind {
                 CanonicalRewriteKind::DomainEnum => (
@@ -521,9 +504,9 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         }
         Err(error) => return Err(error.to_string()),
     }
-    diagnostics.extend(metadata_diagnostics(source));
-    diagnostics.extend(default_diagnostics(source, path));
-    diagnostics.extend(action_map_diagnostics(source, &document));
+    diagnostics.extend(metadata_diagnostics(source, *options));
+    diagnostics.extend(default_diagnostics(source, path, *options));
+    diagnostics.extend(action_map_diagnostics(source, &document, *options));
 
     if diagnostics
         .iter()
@@ -546,17 +529,158 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         .collect::<Vec<_>>();
     let rewritten =
         fsl_syntax::apply_source_edits(source, edits).map_err(|error| error.to_string())?;
-    let formatted = fsl_syntax::format_source(
-        &rewritten,
-        match edition {
-            Edition::Current => fsl_syntax::FormatEdition::Current,
-            Edition::Next => fsl_syntax::FormatEdition::Next,
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    let formatted = fsl_syntax::format_source_with(&rewritten, edition, options)
+        .map_err(|error| error.to_string())?;
     Ok(MigrationPlan {
         migrated_source: (formatted != source).then_some(formatted),
         diagnostics,
+    })
+}
+
+/// The rendered `edition_conflict` rejection when `source`'s edition header
+/// and the requested `--edition` differ.
+///
+/// # Errors
+///
+/// Returns the parse-error envelope (built on `envelope`) and exit status 2.
+pub fn edition_conflict(
+    source: &str,
+    requested: Option<Edition>,
+    options: &ParseOptions,
+    envelope: Map<String, Value>,
+) -> Result<(), (Value, i32)> {
+    match fsl_syntax::document_edition(source, requested, Edition::Fsl4, options) {
+        Err(error) if error.code() == fsl_syntax::EDITION_CONFLICT => Err((
+            crate::frontend_output::render_surface_parse_error(envelope, &error),
+            2,
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Apply the edition `source` is read in to a finished `check` / `verify`
+/// result: in the next edition every migration finding is an error, otherwise
+/// the deprecated domain enum union (and, with `implicit_warnings`, an
+/// omitted initial value) is a warning.
+///
+/// `requested` is the `--edition` value (`None` = `current`). The document is
+/// read in its header's edition when it has one; an unreadable header already
+/// failed the document's own parse, so the request decides then. A header
+/// adds `fsl_edition`; without one the envelope keeps its published shape.
+///
+/// # Panics
+///
+/// Panics if `output` already carries a `warnings` member that is not an
+/// array.
+pub fn apply_edition(
+    (mut output, status): (Value, i32),
+    source: &str,
+    path: &str,
+    requested: Option<Edition>,
+    options: &ParseOptions,
+    envelope: &dyn Fn() -> Map<String, Value>,
+    implicit_warnings: bool,
+) -> (Value, i32) {
+    if let Err(conflict) = edition_conflict(source, requested, options, envelope()) {
+        return conflict;
+    }
+    let declared = fsl_syntax::edition_header(source, options)
+        .ok()
+        .flatten()
+        .map(|header| header.edition);
+    let edition = declared.or(requested).unwrap_or_default();
+    let next = edition == Edition::Fsl5;
+    let Ok(plan) = plan_migration(source, path, edition, options) else {
+        return (with_declared_edition(output, declared), status);
+    };
+    let mut additions = plan
+        .diagnostics
+        .iter()
+        .filter(|finding| next || finding.code == "deprecated_domain_enum_union")
+        .map(|finding| finding.json(path, edition))
+        .collect::<Vec<_>>();
+    if !next && implicit_warnings {
+        additions.extend(crate::frontend_output::implicit_initial_value_warnings(
+            source, path, options,
+        ));
+    }
+    if next && !additions.is_empty() {
+        let kind = if additions.iter().all(|finding| {
+            finding.get("code").and_then(Value::as_str) == Some("deprecated_domain_enum_union")
+        }) {
+            "deprecated_domain_enum_union"
+        } else {
+            "unsupported_in_edition"
+        };
+        let mut error = envelope();
+        error.insert("result".to_owned(), json!("error"));
+        error.insert("kind".to_owned(), json!(kind));
+        error.insert("edition".to_owned(), json!(edition.as_str()));
+        error.insert("findings".to_owned(), Value::Array(additions));
+        return (with_declared_edition(Value::Object(error), declared), 2);
+    }
+    if !additions.is_empty()
+        && let Value::Object(envelope) = &mut output
+    {
+        envelope
+            .entry("warnings")
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .expect("warnings is an array")
+            .extend(additions);
+    }
+    if next && let Value::Object(envelope) = &mut output {
+        envelope.insert("edition".to_owned(), json!(edition.as_str()));
+    }
+    (with_declared_edition(output, declared), status)
+}
+
+/// Record the edition a document's header declares as `fsl_edition`. A
+/// header is read only when the options enable it, so without them (or
+/// without a header) the envelope is unchanged.
+fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value {
+    if let (Some(edition), Value::Object(envelope)) = (declared, &mut output) {
+        envelope.insert("fsl_edition".to_owned(), json!(edition.number()));
+    }
+    output
+}
+
+/// The `missing_edition_header` finding of a document read for `edition`
+/// without an edition header: one edit inserting the header line before the
+/// first significant line. `None` unless the options read headers, the
+/// edition is the next one, and the document has no header.
+#[must_use]
+pub fn missing_edition_header(
+    source: &str,
+    edition: Edition,
+    options: &ParseOptions,
+) -> Option<MigrationDiagnostic> {
+    if edition != Edition::Fsl5
+        || !options
+            .unstable()
+            .contains(fsl_syntax::UnstableFeature::Fsl5)
+        || !matches!(fsl_syntax::edition_header(source, options), Ok(None))
+    {
+        return None;
+    }
+    let first = fsl_syntax::first_significant_offset(source);
+    let line_start = source[..first].rfind('\n').map_or_else(
+        || first.min(if source.starts_with('\u{feff}') { 3 } else { 0 }),
+        |newline| newline + 1,
+    );
+    let span = source_span(source, line_start, line_start);
+    let header = format!("fsl {}", edition.number());
+    Some(MigrationDiagnostic {
+        code: fsl_syntax::MISSING_EDITION_HEADER,
+        taxonomy: Taxonomy::NonCanonical,
+        message: format!("the document has no edition header; add '{header}'"),
+        span,
+        canonical_replacement: header.clone(),
+        machine_applicable: true,
+        edits: vec![SourceEdit {
+            span,
+            replacement: format!("{header}\n"),
+        }],
     })
 }
 
@@ -656,8 +780,12 @@ struct IdOccurrence {
 /// Report project-policy violations without changing source identity.
 ///
 #[must_use]
-pub fn id_policy_diagnostics(source: &str, policy: &IdPolicy) -> Vec<MigrationDiagnostic> {
-    let mut diagnostics = id_occurrences(source)
+pub fn id_policy_diagnostics(
+    source: &str,
+    policy: &IdPolicy,
+    options: &ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    let mut diagnostics = id_occurrences(source, *options)
         .into_iter()
         .map(|mut occurrence| {
             if occurrence.is_tag {
@@ -688,14 +816,14 @@ pub fn id_policy_diagnostics(source: &str, policy: &IdPolicy) -> Vec<MigrationDi
     diagnostics
 }
 
-fn id_occurrences(source: &str) -> Vec<IdOccurrence> {
-    let Ok(tokens) = fsl_syntax::lex(source) else {
+fn id_occurrences(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
+    let Ok(tokens) = fsl_syntax::lex_with(source, &options) else {
         // Edition diagnostics own unsupported-token reporting. Do not replace
         // those findings with a secondary ID-policy failure.
         return Vec::new();
     };
     let mut occurrences = Vec::new();
-    let document = fsl_syntax::dialect_keyword(source).ok();
+    let document = fsl_syntax::dialect_keyword_with(source, &options).ok();
     for (index, token) in tokens.iter().enumerate() {
         let TokenKind::Ident(keyword) = &token.kind else {
             continue;
@@ -764,7 +892,7 @@ fn id_occurrences(source: &str) -> Vec<IdOccurrence> {
             });
         }
     }
-    occurrences.extend(legacy_requirement_ids(source));
+    occurrences.extend(legacy_requirement_ids(source, options));
     occurrences
 }
 
@@ -884,8 +1012,8 @@ fn requirement_id_at(
     ))
 }
 
-fn legacy_requirement_ids(source: &str) -> Vec<IdOccurrence> {
-    let tree = lossless_document(source);
+fn legacy_requirement_ids(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -933,8 +1061,8 @@ fn legacy_requirement_ids(source: &str) -> Vec<IdOccurrence> {
     occurrences
 }
 
-fn metadata_diagnostics(source: &str) -> Vec<MigrationDiagnostic> {
-    let tree = lossless_document(source);
+fn metadata_diagnostics(source: &str, options: ParseOptions) -> Vec<MigrationDiagnostic> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1029,8 +1157,12 @@ fn metadata_diagnostics(source: &str) -> Vec<MigrationDiagnostic> {
     diagnostics
 }
 
-fn default_diagnostics(source: &str, path: &str) -> Vec<MigrationDiagnostic> {
-    crate::frontend_output::implicit_initial_value_warnings(source, path)
+fn default_diagnostics(
+    source: &str,
+    path: &str,
+    options: ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    crate::frontend_output::implicit_initial_value_warnings(source, path, &options)
         .into_iter()
         .filter_map(|warning| {
             let suggestion = warning.get("suggestion")?;
@@ -1087,7 +1219,11 @@ fn source_offset(source: &str, line: u32, column: u32) -> Option<usize> {
     (column_bytes <= line_text.len()).then_some(line_start + column_bytes)
 }
 
-fn action_map_diagnostics(source: &str, document: &SurfaceDocument) -> Vec<MigrationDiagnostic> {
+fn action_map_diagnostics(
+    source: &str,
+    document: &SurfaceDocument,
+    options: ParseOptions,
+) -> Vec<MigrationDiagnostic> {
     let SurfaceDocument::Requirements(requirements) = document else {
         return Vec::new();
     };
@@ -1106,14 +1242,19 @@ fn action_map_diagnostics(source: &str, document: &SurfaceDocument) -> Vec<Migra
             RequirementsItem::Requirement { items, .. } => {
                 for nested in items {
                     if let fsl_syntax::RequirementBlockItem::Action(action) = nested {
-                        diagnostics.extend(action_map_diagnostic(source, action, &implements));
+                        diagnostics.extend(action_map_diagnostic(
+                            source,
+                            action,
+                            &implements,
+                            options,
+                        ));
                     }
                 }
                 continue;
             }
             _ => continue,
         };
-        diagnostics.extend(action_map_diagnostic(source, action, &implements));
+        diagnostics.extend(action_map_diagnostic(source, action, &implements, options));
     }
     diagnostics
 }
@@ -1123,6 +1264,7 @@ fn action_map_diagnostic(
     source: &str,
     action: &fsl_syntax::RequirementAction,
     implements: &[(&Vec<fsl_syntax::RefinementItem>, Span)],
+    options: ParseOptions,
 ) -> Vec<MigrationDiagnostic> {
     let mut diagnostics = Vec::new();
     for item in &action.items {
@@ -1174,7 +1316,8 @@ fn action_map_diagnostic(
         });
         return diagnostics;
     }
-    let Some((maps_end, maps_text)) = maps_clause_text(source, maps.span.start.offset) else {
+    let Some((maps_end, maps_text)) = maps_clause_text(source, maps.span.start.offset, options)
+    else {
         diagnostics.push(MigrationDiagnostic {
             code: "inline_action_maps",
             taxonomy: Taxonomy::AmbiguousIntent,
@@ -1186,10 +1329,10 @@ fn action_map_diagnostic(
         });
         return diagnostics;
     };
-    let Some(close) = block_close_offset(source, implements_span.start.offset) else {
+    let Some(close) = block_close_offset(source, implements_span.start.offset, options) else {
         return diagnostics;
     };
-    if comment_immediately_before(source, close) {
+    if comment_immediately_before(source, close, options) {
         diagnostics.push(MigrationDiagnostic {
             code: "inline_action_maps",
             taxonomy: Taxonomy::AmbiguousIntent,
@@ -1202,7 +1345,7 @@ fn action_map_diagnostic(
         });
         return diagnostics;
     }
-    let Some(params) = action_params_text(source, action.span.start.offset) else {
+    let Some(params) = action_params_text(source, action.span.start.offset, options) else {
         diagnostics.push(MigrationDiagnostic {
             code: "inline_action_maps",
             taxonomy: Taxonomy::AmbiguousIntent,
@@ -1239,8 +1382,8 @@ fn action_map_diagnostic(
     diagnostics
 }
 
-fn maps_clause_text(source: &str, start: usize) -> Option<(usize, String)> {
-    let tree = lossless_document(source);
+fn maps_clause_text(source: &str, start: usize, options: ParseOptions) -> Option<(usize, String)> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1262,8 +1405,8 @@ fn maps_clause_text(source: &str, start: usize) -> Option<(usize, String)> {
     Some((end, source[start..end].to_owned()))
 }
 
-fn action_params_text(source: &str, start: usize) -> Option<String> {
-    let tree = lossless_document(source);
+fn action_params_text(source: &str, start: usize, options: ParseOptions) -> Option<String> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1286,8 +1429,8 @@ fn action_params_text(source: &str, start: usize) -> Option<String> {
     Some(source[params_start..params_end].to_owned())
 }
 
-fn block_close_offset(source: &str, start: usize) -> Option<usize> {
-    let tree = lossless_document(source);
+fn block_close_offset(source: &str, start: usize, options: ParseOptions) -> Option<usize> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1301,8 +1444,8 @@ fn block_close_offset(source: &str, start: usize) -> Option<usize> {
     Some(tokens[close].span.start.offset)
 }
 
-fn comment_immediately_before(source: &str, offset: usize) -> bool {
-    let tree = lossless_document(source);
+fn comment_immediately_before(source: &str, offset: usize, options: ParseOptions) -> bool {
+    let tree = lossless_document_with(source, &options);
     let Some(close) = tree
         .nodes()
         .iter()
@@ -1404,7 +1547,8 @@ business CheckoutBusiness {
   goal CanPay "goal" { true }
 }
 "#;
-        let diagnostics = id_policy_diagnostics(source, &IdPolicy::default());
+        let diagnostics =
+            id_policy_diagnostics(source, &IdPolicy::default(), &ParseOptions::stable());
         let messages = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.message.as_str())
@@ -1433,7 +1577,9 @@ ai_component Safe {
   authority { forbidden DeleteCustomerData; }
   fallback { when low_confidence require human_review; }
 }";
-        assert!(id_policy_diagnostics(source, &IdPolicy::default()).is_empty());
+        assert!(
+            id_policy_diagnostics(source, &IdPolicy::default(), &ParseOptions::stable()).is_empty()
+        );
     }
 
     #[test]
@@ -1442,7 +1588,7 @@ ai_component Safe {
   policy POL-CLAIMS-001 "policy" satisfies CTRL-BAD { true }
 }"#;
         assert!(
-            id_policy_diagnostics(business, &IdPolicy::default())
+            id_policy_diagnostics(business, &IdPolicy::default(), &ParseOptions::stable())
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("control ID 'CTRL-BAD'"))
         );
@@ -1457,10 +1603,11 @@ ai_component Safe {
     preserve CTRL-BAD
   }
 }"#;
-        let messages = id_policy_diagnostics(governance, &IdPolicy::default())
-            .into_iter()
-            .map(|diagnostic| diagnostic.message)
-            .collect::<Vec<_>>();
+        let messages =
+            id_policy_diagnostics(governance, &IdPolicy::default(), &ParseOptions::stable())
+                .into_iter()
+                .map(|diagnostic| diagnostic.message)
+                .collect::<Vec<_>>();
         for expected in [
             "control ID 'CTRL-BAD'",
             "policy ID 'POL-BAD'",

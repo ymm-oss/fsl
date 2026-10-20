@@ -71,7 +71,8 @@ fn spec_with_state_field(header: &str, field: &str) -> String {
 
 /// Acceptance 1: `経費` stays an unexpected character unless both the gate and
 /// the `fsl 5` header are present, and those outputs are byte-identical to
-/// the gate-off output of the same file.
+/// the gate-off output of the same file, except that `check` records a
+/// header read under the gate as `fsl_edition`.
 #[test]
 fn japanese_identifier_needs_both_the_gate_and_the_fsl5_header() {
     let scratch = Scratch::new("acceptance-1");
@@ -93,28 +94,39 @@ fn japanese_identifier_needs_both_the_gate_and_the_fsl5_header() {
                     .is_some_and(|message| message.starts_with("unexpected character '経'")),
                 "{name}: {output:#}"
             );
-            assert_eq!(
-                fslc(subcommand, &path, false),
-                (stdout, exit),
-                "{subcommand} {name}: the gate changed the bytes"
-            );
+            let (published, published_exit) = fslc(subcommand, &path, false);
+            assert_eq!(published_exit, exit, "{subcommand} {name}");
+            if gate && !header.is_empty() && subcommand == "check" {
+                // A header read under the gate adds only `fsl_edition`.
+                let mut expected = envelope(&published);
+                expected
+                    .as_object_mut()
+                    .expect("envelope object")
+                    .insert("fsl_edition".to_owned(), 4.into());
+                assert_eq!(output, expected, "{subcommand} {name}");
+            } else {
+                assert_eq!(
+                    published, stdout,
+                    "{subcommand} {name}: the gate changed the bytes"
+                );
+            }
         }
     }
 
-    // The lexer accepts the identifier; the header itself is not read as a
-    // declaration yet, so dispatch rejects `fsl` as it does today.
+    // The lexer accepts the identifier and the header is read, so the
+    // document checks in the next edition.
     let path = scratch.write(
         "fsl5-gate-on.fsl",
         &spec_with_state_field("fsl 5\n", "経費"),
     );
     let (stdout, exit) = fslc("lint", &path, true);
-    assert_eq!(exit, 2);
+    assert_eq!(exit, 0, "{}", String::from_utf8_lossy(&stdout));
+    assert_eq!(envelope(&stdout)["finding_count"], 0);
+    let (stdout, exit) = fslc("check", &path, true);
     let output = envelope(&stdout);
-    assert_eq!(
-        output["diagnostic_code"], "FSL-DIALECT-UNKNOWN",
-        "{output:#}"
-    );
-    assert_eq!(line_column(&output), (1, 1));
+    assert_eq!(exit, 0, "{output:#}");
+    assert_eq!(output["result"], "ok", "{output:#}");
+    assert_eq!(output["fsl_edition"], 5, "{output:#}");
 }
 
 /// Acceptance 2 (lexical rows of design C.4): each look-alike fails with its

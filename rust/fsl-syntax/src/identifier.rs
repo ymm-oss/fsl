@@ -13,7 +13,7 @@
 use unicode_normalization::UnicodeNormalization;
 use unicode_security::mixed_script::AugmentedScriptSet;
 
-use crate::{ParseOptions, UnstableFeature};
+use crate::ParseOptions;
 
 /// An identifier spelled with full-width letters or digits (`Ｃｌａｉｍ`).
 pub const FULLWIDTH_ASCII_IDENTIFIER: &str = "fullwidth_ascii_identifier";
@@ -71,10 +71,9 @@ impl IdentifierRule {
     /// `fsl5` feature is enabled and the document opens with `fsl 5`.
     #[must_use]
     pub fn for_source(source: &str, options: &ParseOptions) -> Self {
-        if options.unstable().contains(UnstableFeature::Fsl5) && declares_fsl5_header(source) {
-            Self::Unicode
-        } else {
-            Self::Ascii
+        match crate::edition_header(source, options) {
+            Ok(Some(header)) if header.edition == crate::Edition::Fsl5 => Self::Unicode,
+            _ => Self::Ascii,
         }
     }
 
@@ -98,23 +97,6 @@ impl IdentifierRule {
             Self::Unicode => unicode_ident::is_xid_continue(ch) && !is_middle_dot(ch),
         }
     }
-}
-
-/// Whether the first significant line, after the lexer's trivia (a leading
-/// BOM, whitespace, `//` comments), is `fsl`, blanks, `5`, and the line end.
-fn declares_fsl5_header(source: &str) -> bool {
-    let mut rest = source.strip_prefix('\u{feff}').unwrap_or(source);
-    loop {
-        rest = rest.trim_start_matches(char::is_whitespace);
-        match rest.strip_prefix("//") {
-            Some(comment) => rest = comment.find('\n').map_or("", |end| &comment[end..]),
-            None => break,
-        }
-    }
-    let line = rest.split('\n').next().unwrap_or_default();
-    line.strip_prefix("fsl")
-        .filter(|tail| tail.starts_with([' ', '\t']))
-        .is_some_and(|tail| tail.trim_matches([' ', '\t', '\r']) == "5")
 }
 
 /// `・` U+30FB and `･` U+FF65. Unicode 15.1 made both `XID_Continue`; a name
@@ -206,7 +188,7 @@ fn highly_restrictive(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::UnstableFeatures;
+    use crate::{UnstableFeature, UnstableFeatures};
 
     fn gated() -> ParseOptions {
         ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
@@ -270,14 +252,9 @@ mod tests {
         }
     }
 
-    /// The surface of a `fsl 5` document lexed behind the gate. Dispatch does
-    /// not read the edition header yet, so the frontend starts after it.
+    /// The surface of a `fsl 5` document parsed behind the gate.
     fn fsl5_surface(body: &str) -> Result<crate::SurfaceDocument, crate::ParseError> {
-        let source = format!("fsl 5\n{body}");
-        let tokens = crate::lex_with(&source, &gated())?;
-        assert!(matches!(&tokens[0].kind, TokenKind::Ident(name) if name == "fsl"));
-        assert_eq!(tokens[1].kind, TokenKind::Int(5));
-        crate::parser::parse_shared_tokens(&source, tokens, 2)
+        crate::parse_surface_document_with(&format!("fsl 5\n{body}"), &gated())
     }
 
     fn fsl5_warnings(body: &str) -> Vec<&'static str> {
@@ -286,8 +263,6 @@ mod tests {
             .map(|warning| warning.code)
             .collect()
     }
-
-    use crate::TokenKind;
 
     /// fsl 5 plan S2 acceptance 1: outside a gated `fsl 5` document a
     /// Japanese identifier is the published unexpected character, error for

@@ -157,17 +157,12 @@ pub(crate) const DEFAULT_MAX_MUTANTS: usize = 200;
 /// Options every command that reads `--edition` carries as one value, so a
 /// setting that applies to how a spec is read reaches each of them through
 /// this struct rather than through each command's own option loop.
-#[derive(Clone, Debug)]
+///
+/// `edition` is the requested `--edition`; `None` is `current`, which reads a
+/// document in the edition its header names.
+#[derive(Clone, Debug, Default)]
 pub(crate) struct SharedOptions {
-    pub(crate) edition: String,
-}
-
-impl Default for SharedOptions {
-    fn default() -> Self {
-        Self {
-            edition: "current".to_owned(),
-        }
-    }
+    pub(crate) edition: Option<fsl_syntax::Edition>,
 }
 
 impl SharedOptions {
@@ -186,13 +181,13 @@ impl SharedOptions {
     }
 }
 
-pub(crate) fn parse_edition(args: &mut impl Iterator<Item = String>) -> Result<String, String> {
-    let edition = required_option_value(args, "--edition")?;
-    if matches!(edition.as_str(), "current" | "next") {
-        Ok(edition)
-    } else {
-        Err("--edition must be current or next".to_owned())
-    }
+pub(crate) fn parse_edition(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<Option<fsl_syntax::Edition>, String> {
+    fsl_syntax::Edition::parse_option(
+        &required_option_value(args, "--edition")?,
+        crate::process::parse_options(),
+    )
 }
 
 fn parse_instance_override(raw: &str) -> Result<(String, i64), String> {
@@ -353,7 +348,7 @@ impl CliVerifyOptions {
             && self.use_cache
             && self.lemmas.is_empty()
             && self.from_state.is_none()
-            && self.shared.edition == "current"
+            && self.shared.edition.is_none()
     }
 }
 

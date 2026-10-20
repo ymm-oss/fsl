@@ -51,7 +51,9 @@ pub(crate) fn referenced_requirement_ids(
     }
     // Ungated (#1243): a parse failure adds nothing, and a case the gate would
     // reject still counts as referencing its requirements.
-    if let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) {
+    if let Ok(Some(contract)) =
+        fsl_core::requirements_trace_contract_with_options(source, crate::process::parse_options())
+    {
         for case in contract
             .unchecked_acceptance()
             .iter()
@@ -138,7 +140,9 @@ pub(crate) fn strict_tag_warnings_from_source(
     // `--requirements` file's warning order is undisturbed; IDs that reach
     // `Declared` only through auto-collection are reported afterward, in a fixed
     // (sorted) order.
-    let declared_from_blocks = fsl_core::requirements_declared_ids(source).unwrap_or_default();
+    let declared_from_blocks =
+        fsl_core::requirements_declared_ids_with_options(source, crate::process::parse_options())
+            .unwrap_or_default();
     let mut declared_from_file: Vec<String> = Vec::new();
     if let Some(path) = requirements {
         let source = std::fs::read_to_string(path).map_err(|error| {

@@ -408,6 +408,7 @@ pub fn requirements_implements_output(
     resolver: &dyn fsl_core::FileResolver,
     model: &KernelModel,
     depth: usize,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
     requirements_implements_output_with_bounds(
         source,
@@ -416,6 +417,7 @@ pub fn requirements_implements_output(
         depth,
         &std::collections::BTreeMap::new(),
         &std::collections::BTreeMap::new(),
+        options,
     )
 }
 
@@ -433,8 +435,10 @@ pub fn requirements_implements_output_with_bounds(
     depth: usize,
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
-    let contract = resolve_requirements_implements(source, resolver, model, instances, values)?;
+    let contract =
+        resolve_requirements_implements(source, resolver, model, instances, values, options)?;
     check_requirements_implements(contract, model, depth)
 }
 
@@ -453,12 +457,15 @@ pub fn resolve_requirements_implements(
     model: &KernelModel,
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Option<fsl_core::ImplementsContract>, RequirementsImplementsError> {
-    fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
-        .map_err(|error| RequirementsImplementsError {
-            message: error.message,
-            span: error.span,
-        })
+    fsl_core::requirements_implements_with_bounds_with_options(
+        source, resolver, model, instances, values, options,
+    )
+    .map_err(|error| RequirementsImplementsError {
+        message: error.message,
+        span: error.span,
+    })
 }
 
 /// Check an already-resolved inline `implements` contract and render its
@@ -672,9 +679,12 @@ pub const NOT_EVALUATED_BOUNDS_OVERRIDE: &str = "bounds_override";
 /// never reads the abstraction's file, so a run that does not evaluate the
 /// seam does not add that file to its cache-key dependency domain (#1023).
 #[must_use]
-pub fn requirements_implements_name(source: &str) -> Option<String> {
+pub fn requirements_implements_name(
+    source: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Option<String> {
     let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
-        fsl_syntax::parse_surface_document(source)
+        fsl_syntax::parse_surface_document_with(source, options)
     else {
         return None;
     };
@@ -736,12 +746,13 @@ pub fn attach_not_evaluated(envelope: &mut Value, key: &str, section: Value) {
 pub fn governance_output(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
+    options: &fsl_syntax::ParseOptions,
     mut preservation_result: impl FnMut(
         &fsl_core::GovernancePreservation,
     ) -> Result<Value, GovernanceOutputError>,
 ) -> Result<Option<Value>, GovernanceOutputError> {
-    let Some(contract) =
-        fsl_core::governance_contract(source, resolver).map_err(GovernanceOutputError::from)?
+    let Some(contract) = fsl_core::governance_contract_with_options(source, resolver, options)
+        .map_err(GovernanceOutputError::from)?
     else {
         return Ok(None);
     };
@@ -764,14 +775,15 @@ pub fn governance_output(
 pub async fn governance_output_async<F, Fut>(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
+    options: &fsl_syntax::ParseOptions,
     mut preservation_result: F,
 ) -> Result<Option<Value>, GovernanceOutputError>
 where
     F: FnMut(&fsl_core::GovernancePreservation) -> Fut,
     Fut: Future<Output = Result<Value, GovernanceOutputError>>,
 {
-    let Some(contract) =
-        fsl_core::governance_contract(source, resolver).map_err(GovernanceOutputError::from)?
+    let Some(contract) = fsl_core::governance_contract_with_options(source, resolver, options)
+        .map_err(GovernanceOutputError::from)?
     else {
         return Ok(None);
     };
@@ -1340,9 +1352,10 @@ pub fn validate_requirement_trace_source(
     envelope: &Map<String, Value>,
     source: &str,
     model: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<TraceGate, String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    let Some(contract) = fsl_core::requirements_trace_contract_with_options(source, options)
+        .map_err(|error| error.to_string())?
     else {
         return Ok(TraceGate::NotRequirements);
     };
@@ -1695,9 +1708,10 @@ pub fn validate_requirement_trace_source_scoped(
     source: &str,
     model: &KernelModel,
     declared: Option<&KernelModel>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<(Option<Value>, Vec<SkippedRequirementTrace>), String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    let Some(contract) = fsl_core::requirements_trace_contract_with_options(source, options)
+        .map_err(|error| error.to_string())?
     else {
         return Ok((None, Vec::new()));
     };

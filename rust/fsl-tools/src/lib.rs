@@ -54,8 +54,8 @@ pub use analysis_export::export_analysis_graph;
 pub use causal::{
     Binding, BindingKind, CausalError, CausalModel, CausalWarning, Claim as CausalClaim,
     ClaimStatus, Clock, Feedback, ImportedSpec, Interval, Lag, Persistence, Polarity,
-    ScopeVocabulary, Variable, VariableRole, active_adjacency, build_causal_model, reachable_from,
-    strongly_connected_components,
+    ScopeVocabulary, Variable, VariableRole, active_adjacency, build_causal_model,
+    build_causal_model_with_options, reachable_from, strongly_connected_components,
 };
 pub use causal_analysis::{
     causal_check_json, causal_review_findings, earliest_from, feedback_loop_classes,

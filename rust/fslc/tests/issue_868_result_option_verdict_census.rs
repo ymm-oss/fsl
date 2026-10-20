@@ -351,6 +351,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/dialect.rs",
+        3279,
+        "requirements_trace_contract_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/dialect.rs",
         3165,
         "governance_contract",
         ResultOption
@@ -358,8 +365,43 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/dialect.rs",
+        3551,
+        "governance_contract_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/dialect.rs",
         3311,
         "verify_scope_type_names",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/dialect.rs",
+        3401,
+        "verify_scope_type_names_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-syntax/src/edition.rs",
+        93,
+        "parse_option",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-syntax/src/edition.rs",
+        123,
+        "edition_header",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/cli_options.rs",
+        184,
+        "parse_edition",
         ResultOption
     ),
     entry!(
@@ -414,8 +456,22 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/refinement.rs",
+        1285,
+        "requirements_implements_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/refinement.rs",
         1268,
         "requirements_implements_with_bounds",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/refinement.rs",
+        1333,
+        "requirements_implements_with_bounds_with_options",
         ResultOption
     ),
     entry!(
