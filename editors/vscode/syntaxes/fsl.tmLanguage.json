@@ -35,7 +35,7 @@
       "patterns": [
         {
           "name": "meta.definition.block.fsl",
-          "match": "\\b(spec|compose|requirements|business|governance|refinement)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+          "match": "\\b(spec|compose|requirements|business|governance|refinement)\\s+([_\\p{XID_Start}][\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]]*)",
           "captures": {
             "1": { "name": "keyword.declaration.fsl" },
             "2": { "name": "entity.name.type.fsl" }
@@ -43,7 +43,7 @@
         },
         {
           "name": "meta.definition.named.fsl",
-          "match": "\\b(const|type|enum|struct|entity|number|action|invariant|trans|reachable|leadsTo|until|unless|requirement|acceptance|forbidden|kpi|process|control|policy|goal|authority|preservation)\\s+([A-Za-z0-9_][A-Za-z0-9_-]*)",
+          "match": "\\b(const|type|enum|struct|entity|number|action|invariant|trans|reachable|leadsTo|until|unless|requirement|acceptance|forbidden|kpi|process|control|policy|goal|authority|preservation)\\s+([\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]][[\\p{XID_Continue}-]&&[^\\x{30FB}\\x{FF65}]]*)",
           "captures": {
             "1": { "name": "keyword.declaration.fsl" },
             "2": { "name": "entity.name.function.fsl" }

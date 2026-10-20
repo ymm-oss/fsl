@@ -143,8 +143,8 @@ pub fn parse_document(source: SourceFile<'_>) -> Result<ParsedDocument, ParseErr
 /// [`parse_document`] under explicit [`ParseOptions`]. Every registered
 /// frontend is reached only through this function.
 ///
-/// No unstable feature changes parsing yet, so the options do not affect the
-/// result; later stages attach syntax to them.
+/// The options select the lexer's identifier rule
+/// ([`crate::IdentifierRule::for_source`]); they do not change dispatch yet.
 ///
 /// # Errors
 ///

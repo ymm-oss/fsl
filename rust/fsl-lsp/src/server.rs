@@ -325,7 +325,7 @@ fn handle_request(sender: &Sender<Message>, state: &ServerState, request: &Reque
         }
         "textDocument/rename" => parse_request::<RenameParams>(request).map(|params| {
             let uri = &params.text_document_position.text_document.uri;
-            let result = valid_identifier(&params.new_name)
+            let result = valid_identifier_in(state, uri, &params.new_name)
                 .then(|| {
                     let locations = workspace_references(
                         state,
@@ -333,7 +333,14 @@ fn handle_request(sender: &Sender<Message>, state: &ServerState, request: &Reque
                         params.text_document_position.position,
                         true,
                     );
-                    if locations.is_empty() {
+                    if locations.is_empty()
+                        || !locations
+                            .iter()
+                            .map(|location| &location.uri)
+                            .collect::<std::collections::HashSet<_>>()
+                            .into_iter()
+                            .all(|edited| valid_identifier_in(state, edited, &params.new_name))
+                    {
                         return None;
                     }
                     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
@@ -403,6 +410,11 @@ fn publish_diagnostics(
     let mut items = source_diagnostics
         .into_iter()
         .map(|item| to_lsp_diagnostic(&source, item))
+        .chain(
+            fsl_syntax::lexical_warnings(&source, &state.parse_options)
+                .into_iter()
+                .map(|warning| lexical_warning_diagnostic(&source, warning)),
+        )
         .collect::<Vec<_>>();
     if analysis_diagnostics_enabled()
         && let Some(model) = model
@@ -508,6 +520,23 @@ fn to_lsp_diagnostic(source: &str, item: SourceDiagnostic) -> Diagnostic {
         None,
     );
     diagnostic.data = Some(serde_json::json!({"kind": item.kind}));
+    diagnostic
+}
+
+fn lexical_warning_diagnostic(source: &str, warning: fsl_syntax::LexWarning) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(
+        span_range(source, warning.span),
+        Some(DiagnosticSeverity::WARNING),
+        Some(NumberOrString::String(warning.code.to_owned())),
+        Some("fslc".to_owned()),
+        warning.message,
+        None,
+        None,
+    );
+    diagnostic.data = Some(serde_json::json!({
+        "kind": "lexical",
+        "replacement": warning.replacement,
+    }));
     diagnostic
 }
 
@@ -882,13 +911,17 @@ fn source_line(source: &str, line: u32) -> &str {
         .trim()
 }
 
-fn valid_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    chars
-        .next()
-        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-        && !crate::index::is_keyword(value)
+/// Whether `value` reads as one identifier in the document at `uri`, whose
+/// edition and the server's options decide the identifier rule.
+fn valid_identifier_in(state: &ServerState, uri: &Url, value: &str) -> bool {
+    let rule = source_for_uri(state, uri).map_or(fsl_syntax::IdentifierRule::Ascii, |source| {
+        fsl_syntax::IdentifierRule::for_source(&source, &state.parse_options)
+    });
+    valid_identifier(value, rule)
+}
+
+fn valid_identifier(value: &str, rule: fsl_syntax::IdentifierRule) -> bool {
+    rule.accepts(value) && !crate::index::is_keyword(value)
 }
 
 fn alias_before_cursor(source: &str, position: Position) -> Option<&str> {
@@ -1214,11 +1247,59 @@ mod tests {
 
     #[test]
     fn rename_identifier_validation_is_closed() {
-        assert!(valid_identifier("new_name"));
-        assert!(!valid_identifier("9name"));
-        assert!(!valid_identifier("state"));
-        assert!(!valid_identifier("use"));
-        assert!(!valid_identifier("two names"));
+        for rule in [
+            fsl_syntax::IdentifierRule::Ascii,
+            fsl_syntax::IdentifierRule::Unicode,
+        ] {
+            assert!(valid_identifier("new_name", rule));
+            assert!(!valid_identifier("9name", rule));
+            assert!(!valid_identifier("state", rule));
+            assert!(!valid_identifier("use", rule));
+            assert!(!valid_identifier("two names", rule));
+        }
+        assert!(!valid_identifier("経費", fsl_syntax::IdentifierRule::Ascii));
+        assert!(valid_identifier(
+            "経費",
+            fsl_syntax::IdentifierRule::Unicode
+        ));
+        for look_alike in ["Ｃｌａｉｍ", "申請・承認", "Сlaim", "\u{304b}\u{3099}"] {
+            assert!(
+                !valid_identifier(look_alike, fsl_syntax::IdentifierRule::Unicode),
+                "{look_alike}"
+            );
+        }
+    }
+
+    /// A rename reaches every file that names the symbol, so the new name must
+    /// be an identifier under each file's own rule: a `fsl 5` document behind
+    /// the gate accepts `経費`, a published-language document never does.
+    #[test]
+    fn rename_target_rule_follows_each_documents_edition_and_the_gate() {
+        let fsl5 = Url::parse("file:///tmp/fsl-lsp-rename/fsl5.fsl").unwrap();
+        let published = Url::parse("file:///tmp/fsl-lsp-rename/published.fsl").unwrap();
+        let mut state = ServerState {
+            parse_options: fsl_syntax::ParseOptions::with_unstable(
+                fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+            ),
+            ..ServerState::default()
+        };
+        for (uri, text) in [
+            (&fsl5, "fsl 5\nspec S { state { x: Int } }\n"),
+            (&published, "spec S { state { x: Int } }\n"),
+        ] {
+            state.documents.insert(
+                uri.clone(),
+                OpenDocument {
+                    text: text.to_owned(),
+                    version: 1,
+                },
+            );
+        }
+        assert!(valid_identifier_in(&state, &fsl5, "経費"));
+        assert!(!valid_identifier_in(&state, &published, "経費"));
+        assert!(valid_identifier_in(&state, &published, "cost"));
+        state.parse_options = fsl_syntax::ParseOptions::stable();
+        assert!(!valid_identifier_in(&state, &fsl5, "経費"));
     }
 
     #[test]

@@ -17,6 +17,7 @@ mod causal;
 mod db;
 mod dispatch;
 mod domain;
+mod identifier;
 mod lexer;
 mod literate;
 mod lossless;
@@ -64,7 +65,13 @@ pub use domain::{
     DomainProjection, DomainReject, DomainRetry, DomainSaga, DomainSagaCompensation,
     DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
-pub use lexer::{LexError, Token, TokenKind, lex, lex_with};
+pub use identifier::{
+    CANONICAL_NAME_NOT_ASCII, FULLWIDTH_ASCII_IDENTIFIER, FULLWIDTH_SPACE, FULLWIDTH_SYMBOL,
+    IDENTIFIER_DIAGNOSTICS, IdentifierRule, IdentifierSeverity, MIDDLE_DOT_IDENTIFIER,
+    MIXED_SCRIPT_IDENTIFIER, NON_ASCII_REQUIREMENT_ID, NON_NFC_IDENTIFIER,
+    RESERVED_IDENTIFIER_CODES,
+};
+pub use lexer::{LexError, LexWarning, Token, TokenKind, lex, lex_with, lexical_warnings};
 pub use literate::extract_literate_fsl;
 pub use lossless::{
     CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,

@@ -47,3 +47,15 @@ test("a string after from that does not close on its line throws, naming the fil
     /^Error: examples\/x\/s\.fsl:2: unterminated string literal/,
   );
 });
+
+test("identifiers follow the lexer's wider rule, so a name ending in `from` is not `from`", () => {
+  const source = [
+    "compose S {",
+    '  use A as 部品from "not-an-import.fsl"',
+    '  use B as 𠮷from "also-not.fsl"',
+    '  use C as 部品 from "c.fsl"',
+    '  use D as d・from "d.fsl"',
+    "}",
+  ].join("\n");
+  assert.deepEqual(specImports(source, "s.fsl"), ["c.fsl", "d.fsl"]);
+});

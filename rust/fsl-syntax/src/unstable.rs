@@ -10,9 +10,10 @@
 //! choose the gate without touching process state.
 //!
 //! With no feature enabled the parser behaves exactly as before the gate
-//! existed. Enabling a feature changes nothing yet; later stages attach
-//! syntax to it. The inventory of every parse entry and how it receives these
-//! options lives in `docs/design/parse-entry-inventory.md`.
+//! existed. Enabling `fsl5` so far only widens the identifier rule of a
+//! document headed by its edition ([`crate::IdentifierRule`]). The inventory of
+//! every parse entry and how it receives these options lives in
+//! `docs/design/parse-entry-inventory.md`.
 
 /// One unstable language feature that can be enabled behind the gate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

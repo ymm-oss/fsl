@@ -61,8 +61,6 @@ enum Owner {
     Definition,
     /// S1 threads the options through this library API (edition wiring).
     S1,
-    /// S2 changes the lexer; this lexes source text for editor features.
-    S2,
     /// decisions/049 D8: this dialect rejects an edition header, so it stays
     /// on the published language.
     D8,
@@ -84,12 +82,14 @@ const LITERATE: &str = "literate Markdown extraction; S1 reads the edition heade
      fsl fence";
 const CAUSAL_AI: &str = "causal or ai dialect: decisions/049 D8 makes an edition header an error \
      there, so the published language is the intended reading";
-const STANDALONE_FRONTEND: &str = "standalone public parser of one dialect (the registry frontend \
-     reuses the dispatcher's routed tokens instead); S2 routes it when the lexer changes";
-const FRAGMENT: &str = "expression / spec fragment parser with no document header; S2 decides \
-     its lexer when identifiers change";
-const EDITOR_LEX: &str = "re-lexes source to place a diagnostic; S2 routes it when the lexer \
-     changes";
+const STANDALONE_FRONTEND: &str = "standalone public parser of one dialect with no product \
+     caller (the registry frontend reuses the dispatcher's routed tokens instead); it never sees \
+     the options, so a document needing the wider identifier rule is rejected here (fail closed)";
+const FRAGMENT: &str = "expression / spec fragment parser with no document header; the wider \
+     identifier rule is selected by the header, so a fragment always reads ASCII identifiers";
+const EDITOR_LEX: &str = "re-lexes source to place a diagnostic of the parse in the same module; \
+     it takes that parse's options when S1 passes them to this shared module, and until then that \
+     parse already rejects a gated document";
 const PARITY_TOOL: &str = "Python-parity debug binary reading the published language; S1 \
      decides whether it takes the gate";
 const REGISTRY: &str = "the private `domain` frontend wrapper shares the public entry's name; \
@@ -168,7 +168,7 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         "fsl-syntax/src/db.rs",
         "lex",
         1,
-        Owner::S2,
+        Owner::Definition,
         STANDALONE_FRONTEND,
     ),
     (
@@ -189,7 +189,7 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         "fsl-syntax/src/domain.rs",
         "lex",
         1,
-        Owner::S2,
+        Owner::Definition,
         STANDALONE_FRONTEND,
     ),
     (
@@ -234,7 +234,13 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         Owner::Definition,
         STABLE_WRAPPER,
     ),
-    ("fsl-syntax/src/parser.rs", "lex", 2, Owner::S2, FRAGMENT),
+    (
+        "fsl-syntax/src/parser.rs",
+        "lex",
+        2,
+        Owner::Definition,
+        FRAGMENT,
+    ),
     (
         "fsl-tools/src/causal.rs",
         "parse_causal",
@@ -395,7 +401,7 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         "fslc/src/source_diagnostic.rs",
         "lex",
         1,
-        Owner::S2,
+        Owner::S1,
         EDITOR_LEX,
     ),
     (
