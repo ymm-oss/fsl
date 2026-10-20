@@ -36,6 +36,15 @@ js-sys = "0.3.82"
 wasm-bindgen = "0.2.105"
 wasm-bindgen-futures = "0.4.55"
 
+# `split-debuginfo` stays at each target's default: no value is stable on
+# every CI target (Windows MSVC accepts only `packed`, wasm32 only `off`), and
+# profiles cannot be scoped per target.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
