@@ -62,6 +62,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             source,
             path.to_str().expect("UTF-8 fixture path"),
             &resolver,
+            &fsl_syntax::ParseOptions::stable(),
         )
         .into_iter()
         .find(|diagnostic| diagnostic.kind != "migration")
@@ -101,6 +102,7 @@ fn distinctness_unproved_diagnostic_shares_cli_and_lsp_identity() {
         &source,
         &fixture,
         &fsl_core::FsResolver::new(Path::new(".")),
+        &fsl_syntax::ParseOptions::stable(),
     )
     .into_iter()
     .find(|diagnostic| diagnostic.kind != "migration")
@@ -183,10 +185,15 @@ fn nested_option_payload_diagnostics_have_cli_lsp_identity() {
         );
         let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
         let resolver = fsl_core::FsResolver::new(Path::new(&directory));
-        let shared = fslc_rust::source_diagnostic::diagnostics(&source, path, &resolver)
-            .into_iter()
-            .find(|diagnostic| diagnostic.kind != "migration")
-            .expect("shared source diagnostic");
+        let shared = fslc_rust::source_diagnostic::diagnostics(
+            &source,
+            path,
+            &resolver,
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .into_iter()
+        .find(|diagnostic| diagnostic.kind != "migration")
+        .expect("shared source diagnostic");
 
         assert_eq!(cli["kind"], shared.kind, "{position} Option<{payload}>");
         assert_eq!(

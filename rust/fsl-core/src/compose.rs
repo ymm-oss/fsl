@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use fsl_syntax::{
-    ActionItem, Annotations, Binder, ComposeItem, Expr, LValue, Param, QualifiedName, SourceFile,
-    SpecItem, Statement, SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction, TypeExpr,
-    parse_document,
+    ActionItem, Annotations, Binder, ComposeItem, Expr, LValue, Param, ParseOptions, QualifiedName,
+    SourceFile, SpecItem, Statement, SurfaceCompose, SurfaceDocument, SurfaceSpec, SyncAction,
+    TypeExpr, parse_document_with,
 };
 use serde_json::{Value, json};
 
@@ -56,7 +56,21 @@ pub fn parse_kernel_source(
     source: &str,
     resolver: &dyn FileResolver,
 ) -> Result<KernelSpec, CoreError> {
-    let parsed = parse_document(SourceFile::new(source))?;
+    parse_kernel_source_with_options(source, resolver, &ParseOptions::stable())
+}
+
+/// [`parse_kernel_source`] under explicit [`ParseOptions`], which also read
+/// every compose component.
+///
+/// # Errors
+///
+/// As [`parse_kernel_source`].
+pub fn parse_kernel_source_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    options: &ParseOptions,
+) -> Result<KernelSpec, CoreError> {
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(spec) => crate::lower_direct_spec(spec),
         SurfaceDocument::Business(business) => crate::lower_business(business),
@@ -65,7 +79,7 @@ pub fn parse_kernel_source(
         SurfaceDocument::Db(system) => crate::lower_db(&system),
         SurfaceDocument::Domain(domain) => crate::lower_domain(&domain),
         SurfaceDocument::AiComponent(component) => crate::lower_ai_component(component),
-        SurfaceDocument::Compose(compose) => lower_compose(compose, resolver),
+        SurfaceDocument::Compose(compose) => lower_compose_with_options(compose, resolver, options),
         SurfaceDocument::Refinement(_) | SurfaceDocument::Agent(_) => Err(CoreError::unlocated(
             "top-level document has not reached the kernel lowering gate",
         )
@@ -89,8 +103,27 @@ pub fn parse_kernel_source_with_file(
     resolver: &dyn FileResolver,
     source_file: impl AsRef<str>,
 ) -> Result<KernelSpec, CoreError> {
+    parse_kernel_source_with_file_with_options(
+        source,
+        resolver,
+        source_file,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`parse_kernel_source_with_file`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_kernel_source_with_file`].
+pub fn parse_kernel_source_with_file_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    source_file: impl AsRef<str>,
+    options: &ParseOptions,
+) -> Result<KernelSpec, CoreError> {
     let source_file = source_file.as_ref();
-    parse_kernel_source(source, resolver)
+    parse_kernel_source_with_options(source, resolver, options)
         .map(|kernel| kernel.with_source_file(source_file))
         .map_err(|error| error.with_source_file(source_file))
 }
@@ -211,8 +244,9 @@ fn parse_component(
     source: &str,
     path: &str,
     use_span: fsl_syntax::Span,
+    options: ParseOptions,
 ) -> Result<(SurfaceSpec, Annotations), CoreError> {
-    let parsed = parse_document(SourceFile::new(source)).map_err(|error| {
+    let parsed = parse_document_with(SourceFile::new(source), &options).map_err(|error| {
         component_error(path, use_span, &CoreError::from(error), "failed to parse")
     })?;
     let SurfaceDocument::Spec(spec) = parsed.surface else {
@@ -254,10 +288,23 @@ fn composed_kernel(
 ///
 /// Returns [`CoreError`] for missing/invalid components, unknown aliases or
 /// actions, sync arity mismatches, and nested compose inputs.
-#[allow(clippy::too_many_lines)]
 pub fn lower_compose(
     compose: SurfaceCompose,
     resolver: &dyn FileResolver,
+) -> Result<KernelSpec, CoreError> {
+    lower_compose_with_options(compose, resolver, &ParseOptions::stable())
+}
+
+/// [`lower_compose`] reading its components under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`lower_compose`].
+#[allow(clippy::too_many_lines)]
+pub fn lower_compose_with_options(
+    compose: SurfaceCompose,
+    resolver: &dyn FileResolver,
+    options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
     let mut components = BTreeMap::new();
     let mut component_annotations = Annotations::default();
@@ -278,7 +325,7 @@ pub fn lower_compose(
         let source = resolver
             .read(path)
             .map_err(|error| component_error(path, *span, &error, "could not be read"))?;
-        let (spec, annotations) = parse_component(&source, path, *span)?;
+        let (spec, annotations) = parse_component(&source, path, *span, *options)?;
         component_annotations.extend(annotations.source_order().iter().cloned());
         order.push(alias.clone());
         components.insert(

@@ -17,7 +17,11 @@ pub(crate) fn validate_specialized_document_from_source(
     path: &Path,
     source: &str,
 ) -> Result<(), String> {
-    fslc_rust::check_stages::validate_specialized_document(source, &path.display().to_string())
+    fslc_rust::check_stages::validate_specialized_document(
+        source,
+        &path.display().to_string(),
+        crate::process::parse_options(),
+    )
 }
 
 pub(crate) fn validate_requirement_traces_from_source(
@@ -32,7 +36,12 @@ pub(crate) fn validate_requirement_trace_source(
     source: &str,
     model: &KernelModel,
 ) -> Result<TraceGate, String> {
-    fslc_rust::verification_output::validate_requirement_trace_source(&envelope(), source, model)
+    fslc_rust::verification_output::validate_requirement_trace_source(
+        &envelope(),
+        source,
+        model,
+        crate::process::parse_options(),
+    )
 }
 
 pub(crate) fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
@@ -77,7 +86,12 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    fslc_rust::check_stages::load_kernel_model(source, &path.to_string_lossy(), resolver)
+    fslc_rust::check_stages::load_kernel_model(
+        source,
+        &path.to_string_lossy(),
+        resolver,
+        crate::process::parse_options(),
+    )
 }
 
 /// Read a spec file, classifying a read failure as `io` rather than letting the
@@ -350,20 +364,30 @@ pub(crate) fn load_model_scoped_from_source(
     source: &str,
     scope: &ScopeBounds,
 ) -> Result<KernelModel, SpecLoadError> {
-    let kernel =
-        match fsl_core::parse_kernel_source_with_bounds(source, &scope.instances, &scope.values) {
-            Ok(kernel) => kernel,
-            // A rejected `--instances`/`--values` bound is a CLI argument
-            // defect, not a construct in the spec, so it owns no location.
-            Err(error) if error.kind == fsl_core::CoreErrorKind::ScopeOverrideWithoutBounds => {
-                return Err(SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
-                    class: DiagnosticClass::Core(error.kind),
-                    diagnostic_code: error.diagnostic_code,
-                    ..SemanticDiagnostic::unlocated(error.message)
-                })));
-            }
-            Err(error) => return Err(kernel_load_error(source, &error)),
-        };
+    let kernel = match fsl_core::parse_kernel_source_with_bounds_with_options(
+        source,
+        &scope.instances,
+        &scope.values,
+        crate::process::parse_options(),
+    ) {
+        Ok(kernel) => kernel,
+        // A rejected `--instances`/`--values` bound is a CLI argument
+        // defect, not a construct in the spec, so it owns no location.
+        Err(error) if error.kind == fsl_core::CoreErrorKind::ScopeOverrideWithoutBounds => {
+            return Err(SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
+                class: DiagnosticClass::Core(error.kind),
+                diagnostic_code: error.diagnostic_code,
+                ..SemanticDiagnostic::unlocated(error.message)
+            })));
+        }
+        Err(error) => {
+            return Err(kernel_load_error(
+                source,
+                &error,
+                crate::process::parse_options(),
+            ));
+        }
+    };
     fsl_core::build_model(kernel).map_err(|error| {
         SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
     })

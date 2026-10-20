@@ -6,7 +6,10 @@ use std::sync::LazyLock;
 
 use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::{Annotations, ParseError, ParseOptions, SurfaceDocument, Token, TokenKind, lex_with};
+use crate::{
+    Annotations, Edition, ParseError, ParseOptions, SurfaceDocument, Token, TokenKind,
+    edition_header, lex_with,
+};
 
 /// Original source passed beside the shared token stream to a dialect frontend.
 #[derive(Clone, Copy, Debug)]
@@ -30,6 +33,8 @@ impl<'a> SourceFile<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParsedDocument {
     pub keyword: &'static str,
+    /// The edition header's edition; [`Edition::Fsl4`] without one.
+    pub edition: Edition,
     pub annotations: Annotations,
     pub surface: SurfaceDocument,
 }
@@ -109,10 +114,39 @@ pub fn dialect_keyword_with(
     source: &str,
     options: &ParseOptions,
 ) -> Result<&'static str, ParseError> {
-    let tokens = lex_with(source, options).map_err(ParseError::from)?;
+    let (tokens, _) = document_tokens(source, *options)?;
     let mut cursor = 0;
     leading_annotations(&tokens, &mut cursor)?;
     select_frontend(&tokens, cursor).map(|registration| registration.keyword)
+}
+
+/// The document's token stream without its edition header, and the edition
+/// it is read in. A header naming an unknown edition, or heading a causal or
+/// AI document ([`crate::EDITIONLESS_DECLARATIONS`]), is rejected here.
+fn document_tokens(
+    source: &str,
+    options: ParseOptions,
+) -> Result<(Vec<Token>, Edition), ParseError> {
+    let header = edition_header(source, &options)?;
+    let tokens = lex_with(source, &options).map_err(ParseError::from)?;
+    let Some(header) = header else {
+        return Ok((tokens, Edition::Fsl4));
+    };
+    let mut cursor = 0;
+    leading_annotations(&tokens, &mut cursor)?;
+    if let TokenKind::Ident(keyword) = &tokens[cursor].kind
+        && crate::EDITIONLESS_DECLARATIONS.contains(&keyword.as_str())
+    {
+        return Err(ParseError::coded(
+            crate::EDITION_HEADER_NOT_ACCEPTED,
+            format!(
+                "a '{keyword}' document has no syntax edition; remove the 'fsl {}' header",
+                header.edition.number()
+            ),
+            header.span,
+        ));
+    }
+    Ok((tokens, header.edition))
 }
 
 /// Return the first significant declaration identifier, including identifiers
@@ -143,24 +177,28 @@ pub fn parse_document(source: SourceFile<'_>) -> Result<ParsedDocument, ParseErr
 /// [`parse_document`] under explicit [`ParseOptions`]. Every registered
 /// frontend is reached only through this function.
 ///
-/// The options select the lexer's identifier rule
-/// ([`crate::IdentifierRule::for_source`]); they do not change dispatch yet.
+/// Behind `fsl5` the options read the edition header
+/// ([`crate::edition_header`]), which selects the lexer's identifier rule
+/// ([`crate::IdentifierRule::for_source`]) and is recorded as
+/// [`ParsedDocument::edition`].
 ///
 /// # Errors
 ///
-/// Returns lexical, annotation, dispatch, or frontend syntax errors.
+/// Returns edition-header, lexical, annotation, dispatch, or frontend syntax
+/// errors.
 pub fn parse_document_with(
     source: SourceFile<'_>,
     options: &ParseOptions,
 ) -> Result<ParsedDocument, ParseError> {
     LazyLock::force(&VALID_REGISTRY);
-    let tokens = lex_with(source.source(), options).map_err(ParseError::from)?;
+    let (tokens, edition) = document_tokens(source.source(), *options)?;
     let mut cursor = 0;
     let annotations = leading_annotations(&tokens, &mut cursor)?;
     let registration = select_frontend(&tokens, cursor)?;
     let surface = (registration.parse)(source, tokens, cursor)?;
     Ok(ParsedDocument {
         keyword: registration.keyword,
+        edition,
         annotations,
         surface,
     })
@@ -337,20 +375,31 @@ mod tests {
         assert!(unknown.message.contains("spec, refinement, compose"));
     }
 
+    fn gated() -> ParseOptions {
+        ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
+        )
+    }
+
     /// decisions/049 D2: a document that declares a syntax edition in its
     /// first line is never read as the published language. Under stable
     /// options every document entry rejects the header with the same
-    /// unknown-declaration error a user sees today, and the gate adds no
-    /// syntax yet, so enabling it does not change any of these results.
+    /// unknown-declaration error a user sees today; behind the gate the same
+    /// documents are read in the edition they declare.
     #[test]
     fn edition_header_fails_closed_under_stable_options() {
-        let gated = ParseOptions::with_unstable(
-            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
-        );
-        for source in [
-            "fsl 5\nrequirements R {}\n",
-            "fsl 4\nspec S { state { x: Int } }\n",
-            "\u{feff}// header after trivia\nfsl 5\nrequirements R {}\n",
+        for (source, edition, keyword) in [
+            ("fsl 5\nrequirements R {}\n", Edition::Fsl5, "requirements"),
+            (
+                "fsl 4\nspec S { state { x: Int } }\n",
+                Edition::Fsl4,
+                "spec",
+            ),
+            (
+                "\u{feff}// header after trivia\nfsl 5\nrequirements R {}\n",
+                Edition::Fsl5,
+                "requirements",
+            ),
         ] {
             let error = parse_document(SourceFile::new(source)).unwrap_err();
             assert_eq!(error.code(), "FSL-DIALECT-UNKNOWN", "{source:?}");
@@ -362,21 +411,69 @@ mod tests {
             );
             assert_eq!(dialect_keyword(source).unwrap_err(), error, "{source:?}");
 
-            assert_eq!(
-                parse_document_with(SourceFile::new(source), &gated).unwrap_err(),
-                error,
-                "{source:?}"
-            );
-            assert_eq!(
-                dialect_keyword_with(source, &gated).unwrap_err(),
-                error,
-                "{source:?}"
-            );
-            assert_eq!(
-                crate::lex_with(source, &gated).unwrap(),
-                crate::lex(source).unwrap()
-            );
+            let parsed = parse_document_with(SourceFile::new(source), &gated()).unwrap();
+            assert_eq!((parsed.keyword, parsed.edition), (keyword, edition));
+            assert_eq!(dialect_keyword_with(source, &gated()), Ok(keyword));
+            let published = crate::lex(source).unwrap();
+            assert_eq!(crate::lex_with(source, &gated()).unwrap(), published[2..]);
         }
+    }
+
+    /// The header is not a declaration: its tokens leave the stream, so the
+    /// parse behind the gate equals the headerless parse with every position
+    /// one line lower, and the identifier `fsl` stays an identifier.
+    #[test]
+    fn header_tokens_leave_the_stream_and_fsl_stays_an_identifier() {
+        let body = "spec S { const fsl = 1 state { x: Int } init { x = fsl } }";
+        let headerless = parse_document_with(SourceFile::new(body), &gated()).unwrap();
+        assert_eq!(headerless.edition, Edition::Fsl4);
+        assert_eq!(headerless, parse_document(SourceFile::new(body)).unwrap());
+        for header in ["fsl 4", "fsl 5"] {
+            let source = format!("{header}\n{body}");
+            let headed = parse_document_with(SourceFile::new(&source), &gated()).unwrap();
+            assert_eq!(headed.keyword, "spec");
+            let tokens = crate::lex_with(&source, &gated()).unwrap();
+            let expected = crate::lex(body).unwrap();
+            assert_eq!(tokens.len(), expected.len());
+            for (token, original) in tokens.iter().zip(&expected) {
+                assert_eq!(token.kind, original.kind);
+                assert_eq!(token.span.start.line, original.span.start.line + 1);
+                assert_eq!(token.span.start.column, original.span.start.column);
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_editions_and_editionless_dialects_reject_the_header() {
+        let error = parse_document_with(SourceFile::new("fsl 6\nspec S {}"), &gated()).unwrap_err();
+        assert_eq!(error.code(), crate::UNSUPPORTED_EDITION);
+        assert_eq!(
+            dialect_keyword_with("fsl 6\nspec S {}", &gated()),
+            Err(error)
+        );
+        for (source, keyword) in [
+            ("fsl 5\ncausal C {}", "causal"),
+            ("fsl 4\ncausal C {}", "causal"),
+            ("fsl 5\n@a.b(c)\nai_component A {}", "ai_component"),
+            ("fsl 5\nagent A {}", "agent"),
+            ("fsl 5\ndataset D {}", "dataset"),
+        ] {
+            let error = parse_document_with(SourceFile::new(source), &gated()).unwrap_err();
+            assert_eq!(
+                error.code(),
+                crate::EDITION_HEADER_NOT_ACCEPTED,
+                "{source:?}"
+            );
+            assert!(
+                error.message.contains(&format!("'{keyword}'")),
+                "{}",
+                error.message
+            );
+            assert_eq!((error.span.start.line, error.span.start.column), (1, 1));
+        }
+        // Without the gate the header stays the published unknown declaration.
+        let error = parse_document(SourceFile::new("fsl 5\ncausal C {}")).unwrap_err();
+        assert_eq!(error.code(), "FSL-DIALECT-UNKNOWN");
     }
 
     #[test]

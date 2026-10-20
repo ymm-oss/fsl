@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-use fsl_syntax::{Annotations, MetaTag};
+use fsl_syntax::{Annotations, MetaTag, ParseOptions};
 use serde_json::{Map, Value, json};
 
-use crate::dialect::{requirements_has_implements, requirements_trace_contract};
+use crate::dialect::{
+    requirements_has_implements_with_options, requirements_trace_contract_with_options,
+};
 use crate::{CoreError, KernelModel, TypeRef};
 
 /// Typed `kind` for the model-level "no user invariants" warning.
@@ -27,12 +29,16 @@ impl<'a> ModelWarningContext<'a> {
     /// # Errors
     ///
     /// Returns [`CoreError`] when the source cannot be parsed as requirements metadata.
-    pub fn from_source(model: &'a KernelModel, source: &str) -> Result<Self, CoreError> {
+    pub fn from_source(
+        model: &'a KernelModel,
+        source: &str,
+        options: &ParseOptions,
+    ) -> Result<Self, CoreError> {
         // Ungated: a forbidden the gate would reject still suppresses the
         // warning; `check` reports that rejection separately.
-        let has_forbidden = requirements_trace_contract(source)?
+        let has_forbidden = requirements_trace_contract_with_options(source, options)?
             .is_some_and(|contract| !contract.unchecked_forbidden().is_empty());
-        let has_implements = requirements_has_implements(source)?;
+        let has_implements = requirements_has_implements_with_options(source, options)?;
         Ok(Self {
             model,
             has_forbidden,

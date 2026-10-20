@@ -8,8 +8,8 @@ use std::fmt;
 
 use fsl_syntax::{
     ActionItem, AnnotationRegistry, Binder, BusinessItem, Expr, LValue, Param, ParseError,
-    RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceDocument, SurfaceSpec,
-    TypeExpr, VerifyItem, parse_document,
+    ParseOptions, RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceDocument,
+    SurfaceSpec, TypeExpr, VerifyItem, parse_document, parse_document_with,
 };
 use serde_json::Value;
 
@@ -48,7 +48,9 @@ mod trace_json;
 mod typecheck;
 
 pub use compose::{
-    FileResolver, FsResolver, lower_compose, parse_kernel_source, parse_kernel_source_with_file,
+    FileResolver, FsResolver, lower_compose, lower_compose_with_options, parse_kernel_source,
+    parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
+    parse_kernel_source_with_options,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
@@ -60,9 +62,12 @@ pub use dialect::{
     AiToolSets, GovernanceContract, GovernanceDelegate, GovernancePreservation,
     RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
     RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
-    governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
-    lower_governance, lower_requirements, requirements_declared_ids, requirements_has_implements,
-    requirements_trace_contract, validate_ai_component, verify_scope_type_names,
+    governance_contract, governance_contract_with_options, lower_ai_component, lower_business,
+    lower_db, lower_domain, lower_governance, lower_requirements, requirements_declared_ids,
+    requirements_declared_ids_with_options, requirements_has_implements,
+    requirements_has_implements_with_options, requirements_trace_contract,
+    requirements_trace_contract_with_options, validate_ai_component, verify_scope_type_names,
+    verify_scope_type_names_with_options,
 };
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
@@ -98,8 +103,9 @@ pub use public_kernel::{
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
-    Refinement, RefinementError, StateMap, parse_refinement, requirements_implements,
-    requirements_implements_with_bounds,
+    Refinement, RefinementError, StateMap, parse_refinement, parse_refinement_with_options,
+    requirements_implements, requirements_implements_with_bounds,
+    requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
@@ -550,7 +556,21 @@ pub fn retain_dialect_scope_overrides(
     instances: &InstanceOverrides,
     values: &ValueOverrides,
 ) -> Result<(InstanceOverrides, ValueOverrides), CoreError> {
-    let parsed = parse_document(SourceFile::new(source))?;
+    retain_dialect_scope_overrides_with_options(source, instances, values, &ParseOptions::stable())
+}
+
+/// [`retain_dialect_scope_overrides`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`retain_dialect_scope_overrides`].
+pub fn retain_dialect_scope_overrides_with_options(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+    options: &ParseOptions,
+) -> Result<(InstanceOverrides, ValueOverrides), CoreError> {
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
     let Some((entities, numbers)) = dialect_scope_override_names(&parsed.surface) else {
         return Ok((instances.clone(), values.clone()));
     };
@@ -650,10 +670,29 @@ pub fn filter_scope_overrides_for_abstraction(
     instances: &InstanceOverrides,
     values: &ValueOverrides,
 ) -> Result<FilteredScopeOverrides, CoreError> {
+    filter_scope_overrides_for_abstraction_with_options(
+        source,
+        instances,
+        values,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`filter_scope_overrides_for_abstraction`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`filter_scope_overrides_for_abstraction`].
+pub fn filter_scope_overrides_for_abstraction_with_options(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+    options: &ParseOptions,
+) -> Result<FilteredScopeOverrides, CoreError> {
     if instances.is_empty() && values.is_empty() {
         return Ok(None);
     }
-    let parsed = parse_document(SourceFile::new(source))?;
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
     let (entities, numbers) = declared_entity_number_names(&parsed.surface);
     let filtered_instances: BTreeMap<String, i64> = instances
         .iter()
@@ -684,15 +723,38 @@ pub fn parse_abstraction_kernel_source_with_bounds(
     instances: &InstanceOverrides,
     values: &ValueOverrides,
 ) -> Result<KernelSpec, CoreError> {
-    let (instances, values) =
-        match filter_scope_overrides_for_abstraction(source, instances, values)? {
-            Some((instances, values)) => (instances, values),
-            None => (BTreeMap::new(), BTreeMap::new()),
-        };
+    parse_abstraction_kernel_source_with_bounds_with_options(
+        source,
+        resolver,
+        instances,
+        values,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`parse_abstraction_kernel_source_with_bounds`] under explicit
+/// [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_abstraction_kernel_source_with_bounds`].
+pub fn parse_abstraction_kernel_source_with_bounds_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+    options: &ParseOptions,
+) -> Result<KernelSpec, CoreError> {
+    let (instances, values) = match filter_scope_overrides_for_abstraction_with_options(
+        source, instances, values, options,
+    )? {
+        Some((instances, values)) => (instances, values),
+        None => (BTreeMap::new(), BTreeMap::new()),
+    };
     if instances.is_empty() && values.is_empty() {
-        parse_kernel_source(source, resolver)
+        parse_kernel_source_with_options(source, resolver, options)
     } else {
-        parse_kernel_source_with_bounds(source, &instances, &values)
+        parse_kernel_source_with_bounds_with_options(source, &instances, &values, options)
     }
 }
 
@@ -708,6 +770,20 @@ pub fn parse_kernel_source_with_bounds(
     source: &str,
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<KernelSpec, CoreError> {
+    parse_kernel_source_with_bounds_with_options(source, instances, values, &ParseOptions::stable())
+}
+
+/// [`parse_kernel_source_with_bounds`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_kernel_source_with_bounds`].
+pub fn parse_kernel_source_with_bounds_with_options(
+    source: &str,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+    options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
     fn update_bounds(
         items: &mut [VerifyItem],
@@ -740,7 +816,7 @@ pub fn parse_kernel_source_with_bounds(
         }
     }
 
-    let parsed = parse_document(SourceFile::new(source))?;
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
     validate_dialect_scope_overrides(&parsed.surface, instances, values)?;
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {

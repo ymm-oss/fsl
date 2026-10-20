@@ -160,8 +160,12 @@ pub fn is_ai_project(source: &str) -> bool {
 
 /// Return deterministic warnings for omitted domain/requirements initial values.
 #[must_use]
-pub fn implicit_initial_value_warnings(source: &str, source_file: &str) -> Vec<Value> {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+pub fn implicit_initial_value_warnings(
+    source: &str,
+    source_file: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Vec<Value> {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, options) else {
         return Vec::new();
     };
     match document {

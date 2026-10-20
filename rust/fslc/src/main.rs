@@ -75,11 +75,11 @@ const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 fn parse_specialized_verify_options(
     args: &mut CommandArgs<impl Iterator<Item = String>>,
     allow_edition: bool,
-) -> Result<(usize, String, String, String), String> {
+) -> Result<(usize, String, String, Option<fsl_syntax::Edition>), String> {
     let mut depth = 8_usize;
     let mut deadlock = "warn".to_owned();
     let mut engine = "bmc".to_owned();
-    let mut edition = "current".to_owned();
+    let mut edition = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--depth" => {
@@ -198,23 +198,18 @@ fn fmt_command() -> Option<(FmtCliOutput, i32)> {
 struct FmtOptions {
     paths: Vec<PathBuf>,
     check: bool,
-    edition: fsl_syntax::FormatEdition,
+    edition: Option<fsl_syntax::Edition>,
 }
 
 fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, String> {
     let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
     let mut check = false;
-    let mut edition = fsl_syntax::FormatEdition::Current;
+    let mut edition = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check = true,
-            "--edition" => {
-                edition = fsl_syntax::FormatEdition::parse(&required_option_value(
-                    &mut args,
-                    "--edition",
-                )?)?;
-            }
+            "--edition" => edition = parse_edition(&mut args)?,
             option if option.starts_with('-') && option != "-" => {
                 return Err(format!("unknown fmt option '{option}'"));
             }
@@ -251,13 +246,23 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
             Ok(source) => source,
             Err(error) => return (FmtCliOutput::Json(error_output("io", &error)), 2),
         };
-        let formatted = match fsl_syntax::format_source(&source, options.edition) {
-            Ok(formatted) => formatted,
-            Err(fsl_syntax::FormatError::Parse(error)) => {
-                return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
-            }
-            Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
+        let edition = match fsl_syntax::document_edition(
+            &source,
+            options.edition,
+            fsl_syntax::Edition::Fsl4,
+            crate::parse_options(),
+        ) {
+            Ok(edition) => edition,
+            Err(error) => return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2),
         };
+        let formatted =
+            match fsl_syntax::format_source_with(&source, edition, crate::parse_options()) {
+                Ok(formatted) => formatted,
+                Err(fsl_syntax::FormatError::Parse(error)) => {
+                    return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
+                }
+                Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
+            };
         if let Err(error) = validate_fmt_semantics(&source, path) {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
@@ -276,7 +281,7 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
         FmtCliOutput::Json(json!({
             "fsl":"1.0",
             "result":"format_check",
-            "edition":options.edition.as_str(),
+            "edition":options.edition.map_or("current", fsl_syntax::Edition::as_str),
             "changed":any_changed,
             "files":files
         })),
@@ -298,7 +303,10 @@ fn read_fmt_source(path: &Path) -> Result<String, String> {
 
 struct MigrationOptions {
     paths: Vec<PathBuf>,
-    edition: fslc_rust::migration::Edition,
+    /// The explicit `--edition`; `None` reads each file in its header's
+    /// edition, or `default_edition` without one.
+    edition: Option<fsl_syntax::Edition>,
+    default_edition: fsl_syntax::Edition,
     write: bool,
     project: Option<PathBuf>,
 }
@@ -309,20 +317,15 @@ fn parse_migration_options(
 ) -> Result<MigrationOptions, String> {
     let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
-    let mut edition = if migrate {
-        fslc_rust::migration::Edition::Next
-    } else {
-        fslc_rust::migration::Edition::Current
-    };
+    let mut edition = None;
     let mut write = false;
     let mut project = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            // `migrate` defaults to the next edition, so an explicit
+            // `current` is kept rather than read as an omitted flag.
             "--edition" => {
-                edition = fslc_rust::migration::Edition::parse(&required_option_value(
-                    &mut args,
-                    "--edition",
-                )?)?;
+                edition = Some(parse_edition(&mut args)?.unwrap_or(fsl_syntax::Edition::Fsl4));
             }
             "--write" if migrate => write = true,
             "--project" if !migrate => {
@@ -358,6 +361,11 @@ fn parse_migration_options(
     Ok(MigrationOptions {
         paths,
         edition,
+        default_edition: if migrate {
+            fsl_syntax::Edition::Fsl5
+        } else {
+            fsl_syntax::Edition::Fsl4
+        },
         write,
         project,
     })
@@ -375,27 +383,29 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
     for path in &paths {
-        let (source, mut plan) = match load_migration_plan(path, options.edition) {
+        let (source, mut plan, edition) = match load_migration_plan(path, options) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
         plan.diagnostics
             .extend(fslc_rust::migration::id_policy_diagnostics(
-                &source, &id_policy,
+                &source,
+                &id_policy,
+                crate::parse_options(),
             ));
         plan.diagnostics
             .sort_by_key(|diagnostic| diagnostic.span.start.offset);
         finding_count += plan.diagnostics.len();
         files.push(json!({
             "path": path,
-            "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+            "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), edition)).collect::<Vec<_>>(),
         }));
     }
     (
         json!({
             "fsl":"1.0",
             "result":"lint",
-            "edition":options.edition.as_str(),
+            "edition":options.requested_edition(),
             "finding_count":finding_count,
             "id_policy":{
                 "source":policy_source,
@@ -506,7 +516,7 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
     let mut files = Vec::new();
     let mut refused = false;
     for path in &options.paths {
-        let (source, plan) = match load_migration_plan(path, options.edition) {
+        let (source, plan, edition) = match load_migration_plan(path, options) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
@@ -520,7 +530,7 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
         files.push(json!({
             "path":path,
             "changed":migrated.is_some(),
-            "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+            "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), edition)).collect::<Vec<_>>(),
             "edits":migrated.map(|replacement| vec![json!({"start":0,"end":source.len(),"replacement":replacement})]).unwrap_or_default(),
         }));
         planned.push((path.clone(), migrated.cloned()));
@@ -530,7 +540,7 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
             json!({
                 "fsl":"1.0",
                 "result":"migration_refused",
-                "edition":options.edition.as_str(),
+                "edition":options.requested_edition(),
                 "written":false,
                 "files":files,
             }),
@@ -558,7 +568,7 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
         json!({
             "fsl":"1.0",
             "result":"migrated",
-            "edition":options.edition.as_str(),
+            "edition":options.requested_edition(),
             "changed":changed,
             "written":options.write,
             "files":files,
@@ -567,14 +577,56 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
     )
 }
 
+impl MigrationOptions {
+    /// The published `edition` field: the requested spelling, else the default.
+    fn requested_edition(&self) -> &'static str {
+        self.edition.unwrap_or(self.default_edition).as_str()
+    }
+}
+
 fn load_migration_plan(
     path: &Path,
-    edition: fslc_rust::migration::Edition,
-) -> Result<(String, fslc_rust::migration::MigrationPlan), Value> {
+    options: &MigrationOptions,
+) -> Result<
+    (
+        String,
+        fslc_rust::migration::MigrationPlan,
+        fsl_syntax::Edition,
+    ),
+    Value,
+> {
     let source = std::fs::read_to_string(path)
         .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
-    let plan = fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), edition)
-        .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+    let edition = fsl_syntax::document_edition(
+        &source,
+        options.edition,
+        options.default_edition,
+        crate::parse_options(),
+    )
+    .map_err(|error| surface_parse_error_output(&error))?;
+    let mut plan = fslc_rust::migration::plan_migration(
+        &source,
+        &path.to_string_lossy(),
+        edition,
+        crate::parse_options(),
+    )
+    .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+    if let Some(header) =
+        fslc_rust::migration::missing_edition_header(&source, edition, crate::parse_options())
+    {
+        if !plan.refused() {
+            let migrated = plan.migrated_source.as_deref().unwrap_or(&source);
+            plan.migrated_source = fslc_rust::migration::missing_edition_header(
+                migrated,
+                edition,
+                crate::parse_options(),
+            )
+            .map(|insertion| fsl_syntax::apply_source_edits(migrated, insertion.edits))
+            .transpose()
+            .map_err(|error| migration_plan_error_output(&source, path, &error.to_string()))?;
+        }
+        plan.diagnostics.push(header);
+    }
     // A refused plan (`plan.refused()`) means `plan_migration` itself already
     // found a legacy construct it cannot machine-apply — e.g. `&&`, which is
     // not tokenizable under the current grammar at all and is recognized via
@@ -587,7 +639,7 @@ fn load_migration_plan(
     if !plan.refused() {
         validate_migration_input_semantics(&source, path)?;
     }
-    Ok((source, plan))
+    Ok((source, plan, edition))
 }
 
 /// Unconditional structural pre-flight shared by `run_lint` and `run_migrate`
@@ -617,14 +669,25 @@ fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), V
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
-        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        path.to_string_lossy(),
+        crate::parse_options(),
+    )
+    .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
     if matches!(
         fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
-        fsl_core::requirements_implements(source, &resolver, &model).map_err(|error| {
+        fsl_core::requirements_implements_with_options(
+            source,
+            &resolver,
+            &model,
+            crate::parse_options(),
+        )
+        .map_err(|error| {
             error.span.map_or_else(
                 || error_output("type", &error.message),
                 |span| located_error_output("type", &error.message, span),
@@ -650,15 +713,25 @@ fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Resul
 fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
-        .map_err(|error| error.to_string())?;
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        path.to_string_lossy(),
+        crate::parse_options(),
+    )
+    .map_err(|error| error.to_string())?;
     let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
     if matches!(
         fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
-        fsl_core::requirements_implements(source, &resolver, &model)
-            .map_err(|error| error.to_string())?;
+        fsl_core::requirements_implements_with_options(
+            source,
+            &resolver,
+            &model,
+            crate::parse_options(),
+        )
+        .map_err(|error| error.to_string())?;
     }
     let mut contract = fsl_core::public_kernel_contract(
         &kernel,
@@ -834,8 +907,13 @@ fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
     let source_file = path.to_string_lossy();
-    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, source_file)
-        .map_err(|error| error.to_string())?;
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        source_file,
+        crate::parse_options(),
+    )
+    .map_err(|error| error.to_string())?;
     fsl_core::build_model(kernel)
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -907,6 +985,9 @@ fn command() -> Result<(Value, i32), String> {
                 Ok(source) => source,
                 Err(error) => return Ok((spec_load_error_output(&error), 2)),
             };
+            if let Err(conflict) = edition_conflict(&source, options.shared.edition) {
+                return Ok(with_version_metadata(conflict));
+            }
             // Standalone causal models are never kernel specs; route them to
             // the causal checker instead of failing dialect dispatch.
             if fsl_syntax::is_causal_source(&source) {
@@ -924,7 +1005,7 @@ fn command() -> Result<(Value, i32), String> {
                 &source,
                 options.strict_tags,
                 options.requirements.as_deref(),
-                &options.shared.edition,
+                options.shared.edition,
             )))
         }
         "lint" => {
@@ -1280,12 +1361,15 @@ fn command() -> Result<(Value, i32), String> {
                     Ok(source) => source,
                     Err(error) => return Ok((spec_load_error_output(&error), 2)),
                 };
+                if let Err(conflict) = edition_conflict(&source, options.shared.edition) {
+                    return Ok(with_version_metadata(conflict));
+                }
                 let result = run_verify_cli_from_source(path, &display_path, &source, &options);
                 with_version_metadata(apply_domain_edition_from_source(
                     result,
                     &source,
                     &display_path,
-                    &options.shared.edition,
+                    options.shared.edition,
                 ))
             } else {
                 if !options.only_depth_and_deadlock() {
@@ -1753,15 +1837,17 @@ fn load_document_claims_with_label(
         // The projector reports a surface-parse failure as a plain message, so
         // recover the span and emit the same `kind:"parse"` envelope `check`
         // emits instead of a location-free `semantics` error.
-        Err(error) => Err(surface_parse_failure(&source).map_or_else(
-            || {
-                document_model_failure(&source, base).map_or_else(
-                    || document_projection_error_output(&error),
-                    |failure| model_error_output(&failure),
-                )
-            },
-            |error| surface_parse_error_output(&error),
-        )),
+        Err(error) => Err(
+            surface_parse_failure(&source, crate::parse_options()).map_or_else(
+                || {
+                    document_model_failure(&source, base).map_or_else(
+                        || document_projection_error_output(&error),
+                        |failure| model_error_output(&failure),
+                    )
+                },
+                |error| surface_parse_error_output(&error),
+            ),
+        ),
     }
 }
 
@@ -1777,7 +1863,11 @@ fn load_document_claims_with_label(
 /// envelope in place.
 fn document_model_failure(source: &str, base: &Path) -> Option<fsl_core::ModelError> {
     let resolver = fsl_core::FsResolver::new(base);
-    fsl_core::build_model(fsl_core::parse_kernel_source(source, &resolver).ok()?).err()
+    fsl_core::build_model(
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .ok()?,
+    )
+    .err()
 }
 
 fn document_diagnostics_error(
@@ -2078,7 +2168,11 @@ fn run_document_generate(
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+    let kernel = match fsl_core::parse_kernel_source_with_options(
+        &source,
+        &resolver,
+        crate::parse_options(),
+    ) {
         Ok(kernel) => kernel,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
@@ -2443,7 +2537,11 @@ fn run_document_check(
     };
     let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+    let kernel = match fsl_core::parse_kernel_source_with_options(
+        &source,
+        &resolver,
+        crate::parse_options(),
+    ) {
         Ok(kernel) => kernel,
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
@@ -2854,7 +2952,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
+            Ok(run_domain_check(&path, depth, &deadlock, &engine, edition))
         }
         "analyze" => {
             while let Some(option) = args.next() {
@@ -5706,6 +5804,7 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
         &display_path.to_string_lossy(),
         &resolver,
         &envelope,
+        crate::parse_options(),
     ) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
             let mut output = envelope();
@@ -5715,10 +5814,11 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
-            let warning_ctx = match ModelWarningContext::from_source(&model, source) {
-                Ok(ctx) => ctx,
-                Err(error) => return (semantic_error_output(&error.to_string()), 2),
-            };
+            let warning_ctx =
+                match ModelWarningContext::from_source(&model, source, crate::parse_options()) {
+                    Ok(ctx) => ctx,
+                    Err(error) => return (semantic_error_output(&error.to_string()), 2),
+                };
             let model_level_warnings =
                 finalize_model_warnings(model_warnings(&model), &warning_ctx);
             let warnings = kernel
@@ -5795,14 +5895,21 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         None
     };
     let parsed = portable_path.as_ref().map_or_else(
-        || fsl_core::parse_kernel_source(&source, &resolver),
-        |source_file| fsl_core::parse_kernel_source_with_file(&source, &resolver, source_file),
+        || fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options()),
+        |source_file| {
+            fsl_core::parse_kernel_source_with_file_with_options(
+                &source,
+                &resolver,
+                source_file,
+                crate::parse_options(),
+            )
+        },
     );
     let kernel = match parsed {
         Ok(kernel) => kernel,
         Err(error) => {
             return (
-                spec_load_error_output(&kernel_load_error(&source, &error)),
+                spec_load_error_output(&kernel_load_error(&source, &error, crate::parse_options())),
                 2,
             );
         }
@@ -5943,7 +6050,7 @@ fn run_check_with_tags_from_source(
     source: &str,
     strict_tags: bool,
     requirements: Option<&Path>,
-    edition: &str,
+    edition: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
     let (mut output, status) = run_check_from_source(path, display_path, source);
     if status == 0 && strict_tags {
@@ -5960,67 +6067,30 @@ fn run_check_with_tags_from_source(
     apply_domain_edition_from_source((output, status), source, display_path, edition)
 }
 
+/// The rendered `edition_conflict` rejection when `source`'s edition header
+/// and the requested `--edition` differ.
+fn edition_conflict(
+    source: &str,
+    requested: Option<fsl_syntax::Edition>,
+) -> Result<(), (Value, i32)> {
+    fslc_rust::migration::edition_conflict(source, requested, crate::parse_options(), envelope())
+}
+
 fn apply_domain_edition_from_source(
-    (mut output, status): (Value, i32),
+    result: (Value, i32),
     source: &str,
     display_path: &Path,
-    edition: &str,
+    requested: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
-    let migration_edition = if edition == "next" {
-        fslc_rust::migration::Edition::Next
-    } else {
-        fslc_rust::migration::Edition::Current
-    };
-    let Ok(plan) = fslc_rust::migration::plan_migration(
+    fslc_rust::migration::apply_edition(
+        result,
         source,
         &display_path.to_string_lossy(),
-        migration_edition,
-    ) else {
-        return (output, status);
-    };
-    let mut additions = plan
-        .diagnostics
-        .iter()
-        .filter(|finding| edition == "next" || finding.code == "deprecated_domain_enum_union")
-        .map(|finding| finding.json(&display_path.to_string_lossy(), migration_edition))
-        .collect::<Vec<_>>();
-    if edition != "next" {
-        additions.extend(fslc_rust::frontend_output::implicit_initial_value_warnings(
-            source,
-            &display_path.to_string_lossy(),
-        ));
-    }
-    if edition == "next" && !additions.is_empty() {
-        let kind = if additions.iter().all(|finding| {
-            finding.get("code").and_then(Value::as_str) == Some("deprecated_domain_enum_union")
-        }) {
-            "deprecated_domain_enum_union"
-        } else {
-            "unsupported_in_edition"
-        };
-        let mut error = envelope();
-        error.insert("result".to_owned(), json!("error"));
-        error.insert("kind".to_owned(), json!(kind));
-        error.insert("edition".to_owned(), json!(edition));
-        error.insert("findings".to_owned(), Value::Array(additions));
-        return (Value::Object(error), 2);
-    }
-    if !additions.is_empty()
-        && let Value::Object(envelope) = &mut output
-    {
-        envelope
-            .entry("warnings")
-            .or_insert_with(|| Value::Array(Vec::new()))
-            .as_array_mut()
-            .expect("warnings is an array")
-            .extend(additions);
-    }
-    if edition == "next"
-        && let Value::Object(envelope) = &mut output
-    {
-        envelope.insert("edition".to_owned(), json!(edition));
-    }
-    (output, status)
+        requested,
+        crate::parse_options(),
+        &envelope,
+        true,
+    )
 }
 
 fn parse_surface_document_from_source(
@@ -6981,7 +7051,7 @@ fn run_domain_check(
     depth: usize,
     deadlock: &str,
     engine: &str,
-    edition: &str,
+    edition: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
     let source = match read_domain_command_source(path) {
         Ok(source) => source,
@@ -8995,7 +9065,11 @@ fn reachable_counterfactuals_from_source(
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source(source, &resolver) else {
+            let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
+                source,
+                &resolver,
+                crate::parse_options(),
+            ) else {
                 return json!([]);
             };
             kernel.into_syntax()
@@ -9491,7 +9565,11 @@ fn invariant_counterfactuals_from_source(
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source(source, &resolver) else {
+            let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
+                source,
+                &resolver,
+                crate::parse_options(),
+            ) else {
                 return json!([]);
             };
             kernel.into_syntax()
@@ -10552,8 +10630,13 @@ fn apply_implements_mutation_oracle(
         return Ok(ImplementsOracle::Decided);
     }
     let resolver = fsl_core::FsResolver::new(base);
-    let Some(contract) = fsl_core::requirements_implements(source, &resolver, model)
-        .map_err(|error| error.to_string())?
+    let Some(contract) = fsl_core::requirements_implements_with_options(
+        source,
+        &resolver,
+        model,
+        crate::parse_options(),
+    )
+    .map_err(|error| error.to_string())?
     else {
         return Ok(ImplementsOracle::Decided);
     };
@@ -11168,13 +11251,15 @@ fn external_mutation_model(
         ));
     }
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source(source, &resolver).map_err(|error| {
-        invalid_mutation_detail(
-            external_mutant_core_error_kind(&error.kind),
-            error.to_string(),
-            None,
-        )
-    })?;
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .map_err(|error| {
+                invalid_mutation_detail(
+                    external_mutant_core_error_kind(&error.kind),
+                    error.to_string(),
+                    None,
+                )
+            })?;
     fsl_core::build_model(kernel).map_err(|error| {
         let message = error.to_string();
         let kind = if message.contains("unknown type") || message.contains("type mismatch") {
@@ -11380,7 +11465,11 @@ fn run_mutate_with(
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
                 fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            match fsl_core::parse_kernel_source(&source, &resolver) {
+            match fsl_core::parse_kernel_source_with_options(
+                &source,
+                &resolver,
+                crate::parse_options(),
+            ) {
                 Ok(kernel) => kernel.into_syntax(),
                 Err(error) => return mutate_error(core_error_output(&error)),
             }
@@ -11756,11 +11845,15 @@ fn run_typestate(path: &Path) -> (Value, i32) {
     };
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
+    let kernel = match fsl_core::parse_kernel_source_with_options(
+        &source,
+        &resolver,
+        crate::parse_options(),
+    ) {
         Ok(kernel) => kernel,
         Err(error) => {
             return (
-                spec_load_error_output(&kernel_load_error(&source, &error)),
+                spec_load_error_output(&kernel_load_error(&source, &error, crate::parse_options())),
                 2,
             );
         }
@@ -12023,8 +12116,11 @@ fn run_counterexample_export(
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    if let Some(message) = fslc_rust::reproducer::reproducer_source_preflight_error(&source, engine)
-    {
+    if let Some(message) = fslc_rust::reproducer::reproducer_source_preflight_error(
+        &source,
+        engine,
+        crate::parse_options(),
+    ) {
         return (semantic_error_output(&message), 2);
     }
     let (_, model) = match load_kernel_model_from_source(path, &source) {
@@ -12403,8 +12499,9 @@ fn render_document_for_approval(
     let loaded_evidence = load_evidence(&evidence_paths)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source(&source, &resolver)
-        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
+            .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model =
         fsl_core::build_model(kernel.clone()).map_err(|error| model_error_output(&error))?;
     let applied_glossary = loaded_glossary
@@ -12500,12 +12597,14 @@ fn approval_spec_digest(path: &Path) -> Result<String, SpecLoadError> {
         return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
     }
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    let kernel = fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| {
-        surface_parse_failure(&source).map_or_else(
-            || SpecLoadError::unlocated_semantic(error.to_string()),
-            |error| SpecLoadError::Parse(Box::new(error)),
-        )
-    })?;
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
+            .map_err(|error| {
+                surface_parse_failure(&source, crate::parse_options()).map_or_else(
+                    || SpecLoadError::unlocated_semantic(error.to_string()),
+                    |error| SpecLoadError::Parse(Box::new(error)),
+                )
+            })?;
     approval::spec_digest_kernel(&kernel).map_err(SpecLoadError::unlocated_semantic)
 }
 
@@ -14042,7 +14141,9 @@ fn add_scenario_items(
 ) {
     // Ungated (#1243): a parse failure projects no case, and a case the gate
     // would reject is projected like any other.
-    let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) else {
+    let Ok(Some(contract)) =
+        fsl_core::requirements_trace_contract_with_options(source, crate::parse_options())
+    else {
         return;
     };
     for (kind, cases) in [
@@ -14333,9 +14434,13 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             ));
         };
         let mapping_source = read_spec_source(&mapping_path)?;
-        let checked_refinement =
-            fsl_core::parse_refinement(&mapping_source, &implementation.model, &abstraction.model)
-                .map_err(|error| SpecLoadError::unlocated_semantic(error.message))?;
+        let checked_refinement = fsl_core::parse_refinement_with_options(
+            &mapping_source,
+            &implementation.model,
+            &abstraction.model,
+            crate::parse_options(),
+        )
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.message))?;
         let display = analysis_display_path(&mapping_path);
         let refinement_id = format!("refinement:{layer}->{target}:{}", refinement.name);
         let file_id = format!("file:{layer}->{target}:{display}");
@@ -15170,7 +15275,12 @@ fn semantic_diff_direction(
         );
         &generated
     };
-    let mapping = match fsl_core::parse_refinement(source, implementation, abstraction) {
+    let mapping = match fsl_core::parse_refinement_with_options(
+        source,
+        implementation,
+        abstraction,
+        crate::parse_options(),
+    ) {
         Ok(mapping) => mapping,
         Err(error) if automatic => {
             return Ok((
@@ -15595,7 +15705,8 @@ fn forbidden_diff_findings(
     // Ungated (#1239): OLD's forbidden cases are replayed by
     // `forbidden_case_finding`, not by the requirement-trace gate.
     let Some(contract) =
-        fsl_core::requirements_trace_contract(old_source).map_err(|error| error.to_string())?
+        fsl_core::requirements_trace_contract_with_options(old_source, crate::parse_options())
+            .map_err(|error| error.to_string())?
     else {
         return Ok(Vec::new());
     };
@@ -15610,7 +15721,8 @@ fn forbidden_diff_findings(
     // `None` when NEW's entity / number types are not in its source (#1229):
     // no NEW `bad_call` can then be told from a step outside a verify scope.
     let new_scope_types =
-        fsl_core::verify_scope_type_names(new_source).map_err(|error| error.to_string())?;
+        fsl_core::verify_scope_type_names_with_options(new_source, crate::parse_options())
+            .map_err(|error| error.to_string())?;
     Ok(contract
         .unchecked_forbidden()
         .iter()
@@ -15784,15 +15896,20 @@ fn run_diff(
     // that bound to the resolved `lo..hi` and shift the field's initial value
     // in the re-scoped old model; dropping it keeps the old document's bound.
     let old_model = if scope_changed {
-        let loadable = match fsl_core::retain_dialect_scope_overrides(
+        let loadable = match fsl_core::retain_dialect_scope_overrides_with_options(
             &old_source,
             &overrides.instances,
             &overrides.values,
+            crate::parse_options(),
         ) {
             Ok((instances, values)) => ScopeBounds { instances, values },
             Err(error) => {
                 return (
-                    spec_load_error_output(&kernel_load_error(&old_source, &error)),
+                    spec_load_error_output(&kernel_load_error(
+                        &old_source,
+                        &error,
+                        crate::parse_options(),
+                    )),
                     2,
                 );
             }
@@ -16630,7 +16747,7 @@ fn run_verify_from_source(
         implements_exit =
             fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
     }
-    if let Ok(ctx) = ModelWarningContext::from_source(&model, source) {
+    if let Ok(ctx) = ModelWarningContext::from_source(&model, source, crate::parse_options()) {
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
     let status = implements_exit.unwrap_or(status);
@@ -17393,8 +17510,11 @@ spec InitTraceability {
                 DEFAULT_EXPLICIT_BUDGET,
                 1,
             );
+            let requested =
+                fsl_syntax::Edition::parse_option(edition, &fsl_syntax::ParseOptions::stable())
+                    .expect("a published --edition value");
             let (output, status) =
-                apply_domain_edition_from_source(result, &captured, &fixture.path, edition);
+                apply_domain_edition_from_source(result, &captured, &fixture.path, requested);
             assert_eq!(
                 status, 0,
                 "{engine}/{edition} must verify source A: {output:#}"
@@ -17714,8 +17834,12 @@ spec InitTraceability {
             DEFAULT_EXPLICIT_BUDGET,
             1,
         );
-        let (output, status) =
-            apply_domain_edition_from_source(verified, &captured, &fixture.path, "next");
+        let (output, status) = apply_domain_edition_from_source(
+            verified,
+            &captured,
+            &fixture.path,
+            Some(fsl_syntax::Edition::Fsl5),
+        );
         assert_eq!(status, 0, "{output:#}");
         assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
         assert_eq!(output["edition"], "next", "{output:#}");

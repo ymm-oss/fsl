@@ -17,6 +17,7 @@ mod causal;
 mod db;
 mod dispatch;
 mod domain;
+mod edition;
 mod identifier;
 mod lexer;
 mod literate;
@@ -65,6 +66,11 @@ pub use domain::{
     DomainProjection, DomainReject, DomainRetry, DomainSaga, DomainSagaCompensation,
     DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
+pub use edition::{
+    EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED, EDITIONLESS_DECLARATIONS, Edition,
+    EditionHeader, MISSING_EDITION_HEADER, UNSUPPORTED_EDITION, document_edition, edition_header,
+    first_significant_offset,
+};
 pub use identifier::{
     CANONICAL_NAME_NOT_ASCII, FULLWIDTH_ASCII_IDENTIFIER, FULLWIDTH_SPACE, FULLWIDTH_SYMBOL,
     IDENTIFIER_DIAGNOSTICS, IdentifierRule, IdentifierSeverity, MIDDLE_DOT_IDENTIFIER,
@@ -74,9 +80,10 @@ pub use identifier::{
 pub use lexer::{LexError, LexWarning, Token, TokenKind, lex, lex_with, lexical_warnings};
 pub use literate::extract_literate_fsl;
 pub use lossless::{
-    CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,
-    LosslessKind, LosslessNode, SourceEdit, UnsafeFormatKind, apply_source_edits,
-    canonical_rewrites, format_source, lossless_document, source_position, source_span,
+    CanonicalRewrite, CanonicalRewriteKind, FormatError, LosslessDocument, LosslessKind,
+    LosslessNode, SourceEdit, UnsafeFormatKind, apply_source_edits, canonical_rewrites,
+    canonical_rewrites_with, format_source, format_source_with, lossless_document,
+    lossless_document_with, source_position, source_span,
 };
 pub use parser::{
     ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,

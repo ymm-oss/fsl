@@ -11,7 +11,8 @@
 //! other fsl-syntax entry that reads source text is *stable-pinned*: it
 //! parses the published language only, which is fail-closed (a document that
 //! needs the gate is rejected there, never read differently), but it is still
-//! a place a later stage must convert.
+//! a place a later stage must convert. fsl-core's published-language wrappers
+//! (each beside a `_with_options` entry) are counted the same way.
 //!
 //! This test reads every non-test Rust source of the workspace as a syntax
 //! tree and counts, per file, each reference to a stable-pinned entry and each
@@ -46,7 +47,36 @@ const STABLE_ENTRIES: &[&str] = &[
     "parse_ai_component",
     "parse_domain",
     "parse_db_system",
-    "extract_literate_fsl",
+];
+
+/// fsl-core entries that read source text under the published language: the
+/// wrappers kept beside each `_with_options` entry, which takes the options.
+/// Counted like the fsl-syntax entries, so a product caller cannot reach a
+/// stable parse through fsl-core either.
+const CORE_STABLE_ENTRIES: &[&str] = &[
+    "parse_kernel_source",
+    "parse_kernel_source_with_file",
+    "parse_kernel_source_with_bounds",
+    "parse_abstraction_kernel_source_with_bounds",
+    "filter_scope_overrides_for_abstraction",
+    "retain_dialect_scope_overrides",
+    "lower_compose",
+    "parse_direct_kernel_spec",
+    "parse_refinement",
+    "requirements_implements",
+    "requirements_implements_with_bounds",
+    "requirements_trace_contract",
+    "verify_scope_type_names",
+    "requirements_declared_ids",
+    "requirements_has_implements",
+    "governance_contract",
+];
+
+/// The crates whose stable entries are counted: `(crate name, workspace
+/// directory, entries)`.
+const OWNERS: &[(&str, &str, &[&str])] = &[
+    ("fsl_syntax", "fsl-syntax/", STABLE_ENTRIES),
+    ("fsl_core", "fsl-core/", CORE_STABLE_ENTRIES),
 ];
 
 /// Explicit constructions of the published-language options. Counted like an
@@ -57,29 +87,18 @@ const STABLE_CONSTRUCTIONS: &[&str] = &["ParseOptions::stable", "ParseOptions::d
 /// Owning stage for converting a stable-pinned reference.
 #[derive(Clone, Copy, Debug)]
 enum Owner {
-    /// The published-language wrapper itself, or the option source; stays.
+    /// The published-language wrapper itself, a fixed published-language
+    /// input, or a parity tool of the published language; stays.
     Definition,
-    /// S1 threads the options through this library API (edition wiring).
-    S1,
     /// decisions/049 D8: this dialect rejects an edition header, so it stays
     /// on the published language.
     D8,
+    /// fsl 5 plan S10 (document): the document projection and render chain
+    /// takes the options when it gains the next edition's sections; until then
+    /// a gated document is rejected there (fail closed), never read differently.
+    S10,
 }
 
-/// fsl-core / fsl-tools library function taking source text: S1 threads the
-/// options through its signature. Until then a gated document is rejected
-/// here (fail closed), never read differently.
-const LIBRARY_API: &str = "library API taking source text; S1 threads ParseOptions through it, \
-     until then a gated document is rejected here (fail closed)";
-/// fslc library module compiled into fsl-wasm / fsl-lsp too: the CLI's
-/// process value would be wrong for a Worker request, so S1 passes the
-/// options as a parameter.
-const SHARED_MODULE: &str = "fslc library module shared with fsl-wasm and fsl-lsp, so it cannot \
-     use the CLI's process options; S1 passes them as a parameter";
-const FORMAT_MIGRATE: &str = "fmt / migrate / migration diagnostics on the lossless tree; S1 owns \
-     the edition wiring of formatting and header insertion";
-const LITERATE: &str = "literate Markdown extraction; S1 reads the edition header in the first \
-     fsl fence";
 const CAUSAL_AI: &str = "causal or ai dialect: decisions/049 D8 makes an edition header an error \
      there, so the published language is the intended reading";
 const STANDALONE_FRONTEND: &str = "standalone public parser of one dialect with no product \
@@ -87,45 +106,70 @@ const STANDALONE_FRONTEND: &str = "standalone public parser of one dialect with 
      the options, so a document needing the wider identifier rule is rejected here (fail closed)";
 const FRAGMENT: &str = "expression / spec fragment parser with no document header; the wider \
      identifier rule is selected by the header, so a fragment always reads ASCII identifiers";
-const EDITOR_LEX: &str = "re-lexes source to place a diagnostic of the parse in the same module; \
-     it takes that parse's options when S1 passes them to this shared module, and until then that \
-     parse already rejects a gated document";
-const PARITY_TOOL: &str = "Python-parity debug binary reading the published language; S1 \
-     decides whether it takes the gate";
+const PARITY_TOOL: &str = "Python-parity debug binary: it compares against the frozen reference, \
+     which reads only the published language, so it never takes the gate";
 const REGISTRY: &str = "the private `domain` frontend wrapper shares the public entry's name; \
      it is reached only through parse_document_with";
-const STABLE_WRAPPER: &str = "the published-language entry itself: the `_with` entry under \
-     ParseOptions::stable";
+const STABLE_WRAPPER: &str = "the published-language entry itself: the options-taking entry \
+     under ParseOptions::stable";
+const DIRECT_KERNEL: &str = "parse_direct_kernel_spec keeps the published language: its only \
+     callers are tests";
+const FIXTURE: &str = "reads a fixed in-repository fixture written in the published language, \
+     never a user document";
+const DOCUMENT: &str = "document claims / render (#1243): the projection reads the published \
+     language until S10 threads the options through it; a gated document is rejected (fail \
+     closed)";
 
 /// `(workspace-relative file, entry, count, owner, reason)`.
 const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     (
+        "fsl-core/src/bin/fsl-parse-kernel.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        PARITY_TOOL,
+    ),
+    (
         "fsl-core/src/compose.rs",
-        "parse_document",
-        2,
-        Owner::S1,
-        LIBRARY_API,
+        "ParseOptions::stable",
+        3,
+        Owner::Definition,
+        STABLE_WRAPPER,
     ),
     (
         "fsl-core/src/dialect.rs",
-        "parse_surface_document",
-        7,
-        Owner::S1,
-        LIBRARY_API,
+        "ParseOptions::stable",
+        5,
+        Owner::Definition,
+        STABLE_WRAPPER,
+    ),
+    (
+        "fsl-core/src/lib.rs",
+        "ParseOptions::stable",
+        4,
+        Owner::Definition,
+        STABLE_WRAPPER,
     ),
     (
         "fsl-core/src/lib.rs",
         "parse_document",
-        4,
-        Owner::S1,
-        LIBRARY_API,
+        1,
+        Owner::Definition,
+        DIRECT_KERNEL,
     ),
     (
         "fsl-core/src/refinement.rs",
-        "parse_surface_document",
+        "ParseOptions::stable",
         2,
-        Owner::S1,
-        LIBRARY_API,
+        Owner::Definition,
+        STABLE_WRAPPER,
+    ),
+    (
+        "fsl-core/src/refinement.rs",
+        "requirements_implements_with_bounds",
+        1,
+        Owner::Definition,
+        STABLE_WRAPPER,
     ),
     (
         "fsl-lsp/src/index.rs",
@@ -135,11 +179,32 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         CAUSAL_AI,
     ),
     (
-        "fsl-lsp/src/server.rs",
-        "canonical_rewrites",
+        "fsl-runtime/src/bin/fsl-bfs.rs",
+        "parse_kernel_source",
         1,
-        Owner::S1,
-        FORMAT_MIGRATE,
+        Owner::Definition,
+        PARITY_TOOL,
+    ),
+    (
+        "fsl-runtime/src/bin/fsl-explicit.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        PARITY_TOOL,
+    ),
+    (
+        "fsl-runtime/src/bin/fsl-refine.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        PARITY_TOOL,
+    ),
+    (
+        "fsl-runtime/src/bin/fsl-refine.rs",
+        "parse_refinement",
+        1,
+        Owner::Definition,
+        PARITY_TOOL,
     ),
     ("fsl-syntax/src/ai.rs", "lex", 1, Owner::D8, CAUSAL_AI),
     (
@@ -153,7 +218,7 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         "fsl-syntax/src/bin/fsl-parse-surface.rs",
         "parse_surface_document",
         1,
-        Owner::S1,
+        Owner::Definition,
         PARITY_TOOL,
     ),
     (
@@ -173,17 +238,17 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ),
     (
         "fsl-syntax/src/dispatch.rs",
-        "parse_domain",
-        1,
-        Owner::Definition,
-        REGISTRY,
-    ),
-    (
-        "fsl-syntax/src/dispatch.rs",
         "ParseOptions::stable",
         2,
         Owner::Definition,
         STABLE_WRAPPER,
+    ),
+    (
+        "fsl-syntax/src/dispatch.rs",
+        "parse_domain",
+        1,
+        Owner::Definition,
+        REGISTRY,
     ),
     (
         "fsl-syntax/src/domain.rs",
@@ -201,31 +266,10 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ),
     (
         "fsl-syntax/src/lossless.rs",
-        "canonical_rewrites",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fsl-syntax/src/lossless.rs",
-        "lex",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fsl-syntax/src/lossless.rs",
-        "lossless_document",
-        2,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fsl-syntax/src/lossless.rs",
-        "parse_document",
+        "ParseOptions::stable",
         3,
-        Owner::S1,
-        FORMAT_MIGRATE,
+        Owner::Definition,
+        STABLE_WRAPPER,
     ),
     (
         "fsl-syntax/src/parser.rs",
@@ -243,24 +287,59 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ),
     (
         "fsl-tools/src/causal.rs",
+        "ParseOptions::stable",
+        1,
+        Owner::Definition,
+        STABLE_WRAPPER,
+    ),
+    (
+        "fsl-tools/src/causal.rs",
         "parse_causal",
         1,
         Owner::D8,
         CAUSAL_AI,
     ),
     (
-        "fsl-tools/src/causal_expectation.rs",
-        "parse_document",
-        1,
-        Owner::S1,
-        LIBRARY_API,
-    ),
-    (
         "fsl-tools/src/document_project.rs",
         "parse_document",
         2,
-        Owner::S1,
-        LIBRARY_API,
+        Owner::S10,
+        DOCUMENT,
+    ),
+    (
+        "fsl-tools/src/document_project.rs",
+        "parse_kernel_source",
+        1,
+        Owner::S10,
+        DOCUMENT,
+    ),
+    (
+        "fsl-tools/src/document_project.rs",
+        "requirements_trace_contract",
+        1,
+        Owner::S10,
+        DOCUMENT,
+    ),
+    (
+        "fsl-tools/src/document_render.rs",
+        "requirements_trace_contract",
+        1,
+        Owner::S10,
+        DOCUMENT,
+    ),
+    (
+        "fslc/src/bin/fsl-bmc.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        PARITY_TOOL,
+    ),
+    (
+        "fslc/src/bin/fsl-replay-actions.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        PARITY_TOOL,
     ),
     (
         "fslc/src/causal.rs",
@@ -270,18 +349,11 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         CAUSAL_AI,
     ),
     (
-        "fslc/src/check_stages.rs",
-        "parse_document",
+        "fslc/src/coverage.rs",
+        "parse_kernel_source",
         1,
-        Owner::S1,
-        SHARED_MODULE,
-    ),
-    (
-        "fslc/src/check_stages.rs",
-        "parse_surface_document",
-        1,
-        Owner::S1,
-        SHARED_MODULE,
+        Owner::Definition,
+        FIXTURE,
     ),
     (
         "fslc/src/frontend_output.rs",
@@ -296,34 +368,6 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         1,
         Owner::D8,
         CAUSAL_AI,
-    ),
-    (
-        "fslc/src/frontend_output.rs",
-        "parse_surface_document",
-        1,
-        Owner::S1,
-        SHARED_MODULE,
-    ),
-    (
-        "fslc/src/literate_access.rs",
-        "extract_literate_fsl",
-        1,
-        Owner::S1,
-        LITERATE,
-    ),
-    (
-        "fslc/src/main.rs",
-        "extract_literate_fsl",
-        1,
-        Owner::S1,
-        LITERATE,
-    ),
-    (
-        "fslc/src/main.rs",
-        "format_source",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
     ),
     (
         "fslc/src/main.rs",
@@ -341,54 +385,11 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ),
     ("fslc/src/main.rs", "parse_causal", 1, Owner::D8, CAUSAL_AI),
     (
-        "fslc/src/migration.rs",
-        "canonical_rewrites",
+        "fslc/src/origin_coverage.rs",
+        "parse_kernel_source_with_file",
         1,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fslc/src/migration.rs",
-        "dialect_keyword",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fslc/src/migration.rs",
-        "format_source",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    ("fslc/src/migration.rs", "lex", 1, Owner::S1, FORMAT_MIGRATE),
-    (
-        "fslc/src/migration.rs",
-        "lossless_document",
-        6,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fslc/src/migration.rs",
-        "parse_surface_document",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
-    ),
-    (
-        "fslc/src/reproducer.rs",
-        "parse_document",
-        1,
-        Owner::S1,
-        SHARED_MODULE,
-    ),
-    (
-        "fslc/src/source_diagnostic.rs",
-        "canonical_rewrites",
-        1,
-        Owner::S1,
-        FORMAT_MIGRATE,
+        Owner::Definition,
+        FIXTURE,
     ),
     (
         "fslc/src/source_diagnostic.rs",
@@ -399,31 +400,10 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ),
     (
         "fslc/src/source_diagnostic.rs",
-        "lex",
-        1,
-        Owner::S1,
-        EDITOR_LEX,
-    ),
-    (
-        "fslc/src/source_diagnostic.rs",
         "parse_causal",
         1,
         Owner::D8,
         CAUSAL_AI,
-    ),
-    (
-        "fslc/src/source_diagnostic.rs",
-        "parse_document",
-        1,
-        Owner::S1,
-        SHARED_MODULE,
-    ),
-    (
-        "fslc/src/spec_load.rs",
-        "parse_document",
-        1,
-        Owner::S1,
-        SHARED_MODULE,
     ),
     (
         "fslc/src/verification.rs",
@@ -438,13 +418,6 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         1,
         Owner::D8,
         CAUSAL_AI,
-    ),
-    (
-        "fslc/src/verification_output.rs",
-        "parse_surface_document",
-        1,
-        Owner::S1,
-        SHARED_MODULE,
     ),
 ];
 
@@ -459,7 +432,10 @@ fn every_parse_entry_is_routed_or_inventoried() {
             "duplicate inventory row {file} / {entry}"
         );
         assert!(
-            STABLE_ENTRIES.contains(&entry) || STABLE_CONSTRUCTIONS.contains(&entry),
+            OWNERS
+                .iter()
+                .any(|(_, _, entries)| entries.contains(&entry))
+                || STABLE_CONSTRUCTIONS.contains(&entry),
             "inventory row {file} / {entry} names no stable entry"
         );
         assert!(
@@ -520,7 +496,7 @@ fn scanner_resolves_paths_aliases_macros_and_shadowing() {
         #[cfg(test)]
         mod tests { fn t() { let _ = fsl_syntax::lex(""); } }
     "#;
-    let observed = scan_source("fixture.rs", source, false);
+    let observed = scan_source("fixture.rs", source, None);
     let counts = observed
         .iter()
         .map(|((_, entry), sites)| (entry.as_str(), sites.len()))
@@ -537,10 +513,60 @@ fn scanner_resolves_paths_aliases_macros_and_shadowing() {
         ])
     );
 
-    let glob = scan_source("glob.rs", "use fsl_syntax::*; fn f() {}", false);
+    let glob = scan_source("glob.rs", "use fsl_syntax::*; fn f() {}", None);
     assert!(
         glob.contains_key(&("glob.rs".to_owned(), "fsl_syntax::*".to_owned())),
         "a glob import must be reported because it hides entries: {glob:?}"
+    );
+}
+
+/// fsl-core's published-language wrappers are counted like fsl-syntax's (by
+/// path, by alias, and inside fsl-core by a bare call to a wrapper the file
+/// defines); its options-taking entries are not.
+#[test]
+fn scanner_counts_fsl_core_wrappers_but_not_their_options_entries() {
+    let product = r"
+        use fsl_core::parse_refinement as refine;
+        fn product(source: &str) {
+            let _ = fsl_core::parse_kernel_source(source, &resolver);
+            let _ = fsl_core::parse_kernel_source_with_options(source, &resolver, &options);
+            let _ = refine(source, &implementation, &abstraction);
+            let _ = fsl_core::requirements_trace_contract_with_options(source, &options);
+        }
+    ";
+    let counts = |observed: &BTreeMap<(String, String), Vec<String>>| {
+        observed
+            .iter()
+            .map(|((_, entry), sites)| (entry.clone(), sites.len()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    assert_eq!(
+        counts(&scan_source("product.rs", product, None)),
+        BTreeMap::from([
+            ("parse_kernel_source".to_owned(), 1),
+            ("parse_refinement".to_owned(), 1),
+        ])
+    );
+
+    let core = OWNERS
+        .iter()
+        .position(|(name, _, _)| *name == "fsl_core")
+        .expect("fsl_core owner");
+    let wrapper = r"
+        use fsl_syntax::ParseOptions;
+        pub fn parse_kernel_source(source: &str) {
+            parse_kernel_source_with_options(source, &ParseOptions::stable())
+        }
+        pub fn caller(source: &str) {
+            let _ = parse_kernel_source(source);
+        }
+    ";
+    assert_eq!(
+        counts(&scan_source("fsl-core/src/compose.rs", wrapper, Some(core))),
+        BTreeMap::from([
+            ("ParseOptions::stable".to_owned(), 1),
+            ("parse_kernel_source".to_owned(), 1),
+        ])
     );
 }
 
@@ -579,8 +605,10 @@ fn observe_workspace() -> BTreeMap<(String, String), Vec<String>> {
             .to_string_lossy()
             .replace('\\', "/");
         let source = std::fs::read_to_string(&path).expect("read Rust source");
-        let in_syntax_crate = relative.starts_with("fsl-syntax/");
-        for (key, sites) in scan_source(&relative, &source, in_syntax_crate) {
+        let home = OWNERS
+            .iter()
+            .position(|(_, directory, _)| relative.starts_with(directory));
+        for (key, sites) in scan_source(&relative, &source, home) {
             observed.entry(key).or_default().extend(sites);
         }
     }
@@ -598,14 +626,14 @@ fn collect_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Scan one file. In fsl-syntax, a bare name also counts when the file
-/// defines it (the entry's own module) or imports it through `crate`,
-/// `super`, or `self`; elsewhere a bare name counts only when imported from
-/// `fsl_syntax`.
+/// Scan one file. In an owning crate (`home`, an index into [`OWNERS`]), a
+/// bare name also counts when the file defines it (the entry's own module) or
+/// imports it through `crate`, `super`, or `self`; elsewhere a bare name
+/// counts only when imported from the owning crate by name.
 fn scan_source(
     relative: &str,
     source: &str,
-    in_syntax_crate: bool,
+    home: Option<usize>,
 ) -> BTreeMap<(String, String), Vec<String>> {
     let file = syn::parse_file(source)
         .unwrap_or_else(|error| panic!("{relative}: not parseable as Rust: {error}"));
@@ -615,18 +643,20 @@ fn scan_source(
             if is_test_only(&item_use.attrs) {
                 continue;
             }
-            imports.collect(&item_use.tree, &mut Vec::new(), in_syntax_crate);
+            imports.collect(&item_use.tree, &mut Vec::new(), home);
         }
-        if in_syntax_crate && let syn::Item::Fn(function) = item {
+        if let Some(home) = home
+            && let syn::Item::Fn(function) = item
+        {
             let name = function.sig.ident.to_string();
-            if STABLE_ENTRIES.contains(&name.as_str()) {
+            if OWNERS[home].2.contains(&name.as_str()) {
                 imports.bare.insert(name.clone(), name);
             }
         }
     }
     let mut scanner = Scanner {
         relative,
-        in_syntax_crate,
+        home,
         imports,
         functions: Vec::new(),
         observed: Observed::new(),
@@ -653,31 +683,31 @@ struct Imports {
 }
 
 impl Imports {
-    fn collect(&mut self, tree: &syn::UseTree, prefix: &mut Vec<String>, in_syntax_crate: bool) {
+    fn collect(&mut self, tree: &syn::UseTree, prefix: &mut Vec<String>, home: Option<usize>) {
         match tree {
             syn::UseTree::Path(path) => {
                 prefix.push(path.ident.to_string());
-                self.collect(&path.tree, prefix, in_syntax_crate);
+                self.collect(&path.tree, prefix, home);
                 prefix.pop();
             }
             syn::UseTree::Group(group) => {
                 for item in &group.items {
-                    self.collect(item, prefix, in_syntax_crate);
+                    self.collect(item, prefix, home);
                 }
             }
             syn::UseTree::Name(name) => {
-                self.import(prefix, &name.ident.to_string(), None, in_syntax_crate);
+                self.import(prefix, &name.ident.to_string(), None, home);
             }
             syn::UseTree::Rename(rename) => {
                 self.import(
                     prefix,
                     &rename.ident.to_string(),
                     Some(rename.rename.to_string()),
-                    in_syntax_crate,
+                    home,
                 );
             }
             syn::UseTree::Glob(_) => {
-                if from_syntax(prefix, in_syntax_crate) {
+                if owner_of(prefix, home).is_some() {
                     self.globs.push(format!("{}::*", prefix.join("::")));
                 }
             }
@@ -689,25 +719,31 @@ impl Imports {
         prefix: &[String],
         name: &str,
         rename: Option<String>,
-        in_syntax_crate: bool,
+        home: Option<usize>,
     ) {
-        if !from_syntax(prefix, in_syntax_crate) {
+        let Some(owner) = owner_of(prefix, home) else {
             return;
-        }
+        };
         let local = rename.unwrap_or_else(|| name.to_owned());
-        if STABLE_ENTRIES.contains(&name) {
+        if OWNERS[owner].2.contains(&name) {
             self.bare.insert(local, name.to_owned());
-        } else if name == "ParseOptions" {
+        } else if owner == SYNTAX && name == "ParseOptions" {
             self.parse_options = true;
         }
     }
 }
 
-fn from_syntax(prefix: &[String], in_syntax_crate: bool) -> bool {
-    prefix.first().is_some_and(|first| {
-        first == "fsl_syntax"
-            || (in_syntax_crate && matches!(first.as_str(), "crate" | "super" | "self"))
-    })
+/// Index of fsl-syntax in [`OWNERS`], the crate that defines `ParseOptions`.
+const SYNTAX: usize = 0;
+
+/// The owning crate a path prefix names: by crate name, or the file's own
+/// crate through `crate` / `super` / `self`.
+fn owner_of(prefix: &[String], home: Option<usize>) -> Option<usize> {
+    let first = prefix.first()?;
+    if matches!(first.as_str(), "crate" | "super" | "self") {
+        return home;
+    }
+    OWNERS.iter().position(|(name, _, _)| first == name)
 }
 
 fn is_test_only(attrs: &[syn::Attribute]) -> bool {
@@ -727,7 +763,7 @@ fn is_test_only(attrs: &[syn::Attribute]) -> bool {
 
 struct Scanner<'a> {
     relative: &'a str,
-    in_syntax_crate: bool,
+    home: Option<usize>,
     imports: Imports,
     functions: Vec<String>,
     observed: Observed,
@@ -760,7 +796,7 @@ impl Scanner<'_> {
         }
         if let [.., qualifier] = head
             && qualifier == "ParseOptions"
-            && from_syntax(head, self.in_syntax_crate)
+            && owner_of(head, self.home) == Some(SYNTAX)
         {
             let construction = format!("ParseOptions::{last}");
             return STABLE_CONSTRUCTIONS
@@ -770,7 +806,10 @@ impl Scanner<'_> {
         if head.is_empty() {
             return self.imports.bare.get(last).cloned();
         }
-        (from_syntax(head, self.in_syntax_crate) && STABLE_ENTRIES.contains(&last.as_str()))
+        let owner = owner_of(head, self.home)?;
+        OWNERS[owner]
+            .2
+            .contains(&last.as_str())
             .then(|| last.clone())
     }
 
@@ -857,8 +896,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
         // resolved up front; a block-level import applies from here on.
         if !is_test_only(&node.attrs) {
             let mut globs = std::mem::take(&mut self.imports.globs);
-            self.imports
-                .collect(&node.tree, &mut Vec::new(), self.in_syntax_crate);
+            self.imports.collect(&node.tree, &mut Vec::new(), self.home);
             for glob in self.imports.globs.drain(..) {
                 if !globs.contains(&glob) {
                     self.observed

@@ -30,8 +30,9 @@ pub fn diagnostics(
     source: &str,
     source_file: &str,
     resolver: &dyn fsl_core::FileResolver,
+    options: &fsl_syntax::ParseOptions,
 ) -> Vec<SourceDiagnostic> {
-    diagnostics_with_model(source, source_file, resolver).0
+    diagnostics_with_model(source, source_file, resolver, options).0
 }
 
 /// Run frontend diagnostics and retain the checked model for analysis consumers.
@@ -40,9 +41,10 @@ pub fn diagnostics_with_model(
     source: &str,
     source_file: &str,
     resolver: &dyn fsl_core::FileResolver,
+    options: &fsl_syntax::ParseOptions,
 ) -> (Vec<SourceDiagnostic>, Option<fsl_core::KernelModel>) {
     if crate::frontend_output::is_ai_project(source) {
-        return (migration_diagnostics(source), None);
+        return (migration_diagnostics(source, *options), None);
     }
     // Standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md):
     // surface their own parse errors, never FSL-DIALECT-UNKNOWN, and no kernel.
@@ -64,7 +66,8 @@ pub fn diagnostics_with_model(
             ),
         };
     }
-    let parsed = match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
+    let parsed = match fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), options)
+    {
         Ok(parsed) => parsed,
         Err(error) => {
             return (
@@ -86,15 +89,20 @@ pub fn diagnostics_with_model(
         parsed.surface,
         SurfaceDocument::Agent(_) | SurfaceDocument::Refinement(_)
     ) {
-        return (migration_diagnostics(source), None);
+        return (migration_diagnostics(source, *options), None);
     }
-    let kernel = match fsl_core::parse_kernel_source_with_file(source, resolver, source_file) {
+    let kernel = match fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        resolver,
+        source_file,
+        options,
+    ) {
         Ok(kernel) => kernel,
         Err(error) => return (vec![core_diagnostic(source, &error)], None),
     };
     match fsl_core::build_model(kernel) {
-        Ok(model) => (migration_diagnostics(source), Some(model)),
-        Err(error) => (vec![model_diagnostic(source, &error)], None),
+        Ok(model) => (migration_diagnostics(source, *options), Some(model)),
+        Err(error) => (vec![model_diagnostic(source, &error, *options)], None),
     }
 }
 
@@ -119,7 +127,11 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
     }
 }
 
-fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnostic {
+fn model_diagnostic(
+    source: &str,
+    error: &fsl_core::ModelError,
+    options: fsl_syntax::ParseOptions,
+) -> SourceDiagnostic {
     let message = error.to_string();
     let class = DiagnosticClass::model(error.name_resolution);
     let kind = crate::verification_output::diagnostic_kind(&message, &class);
@@ -132,7 +144,7 @@ fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnos
                 .and_then(|origin| origin.primary.as_ref())
                 .and_then(|site| site.span)
         })
-        .or_else(|| diagnostic_span_from_message(source, &message));
+        .or_else(|| diagnostic_span_from_message(source, &message, options));
     SourceDiagnostic {
         kind,
         code: error.diagnostic_code.map_or_else(
@@ -152,16 +164,23 @@ fn model_diagnostic(source: &str, error: &fsl_core::ModelError) -> SourceDiagnos
     }
 }
 
-fn diagnostic_span_from_message(source: &str, message: &str) -> Option<Span> {
+fn diagnostic_span_from_message(
+    source: &str,
+    message: &str,
+    options: fsl_syntax::ParseOptions,
+) -> Option<Span> {
     let quoted = message.split('\'').nth(1)?;
-    fsl_syntax::lex(source).ok()?.into_iter().find_map(|token| {
-        matches!(&token.kind, fsl_syntax::TokenKind::Ident(name) if name == quoted)
-            .then_some(token.span)
-    })
+    fsl_syntax::lex_with(source, &options)
+        .ok()?
+        .into_iter()
+        .find_map(|token| {
+            matches!(&token.kind, fsl_syntax::TokenKind::Ident(name) if name == quoted)
+                .then_some(token.span)
+        })
 }
 
-fn migration_diagnostics(source: &str) -> Vec<SourceDiagnostic> {
-    fsl_syntax::canonical_rewrites(source).map_or_else(
+fn migration_diagnostics(source: &str, options: fsl_syntax::ParseOptions) -> Vec<SourceDiagnostic> {
+    fsl_syntax::canonical_rewrites_with(source, &options).map_or_else(
         |_| Vec::new(),
         |rewrites| {
             rewrites
@@ -234,7 +253,12 @@ mod tests {
     #[test]
     fn preserves_authoritative_parse_diagnostic() {
         let source = "spec Broken { state {";
-        let found = diagnostics(source, "broken.fsl", &fsl_core::FsResolver::new("."));
+        let found = diagnostics(
+            source,
+            "broken.fsl",
+            &fsl_core::FsResolver::new("."),
+            &fsl_syntax::ParseOptions::stable(),
+        );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, "parse");
         assert_eq!(found[0].code, "FSL-PARSE");
@@ -248,7 +272,12 @@ mod tests {
   state { value: Missing }
   init { value = 0 }
 }";
-        let found = diagnostics(source, "broken.fsl", &fsl_core::FsResolver::new("."));
+        let found = diagnostics(
+            source,
+            "broken.fsl",
+            &fsl_core::FsResolver::new("."),
+            &fsl_syntax::ParseOptions::stable(),
+        );
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, "type");
         assert!(found[0].message.contains("unknown type 'Missing'"));
@@ -269,7 +298,12 @@ mod tests {
                 "}",
             ]
             .join(newline);
-            let found = diagnostics(&source, "probe.fsl", &fsl_core::FsResolver::new("."));
+            let found = diagnostics(
+                &source,
+                "probe.fsl",
+                &fsl_core::FsResolver::new("."),
+                &fsl_syntax::ParseOptions::stable(),
+            );
             let diagnostic = found
                 .iter()
                 .find(|item| item.message.contains("undefined predicate"))
@@ -294,7 +328,15 @@ mod tests {
   @undecided("pending")
   invariant Ready { ready }
 }"#;
-        assert!(diagnostics(source, "annotated.fsl", &fsl_core::FsResolver::new(".")).is_empty());
+        assert!(
+            diagnostics(
+                source,
+                "annotated.fsl",
+                &fsl_core::FsResolver::new("."),
+                &fsl_syntax::ParseOptions::stable()
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -303,7 +345,12 @@ mod tests {
   type Status = Pending | Approved
   aggregate Order { state { status: Status = Pending; } }
 }";
-        let found = diagnostics(source, "orders.fsl", &fsl_core::FsResolver::new("."));
+        let found = diagnostics(
+            source,
+            "orders.fsl",
+            &fsl_core::FsResolver::new("."),
+            &fsl_syntax::ParseOptions::stable(),
+        );
         assert!(
             found
                 .iter()

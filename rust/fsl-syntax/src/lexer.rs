@@ -83,13 +83,30 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
 }
 
 /// [`lex`] under explicit [`crate::ParseOptions`], with the identifier rule
-/// [`IdentifierRule::for_source`] selects.
+/// [`IdentifierRule::for_source`] selects. The tokens of an edition header
+/// ([`crate::edition_header`]) are not part of the stream.
 ///
 /// # Errors
 ///
 /// Returns [`LexError`] for characters or literals the lexer rejects.
 pub fn lex_with(source: &str, options: &crate::ParseOptions) -> Result<Vec<Token>, LexError> {
-    Lexer::new(source, IdentifierRule::for_source(source, options)).lex_all()
+    let mut tokens = lex_with_header(source, *options)?;
+    if matches!(crate::edition_header(source, options), Ok(Some(_))) {
+        debug_assert!(
+            matches!(&tokens[0].kind, TokenKind::Ident(name) if name == "fsl")
+                && matches!(tokens[1].kind, TokenKind::Int(_))
+        );
+        tokens.drain(..2);
+    }
+    Ok(tokens)
+}
+
+/// [`lex_with`] keeping the edition header's tokens, for the lossless tree.
+pub(crate) fn lex_with_header(
+    source: &str,
+    options: crate::ParseOptions,
+) -> Result<Vec<Token>, LexError> {
+    Lexer::new(source, IdentifierRule::for_source(source, &options)).lex_all()
 }
 
 /// The warnings lexing `source` under `options` reports, up to the first

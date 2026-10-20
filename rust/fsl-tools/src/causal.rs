@@ -291,13 +291,28 @@ pub fn build_causal_model(
     source: &str,
     resolver: &dyn FileResolver,
 ) -> Result<(CausalModel, Vec<CausalWarning>), CausalError> {
+    build_causal_model_with_options(source, resolver, &fsl_syntax::ParseOptions::stable())
+}
+
+/// [`build_causal_model`] with the imported specs read under `options`. The
+/// causal document itself has no syntax edition.
+///
+/// # Errors
+///
+/// Returns the first fatal well-formedness [`CausalError`]; parse errors use
+/// kind `parse`. Warnings never block model construction.
+pub fn build_causal_model_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<(CausalModel, Vec<CausalWarning>), CausalError> {
     let surface = parse_causal(source).map_err(|error| CausalError {
         kind: "parse",
         message: error.message.clone(),
         line: error.span.start.line,
         column: error.span.start.column,
     })?;
-    type_causal_model(&surface, resolver)
+    type_causal_model(&surface, resolver, *options)
 }
 
 fn duplicate(kind: &str, id: &str, span: Span) -> CausalError {
@@ -312,6 +327,7 @@ fn duplicate(kind: &str, id: &str, span: Span) -> CausalError {
 fn type_causal_model(
     surface: &CausalSource,
     resolver: &dyn FileResolver,
+    options: fsl_syntax::ParseOptions,
 ) -> Result<(CausalModel, Vec<CausalWarning>), CausalError> {
     let timebase = validate_timebase(surface)?;
     let horizon = surface
@@ -324,7 +340,7 @@ fn type_causal_model(
             )
         })?
         .0;
-    let imports = resolve_imports(surface, resolver)?;
+    let imports = resolve_imports(surface, resolver, options)?;
     let scope = build_scope_vocabulary(surface)?;
     let default_scope = resolve_scope_selections(&surface.default_scope, &scope)?;
     let clocks = resolve_clocks(surface, &imports, &timebase)?;
@@ -375,6 +391,7 @@ fn validate_timebase(surface: &CausalSource) -> Result<String, CausalError> {
 fn resolve_imports(
     surface: &CausalSource,
     resolver: &dyn FileResolver,
+    options: fsl_syntax::ParseOptions,
 ) -> Result<BTreeMap<String, ImportedSpec>, CausalError> {
     let mut imports = BTreeMap::new();
     for import in &surface.uses {
@@ -388,29 +405,34 @@ fn resolve_imports(
                 import.span,
             )
         })?;
-        let kernel = fsl_core::parse_kernel_source_with_file(&source, resolver, &import.path)
-            .map_err(|error| {
+        let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+            &source,
+            resolver,
+            &import.path,
+            &options,
+        )
+        .map_err(|error| {
+            CausalError::at(
+                "causal_unknown_reference",
+                format!(
+                    "imported spec '{}' failed its own check: {} (at {}:{})",
+                    import.path, error.message, error.line, error.column
+                ),
+                import.span,
+            )
+        })
+        .and_then(|kernel| {
+            build_model(kernel).map_err(|error| {
                 CausalError::at(
                     "causal_unknown_reference",
                     format!(
-                        "imported spec '{}' failed its own check: {} (at {}:{})",
-                        import.path, error.message, error.line, error.column
+                        "imported spec '{}' failed its own check: {}",
+                        import.path, error.message
                     ),
                     import.span,
                 )
             })
-            .and_then(|kernel| {
-                build_model(kernel).map_err(|error| {
-                    CausalError::at(
-                        "causal_unknown_reference",
-                        format!(
-                            "imported spec '{}' failed its own check: {}",
-                            import.path, error.message
-                        ),
-                        import.span,
-                    )
-                })
-            })?;
+        })?;
         let mut spec = ImportedSpec {
             spec_name: kernel.name.clone(),
             ..ImportedSpec::default()

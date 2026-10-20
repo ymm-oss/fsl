@@ -6,7 +6,9 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::{LexError, ParseError, SourceFile, Span, TokenKind, lex, parse_document};
+use crate::{
+    Edition, LexError, ParseError, ParseOptions, SourceFile, Span, TokenKind, parse_document_with,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LosslessKind {
@@ -86,35 +88,6 @@ impl LosslessDocument {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FormatEdition {
-    Current,
-    Next,
-}
-
-impl FormatEdition {
-    /// Parse the public CLI spelling.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for editions that have no formatting policy.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "current" => Ok(Self::Current),
-            "next" => Ok(Self::Next),
-            _ => Err("--edition must be current or next".to_owned()),
-        }
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Next => "next",
-        }
-    }
-}
-
 /// Why a formatter rewrite was refused as unsafe, independent of its wording.
 ///
 /// Consumers that classify the refusal (`fslc migrate`'s diagnostic code)
@@ -178,7 +151,14 @@ impl std::error::Error for FormatError {}
 /// without losing the original bytes.
 #[must_use]
 pub fn lossless_document(source: &str) -> LosslessDocument {
-    let tokens = match lex(source) {
+    lossless_document_with(source, &ParseOptions::stable())
+}
+
+/// [`lossless_document`] under explicit [`ParseOptions`]. An edition header
+/// stays in the tree as its two tokens.
+#[must_use]
+pub fn lossless_document_with(source: &str, options: &ParseOptions) -> LosslessDocument {
+    let tokens = match crate::lexer::lex_with_header(source, *options) {
         Ok(tokens) => tokens,
         Err(error) => {
             return LosslessDocument {
@@ -306,8 +286,22 @@ pub fn source_span(source: &str, start: usize, end: usize) -> Span {
 /// Returns the original lexical or parse error. Sources containing a legacy
 /// domain enum with an interior comment are refused until that structural
 /// rewrite can preserve the comment attachment unambiguously.
-pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, FormatError> {
-    let rewrites = canonical_rewrites(source)?;
+pub fn format_source(source: &str, edition: Edition) -> Result<String, FormatError> {
+    format_source_with(source, edition, &ParseOptions::stable())
+}
+
+/// [`format_source`] under explicit [`ParseOptions`]; an edition header is
+/// kept.
+///
+/// # Errors
+///
+/// As [`format_source`].
+pub fn format_source_with(
+    source: &str,
+    _edition: Edition,
+    options: &ParseOptions,
+) -> Result<String, FormatError> {
+    let rewrites = canonical_rewrites_with(source, options)?;
     let rewritten = apply_source_edits(
         source,
         rewrites
@@ -315,13 +309,14 @@ pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, Fo
             .flat_map(|rewrite| rewrite.edits)
             .collect(),
     )?;
-    let tree = lossless_document(&rewritten);
-    let parsed = parse_document(SourceFile::new(&rewritten)).map_err(FormatError::Parse)?;
+    let tree = lossless_document_with(&rewritten, options);
+    let parsed =
+        parse_document_with(SourceFile::new(&rewritten), options).map_err(FormatError::Parse)?;
     let compact_hyphens = business_id_hyphen_offsets(&tree, parsed.keyword);
     let mut formatter = Formatter::new(compact_hyphens);
     formatter.write(tree.nodes());
     let output = formatter.finish();
-    parse_document(SourceFile::new(&output)).map_err(FormatError::Parse)?;
+    parse_document_with(SourceFile::new(&output), options).map_err(FormatError::Parse)?;
     Ok(output)
 }
 
@@ -332,11 +327,24 @@ pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, Fo
 /// Returns the original parse failure or an unsafe-rewrite error when source
 /// trivia cannot be attached unambiguously.
 pub fn canonical_rewrites(source: &str) -> Result<Vec<CanonicalRewrite>, FormatError> {
-    let tree = lossless_document(source);
+    canonical_rewrites_with(source, &ParseOptions::stable())
+}
+
+/// [`canonical_rewrites`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`canonical_rewrites`].
+pub fn canonical_rewrites_with(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<Vec<CanonicalRewrite>, FormatError> {
+    let tree = lossless_document_with(source, options);
     if let Some(error) = tree.error() {
         return Err(FormatError::Lex(error.clone()));
     }
-    let parsed = parse_document(SourceFile::new(source)).map_err(FormatError::Parse)?;
+    let parsed =
+        parse_document_with(SourceFile::new(source), options).map_err(FormatError::Parse)?;
     refuse_opaque_agent(&tree, parsed.keyword)?;
     let mut rewrites = plan_domain_enum(&tree, parsed.keyword)?;
     rewrites.extend(plan_domain_logical(&tree, parsed.keyword));
@@ -991,7 +999,7 @@ mod tests {
         assert!(matches!(tree.nodes()[0].kind, LosslessKind::Error));
         assert_eq!(tree.nodes()[0].text, source);
         assert!(matches!(
-            format_source(source, FormatEdition::Current),
+            format_source(source, Edition::Fsl4),
             Err(FormatError::Lex(_))
         ));
     }
@@ -1000,8 +1008,8 @@ mod tests {
     fn formatter_is_idempotent_and_preserves_comments() {
         let source =
             include_str!("../../fslc/tests/fixtures/domain_characterization/expressions_valid.fsl");
-        let once = format_source(source, FormatEdition::Next).expect("format");
-        let twice = format_source(&once, FormatEdition::Next).expect("format twice");
+        let once = format_source(source, Edition::Fsl5).expect("format");
+        let twice = format_source(&once, Edition::Fsl5).expect("format twice");
         assert_eq!(once, twice);
         assert!(once.contains("// SPDX-License-Identifier: Apache-2.0"));
         assert!(once.contains("enum OrderStatus"));
@@ -1009,10 +1017,34 @@ mod tests {
         assert!(once.contains(" => "));
     }
 
+    /// The formatter keeps an edition header (behind the gate) and leaves the
+    /// rest of the document formatted as without it.
+    #[test]
+    fn formatter_keeps_the_edition_header() {
+        let gated = ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
+        );
+        let body = "domain D {   type Status = Draft | Done; }";
+        let plain = format_source(body, Edition::Fsl4).expect("format");
+        for header in ["fsl 4", "fsl 5"] {
+            let source = format!("// note\n{header}\n\n{body}");
+            let once = format_source_with(&source, Edition::Fsl4, &gated).expect("format");
+            assert_eq!(once, format!("// note\n{header}\n\n{plain}"));
+            assert_eq!(
+                format_source_with(&once, Edition::Fsl4, &gated).expect("format twice"),
+                once
+            );
+            assert!(matches!(
+                format_source(&source, Edition::Fsl4),
+                Err(FormatError::Parse(error)) if error.code() == "FSL-DIALECT-UNKNOWN"
+            ));
+        }
+    }
+
     #[test]
     fn commented_legacy_enum_is_refused_without_losing_source() {
         let source = "domain D { type Status = Draft // keep\n | Done; }";
-        let error = format_source(source, FormatEdition::Next).expect_err("unsafe rewrite");
+        let error = format_source(source, Edition::Fsl5).expect_err("unsafe rewrite");
         assert!(matches!(error, FormatError::Unsafe { .. }));
         assert_eq!(lossless_document(source).source(), source);
     }
@@ -1022,8 +1054,8 @@ mod tests {
         let source = "spec LegacyQuantifierColons { const MAXI = 1 const MAXU = 1 \
             state { flag: Bool } init { forall i in 0..MAXI: { flag = false } } \
             action keep() { forall i in 0..MAXU: { flag = flag } } }";
-        let once = format_source(source, FormatEdition::Next).expect("format quantifiers");
-        let twice = format_source(&once, FormatEdition::Next).expect("format twice");
+        let once = format_source(source, Edition::Fsl5).expect("format quantifiers");
+        let twice = format_source(&once, Edition::Fsl5).expect("format twice");
         assert_eq!(once, twice);
         assert!(!once.contains("MAXI:"));
         assert!(!once.contains("MAXU:"));
@@ -1042,14 +1074,14 @@ mod tests {
         // bodies, because no native pretty-printer exists for the agent
         // grammar yet (see the next test).
         let source = "agent Planner { opaque_call() }";
-        let error = format_source(source, FormatEdition::Current).expect_err("invalid agent body");
+        let error = format_source(source, Edition::Fsl4).expect_err("invalid agent body");
         assert!(matches!(error, FormatError::Parse(_)));
     }
 
     #[test]
     fn nonempty_well_formed_agent_body_is_still_refused_pending_a_printer() {
         let source = "agent Planner { model foo; }";
-        let error = format_source(source, FormatEdition::Current).expect_err("no agent printer");
+        let error = format_source(source, Edition::Fsl4).expect_err("no agent printer");
         assert!(matches!(error, FormatError::Unsafe { .. }));
     }
 
@@ -1057,8 +1089,8 @@ mod tests {
     fn equivalent_layouts_converge_to_one_canonical_form() {
         let compact = "spec S { state { stock: Map<Int, Bool> } init { stock[0] = false } invariant P { stock[0] == false } }";
         let spaced = "spec S {\n  state { stock: Map < Int, Bool > }\n\n  init { stock [0] = false } invariant P { stock [0] == false }\n}\n";
-        let compact = format_source(compact, FormatEdition::Current).expect("compact format");
-        let spaced = format_source(spaced, FormatEdition::Current).expect("spaced format");
+        let compact = format_source(compact, Edition::Fsl4).expect("compact format");
+        let spaced = format_source(spaced, Edition::Fsl4).expect("spaced format");
         assert_eq!(compact, spaced);
         assert!(compact.contains("\n  state {"));
         assert!(compact.contains("Map<Int, Bool>"));
@@ -1068,21 +1100,21 @@ mod tests {
     #[test]
     fn detached_comment_blank_line_is_preserved() {
         let source = "spec S {\n\n  // detached\n  state { x: Bool }\n  init { x = false }\n  invariant P { x == false }\n}\n";
-        let formatted = format_source(source, FormatEdition::Current).expect("format");
+        let formatted = format_source(source, Edition::Fsl4).expect("format");
         assert!(formatted.contains("spec S {\n\n  // detached\n"));
     }
 
     #[test]
     fn trailing_comment_stays_attached_to_its_closing_brace() {
         let source = "spec S { struct Pair { left: Bool, right: Bool } // attached\n state { x: Bool } init { x = false } invariant P { x == false } }";
-        let formatted = format_source(source, FormatEdition::Current).expect("format");
+        let formatted = format_source(source, Edition::Fsl4).expect("format");
         assert!(formatted.contains("} // attached\n\n  state"));
     }
 
     #[test]
     fn domain_identifier_named_on_does_not_hide_legacy_implication() {
         let source = "domain D { implementation_profile functional_ddd type Id = 0..1 aggregate A { id Id state { on: Bool = false; } invariant P { on -> not on } } }";
-        let formatted = format_source(source, FormatEdition::Next).expect("format");
+        let formatted = format_source(source, Edition::Fsl5).expect("format");
         assert!(formatted.contains("on => not on"));
     }
 }

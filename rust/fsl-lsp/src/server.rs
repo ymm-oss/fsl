@@ -405,11 +405,19 @@ fn publish_diagnostics(
         .and_then(Path::to_str)
         .unwrap_or(uri.as_str());
     let version = state.documents.get(uri).map(|document| document.version);
-    let (source_diagnostics, model) =
-        fslc_rust::source_diagnostic::diagnostics_with_model(&source, source_file, &resolver);
+    let (source_diagnostics, model) = fslc_rust::source_diagnostic::diagnostics_with_model(
+        &source,
+        source_file,
+        &resolver,
+        &state.parse_options,
+    );
+    let edition = match fsl_syntax::edition_header(&source, &state.parse_options) {
+        Ok(Some(header)) => header.edition,
+        _ => fsl_syntax::Edition::Fsl4,
+    };
     let mut items = source_diagnostics
         .into_iter()
-        .map(|item| to_lsp_diagnostic(&source, item))
+        .map(|item| to_lsp_diagnostic(&source, item, edition))
         .chain(
             fsl_syntax::lexical_warnings(&source, &state.parse_options)
                 .into_iter()
@@ -504,8 +512,14 @@ fn analysis_diagnostic(
     }
 }
 
-fn to_lsp_diagnostic(source: &str, item: SourceDiagnostic) -> Diagnostic {
-    let severity = if item.kind == "migration" {
+/// A migration finding is a warning, except in the next edition, which no
+/// longer accepts the legacy forms it reports.
+fn to_lsp_diagnostic(
+    source: &str,
+    item: SourceDiagnostic,
+    edition: fsl_syntax::Edition,
+) -> Diagnostic {
+    let severity = if item.kind == "migration" && edition != fsl_syntax::Edition::Fsl5 {
         DiagnosticSeverity::WARNING
     } else {
         DiagnosticSeverity::ERROR
@@ -825,8 +839,12 @@ fn code_actions(state: &ServerState, uri: &Url) -> Option<Vec<CodeActionOrComman
         .as_deref()
         .and_then(Path::to_str)
         .unwrap_or(uri.as_str());
-    let (diagnostics, _) =
-        fslc_rust::source_diagnostic::diagnostics_with_model(&source, source_file, &resolver);
+    let (diagnostics, _) = fslc_rust::source_diagnostic::diagnostics_with_model(
+        &source,
+        source_file,
+        &resolver,
+        &state.parse_options,
+    );
     let semantic_fixes = diagnostics
         .into_iter()
         .filter_map(|diagnostic| {
@@ -850,7 +868,7 @@ fn code_actions(state: &ServerState, uri: &Url) -> Option<Vec<CodeActionOrComman
             })
         })
         .collect::<Vec<_>>();
-    let rewrites = fsl_syntax::canonical_rewrites(&source).ok()?;
+    let rewrites = fsl_syntax::canonical_rewrites_with(&source, &state.parse_options).ok()?;
     let canonical_fixes = rewrites
         .into_iter()
         .map(|rewrite| {
