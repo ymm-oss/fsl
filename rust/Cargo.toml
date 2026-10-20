@@ -48,6 +48,13 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# z3-sys's build script compiles vendored Z3 through cmake-rs, which maps
+# opt-level 0 to CMAKE_BUILD_TYPE=Debug (`-O0`, Z3's internal assertions and
+# tracing). With opt-level 2 and debug = false it selects Release, the same
+# Z3 configuration release builds ship.
+[profile.dev.package.z3-sys]
+opt-level = 2
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
