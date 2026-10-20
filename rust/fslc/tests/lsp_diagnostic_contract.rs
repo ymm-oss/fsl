@@ -13,6 +13,12 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
     let cases = [
         ("parse", "spec Broken { state {", None, None),
         (
+            "parse-outside-bmp",
+            "spec Broken {\n  state { 𠮷: Int }\n}",
+            Some((2, 11)),
+            None,
+        ),
+        (
             "type",
             "spec Broken { state { value: Missing } init { value = 0 } }",
             Some((1, 23)),

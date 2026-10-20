@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use crate::identifier::{self, IdentifierRule};
 use crate::{SourcePos, Span};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,6 +25,39 @@ pub struct Token {
 pub struct LexError {
     pub message: String,
     pub span: Span,
+    code: &'static str,
+}
+
+impl LexError {
+    fn new(message: impl Into<String>, span: Span) -> Self {
+        Self::coded("FSL-PARSE", message.into(), span)
+    }
+
+    const fn coded(code: &'static str, message: String, span: Span) -> Self {
+        Self {
+            message,
+            span,
+            code,
+        }
+    }
+
+    /// The diagnostic code: `FSL-PARSE`, or one of
+    /// [`crate::IDENTIFIER_DIAGNOSTICS`] under [`IdentifierRule::Unicode`].
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        self.code
+    }
+}
+
+/// A finding the lexer reports beside a document it still reads.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LexWarning {
+    /// One of the warning codes of [`crate::IDENTIFIER_DIAGNOSTICS`].
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
+    /// The text that reads the same without the warning.
+    pub replacement: String,
 }
 
 impl fmt::Display for LexError {
@@ -48,18 +82,48 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
     lex_with(source, &crate::ParseOptions::stable())
 }
 
-/// [`lex`] under explicit [`crate::ParseOptions`]. No unstable feature changes
-/// the lexer yet.
+/// [`lex`] under explicit [`crate::ParseOptions`], with the identifier rule
+/// [`IdentifierRule::for_source`] selects.
 ///
 /// # Errors
 ///
 /// Returns [`LexError`] for characters or literals the lexer rejects.
-pub fn lex_with(source: &str, _options: &crate::ParseOptions) -> Result<Vec<Token>, LexError> {
-    Lexer::new(source).lex_all()
+pub fn lex_with(source: &str, options: &crate::ParseOptions) -> Result<Vec<Token>, LexError> {
+    Lexer::new(source, IdentifierRule::for_source(source, options)).lex_all()
+}
+
+/// The warnings lexing `source` under `options` reports, up to the first
+/// lexical error. Always empty under [`IdentifierRule::Ascii`].
+#[must_use]
+pub fn lexical_warnings(source: &str, options: &crate::ParseOptions) -> Vec<LexWarning> {
+    let rule = IdentifierRule::for_source(source, options);
+    if rule == IdentifierRule::Ascii {
+        return Vec::new();
+    }
+    let mut lexer = Lexer::new(source, rule);
+    while lexer
+        .next_token()
+        .is_ok_and(|token| !matches!(token.kind, TokenKind::Eof))
+    {}
+    lexer.warnings
+}
+
+pub(crate) fn is_single_identifier(name: &str, rule: IdentifierRule) -> bool {
+    let mut lexer = Lexer::new(name, rule);
+    let Ok(token) = lexer.next_token() else {
+        return false;
+    };
+    matches!(&token.kind, TokenKind::Ident(value) if value == name)
+        && token.span.start.offset == 0
+        && token.span.end.offset == name.len()
+        && lexer
+            .next_token()
+            .is_ok_and(|token| matches!(token.kind, TokenKind::Eof))
+        && lexer.warnings.is_empty()
 }
 
 pub(crate) fn lex_declaration_prefix(source: &str) -> Result<Vec<Token>, LexError> {
-    let mut lexer = Lexer::new(source);
+    let mut lexer = Lexer::new(source, IdentifierRule::Ascii);
     let mut tokens = Vec::new();
     loop {
         let token = lexer.next_token()?;
@@ -86,15 +150,19 @@ struct Lexer<'a> {
     offset: usize,
     line: u32,
     column: u32,
+    rule: IdentifierRule,
+    warnings: Vec<LexWarning>,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(source: &'a str) -> Self {
+    const fn new(source: &'a str, rule: IdentifierRule) -> Self {
         Self {
             source,
             offset: 0,
             line: 1,
             column: 1,
+            rule,
+            warnings: Vec::new(),
         }
     }
 
@@ -119,8 +187,8 @@ impl<'a> Lexer<'a> {
                 span: Span { start, end: start },
             });
         };
-        let kind = if ch.is_ascii_alphabetic() || ch == '_' {
-            self.lex_ident()
+        let kind = if self.rule.starts(ch) {
+            self.lex_ident(start)?
         } else if ch.is_ascii_digit() {
             self.lex_int(start)?
         } else if ch == '"' {
@@ -143,7 +211,19 @@ impl<'a> Lexer<'a> {
                 self.bump();
             }
             while self.peek().is_some_and(char::is_whitespace) {
-                self.bump();
+                let start = self.pos();
+                let ch = self.bump();
+                if self.rule == IdentifierRule::Unicode && ch == Some('\u{3000}') {
+                    self.warnings.push(LexWarning {
+                        code: identifier::FULLWIDTH_SPACE,
+                        message: "full-width space U+3000 is read as a space; write ' '".to_owned(),
+                        span: Span {
+                            start,
+                            end: self.pos(),
+                        },
+                        replacement: " ".to_owned(),
+                    });
+                }
             }
             if self.remaining().starts_with("//") {
                 while self.peek().is_some_and(|ch| ch != '\n') {
@@ -155,15 +235,32 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_ident(&mut self) -> TokenKind {
-        let start = self.offset;
-        while self
-            .peek()
-            .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-        {
+    fn lex_ident(&mut self, start: SourcePos) -> Result<TokenKind, LexError> {
+        let rule = self.rule;
+        while self.peek().is_some_and(|ch| rule.continues(ch)) {
             self.bump();
         }
-        TokenKind::Ident(self.source[start..self.offset].to_owned())
+        let raw = &self.source[start.offset..self.offset];
+        if rule == IdentifierRule::Ascii {
+            return Ok(TokenKind::Ident(raw.to_owned()));
+        }
+        let span = Span {
+            start,
+            end: self.pos(),
+        };
+        let name = identifier::unicode_identifier(raw)
+            .map_err(|(code, message)| LexError::coded(code, message, span))?;
+        if name != raw {
+            self.warnings.push(LexWarning {
+                code: identifier::NON_NFC_IDENTIFIER,
+                message: format!(
+                    "identifier is not in Unicode normalization form C; it is read as '{name}'"
+                ),
+                span,
+                replacement: name.clone(),
+            });
+        }
+        Ok(TokenKind::Ident(name))
     }
 
     fn lex_int(&mut self, start: SourcePos) -> Result<TokenKind, LexError> {
@@ -172,15 +269,15 @@ impl<'a> Lexer<'a> {
             self.bump();
         }
         let text = &self.source[start_offset..self.offset];
-        text.parse::<i64>()
-            .map(TokenKind::Int)
-            .map_err(|_| LexError {
-                message: "integer literal is outside the i64 range".to_owned(),
-                span: Span {
+        text.parse::<i64>().map(TokenKind::Int).map_err(|_| {
+            LexError::new(
+                "integer literal is outside the i64 range",
+                Span {
                     start,
                     end: self.pos(),
                 },
-            })
+            )
+        })
     }
 
     fn lex_string(&mut self, start: SourcePos) -> Result<TokenKind, LexError> {
@@ -197,13 +294,13 @@ impl<'a> Lexer<'a> {
             }
             self.bump();
         }
-        Err(LexError {
-            message: "unterminated string literal".to_owned(),
-            span: Span {
+        Err(LexError::new(
+            "unterminated string literal",
+            Span {
                 start,
                 end: self.pos(),
             },
-        })
+        ))
     }
 
     fn lex_symbol(&mut self, start: SourcePos) -> Result<TokenKind, LexError> {
@@ -218,15 +315,17 @@ impl<'a> Lexer<'a> {
         }
         let ch = self.bump().expect("peeked character");
         if "{}()[],:;.+-*/%<>=.|@".contains(ch) {
-            Ok(TokenKind::Symbol(ch.to_string()))
-        } else {
-            Err(LexError {
-                message: format!("unexpected character {ch:?}"),
-                span: Span {
-                    start,
-                    end: self.pos(),
-                },
-            })
+            return Ok(TokenKind::Symbol(ch.to_string()));
+        }
+        let span = Span {
+            start,
+            end: self.pos(),
+        };
+        match identifier::unexpected_character(ch) {
+            Some((code, message)) if self.rule == IdentifierRule::Unicode => {
+                Err(LexError::coded(code, message, span))
+            }
+            _ => Err(LexError::new(format!("unexpected character {ch:?}"), span)),
         }
     }
 

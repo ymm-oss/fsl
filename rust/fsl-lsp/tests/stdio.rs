@@ -209,3 +209,89 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
     drop(stdin);
     assert!(child.wait().expect("wait for fslc-lsp").success());
 }
+
+/// Open `text` in a fresh server with the unstable gate set or unset and
+/// return the diagnostics the server publishes for it.
+fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env_remove("FSLC_UNSTABLE");
+    if let Some(features) = unstable {
+        command.env("FSLC_UNSTABLE", features);
+    }
+    let mut child = command.spawn().expect("spawn fslc-lsp");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    send(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0","id":1,"method":"initialize",
+            "params":{"processId":null,"rootUri":null,"capabilities":{}}
+        }),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 1);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    send(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+                "uri":"file:///tmp/fsl-lsp-astral.fsl","languageId":"fsl","version":1,"text":text
+            }}
+        }),
+    );
+    let published = receive(&mut stdout);
+    assert_eq!(published["method"], "textDocument/publishDiagnostics");
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 2);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    );
+    drop(stdin);
+    assert!(child.wait().expect("wait for fslc-lsp").success());
+    published["params"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics array")
+        .clone()
+}
+
+/// fsl 5 plan S2 acceptance 4: on a line holding a character outside the
+/// BMP (CJK Extension B `𠮷`, two UTF-16 code units), every published range
+/// is in UTF-16 code units, including the lexer's own warnings behind the
+/// gate. Without the gate the same document publishes no lexical warning.
+#[test]
+fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
+    let text = "fsl 5\nspec S {\n  state { 𠮷野\u{3000}: Int }\n}\n";
+    let range = |line: u32, start: u32, end: u32| json!({"start":{"line":line,"character":start},"end":{"line":line,"character":end}});
+
+    let gated = published_diagnostics(text, Some("fsl5"));
+    let warning = gated
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "fullwidth_space")
+        .unwrap_or_else(|| panic!("fullwidth_space published: {gated:#?}"));
+    assert_eq!(warning["severity"], 2, "{warning:#}");
+    assert_eq!(warning["range"], range(2, 13, 14), "{warning:#}");
+    assert_eq!(warning["data"]["replacement"], " ");
+
+    for diagnostics in [&gated, &published_diagnostics(text, None)] {
+        let error = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["severity"] == 1)
+            .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"));
+        assert_eq!(error["range"], range(2, 10, 12), "{error:#}");
+    }
+    assert!(
+        published_diagnostics(text, None)
+            .iter()
+            .all(|diagnostic| diagnostic["data"]["kind"] != "lexical")
+    );
+}
