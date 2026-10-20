@@ -9,11 +9,11 @@ use serde_json::json;
 use fsl_syntax::{
     ActionItem, ActionTarget, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
-    GovernanceItem, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessField,
-    ProcessItem, ProcessTransition, QualifiedName, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness,
-    SurfaceDocument, SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr,
-    VerifyItem,
+    GovernanceItem, LValue, MapsClause, MetaTag, Param, ParseOptions, PreservationItem,
+    ProcessField, ProcessItem, ProcessTransition, QualifiedName, RequirementAction,
+    RequirementActionItem, RequirementBlockItem, RequirementsItem, SpecItem, StateField, Statement,
+    SurfaceBusiness, SurfaceDocument, SurfaceGovernance, SurfaceRequirements, SurfaceSpec,
+    TimeItem, TypeExpr, VerifyItem, parse_surface_document_with,
 };
 
 use crate::{
@@ -3268,7 +3268,19 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
 pub fn requirements_trace_contract(
     source: &str,
 ) -> Result<Option<RequirementsTraceContract>, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    requirements_trace_contract_with_options(source, &ParseOptions::stable())
+}
+
+/// [`requirements_trace_contract`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`requirements_trace_contract`].
+pub fn requirements_trace_contract_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<Option<RequirementsTraceContract>, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(None);
     };
@@ -3378,7 +3390,19 @@ pub fn requirements_trace_contract(
 ///
 /// Returns [`CoreError`] when the source cannot be parsed.
 pub fn verify_scope_type_names(source: &str) -> Result<Option<BTreeSet<String>>, CoreError> {
-    Ok(match fsl_syntax::parse_surface_document(source)? {
+    verify_scope_type_names_with_options(source, &ParseOptions::stable())
+}
+
+/// [`verify_scope_type_names`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`verify_scope_type_names`].
+pub fn verify_scope_type_names_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<Option<BTreeSet<String>>, CoreError> {
+    Ok(match parse_surface_document_with(source, options)? {
         SurfaceDocument::Spec(spec) => Some(
             spec.items
                 .iter()
@@ -3433,7 +3457,19 @@ fn requirements_scope_type_names(requirements: &SurfaceRequirements) -> BTreeSet
 ///
 /// Returns [`CoreError`] when the source cannot be parsed.
 pub fn requirements_declared_ids(source: &str) -> Result<BTreeSet<String>, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    requirements_declared_ids_with_options(source, &ParseOptions::stable())
+}
+
+/// [`requirements_declared_ids`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`requirements_declared_ids`].
+pub fn requirements_declared_ids_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<BTreeSet<String>, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(BTreeSet::new());
     };
@@ -3453,7 +3489,19 @@ pub fn requirements_declared_ids(source: &str) -> Result<BTreeSet<String>, CoreE
 ///
 /// Returns [`CoreError`] when the source cannot be parsed.
 pub fn requirements_has_implements(source: &str) -> Result<bool, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    requirements_has_implements_with_options(source, &ParseOptions::stable())
+}
+
+/// [`requirements_has_implements`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`requirements_has_implements`].
+pub fn requirements_has_implements_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<bool, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(false);
     };
@@ -3491,7 +3539,21 @@ pub fn governance_contract(
     source: &str,
     resolver: &dyn FileResolver,
 ) -> Result<Option<GovernanceContract>, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    governance_contract_with_options(source, resolver, &ParseOptions::stable())
+}
+
+/// [`governance_contract`] under explicit [`ParseOptions`], which also read
+/// the governance dependencies.
+///
+/// # Errors
+///
+/// As [`governance_contract`].
+pub fn governance_contract_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    options: &ParseOptions,
+) -> Result<Option<GovernanceContract>, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Governance(governance) = document else {
         return Ok(None);
     };
@@ -3536,6 +3598,7 @@ pub fn governance_contract(
                     span,
                     &control_ids,
                     resolver,
+                    *options,
                 )?);
             }
             GovernanceItem::Preservation { name, items, span } => {
@@ -3551,6 +3614,7 @@ pub fn governance_contract(
                     span,
                     &control_ids,
                     resolver,
+                    *options,
                 )?);
             }
         }
@@ -3570,11 +3634,12 @@ fn governance_business_catalog(
     path: &str,
     span: fsl_syntax::Span,
     resolver: &dyn FileResolver,
+    options: ParseOptions,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>, GovernanceSatisfaction), CoreError> {
     let dependency = resolver
         .read(path)
         .map_err(|_| core_error(format!("governance dependency not found: '{path}'"), span))?;
-    let parsed = fsl_syntax::parse_surface_document(&dependency).map_err(|error| {
+    let parsed = parse_surface_document_with(&dependency, &options).map_err(|error| {
         core_error(
             format!("invalid governance dependency '{path}': {error}"),
             span,
@@ -3626,9 +3691,10 @@ fn validate_governance_delegate(
     span: fsl_syntax::Span,
     controls: &BTreeSet<String>,
     resolver: &dyn FileResolver,
+    options: ParseOptions,
 ) -> Result<GovernanceDelegate, CoreError> {
     let (policies, goals, implicit_satisfaction) =
-        governance_business_catalog(&business_name, path, span, resolver)?;
+        governance_business_catalog(&business_name, path, span, resolver, options)?;
     let mut required = Vec::new();
     let mut required_ids = BTreeSet::new();
     let mut explicit = GovernanceSatisfaction::new();
@@ -3703,6 +3769,7 @@ fn validate_governance_preservation(
     span: fsl_syntax::Span,
     controls: &BTreeSet<String>,
     resolver: &dyn FileResolver,
+    options: ParseOptions,
 ) -> Result<GovernancePreservation, CoreError> {
     let mut before = None;
     let mut after = None;
@@ -3767,8 +3834,8 @@ fn validate_governance_preservation(
             span,
         ));
     }
-    validate_governance_document(resolver, &before_path, &before_name, before_span)?;
-    validate_governance_document(resolver, &after_path, &after_name, after_span)?;
+    validate_governance_document(resolver, &before_path, &before_name, before_span, options)?;
+    validate_governance_document(resolver, &after_path, &after_name, after_span, options)?;
     resolver.read(&refinement_path).map_err(|_| {
         core_error(
             format!("governance dependency not found: '{refinement_path}'"),
@@ -3807,11 +3874,12 @@ fn validate_governance_document(
     path: &str,
     expected_name: &str,
     span: fsl_syntax::Span,
+    options: ParseOptions,
 ) -> Result<(), CoreError> {
     let source = resolver
         .read(path)
         .map_err(|_| core_error(format!("governance dependency not found: '{path}'"), span))?;
-    let document = fsl_syntax::parse_surface_document(&source).map_err(|error| {
+    let document = parse_surface_document_with(&source, &options).map_err(|error| {
         core_error(
             format!("invalid governance dependency '{path}': {error}"),
             span,

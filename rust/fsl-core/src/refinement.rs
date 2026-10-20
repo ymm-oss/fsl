@@ -12,7 +12,7 @@ use fsl_syntax::{
 use crate::recursion;
 use crate::{
     ActionDef, FileResolver, KernelModel, ParamDef, TypeDef, TypeRef, build_model,
-    parse_abstraction_kernel_source_with_bounds,
+    parse_abstraction_kernel_source_with_bounds_with_options,
 };
 
 #[derive(Clone, Debug)]
@@ -121,9 +121,30 @@ pub fn parse_refinement(
     implementation: &KernelModel,
     abstraction: &KernelModel,
 ) -> Result<Refinement, RefinementError> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| RefinementError {
-        message: error.message,
-        span: Some(error.span),
+    parse_refinement_with_options(
+        source,
+        implementation,
+        abstraction,
+        &fsl_syntax::ParseOptions::stable(),
+    )
+}
+
+/// [`parse_refinement`] under explicit [`fsl_syntax::ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_refinement`].
+pub fn parse_refinement_with_options(
+    source: &str,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Refinement, RefinementError> {
+    let document = fsl_syntax::parse_surface_document_with(source, options).map_err(|error| {
+        RefinementError {
+            message: error.message,
+            span: Some(error.span),
+        }
     })?;
     let SurfaceDocument::Refinement(surface) = document else {
         return Err(refinement_error("expected refinement document", None));
@@ -1256,6 +1277,27 @@ pub fn requirements_implements(
     )
 }
 
+/// [`requirements_implements`] under `options`.
+///
+/// # Errors
+///
+/// Returns [`RefinementError`] for dependency, lowering, or mapping failures.
+pub fn requirements_implements_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    implementation: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<ImplementsContract>, RefinementError> {
+    requirements_implements_with_bounds_with_options(
+        source,
+        resolver,
+        implementation,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        options,
+    )
+}
+
 /// Resolve an inline `implements` contract with abstraction bounds overrides.
 ///
 /// Overrides are filtered to entity/number names declared by the abstraction
@@ -1264,7 +1306,6 @@ pub fn requirements_implements(
 /// # Errors
 ///
 /// Returns [`RefinementError`] for dependency, lowering, or mapping failures.
-#[allow(clippy::too_many_lines)]
 pub fn requirements_implements_with_bounds(
     source: &str,
     resolver: &dyn FileResolver,
@@ -1272,9 +1313,36 @@ pub fn requirements_implements_with_bounds(
     instances: &BTreeMap<String, i64>,
     values: &BTreeMap<String, (i64, i64)>,
 ) -> Result<Option<ImplementsContract>, RefinementError> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| RefinementError {
-        message: error.message,
-        span: Some(error.span),
+    requirements_implements_with_bounds_with_options(
+        source,
+        resolver,
+        implementation,
+        instances,
+        values,
+        &fsl_syntax::ParseOptions::stable(),
+    )
+}
+
+/// [`requirements_implements_with_bounds`] under explicit
+/// [`fsl_syntax::ParseOptions`], which also read the abstraction.
+///
+/// # Errors
+///
+/// As [`requirements_implements_with_bounds`].
+#[allow(clippy::too_many_lines)]
+pub fn requirements_implements_with_bounds_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    implementation: &KernelModel,
+    instances: &BTreeMap<String, i64>,
+    values: &BTreeMap<String, (i64, i64)>,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<ImplementsContract>, RefinementError> {
+    let document = fsl_syntax::parse_surface_document_with(source, options).map_err(|error| {
+        RefinementError {
+            message: error.message,
+            span: Some(error.span),
+        }
     })?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(None);
@@ -1295,12 +1363,17 @@ pub fn requirements_implements_with_bounds(
         message: error.message,
         span: Some(span),
     })?;
-    let kernel =
-        parse_abstraction_kernel_source_with_bounds(&abs_source, resolver, instances, values)
-            .map_err(|error| RefinementError {
-                message: error.message,
-                span: Some(span),
-            })?;
+    let kernel = parse_abstraction_kernel_source_with_bounds_with_options(
+        &abs_source,
+        resolver,
+        instances,
+        values,
+        options,
+    )
+    .map_err(|error| RefinementError {
+        message: error.message,
+        span: Some(span),
+    })?;
     let abstraction = build_model(kernel).map_err(|error| RefinementError {
         message: error.message,
         span: Some(span),

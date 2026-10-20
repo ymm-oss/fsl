@@ -20,9 +20,13 @@ pub const REPRODUCER_DO_NOT_ASSUME: &[&str] = &[
 
 /// Return a fail-closed preflight diagnostic from the root source before model load.
 #[must_use]
-pub fn reproducer_source_preflight_error(source: &str, engine: &str) -> Option<String> {
+pub fn reproducer_source_preflight_error(
+    source: &str,
+    engine: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Option<String> {
     if matches!(
-        fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)),
+        fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), options),
         Ok(fsl_syntax::ParsedDocument {
             surface: fsl_syntax::SurfaceDocument::Refinement(_),
             ..

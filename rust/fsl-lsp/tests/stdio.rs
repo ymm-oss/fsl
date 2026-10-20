@@ -282,16 +282,92 @@ fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
     assert_eq!(warning["range"], range(2, 13, 14), "{warning:#}");
     assert_eq!(warning["data"]["replacement"], " ");
 
-    for diagnostics in [&gated, &published_diagnostics(text, None)] {
-        let error = diagnostics
+    // With the gate the header selects the wider identifier rule for every
+    // parse, so the document is valid; without it `𠮷` is a lexer error.
+    assert!(
+        gated.iter().all(|diagnostic| diagnostic["severity"] != 1),
+        "{gated:#?}"
+    );
+    let error_at = |text: &str, unstable: Option<&str>| {
+        let diagnostics = published_diagnostics(text, unstable);
+        diagnostics
             .iter()
             .find(|diagnostic| diagnostic["severity"] == 1)
-            .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"));
-        assert_eq!(error["range"], range(2, 10, 12), "{error:#}");
-    }
+            .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"))["range"]
+            .clone()
+    };
+    assert_eq!(error_at(text, None), range(2, 10, 12));
+    let unknown_type = "fsl 5\nspec S {\n  state { 𠮷野\u{3000}: Nope }\n}\n";
+    // The field declaration: it ends after `Nope` at 20 UTF-16 units (19 chars).
+    assert_eq!(error_at(unknown_type, Some("fsl5")), range(2, 10, 20));
     assert!(
         published_diagnostics(text, None)
             .iter()
             .all(|diagnostic| diagnostic["data"]["kind"] != "lexical")
+    );
+}
+
+/// fsl 5 plan S1 acceptance 5: an `fsl 5` document whose first line is a
+/// Japanese `//` comment is served without a panic, and its migration
+/// diagnostics are errors, as `--edition next` makes them. The same body
+/// without the header, or without the gate, keeps them warnings.
+#[test]
+fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors() {
+    const ERROR: u64 = 1;
+    const WARNING: u64 = 2;
+    let body = "spec Quantifier {\n  type Id = 0..1\n  state { ready: Map<Id, Bool> }\n  init { forall i in 0..1: { ready[i] = false } }\n  invariant Typed { forall i in 0..1: ready[i] == true or ready[i] == false }\n}\n";
+    let migration = |diagnostics: &[Value]| {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["data"]["kind"] == "migration")
+            .map(|diagnostic| {
+                (
+                    diagnostic["code"].as_str().unwrap_or_default().to_owned(),
+                    diagnostic["severity"].as_u64().unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let headed = format!("// 日本語のコメント\nfsl 5\n{body}");
+    let gated = published_diagnostics(&headed, Some("fsl5"));
+    let found = migration(&gated);
+    assert!(!found.is_empty(), "{gated:#?}");
+    assert!(
+        found.iter().all(|(_, severity)| *severity == ERROR),
+        "{gated:#?}"
+    );
+    assert!(
+        gated
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != "FSL-DIALECT-UNKNOWN"),
+        "{gated:#?}"
+    );
+
+    let plain = migration(&published_diagnostics(
+        &format!("// 日本語のコメント\n{body}"),
+        Some("fsl5"),
+    ));
+    assert_eq!(
+        plain
+            .iter()
+            .map(|(code, _)| code.as_str())
+            .collect::<Vec<_>>(),
+        found
+            .iter()
+            .map(|(code, _)| code.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        plain.iter().all(|(_, severity)| *severity == WARNING),
+        "{plain:?}"
+    );
+
+    let ungated = published_diagnostics(&headed, None);
+    assert!(
+        ungated
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "FSL-DIALECT-UNKNOWN"),
+        "without the gate the header is the unknown declaration `fsl`: {ungated:#?}"
     );
 }

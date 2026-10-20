@@ -292,8 +292,7 @@ fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
             continue;
         };
         *dialects.entry(dialect).or_default() += 1;
-        let formatted = match fsl_syntax::format_source(&source, fsl_syntax::FormatEdition::Current)
-        {
+        let formatted = match fsl_syntax::format_source(&source, fsl_syntax::Edition::Fsl4) {
             Ok(formatted) => formatted,
             Err(fsl_syntax::FormatError::Unsafe { .. }) if dialect == "agent" => continue,
             Err(fsl_syntax::FormatError::Unsafe { message, .. })
@@ -314,7 +313,7 @@ fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
             Err(fsl_syntax::FormatError::Lex(_)) if fsl_syntax::lex(&source).is_err() => continue,
             Err(error) => panic!("{}: {error}", path.display()),
         };
-        let next = fsl_syntax::format_source(&source, fsl_syntax::FormatEdition::Next)
+        let next = fsl_syntax::format_source(&source, fsl_syntax::Edition::Fsl5)
             .unwrap_or_else(|error| panic!("{} next: {error}", path.display()));
         assert_eq!(
             formatted,
@@ -329,7 +328,7 @@ fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
             path.display()
         );
         assert_eq!(
-            fsl_syntax::format_source(&formatted, fsl_syntax::FormatEdition::Current)
+            fsl_syntax::format_source(&formatted, fsl_syntax::Edition::Fsl4)
                 .expect("second format"),
             formatted,
             "{}",

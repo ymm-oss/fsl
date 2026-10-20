@@ -163,14 +163,21 @@ impl std::fmt::Display for SpecLoadError {
 /// document whose *component* fails to parse still lowers its own top level
 /// successfully and therefore stays `semantics`, exactly as `check` reports it.
 #[must_use]
-pub fn surface_parse_failure(source: &str) -> Option<fsl_syntax::ParseError> {
-    fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)).err()
+pub fn surface_parse_failure(
+    source: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Option<fsl_syntax::ParseError> {
+    fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), options).err()
 }
 
 /// Classify a kernel lowering failure, preserving a surface-parse span.
 #[must_use]
-pub fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadError {
-    if let Some(parse_error) = surface_parse_failure(source) {
+pub fn kernel_load_error(
+    source: &str,
+    error: &fsl_core::CoreError,
+    options: &fsl_syntax::ParseOptions,
+) -> SpecLoadError {
+    if let Some(parse_error) = surface_parse_failure(source, options) {
         return SpecLoadError::Parse(Box::new(parse_error));
     }
     // The substituted "spec has no state block" message describes the document

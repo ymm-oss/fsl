@@ -25,15 +25,20 @@ pub(crate) fn governance_result_from_source(
 ) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    fslc_rust::verification_output::governance_output(source, &resolver, |preservation| {
-        let (result, status) = run_refine(
-            &base.join(&preservation.after_path),
-            &base.join(&preservation.before_path),
-            &base.join(&preservation.refinement_path),
-            depth,
-        );
-        preservation_refine_result(&result, status, preservation.span)
-    })
+    fslc_rust::verification_output::governance_output(
+        source,
+        &resolver,
+        crate::process::parse_options(),
+        |preservation| {
+            let (result, status) = run_refine(
+                &base.join(&preservation.after_path),
+                &base.join(&preservation.before_path),
+                &base.join(&preservation.refinement_path),
+                depth,
+            );
+            preservation_refine_result(&result, status, preservation.span)
+        },
+    )
 }
 
 /// A preservation's `result` from its `run_refine` envelope and exit, or the
@@ -110,6 +115,7 @@ pub(crate) fn implements_result_from_source_with_bounds(
         depth,
         &scope.instances,
         &scope.values,
+        crate::process::parse_options(),
     )
 }
 
@@ -295,7 +301,12 @@ pub(crate) fn run_refine(
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
-    let mapping = match fsl_core::parse_refinement(&source, &implementation, &abstraction) {
+    let mapping = match fsl_core::parse_refinement_with_options(
+        &source,
+        &implementation,
+        &abstraction,
+        crate::process::parse_options(),
+    ) {
         Ok(mapping) => mapping,
         Err(error) => {
             return (

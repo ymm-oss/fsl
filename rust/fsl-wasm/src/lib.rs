@@ -159,14 +159,22 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
     // `kind:"parse"` here while native reported `semantics`/`type` for the very
     // same input (issue #556); a second classifier on this side is what
     // produced that divergence, so there must not be one.
-    let kernel =
-        fsl_core::parse_kernel_source_with_file(&request.source, &resolver, &request.source_file)
-            .map_err(|failure| {
-            fslc_rust::spec_load::render_spec_load_error(
-                envelope(solver_version),
-                &fslc_rust::spec_load::kernel_load_error(&request.source, &failure),
-            )
-        })?;
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        &request.source,
+        &resolver,
+        &request.source_file,
+        &request.parse_options(),
+    )
+    .map_err(|failure| {
+        fslc_rust::spec_load::render_spec_load_error(
+            envelope(solver_version),
+            &fslc_rust::spec_load::kernel_load_error(
+                &request.source,
+                &failure,
+                &request.parse_options(),
+            ),
+        )
+    })?;
     // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed while
     // lowering, before `build_model` drops the per-component information that
     // produced them, so they must be captured here rather than derived from
@@ -200,16 +208,18 @@ async fn check(request: &Request, solver_version: &str) -> Value {
         &request.source_file,
         &resolver,
         &|| envelope(solver_version),
+        &request.parse_options(),
     ) {
         Ok(checked) => checked,
         Err((output, _)) => return output,
     };
     let compose_warnings = checked.kernel.diagnostics().to_vec();
     let model = checked.model;
-    let warning_ctx = match ModelWarningContext::from_source(&model, &request.source) {
-        Ok(ctx) => ctx,
-        Err(core_error) => return error(solver_version, "semantics", core_error.to_string()),
-    };
+    let warning_ctx =
+        match ModelWarningContext::from_source(&model, &request.source, &request.parse_options()) {
+            Ok(ctx) => ctx,
+            Err(core_error) => return error(solver_version, "semantics", core_error.to_string()),
+        };
     let mut output = envelope(solver_version);
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -225,7 +235,31 @@ async fn check(request: &Request, solver_version: &str) -> Value {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
         Err(failure) => return implements_error(solver_version, &failure),
     };
-    fold_governance(request, solver_version, output).await
+    let output = fold_governance(request, solver_version, output).await;
+    apply_edition(request, solver_version, output)
+}
+
+/// The native edition step for a document with an edition header. Without a
+/// header the Worker envelope keeps its shape; it already carries the
+/// omitted-initial-value warnings the native step adds.
+fn apply_edition(request: &Request, solver_version: &str, output: Value) -> Value {
+    let options = request.parse_options();
+    if !matches!(
+        fsl_syntax::edition_header(&request.source, &options),
+        Ok(Some(_))
+    ) {
+        return output;
+    }
+    fslc_rust::migration::apply_edition(
+        (output, 0),
+        &request.source,
+        &request.source_file,
+        None,
+        &options,
+        &|| envelope(solver_version),
+        false,
+    )
+    .0
 }
 
 /// Evaluate a governance document's preservations and fold them into a
@@ -259,12 +293,16 @@ async fn governance_output(
         files: request.files.clone(),
     };
     let resolver_ref = &resolver;
+    let options = request.parse_options();
+    let options_ref = &options;
     fslc_rust::verification_output::governance_output_async(
         &request.source,
         resolver_ref,
+        &options,
         |preservation| {
             let preservation = preservation.clone();
             let resolver = resolver_ref;
+            let options = options_ref;
             async move {
                 let implementation_source = resolver
                     .read(&preservation.after_path)
@@ -276,26 +314,32 @@ async fn governance_output(
                     .read(&preservation.refinement_path)
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
                 let implementation = fsl_core::build_model(
-                    fsl_core::parse_kernel_source_with_file(
+                    fsl_core::parse_kernel_source_with_file_with_options(
                         &implementation_source,
                         resolver,
                         &preservation.after_path,
+                        options,
                     )
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
                 )
                 .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
                 let abstraction = fsl_core::build_model(
-                    fsl_core::parse_kernel_source_with_file(
+                    fsl_core::parse_kernel_source_with_file_with_options(
                         &abstraction_source,
                         resolver,
                         &preservation.before_path,
+                        options,
                     )
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
                 )
                 .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
-                let mapping =
-                    fsl_core::parse_refinement(&mapping_source, &implementation, &abstraction)
-                        .map_err(|failure| governance_error(failure.message, preservation.span))?;
+                let mapping = fsl_core::parse_refinement_with_options(
+                    &mapping_source,
+                    &implementation,
+                    &abstraction,
+                    options,
+                )
+                .map_err(|failure| governance_error(failure.message, preservation.span))?;
                 let checked =
                     fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 8)
                         .map_err(|failure| {
@@ -364,6 +408,7 @@ fn implements_output(
         &resolver,
         model,
         depth,
+        &request.parse_options(),
     )
 }
 
@@ -378,12 +423,15 @@ fn add_frontend_metadata(
     if let Some(implements) = implements {
         fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
     }
-    if let Ok(ctx) = ModelWarningContext::from_source(model, &request.source) {
+    if let Ok(ctx) =
+        ModelWarningContext::from_source(model, &request.source, &request.parse_options())
+    {
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
     let additions = fslc_rust::frontend_output::implicit_initial_value_warnings(
         &request.source,
         &request.source_file,
+        &request.parse_options(),
     );
     if !additions.is_empty() {
         output
@@ -400,7 +448,8 @@ fn add_frontend_metadata(
 
 async fn verify(request: &Request, solver_version: &str) -> Value {
     let output = verify_kernel(request, solver_version).await;
-    fold_governance(request, solver_version, output).await
+    let output = fold_governance(request, solver_version, output).await;
+    apply_edition(request, solver_version, output)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -438,6 +487,7 @@ async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
     if let Err(failure) = fslc_rust::check_stages::validate_specialized_document(
         &request.source,
         &request.source_file,
+        &request.parse_options(),
     ) {
         return fslc_rust::verification_output::render_semantic_error(
             envelope(solver_version),
@@ -455,6 +505,7 @@ async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
                 &envelope(solver_version),
                 &request.source,
                 model,
+                &request.parse_options(),
             ) {
                 Ok(fslc_rust::verification_output::TraceGate::Rejected { failure, .. }) => {
                     return failure;
@@ -1064,6 +1115,7 @@ mod tests {
             &request.source,
             &request.source_file,
             &resolver,
+            &request.parse_options(),
         )
         .into_iter()
         .find(|diagnostic| diagnostic.kind != "migration")
@@ -1104,6 +1156,7 @@ mod tests {
             &envelope(solver_version),
             &request.source,
             &model,
+            &request.parse_options(),
         )
         .expect("fixture trace validation must run")
         {
@@ -1204,6 +1257,7 @@ mod tests {
         let failure = fslc_rust::verification_output::governance_output(
             &request.source,
             &resolver,
+            &request.parse_options(),
             |preservation| {
                 let error = resolver
                     .read(&preservation.after_path)
@@ -1240,6 +1294,7 @@ mod tests {
             &resolver,
             &model,
             8,
+            &request.parse_options(),
         )
         .expect_err("fixture must fail native implements output");
         fslc_rust::verification_output::render_requirements_implements_error(
@@ -2657,5 +2712,46 @@ mod tests {
                 .unstable()
                 .contains(fsl_syntax::UnstableFeature::Fsl5)
         );
+    }
+
+    /// The Worker applies the native edition step to a document with an
+    /// edition header: in `fsl 5` a migration finding is an error, as native
+    /// `check` reports it (`verify` runs the same step; it needs the browser
+    /// solver, so it is not run here). Without the gate the header stays an unknown
+    /// declaration, and without a header the envelope keeps its shape.
+    #[test]
+    fn an_edition_header_reaches_the_worker_edition_step() {
+        let body = "spec Q {\n  type Id = 0..1\n  state { ready: Map<Id, Bool> }\n  init { forall i in 0..1: { ready[i] = false } }\n  invariant Typed { forall i in 0..1: ready[i] == true or ready[i] == false }\n}\n";
+        let request = |source: &str, unstable: &[&str]| -> Request {
+            serde_json::from_value(json!({"cmd":"check","source":source,"unstable":unstable}))
+                .expect("request")
+        };
+        let headed = format!("fsl 5\n{body}");
+        let output = block_on(check(&request(&headed, &["fsl5"]), TEST_SOLVER_VERSION));
+        assert_eq!(output["result"], "error", "{output:#}");
+        assert_eq!(output["kind"], "unsupported_in_edition", "{output:#}");
+        assert_eq!(output["edition"], "next", "{output:#}");
+        assert_eq!(output["fsl_edition"], 5, "{output:#}");
+        assert!(
+            output["findings"]
+                .as_array()
+                .is_some_and(|findings| !findings.is_empty()
+                    && findings
+                        .iter()
+                        .all(|finding| finding["severity"] == "error")),
+            "{output:#}"
+        );
+
+        let ungated = block_on(check(&request(&headed, &[]), TEST_SOLVER_VERSION));
+        assert_eq!(
+            ungated["diagnostic_code"], "FSL-DIALECT-UNKNOWN",
+            "{ungated:#}"
+        );
+
+        let plain = block_on(check(&request(body, &["fsl5"]), TEST_SOLVER_VERSION));
+        let published = block_on(check(&request(body, &[]), TEST_SOLVER_VERSION));
+        assert_eq!(plain, published, "a document without a header is unchanged");
+        assert_eq!(plain["result"], "ok", "{plain:#}");
+        assert!(plain.get("fsl_edition").is_none(), "{plain:#}");
     }
 }

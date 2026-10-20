@@ -1749,8 +1749,13 @@ fn verify_cache_keys_with_solver_version(
 /// this one is a fixed constant with no CLI flag, added to the options
 /// blob instead. Both are inputs to the same single key derivation -- they
 /// do not compete for one slot.
+///
+/// With unstable features enabled the key also carries their names and the
+/// exact `--edition` request, so a run with the gate never reuses a result
+/// computed without it (the document's edition header is part of the source
+/// text the key already hashes). Without them the blob is unchanged.
 fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value {
-    json!({
+    let mut blob = json!({
         "deadlock": options.deadlock,
         "engine": engine,
         "explicit_budget": options.explicit_budget,
@@ -1763,8 +1768,28 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
         "values": options.scope.values,
         "strict_tags": options.strict_tags,
         "lemmas": options.lemmas,
-        "edition": options.shared.edition,
-    })
+        "edition": options.shared.edition.map_or("current", fsl_syntax::Edition::as_str),
+    });
+    let unstable = crate::process::parse_options().unstable();
+    if !unstable.is_empty()
+        && let Value::Object(fields) = &mut blob
+    {
+        fields.insert(
+            "unstable".to_owned(),
+            json!(
+                fsl_syntax::UnstableFeature::ALL
+                    .iter()
+                    .filter(|feature| unstable.contains(**feature))
+                    .map(|feature| feature.name())
+                    .collect::<Vec<_>>()
+            ),
+        );
+        fields.insert(
+            "edition_request".to_owned(),
+            json!(options.shared.edition.map(fsl_syntax::Edition::number)),
+        );
+    }
+    blob
 }
 
 /// `sources` is the resolved-absolute-path/content set actually read while
@@ -2067,7 +2092,10 @@ fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Opti
     if reasons.is_empty() {
         return None;
     }
-    let abs = fslc_rust::verification_output::requirements_implements_name(source)?;
+    let abs = fslc_rust::verification_output::requirements_implements_name(
+        source,
+        crate::process::parse_options(),
+    )?;
     let mut fields = Map::new();
     fields.insert("abs".to_owned(), json!(abs));
     Some(fslc_rust::verification_output::not_evaluated_section(
@@ -2247,6 +2275,7 @@ fn run_verify_cli_kernel_from_source(
                 model,
                 &options.scope.instances,
                 &options.scope.values,
+                crate::process::parse_options(),
             ) {
                 Ok(contract) => contract,
                 Err(error) => return (implements_error_output(&error), 2),
@@ -2351,6 +2380,7 @@ fn prepare_cli_verification_from_source(
                 source,
                 model,
                 declared.as_ref(),
+                crate::process::parse_options(),
             ) {
                 Ok((Some(failure), _)) => return Err((failure, 2)),
                 Ok((None, skipped)) => skipped,
@@ -2761,7 +2791,9 @@ fn decorate_default_cli_verification(
     let implements_exit = implements.and_then(|implements| {
         fslc_rust::verification_output::attach_requirements_implements(output, implements)
     });
-    if let Ok(ctx) = fsl_core::ModelWarningContext::from_source(model, source) {
+    if let Ok(ctx) =
+        fsl_core::ModelWarningContext::from_source(model, source, crate::process::parse_options())
+    {
         fsl_core::finalize_envelope_model_warnings(output, &ctx);
     }
     let Value::Object(envelope) = output else {

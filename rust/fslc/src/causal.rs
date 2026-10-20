@@ -337,7 +337,7 @@ fn load_causal_model(
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let resolver = fsl_core::FsResolver::new(base);
     let legacy_literate = path.extension().and_then(std::ffi::OsStr::to_str) == Some("md");
-    fsl_tools::build_causal_model(&source, &resolver)
+    fsl_tools::build_causal_model_with_options(&source, &resolver, crate::process::parse_options())
         .map_err(|error| causal_error_output(&error, legacy_literate))
 }
 
@@ -567,7 +567,12 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let resolver = fsl_core::FsResolver::new(base);
-    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+    let compiled = match fsl_tools::compile_expectations(
+        &surface,
+        &model,
+        &resolver,
+        crate::process::parse_options(),
+    ) {
         Ok(compiled) => compiled,
         Err(error) => return causal_error_output(&error, false),
     };
@@ -704,7 +709,12 @@ fn run_causal_observe_expectations(
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let resolver = fsl_core::FsResolver::new(base);
-    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+    let compiled = match fsl_tools::compile_expectations(
+        &surface,
+        &model,
+        &resolver,
+        crate::process::parse_options(),
+    ) {
         Ok(compiled) => compiled,
         Err(error) => return causal_error_output(&error, false),
     };
@@ -815,7 +825,11 @@ fn run_causal_observe_expectations(
                 );
             }
         };
-        let kernel = match fsl_core::parse_kernel_source(&spec_source, &resolver) {
+        let kernel = match fsl_core::parse_kernel_source_with_options(
+            &spec_source,
+            &resolver,
+            crate::process::parse_options(),
+        ) {
             Ok(kernel) => kernel,
             Err(error) => return (error_output("semantics", &error.to_string()), 2),
         };

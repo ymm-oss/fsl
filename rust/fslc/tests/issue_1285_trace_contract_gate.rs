@@ -17,10 +17,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const PARSE: &str = "requirements_trace_contract";
+/// The same parse under explicit `ParseOptions`; its calls count as [`PARSE`].
+const PARSE_WITH_OPTIONS: &str = "requirements_trace_contract_with_options";
 const UNCHECKED: [&str; 2] = ["unchecked_acceptance", "unchecked_forbidden"];
 
-/// `(workspace-relative file, entry, count, reason)`. `entry` is [`PARSE`] or
-/// `"unchecked"` (either `UNCHECKED` accessor).
+/// `(workspace-relative file, entry, count, reason)`. `entry` is [`PARSE`]
+/// (either spelling) or `"unchecked"` (either `UNCHECKED` accessor).
 const INVENTORY: &[(&str, &str, usize, &str)] = &[
     (
         "fsl-core/src/diagnostics.rs",
@@ -33,6 +35,12 @@ const INVENTORY: &[(&str, &str, usize, &str)] = &[
         "unchecked",
         1,
         "no_user_invariants suppression reads whether a forbidden exists",
+    ),
+    (
+        "fsl-core/src/dialect.rs",
+        PARSE,
+        1,
+        "the published-language requirements_trace_contract delegating to its options form; no consumer",
     ),
     (
         "fsl-tools/src/document_project.rs",
@@ -166,7 +174,7 @@ fn census() -> BTreeMap<(String, &'static str), usize> {
             .expect("source under workspace")
             .to_string_lossy()
             .replace('\\', "/");
-        let parses = calls(&text, PARSE);
+        let parses = calls(&text, PARSE) + calls(&text, PARSE_WITH_OPTIONS);
         if parses > 0 {
             found.insert((relative.clone(), PARSE), parses);
         }
