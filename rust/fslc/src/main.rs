@@ -5807,6 +5807,9 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
         crate::parse_options(),
     ) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
+            if let Some(rejected) = rule_guards_beyond_enumeration(source) {
+                return rejected;
+            }
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
             output.insert("spec".to_owned(), json!(model.name));
@@ -5841,6 +5844,54 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
             }
         }
         Err(result) => result,
+    }
+}
+
+/// The rule-guard conflicts the lowering's enumeration leaves undecided
+/// (domains past `fsl_core::ENUMERATION_BOUND`), asked of the solver: the
+/// rejection envelope of the first, if any.
+fn rule_guards_beyond_enumeration(source: &str) -> Option<(Value, i32)> {
+    if crate::parse_options().unstable().is_empty() {
+        return None;
+    }
+    let Ok(fsl_syntax::ParsedDocument {
+        surface: fsl_syntax::SurfaceDocument::Requirements(requirements),
+        ..
+    }) = fsl_syntax::parse_document_with(
+        fsl_syntax::SourceFile::new(source),
+        crate::parse_options(),
+    )
+    else {
+        return None;
+    };
+    let problems = fsl_core::rule_guard_problems(&requirements);
+    if problems.is_empty() {
+        return None;
+    }
+    let mut solver = match fsl_solver_z3::Z3Solver::new() {
+        Ok(solver) => solver,
+        Err(error) => return Some((error_output("internal", &error.to_string()), 3)),
+    };
+    match block_on_native(fslc_rust::rule_guard_solver::unsatisfiable_rule_guard(
+        &problems,
+        &mut solver,
+    )) {
+        Ok(None) => None,
+        // Spelled as the lowering's enumeration reports the same conflict.
+        Ok(Some((message, span))) => Some((
+            fslc_rust::verification_output::render_semantic_error(
+                envelope(),
+                &format!("{message} at {}:{}", span.start.line, span.start.column),
+                None,
+                &fslc_rust::verification_output::DiagnosticClass::Core(
+                    fsl_core::CoreErrorKind::Semantics,
+                ),
+                Some(fsl_core::RULE_CONFLICT_UNSATISFIABLE_GUARD),
+                None,
+            ),
+            2,
+        )),
+        Err(error) => Some((error_output("internal", &error.to_string()), 3)),
     }
 }
 

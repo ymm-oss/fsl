@@ -43,6 +43,7 @@ mod partial_operation;
 mod public_kernel;
 mod refinement;
 mod reserved;
+mod rule_guards;
 mod trace;
 mod trace_json;
 mod typecheck;
@@ -106,6 +107,10 @@ pub use refinement::{
     Refinement, RefinementError, StateMap, parse_refinement, parse_refinement_with_options,
     requirements_implements, requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
+};
+pub use rule_guards::{
+    ENUMERATION_BOUND, FiniteDomain, FiniteValue, GuardDecision, GuardProblem, ProblemGuard,
+    RULE_CONFLICT_UNSATISFIABLE_GUARD, rule_guard_problems,
 };
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{

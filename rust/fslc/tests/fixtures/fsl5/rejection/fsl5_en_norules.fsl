@@ -45,14 +45,14 @@ requirements AgenticRagToolApprovalSlice {
     set approval = Approved
 
   requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
-    invariant ToolExecutionApproved {
+    invariant REQ_5_always {
       forall r: Request {
         request_stage[r] == ActionExecuted => (
           request_approval[r] == Approved and request_role[r] == Operator
         )
       }
     }
-    trans ExecutionComesFromApprovedStage {
+    trans REQ_5_enters {
       forall r: Request {
         request_stage[r] == ActionExecuted => (
           old(request_stage[r]) == ToolApproved or old(request_stage[r]) == ActionExecuted
