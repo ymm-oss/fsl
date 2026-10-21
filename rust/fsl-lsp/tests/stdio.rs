@@ -546,3 +546,32 @@ fn keyword_spelled_names_navigate_rename_and_hover_like_any_other_name() {
     }
     session.finish();
 }
+
+/// fsl 5 plan S7, decisions/048 J3: the language server, which has no
+/// solver, publishes a decision table's gap with the values native `check`
+/// reports, because fsl-core enumerates the field's domain.
+#[test]
+fn a_decision_table_gap_is_published_with_its_values() {
+    let text = "fsl 5\nrequirements R {\n  number Amount\n  const AUTO_LIMIT = 1\n  \
+                actor System, Manager\n  entity Claim {\n    amount: Amount = 0\n    \
+                lifecycle Submitted -> Approved\n  }\n  \
+                concept SmallClaim = Claim where amount < AUTO_LIMIT\n  \
+                concept LargeClaim = Claim where amount > AUTO_LIMIT\n  \
+                event auto_approve = System approves Claim Submitted -> Approved\n  \
+                event mgr_approve = Manager approves Claim Submitted -> Approved\n  \
+                decide T \"who\" for Submitted Claim {\n    \
+                SmallClaim => System approves\n    LargeClaim => Manager approves\n  \
+                }\n}\nverify {\n  instances Claim = 1\n  values Amount = 0..3\n}\n";
+    let diagnostics = published_diagnostics(text, Some("fsl5"));
+    let gap = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "decide_not_exhaustive")
+        .unwrap_or_else(|| panic!("decide_not_exhaustive published: {diagnostics:#?}"));
+    assert_eq!(gap["severity"], 1, "{gap:#}");
+    assert!(
+        gap["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("no row holds at amount = 1, AUTO_LIMIT = 1")),
+        "{gap:#}"
+    );
+}
