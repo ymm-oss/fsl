@@ -371,3 +371,49 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
         "without the gate the header is the unknown declaration `fsl`: {ungated:#?}"
     );
 }
+
+/// #1243: the editor published no error for a forbidden the requirement-trace
+/// gate rejects, although `check` refuses the spec. It now publishes the gate's
+/// error where `check` locates it (`loc` line 19, column 3 of the gallery
+/// fixture: the `forbidden FB-1` case), and the server keeps serving
+/// (`published_diagnostics` shuts it down cleanly). With the guard restored,
+/// the gate passes and nothing is published.
+#[test]
+fn a_forbidden_the_gate_rejects_is_published_as_an_error() {
+    const ERROR: u64 = 1;
+    let fixture = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gallery/errors/forbidden_op_accepted.fsl"),
+    )
+    .expect("read gallery fixture");
+    let published = published_diagnostics(&fixture, None);
+    let trace = published
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "FSL-REQUIREMENT-TRACE")
+        .collect::<Vec<_>>();
+    assert_eq!(trace.len(), 1, "{published:#?}");
+    assert_eq!(trace[0]["severity"], ERROR);
+    assert_eq!(trace[0]["data"]["kind"], "forbidden");
+    assert_eq!(
+        trace[0]["range"]["start"],
+        json!({"line": 18, "character": 2})
+    );
+    let message = trace[0]["message"].as_str().expect("message");
+    assert!(
+        message.starts_with("forbidden 'FB-1' does not pass the requirement-trace gate: "),
+        "{message}"
+    );
+
+    let guarded = fixture.replace(
+        "requires order[o] == Paid or order[o] == Shipped",
+        "requires order[o] == Paid",
+    );
+    assert_ne!(guarded, fixture, "the fixture's weakened guard moved");
+    let published = published_diagnostics(&guarded, None);
+    assert!(
+        published
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != "FSL-REQUIREMENT-TRACE"),
+        "{published:#?}"
+    );
+}

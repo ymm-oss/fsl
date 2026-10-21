@@ -17,9 +17,7 @@ use fsl_core::{FileResolver, KernelModel, KernelSpec};
 use serde_json::{Map, Value, json};
 
 use crate::spec_load::{SemanticDiagnostic, SpecLoadError, kernel_load_error};
-use crate::verification_output::{
-    TraceGate, render_runtime_error, render_semantic_error, validate_requirement_trace_source,
-};
+use crate::verification_output::{render_runtime_error, render_semantic_error, require_trace_gate};
 
 /// A spec that passed every validity stage of `check`.
 #[derive(Debug)]
@@ -198,10 +196,8 @@ fn check_stages(
     if let Err(error) = fsl_runtime::check_init_write_ownership(&model) {
         return Err((render_runtime_error(envelope(), &error), 2));
     }
-    match validate_requirement_trace_source(&envelope(), source, &model, options) {
-        Ok(TraceGate::Rejected { failure, .. }) => return Err((failure, 2)),
-        Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
-        Err(error) => return Err((semantic_error(envelope(), &error), 2)),
+    if let Err(refusal) = require_trace_gate(&envelope(), source, &model, options) {
+        return Err((refusal, 2));
     }
     Ok(CheckedSpec { kernel, model })
 }

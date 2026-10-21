@@ -60,9 +60,8 @@ use refinement::{
 };
 use spec_loading::{
     load_kernel_model_from_source, load_model, load_model_from_source, load_model_scoped,
-    load_snapshot_value_object, read_spec_source, snapshot_value,
-    validate_requirement_trace_source, validate_requirement_traces_from_source,
-    validate_specialized_document_from_source,
+    load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
+    validate_requirement_trace_source, validate_specialized_document_from_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
 use verification::{
@@ -1854,7 +1853,10 @@ fn load_document_claims_with_label(
     let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     match fsl_tools::project_requirement_claims_from_source(&source, Some(label), base) {
-        Ok(claims) => Ok((source, claims)),
+        Ok(claims) => {
+            document_trace_gate(&source, base)?;
+            Ok((source, claims))
+        }
         // The projector reports a surface-parse failure as a plain message, so
         // recover the span and emit the same `kind:"parse"` envelope `check`
         // emits instead of a location-free `semantics` error.
@@ -1870,6 +1872,21 @@ fn load_document_claims_with_label(
             ),
         ),
     }
+}
+
+/// The requirement-trace gate for every `document` command and the
+/// `requirements_document` approval, which all project through
+/// [`load_document_claims_with_label`]: the document states a claim per
+/// acceptance / forbidden case, so a spec whose traces the gate refuses gets
+/// the gate's error (exit 2) instead of a document (#1243). The model is built
+/// the way the document commands build theirs.
+fn document_trace_gate(source: &str, base: &Path) -> Result<(), Value> {
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
+    require_trace_gate(source, &model).map(|_checked| ())
 }
 
 /// Recover the typed-model diagnostic behind a document-projection failure that
@@ -5303,17 +5320,39 @@ fn run_scenarios_mode_from_source(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let trace_contract = match validate_requirement_traces_from_source(path, source, &model) {
-        Ok(TraceGate::Rejected { failure, .. }) => return (failure, 2),
-        Ok(TraceGate::Passed(contract)) => Some(contract),
-        Ok(TraceGate::NotRequirements) => None,
-        Err(error) => return (semantic_error_output(&error), 2),
+    let trace_contract = match require_trace_gate(source, &model) {
+        Ok(contract) => contract,
+        Err(refusal) => return (refusal, 2),
     };
+    scenarios_from_checked_traces(
+        path,
+        source,
+        &model,
+        trace_contract.as_ref(),
+        depth,
+        deadlock_mode,
+        allow_unreached,
+    )
+}
+
+/// The scenarios envelope of a model whose requirement traces already passed
+/// the gate: only the gate hands out `trace_contract`, which the acceptance /
+/// forbidden scenarios are built from.
+#[allow(clippy::too_many_lines)]
+fn scenarios_from_checked_traces(
+    path: &Path,
+    source: &str,
+    model: &KernelModel,
+    trace_contract: Option<&CheckedTraceContract>,
+    depth: usize,
+    deadlock_mode: &str,
+    allow_unreached: bool,
+) -> (Value, i32) {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
-    let result = match block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
+    let result = match block_on_native(fsl_verifier::verify_bounded(model, &mut solver, depth)) {
         Ok(result) => result,
         Err(error) => return (error_output("semantics", &error.to_string()), 2),
     };
@@ -5332,8 +5371,7 @@ fn run_scenarios_mode_from_source(
             1,
         );
     }
-    if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
-    {
+    if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(model, &result, None) {
         return (error_output("internal", &error), 3);
     }
     let covers = match fsl_runtime::action_cover_traces(model.clone(), depth) {
@@ -5362,7 +5400,7 @@ fn run_scenarios_mode_from_source(
                 // Never enabled (blocked by an unsatisfiable `requires`), not merely
                 // uncovered — say so, matching `fsl_runtime::verification_warnings`'s
                 // wording for the same diagnosis on the verify path.
-                fsl_runtime::never_enabled_action_warning(&model, action, depth)
+                fsl_runtime::never_enabled_action_warning(model, action, depth)
             } else {
                 Some(json!({
                     "message": format!(
@@ -5377,7 +5415,7 @@ fn run_scenarios_mode_from_source(
     for (published, name, witness) in reachables.iter().filter_map(|(published, name, witness)| {
         witness.as_ref().map(|witness| (published, name, witness))
     }) {
-        let mut scenario = scenario_from_trace(&model, &witness.trace);
+        let mut scenario = scenario_from_trace(model, &witness.trace);
         scenario.insert("name".to_owned(), json!(format!("reach_{published}")));
         scenario.insert("kind".to_owned(), json!("reachable"));
         scenario.insert("property".to_owned(), json!(published.as_str()));
@@ -5395,7 +5433,7 @@ fn run_scenarios_mode_from_source(
         }
         scenarios.push(Value::Object(scenario));
     }
-    let (responses, missing_responses) = match fsl_runtime::leadsto_response_traces(&model, depth) {
+    let (responses, missing_responses) = match fsl_runtime::leadsto_response_traces(model, depth) {
         Ok(result) => result,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
@@ -5457,7 +5495,7 @@ fn run_scenarios_mode_from_source(
         }
     }));
     for response in responses {
-        let mut scenario = scenario_from_trace(&model, &response.trace);
+        let mut scenario = scenario_from_trace(model, &response.trace);
         let mut suffix = String::new();
         for (name, value) in &response.bindings {
             suffix.push('_');
@@ -5514,7 +5552,7 @@ fn run_scenarios_mode_from_source(
         let Some(trace) = covers.get(name) else {
             continue;
         };
-        let mut scenario = scenario_from_trace(&model, trace);
+        let mut scenario = scenario_from_trace(model, trace);
         scenario.insert(
             "name".to_owned(),
             json!(format!("cover_{}", model.action_display_name(name))),
@@ -5527,7 +5565,7 @@ fn run_scenarios_mode_from_source(
     if let Some(trace) = &result.deadlock_trace
         && deadlock_mode != "ignore"
     {
-        let mut scenario = scenario_from_trace(&model, trace);
+        let mut scenario = scenario_from_trace(model, trace);
         scenario.insert("name".to_owned(), json!("deadlock_terminal"));
         scenario.insert("kind".to_owned(), json!("deadlock"));
         scenario.insert(
@@ -5536,7 +5574,7 @@ fn run_scenarios_mode_from_source(
         );
         scenarios.push(Value::Object(scenario));
     }
-    match requirement_trace_scenarios(trace_contract.as_ref(), &model) {
+    match requirement_trace_scenarios(trace_contract, model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
         Err(error) => return (semantic_error_output(&error), 2),
     }
@@ -5553,16 +5591,30 @@ fn run_scenarios_mode_from_source(
     (Value::Object(output), 0)
 }
 
-/// The scenarios envelope without its exit status, for a consumer that embeds
-/// the envelope even when it is a requirement-trace gate failure (#1242).
-fn scenarios_discarding_gate_status(
+/// The scenarios envelope that explain and ledger embed, for a model whose
+/// requirement traces passed the gate (the caller holds `trace_contract`).
+///
+/// The status is not returned: past the gate, a non-zero status is a
+/// violation (the scenarios envelope is then the `verify` envelope, which
+/// has no scenarios) or an internal error, and both consumers report the
+/// spec's verification separately. A gate refusal never reaches here.
+fn witness_scenarios(
     path: &Path,
     source: &str,
+    model: &KernelModel,
+    trace_contract: Option<&CheckedTraceContract>,
     depth: usize,
     deadlock_mode: &str,
 ) -> Value {
-    let (scenarios, _discarded_status) =
-        run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
+    let (scenarios, _status_past_the_gate) = scenarios_from_checked_traces(
+        path,
+        source,
+        model,
+        trace_contract,
+        depth,
+        deadlock_mode,
+        false,
+    );
     scenarios
 }
 
@@ -9824,9 +9876,16 @@ fn run_explain_from_source(
         Ok(loaded) => loaded,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    // Witnesses come from the checked acceptance / forbidden cases, so a spec
+    // whose traces the gate refuses gets the gate's error, not an explanation
+    // without them (#1242).
+    let trace_contract = match require_trace_gate(source, &model) {
+        Ok(contract) => contract,
+        Err(refusal) => return (refusal, 2),
+    };
     let spec_kind = source_dialect(source);
     let skeleton = model_skeleton(&model, spec_kind);
-    let scenarios = scenarios_discarding_gate_status(path, source, depth, "warn");
+    let scenarios = witness_scenarios(path, source, &model, trace_contract.as_ref(), depth, "warn");
     let mut output = envelope();
     output.insert("result".to_owned(), json!("explained"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -11501,11 +11560,9 @@ fn run_mutate_with(
     };
     // The `verified` baseline already passed this gate on the same source and
     // model; it runs again because only the gate hands out the checked cases.
-    let trace_contract = match validate_requirement_trace_source(&source, &model) {
-        Ok(TraceGate::Passed(contract)) => Some(contract),
-        Ok(TraceGate::NotRequirements) => None,
-        Ok(TraceGate::Rejected { failure, .. }) => return mutate_error(failure),
-        Err(error) => return mutate_error(semantic_error_output(&error)),
+    let trace_contract = match require_trace_gate(&source, &model) {
+        Ok(contract) => contract,
+        Err(refusal) => return mutate_error(refusal),
     };
     let document = match parse_surface_document_from_source(path, &source) {
         Ok(document) => document,
@@ -13116,6 +13173,9 @@ fn prepare_ledger_report_from_source(
         Ok(model) => model,
         Err(error) => return Err(spec_load_error_output(&error)),
     };
+    // A ledger row per acceptance / forbidden case is a claim about that case,
+    // so a spec whose traces the gate refuses gets no ledger (#1243).
+    let trace_contract = require_trace_gate(source, &model)?;
     let (verification, verification_status) = run_verify_from_source(
         request.path,
         source,
@@ -13155,9 +13215,11 @@ fn prepare_ledger_report_from_source(
             Ok((evidence_path.clone(), value))
         })
         .collect::<Result<Vec<_>, Value>>()?;
-    let scenarios = scenarios_discarding_gate_status(
+    let scenarios = witness_scenarios(
         request.path,
         source,
+        &model,
+        trace_contract.as_ref(),
         request.depth,
         request.deadlock_mode,
     );
@@ -14194,20 +14256,70 @@ fn add_scenario_items(
     node_additions: &mut Vec<Value>,
     edge_additions: &mut Vec<Value>,
 ) {
-    // Ungated (#1243): a parse failure projects no case, and a case the gate
-    // would reject is projected like any other.
-    let Ok(Some(contract)) =
-        fsl_core::requirements_trace_contract_with_options(source, crate::parse_options())
-    else {
-        return;
+    // The graph is structure, not a verdict, so a contract the gate refuses is
+    // still projected, with every case node marked `trace_gate: "unchecked"`
+    // (#1243). A contract that does not parse projects no case.
+    let unchecked = match validate_requirement_trace_source(source, model) {
+        Ok(TraceGate::NotRequirements) => return,
+        Ok(TraceGate::Passed(contract)) => {
+            let cases = [
+                ("acceptance", contract.acceptance()),
+                ("forbidden", contract.forbidden()),
+            ];
+            add_scenario_cases(
+                model,
+                spec_id,
+                &cases,
+                false,
+                known_ids,
+                node_additions,
+                edge_additions,
+            );
+            return;
+        }
+        Ok(TraceGate::Rejected { contract, .. }) => contract,
+        Err(_) => {
+            match fsl_core::requirements_trace_contract_with_options(source, crate::parse_options())
+            {
+                Ok(Some(contract)) => contract,
+                Ok(None) | Err(_) => return,
+            }
+        }
     };
-    for (kind, cases) in [
-        ("acceptance", contract.unchecked_acceptance()),
-        ("forbidden", contract.unchecked_forbidden()),
-    ] {
+    let cases = [
+        ("acceptance", unchecked.unchecked_acceptance()),
+        ("forbidden", unchecked.unchecked_forbidden()),
+    ];
+    add_scenario_cases(
+        model,
+        spec_id,
+        &cases,
+        true,
+        known_ids,
+        node_additions,
+        edge_additions,
+    );
+}
+
+/// The nodes and edges of [`add_scenario_items`]' cases; `unchecked` marks
+/// cases of a contract the requirement-trace gate did not pass.
+fn add_scenario_cases(
+    model: &KernelModel,
+    spec_id: &str,
+    cases: &[(&str, &[fsl_core::RequirementsTraceCase])],
+    unchecked: bool,
+    known_ids: &mut std::collections::BTreeSet<String>,
+    node_additions: &mut Vec<Value>,
+    edge_additions: &mut Vec<Value>,
+) {
+    for &(kind, cases) in cases {
         for case in cases {
             let id = format!("{kind}:{}", case.id);
-            node_additions.push(project_analysis_node(&id, kind, &case.id));
+            let mut node = project_analysis_node(&id, kind, &case.id);
+            if unchecked {
+                node["trace_gate"] = json!("unchecked");
+            }
+            node_additions.push(node);
             known_ids.insert(id.clone());
             edge_additions.push(project_analysis_edge(spec_id, "declares", &id));
             for requirement in requirement_metadata(&case.annotations, None) {
@@ -16715,10 +16827,8 @@ fn run_verify_from_source(
     let loaded_model = load_kernel_model_from_source(path, source);
     let (implements, compose_warnings) = match &loaded_model {
         Ok((kernel, model)) => {
-            match validate_requirement_traces_from_source(path, source, model) {
-                Ok(TraceGate::Rejected { failure, .. }) => return (failure, 2),
-                Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
-                Err(error) => return (semantic_error_output(&error), 2),
+            if let Err(refusal) = require_trace_gate(source, model) {
+                return (refusal, 2);
             }
             let implements = match implements_result_from_source(path, source, model, depth) {
                 Ok(implements) => implements,
@@ -17529,7 +17639,7 @@ spec InitTraceability {
             "kernel model must retain source A's state"
         );
         assert_eq!(
-            validate_requirement_traces_from_source(&fixture.path, &captured, &model)
+            validate_requirement_trace_source(&captured, &model)
                 .expect("validate source A requirement traces"),
             TraceGate::NotRequirements
         );

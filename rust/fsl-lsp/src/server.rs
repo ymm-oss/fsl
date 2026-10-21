@@ -415,8 +415,14 @@ fn publish_diagnostics(
         Ok(Some(header)) => header.edition,
         _ => fsl_syntax::Edition::Fsl4,
     };
+    // `check` refuses a spec whose acceptance / forbidden traces the gate
+    // rejects, so the editor shows that error instead of accepting it (#1243).
+    let trace_gate = model.as_ref().map_or_else(Vec::new, |model| {
+        fslc_rust::source_diagnostic::trace_gate_diagnostics(&source, model, &state.parse_options)
+    });
     let mut items = source_diagnostics
         .into_iter()
+        .chain(trace_gate)
         .map(|item| to_lsp_diagnostic(&source, item, edition))
         .chain(
             fsl_syntax::lexical_warnings(&source, &state.parse_options)
