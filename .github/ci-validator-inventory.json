@@ -435,6 +435,13 @@
       "tier": "exempt"
     },
     {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_rust_cache_key.py",
+      "tier": "required"
+    },
+    {
       "exempt_reason": "frozen-python-compatibility",
       "path": "tests/test_rust_cli_semantics.py",
       "tier": "exempt"

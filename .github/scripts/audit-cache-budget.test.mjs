@@ -12,6 +12,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -21,6 +22,7 @@ import {
   BUDGET_WARN_FRACTION,
   CACHE_LIMIT_BYTES,
   CI_SHARED_KEYS,
+  CURRENT_KEY_PREFIX,
   GIB,
   REQUIRED_MAIN_ENTRIES,
 } from "./audit-cache-budget.mjs";
@@ -40,6 +42,7 @@ import {
   STABILITY_ATTEMPTS,
   STABILITY_RETRY_DELAY_MS,
 } from "./run-cache-budget-audit.mjs";
+import { PROFILE_HASH_ENV, profileHash, profileSections } from "./cargo-profile-hash.mjs";
 
 const MAIN = "refs/heads/main";
 const BYTES_PER_GIB = 1_073_741_824;
@@ -123,15 +126,20 @@ function healthyListing() {
   // docs/design/DESIGN-ci.md, "Actions cache budget", for the full account. No
   // `fsl-logic` entry: that job is restore-only against `rust-workspace`
   // (same section) and a healthy state after that change has no dedicated
-  // `fsl-logic` key at all.
+  // `fsl-logic` key at all. The key prefix is the current `prefix-key`
+  // generation (`CURRENT_KEY_PREFIX`); the observation itself was under
+  // rust-cache's default `v0-rust`, and only that prefix is rewritten here --
+  // hashes and byte counts are the observed ones. Every other default-branch
+  // fixture below follows the same rule; pull-request-ref fixtures keep `v0-rust`
+  // because rules 3 and 4 are generation-independent.
   return [
-    cacheBytes("v0-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_605_761_517),
-    cacheBytes("v0-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_452_450_563),
-    cacheBytes("v0-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2_919_716_751),
+    cacheBytes("v1-rust-rust-workspace-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_605_761_517),
+    cacheBytes("v1-rust-wasm-Linux-x64-e8b3ee54-09fbaf53", MAIN, 1_452_450_563),
+    cacheBytes("v1-rust-semantic-mutation-Linux-x64-e8b3ee54-09fbaf53", MAIN, 2_919_716_751),
     // `rust-native-z3` is one shared key across a `[macos-15, windows-latest]`
     // matrix (`ci.yml`), so it needs one entry per platform to be healthy.
-    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-f9b08cb2-09fbaf53", MAIN, 1_239_235_056),
-    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53", MAIN, 619_429_238),
+    cacheBytes("v1-rust-rust-native-z3-Darwin-arm64-f9b08cb2-09fbaf53", MAIN, 1_239_235_056),
+    cacheBytes("v1-rust-rust-native-z3-Windows_NT-x64-af4551b0-09fbaf53", MAIN, 619_429_238),
   ];
 }
 
@@ -281,18 +289,18 @@ test("accepting: default-branch caches present, budget below threshold, no pull-
 // was independently confirmed for that platform too.
 function generationCoexistenceListing() {
   return [
-    cacheBytes("v0-rust-semantic-mutation-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 2_918_976_572),
-    cacheBytes("v0-rust-rust-workspace-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 1_606_856_511),
-    cacheBytes("v0-rust-wasm-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 1_451_597_557),
+    cacheBytes("v1-rust-semantic-mutation-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 2_918_976_572),
+    cacheBytes("v1-rust-rust-workspace-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 1_606_856_511),
+    cacheBytes("v1-rust-wasm-Linux-x64-0b9fd15e-9efe1eb7", MAIN, 1_451_597_557),
     // Older generation of each, created first.
     cacheBytes(
-      "v0-rust-rust-native-z3-Darwin-arm64-cf75cde1-9efe1eb7",
+      "v1-rust-rust-native-z3-Darwin-arm64-cf75cde1-9efe1eb7",
       MAIN,
       1_240_460_598,
       "2026-08-27T11:08:31Z",
     ),
     cacheBytes(
-      "v0-rust-rust-native-z3-Windows_NT-x64-e61e1838-9efe1eb7",
+      "v1-rust-rust-native-z3-Windows_NT-x64-e61e1838-9efe1eb7",
       MAIN,
       620_172_089,
       "2026-08-21T00:00:00Z",
@@ -300,13 +308,13 @@ function generationCoexistenceListing() {
     // Newer generation of each, created later -- the one Swatinem/rust-cache
     // would actually restore today.
     cacheBytes(
-      "v0-rust-rust-native-z3-Darwin-arm64-2bc65c5a-9efe1eb7",
+      "v1-rust-rust-native-z3-Darwin-arm64-2bc65c5a-9efe1eb7",
       MAIN,
       1_240_258_986,
       "2026-09-02T21:39:44Z",
     ),
     cacheBytes(
-      "v0-rust-rust-native-z3-Windows_NT-x64-368f6b88-9efe1eb7",
+      "v1-rust-rust-native-z3-Windows_NT-x64-368f6b88-9efe1eb7",
       MAIN,
       620_209_508,
       "2026-09-03T21:01:35Z",
@@ -402,8 +410,8 @@ test("rejecting: two same-identity generations physically filling the budget mus
   // (5 GiB, 50%) and passed; GitHub's own budget and eviction act on both
   // physical blobs regardless of which one this audit calls "current."
   const caches = [
-    cacheBytes("v0-rust-rust-workspace-Linux-x64-aaaaaaaa-11111111", MAIN, 5 * BYTES_PER_GIB, "2026-01-01T00:00:00Z"),
-    cacheBytes("v0-rust-rust-workspace-Linux-x64-bbbbbbbb-11111111", MAIN, 5 * BYTES_PER_GIB, "2026-01-02T00:00:00Z"),
+    cacheBytes("v1-rust-rust-workspace-Linux-x64-aaaaaaaa-11111111", MAIN, 5 * BYTES_PER_GIB, "2026-01-01T00:00:00Z"),
+    cacheBytes("v1-rust-rust-workspace-Linux-x64-bbbbbbbb-11111111", MAIN, 5 * BYTES_PER_GIB, "2026-01-02T00:00:00Z"),
   ];
   const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
 
@@ -423,8 +431,8 @@ test("rejecting: a listing sum lower than the independently-observed usage must 
   // even when the listing itself sums to far less and appears to explain
   // some of the gap via a stale generation.
   const caches = [
-    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-aaaa0000-11111111", MAIN, 2 * BYTES_PER_GIB, "2026-01-01T00:00:00Z"),
-    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-bbbb1111-11111111", MAIN, 2 * BYTES_PER_GIB, "2026-01-02T00:00:00Z"),
+    cacheBytes("v1-rust-rust-native-z3-Darwin-arm64-aaaa0000-11111111", MAIN, 2 * BYTES_PER_GIB, "2026-01-01T00:00:00Z"),
+    cacheBytes("v1-rust-rust-native-z3-Darwin-arm64-bbbb1111-11111111", MAIN, 2 * BYTES_PER_GIB, "2026-01-02T00:00:00Z"),
   ];
   const result = auditCacheBudget({ caches, usageBytes: 10 * BYTES_PER_GIB });
 
@@ -624,7 +632,7 @@ test("accepting: a page-boundary mixed collection retries to a stable observatio
     {
       ...oldEntries[0],
       id: 201,
-      key: "v0-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb",
+      key: "v1-rust-rust-compile-Linux-x64-aaaaaaaa-bbbbbbbb",
       ref: "refs/pull/9/merge",
     },
   ];
@@ -1707,7 +1715,7 @@ test("rejecting: every declared shared key is independently required on main", (
 
 test("accepting: cache keys recognize every os.type() platform spelling", () => {
   for (const platform of ["Linux", "Darwin", "Windows_NT"]) {
-    const key = `v0-rust-platform-test-${platform}-x64-aaaaaaaa-bbbbbbbb`;
+    const key = `v1-rust-platform-test-${platform}-x64-aaaaaaaa-bbbbbbbb`;
     const result = auditCacheBudget({
       caches: [cacheBytes(key, MAIN, 0)],
       usageBytes: 0,
@@ -1721,7 +1729,7 @@ test("accepting: cache keys recognize every os.type() platform spelling", () => 
 test("rejecting: runner.os and unknown cache-key platforms are never attributed as required entries", () => {
   for (const platform of ["macOS", "Windows", "FreeBSD"]) {
     const result = auditCacheBudget({
-      caches: [cacheBytes(`v0-rust-platform-test-${platform}-x64-aaaaaaaa-bbbbbbbb`, MAIN, 0)],
+      caches: [cacheBytes(`v1-rust-platform-test-${platform}-x64-aaaaaaaa-bbbbbbbb`, MAIN, 0)],
       usageBytes: 0,
       requiredMainEntries: [{ key: "platform-test", platform }],
       ciSharedKeys: [],
@@ -1739,7 +1747,7 @@ test("accepting: a shared key containing an earlier platform-like substring is p
   // greedily from the tail (anchored at `$`) fixes it.
   const caches = [
     ...healthyListing(),
-    cache("v0-rust-foo-Linux-bar-Linux-x64-aaaaaaaa-bbbbbbbb", MAIN, 0.01),
+    cache("v1-rust-foo-Linux-bar-Linux-x64-aaaaaaaa-bbbbbbbb", MAIN, 0.01),
   ];
   const result = auditCacheBudget({
     caches,
@@ -1917,7 +1925,7 @@ test("formatReport fixes the complete default FAIL report count, order, and deli
   const result = auditCacheBudget({
     caches: [
       cacheBytes(
-        "v0-rust-rust-workspace-Linux-x64-aaaaaaaa-bbbbbbbb",
+        "v1-rust-rust-workspace-Linux-x64-aaaaaaaa-bbbbbbbb",
         "refs/pull/9/merge",
         1_073_741_824,
       ),
@@ -1948,4 +1956,210 @@ test("formatReport fixes the complete default FAIL report count, order, and deli
       `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: 1, staleGenerations: 0, staleBytes: 0, effectiveBytes: 9_126_805_504 })}`,
     ].join("\n"),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Cache key generation (`prefix-key` and `FSL_CARGO_PROFILE_HASH`). See
+// docs/design/DESIGN-ci.md, "Cache key generation".
+
+// Exact `gh cache list -R ymm-oss/fsl` observation, 2026-10-21, before the bump
+// to `v1-rust`: every Rust entry is under rust-cache's default `v0-rust`, and
+// `v0-rust-rust-native-z3-Windows_NT-x64-70fc7789-b374b7ca` is the entry every
+// post-#1380 Windows run exact-hit with a pre-#1380 Debug-Z3 build and never
+// re-saved. Usage endpoint: 9,849,460,696 B, 11 entries.
+function liveV0Listing() {
+  return [
+    cacheBytes("Linux-cargo-nextest-0.9.143", MAIN, 9_035_968, "2026-10-20T03:02:23Z"),
+    cacheBytes("Linux-wasm-bindgen-cli-0.2.126", MAIN, 8_443_882, "2026-10-20T03:00:10Z"),
+    cacheBytes("node-cache-Linux-x64-npm-541c2caf2ed5378dd8986252a0959abcf8229ef6fd20cc2315b07fb766123eef", MAIN, 12_192_367, "2026-10-20T03:00:11Z"),
+    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-70fc7789-b374b7ca", MAIN, 657_901_330, "2026-10-20T00:46:03Z"),
+    cacheBytes("v0-rust-semantic-mutation-Linux-x64-fce45c49-b374b7ca", MAIN, 363_271_146, "2026-10-20T07:57:39Z"),
+    cacheBytes("v0-rust-wasm-Linux-x64-fce45c49-b374b7ca", MAIN, 1_461_992_338, "2026-10-20T00:32:51Z"),
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-fce45c49-b374b7ca", MAIN, 1_523_244_132, "2026-10-20T00:46:14Z"),
+    cacheBytes("v0-rust-rust-workspace-Linux-x64-d0c4c80e-b374b7ca", MAIN, 1_517_992_226, "2026-10-20T03:17:30Z"),
+    cacheBytes("v0-rust-semantic-mutation-Linux-x64-d0c4c80e-b374b7ca", MAIN, 3_011_848_336, "2026-10-20T00:17:22Z"),
+    cacheBytes("v0-rust-rust-native-z3-Darwin-arm64-a0373415-b374b7ca", MAIN, 1_271_347_403, "2026-10-20T00:57:33Z"),
+    cacheBytes("node-cache-Linux-x64-npm-e6d58c0aa2ebc53c41327e302ab36a33940d4fdecff9c231e58abfb54fc45d87", MAIN, 12_191_568, "2026-10-20T02:43:28Z"),
+  ];
+}
+const LIVE_V0_RUST_KEYS = liveV0Listing()
+  .map((entry) => entry.key)
+  .filter((key) => key.startsWith("v0-rust-"));
+
+test("the current key prefix is a bumped generation, not rust-cache's default", () => {
+  assert.match(CURRENT_KEY_PREFIX, /^v[1-9]\d*-rust$/);
+});
+
+test("rejecting: a default branch holding only superseded-prefix entries is reported absent for every required pair", () => {
+  // The state right after the bump, before main's first save: each required
+  // {key, platform} pair still has a `v0-rust` entry, but no current step can
+  // restore it. Treating it as present would report a warm main while every
+  // pull request builds cold.
+  const caches = liveV0Listing();
+  assert.equal(usageOf(caches), 9_849_460_696);
+  const result = auditCacheBudget({ caches, usageBytes: 9_849_460_696 });
+
+  assert.equal(result.ok, false);
+  const missing = result.findings.filter((finding) => finding.code === "main-cache-absent");
+  assert.equal(missing.length, REQUIRED_MAIN_ENTRIES.length, formatReport(result));
+  for (const finding of missing) {
+    assert.match(finding.message, /Only a superseded `prefix-key` generation is present \(current: `v1-rust`\)/);
+  }
+  // Rule 1 is still judged on the raw physical total: superseded bytes are
+  // not subtracted.
+  const budget = result.findings.find((finding) => finding.code === "budget-exhausted");
+  assert.ok(budget, formatReport(result));
+  assert.match(budget.message, /^cache usage is 9\.17 GiB of a 10\.00 GiB limit \(92%\)/);
+  const explanation = result.findings.find(
+    (finding) => finding.code === "generation-coexistence-partial-explanation",
+  );
+  assert.ok(explanation, formatReport(result));
+  assert.match(explanation.message, /up to 9\.13 GiB of this overage may be 7 generations/);
+
+  const superseded = result.informational.find((entry) => entry.code === "superseded-key-prefix");
+  assert.ok(superseded, formatReport(result));
+  for (const key of LIVE_V0_RUST_KEYS) assert.ok(superseded.message.includes(`\`${key}\``), key);
+  assert.match(superseded.message, /^7 `refs\/heads\/main` cache entries \(9\.13 GiB\)/);
+});
+
+test("accepting: leftover superseded-prefix entries beside a healthy current set pass and are listed as reclaimable", () => {
+  // Superseded entries are stale regardless of created_at: here they are
+  // *newer* than the current generation, and still not the one restored.
+  const leftovers = LIVE_V0_RUST_KEYS.slice(0, 2).map((key) =>
+    cacheBytes(key, MAIN, 1, "2027-01-01T00:00:00Z"),
+  );
+  const caches = [...healthyListing(), ...leftovers];
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+
+  assert.equal(result.ok, true, formatReport(result));
+  assert.deepEqual(result.informational.map((entry) => entry.code), [
+    "generation-coexistence",
+    "superseded-key-prefix",
+  ]);
+  assert.match(result.informational[0].message, /; 2 generations beyond the newest/);
+  assert.equal(
+    result.informational[1].message,
+    `2 \`refs/heads/main\` cache entries (0.00 GiB) under a superseded rust-cache \`prefix-key\` (current: \`v1-rust\`); no current step restores them, so each is reclaimable -- delete it, or GitHub evicts it after 7 days without access: ${leftovers
+      .map((entry) => entry.key)
+      .sort()
+      .map((key) => `\`${key}\``)
+      .join(", ")}. See docs/design/DESIGN-ci.md, "Cache key generation".`,
+  );
+  // A healthy current-only listing reports no superseded entries at all.
+  const clean = auditCacheBudget({ caches: healthyListing(), usageBytes: usageOf(healthyListing()) });
+  assert.deepEqual(clean.informational.map((entry) => entry.code), ["generation-coexistence"]);
+});
+
+test("rejecting: superseded-prefix bytes still count toward the physical budget", () => {
+  const caches = [
+    ...healthyListing(),
+    cacheBytes("v0-rust-semantic-mutation-Linux-x64-d0c4c80e-b374b7ca", MAIN, 3_011_848_336),
+  ];
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.findings.map((finding) => finding.code), [
+    "budget-exhausted",
+    "generation-coexistence-partial-explanation",
+  ]);
+  // Deleting it (what the superseded-key-prefix line invites) restores PASS.
+  const afterDelete = healthyListing();
+  assert.equal(auditCacheBudget({ caches: afterDelete, usageBytes: usageOf(afterDelete) }).ok, true);
+});
+
+test("rejecting: a pull-request save under a superseded prefix is still a violation", () => {
+  const caches = [
+    ...healthyListing(),
+    cacheBytes("v0-rust-rust-native-z3-Windows_NT-x64-70fc7789-b374b7ca", "refs/pull/9/merge", 1),
+  ];
+  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+  assert.deepEqual(result.findings.map((finding) => finding.code), ["pull-request-rust-cache-present"]);
+});
+
+// Workflow-side consistency (every rust-cache step passes `CURRENT_KEY_PREFIX`
+// and `FSL_CARGO_PROFILE_HASH`) is the parser-backed
+// `.github/scripts/validate_rust_cache_key.py`, calibrated by
+// tests/test_rust_cache_key.py, not a line scan here (docs/design/DESIGN-ci.md,
+// "Automation contracts use parser-backed workflow inspection").
+
+// Profile states of rust/Cargo.toml around #1379 and #1380, abridged to the
+// sections that matter.
+const MANIFEST_BEFORE_1379 = `[workspace]
+members = ["fslc"]
+
+[workspace.package]
+version = "4.12.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+`;
+const MANIFEST_AFTER_1379 = MANIFEST_BEFORE_1379.replace(
+  "[workspace.lints.rust]",
+  `[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[workspace.lints.rust]`,
+);
+const MANIFEST_AFTER_1380 = MANIFEST_AFTER_1379.replace(
+  "[workspace.lints.rust]",
+  `# z3-sys: Release Z3 in dev/test.
+[profile.dev.package.z3-sys]
+opt-level = 2
+
+[workspace.lints.rust]`,
+);
+
+test("rejecting: the profile hash changes with each profile edit that once left the cache stale", () => {
+  const hashes = [MANIFEST_BEFORE_1379, MANIFEST_AFTER_1379, MANIFEST_AFTER_1380].map(profileHash);
+  assert.equal(new Set(hashes).size, 3, hashes.join(" "));
+  assert.notEqual(
+    profileHash(MANIFEST_AFTER_1380),
+    profileHash(MANIFEST_AFTER_1380.replace("opt-level = 2", "opt-level = 3")),
+  );
+  assert.equal(
+    profileSections(MANIFEST_AFTER_1380),
+    '[profile.dev]\ndebug = "line-tables-only"\n[profile.dev.package."*"]\ndebug = false\n[profile.dev.package.z3-sys]\nopt-level = 2',
+  );
+});
+
+test("accepting: the profile hash ignores release version bumps, comments, blank lines, and CRLF", () => {
+  const base = profileHash(MANIFEST_AFTER_1380);
+  assert.equal(profileHash(MANIFEST_AFTER_1380.replace('version = "4.12.0"', 'version = "5.0.0"')), base);
+  assert.equal(profileHash(MANIFEST_AFTER_1380.replace("# z3-sys: Release Z3 in dev/test.\n", "")), base);
+  assert.equal(profileHash(MANIFEST_AFTER_1380.replace(/\n\n/g, "\n")), base);
+  assert.equal(profileHash(MANIFEST_AFTER_1380.replace(/\n/g, "\r\n")), base);
+  // An indented array element is never a table header.
+  assert.equal(
+    profileSections('[profile.dev]\ndebug = false\n[workspace]\nmembers = [\n    ["profile.x"],\n]\n'),
+    "[profile.dev]\ndebug = false",
+  );
+});
+
+test("the real workspace manifest has profile sections for the hash to cover", () => {
+  const text = readFileSync(new URL("../../rust/Cargo.toml", import.meta.url), "utf8");
+  assert.match(profileSections(text), /^\[profile\.dev\]$/m);
+  assert.match(profileSections(text), /^\[profile\.dev\.package\.z3-sys\]$/m);
+});
+
+test("the profile-hash executable appends one line to GITHUB_ENV and prints it", () => {
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const envFile = `${dir}/.cargo-profile-hash-test-${process.pid}.env`;
+  try {
+    const run = spawnSync(process.execPath, [`${dir}/cargo-profile-hash.mjs`, `${dir}/../../rust/Cargo.toml`], {
+      env: { PATH: process.env.PATH, GITHUB_ENV: envFile },
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, run.stderr);
+    const expected = `${PROFILE_HASH_ENV}=${profileHash(
+      readFileSync(new URL("../../rust/Cargo.toml", import.meta.url), "utf8"),
+    )}\n`;
+    assert.equal(run.stdout, expected);
+    assert.equal(readFileSync(envFile, "utf8"), expected);
+    const missing = spawnSync(process.execPath, [`${dir}/cargo-profile-hash.mjs`], { encoding: "utf8" });
+    assert.equal(missing.status, 2);
+  } finally {
+    spawnSync("rm", ["-f", envFile]);
+  }
 });

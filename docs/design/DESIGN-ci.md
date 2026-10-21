@@ -800,7 +800,10 @@ rather than the derivation mechanism, establish the observed full-key match. A f
 could still produce `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build,
 but that is not what these runs observed. Neither job ever writes to this key: save-enabled `ci.yml`
 steps write on non-`pull_request` events, so no `pull_request` event can grow it, and
-merge-readiness gains no eviction pressure of its own to reintroduce.
+merge-readiness gains no eviction pressure of its own to reintroduce. Since the key was given an
+explicit generation and a Cargo profile hash, matching also requires each restore-only step to pass
+the same `prefix-key` and `env-vars` as its saver and to run the same hash step first; see "Cache key
+generation" below, which also explains why the logged keys above now read `v1-rust-...`.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
@@ -1101,8 +1104,10 @@ rather than approaching the repository quota.
 Given a usable observation, the pure audit fails closed on four states: usage at or above 85% of
 the limit, a missing `refs/heads/main` cache for any critical-path `{key, platform}` pair, — the
 rejecting control for the `save-if` guard itself — any pull-request-scoped cache for one of
-`ci.yml`'s shared keys, and — the general form of that same control — any `v0-rust-*`-prefixed
-cache on a pull-request ref at all, whether or not its shared key is one `ci.yml` declares.
+`ci.yml`'s shared keys, and — the general form of that same control — any `v<N>-rust-*`-prefixed
+cache on a pull-request ref at all, whether or not its shared key is one `ci.yml` declares, and
+under any key generation. The critical-path check counts only entries under the current key
+generation (`CURRENT_KEY_PREFIX`); see "Cache key generation".
 
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
 shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
@@ -1317,6 +1322,75 @@ pressure. This resolves *this* coexistence, not the mechanism: any future `macos
 the same transient two-generation overlap again, on whichever `{key, platform}` pair happens to be
 built next after the change. The issue's title calls the budget overrun constant; the recurring
 mechanism, not any one incident, is why.
+
+### Cache key generation
+
+**Problem (measured 2026-10-20).** `Swatinem/rust-cache@v2` (`src/config.ts` at the `v2` tag,
+`e9d7b9f1`) composes its key as
+`<prefix-key>-<shared-key>-<os.type()>-<arch>-<env hash>-<lock hash>`. `prefix-key` defaults to
+`v0-rust`; with `shared-key` set, the `key` input and the job id are ignored. The env hash covers the
+installed rustc versions and every `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed variable plus
+any `env-vars` prefixes; the lock hash covers `.cargo/config.toml`, `rust-toolchain*`, each workspace
+*member's* `Cargo.toml` and `Cargo.lock`. `rust/Cargo.toml` is a virtual manifest, not a member, so
+its `[profile.*]` sections — the only profiles cargo applies — are in neither hash. #1379
+(`debug = "line-tables-only"`) and #1380 (`[profile.dev.package.z3-sys] opt-level = 2`) therefore
+left every key unchanged: each later run restored the pre-change entry with `full match: true`,
+rebuilt what the profile change invalidated (all of vendored Z3 on the native lanes), and — because
+rust-cache skips saving on an exact hit — never replaced the entry, so the cache could not heal.
+Step timings from the run metadata: before (push run `39345907365`, `006e21b9`), `rust checks` took
+2m59s and `native Z3 4.16 (windows-latest)`'s test step 35m39s, and each `Post Run
+Swatinem/rust-cache@v2` step ran 24 s / 44 s (saving); after (push run `39387374602` and scheduled
+run `39501648132`, both `5009886f`), `rust checks` took 13m23s / 19m49s, the Windows test step
+53m08s / 48m41s, and each post step ran 0–1 s (no save). The live listing at that point is the
+`liveV0Listing()` fixture in `audit-cache-budget.test.mjs`: the Windows job kept restoring
+`v0-rust-rust-native-z3-Windows_NT-x64-70fc7789-b374b7ca`.
+
+**Decision: an explicit generation, plus a profile hash in the env hash.** Every
+`Swatinem/rust-cache` step in `ci.yml` and `merge-readiness.yml` passes
+
+- `prefix-key: v1-rust` — the manual generation. Bumping it re-keys every entry at once; that is the
+  lever for a build-affecting change no hash sees. The bump from rust-cache's default `v0-rust` is
+  what discards the entries that exact-hit the pre-#1379/#1380 build.
+- `env-vars: FSL_CARGO_PROFILE_HASH`, exported by the step immediately before it,
+  `node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml`: a hash of `rust/Cargo.toml`'s
+  `[profile.*]` sections only (line endings normalised, blank and full-line comment lines dropped),
+  appended to `$GITHUB_ENV`. Any later profile edit changes the env hash and therefore the key, so
+  the next run misses, builds, and saves a fresh entry. Not `key:` (ignored once `shared-key` is set)
+  and not `hashFiles('rust/Cargo.toml')`: the whole file also carries `[workspace.package] version`,
+  which every release bumps and which rust-cache itself normalises away for members, so a whole-file
+  hash would add one cold build per key per release. The env hash, not the lock hash, also changes
+  rust-cache's restore prefix, so a profile edit is a clean miss rather than a prefix restore of
+  artifacts built under the old profile; the price is one cold build per key per profile edit.
+
+The hash step carries the cache step's `if:`, and the hash script is shell-independent, so the same
+step runs under the Windows runner's default PowerShell. Restore-only steps (`merge-readiness.yml`'s
+two jobs, `fsl-logic`, `semantic-mutation-mutants`) still match their saver because they pass the same
+two inputs and compute the same hash from the same checkout; a pull request that edits the profiles
+misses on purpose, since `main`'s entry was built under the old ones.
+`.github/scripts/validate_rust_cache_key.py` (parser-backed, calibrated by
+`tests/test_rust_cache_key.py`, run by the automation lane) fails closed when any rust-cache step lacks
+either input, when the step before it is not the hash step or has a different `if:`, or when the
+workflows' `prefix-key` and the audit's `CURRENT_KEY_PREFIX` differ. `rust/Cargo.toml` itself carries
+no note: a profile edit needs no manual step, and a comment there would make this CI-only change a
+product-surface diff.
+
+**Audit consequence.** `audit-cache-budget.mjs` exports `CURRENT_KEY_PREFIX`. The default-branch
+presence rule counts only current-generation entries: a leftover `v0-rust` entry is unreachable by
+every current step's key and restore prefix, so letting it satisfy the rule would report a warm `main`
+while every pull request builds cold; such a finding names the superseded generation that is present.
+A superseded-generation entry is stale whatever its `created_at`, counted in the generation-coexistence
+split, and listed by key in a non-gating `superseded-key-prefix` informational line as reclaimable.
+Its bytes stay in the raw budget judgment, which is unchanged from "Generation coexistence (issue
+#926, measured 2026-09-04)": they physically occupy the budget until deleted or evicted after 7 days
+without access. Unlike the #926 case, deleting a superseded-generation entry cannot make anything
+colder — no current step can restore it — so it is safe to delete once the change is on `main`.
+Pull-request rules 3 and 4 stay generation-independent.
+
+**Cost.** The first `main` run after a bump or a profile edit is cold on every key (the native lanes
+rebuild vendored Z3 from source) and saves the new generation; `merge-readiness.yml` and other pull
+requests are cold until that save lands. While both generations exist the listing temporarily holds
+up to twice the Rust bytes, so the audit can report `budget-exhausted` until the superseded entries
+are deleted or LRU-evicted, and `main-cache-absent` for any pair whose new entry is not saved yet.
 
 ## Required pre-merge contexts, and why the merge queue was rejected
 
