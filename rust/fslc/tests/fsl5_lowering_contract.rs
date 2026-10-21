@@ -11,9 +11,12 @@
 //! has no golden-update switch. Changing it means reading the diff in review.
 //!
 //! - **K** (kernel equality): every next-edition source of an example lowers
-//!   to exactly the kernel of `lowered.fsl`, compared by
+//!   to exactly the kernel of its expected lowering, compared by
 //!   `support/kernel_compare.rs`. The stages that add the syntax add the
-//!   sources to [`FSL5_SOURCES`].
+//!   sources to [`FSL5_SOURCES`]. Until the rule stages, a source written
+//!   without its rules (`fsl5_en_norules.fsl`) is compared with
+//!   `lowered_norules.fsl`: `lowered.fsl` with only the requires lines the
+//!   rules contribute deleted by hand, a diff read in review.
 //! - **R** (refinement both ways): `lowered.fsl` and the original refine each
 //!   other at depth 8.
 //! - **M** (the check can fail): one rule of `lowered.fsl` weakened makes R
@@ -71,10 +74,12 @@ const EXAMPLES: &[Example] = &[
     },
 ];
 
-/// `(example, next-edition source)` pairs checked by K. Empty until the
-/// stages that add the syntax import the `fsl5_*.fsl` sources;
+/// `(example, next-edition source, expected lowering)` checked by K;
 /// `every_fsl5_source_is_under_k` keeps a source from being added without K.
-const FSL5_SOURCES: &[(&str, &str)] = &[];
+const FSL5_SOURCES: &[(&str, &str, &str)] = &[
+    ("e2e", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
+    ("rejection", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
+];
 
 fn example_dir(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -189,13 +194,47 @@ fn m_weakened_lowering_fails_r_and_differs_in_k() {
 
 #[test]
 fn k_fsl5_sources_lower_to_the_lowered_kernel() {
-    for &(example, source) in FSL5_SOURCES {
+    for &(example, source, lowering) in FSL5_SOURCES {
         let dir = example_dir(example);
         kernel_compare::assert_same_kernel(
             &kernel_compare::kernel_v2_fsl5(&dir.join(source)),
-            &kernel_compare::kernel_v2(&dir.join("lowered.fsl")),
-            &format!("{example}/{source}"),
+            &kernel_compare::kernel_v2(&dir.join(lowering)),
+            &format!("{example}/{source} against {lowering}"),
         );
+    }
+}
+
+/// A no-rules lowering differs from `lowered.fsl` by deleted `requires`
+/// lines only: every other line of `lowered.fsl` is kept, in order, and every
+/// deleted line is a `requires`.
+#[test]
+fn norules_lowerings_only_delete_requires_lines() {
+    for &(example, _, lowering) in FSL5_SOURCES {
+        if lowering == "lowered.fsl" {
+            continue;
+        }
+        let dir = example_dir(example);
+        let full = std::fs::read_to_string(dir.join("lowered.fsl")).expect("read lowered");
+        let reduced = std::fs::read_to_string(dir.join(lowering)).expect("read lowering");
+        let mut kept = reduced.lines().peekable();
+        let mut deleted = 0;
+        for line in full.lines() {
+            if kept.peek() == Some(&line) {
+                kept.next();
+            } else {
+                assert!(
+                    line.trim_start().starts_with("requires "),
+                    "{example}/{lowering} deletes a line that is not a requires: {line:?}"
+                );
+                deleted += 1;
+            }
+        }
+        assert_eq!(
+            kept.next(),
+            None,
+            "{example}/{lowering} adds or reorders lines"
+        );
+        assert!(deleted > 0, "{example}/{lowering} deletes nothing");
     }
 }
 
@@ -210,7 +249,10 @@ fn every_fsl5_source_is_under_k() {
                 .into_owned();
             if name.starts_with("fsl5_") {
                 assert!(
-                    FSL5_SOURCES.contains(&(example.name, name.as_str())),
+                    FSL5_SOURCES
+                        .iter()
+                        .any(|&(listed, source, _)| (listed, source)
+                            == (example.name, name.as_str())),
                     "{}/{name} is a next-edition source without a K check",
                     example.name
                 );

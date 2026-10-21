@@ -3,19 +3,21 @@
 
 use std::fmt;
 
+mod next_requirements;
+
 use crate::annotation_parse;
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Annotations, Binder,
     BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute,
-    CorrespondenceOrigin, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
-    HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessCover,
-    ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName, RefinementItem,
-    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementBranch, RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness,
-    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
-    SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem, Token, TokenKind,
-    TypeExpr, VerifyItem, lex,
+    CorrespondenceOrigin, Edition, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
+    GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem,
+    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName,
+    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem,
+    Token, TokenKind, TypeExpr, VerifyItem, lex,
 };
 
 fn join_span(start: Span, end: Span) -> Span {
@@ -129,8 +131,10 @@ pub(crate) fn parse_shared_tokens(
     source: &str,
     tokens: Vec<Token>,
     cursor: usize,
+    edition: Edition,
 ) -> Result<SurfaceDocument, ParseError> {
     let mut parser = Parser::new(source, tokens, cursor);
+    parser.edition = edition;
     let document = if parser.peek_ident("spec") {
         SurfaceDocument::Spec(parser.surface_spec()?)
     } else if parser.peek_ident("refinement") {
@@ -157,6 +161,8 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     cursor: usize,
     pending_annotations: Annotations,
+    /// The edition the document is read in ([`crate::SourceFile::edition`]).
+    edition: Edition,
 }
 
 impl<'a> Parser<'a> {
@@ -166,6 +172,7 @@ impl<'a> Parser<'a> {
             tokens,
             cursor,
             pending_annotations: Annotations::default(),
+            edition: Edition::Fsl4,
         }
     }
 
@@ -462,8 +469,15 @@ impl<'a> Parser<'a> {
         let name = self.expect_ident()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
+        let mut next = next_requirements::Pending::default();
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
+            if self.edition == Edition::Fsl5
+                && self.next_requirements_member(&mut next, items.len())?
+            {
+                self.expect_no_pending_annotations()?;
+                continue;
+            }
             let item = self.requirements_item()?;
             self.expect_no_pending_annotations()?;
             items.push(item);
@@ -471,7 +485,13 @@ impl<'a> Parser<'a> {
         if self.peek_ident("verify") {
             items.push(RequirementsItem::Common(self.verify_bounds()?));
         }
-        Ok(SurfaceRequirements { name, items })
+        let (items, next) = if self.edition == Edition::Fsl5 {
+            let (items, next) = next.desugar(items)?;
+            (items, Some(next))
+        } else {
+            (items, None)
+        };
+        Ok(SurfaceRequirements { name, items, next })
     }
 
     fn requirements_item(&mut self) -> Result<RequirementsItem, ParseError> {
@@ -1119,6 +1139,7 @@ impl<'a> Parser<'a> {
             covers,
             span,
             annotations,
+            event: None,
         })))
     }
 

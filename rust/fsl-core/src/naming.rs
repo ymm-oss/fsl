@@ -82,6 +82,46 @@ pub(crate) fn compose_internal(alias: &str, name: &str) -> String {
     format!("{alias}__{name}")
 }
 
+/// The stage state of a requirements `process`: `claim_stage` for `Claim`.
+pub(crate) fn process_stage_state(process: &str) -> String {
+    format!("{}_stage", process.to_lowercase())
+}
+
+/// The stage enum of a requirements `process`: `ClaimStage` for `Claim`.
+pub(crate) fn process_stage_enum(process: &str) -> String {
+    format!("{process}Stage")
+}
+
+/// The state of one data field of a requirements `process`: `claim_amount`.
+pub(crate) fn process_field_state(process: &str, field: &str) -> String {
+    format!("{}_{}", process.to_lowercase(), field)
+}
+
+/// The binder a next-edition entity's events and initial values quantify
+/// over: the entity's first letter in lower case (`c` for `Claim`, `r` for
+/// `Request`). A `process` quantifies over `c`.
+pub(crate) fn entity_binder(entity: &str) -> String {
+    entity
+        .chars()
+        .next()
+        .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
+}
+
+/// Every declaration name a next-edition entity lowers to: its stage enum,
+/// its stage state, and one state per field.
+pub(crate) fn entity_generated_names<'a>(
+    entity: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut names = vec![process_stage_enum(entity), process_stage_state(entity)];
+    names.extend(
+        fields
+            .into_iter()
+            .map(|field| process_field_state(entity, field)),
+    );
+    names
+}
+
 /// A name an engine builds for a violation or an implicit property.
 ///
 /// [`Self::internal`] is the only spelling and [`Self::parse_internal`] the

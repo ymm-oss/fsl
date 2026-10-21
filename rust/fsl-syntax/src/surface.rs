@@ -332,6 +332,20 @@ pub struct ProcessTransition {
     pub covers: Option<ProcessCover>,
     pub span: Span,
     pub annotations: Annotations,
+    /// Set when the transition is a next-edition `event` ([`EventForm`]);
+    /// `None` for a `transition`.
+    pub event: Option<EventForm>,
+}
+
+/// How a next-edition `event` lowers where it differs from a `transition`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventForm {
+    /// The verb of the event's phrase (the event name when it is omitted).
+    pub verb: String,
+    /// `false` for a `fault event`.
+    pub fair: bool,
+    /// `false` for `in S`: the event keeps its stage and writes none.
+    pub moves: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -622,6 +636,44 @@ pub enum RequirementsItem {
 pub struct SurfaceRequirements {
     pub name: String,
     pub items: Vec<RequirementsItem>,
+    /// What a next-edition document declared beyond the items it was
+    /// desugared into; `None` in the published edition.
+    pub next: Option<NextEditionRequirements>,
+}
+
+/// The declarations of a next-edition requirements document that do not
+/// survive as [`RequirementsItem`]s: `entity { … }`, `event`, `scenario` and
+/// `forbidden … then rejected` become `process`, `acceptance` and `forbidden`
+/// items, and this keeps the rest.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NextEditionRequirements {
+    /// The declared actors.
+    pub actors: Vec<String>,
+    /// The entities declared with a body, each desugared into a `process` of
+    /// the same name.
+    pub entities: Vec<String>,
+    /// The concepts, expanded where a later construct uses them.
+    pub concepts: Vec<ConceptDeclaration>,
+    /// Warnings found while desugaring, in source order.
+    pub warnings: Vec<EditionWarning>,
+}
+
+/// `concept Name = Entity [in Stage, …] [where condition]`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConceptDeclaration {
+    pub name: String,
+    pub entity: String,
+    pub stages: Vec<String>,
+    pub condition: Option<Expr>,
+    pub span: Span,
+}
+
+/// A coded warning about a next-edition declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditionWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
