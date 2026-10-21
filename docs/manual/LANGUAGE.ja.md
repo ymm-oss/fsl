@@ -3029,15 +3029,15 @@ DESIGN-*.md があります)。
   (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
   深さが違反に届けば `violated`(exit 1)、届かなければ `verified`(exit 0)、
   `--engine induction` ではその判定です。この検査を走らせる他のコマンドも exit 2 で
-  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力せず、`html` と
-  `ledger` はレポートを書き出します)。ただし次の 3 つは exit 2 に
-  なりません。`explain` は exit 0 のままで witness はありません(既知の欠落 #1242:
-  `explain` は gate のエラーを捨て、`html` の witness 欄も同じです)。
-  `approval create --kind ledger` は exit 0 で、エラーを載せた ledger を記録します。
-  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
-  `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
-  #1243 で扱います)。以前に作った ledger の記録の `approval check` は `drifted`
-  (exit 0)です。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力しません)。
+  **#1242 / #1243 から(破壊的変更)** `explain`、`html`、`ledger`、`document` の各コマンド、
+  どの種類の `approval create` / `check` も同じで、gate のエラーを出力し、レポート・ledger・
+  文書・記録を書き出しません(以前は `explain` が exit 0 で witness なし、`html` と `ledger` は
+  レポートを書き出し、`document` の各コマンドはその case を claim として出し、
+  `approval create --kind ledger` / `requirements_document` は承認を記録し、ledger の記録の
+  `approval check` は `drifted`(exit 0)でした)。言語サーバーはこのエラーを
+  `FSL-REQUIREMENT-TRACE` の診断として示し、`fslc analyze` はその case をグラフに出したうえで
+  各ノードに `"trace_gate": "unchecked"` を付けます。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
   出力の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
   scenario の `rejected_by`(testgen が assert します)は、
@@ -3066,20 +3066,14 @@ DESIGN-*.md があります)。
   検証が通れば exit 0、通らなければ exit 1 で、`scenarios`、`testgen`、
   `counterexample export`、`approval create` は exit 2 になることもありました。
   今は `check`、`verify`(どのエンジンでも)、`sweep`、`chain`、`scenarios`、`testgen`、
-  `mutate` の baseline、`counterexample export`、`html`、`ledger`、
-  `approval create --kind scenarios` / `html` が exit 2 になり、仕様の残りの
-  部分についての判定・反例・scenario・テスト・mutant を報告しません。`html`、`ledger`、
-  `approval create --kind html` の stdout は生成結果(`result: "generated"`)で、エラーは
-  レポートの中に載ります(`html` と `ledger` はレポートを書き出します)。`chain` はエラーを
-  `[requirements]` 層の `detail` に載せ、それ以外はエラー(`error` / `kind: "forbidden"`)を
-  出力します。以前に作った `scenarios` / `html` の記録の `approval check` は
-  exit 2 です。exit 2 にならないのは次の 3 つです。`explain` は exit 0 のままで、witness は
-  ありません(既知の欠落 #1242: `explain` は gate のエラーを捨て、`html` の witness 欄も
-  同じです)。`approval create --kind ledger` は exit 0 で、エラーを載せた ledger を
-  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
-  その ledger が実時間の `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる
-  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の `approval check` は
-  `drifted`(exit 0)です。
+  `mutate` の baseline、`counterexample export`、`explain`、`html`、`ledger`、`document` の
+  各コマンド、どの種類の `approval create` / `check` も exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant・説明・レポート・ledger・文書・記録を
+  報告しません。`chain` はエラーを `[requirements]` 層の `detail` に載せ、それ以外はエラー
+  (`error` / `kind: "forbidden"`)を出力し、言語サーバーは `FSL-REQUIREMENT-TRACE` の診断として
+  示します(`explain`、`html`、`ledger`、`document` の各コマンド、
+  `approval create --kind ledger` / `requirements_document`、ledger の記録の
+  `approval check` は #1242 / #1243 からです。変更前と変更後は設計ノートの §2.1 にあります)。
   `fslc diff` はどちらのステップでも forbidden の判定を変えるので、
   `--forbid unknown` の exit が変わることがあります。各コマンドの変更前と変更後の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。

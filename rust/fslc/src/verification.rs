@@ -2388,10 +2388,11 @@ fn prepare_cli_verification_from_source(
         }
         _ => Vec::new(),
     };
-    if !has_scope && let Ok(model) = &snapshot_model {
-        if let Err(refusal) = require_trace_gate(source, model) {
-            return Err((refusal, 2));
-        }
+    if !has_scope
+        && let Ok(model) = &snapshot_model
+        && let Err(refusal) = require_trace_gate(source, model)
+    {
+        return Err((refusal, 2));
     }
     // A scenario skipped as out of the overridden scope was not evaluated,
     // and the envelope says so instead of reading as if it had passed

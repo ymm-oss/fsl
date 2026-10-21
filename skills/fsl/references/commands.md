@@ -386,7 +386,9 @@ properties, acceptance/forbidden scenarios, and traceability metadata.
 `--projection action_state_graph`, `action_dependency_graph`,
 `impact_graph --focus NODE`, `requirement_property_graph`, and
 `property_state_graph` summarize deterministic components/SCCs/cycles, degree,
-and metrics over that graph. It accepts multiple files/directories in batch mode;
+and metrics over that graph. An acceptance / forbidden node of a spec whose
+traces the requirement-trace gate refuses is still projected but carries
+`"trace_gate": "unchecked"`: it is not a checked claim. It accepts multiple files/directories in batch mode;
 directories expand recursively to sorted `*.fsl` files (the `*.fsl` filter applies
 only to that expansion — an explicitly named file is always kept, whatever its
 extension) and partial failures stay visible in `files[]`/`errors[]`; a batch
@@ -448,7 +450,11 @@ reader can decide approve/reject/risk-accept from. It is a presentation layer
 (no new verification): the `trace_type` discriminator drives a per-finding
 business translation, governance columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
-positive form. Raw JSON is demoted to a collapsed appendix. `--impl-log
+positive form. A spec whose acceptance / forbidden traces the requirement-trace
+gate refuses (the `kind: "acceptance"` / `"forbidden"` / `"forbidden_setup"`
+error of `check`) gets that error and exit 2 instead of a ledger, as it does
+from `explain`, `html`, the `document` commands, and `approval create` /
+`check`; fix the case it names first. Raw JSON is demoted to a collapsed appendix. `--impl-log
 <trace.json>` folds a `run_replay` conformance row into the ledger, but a
 replay **error** (missing file, malformed JSON, wrong-spec trace,
 schema-invalid trace) fails the whole `ledger` command through the standard

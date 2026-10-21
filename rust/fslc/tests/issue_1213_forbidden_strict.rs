@@ -550,7 +550,8 @@ fn run_in(directory: &Path, args: &[&str]) -> (Value, i32) {
 /// exited 0 or 1 before #1213. `counterexample export` and `testgen` write no
 /// file, the JSON of `verify`, `sweep`, `counterexample export`, `scenarios`,
 /// and `testgen` is the `kind: "forbidden"` error and carries no `trace` or
-/// `scenarios`, and `html` still writes its report. `ledger` exits 2 in
+/// `scenarios`, and `html` prints that error and writes no report (#1242).
+/// `ledger` exits 2 in
 /// `ledger_reports_a_violating_final_step_as_a_violation` (a one-step spec);
 /// the `mutate` baseline, the `explicit` and `auto` engines, `explain`, and
 /// `approval` are not run in this file.
@@ -611,9 +612,14 @@ fn a_violating_final_step_exits_2_in_verify_at_depth_1_2_and_induction_and_six_l
         let args = ["html", "wallet.fsl", "--depth", depth, "-o", "report.html"];
         let (output, status) = run_in(&directory, &args);
         assert_eq!(status, 2, "{args:?}: {output:#}");
+        assert_eq!(output["kind"], "forbidden", "{args:?}: {output:#}");
+        assert_eq!(
+            output["violation"]["name"], "NonNegative",
+            "{args:?}: {output:#}"
+        );
         assert!(
-            directory.join("report.html").exists(),
-            "{args:?}: report.html not written"
+            !directory.join("report.html").exists(),
+            "{args:?}: report.html written"
         );
     }
     std::fs::write(
@@ -660,7 +666,8 @@ fn mutate_kills_a_guard_dropping_mutant_with_the_forbidden() {
 }
 
 /// `fslc ledger` reports the violation error as a violation reached by an
-/// enabled step, not as an accepted final step.
+/// enabled step, not as an accepted final step: it prints the gate's error and
+/// writes no ledger (#1243).
 #[test]
 fn ledger_reports_a_violating_final_step_as_a_violation() {
     let directory = scratch("ledger");
@@ -672,20 +679,16 @@ fn ledger_reports_a_violating_final_step_as_a_violation() {
             "  invariant NonNegative { balance >= 0 }\n",
         ),
     );
-    let (_, status) = run_in(
+    let (output, status) = run_in(
         &directory,
         &["ledger", "wallet.fsl", "--depth", "3", "-o", "ledger.md"],
     );
-    let content = std::fs::read_to_string(directory.join("ledger.md")).expect("read ledger");
+    let written = directory.join("ledger.md").exists();
     let _ = std::fs::remove_dir_all(&directory);
-    assert_eq!(status, 2, "{content}");
-    let entry = content
-        .split("### FB-1")
-        .nth(1)
-        .and_then(|rest| rest.split("```").next())
-        .unwrap_or_else(|| panic!("no FB-1 finding in ledger:\n{content}"));
-    assert!(entry.contains("invariant 'NonNegative'"), "{entry}");
-    assert!(entry.contains("実行時違反"), "{entry}");
-    assert!(!entry.contains("accepted_trace あり"), "{entry}");
-    assert!(!entry.contains("許容されている"), "{entry}");
+    assert_eq!(status, 2, "{output:#}");
+    assert!(!written, "ledger written for a refused trace");
+    assert_eq!(output["kind"], "forbidden", "{output:#}");
+    assert_eq!(output["violation"]["name"], "NonNegative", "{output:#}");
+    assert_eq!(output["violation"]["kind"], "invariant", "{output:#}");
+    assert!(output.get("accepted_step").is_none(), "{output:#}");
 }
