@@ -1985,14 +1985,17 @@ fn generated_age_type(name: &str, existing: &mut BTreeSet<String>) -> String {
     candidate
 }
 
-/// Lower the requirements dialect into the shared kernel.
+/// Lower the requirements dialect into the shared kernel, after name
+/// resolution ([`crate::lower_requirements`]) replaced every glossary alias.
 ///
 /// # Errors
 ///
 /// Returns [`CoreError`] for missing entity/number bounds or malformed process
 /// declarations.
 #[allow(clippy::too_many_lines)]
-pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpec, CoreError> {
+pub(crate) fn lower_resolved_requirements(
+    requirements: SurfaceRequirements,
+) -> Result<KernelSpec, CoreError> {
     let mut common = Vec::new();
     let mut entities = Vec::new();
     let mut numbers = Vec::new();

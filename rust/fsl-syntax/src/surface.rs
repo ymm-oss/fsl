@@ -580,6 +580,9 @@ pub enum TimeItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequirementsItem {
+    /// The next edition's `glossary` block, already applied to the rest of
+    /// the document (see [`crate::Glossary`]).
+    Glossary(crate::Glossary),
     Implements {
         name: String,
         path: String,
@@ -1704,6 +1707,15 @@ impl RequirementsItem {
     #[must_use]
     pub fn kernel_ast_v1(&self) -> Value {
         match self {
+            Self::Glossary(glossary) => json!([
+                "glossary",
+                glossary
+                    .entries
+                    .iter()
+                    .map(|entry| json!([entry.canonical.written(), entry.alias]))
+                    .collect::<Vec<_>>(),
+                glossary.span.python_loc()
+            ]),
             Self::Implements {
                 name,
                 path,

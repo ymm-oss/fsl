@@ -29,6 +29,7 @@ mod cli_options;
 mod cli_output;
 mod code_audit;
 mod log_replay;
+mod name_display;
 mod process;
 mod property_selection;
 mod refinement;
@@ -309,6 +310,9 @@ struct MigrationOptions {
     default_edition: fsl_syntax::Edition,
     write: bool,
     project: Option<PathBuf>,
+    /// `lint --strict-names`: report `mixed_names` (read only behind the
+    /// next edition's gate).
+    strict_names: bool,
 }
 
 fn parse_migration_options(
@@ -320,8 +324,17 @@ fn parse_migration_options(
     let mut edition = None;
     let mut write = false;
     let mut project = None;
+    let mut strict_names = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--strict-names"
+                if !migrate
+                    && crate::parse_options()
+                        .unstable()
+                        .contains(fsl_syntax::UnstableFeature::Fsl5) =>
+            {
+                strict_names = true;
+            }
             // `migrate` defaults to the next edition, so an explicit
             // `current` is kept rather than read as an omitted flag.
             "--edition" => {
@@ -368,6 +381,7 @@ fn parse_migration_options(
         },
         write,
         project,
+        strict_names,
     })
 }
 
@@ -393,6 +407,13 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
                 &id_policy,
                 crate::parse_options(),
             ));
+        if options.strict_names {
+            plan.diagnostics
+                .extend(fslc_rust::migration::mixed_names_diagnostics(
+                    &source,
+                    crate::parse_options(),
+                ));
+        }
         plan.diagnostics
             .sort_by_key(|diagnostic| diagnostic.span.start.offset);
         finding_count += plan.diagnostics.len();
@@ -1087,7 +1108,7 @@ fn command() -> Result<(Value, i32), String> {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
-                "explain" => run_explain(path, options.depth, options.readable),
+                "explain" => run_explain(path, options.depth, options.readable, options.names),
                 "mutate" => run_mutate(
                     path,
                     options.depth,
@@ -9745,12 +9766,42 @@ fn readable_implements_text_from_source(
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
+fn run_explain(
+    path: &Path,
+    depth: usize,
+    readable: bool,
+    names: Option<name_display::NameSpelling>,
+) -> (Value, i32) {
     let source = match read_spec_source(path) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_explain_from_source(path, &source, depth, readable)
+    run_explain_from_source_with_names(path, &source, depth, readable, names)
+}
+
+/// [`run_explain_from_source`] spelled for a reader: a document with a
+/// glossary shows aliases unless `--names canonical` asks for the canonical
+/// names (a document without one always shows canonical names).
+fn run_explain_from_source_with_names(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    readable: bool,
+    names: Option<name_display::NameSpelling>,
+) -> (Value, i32) {
+    let (mut output, status) = run_explain_from_source(path, source, depth, readable);
+    // A glossary exists only behind the gate; without it nothing is reloaded.
+    let gated = parse_options()
+        .unstable()
+        .contains(fsl_syntax::UnstableFeature::Fsl5);
+    if gated
+        && status == 0
+        && names != Some(name_display::NameSpelling::Canonical)
+        && let Ok((_, model)) = load_kernel_model_from_source(path, source)
+    {
+        name_display::show_aliases(&mut output, model.names().glossary());
+    }
+    (output, status)
 }
 
 /// Explain one caller-owned root-source snapshot.

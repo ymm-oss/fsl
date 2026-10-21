@@ -18,6 +18,7 @@ mod db;
 mod dispatch;
 mod domain;
 mod edition;
+mod glossary;
 mod identifier;
 mod lexer;
 mod literate;
@@ -70,6 +71,12 @@ pub use edition::{
     EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED, EDITIONLESS_DECLARATIONS, Edition,
     EditionHeader, MISSING_EDITION_HEADER, UNSUPPORTED_EDITION, document_edition, edition_header,
     first_significant_offset,
+};
+pub use glossary::{
+    ALIAS_COLLISION, ALIAS_IN_IMPLEMENTS, ALIAS_SHADOWS_KEYWORD, ALIAS_SHADOWS_NAME,
+    DUPLICATE_ALIAS, GLOSSARY_DIAGNOSTICS, Glossary, GlossaryEntry, GlossaryName,
+    KEYWORD_SPELLINGS, MISPLACED_GLOSSARY, MIXED_NAMES, NameUse, alias_at, document_glossary,
+    is_keyword_spelling,
 };
 pub use identifier::{
     CANONICAL_NAME_NOT_ASCII, FULLWIDTH_ASCII_IDENTIFIER, FULLWIDTH_SPACE, FULLWIDTH_SYMBOL,

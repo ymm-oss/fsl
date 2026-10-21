@@ -1,0 +1,81 @@
+fsl 5
+// Expense reimbursement requirements in the vocabulary of the business:
+// fsl5/e2e/original.fsl with every declared name written as its Japanese
+// alias. The glossary maps each canonical (English) name to its alias, and
+// name resolution replaces the alias before anything is lowered, so this
+// document lowers to exactly the kernel of original.fsl (the next edition
+// also wants the initial value of the amount written out). `implements` is
+// the mapping to another layer and stays in canonical names.
+requirements ExpenseRequirements {
+  glossary {
+    ExpenseRequirements = 経費精算要件
+    Amount       = 金額
+    AUTO_LIMIT   = 自動承認上限
+    Claim        = 申請
+    Claim.amount = 申請金額
+    Draft        = 下書き
+    Submitted    = 提出済み
+    Approved     = 承認済み
+    Rejected     = 却下済み
+    Paid         = 支払済み
+    Employee     = 従業員
+    System       = システム
+    Manager      = 上長
+    Finance      = 経理
+    submit       = 提出
+    auto_approve = 自動承認
+    mgr_approve  = 上長承認
+    reject       = 却下
+    pay          = 支払
+    a            = 入力金額
+    paid_claims  = 支払件数
+  }
+
+  implements ExpenseToBe from "../../fsl5/e2e/1_business.fsl" {
+    action submit(c, a) -> submit(c)
+  }
+
+  number 金額
+  const 自動承認上限 = 1
+
+  process 申請 with 申請金額: 金額 = 0 {
+    stages 下書き, 提出済み, 承認済み, 却下済み, 支払済み
+    initial 下書き
+
+    transition 提出     下書き   -> 提出済み by 従業員
+      with 入力金額: 金額
+      when 入力金額 > 0
+      set 申請金額 = 入力金額
+      covers REQ-1 "申請者は金額を入力して経費申請を提出する"
+
+    transition 自動承認 提出済み -> 承認済み by システム
+      when 申請金額 <= 自動承認上限
+      covers REQ-2 "自動承認上限以下の申請はシステムが自動承認する"
+
+    transition 上長承認 提出済み -> 承認済み by 上長
+      when 申請金額 >  自動承認上限
+      covers REQ-3 "自動承認上限を超える申請は上長が承認する"
+
+    transition 却下     提出済み -> 却下済み by 上長
+      when 申請金額 >  自動承認上限
+      covers REQ-3 "自動承認上限を超える申請は上長が却下できる"
+
+    transition 支払     承認済み -> 支払済み by 経理
+      covers REQ-4 "承認された申請だけが支払われる"
+  }
+
+  kpi 支払件数 = count 申請 in 支払済み
+
+  acceptance AC-1 "承認の流れ: 少額の申請が自動承認され支払われる" {
+    提出(0, 1) 自動承認(0) 支払(0)
+    expect 申請 0 in 支払済み
+  }
+  acceptance AC-2 "却下の流れ: 高額の申請が上長に却下される" {
+    提出(1, 2) 却下(1)
+    expect 申請 1 in 却下済み
+  }
+}
+verify {
+  instances 申請 = 3
+  values 金額 = 0..3
+}

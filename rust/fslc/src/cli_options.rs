@@ -572,6 +572,8 @@ pub(crate) struct MutationFamilyOptions {
     pub(crate) external_mutants: Option<PathBuf>,
     pub(crate) fail_on_survivors: bool,
     pub(crate) min_kill_rate: Option<f64>,
+    /// `explain --names`, read only behind the next edition's gate.
+    pub(crate) names: Option<crate::name_display::NameSpelling>,
 }
 
 impl MutationFamilyOptions {
@@ -586,8 +588,19 @@ impl MutationFamilyOptions {
         let mut external_mutants = None;
         let mut fail_on_survivors = false;
         let mut min_kill_rate = None;
+        let mut names = None;
         while let Some(option) = args.next() {
             match option.as_str() {
+                "--names"
+                    if command == "explain"
+                        && crate::process::parse_options()
+                            .unstable()
+                            .contains(fsl_syntax::UnstableFeature::Fsl5) =>
+                {
+                    names = Some(crate::name_display::NameSpelling::parse(
+                        &required_option_value(&mut args, "--names")?,
+                    )?);
+                }
                 // Issue #1237: the opt-in mutation gate belongs to `mutate`
                 // alone; the other two commands sharing this loop reject it
                 // instead of silently accepting a flag that cannot apply.
@@ -645,6 +658,7 @@ impl MutationFamilyOptions {
             external_mutants,
             fail_on_survivors,
             min_kill_rate,
+            names,
         })
     }
 }
