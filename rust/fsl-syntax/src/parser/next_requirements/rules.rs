@@ -12,6 +12,10 @@
 //! block's own `deadline`. Guards are conjunctions, so the order the rules
 //! are written in does not matter (B.6).
 //!
+//! A statement that lowers to a property can be named, `Name: always …` or
+//! `Name: E enters T only from S…`; the name becomes the Kernel property's,
+//! and an unnamed one gets a name the core generates.
+//!
 //! `P only after Q` adds a ghost field `did_<events of Q>` to the entity,
 //! set by Q's events and required by P's, unless the lifecycle already
 //! orders the two (`implied_by_lifecycle`).
@@ -21,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::{Parser, join_span};
 use super::{
     Entity, EventSignature, UNKNOWN_EVENT_PHRASE, UNKNOWN_VERB, Word, actor_not_declared,
-    join_names, nearest, resolve_event_names,
+    is_symbol, join_names, nearest, resolve_event_names,
 };
 use crate::{
     Annotation, ConceptDeclaration, EditionWarning, Expr, NextEditionRequirements, ParseError,
@@ -35,6 +39,9 @@ pub const IMPLIED_BY_LIFECYCLE: &str = "implied_by_lifecycle";
 /// trace probes (#1300: a rejection rule is a checked guard plus a forbidden
 /// trace).
 pub const NEVER_RULE_WITHOUT_FORBIDDEN: &str = "never_rule_without_forbidden";
+/// A name written before a rule statement that no property takes, or that
+/// is not a valid property name.
+pub const INVALID_RULE_PROPERTY_NAME: &str = "invalid_rule_property_name";
 /// A ghost field an ordering rule adds is already a field of the entity.
 /// Same code as the core's check of the names an entity generates.
 pub const GENERATED_NAME_COLLISION: &str = "generated_name_collision";
@@ -79,6 +86,8 @@ enum RuleStatement {
 }
 
 struct Located {
+    /// The property name written before the statement (`Name: …`).
+    name: Option<Word>,
     statement: RuleStatement,
     /// The statement as written, whitespace collapsed.
     detail: String,
@@ -103,14 +112,42 @@ impl Parser<'_> {
         self.expect_symbol("{")?;
         let mut statements = Vec::new();
         while !self.eat_symbol("}") {
+            let name = if matches!(self.peek().kind, TokenKind::Ident(_))
+                && is_symbol(self.peek_n(1), ":")
+            {
+                let name = self.word()?;
+                self.bump();
+                Some(name)
+            } else {
+                None
+            };
             let begin = self.peek().span;
             let statement = self.rule_statement()?;
+            if let Some(name) = &name
+                && !matches!(
+                    statement,
+                    RuleStatement::Always(..)
+                        | RuleStatement::AlwaysHas { .. }
+                        | RuleStatement::Enters { .. }
+                )
+            {
+                return Err(ParseError::coded(
+                    INVALID_RULE_PROPERTY_NAME,
+                    format!(
+                        "'{}:' names a property, but this statement lowers to a guard or a \
+                         deadline; only `always` and `enters` statements take a name",
+                        name.text
+                    ),
+                    name.span,
+                ));
+            }
             let span = join_span(begin, self.last_span());
             let detail = self.source[span.start.offset..span.end.offset]
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
             statements.push(Located {
+                name,
                 statement,
                 detail,
                 span,
@@ -613,6 +650,7 @@ pub(in crate::parser) fn apply(
                 .push(guard);
         };
         for Located {
+            name: label,
             statement,
             detail,
             span,
@@ -797,6 +835,7 @@ pub(in crate::parser) fn apply(
                     )
                     .expect("a stage");
                     next.properties.push(RuleProperty {
+                        name: label.as_ref().map(|label| label.text.clone()),
                         kind: "enters",
                         requirement: rule.id.clone(),
                         requirement_text: rule.text.clone(),
@@ -815,6 +854,7 @@ pub(in crate::parser) fn apply(
                         scope.concept_condition(&right, &entity_name)?,
                     );
                     next.properties.push(RuleProperty {
+                        name: label.as_ref().map(|label| label.text.clone()),
                         kind: "always",
                         requirement: rule.id.clone(),
                         requirement_text: rule.text.clone(),
@@ -856,6 +896,7 @@ pub(in crate::parser) fn apply(
                     }
                     .expect("a stage");
                     next.properties.push(RuleProperty {
+                        name: label.as_ref().map(|label| label.text.clone()),
                         kind: "always",
                         requirement: rule.id.clone(),
                         requirement_text: rule.text.clone(),

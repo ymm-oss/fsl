@@ -269,10 +269,15 @@ fn the_rejection_forbidden_traces_hold_with_the_rules_and_each_needs_its_rule() 
                 ],
             ),
             (
-                "always ActionExecuted Request is ExplicitlyApproved and OperatorHeld",
+                "ToolExecutionApproved: always ActionExecuted Request is ExplicitlyApproved and \
+                 OperatorHeld",
                 &[],
             ),
-            ("Request enters ActionExecuted only from ToolApproved", &[]),
+            (
+                "ExecutionComesFromApprovedStage: Request enters ActionExecuted only from \
+                 ToolApproved",
+                &[],
+            ),
         ],
     );
 }
@@ -805,4 +810,117 @@ fn a_rule_deadline_is_the_requirement_deadline() {
         (Some("verified"), 0),
         "{output:#}"
     );
+}
+
+/// The kernel property names of a `fsl 5` document's invariants and
+/// transition properties (the kernel lists them by name).
+fn property_names(label: &str, source: &str) -> BTreeSet<String> {
+    let scratch = Scratch::new(label, None);
+    let path = scratch.write("doc.fsl", source);
+    let kernel = kernel_compare::kernel_v2_fsl5(&path);
+    ["invariants", "transitions"]
+        .iter()
+        .flat_map(|kind| {
+            kernel["properties"][kind]
+                .as_array()
+                .expect("property list")
+                .iter()
+                .map(|property| property["name"].as_str().expect("name").to_owned())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// A property statement takes the name written before it (`Name: …`); an
+/// unnamed one falls back to `<REQ>_<kind>`, numbered among the
+/// requirement's unnamed statements of that kind.
+#[test]
+fn a_written_property_name_is_kept_and_an_omitted_one_is_generated() {
+    let source = claim_document(
+        "  rule REQ-1 \"t\" {\n    always Approved Claim is Small\n    \
+         SmallRejected: always Rejected Claim is Small\n    \
+         always Submitted Claim is Small\n    \
+         Claim enters Approved only from Submitted\n    \
+         ApprovedFromSubmitted: Claim enters Approved only from Submitted\n  }\n",
+        SMALL,
+    );
+    assert_eq!(
+        property_names("names", &source),
+        ids(&[
+            "REQ_1_always",
+            "SmallRejected",
+            "REQ_1_always_2",
+            "REQ_1_enters",
+            "ApprovedFromSubmitted",
+        ])
+    );
+}
+
+/// A written name goes through the same collision check as a generated one:
+/// it may not meet a declared property or another rule's property.
+#[test]
+fn a_written_property_name_that_is_taken_is_rule_property_name_collision() {
+    assert_error(
+        "written-declared",
+        &claim_document(
+            "  rule REQ-1 \"t\" {\n    Approvals: always Approved Claim is Small\n  }\n  \
+             requirement REQ-9 \"t\" {\n    invariant Approvals {\n      true\n    }\n  }\n",
+            SMALL,
+        ),
+        "rule_property_name_collision",
+        "'Approvals', which is already declared",
+    );
+    assert_error(
+        "written-twice",
+        &claim_document(
+            "  rule REQ-1 \"t\" {\n    Approvals: always Approved Claim is Small\n  }\n  \
+             rule REQ-2 \"t\" {\n    Approvals: Claim enters Approved only from Submitted\n  }\n",
+            SMALL,
+        ),
+        "rule_property_name_collision",
+        "'Approvals'",
+    );
+    assert_error(
+        "written-generated",
+        &claim_document(
+            "  rule REQ-1 \"t\" {\n    REQ_2_always: always Approved Claim is Small\n  }\n  \
+             rule REQ-2 \"t\" {\n    always Rejected Claim is Small\n  }\n",
+            SMALL,
+        ),
+        "generated_name_collision",
+        "'REQ_2_always'",
+    );
+}
+
+/// A name no Kernel property can take, or a name on a statement that lowers
+/// to no property, is `invalid_rule_property_name`.
+#[test]
+fn an_invalid_property_name_is_invalid_rule_property_name() {
+    for (label, statement, message) in [
+        (
+            "separator",
+            "Small__Approved: always Approved Claim is Small",
+            "contains `__`",
+        ),
+        (
+            "literal",
+            "none: always Approved Claim is Small",
+            "is a literal",
+        ),
+        (
+            "guard",
+            "Gate: allow Manager approves Claim only for Small",
+            "only `always` and `enters` statements take a name",
+        ),
+    ] {
+        assert_error(
+            label,
+            &claim_document(
+                &format!("  rule REQ-1 \"t\" {{\n    {statement}\n  }}\n"),
+                SMALL,
+            ),
+            "invalid_rule_property_name",
+            message,
+        );
+    }
 }

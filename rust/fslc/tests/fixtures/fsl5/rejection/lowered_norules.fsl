@@ -101,7 +101,7 @@ requirements AgenticRagToolApprovalSlice {
     }
 
     // rule: always ActionExecuted Request is ExplicitlyApproved and OperatorHeld
-    invariant REQ_5_always {
+    invariant ToolExecutionApproved {
       forall r: Request {
         request_stage[r] == ActionExecuted => (
           request_approval[r] == Approved and request_role[r] == Operator
@@ -110,7 +110,7 @@ requirements AgenticRagToolApprovalSlice {
     }
 
     // rule: Request enters ActionExecuted only from ToolApproved
-    trans REQ_5_enters {
+    trans ExecutionComesFromApprovedStage {
       forall r: Request {
         request_stage[r] == ActionExecuted => (
           old(request_stage[r]) == ToolApproved or old(request_stage[r]) == ActionExecuted

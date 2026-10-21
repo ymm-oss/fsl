@@ -371,12 +371,15 @@ pub struct RuleGuard {
 
 /// One property a next-edition `rule` declares: `always …` (an invariant) or
 /// `… enters … only from …` (a transition property), over every instance of
-/// `entity`. The condition is spelled as in [`RuleGuard`]; a transition
+/// `entity`, optionally named (`Name: always …`). The condition is spelled as in [`RuleGuard`]; a transition
 /// property reads the previous state with `old(…)`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuleProperty {
     /// `always` or `enters`, the kind of the property's lowering step.
     pub kind: &'static str,
+    /// The name written before the statement (`Name: always …`); `None`
+    /// when the core generates one.
+    pub name: Option<String>,
     pub requirement: String,
     pub requirement_text: String,
     pub requirement_span: Span,

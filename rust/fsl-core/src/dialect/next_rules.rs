@@ -97,6 +97,11 @@ pub(super) fn check_rule_guards(
     Ok(())
 }
 
+/// A name written for a rule property that a Kernel property cannot take.
+pub const INVALID_RULE_PROPERTY_NAME: &str = "invalid_rule_property_name";
+/// A name written for a rule property that another property already has.
+pub const RULE_PROPERTY_NAME_COLLISION: &str = "rule_property_name_collision";
+
 /// One lowered rule property with what the requirements lowering binds to
 /// it.
 pub(super) struct LoweredProperty {
@@ -151,20 +156,72 @@ fn property_replacements(process: &RequirementsProcess, binder: &str) -> HashMap
     replacements
 }
 
+/// The Kernel name of `property`: the written one, checked, or the one
+/// [`crate::naming::rule_property_name`] generates, numbered among the
+/// requirement's unnamed statements of its kind. The name joins `declared`.
+fn property_name<'a>(
+    property: &'a RuleProperty,
+    ordinals: &mut BTreeMap<(&'a str, &'a str), usize>,
+    declared: &mut BTreeSet<String>,
+) -> Result<String, CoreError> {
+    let name = if let Some(written) = &property.name {
+        if let Some(reason) = crate::naming::invalid_rule_property_name(written) {
+            return Err(CoreError {
+                diagnostic_code: Some(INVALID_RULE_PROPERTY_NAME),
+                ..core_error(
+                    format!(
+                        "rule {} names its property '{written}', which {reason}",
+                        property.requirement
+                    ),
+                    property.span,
+                )
+            });
+        }
+        written.clone()
+    } else {
+        let ordinal = ordinals
+            .entry((property.requirement.as_str(), property.kind))
+            .or_default();
+        *ordinal += 1;
+        crate::naming::rule_property_name(&property.requirement, property.kind, *ordinal)
+    };
+    if !declared.insert(name.clone()) {
+        let (code, verb) = if property.name.is_some() {
+            (RULE_PROPERTY_NAME_COLLISION, "names")
+        } else {
+            (GENERATED_NAME_COLLISION, "generates")
+        };
+        return Err(CoreError {
+            diagnostic_code: Some(code),
+            ..core_error(
+                format!(
+                    "rule {} `{}` {verb} the property '{name}', which is already \
+                     declared; rename one of them",
+                    property.requirement, property.detail
+                ),
+                property.span,
+            )
+        });
+    }
+    Ok(name)
+}
+
 /// Lower `properties` over the processes their entities desugared into;
 /// `items` are the document's items, whose property names a generated name
 /// may not take.
 ///
 /// # Errors
 ///
-/// Returns [`GENERATED_NAME_COLLISION`] when a generated name is declared.
+/// Returns [`INVALID_RULE_PROPERTY_NAME`] for a written name no property can
+/// take, [`RULE_PROPERTY_NAME_COLLISION`] when a written name is taken, and
+/// [`GENERATED_NAME_COLLISION`] when a generated one is.
 pub(super) fn lower_rule_properties(
     properties: &[RuleProperty],
     processes: &[RequirementsProcess],
     binders: &[String],
     items: &[RequirementsItem],
 ) -> Result<Vec<LoweredProperty>, CoreError> {
-    let declared = declared_property_names(items);
+    let mut declared = declared_property_names(items);
     let mut ordinals = BTreeMap::<(&str, &str), usize>::new();
     let mut lowered = Vec::new();
     for property in properties {
@@ -179,25 +236,7 @@ pub(super) fn lower_rule_properties(
             ));
         };
         let replacements = property_replacements(process, binder);
-        let ordinal = ordinals
-            .entry((property.requirement.as_str(), property.kind))
-            .or_default();
-        *ordinal += 1;
-        let name =
-            crate::naming::rule_property_name(&property.requirement, property.kind, *ordinal);
-        if declared.contains(&name) {
-            return Err(CoreError {
-                diagnostic_code: Some(GENERATED_NAME_COLLISION),
-                ..core_error(
-                    format!(
-                        "rule {} `{}` generates the property '{name}', which is already \
-                         declared; rename it",
-                        property.requirement, property.detail
-                    ),
-                    property.span,
-                )
-            });
-        }
+        let name = property_name(property, &mut ordinals, &mut declared)?;
         let expr = Box::new(Expr::Quantified {
             quantifier: "forall".to_owned(),
             binder: typed_binder(binder, &property.entity),
