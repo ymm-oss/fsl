@@ -270,9 +270,49 @@ fn an_fsl_5_header_checks_the_corpus_as_edition_next_does() {
         golden, actual,
         "the published `--edition next` corpus run moved; review the golden diff"
     );
+    // fsl 5 plan S4 (decisions/046 Q2): a `fsl 5` requirements document does
+    // not take the process form, so every corpus requirements file with a
+    // `process`, and any file checked through one, fails with
+    // `mixed_requirements_forms` where `--edition next` reads it. No other
+    // row may differ.
+    let mixed_forms = rows
+        .iter()
+        .filter(|(_, header)| header.contains("code=\"mixed_requirements_forms\""))
+        .map(|(_, header)| header.split('\t').next().expect("row path"))
+        .collect::<std::collections::BTreeSet<_>>();
+    let root = root();
+    let process_requirements = paths
+        .iter()
+        .filter(|path| {
+            let source = std::fs::read_to_string(root.join(path)).expect("read corpus file");
+            matches!(
+                fsl_syntax::parse_surface_document(&source),
+                Ok(fsl_syntax::SurfaceDocument::Requirements(requirements))
+                    if requirements
+                        .items
+                        .iter()
+                        .any(|item| matches!(item, fsl_syntax::RequirementsItem::Process(_)))
+            )
+        })
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        !process_requirements.is_empty(),
+        "not vacuous: the corpus has process-form requirements"
+    );
+    let unflagged = process_requirements
+        .iter()
+        .filter(|path| !mixed_forms.contains(*path))
+        .collect::<Vec<_>>();
+    assert!(
+        unflagged.is_empty(),
+        "process-form requirements read under `fsl 5` without mixed_requirements_forms: {unflagged:?}"
+    );
     let differences = rows
         .iter()
-        .filter(|(next, header)| next != header)
+        .filter(|(next, header)| {
+            next != header && !header.contains("code=\"mixed_requirements_forms\"")
+        })
         .map(|(next, header)| format!("--edition next: {next}\nfsl 5 header:   {header}"))
         .collect::<Vec<_>>();
     assert!(differences.is_empty(), "{}", differences.join("\n"));

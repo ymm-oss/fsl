@@ -1,0 +1,170 @@
+// ════════════════════════════════════════════════════════════════
+// rejection/fsl3_*.fsl が「意図する lowering」を今の構文（2.x requirements、
+// kernel-wrapper form）で書き下したもの。
+//
+// lowering の規則（design.md B.3 を参照）:
+//   entity Request { f: T = v ... lifecycle ... }
+//       -> type Request = 0..(instances-1)、enum RequestStage、
+//          状態は field ごとの Map（request_stage / request_<field>）。
+//          今の process+data profile と同じ命名（claim_stage / claim_amount）。
+//   event n = <Actor> <verb> Request [in S | S -> T] [set ...]
+//       -> fair action n(r: Request)（fault event は fair を付けない）
+//   allow <phrase> only for <Concept>     -> その event の requires に concept 条件
+//   always <Stage> Request is <Concept>   -> invariant
+//   Request enters <T> only from <S>      -> trans
+//   goal ... some Request can reach <T>   -> reachable
+//   forbidden FB-x { ... then rejected }  -> forbidden FB-x { ... expect rejected }
+// ════════════════════════════════════════════════════════════════
+requirements AgenticRagToolApprovalSlice {
+  type Request = 0..0
+
+  enum RequestStage { New, EvidenceReady, ToolApproval, ToolApproved, ActionExecuted, Refused }
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+
+  state {
+    request_stage: Map<Request, RequestStage>,
+    request_evidence: Map<Request, Evidence>,
+    request_approval: Map<Request, Approval>,
+    request_role: Map<Request, Role>,
+    request_needs_tool: Map<Request, Bool>
+  }
+
+  init {
+    forall r: Request {
+      request_stage[r] = New
+      request_evidence[r] = Missing
+      request_approval[r] = NoApproval
+      request_role[r] = Public
+      request_needs_tool[r] = false
+    }
+  }
+
+  requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
+    // event grant_operator = Admin grants Request   in New   set role = Operator
+    fair action grant_operator(r: Request) {
+      requires request_stage[r] == New
+      request_role[r] = Operator
+    }
+    // event prepare_tool_ready = Retriever prepares Request   New -> EvidenceReady
+    //   set evidence = Adequate, needs_tool = true
+    fair action prepare_tool_ready(r: Request) {
+      requires request_stage[r] == New
+      request_stage[r] = EvidenceReady
+      request_evidence[r] = Adequate
+      request_needs_tool[r] = true
+    }
+    // event request_tool_approval = Agent requests Request   EvidenceReady -> ToolApproval
+    //   set approval = Requested
+    // rule: allow Agent requests Request only for ToolNeeded
+    fair action request_tool_approval(r: Request) {
+      requires request_stage[r] == EvidenceReady
+      request_stage[r] = ToolApproval
+      request_approval[r] = Requested
+    }
+    // event approve_tool = Operator approves Request   ToolApproval -> ToolApproved
+    //   set approval = Approved
+    // rule: allow Operator approves Request only for OperatorHeld
+    fair action approve_tool(r: Request) {
+      requires request_stage[r] == ToolApproval
+      request_stage[r] = ToolApproved
+      request_approval[r] = Approved
+    }
+    // event deny_tool = Operator denies Request   ToolApproval -> Refused   set approval = Denied
+    fair action deny_tool(r: Request) {
+      requires request_stage[r] == ToolApproval
+      request_stage[r] = Refused
+      request_approval[r] = Denied
+    }
+    // fault event downgrade_approval = Fault downgrades Request  in ToolApproved  set approval = Requested
+    action downgrade_approval(r: Request) {
+      requires request_stage[r] == ToolApproved
+      request_approval[r] = Requested
+    }
+    // fault event revoke_operator = Fault revokes Request  in ToolApproved  set role = Public
+    action revoke_operator(r: Request) {
+      requires request_stage[r] == ToolApproved
+      request_role[r] = Public
+    }
+    // fault event make_waiting_but_approved = Fault forges Request  in ToolApproval  set approval = Approved
+    // rule: allow Fault forges Request only for OperatorHeld
+    action make_waiting_but_approved(r: Request) {
+      requires request_stage[r] == ToolApproval
+      request_approval[r] = Approved
+    }
+    // event execute_tool = Agent executes Request   ToolApproved -> ActionExecuted
+    // rule: allow Agent executes Request only for ExplicitlyApproved and OperatorHeld
+    fair action execute_tool(r: Request) {
+      requires request_stage[r] == ToolApproved
+      request_stage[r] = ActionExecuted
+    }
+
+    // rule: always ActionExecuted Request is ExplicitlyApproved and OperatorHeld
+    invariant ToolExecutionApproved {
+      forall r: Request {
+        request_stage[r] == ActionExecuted => (
+          request_approval[r] == Approved and request_role[r] == Operator
+        )
+      }
+    }
+
+    // rule: Request enters ActionExecuted only from ToolApproved
+    trans ExecutionComesFromApprovedStage {
+      forall r: Request {
+        request_stage[r] == ActionExecuted => (
+          old(request_stage[r]) == ToolApproved or old(request_stage[r]) == ActionExecuted
+        )
+      }
+    }
+
+    // goal CanExecuteTool: some Request can reach ActionExecuted
+    reachable CanExecuteTool {
+      exists r: Request { request_stage[r] == ActionExecuted }
+    }
+  }
+
+  acceptance AC-TOOL "operator承認後に副作用toolを実行できる" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    execute_tool(0)
+    expect request_stage[0] == ActionExecuted
+  }
+
+  forbidden FB-PUBLIC-APPROVE "非operatorは承認できない" {
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-BEFORE-APPROVAL "承認待ちから直接実行できない" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    execute_tool(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-WITH-DOWNGRADED-APPROVAL "承認状態を戻した後は実行できない" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    downgrade_approval(0)
+    execute_tool(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-WITH-PUBLIC-ROLE "operator権限を失った後は実行できない" {
+    grant_operator(0)
+    prepare_tool_ready(0)
+    request_tool_approval(0)
+    approve_tool(0)
+    revoke_operator(0)
+    execute_tool(0)
+    expect rejected
+  }
+}
