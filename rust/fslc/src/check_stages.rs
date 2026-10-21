@@ -58,10 +58,10 @@ pub fn run_check_stages(
         display_path,
         resolver,
         envelope,
-        options,
+        *options,
     )
     .map_err(|(mut output, status)| {
-        display_alias(&mut output, source, options);
+        display_alias(&mut output, source, *options);
         (output, status)
     })
 }
@@ -73,7 +73,8 @@ pub fn run_check_stages(
 /// `display` (alias) for the name the diagnostic is about: the alias written
 /// at its location, else the first aliased name it quotes. Nothing changes
 /// for a document without a glossary.
-fn display_alias(output: &mut Value, source: &str, options: &fsl_syntax::ParseOptions) {
+fn display_alias(output: &mut Value, source: &str, options: fsl_syntax::ParseOptions) {
+    let options = &options;
     let Some(glossary) = fsl_syntax::document_glossary(source, options) else {
         return;
     };
@@ -89,8 +90,15 @@ fn display_alias(output: &mut Value, source: &str, options: &fsl_syntax::ParseOp
             ))
         })
         .and_then(|(line, column)| fsl_syntax::alias_at(source, options, line, column));
+    // A glossary diagnostic already names both spellings.
+    let about_glossary = object
+        .get("diagnostic_code")
+        .and_then(Value::as_str)
+        .is_some_and(|code| fsl_syntax::GLOSSARY_DIAGNOSTICS.contains(&code));
     let mut quoted = None;
-    if let Some(Value::String(message)) = object.get_mut("message") {
+    if let Some(Value::String(message)) = object.get_mut("message")
+        && !about_glossary
+    {
         let mut first = None;
         for entry in &glossary.entries {
             let name = format!("'{}'", entry.canonical.name);
@@ -124,8 +132,9 @@ fn check_stages(
     display_path: &str,
     resolver: &dyn FileResolver,
     envelope: &dyn Fn() -> Map<String, Value>,
-    options: &fsl_syntax::ParseOptions,
+    options: fsl_syntax::ParseOptions,
 ) -> Result<CheckedSpec, (Value, i32)> {
+    let options = &options;
     // The fsl-ai project gate carries its own exit code: an unexecutable
     // `require` clause is a spec error (issue #542), so this may not be
     // flattened back to a fixed exit 0.

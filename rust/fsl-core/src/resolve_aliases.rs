@@ -62,7 +62,23 @@ fn reject_shadowed_names(
                 ),
                 line: entry.alias_span.start.line,
                 column: entry.alias_span.start.column,
-                origin: None,
+                // An authored site: the alias as the glossary writes it.
+                origin: Some(Box::new(crate::OriginChain {
+                    id: crate::OriginId(format!(
+                        "glossary:{}:{}",
+                        entry.alias_span.start.offset, entry.alias_span.end.offset
+                    )),
+                    dialect: "requirements".to_owned(),
+                    primary: Some(crate::OriginSite {
+                        source_file: None,
+                        span: Some(entry.alias_span),
+                        dialect: "requirements".to_owned(),
+                        declaration_path: Vec::new(),
+                    }),
+                    secondary: Vec::new(),
+                    lowering_steps: Vec::new(),
+                    generated: false,
+                })),
                 kind: crate::CoreErrorKind::Semantics,
                 diagnostic_code: Some(ALIAS_SHADOWS_NAME),
             });

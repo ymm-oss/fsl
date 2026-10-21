@@ -9781,7 +9781,8 @@ fn run_explain(
 
 /// [`run_explain_from_source`] spelled for a reader: a document with a
 /// glossary shows aliases unless `--names canonical` asks for the canonical
-/// names (a document without one always shows canonical names).
+/// names everywhere, including where explain quotes the source (a document
+/// without one always shows canonical names).
 fn run_explain_from_source_with_names(
     path: &Path,
     source: &str,
@@ -9796,10 +9797,13 @@ fn run_explain_from_source_with_names(
         .contains(fsl_syntax::UnstableFeature::Fsl5);
     if gated
         && status == 0
-        && names != Some(name_display::NameSpelling::Canonical)
         && let Ok((_, model)) = load_kernel_model_from_source(path, source)
     {
-        name_display::show_aliases(&mut output, model.names().glossary());
+        name_display::respell(
+            &mut output,
+            model.names().glossary(),
+            names.unwrap_or(name_display::NameSpelling::Alias),
+        );
     }
     (output, status)
 }

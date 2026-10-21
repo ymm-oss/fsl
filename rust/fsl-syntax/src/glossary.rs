@@ -511,7 +511,7 @@ pub(crate) fn resolve_alias_tokens(
         .iter()
         .map(|entry| (entry.alias.clone(), entry))
         .collect::<BTreeMap<_, _>>();
-    let aliased = glossary
+    let canonical_targets = glossary
         .entries
         .iter()
         .map(|entry| entry.canonical.name.as_str())
@@ -546,7 +546,7 @@ pub(crate) fn resolve_alias_tokens(
                     span: token.span,
                 });
                 word.clone_from(&entry.canonical.name);
-            } else if aliased.contains(word.as_str()) {
+            } else if canonical_targets.contains(word.as_str()) {
                 uses.push(NameUse {
                     canonical: word.clone(),
                     via_alias: false,
