@@ -168,7 +168,11 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
 {
     // Mirrors issue #330's own equivalent test: cancel_system.fsl has
     // pre-existing unsupported targets unrelated to evidence, which would
-    // otherwise mask FSL-DOC-EVIDENCE-UNMATCHED under --strict.
+    // otherwise mask FSL-DOC-EVIDENCE-UNMATCHED under --strict. The empty
+    // `init` keeps `init` out of the unsupported targets, so the fixture
+    // declares no acceptance case: the requirement-trace gate could not
+    // replay one from an incomplete initial state, and the document commands
+    // refuse a spec whose traces it cannot replay (#1243).
     let spec = temp_path(".fsl");
     std::fs::write(
         &spec,
@@ -177,7 +181,6 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
   init { }
   @requirement("REQ-1", "Bump can happen")
   fair action bump() { counter = counter + 1 }
-  acceptance AC-1 "bump happens" { bump() expect true }
 }
 "#,
     )

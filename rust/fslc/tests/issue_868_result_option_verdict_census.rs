@@ -538,6 +538,20 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultTupleOption
     ),
     entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        1382,
+        "require_trace_gate",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/spec_loading.rs",
+        41,
+        "require_trace_gate",
+        ResultOption
+    ),
+    entry!(
         Ordinary,
         "rust/fslc/src/approval.rs",
         272,
