@@ -78,6 +78,19 @@ export const CI_SHARED_KEYS = [
 // only ever run on `ubuntu-latest`, hence `Linux` for all three. `fsl-logic`
 // is deliberately absent: it is restore-only against `rust-workspace` and
 // never saves its own key, so requiring one here would always fail.
+// The cache key generation every `Swatinem/rust-cache` step in `ci.yml` and
+// `merge-readiness.yml` currently passes as `prefix-key` (rust-cache's own
+// default is `v0-rust`). Bumping it is how the whole set is re-keyed at once:
+// `v0-rust` entries were superseded because they predated
+// `FSL_CARGO_PROFILE_HASH` and exact-hit a pre-#1380 Debug-Z3 build that
+// rust-cache then never re-saved. An entry under any other `v<N>-rust` prefix
+// is a superseded generation: no current step restores it (rust-cache's
+// restore prefix starts with `prefix-key`), so it cannot satisfy rule 2 and is
+// reported as reclaimable, but its bytes still count toward rule 1's physical
+// budget. The calibration suite checks this constant against both workflows.
+// See docs/design/DESIGN-ci.md, "Cache key generation".
+export const CURRENT_KEY_PREFIX = "v1-rust";
+
 export const REQUIRED_MAIN_ENTRIES = [
   { key: "rust-workspace", platform: "Linux" },
   { key: "wasm", platform: "Linux" },
@@ -87,7 +100,11 @@ export const REQUIRED_MAIN_ENTRIES = [
 ];
 
 function entryIdentity(key) {
-  // Swatinem/rust-cache composes `v0-rust-<shared-key>-<platform>-<arch>-<hash>-<hash>`.
+  // Swatinem/rust-cache composes `<prefix-key>-<shared-key>-<platform>-<arch>-<hash>-<hash>`,
+  // where `prefix-key` is `v<N>-rust` (`CURRENT_KEY_PREFIX` above; rust-cache's
+  // default is `v0-rust`). `keyPrefix` is returned so callers can tell the
+  // current generation from a superseded one; the identity itself
+  // ({sharedKey, platform}) is generation-independent.
   // Parsed from the tail, not the head: a lazy `(.+?)` stops at the *first*
   // platform-like substring it finds, so a shared key that happens to contain
   // one -- e.g. a hypothetical `foo-Linux-bar` -- would misparse as shared key
@@ -100,10 +117,12 @@ function entryIdentity(key) {
   // `runner.os` spellings `Linux`/`macOS`/`Windows`. Only the os.type()
   // spellings below are accepted; a key with an unknown platform is never
   // attributed to a required entry.
-  const match = /^v\d+-rust-(.+)-(Linux|Darwin|Windows_NT)-[^-]+-[0-9a-f]+-[0-9a-f]+$/.exec(
+  const match = /^(v\d+-rust)-(.+)-(Linux|Darwin|Windows_NT)-[^-]+-[0-9a-f]+-[0-9a-f]+$/.exec(
     key ?? "",
   );
-  return match ? { sharedKey: match[1], platform: match[2] } : { sharedKey: null, platform: null };
+  return match
+    ? { keyPrefix: match[1], sharedKey: match[2], platform: match[3] }
+    : { keyPrefix: null, sharedKey: null, platform: null };
 }
 
 function formatGiB(bytes) {
@@ -117,6 +136,7 @@ function formatGiB(bytes) {
  *          warnFraction?: number,
  *          requiredMainEntries?: {key: string, platform: string}[],
  *          ciSharedKeys?: string[],
+ *          currentKeyPrefix?: string,
  *          defaultBranchRef?: string}} input
  * @returns {{findings: Array<{code: string, message: string}>,
  *            informational: Array<{code: string, message: string}>,
@@ -129,6 +149,7 @@ export function auditCacheBudget({
   warnFraction = BUDGET_WARN_FRACTION,
   requiredMainEntries = REQUIRED_MAIN_ENTRIES,
   ciSharedKeys = CI_SHARED_KEYS,
+  currentKeyPrefix = CURRENT_KEY_PREFIX,
   defaultBranchRef = "refs/heads/main",
 }) {
   const findings = [];
@@ -191,12 +212,29 @@ export function auditCacheBudget({
 
   let staleGenerationBytes = 0;
   let staleGenerationCount = 0;
+  const supersededPrefixEntries = [];
   for (const group of mainGenerationsByIdentity.values()) {
-    if (group.length < 2) continue;
+    // An entry under a superseded `prefix-key` is stale whatever its
+    // created_at: no current step's exact key or restore prefix can reach it.
+    // A leftover generation (e.g. `v0-rust` after the bump to `v1-rust`) is
+    // therefore reclaimable at once -- deletable, or evicted by GitHub once
+    // unaccessed for 7 days -- rather than waiting to be out-aged by a newer
+    // entry of the same identity.
+    const current = [];
+    for (const entry of group) {
+      if (entryIdentity(entry.key).keyPrefix === currentKeyPrefix) {
+        current.push(entry);
+      } else {
+        supersededPrefixEntries.push(entry);
+        staleGenerationBytes += entry.size_in_bytes ?? 0;
+        staleGenerationCount += 1;
+      }
+    }
+    if (current.length < 2) continue;
     // Newest first: the generation Swatinem/rust-cache would actually restore
     // today. Every older generation in the same group is the one no lever
     // this audit rewards can fix -- it can only be waited out.
-    const bySize = [...group].sort(
+    const bySize = [...current].sort(
       (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
     );
     for (const stale of bySize.slice(1)) {
@@ -231,6 +269,28 @@ export function auditCacheBudget({
       rawEffective - Math.min(staleGenerationBytes, rawEffective),
     )}. This is diagnostic visibility only, not subtracted from the budget judgment below; the listing and the independently-observed usage total are separate, non-atomic observations, so this split does not prove that either amount is in the usage total or that net-growth is repository-controllable.`,
   });
+
+  // Only when present, and never a pass/fail input: the default-branch
+  // entries left under a superseded `prefix-key`, listed by key (sorted, so
+  // the report is deterministic) so a maintainer can delete them. Their bytes stay in rule 1's raw judgment
+  // (they physically occupy the budget until deleted or evicted); they are
+  // already counted in the generation-coexistence split above.
+  if (supersededPrefixEntries.length > 0) {
+    const supersededBytes = supersededPrefixEntries.reduce(
+      (total, entry) => total + (entry.size_in_bytes ?? 0),
+      0,
+    );
+    informational.push({
+      code: "superseded-key-prefix",
+      message: `${supersededPrefixEntries.length} \`${defaultBranchRef}\` cache entr${
+        supersededPrefixEntries.length === 1 ? "y" : "ies"
+      } (${formatGiB(supersededBytes)}) under a superseded rust-cache \`prefix-key\` (current: \`${currentKeyPrefix}\`); no current step restores them, so each is reclaimable -- delete it, or GitHub evicts it after 7 days without access: ${supersededPrefixEntries
+        .map((entry) => entry.key)
+        .sort()
+        .map((key) => `\`${key}\``)
+        .join(", ")}. See docs/design/DESIGN-ci.md, "Cache key generation".`,
+    });
+  }
 
   if (rawEffective >= limitBytes * warnFraction) {
     const limitDiagnostic =
@@ -269,24 +329,40 @@ export function auditCacheBudget({
   //    by a matrix job (`rust-native-z3`) can have one platform's entry
   //    present and another's absent, and a key-only set would let the former
   //    hide the latter.
+  //    Only the current `prefix-key` generation counts: a superseded one
+  //    (e.g. a leftover `v0-rust` entry) is unreachable by every current
+  //    step's key and restore prefix, so letting it satisfy this rule would
+  //    report a warm `main` while every pull request builds cold.
+  const mainIdentities = caches
+    .filter((entry) => entry.ref === defaultBranchRef)
+    .map((entry) => entryIdentity(entry.key))
+    .filter(({ sharedKey, platform }) => sharedKey && platform);
   const mainEntries = new Set(
-    caches
-      .filter((entry) => entry.ref === defaultBranchRef)
-      .map((entry) => entryIdentity(entry.key))
-      .filter(({ sharedKey, platform }) => sharedKey && platform)
+    mainIdentities
+      .filter(({ keyPrefix }) => keyPrefix === currentKeyPrefix)
+      .map(({ sharedKey, platform }) => `${sharedKey}::${platform}`),
+  );
+  const supersededMainEntries = new Set(
+    mainIdentities
+      .filter(({ keyPrefix }) => keyPrefix !== currentKeyPrefix)
       .map(({ sharedKey, platform }) => `${sharedKey}::${platform}`),
   );
   for (const { key, platform } of requiredMainEntries) {
     if (!mainEntries.has(`${key}::${platform}`)) {
+      const supersededNote = supersededMainEntries.has(`${key}::${platform}`)
+        ? ` Only a superseded \`prefix-key\` generation is present (current: \`${currentKeyPrefix}\`); no current step restores it.`
+        : "";
       findings.push({
         code: "main-cache-absent",
-        message: `no \`${defaultBranchRef}\` cache for shared key \`${key}\` on platform \`${platform}\`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are \`${defaultBranchRef}\`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.`,
+        message: `no \`${defaultBranchRef}\` cache for shared key \`${key}\` on platform \`${platform}\`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are \`${defaultBranchRef}\`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.${supersededNote}`,
       });
     }
   }
 
   // 3. No pull-request-scoped cache for a `ci.yml` shared key. This is the
   //    rejecting control for `save-if`: if the guard is removed, these reappear.
+  //    Generation-independent: a pull-request save is a violation under any
+  //    `prefix-key`, current or superseded.
   const ciKeys = new Set(ciSharedKeys);
   const attributedPullRequestEntries = new Set();
   for (const entry of caches) {
