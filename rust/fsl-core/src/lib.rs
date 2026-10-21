@@ -30,6 +30,7 @@ pub use fsl_syntax::{
 
 mod compose;
 mod db;
+mod decision_table;
 mod diagnostics;
 mod dialect;
 mod domain;
@@ -52,6 +53,10 @@ pub use compose::{
     FileResolver, FsResolver, lower_compose, lower_compose_with_options, parse_kernel_source,
     parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
     parse_kernel_source_with_options,
+};
+pub use decision_table::{
+    DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DOMAIN_BOUND, DecisionObligation,
+    decision_solver_obligations,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
