@@ -16,7 +16,9 @@
 //!   sources to [`FSL5_SOURCES`]. Until the rule stages, a source written
 //!   without its rules (`fsl5_en_norules.fsl`) is compared with
 //!   `lowered_norules.fsl`: `lowered.fsl` with only the requires lines the
-//!   rules contribute deleted by hand, a diff read in review.
+//!   rules contribute deleted by hand, a diff read in review. A source with
+//!   only some of its rules (`fsl5_en_decide.fsl`: the decision table, not
+//!   the `rule` block) is compared the same way with its own reduced lowering.
 //! - **R** (refinement both ways): `lowered.fsl` and the original refine each
 //!   other at depth 8.
 //! - **M** (the check can fail): one rule of `lowered.fsl` weakened makes R
@@ -78,6 +80,9 @@ const EXAMPLES: &[Example] = &[
 /// `every_fsl5_source_is_under_k` keeps a source from being added without K.
 const FSL5_SOURCES: &[(&str, &str, &str)] = &[
     ("e2e", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
+    // The decision table without the rule (S7): `lowered.fsl` minus REQ-1's
+    // requires line.
+    ("e2e", "fsl5_en_decide.fsl", "lowered_decide.fsl"),
     ("rejection", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
 ];
 

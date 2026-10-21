@@ -656,6 +656,38 @@ pub struct NextEditionRequirements {
     pub concepts: Vec<ConceptDeclaration>,
     /// Warnings found while desugaring, in source order.
     pub warnings: Vec<EditionWarning>,
+    /// The decision tables, already folded into their events' guards; kept
+    /// for the exhaustiveness / overlap checks and the lowering's origins.
+    pub decisions: Vec<DecisionTable>,
+}
+
+/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionTable {
+    pub id: String,
+    pub text: String,
+    pub entity: String,
+    pub stage: String,
+    /// The rows in source order; an `otherwise` row is last.
+    pub rows: Vec<DecisionRow>,
+    /// `assuming Q`, over the entity's fields as `Entity.field` names.
+    pub assuming: Option<Expr>,
+    pub span: Span,
+}
+
+/// One row of a [`DecisionTable`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionRow {
+    /// The row as written, `SmallClaim => System approves`.
+    pub source: String,
+    /// The row's condition at the table's stage, over the entity's fields as
+    /// `Entity.field` names (concepts expanded, their stages decided).
+    pub condition: Expr,
+    /// The events the row's outcome names.
+    pub events: Vec<String>,
+    /// `true` for `otherwise`, whose condition negates every other row.
+    pub otherwise: bool,
+    pub span: Span,
 }
 
 /// `concept Name = Entity [in Stage, …] [where condition]`.

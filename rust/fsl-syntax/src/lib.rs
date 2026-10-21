@@ -91,14 +91,14 @@ pub use parser::{
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, ComposeItem, ConceptDeclaration, ControlAttribute,
-    CorrespondenceOrigin, EditionWarning, EventForm, GovernanceArtifactRef, GovernanceDelegateItem,
-    GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, NextEditionRequirements, Param,
-    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementBranch, RequirementsItem, SpecItem, StateField, Statement,
-    SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance,
-    SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr,
-    VerifyItem,
+    CorrespondenceOrigin, DecisionRow, DecisionTable, EditionWarning, EventForm,
+    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
+    MapsClause, MetaTag, NextEditionRequirements, Param, PreservationItem, ProcessCover,
+    ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem, RefinementParam,
+    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
+    RequirementsItem, SpecItem, StateField, Statement, SurfaceAgent, SurfaceBusiness,
+    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
+    SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

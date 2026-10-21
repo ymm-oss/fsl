@@ -2223,6 +2223,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
 
     let processes = requirements_processes(&requirements)?;
     let binders = process_binders(&requirements, &processes);
+    let decision_tables = crate::decision_table::Tables::of(&requirements);
     if let Some(next) = &requirements.next {
         check_generated_names(next, &items, &processes, &binders)?;
     }
@@ -2383,10 +2384,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 },
             );
             if let Some(event) = event {
-                extra_origins.push((
-                    crate::action_target(&transition.name),
-                    event_origin(transition, event, &process.process),
-                ));
+                let mut origin = event_origin(transition, event, &process.process);
+                origin.lowering_steps.extend(
+                    decision_tables.lowering_steps(&process.process.entity, &transition.name),
+                );
+                extra_origins.push((crate::action_target(&transition.name), origin));
             }
             let mut params = vec![Param::Typed(
                 binder.clone(),
@@ -2778,6 +2780,14 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             });
         }
     }
+    for (item, annotation, origin) in decision_tables.assumption_invariants() {
+        if let SpecItem::Invariant { name, .. } = &item {
+            let target = crate::property_target("invariant", name);
+            extra_annotations.push((target.clone(), annotation));
+            extra_origins.push((target, origin));
+        }
+        items.push(item);
+    }
     let stage_processes = processes
         .iter()
         .map(|process| process.process.clone())
@@ -2823,6 +2833,8 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 "loc": warning.span.python_loc(),
             })
         }));
+    let decision_warnings = decision_tables.check(&kernel)?;
+    kernel.diagnostics.extend(decision_warnings);
     Ok(kernel)
 }
 
