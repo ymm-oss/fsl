@@ -1890,21 +1890,33 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
   コンポーネントで変換をモデル化してください。</li>
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — その action をインターリービングから除外します。</li>
 <li>(<code>=</code> のない)通常の <code>action</code> も書けます(グルー action)。</li>
-<li>JSON の表示: 物理名 <code>alias__x</code> は <code>alias.x</code> として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
-  コンポーネントの action の公開名は alias と action 名から作るので、
-  <code>use X as a__b</code> の action <code>c</code> は <code>a__b.c</code> です。コンポーネントの action を名指す
-  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
-  mutate、refine、diff、html、ledger、analyze(<code>action:a__b.c</code> のようなグラフの ID を
-  含む)、<code>check --strict-tags</code> の警告、<code>state_mismatch.action</code> を含む <code>replay</code> の出力 — がこの <code>alias.action</code> 形を
-  使います。<code>_requires_failed_a__b.c</code> のように action から作る名前も同じです。
-  状態のキーは上の規則のままなので、<code>use X as a__b</code> の状態 <code>n</code> は <code>a.b__n</code> と
-  表示されます(凍結した Python 参照実装では <code>a__b.n</code>)。
-  v1 の <code>replay</code> トレースでは、コンポーネントの action を <code>alias.action</code> と書いても
-  旧来の <code>alias__action</code> と書いてもかまいません。どちらも同じ action を指します
-  (<code>docs/design/DESIGN-replay-trace.md</code> を参照)。ネイティブ実装では、これらの
-  綴りと、<code>_partial_&lt;action&gt;</code>・<code>_bounds_&lt;state&gt;</code> のようにエンジンが作る名前を、
-  1 つのモジュール <code>rust/fsl-core/src/naming.rs</code> が持ちます。</li>
+<li>名前と <code>__</code>: <code>spec</code>・<code>requirements</code>・<code>business</code>・<code>compose</code> の文書で宣言する名前
+  (spec、action、パラメータ、<code>let</code>、状態変数、property、型、const、enum の
+  メンバー、struct のフィールド、process、stage、actor、<code>use</code> の alias)には
+  <code>__</code> を含められません。<code>fslc check</code> は宣言の位置で拒否します(<code>kind:"name"</code>、
+  exit 2)。compose のコンポーネントの宣言は、親の <code>use</code> の位置で報告します。
+  <code>__</code> は lowering が作る名前のためにとってあります。compose のコンポーネントの
+  宣言の物理名 <code>alias__x</code> と、requirements の <code>branches</code> の action を分けた
+  <code>submit__b1</code> です。作られた名前を参照することはできます(refinement の対応が
+  <code>submit__b1</code> を参照するように)。</li>
+<li>JSON の表示: 作られた名前は <code>__</code> を <code>.</code> に置き換えた 1 つの綴りで、すべての
+  出力に出ます。物理名 <code>alias__x</code> は <code>alias.x</code>、<code>branches</code> で分けた
+  <code>submit__b1</code> は <code>submit.b1</code> です(状態のキー、action 名、invariant /
+  reachable 名、診断、トレース、シナリオ、Monitor — すべて)。コンポーネントの
+  宣言の公開名は alias と宣言の名前から作ります。それを名指すすべてのコマンド
+  — verify(<code>cost.properties[].name</code> を含む)、sweep、scenarios、explain、
+  testgen、conformance(<code>acct.Inv</code> のような outcome の名前を含む)、testplan、
+  mutate(target と死 action の注記)、refine、diff、html、ledger、
+  analyze(<code>action:acct.go</code>・<code>action:submit.b1</code> のようなグラフの ID を含む)、
+  <code>check --strict-tags</code> の警告、<code>state_mismatch.action</code> を含む <code>replay</code> の出力
+  — がこの形を使います。<code>_requires_failed_acct.go</code> のように action から作る
+  名前も同じです。内部名のまま出すのは Public Kernel(<code>fslc kernel</code>)だけです。
+  v1 の <code>replay</code> トレースでは、作られた action を公開の綴りで書いても内部名で
+  書いてもかまいません(<code>acct.go</code> と <code>acct__go</code>、<code>submit.b1</code> と <code>submit__b1</code>)。
+  どちらも同じ action を指します(<code>docs/design/DESIGN-replay-trace.md</code> を参照)。
+  ネイティブ実装では、これらの綴りと、<code>_partial_&lt;action&gt;</code>・<code>_bounds_&lt;state&gt;</code> の
+  ようにエンジンが作る名前を、1 つのモジュール <code>rust/fsl-core/src/naming.rs</code> が
+  持ちます。</li>
 </ul>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8
@@ -2420,8 +2432,9 @@ verify {
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
   <code>struct</code> / <code>state</code> / <code>init</code>、<code>fair action</code>、<code>branches</code>、明示の <code>maps</code> をサポート
   します。<code>branches</code> は action を各 when 条件で自動的に分割し
-  (<code>submit[a &lt;= AUTO_LIMIT]</code> と表示されます)、<code>maps</code> 節が上位レイヤーへの action
-  の対応を提供します。</li>
+  (mutation の target では <code>submit[a &lt;= AUTO_LIMIT]</code>、それ以外の出力では分けた
+  action を <code>submit.b1</code>・<code>submit.b2</code> … と表示します)、<code>maps</code> 節が上位レイヤーへの
+  action の対応を提供します。</li>
 <li><code>terminal { &lt;expr&gt; }</code> は <code>requirements</code> spec のトップレベルで許され、カーネルへ
   lowering されます(§6) — カーネルと同じく、spec ごとに <code>terminal</code> ブロックは
   ちょうど 1 つです。<code>stage(c)</code> は、<code>c</code> が型付きのエンティティパラメータまたは

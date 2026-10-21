@@ -30,6 +30,7 @@ pub use fsl_syntax::{
 
 mod compose;
 mod db;
+mod declared_names;
 mod diagnostics;
 mod dialect;
 mod domain;
@@ -53,6 +54,7 @@ pub use compose::{
     parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
     parse_kernel_source_with_options,
 };
+pub use declared_names::reject_declared_separator;
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
     finalize_model_warnings, insert_requirement_metadata, is_no_user_invariants_warning,
@@ -395,6 +397,7 @@ impl KernelSpec {
 /// predicate definitions, recursion, arity mismatches, or variable capture.
 pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
     let parsed = parse_document(SourceFile::new(source))?;
+    reject_declared_separator(&parsed.surface, source)?;
     let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(CoreError {
             message: "expected direct kernel spec".to_owned(),
@@ -820,6 +823,7 @@ pub fn parse_kernel_source_with_bounds_with_options(
     }
 
     let parsed = parse_document_with(SourceFile::new(source), options)?;
+    reject_declared_separator(&parsed.surface, source)?;
     validate_dialect_scope_overrides(&parsed.surface, instances, values)?;
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {
