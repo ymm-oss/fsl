@@ -69,7 +69,7 @@ Under `Unicode`:
   (the parser; unreachable under `Ascii`).
 
 `IDENTIFIER_DIAGNOSTICS` lists these codes; `canonical_name_not_ascii` is
-reserved for alias resolution (S3). Errors are lexer/parse errors with the code
+emitted by alias resolution (S3, below), not by the lexer. Errors are lexer/parse errors with the code
 as `diagnostic_code`; warnings come from `lexical_warnings` and are published by
 the language server. Commands that parse through the shared modules (`check`,
 `kernel`, the language server's diagnostics) receive the options and see the
@@ -112,6 +112,44 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   verify cache key adds the unstable set and the exact `--edition` request
   when the gate is on; the header itself is part of the hashed source.
 - The Worker applies the same edition step to a document with a header.
+
+## Glossary and alias resolution (S3)
+
+- `glossary { Canonical = alias  Entity.field = alias ... }` is read only in a
+  `requirements` document headed `fsl 5` with the gate on, and only as its
+  first item (`misplaced_glossary` otherwise). Elsewhere `glossary` is still
+  `expected requirements declaration`. The parser learns the edition through
+  S4's `SourceFile::edition`.
+- Resolution starts on the token stream (`fsl-syntax/src/glossary.rs`): the
+  block is checked on its own (`canonical_name_not_ascii` for a left side,
+  `duplicate_alias`, `alias_collision`, `alias_shadows_keyword` against
+  `KEYWORD_SPELLINGS`, the union of every keyword spelling, `alias_shadows_name`
+  against the block's canonical names), then every later identifier token
+  that is an alias becomes its canonical name (a field alias becomes the
+  field name), so every frontend position reads canonical names. The body of
+  `implements NAME from "path" { ... }` is not rewritten; an alias there is
+  `alias_in_implements`. Resolution runs before S4's members are read and
+  desugared, so aliases work in entity, lifecycle, concept, event and
+  scenario text too. After the parse, a non-ASCII identifier that is neither
+  an alias nor a keyword spelling is `canonical_name_not_ascii`, so nothing
+  non-ASCII can reach a Kernel name; a `scenario` / `forbidden` body is not
+  scanned, because its instance labels (`申請1`) become numbers. `Glossary::uses` records each
+  resolved alias and each canonical spelling of an aliased name.
+- `fsl_core::lower_requirements` (`resolve_aliases.rs`) lowers the resolved
+  document, rejects an alias spelled like a declared name of the lowered spec
+  (`alias_shadows_name`, e.g. a generated `claim_stage`), and publishes the
+  table as `NameMap::glossary()` (`fsl_core::Glossary`). No Kernel name and no
+  `PublicName` is ever an alias.
+- Display only: `check` (shared with the Worker through `check_stages`) shows
+  `'alias（Canonical）'` for each quoted canonical name and adds `name` /
+  `display` to a rejection; `explain` shows aliases by default for a document
+  with a glossary and canonical names with `--names canonical`; `lint
+  --strict-names` reports `mixed_names` (warning) where a canonical name is
+  also written as itself. `--names` and `--strict-names` exist only behind
+  the gate.
+- Not yet: the language server (hover, completion, rename of aliases; S11),
+  `fmt --names` (S10), and the document glossary, whose project parse is
+  pinned to the published language until S10 (`DOCUMENT` rows below).
 
 ## Fail closed (decisions/049 D2)
 
