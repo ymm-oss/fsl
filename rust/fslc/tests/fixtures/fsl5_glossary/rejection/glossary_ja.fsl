@@ -1,0 +1,200 @@
+fsl 5
+// fsl5/rejection/original.fsl (side-effect tool approval) with every declared
+// name written as its Japanese alias: types and enum members, struct fields,
+// state, actions, properties. Lowers to exactly the kernel of the original.
+requirements AgenticRagToolApprovalSlice {
+  glossary {
+    AgenticRagToolApprovalSlice = ツール承認要件
+    Req            = 依頼
+    Stage          = 処理段階
+    New            = 新規
+    EvidenceReady  = 根拠確認済み
+    ToolApproval   = 承認待ち
+    ToolApproved   = ツール承認済み
+    ActionExecuted = 実行済み
+    Refused        = 却下済み
+    Evidence       = 根拠
+    Missing        = 根拠なし
+    Adequate       = 十分
+    Inadequate     = 不十分
+    Approval       = 承認
+    NoApproval     = 未承認
+    Requested      = 承認依頼中
+    Approved       = 承認済み
+    Denied         = 承認拒否
+    Role           = 権限
+    Public         = 一般
+    Operator       = 運用者
+    Case           = 案件
+    Case.st         = 段階値
+    Case.evidence   = 根拠値
+    Case.approval   = 承認値
+    Case.role       = 権限値
+    Case.needs_tool = ツール要否
+    req            = 依頼表
+    grant_operator            = 運用権限付与
+    prepare_tool_ready        = ツール準備
+    request_tool_approval     = 承認依頼
+    approve_tool              = ツール承認
+    deny_tool                 = ツール拒否
+    downgrade_approval        = 承認取消
+    revoke_operator           = 運用権限剥奪
+    make_waiting_but_approved = 承認待ち承認済み化
+    execute_tool              = ツール実行
+    ToolExecutionApproved            = 承認済み実行のみ
+    ExecutionComesFromApprovedStage  = 承認段階経由実行
+    CanExecuteTool                   = 実行可能
+  }
+
+  type 依頼 = 0..0
+
+  enum 処理段階 { 新規, 根拠確認済み, 承認待ち, ツール承認済み, 実行済み, 却下済み }
+  enum 根拠 { 根拠なし, 十分, 不十分 }
+  enum 承認 { 未承認, 承認依頼中, 承認済み, 承認拒否 }
+  enum 権限 { 一般, 運用者 }
+
+  struct 案件 {
+    段階値: 処理段階,
+    根拠値: 根拠,
+    承認値: 承認,
+    権限値: 権限,
+    ツール要否: Bool
+  }
+
+  state {
+    依頼表: Map<依頼, 案件>
+  }
+
+  init {
+    forall r: 依頼 {
+      依頼表[r] = 案件 {
+        段階値: 新規,
+        根拠値: 根拠なし,
+        承認値: 未承認,
+        権限値: 一般,
+        ツール要否: false
+      }
+    }
+  }
+
+  requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
+    action 運用権限付与(r: 依頼) {
+      requires 依頼表[r].段階値 == 新規
+      依頼表[r].権限値 = 運用者
+    }
+
+    action ツール準備(r: 依頼) {
+      requires 依頼表[r].段階値 == 新規
+      依頼表[r].段階値 = 根拠確認済み
+      依頼表[r].根拠値 = 十分
+      依頼表[r].ツール要否 = true
+    }
+
+    fair action 承認依頼(r: 依頼) {
+      requires 依頼表[r].段階値 == 根拠確認済み
+      requires 依頼表[r].ツール要否
+      依頼表[r].段階値 = 承認待ち
+      依頼表[r].承認値 = 承認依頼中
+    }
+
+    fair action ツール承認(r: 依頼) {
+      requires 依頼表[r].段階値 == 承認待ち
+      requires 依頼表[r].権限値 == 運用者
+      依頼表[r].段階値 = ツール承認済み
+      依頼表[r].承認値 = 承認済み
+    }
+
+    fair action ツール拒否(r: 依頼) {
+      requires 依頼表[r].段階値 == 承認待ち
+      依頼表[r].段階値 = 却下済み
+      依頼表[r].承認値 = 承認拒否
+    }
+
+    action 承認取消(r: 依頼) {
+      requires 依頼表[r].段階値 == ツール承認済み
+      依頼表[r].承認値 = 承認依頼中
+    }
+
+    action 運用権限剥奪(r: 依頼) {
+      requires 依頼表[r].段階値 == ツール承認済み
+      依頼表[r].権限値 = 一般
+    }
+
+    action 承認待ち承認済み化(r: 依頼) {
+      requires 依頼表[r].段階値 == 承認待ち
+      requires 依頼表[r].権限値 == 運用者
+      依頼表[r].承認値 = 承認済み
+    }
+
+    fair action ツール実行(r: 依頼) {
+      requires 依頼表[r].段階値 == ツール承認済み
+      requires 依頼表[r].承認値 == 承認済み
+      requires 依頼表[r].権限値 == 運用者
+      依頼表[r].段階値 = 実行済み
+    }
+
+    invariant 承認済み実行のみ {
+      forall r: 依頼 {
+        依頼表[r].段階値 == 実行済み => (
+          依頼表[r].承認値 == 承認済み and 依頼表[r].権限値 == 運用者
+        )
+      }
+    }
+
+    trans 承認段階経由実行 {
+      forall r: 依頼 {
+        依頼表[r].段階値 == 実行済み => (
+          old(依頼表[r].段階値) == ツール承認済み or old(依頼表[r].段階値) == 実行済み
+        )
+      }
+    }
+
+    reachable 実行可能 {
+      exists r: 依頼 { 依頼表[r].段階値 == 実行済み }
+    }
+  }
+
+  acceptance AC-TOOL "operator承認後に副作用toolを実行できる" {
+    運用権限付与(0)
+    ツール準備(0)
+    承認依頼(0)
+    ツール承認(0)
+    ツール実行(0)
+    expect 依頼表[0].段階値 == 実行済み
+  }
+
+  forbidden FB-PUBLIC-APPROVE "非operatorは承認できない" {
+    ツール準備(0)
+    承認依頼(0)
+    ツール承認(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-BEFORE-APPROVAL "承認待ちから直接実行できない" {
+    運用権限付与(0)
+    ツール準備(0)
+    承認依頼(0)
+    ツール実行(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-WITH-DOWNGRADED-APPROVAL "承認状態を戻した後は実行できない" {
+    運用権限付与(0)
+    ツール準備(0)
+    承認依頼(0)
+    ツール承認(0)
+    承認取消(0)
+    ツール実行(0)
+    expect rejected
+  }
+
+  forbidden FB-EXECUTE-WITH-PUBLIC-ROLE "operator権限を失った後は実行できない" {
+    運用権限付与(0)
+    ツール準備(0)
+    承認依頼(0)
+    ツール承認(0)
+    運用権限剥奪(0)
+    ツール実行(0)
+    expect rejected
+  }
+}

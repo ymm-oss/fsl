@@ -466,9 +466,20 @@ impl<'a> Parser<'a> {
 
     fn surface_requirements(&mut self) -> Result<SurfaceRequirements, ParseError> {
         self.expect_ident_value("requirements")?;
+        let name_start = self.cursor;
         let name = self.expect_ident()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
+        let next_edition = self.edition == Edition::Fsl5;
+        // Aliases are resolved first, on the tokens, so every member below
+        // (the published items and the next edition's entity / event /
+        // scenario forms) reads canonical names before it is desugared.
+        if next_edition && self.peek_ident("glossary") {
+            let mut glossary = crate::glossary::parse_glossary(&self.tokens, &mut self.cursor)?;
+            crate::glossary::resolve_alias_tokens(&mut self.tokens, self.cursor, &mut glossary)?;
+            items.push(RequirementsItem::Glossary(glossary));
+        }
+        let body_start = self.cursor;
         let mut next = next_requirements::Pending::default();
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
@@ -485,7 +496,11 @@ impl<'a> Parser<'a> {
         if self.peek_ident("verify") {
             items.push(RequirementsItem::Common(self.verify_bounds()?));
         }
-        let (items, next) = if self.edition == Edition::Fsl5 {
+        if next_edition {
+            crate::glossary::reject_unaliased_non_ascii(&self.tokens[name_start..=name_start])?;
+            crate::glossary::reject_unaliased_non_ascii(&self.tokens[body_start..])?;
+        }
+        let (items, next) = if next_edition {
             let (items, next) = next.desugar(items)?;
             (items, Some(next))
         } else {
@@ -495,6 +510,13 @@ impl<'a> Parser<'a> {
     }
 
     fn requirements_item(&mut self) -> Result<RequirementsItem, ParseError> {
+        if self.edition == Edition::Fsl5 && self.peek_ident("glossary") {
+            return Err(ParseError::coded(
+                crate::glossary::MISPLACED_GLOSSARY,
+                "glossary must be the first item of requirements, and a document has one",
+                self.peek().span,
+            ));
+        }
         if self.peek_ident("implements") {
             return self.requirements_implements();
         }

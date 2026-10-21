@@ -52,6 +52,89 @@ pub fn run_check_stages(
     envelope: &dyn Fn() -> Map<String, Value>,
     options: &fsl_syntax::ParseOptions,
 ) -> Result<CheckedSpec, (Value, i32)> {
+    check_stages(
+        source,
+        source_path,
+        display_path,
+        resolver,
+        envelope,
+        *options,
+    )
+    .map_err(|(mut output, status)| {
+        display_alias(&mut output, source, *options);
+        (output, status)
+    })
+}
+
+/// A rejection names canonical names only: resolution replaced every alias
+/// before lowering. For a document with a glossary, show the reader's word
+/// beside it: each quoted canonical name in the message that has an alias
+/// reads `'alias（name）'`, and the envelope gains `name` (canonical) and
+/// `display` (alias) for the name the diagnostic is about: the alias written
+/// at its location, else the first aliased name it quotes. Nothing changes
+/// for a document without a glossary.
+fn display_alias(output: &mut Value, source: &str, options: fsl_syntax::ParseOptions) {
+    let options = &options;
+    let Some(glossary) = fsl_syntax::document_glossary(source, options) else {
+        return;
+    };
+    let Some(object) = output.as_object_mut() else {
+        return;
+    };
+    let located = object
+        .get("loc")
+        .and_then(|loc| {
+            Some((
+                u32::try_from(loc.get("line")?.as_u64()?).ok()?,
+                u32::try_from(loc.get("column")?.as_u64()?).ok()?,
+            ))
+        })
+        .and_then(|(line, column)| fsl_syntax::alias_at(source, options, line, column));
+    // A glossary diagnostic already names both spellings.
+    let about_glossary = object
+        .get("diagnostic_code")
+        .and_then(Value::as_str)
+        .is_some_and(|code| fsl_syntax::GLOSSARY_DIAGNOSTICS.contains(&code));
+    let mut quoted = None;
+    if let Some(Value::String(message)) = object.get_mut("message")
+        && !about_glossary
+    {
+        let mut first = None;
+        for entry in &glossary.entries {
+            let name = format!("'{}'", entry.canonical.name);
+            if let Some(position) = message.find(&name)
+                && first.as_ref().is_none_or(|(at, _)| position < *at)
+            {
+                first = Some((position, entry));
+            }
+        }
+        quoted = first.map(|(_, entry)| (entry.canonical.name.clone(), entry.alias.clone()));
+        for entry in &glossary.entries {
+            *message = message.replace(
+                &format!("'{}'", entry.canonical.name),
+                &format!("'{}（{}）'", entry.alias, entry.canonical.name),
+            );
+        }
+    }
+    if let Some((canonical, alias)) = located.or(quoted) {
+        object
+            .entry("name")
+            .or_insert_with(|| Value::String(canonical));
+        object
+            .entry("display")
+            .or_insert_with(|| Value::String(alias));
+    }
+}
+
+fn check_stages(
+    source: &str,
+    source_path: &str,
+    display_path: &str,
+    resolver: &dyn FileResolver,
+    envelope: &dyn Fn() -> Map<String, Value>,
+    options: fsl_syntax::ParseOptions,
+) -> Result<CheckedSpec, (Value, i32)> {
+    let options = &options;
     // The fsl-ai project gate carries its own exit code: an unexecutable
     // `require` clause is a spec error (issue #542), so this may not be
     // flattened back to a fixed exit 0.

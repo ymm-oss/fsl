@@ -44,6 +44,7 @@ mod partial_operation;
 mod public_kernel;
 mod refinement;
 mod reserved;
+mod resolve_aliases;
 mod trace;
 mod trace_json;
 mod typecheck;
@@ -68,7 +69,7 @@ pub use dialect::{
     RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
     RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, governance_contract_with_options, lower_ai_component, lower_business,
-    lower_db, lower_domain, lower_governance, lower_requirements, requirements_declared_ids,
+    lower_db, lower_domain, lower_governance, requirements_declared_ids,
     requirements_declared_ids_with_options, requirements_has_implements,
     requirements_has_implements_with_options, requirements_trace_contract,
     requirements_trace_contract_with_options, validate_ai_component, verify_scope_type_names,
@@ -83,7 +84,8 @@ pub use model::{
     build_model, static_leadsto_bindings,
 };
 pub use naming::{
-    AmbiguousName, ComposeName, NameMap, PublicName, SyntheticName, unmapped_public_spelling,
+    AmbiguousName, ComposeName, Glossary, NameMap, PublicName, SyntheticName,
+    unmapped_public_spelling,
 };
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
@@ -112,6 +114,7 @@ pub use refinement::{
     requirements_implements, requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
+pub use resolve_aliases::lower_requirements;
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
     fsl_value_json, internal_origin_json, origin_display_name, state_json, state_summary,

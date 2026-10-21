@@ -318,6 +318,80 @@ pub struct AmbiguousName<'n> {
     pub candidates: Vec<&'n str>,
 }
 
+/// The aliases a next-edition requirements glossary gives canonical names.
+///
+/// Aliases are display spellings only: name resolution replaced every alias
+/// by its canonical name before lowering, so no Kernel name, and no
+/// [`PublicName`], is ever an alias. This table is how a delivery surface
+/// that displays names for a reader (diagnostics, `explain`) finds the alias
+/// of a canonical name, and the one place the pair is kept.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Glossary {
+    /// `(canonical as written, alias)` in glossary order. A field's canonical
+    /// side is written `Entity.field`.
+    entries: Vec<(String, String)>,
+}
+
+impl Glossary {
+    pub(crate) fn insert(&mut self, written: String, alias: String) {
+        self.entries.push((written, alias));
+    }
+
+    /// Whether the document had no glossary.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// `(canonical, alias)` pairs in glossary order.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries
+            .iter()
+            .map(|(canonical, alias)| (canonical.as_str(), alias.as_str()))
+    }
+
+    /// The alias of `name`: an unqualified canonical name, `Entity.field`, or
+    /// the bare name of a field when exactly one entry gives that field name
+    /// an alias.
+    #[must_use]
+    pub fn alias(&self, name: &str) -> Option<&str> {
+        if let Some((_, alias)) = self.entries.iter().find(|(canonical, _)| canonical == name) {
+            return Some(alias);
+        }
+        let mut fields = self.entries.iter().filter(|(canonical, _)| {
+            canonical
+                .split_once('.')
+                .is_some_and(|(_, field)| field == name)
+        });
+        match (fields.next(), fields.next()) {
+            (Some((_, alias)), None) => Some(alias),
+            _ => None,
+        }
+    }
+
+    /// The canonical name (the field name for a qualified entry) `alias`
+    /// resolves to.
+    #[must_use]
+    pub fn canonical(&self, alias: &str) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|(_, candidate)| candidate == alias)
+            .map(|(canonical, _)| {
+                canonical
+                    .split_once('.')
+                    .map_or(canonical.as_str(), |(_, field)| field)
+            })
+    }
+
+    /// How a reader sees `name` in a message: `alias（name）` when it has an
+    /// alias, `name` otherwise.
+    #[must_use]
+    pub fn display(&self, name: &str) -> String {
+        self.alias(name)
+            .map_or_else(|| name.to_owned(), |alias| format!("{alias}（{name}）"))
+    }
+}
+
 /// Internal name to structural identity for one model's compose declarations.
 /// Empty for any document that is not a compose.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -325,9 +399,22 @@ pub struct NameMap {
     actions: BTreeMap<String, ComposeName>,
     states: BTreeMap<String, ComposeName>,
     properties: BTreeMap<String, ComposeName>,
+    /// Empty unless the document is a next-edition requirements document
+    /// with a glossary.
+    glossary: Glossary,
 }
 
 impl NameMap {
+    /// The aliases of the document's glossary (empty without one).
+    #[must_use]
+    pub fn glossary(&self) -> &Glossary {
+        &self.glossary
+    }
+
+    pub(crate) fn set_glossary(&mut self, glossary: Glossary) {
+        self.glossary = glossary;
+    }
+
     pub(crate) fn insert_action(&mut self, alias: &str, name: &str) {
         self.actions
             .insert(compose_internal(alias, name), ComposeName::new(alias, name));
