@@ -100,6 +100,10 @@ jobs:
         with:
           components: clippy,rustfmt
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -117,6 +121,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-workspace
 
       - name: Check Rust workspace (non-test phases)
@@ -146,6 +159,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -160,6 +177,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-workspace
 
       - name: Cache pinned cargo-nextest CLI
@@ -287,6 +313,10 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -301,6 +331,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - uses: actions/setup-node@v4
         if: steps.scope.outputs.run == 'true'
@@ -382,6 +421,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Saving is restricted to non-pull-request events. Actions cache visibility is
@@ -395,6 +437,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-native-z3
           # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
@@ -451,6 +502,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Saving is restricted to non-pull-request events. Actions cache visibility is
@@ -464,6 +518,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-native-z3
           # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
@@ -503,6 +566,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Saving is restricted to non-pull-request events. Actions cache visibility is
@@ -516,6 +582,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Test pinned native solver and BMC crates
         working-directory: rust
@@ -557,6 +632,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -571,6 +650,15 @@ jobs:
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
           save-if: ${{ github.event_name != 'pull_request' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: semantic-mutation
           # Under the old 30-minute budget, a cold operators run was cancelled at
           # 30.2 minutes and its post save was skipped. `cache-on-failure: true`
@@ -641,6 +729,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -658,6 +750,15 @@ jobs:
           # issue #747.
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: semantic-mutation
 
       - name: Install pinned semantic mutation runner
@@ -770,6 +871,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -799,6 +904,15 @@ jobs:
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Run bounded pull-request generation
         if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))

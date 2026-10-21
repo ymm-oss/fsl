@@ -6,13 +6,13 @@
 //! resolved to the canonical names before lowering, and implementations see
 //! the canonical names only.
 //!
-//! The fixtures under `tests/fixtures/fsl5_glossary/<example>/` are the
-//! examples of `tests/fixtures/fsl5/` written in aliases, in today's process
-//! and action forms (the next edition's entity and event forms are a later
-//! stage):
+//! The fixtures under `tests/fixtures/fsl5_glossary/<example>/` are
+//! examples of `tests/fixtures/fsl5/` written in aliases: the e2e example in
+//! the next edition's entity / event / scenario form, the rejection example in
+//! the requirement / action form both editions read:
 //!
-//! - acceptance 1 (K): each lowers to exactly the kernel of the example's
-//!   `original.fsl` read in the published language;
+//! - acceptance 1 (K): each lowers to exactly the kernel of its canonical
+//!   twin;
 //! - acceptance 2: `kernel`, `testgen` and `explain --names canonical` print
 //!   only ASCII names (string literals, the requirement wording, aside);
 //! - acceptance 3: each glossary diagnostic, and an alias inside
@@ -26,13 +26,52 @@ use serde_json::Value;
 #[path = "support/kernel_compare.rs"]
 mod kernel_compare;
 
-/// `(example, glossary source)`; the example's `fsl5/<example>/original.fsl`
-/// is the same model in canonical names.
-const SOURCES: &[(&str, &str)] = &[
-    ("e2e", "glossary_ja.fsl"),
-    ("e2e", "glossary_ascii.fsl"),
-    ("rejection", "glossary_ja.fsl"),
+/// A glossary source and its canonical twin, the same model in canonical
+/// names: `fsl5/<example>/<twin>`, read behind the gate when `twin_gated`.
+struct Source {
+    example: &'static str,
+    name: &'static str,
+    twin: &'static str,
+    twin_gated: bool,
+}
+
+/// The entity / event / scenario fixture in Japanese aliases, which
+/// `aliases_resolve_inside_entity_event_and_scenario` covers.
+const ENTITY_FORM: Source = Source {
+    example: "e2e",
+    name: "glossary_ja.fsl",
+    twin: "fsl5_en_norules.fsl",
+    twin_gated: true,
+};
+
+const SOURCES: &[Source] = &[
+    Source {
+        example: "e2e",
+        name: "glossary_ascii.fsl",
+        twin: "fsl5_en_norules.fsl",
+        twin_gated: true,
+    },
+    Source {
+        example: "rejection",
+        name: "glossary_ja.fsl",
+        twin: "original.fsl",
+        twin_gated: false,
+    },
 ];
+
+impl Source {
+    fn path(&self) -> PathBuf {
+        source(self.example, self.name)
+    }
+
+    fn twin_path(&self) -> PathBuf {
+        fixtures().join("fsl5").join(self.example).join(self.twin)
+    }
+
+    fn context(&self) -> String {
+        format!("{}/{}", self.example, self.name)
+    }
+}
 
 /// Keys whose values are the author's prose, which may be in any language.
 const PROSE_KEYS: &[&str] = &["text", "reason", "recommended_action"];
@@ -137,91 +176,135 @@ fn broken_copy(label: &str, from: &str, to: &str) -> (PathBuf, String) {
     (path, text)
 }
 
+/// K: the source checks, and lowers to the kernel its canonical twin lowers
+/// to, names and all.
+fn assert_canonical_kernel(source: &Source) {
+    let (check, exit) = fslc(&["check"], &source.path(), true);
+    assert_eq!(exit, 0, "{}: {check}", source.context());
+    let twin = if source.twin_gated {
+        kernel_compare::kernel_v2_fsl5(&source.twin_path())
+    } else {
+        kernel_compare::kernel_v2(&source.twin_path())
+    };
+    kernel_compare::assert_same_kernel(
+        &kernel_compare::kernel_v2_fsl5(&source.path()),
+        &twin,
+        &source.context(),
+    );
+}
+
 /// Acceptance 1 (K): written in aliases, each example lowers to the kernel
-/// its canonical original lowers to in the published language, names and
-/// all.
+/// of its canonical twin.
 #[test]
 fn k_glossary_sources_lower_to_the_canonical_kernel() {
-    for &(example, name) in SOURCES {
-        let path = source(example, name);
-        let (check, exit) = fslc(&["check"], &path, true);
-        assert_eq!(exit, 0, "{example}/{name}: {check}");
-        kernel_compare::assert_same_kernel(
-            &kernel_compare::kernel_v2_fsl5(&path),
-            &kernel_compare::kernel_v2(&fixtures().join("fsl5").join(example).join("original.fsl")),
-            &format!("{example}/{name}"),
+    for source in SOURCES {
+        assert_canonical_kernel(source);
+    }
+}
+
+/// Acceptance 2 for one source: the outputs an implementation consumes
+/// carry canonical names only. For a source in Japanese aliases, the same
+/// scan finds the aliases in `explain`'s default rendering, so it is not
+/// vacuous.
+fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
+    for version in ["1", "2"] {
+        let (stdout, exit) = fslc(&["kernel", "--kernel-version", version], path, true);
+        assert_eq!(exit, 0, "{context}: kernel v{version}: {stdout}");
+        assert_eq!(
+            non_ascii_names(&json(&stdout)),
+            Vec::<String>::new(),
+            "{context}: kernel v{version}"
         );
     }
-    // The inline implements seam still sees the abstraction's names.
-    let (check, _) = fslc(&["check"], &source("e2e", "glossary_ja.fsl"), true);
-    assert_eq!(json(&check)["implements"]["result"], "refines", "{check}");
+    for target in ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"] {
+        let (stdout, exit) = fslc(&["testgen", "--target", target], path, true);
+        assert_eq!(exit, 0, "{context}: testgen {target}: {stdout}");
+        assert_eq!(
+            non_ascii_identifiers(&stdout, &[]),
+            Vec::<String>::new(),
+            "{context}: testgen {target}"
+        );
+    }
+    let (stdout, exit) = fslc(&["explain", "--names", "canonical"], path, true);
+    assert_eq!(exit, 0, "{context}: explain: {stdout}");
+    let explained = json(&stdout);
+    assert_eq!(
+        non_ascii_names(&explained),
+        Vec::<String>::new(),
+        "{context}: explain --names canonical"
+    );
+    let wording = prose(&explained);
+    let (readable, exit) = fslc(
+        &["explain", "--readable", "--names", "canonical"],
+        path,
+        true,
+    );
+    assert_eq!(exit, 0, "{context}: explain --readable: {readable}");
+    assert_eq!(
+        non_ascii_identifiers(&readable, &wording),
+        Vec::<String>::new(),
+        "{context}: explain --readable --names canonical"
+    );
+    if japanese {
+        let (aliased, _) = fslc(&["explain"], path, true);
+        assert!(
+            !non_ascii_names(&json(&aliased)).is_empty(),
+            "{context}: explain shows aliases by default"
+        );
+        let (aliased, _) = fslc(&["explain", "--readable"], path, true);
+        assert!(
+            !non_ascii_identifiers(&aliased, &wording).is_empty(),
+            "{context}: explain --readable shows aliases by default"
+        );
+    }
 }
 
 /// Acceptance 2: the outputs an implementation consumes carry canonical
-/// names only. The same scan finds the aliases in `explain`'s default
-/// rendering, so it is not vacuous.
+/// names only.
 #[test]
 fn implementations_see_only_ascii_canonical_names() {
-    for &(example, name) in SOURCES {
-        let path = source(example, name);
-        let context = format!("{example}/{name}");
-        for version in ["1", "2"] {
-            let (stdout, exit) = fslc(&["kernel", "--kernel-version", version], &path, true);
-            assert_eq!(exit, 0, "{context}: kernel v{version}: {stdout}");
-            assert_eq!(
-                non_ascii_names(&json(&stdout)),
-                Vec::<String>::new(),
-                "{context}: kernel v{version}"
-            );
-        }
-        for target in ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"] {
-            let (stdout, exit) = fslc(&["testgen", "--target", target], &path, true);
-            assert_eq!(exit, 0, "{context}: testgen {target}: {stdout}");
-            assert_eq!(
-                non_ascii_identifiers(&stdout, &[]),
-                Vec::<String>::new(),
-                "{context}: testgen {target}"
-            );
-        }
-        let (stdout, exit) = fslc(&["explain", "--names", "canonical"], &path, true);
-        assert_eq!(exit, 0, "{context}: explain: {stdout}");
-        let explained = json(&stdout);
-        assert_eq!(
-            non_ascii_names(&explained),
-            Vec::<String>::new(),
-            "{context}: explain --names canonical"
+    for source in SOURCES {
+        assert_ascii_outputs(
+            &source.path(),
+            &source.context(),
+            source.name.ends_with("_ja.fsl"),
         );
-        let wording = prose(&explained);
-        let (readable, exit) = fslc(
-            &["explain", "--readable", "--names", "canonical"],
-            &path,
-            true,
-        );
-        assert_eq!(exit, 0, "{context}: explain --readable: {readable}");
-        assert_eq!(
-            non_ascii_identifiers(&readable, &wording),
-            Vec::<String>::new(),
-            "{context}: explain --readable --names canonical"
-        );
-
-        if name.ends_with("_ja.fsl") {
-            let (aliased, _) = fslc(&["explain"], &path, true);
-            assert!(
-                !non_ascii_names(&json(&aliased)).is_empty(),
-                "{context}: explain shows aliases by default"
-            );
-            let (aliased, _) = fslc(&["explain", "--readable"], &path, true);
-            assert!(
-                !non_ascii_identifiers(&aliased, &wording).is_empty(),
-                "{context}: explain --readable shows aliases by default"
-            );
-        }
     }
 }
 
+/// Aliases written in the next edition's entity, lifecycle, concept, event
+/// phrase, event input and scenario step resolve before they are desugared:
+/// the document lowers to the kernel of its canonical twin (K), the outputs
+/// an implementation consumes are ASCII, and the `event` lowering step that
+/// records each phrase (an origin, outside K) names canonical words too.
+#[test]
+fn aliases_resolve_inside_entity_event_and_scenario() {
+    let source = ENTITY_FORM;
+    assert_canonical_kernel(&source);
+    assert_ascii_outputs(&source.path(), &source.context(), true);
+    let kernel = kernel_compare::kernel_v2_fsl5(&source.path());
+    let mut phrases = Vec::new();
+    for origin in kernel["provenance"]["origins"].as_array().expect("origins") {
+        for step in origin["lowering_steps"].as_array().into_iter().flatten() {
+            if step["kind"] == "event" {
+                phrases.push(step["detail"].as_str().expect("event detail").to_owned());
+            }
+        }
+    }
+    assert!(
+        phrases.contains(&"Employee submits Claim Draft -> Submitted".to_owned()),
+        "{phrases:?}"
+    );
+    assert_eq!(phrases.len(), 5, "{phrases:?}");
+    assert!(
+        phrases.iter().all(|phrase| phrase.is_ascii()),
+        "{phrases:?}"
+    );
+}
+
 /// `explain --names canonical` of a glossary document is `explain` of its
-/// canonical original, apart from the requirement wording, source positions
-/// (the two files differ in layout) and timings.
+/// canonical twin, apart from the requirement wording, source positions and
+/// origins (the two files differ in layout) and timings.
 #[test]
 fn explain_names_canonical_is_the_canonical_explanation() {
     fn comparable(mut value: Value) -> Value {
@@ -230,7 +313,8 @@ fn explain_names_canonical_is_the_canonical_explanation() {
                 Value::Array(items) => items.iter_mut().for_each(strip),
                 Value::Object(object) => {
                     object.retain(|key, _| {
-                        !PROSE_KEYS.contains(&key.as_str()) && key != "loc" && key != "cost"
+                        !PROSE_KEYS.contains(&key.as_str())
+                            && !["loc", "origin", "cost"].contains(&key.as_str())
                     });
                     object.values_mut().for_each(strip);
                 }
@@ -240,21 +324,14 @@ fn explain_names_canonical_is_the_canonical_explanation() {
         strip(&mut value);
         value
     }
-    for &(example, name) in SOURCES {
-        let (canonical, _) = fslc(
-            &["explain", "--names", "canonical"],
-            &source(example, name),
-            true,
-        );
-        let (original, _) = fslc(
-            &["explain"],
-            &fixtures().join("fsl5").join(example).join("original.fsl"),
-            false,
-        );
+    for source in SOURCES.iter().chain([&ENTITY_FORM]) {
+        let (canonical, _) = fslc(&["explain", "--names", "canonical"], &source.path(), true);
+        let (twin, _) = fslc(&["explain"], &source.twin_path(), source.twin_gated);
         assert_eq!(
             comparable(json(&canonical)),
-            comparable(json(&original)),
-            "{example}/{name}"
+            comparable(json(&twin)),
+            "{}",
+            source.context()
         );
     }
 }
@@ -332,9 +409,9 @@ const BROKEN: &[Broken] = &[
     },
     Broken {
         code: "alias_in_implements",
-        from: "    action submit(c, a) -> submit(c)\n",
-        to: "    action 提出(c, a) -> submit(c)\n",
-        at: "提出(c, a)",
+        from: "    action submit(c, amount) -> submit(c)\n",
+        to: "    action 提出(c, amount) -> submit(c)\n",
+        at: "提出(c, amount)",
         occurrence: 0,
     },
     Broken {
@@ -400,11 +477,19 @@ fn diagnostics_show_the_alias_beside_the_canonical_name() {
     for (index, (from, to, message, name, display)) in [
         // A rejection at an alias the source wrote.
         (
-            "    transition 提出     下書き   -> 提出済み",
-            "    transition 提出     下書き   提出済み",
-            "expected '->'",
-            "Submitted",
-            "提出済み",
+            "  number 金額\n",
+            "  number 金額 金額\n",
+            "expected requirements declaration",
+            "Amount",
+            "金額",
+        ),
+        // A next-edition scenario's diagnostic, quoting canonical names.
+        (
+            "    then 申請1 is 支払済み",
+            "    then 申請1 is 金額",
+            "'金額（Amount）' is not a stage of '申請（Claim）'",
+            "Amount",
+            "金額",
         ),
         // A rejection that quotes a canonical name.
         (
@@ -440,7 +525,11 @@ fn diagnostics_show_the_alias_beside_the_canonical_name() {
 /// (`mixed_names`); plain `lint` does not.
 #[test]
 fn strict_names_reports_mixed_names() {
-    let (path, text) = broken_copy("mixed", "      when 入力金額 > 0", "      when a > 0");
+    let (path, text) = broken_copy(
+        "mixed",
+        "  concept 少額申請 = 申請 where 申請金額 <= 自動承認上限",
+        "  concept 少額申請 = 申請 where amount <= 自動承認上限",
+    );
     let mixed = |args: &[&str]| {
         let (stdout, _) = fslc(args, &path, true);
         json(&stdout)["files"][0]["findings"]
@@ -453,7 +542,7 @@ fn strict_names_reports_mixed_names() {
     };
     let findings = mixed(&["lint", "--strict-names"]);
     assert_eq!(findings.len(), 1, "{findings:#?}");
-    let (line, column) = position(&text, "a > 0", 0);
+    let (line, column) = position(&text, "amount <=", 0);
     assert_eq!(
         (
             findings[0]["loc"]["line"].as_u64(),

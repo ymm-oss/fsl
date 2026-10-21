@@ -561,11 +561,17 @@ pub(crate) fn resolve_alias_tokens(
 }
 
 /// After resolution, a name that is still not ASCII has no alias: it would
-/// reach implementations as written.
+/// reach implementations as written. A `scenario` or `forbidden` body is not
+/// scanned: it names instances with its own labels (`申請1`), which become
+/// instance numbers and never reach the kernel, and every other word there is
+/// an actor, a verb, a stage or an input that the trace resolves against the
+/// declarations, which are scanned.
 pub(crate) fn reject_unaliased_non_ascii(tokens: &[Token]) -> Result<(), ParseError> {
     let mut index = 0;
     while index < tokens.len() {
-        if let Some(body_end) = implements_body_end(tokens, index) {
+        if let Some(body_end) =
+            implements_body_end(tokens, index).or_else(|| trace_body_end(tokens, index))
+        {
             index = body_end;
             continue;
         }
@@ -596,23 +602,39 @@ fn implements_body_end(tokens: &[Token], index: usize) -> Option<usize> {
         && matches!(&head[2].kind, TokenKind::Ident(word) if word == "from")
         && matches!(head[3].kind, TokenKind::String(_))
         && is_symbol(&head[4], "{");
-    if !opens {
+    opens.then(|| block_end(tokens, index + 4))
+}
+
+/// When `tokens[index]` starts a `scenario` or `forbidden` block, the index
+/// just past its closing brace.
+fn trace_body_end(tokens: &[Token], index: usize) -> Option<usize> {
+    if !matches!(&tokens[index].kind, TokenKind::Ident(word) if word == "scenario" || word == "forbidden")
+    {
         return None;
     }
+    let open = index
+        + tokens[index..]
+            .iter()
+            .position(|token| is_symbol(token, "{"))?;
+    Some(block_end(tokens, open))
+}
+
+/// The index just past the brace closing the block opened at `open`.
+fn block_end(tokens: &[Token], open: usize) -> usize {
     let mut depth = 0usize;
-    for (offset, token) in tokens[index + 4..].iter().enumerate() {
+    for (offset, token) in tokens[open..].iter().enumerate() {
         if is_symbol(token, "{") {
             depth += 1;
         } else if is_symbol(token, "}") {
             depth -= 1;
             if depth == 0 {
-                return Some(index + 4 + offset + 1);
+                return open + offset + 1;
             }
         } else if matches!(token.kind, TokenKind::Eof) {
-            return Some(index + 4 + offset);
+            return open + offset;
         }
     }
-    Some(tokens.len())
+    tokens.len()
 }
 
 fn is_symbol(token: &Token, symbol: &str) -> bool {
@@ -707,7 +729,11 @@ mod tests {
     /// spelling, so an alias can never take a keyword's place.
     #[test]
     fn keyword_spellings_cover_the_parser() {
-        let sources = [include_str!("parser.rs"), include_str!("syntax_expr.rs")];
+        let sources = [
+            include_str!("parser.rs"),
+            include_str!("parser/next_requirements.rs"),
+            include_str!("syntax_expr.rs"),
+        ];
         let mut missing = BTreeSet::new();
         for source in sources {
             for call in ["peek_ident(\"", "eat_ident(\"", "expect_ident_value(\""] {

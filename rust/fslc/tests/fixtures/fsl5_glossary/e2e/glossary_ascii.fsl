@@ -1,12 +1,16 @@
 fsl 5
 // e2e/glossary_ja.fsl with ASCII aliases (romanised Japanese): the
 // resolution of aliases does not depend on the wider identifier rule.
-// Lowers to exactly the kernel of fsl5/e2e/original.fsl.
+// Lowers to exactly the kernel of fsl5/e2e/fsl5_en_norules.fsl.
 requirements ExpenseRequirements {
   glossary {
     ExpenseRequirements = KeihiSeisanYoken
     Amount       = Kingaku
     AUTO_LIMIT   = JidoShoninJogen
+    Employee     = Jugyoin
+    System       = Shisutemu
+    Manager      = Jocho
+    Finance      = Keiri
     Claim        = Shinsei
     Claim.amount = ShinseiKingaku
     Draft        = Shitagaki
@@ -14,61 +18,57 @@ requirements ExpenseRequirements {
     Approved     = ShoninZumi
     Rejected     = KyakkaZumi
     Paid         = ShiharaiZumi
-    Employee     = Jugyoin
-    System       = Shisutemu
-    Manager      = Jocho
-    Finance      = Keiri
+    SmallClaim   = ShogakuShinsei
+    LargeClaim   = KogakuShinsei
+    submits      = Teishutsusuru
+    approves     = Shoninsuru
+    rejects      = Kyakkasuru
+    pays         = Shiharau
     submit       = Teishutsu
     auto_approve = JidoShonin
     mgr_approve  = JochoShonin
     reject       = Kyakka
     pay          = Shiharai
-    a            = NyuryokuKingaku
     paid_claims  = ShiharaiKensu
   }
 
   implements ExpenseToBe from "../../fsl5/e2e/1_business.fsl" {
-    action submit(c, a) -> submit(c)
+    action submit(c, amount) -> submit(c)
   }
 
   number Kingaku
   const JidoShoninJogen = 1
+  actor Jugyoin, Shisutemu, Jocho, Keiri
 
-  process Shinsei with ShinseiKingaku: Kingaku = 0 {
-    stages Shitagaki, TeishutsuZumi, ShoninZumi, KyakkaZumi, ShiharaiZumi
-    initial Shitagaki
-
-    transition Teishutsu     Shitagaki   -> TeishutsuZumi by Jugyoin
-      with NyuryokuKingaku: Kingaku
-      when NyuryokuKingaku > 0
-      set ShinseiKingaku = NyuryokuKingaku
-      covers REQ-1 "申請者は金額を入力して経費申請を提出する"
-
-    transition JidoShonin TeishutsuZumi -> ShoninZumi by Shisutemu
-      when ShinseiKingaku <= JidoShoninJogen
-      covers REQ-2 "自動承認上限以下の申請はシステムが自動承認する"
-
-    transition JochoShonin TeishutsuZumi -> ShoninZumi by Jocho
-      when ShinseiKingaku >  JidoShoninJogen
-      covers REQ-3 "自動承認上限を超える申請は上長が承認する"
-
-    transition Kyakka     TeishutsuZumi -> KyakkaZumi by Jocho
-      when ShinseiKingaku >  JidoShoninJogen
-      covers REQ-3 "自動承認上限を超える申請は上長が却下できる"
-
-    transition Shiharai     ShoninZumi -> ShiharaiZumi by Keiri
-      covers REQ-4 "承認された申請だけが支払われる"
+  entity Shinsei {
+    ShinseiKingaku: Kingaku = 0
+    lifecycle Shitagaki -> TeishutsuZumi -> ShoninZumi
+    lifecycle TeishutsuZumi -> KyakkaZumi
+    lifecycle ShoninZumi -> ShiharaiZumi
   }
+
+  concept ShogakuShinsei = Shinsei where ShinseiKingaku <= JidoShoninJogen
+  concept KogakuShinsei = Shinsei where ShinseiKingaku > JidoShoninJogen
+
+  event Teishutsu     = Jugyoin Teishutsusuru Shinsei with ShinseiKingaku   Shitagaki -> TeishutsuZumi
+  event JidoShonin = Shisutemu Shoninsuru Shinsei               TeishutsuZumi -> ShoninZumi
+  event JochoShonin = Jocho Shoninsuru Shinsei                   TeishutsuZumi -> ShoninZumi
+  event Kyakka     = Jocho Kyakkasuru Shinsei                   TeishutsuZumi -> KyakkaZumi
+  event Shiharai     = Keiri Shiharau Shinsei                     ShoninZumi -> ShiharaiZumi
+    covers REQ-4 "承認された申請だけが支払われる"
 
   kpi ShiharaiKensu = count Shinsei in ShiharaiZumi
 
-  acceptance AC-1 "承認の流れ: 少額の申請が自動承認され支払われる" {
-    Teishutsu(0, 1) JidoShonin(0) Shiharai(0)
-    expect Shinsei 0 in ShiharaiZumi
+  scenario AC-1 "承認の流れ: 少額の申請が自動承認され支払われる" {
+    Jugyoin Teishutsusuru Shinsei1 with ShinseiKingaku 1
+    Shisutemu Shoninsuru Shinsei1
+    Keiri Shiharau Shinsei1
+    then Shinsei1 is ShiharaiZumi
   }
-  acceptance AC-2 "却下の流れ: 高額の申請が上長に却下される" {
-    Teishutsu(1, 2) Kyakka(1)
-    expect Shinsei 1 in KyakkaZumi
+  scenario AC-2 "却下の流れ: 高額の申請が上長に却下される" {
+    Jugyoin Teishutsusuru Shinsei1 with ShinseiKingaku 2
+    Jocho Kyakkasuru Shinsei1
+    then Shinsei1 is KyakkaZumi
   }
 }
 verify {

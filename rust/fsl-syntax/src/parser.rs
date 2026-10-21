@@ -3,19 +3,21 @@
 
 use std::fmt;
 
+mod next_requirements;
+
 use crate::annotation_parse;
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, Annotations, Binder,
     BusinessGoalBody, BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute,
-    CorrespondenceOrigin, Expr, GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem,
-    HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessCover,
-    ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName, RefinementItem,
-    RefinementParam, RequirementAction, RequirementActionItem, RequirementBlockItem,
-    RequirementBranch, RequirementsItem, Span, SpecItem, Statement, SurfaceBusiness,
-    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
-    SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem, Token, TokenKind,
-    TypeExpr, VerifyItem, lex,
+    CorrespondenceOrigin, Edition, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
+    GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, Param, PreservationItem,
+    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, QualifiedName,
+    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementBranch, RequirementsItem, Span, SpecItem, Statement,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SymbolPath, SyncAction, SyncRef, SyntaxIdent, TimeItem,
+    Token, TokenKind, TypeExpr, VerifyItem, lex,
 };
 
 fn join_span(start: Span, end: Span) -> Span {
@@ -127,9 +129,9 @@ pub fn parse_surface_document_with(
 
 pub(crate) fn parse_shared_tokens(
     source: &str,
-    edition: crate::Edition,
     tokens: Vec<Token>,
     cursor: usize,
+    edition: Edition,
 ) -> Result<SurfaceDocument, ParseError> {
     let mut parser = Parser::new(source, tokens, cursor);
     parser.edition = edition;
@@ -159,9 +161,8 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     cursor: usize,
     pending_annotations: Annotations,
-    /// The document's edition; what only the next edition has is read only
-    /// under [`crate::Edition::Fsl5`].
-    edition: crate::Edition,
+    /// The edition the document is read in ([`crate::SourceFile::edition`]).
+    edition: Edition,
 }
 
 impl<'a> Parser<'a> {
@@ -171,7 +172,7 @@ impl<'a> Parser<'a> {
             tokens,
             cursor,
             pending_annotations: Annotations::default(),
-            edition: crate::Edition::Fsl4,
+            edition: Edition::Fsl4,
         }
     }
 
@@ -469,15 +470,25 @@ impl<'a> Parser<'a> {
         let name = self.expect_ident()?;
         self.expect_symbol("{")?;
         let mut items = Vec::new();
-        let next_edition = self.edition == crate::Edition::Fsl5;
+        let next_edition = self.edition == Edition::Fsl5;
+        // Aliases are resolved first, on the tokens, so every member below
+        // (the published items and the next edition's entity / event /
+        // scenario forms) reads canonical names before it is desugared.
         if next_edition && self.peek_ident("glossary") {
             let mut glossary = crate::glossary::parse_glossary(&self.tokens, &mut self.cursor)?;
             crate::glossary::resolve_alias_tokens(&mut self.tokens, self.cursor, &mut glossary)?;
             items.push(RequirementsItem::Glossary(glossary));
         }
         let body_start = self.cursor;
+        let mut next = next_requirements::Pending::default();
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
+            if self.edition == Edition::Fsl5
+                && self.next_requirements_member(&mut next, items.len())?
+            {
+                self.expect_no_pending_annotations()?;
+                continue;
+            }
             let item = self.requirements_item()?;
             self.expect_no_pending_annotations()?;
             items.push(item);
@@ -489,11 +500,17 @@ impl<'a> Parser<'a> {
             crate::glossary::reject_unaliased_non_ascii(&self.tokens[name_start..=name_start])?;
             crate::glossary::reject_unaliased_non_ascii(&self.tokens[body_start..])?;
         }
-        Ok(SurfaceRequirements { name, items })
+        let (items, next) = if next_edition {
+            let (items, next) = next.desugar(items)?;
+            (items, Some(next))
+        } else {
+            (items, None)
+        };
+        Ok(SurfaceRequirements { name, items, next })
     }
 
     fn requirements_item(&mut self) -> Result<RequirementsItem, ParseError> {
-        if self.edition == crate::Edition::Fsl5 && self.peek_ident("glossary") {
+        if self.edition == Edition::Fsl5 && self.peek_ident("glossary") {
             return Err(ParseError::coded(
                 crate::glossary::MISPLACED_GLOSSARY,
                 "glossary must be the first item of requirements, and a document has one",
@@ -1144,6 +1161,7 @@ impl<'a> Parser<'a> {
             covers,
             span,
             annotations,
+            event: None,
         })))
     }
 

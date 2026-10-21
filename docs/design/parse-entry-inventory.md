@@ -118,8 +118,8 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
 - `glossary { Canonical = alias  Entity.field = alias ... }` is read only in a
   `requirements` document headed `fsl 5` with the gate on, and only as its
   first item (`misplaced_glossary` otherwise). Elsewhere `glossary` is still
-  `expected requirements declaration`. The frontends learn the edition through
-  `SourceFile`, which `parse_document_with` stamps after reading the header.
+  `expected requirements declaration`. The parser learns the edition through
+  S4's `SourceFile::edition`.
 - Resolution starts on the token stream (`fsl-syntax/src/glossary.rs`): the
   block is checked on its own (`canonical_name_not_ascii` for a left side,
   `duplicate_alias`, `alias_collision`, `alias_shadows_keyword` against
@@ -128,9 +128,12 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   that is an alias becomes its canonical name (a field alias becomes the
   field name), so every frontend position reads canonical names. The body of
   `implements NAME from "path" { ... }` is not rewritten; an alias there is
-  `alias_in_implements`. After the parse, a non-ASCII identifier that is
-  neither an alias nor a keyword spelling is `canonical_name_not_ascii`, so
-  nothing non-ASCII can reach a Kernel name. `Glossary::uses` records each
+  `alias_in_implements`. Resolution runs before S4's members are read and
+  desugared, so aliases work in entity, lifecycle, concept, event and
+  scenario text too. After the parse, a non-ASCII identifier that is neither
+  an alias nor a keyword spelling is `canonical_name_not_ascii`, so nothing
+  non-ASCII can reach a Kernel name; a `scenario` / `forbidden` body is not
+  scanned, because its instance labels (`申請1`) become numbers. `Glossary::uses` records each
   resolved alias and each canonical spelling of an aliased name.
 - `fsl_core::lower_requirements` (`resolve_aliases.rs`) lowers the resolved
   document, rejects an alias spelled like a declared name of the lowered spec

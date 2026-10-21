@@ -244,7 +244,7 @@ fn typed_binder(name: &str, type_name: &str) -> Binder {
 }
 
 fn process_state(name: &str) -> String {
-    format!("{}_stage", name.to_lowercase())
+    crate::naming::process_stage_state(name)
 }
 
 fn process_symbol(path: &fsl_syntax::SymbolPath) -> String {
@@ -268,7 +268,7 @@ fn process_path(document: &str, path: &fsl_syntax::SymbolPath) -> Vec<String> {
 }
 
 fn process_enum(name: &str) -> String {
-    format!("{name}Stage")
+    crate::naming::process_stage_enum(name)
 }
 
 fn stage_access(process: &Process, entity: Expr) -> Expr {
@@ -1722,7 +1722,7 @@ fn requirements_processes(
 }
 
 fn process_field_state(process: &str, field: &str) -> String {
-    format!("{}_{}", process.to_lowercase(), field)
+    crate::naming::process_field_state(process, field)
 }
 
 fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
@@ -1985,6 +1985,144 @@ fn generated_age_type(name: &str, existing: &mut BTreeSet<String>) -> String {
     candidate
 }
 
+/// A requirements name generated for a next-edition entity collides with a
+/// declared or another generated name (decisions/050: the names come from
+/// [`crate::naming`]).
+pub const GENERATED_NAME_COLLISION: &str = "generated_name_collision";
+
+/// The binder each process's actions and initial values quantify over: the
+/// entity's [`crate::naming::entity_binder`] for a next-edition entity, `c`
+/// for a `process`.
+fn process_binders(
+    requirements: &SurfaceRequirements,
+    processes: &[RequirementsProcess],
+) -> Vec<String> {
+    processes
+        .iter()
+        .map(|process| {
+            let entity = &process.process.entity;
+            if requirements
+                .next
+                .as_ref()
+                .is_some_and(|next| next.entities.contains(entity))
+            {
+                crate::naming::entity_binder(entity)
+            } else {
+                "c".to_owned()
+            }
+        })
+        .collect()
+}
+
+/// Refuse a next-edition entity whose generated names
+/// ([`crate::naming::entity_generated_names`]) meet a name declared in
+/// `declared` or generated for an earlier entity, or whose binder meets one of
+/// its fields or event inputs.
+fn check_generated_names(
+    next: &fsl_syntax::NextEditionRequirements,
+    declared: &[SpecItem],
+    processes: &[RequirementsProcess],
+    binders: &[String],
+) -> Result<(), CoreError> {
+    let mut taken = BTreeSet::new();
+    for item in declared {
+        match item {
+            SpecItem::Const { name, .. }
+            | SpecItem::Def { name, .. }
+            | SpecItem::Type { name, .. }
+            | SpecItem::Enum { name, .. }
+            | SpecItem::Struct { name, .. } => {
+                taken.insert(name.clone());
+            }
+            SpecItem::State(fields) => {
+                taken.extend(fields.iter().map(|field| field.name.clone()));
+            }
+            _ => {}
+        }
+    }
+    let collision = |name: &str, entity: &str, span, what: &str| CoreError {
+        diagnostic_code: Some(GENERATED_NAME_COLLISION),
+        ..core_error(
+            format!("entity '{entity}' generates '{name}', which {what}; rename one of them"),
+            span,
+        )
+    };
+    for (process, binder) in processes.iter().zip(binders) {
+        let entity = &process.process.entity;
+        if !next.entities.contains(entity) {
+            continue;
+        }
+        let fields = process.fields.iter().map(|field| field.name.as_str());
+        for name in crate::naming::entity_generated_names(entity, fields) {
+            if !taken.insert(name.clone()) {
+                return Err(collision(
+                    &name,
+                    entity,
+                    process.process.span,
+                    "is already declared",
+                ));
+            }
+        }
+        let locals = process
+            .fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .chain(process.process.transitions.iter().flat_map(|transition| {
+                transition.inputs.iter().map(|input| match input {
+                    Param::Typed(name, _) | Param::Range(name, _, _) => name.as_str(),
+                })
+            }));
+        if let Some(local) = locals.into_iter().find(|local| local == binder) {
+            return Err(collision(
+                binder,
+                entity,
+                process.process.span,
+                &format!("as its binder, is also its field or input '{local}'"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The origin of an action lowered from a next-edition `event`: its phrase
+/// and move, as an `event` lowering step.
+fn event_origin(
+    transition: &ProcessTransition,
+    event: &fsl_syntax::EventForm,
+    process: &Process,
+) -> OriginChain {
+    let movement = if event.moves {
+        format!("{} -> {}", transition.source, transition.target)
+    } else {
+        format!("in {}", transition.source)
+    };
+    OriginChain {
+        id: OriginId(format!(
+            "requirements:event:{}:{}",
+            transition.name, transition.span.start.offset
+        )),
+        dialect: "requirements".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(transition.span),
+            dialect: "requirements".to_owned(),
+            declaration_path: vec![transition.name.clone()],
+        }),
+        secondary: Vec::new(),
+        lowering_steps: vec![LoweringStep {
+            kind: "event".to_owned(),
+            detail: Some(format!(
+                "{}{} {} {} {movement}",
+                if event.fair { "" } else { "fault " },
+                transition.actor,
+                event.verb,
+                process.entity
+            )),
+        }],
+        generated: true,
+    }
+}
+
 /// Lower the requirements dialect into the shared kernel, after name
 /// resolution ([`crate::lower_requirements`]) replaced every glossary alias.
 ///
@@ -2087,6 +2225,10 @@ pub(crate) fn lower_resolved_requirements(
     items.extend(common);
 
     let processes = requirements_processes(&requirements)?;
+    let binders = process_binders(&requirements, &processes);
+    if let Some(next) = &requirements.next {
+        check_generated_names(next, &items, &processes, &binders)?;
+    }
     for process in &processes {
         items.push(SpecItem::Enum {
             name: process_enum(&process.process.name),
@@ -2097,7 +2239,7 @@ pub(crate) fn lower_resolved_requirements(
     }
     let mut state = Vec::new();
     let mut init = Vec::new();
-    for process in &processes {
+    for (process, binder) in processes.iter().zip(&binders) {
         let process_name = &process.process.name;
         state.push(StateField::generated(
             process_state(process_name),
@@ -2108,7 +2250,7 @@ pub(crate) fn lower_resolved_requirements(
             process.process.span,
         ));
         let mut init_body = vec![Statement::Assign {
-            target: LValue::Index(process_state(process_name), Expr::Var("c".to_owned())),
+            target: LValue::Index(process_state(process_name), Expr::Var(binder.clone())),
             value: Expr::Var(process.process.initial.clone()),
             span: process.process.span,
         }];
@@ -2134,14 +2276,14 @@ pub(crate) fn lower_resolved_requirements(
             init_body.push(Statement::Assign {
                 target: LValue::Index(
                     process_field_state(process_name, &field.name),
-                    Expr::Var("c".to_owned()),
+                    Expr::Var(binder.clone()),
                 ),
                 value: initial,
                 span: process.process.span,
             });
         }
         init.push(Statement::ForAll {
-            binder: typed_binder("c", &process.process.entity),
+            binder: typed_binder(binder, &process.process.entity),
             statements: init_body,
             span: process.process.span,
         });
@@ -2154,26 +2296,49 @@ pub(crate) fn lower_resolved_requirements(
             annotations: Annotations::default(),
         });
     }
-    for process in &processes {
-        let replacements = process
+    for (process, binder) in processes.iter().zip(&binders) {
+        let field_reads = process
             .fields
             .iter()
             .map(|field| {
-                (
-                    field.name.clone(),
-                    Expr::Index(
-                        Box::new(Expr::Var(process_field_state(
-                            &process.process.name,
-                            &field.name,
-                        ))),
-                        Box::new(Expr::Var("c".to_owned())),
-                    ),
+                Expr::Index(
+                    Box::new(Expr::Var(process_field_state(
+                        &process.process.name,
+                        &field.name,
+                    ))),
+                    Box::new(Expr::Var(binder.clone())),
                 )
             })
-            .collect::<std::collections::HashMap<_, _>>();
+            .collect::<Vec<_>>();
         for transition in &process.process.transitions {
+            // A next-edition event's input shadows the field it shares a
+            // name with; `Entity.field` names the field (decisions/046 Q6).
+            let event = transition.event.as_ref();
+            let inputs = transition
+                .inputs
+                .iter()
+                .map(|input| match input {
+                    Param::Typed(name, _) | Param::Range(name, _, _) => name.as_str(),
+                })
+                .collect::<BTreeSet<_>>();
+            let replacements = process
+                .fields
+                .iter()
+                .zip(&field_reads)
+                .flat_map(|(field, read)| {
+                    let bare = (event.is_none() || !inputs.contains(field.name.as_str()))
+                        .then(|| (field.name.clone(), read.clone()));
+                    let dotted = event.map(|_| {
+                        (
+                            format!("{}.{}", process.process.entity, field.name),
+                            read.clone(),
+                        )
+                    });
+                    bare.into_iter().chain(dotted)
+                })
+                .collect::<std::collections::HashMap<_, _>>();
             let mut body = vec![ActionItem::Requires(
-                stage_is(&process.process, "c", &transition.source),
+                stage_is(&process.process, binder, &transition.source),
                 transition.span,
             )];
             if let Some(guard) = &transition.guard {
@@ -2182,19 +2347,21 @@ pub(crate) fn lower_resolved_requirements(
                     transition.span,
                 ));
             }
-            body.push(ActionItem::Statement(Statement::Assign {
-                target: LValue::Index(
-                    process_state(&process.process.name),
-                    Expr::Var("c".to_owned()),
-                ),
-                value: Expr::Var(transition.target.clone()),
-                span: transition.span,
-            }));
+            if event.is_none_or(|event| event.moves) {
+                body.push(ActionItem::Statement(Statement::Assign {
+                    target: LValue::Index(
+                        process_state(&process.process.name),
+                        Expr::Var(binder.clone()),
+                    ),
+                    value: Expr::Var(transition.target.clone()),
+                    span: transition.span,
+                }));
+            }
             for (field, expression) in &transition.assignments {
                 body.push(ActionItem::Statement(Statement::Assign {
                     target: LValue::Index(
                         process_field_state(&process.process.name, field),
-                        Expr::Var("c".to_owned()),
+                        Expr::Var(binder.clone()),
                     ),
                     value: substitute_expr(expression.clone(), &replacements),
                     span: transition.span,
@@ -2218,8 +2385,14 @@ pub(crate) fn lower_resolved_requirements(
                     })
                 },
             );
+            if let Some(event) = event {
+                extra_origins.push((
+                    crate::action_target(&transition.name),
+                    event_origin(transition, event, &process.process),
+                ));
+            }
             let mut params = vec![Param::Typed(
-                "c".to_owned(),
+                binder.clone(),
                 qualified(&process.process.entity),
             )];
             params.extend(transition.inputs.clone());
@@ -2228,7 +2401,7 @@ pub(crate) fn lower_resolved_requirements(
                 params,
                 items: body,
                 span: transition.span,
-                fair: true,
+                fair: event.is_none_or(|event| event.fair),
                 meta: metadata,
                 sync: false,
                 annotations: transition.annotations.clone(),
@@ -2625,6 +2798,11 @@ pub(crate) fn lower_resolved_requirements(
     for (target, origin) in extra_origins {
         origins.bind(target, origin);
     }
+    let next_warnings = requirements
+        .next
+        .as_ref()
+        .map(|next| next.warnings.clone())
+        .unwrap_or_default();
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
             name: requirements.name,
@@ -2637,6 +2815,17 @@ pub(crate) fn lower_resolved_requirements(
     for (target, annotation) in extra_annotations {
         kernel.bind_annotation(target, annotation);
     }
+    kernel
+        .diagnostics
+        .extend(next_warnings.into_iter().map(|warning| {
+            json!({
+                "kind": warning.code,
+                "code": warning.code,
+                "severity": "warning",
+                "message": warning.message,
+                "loc": warning.span.python_loc(),
+            })
+        }));
     Ok(kernel)
 }
 

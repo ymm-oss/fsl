@@ -15,9 +15,7 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub struct SourceFile<'a> {
     source: &'a str,
-    /// The edition the document is read in, set by [`parse_document_with`]
-    /// once the header is read, so a frontend can accept what only that
-    /// edition has.
+    /// The edition the document is read in; set by [`parse_document_with`].
     edition: Edition,
 }
 
@@ -35,8 +33,10 @@ impl<'a> SourceFile<'a> {
         self.source
     }
 
-    const fn with_edition(self, edition: Edition) -> Self {
-        Self { edition, ..self }
+    /// The edition a frontend reads this document in.
+    #[must_use]
+    pub const fn edition(self) -> Edition {
+        self.edition
     }
 }
 
@@ -206,7 +206,8 @@ pub fn parse_document_with(
     let mut cursor = 0;
     let annotations = leading_annotations(&tokens, &mut cursor)?;
     let registration = select_frontend(&tokens, cursor)?;
-    let surface = (registration.parse)(source.with_edition(edition), tokens, cursor)?;
+    let source = SourceFile { edition, ..source };
+    let surface = (registration.parse)(source, tokens, cursor)?;
     Ok(ParsedDocument {
         keyword: registration.keyword,
         edition,
@@ -274,7 +275,7 @@ fn parse_shared(
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<SurfaceDocument, ParseError> {
-    crate::parser::parse_shared_tokens(source.source(), source.edition, tokens, cursor)
+    crate::parser::parse_shared_tokens(source.source(), tokens, cursor, source.edition())
 }
 
 fn parse_db(
