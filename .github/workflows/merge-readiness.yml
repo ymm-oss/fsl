@@ -25,6 +25,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
@@ -66,6 +69,15 @@ jobs:
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Check the native-Z3-free Rust surface
         run: ./tools/check-merge-readiness.sh compile
@@ -80,6 +92,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: rustfmt
+
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -118,6 +133,15 @@ jobs:
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Check solver-independent contracts
         run: ./tools/check-merge-readiness.sh core
