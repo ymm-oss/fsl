@@ -661,22 +661,6 @@ const CLASSIFICATIONS: &[Classification] = &[
         "comparison_threshold",
         ResultOption
     ),
-    // `Some` is the conflict `check` rejects the spec for (rule guards that
-    // cannot hold together); dropping it accepts the spec.
-    entry!(
-        Verdict,
-        "rust/fslc/src/rule_guard_solver.rs",
-        28,
-        "unsatisfiable_rule_guard",
-        SolverResultOption
-    ),
-    entry!(
-        Verdict,
-        "rust/fslc/src/rule_guard_solver.rs",
-        146,
-        "problem_core",
-        SolverResultOption
-    ),
     entry!(
         Ordinary,
         "rust/fsl-solver/src/lib.rs",

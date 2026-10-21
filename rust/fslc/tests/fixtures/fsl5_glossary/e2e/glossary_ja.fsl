@@ -1,0 +1,82 @@
+fsl 5
+// Expense reimbursement requirements in the vocabulary of the business:
+// fsl5/e2e/fsl5_en_norules.fsl with every name written as its Japanese alias,
+// in the entity / event / scenario form. The glossary maps each canonical
+// (English) name to its alias, and name resolution replaces the alias before
+// the entity, events and scenarios are desugared, so this document lowers to
+// exactly the kernel of fsl5_en_norules.fsl. `implements` is the mapping to
+// another layer and stays in canonical names; `申請1` is a scenario's own
+// label for an instance and never reaches the kernel.
+requirements ExpenseRequirements {
+  glossary {
+    ExpenseRequirements = 経費精算要件
+    Amount       = 金額
+    AUTO_LIMIT   = 自動承認上限
+    Employee     = 従業員
+    System       = システム
+    Manager      = 上長
+    Finance      = 経理
+    Claim        = 申請
+    Claim.amount = 申請金額
+    Draft        = 下書き
+    Submitted    = 提出済み
+    Approved     = 承認済み
+    Rejected     = 却下済み
+    Paid         = 支払済み
+    SmallClaim   = 少額申請
+    LargeClaim   = 高額申請
+    submits      = 提出する
+    approves     = 承認する
+    rejects      = 却下する
+    pays         = 支払う
+    submit       = 提出
+    auto_approve = 自動承認
+    mgr_approve  = 上長承認
+    reject       = 却下
+    pay          = 支払
+    paid_claims  = 支払件数
+  }
+
+  implements ExpenseToBe from "../../fsl5/e2e/1_business.fsl" {
+    action submit(c, amount) -> submit(c)
+  }
+
+  number 金額
+  const 自動承認上限 = 1
+  actor 従業員, システム, 上長, 経理
+
+  entity 申請 {
+    申請金額: 金額 = 0
+    lifecycle 下書き -> 提出済み -> 承認済み
+    lifecycle 提出済み -> 却下済み
+    lifecycle 承認済み -> 支払済み
+  }
+
+  concept 少額申請 = 申請 where 申請金額 <= 自動承認上限
+  concept 高額申請 = 申請 where 申請金額 > 自動承認上限
+
+  event 提出     = 従業員 提出する 申請 with 申請金額   下書き -> 提出済み
+  event 自動承認 = システム 承認する 申請               提出済み -> 承認済み
+  event 上長承認 = 上長 承認する 申請                   提出済み -> 承認済み
+  event 却下     = 上長 却下する 申請                   提出済み -> 却下済み
+  event 支払     = 経理 支払う 申請                     承認済み -> 支払済み
+    covers REQ-4 "承認された申請だけが支払われる"
+
+  kpi 支払件数 = count 申請 in 支払済み
+
+  scenario AC-1 "承認の流れ: 少額の申請が自動承認され支払われる" {
+    従業員 提出する 申請1 with 申請金額 1
+    システム 承認する 申請1
+    経理 支払う 申請1
+    then 申請1 is 支払済み
+  }
+  scenario AC-2 "却下の流れ: 高額の申請が上長に却下される" {
+    従業員 提出する 申請1 with 申請金額 2
+    上長 却下する 申請1
+    then 申請1 is 却下済み
+  }
+}
+verify {
+  instances 申請 = 3
+  values 金額 = 0..3
+}

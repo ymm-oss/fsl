@@ -2125,14 +2125,17 @@ fn event_origin(
     }
 }
 
-/// Lower the requirements dialect into the shared kernel.
+/// Lower the requirements dialect into the shared kernel, after name
+/// resolution ([`crate::lower_requirements`]) replaced every glossary alias.
 ///
 /// # Errors
 ///
 /// Returns [`CoreError`] for missing entity/number bounds or malformed process
 /// declarations.
 #[allow(clippy::too_many_lines)]
-pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpec, CoreError> {
+pub(crate) fn lower_resolved_requirements(
+    requirements: SurfaceRequirements,
+) -> Result<KernelSpec, CoreError> {
     let mut common = Vec::new();
     let mut entities = Vec::new();
     let mut numbers = Vec::new();
@@ -2225,9 +2228,10 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
 
     let processes = requirements_processes(&requirements)?;
     let binders = process_binders(&requirements, &processes);
+    let decision_tables = crate::decision_table::Tables::of(&requirements);
+    let rule_guards = crate::rule_guards::RuleGuards::of(&requirements);
     if let Some(next) = &requirements.next {
         check_generated_names(next, &items, &processes, &binders)?;
-        next_rules::check_rule_guards(&requirements)?;
     }
     for process in &processes {
         items.push(SpecItem::Enum {
@@ -2397,10 +2401,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 },
             );
             if let Some(event) = event {
-                extra_origins.push((
-                    crate::action_target(&transition.name),
-                    event_origin(transition, event, &process.process),
-                ));
+                let mut origin = event_origin(transition, event, &process.process);
+                origin.lowering_steps.extend(
+                    decision_tables.lowering_steps(&process.process.entity, &transition.name),
+                );
+                extra_origins.push((crate::action_target(&transition.name), origin));
             }
             let mut params = vec![Param::Typed(
                 binder.clone(),
@@ -2804,6 +2809,14 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             });
         }
     }
+    for (item, annotation, origin) in decision_tables.assumption_invariants() {
+        if let SpecItem::Invariant { name, .. } = &item {
+            let target = crate::property_target("invariant", name);
+            extra_annotations.push((target.clone(), annotation));
+            extra_origins.push((target, origin));
+        }
+        items.push(item);
+    }
     let stage_processes = processes
         .iter()
         .map(|process| process.process.clone())
@@ -2855,6 +2868,8 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 "loc": warning.span.python_loc(),
             })
         }));
+    let domain_warnings = crate::finite_domain::check(&decision_tables, &rule_guards, &kernel)?;
+    kernel.diagnostics.extend(domain_warnings);
     Ok(kernel)
 }
 

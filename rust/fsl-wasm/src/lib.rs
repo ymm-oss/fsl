@@ -2754,4 +2754,37 @@ mod tests {
         assert_eq!(plain["result"], "ok", "{plain:#}");
         assert!(plain.get("fsl_edition").is_none(), "{plain:#}");
     }
+
+    /// fsl 5 plan S7, decisions/048 J3: a decision table's gap is found by
+    /// enumerating the field's domain in fsl-core, so the Worker (which has
+    /// no native solver) reports the same code and values as native `check`
+    /// (`fslc/tests/fsl5_decide.rs` asserts the same message there).
+    #[test]
+    fn a_decision_table_gap_is_reported_by_the_worker_with_its_values() {
+        let source = "fsl 5\nrequirements R {\n  number Amount\n  const AUTO_LIMIT = 1\n  \
+                      actor System, Manager\n  entity Claim {\n    amount: Amount = 0\n    \
+                      lifecycle Submitted -> Approved\n  }\n  \
+                      concept SmallClaim = Claim where amount < AUTO_LIMIT\n  \
+                      concept LargeClaim = Claim where amount > AUTO_LIMIT\n  \
+                      event auto_approve = System approves Claim Submitted -> Approved\n  \
+                      event mgr_approve = Manager approves Claim Submitted -> Approved\n  \
+                      decide T \"who\" for Submitted Claim {\n    \
+                      SmallClaim => System approves\n    LargeClaim => Manager approves\n  \
+                      }\n}\nverify {\n  instances Claim = 1\n  values Amount = 0..3\n}\n";
+        let request: Request =
+            serde_json::from_value(json!({"cmd":"check","source":source,"unstable":["fsl5"]}))
+                .expect("request");
+        let output = block_on(check(&request, TEST_SOLVER_VERSION));
+        assert_eq!(output["result"], "error", "{output:#}");
+        assert_eq!(
+            output["diagnostic_code"], "decide_not_exhaustive",
+            "{output:#}"
+        );
+        assert!(
+            output["message"].as_str().is_some_and(
+                |message| message.contains("no row holds at amount = 1, AUTO_LIMIT = 1")
+            ),
+            "{output:#}"
+        );
+    }
 }

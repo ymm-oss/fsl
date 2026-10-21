@@ -22,9 +22,6 @@ use super::{
     GENERATED_NAME_COLLISION, Process, RequirementsProcess, core_error, meta, process_field_state,
     stage_access, typed_binder,
 };
-use crate::rule_guards::{
-    ENUMERATION_BOUND, GuardDecision, RULE_CONFLICT_UNSATISFIABLE_GUARD, rule_guard_problems,
-};
 use crate::{CoreError, LoweringStep, OriginChain, OriginId, OriginSite, property_target};
 
 /// The replacement that reads the stage of `process`'s instance `binder`
@@ -73,28 +70,6 @@ pub(super) fn guard_origin(transition: &ProcessTransition, guard: &RuleGuard) ->
         guard.kind,
         &guard.detail,
     )
-}
-
-/// Refuse an event whose rule guards cannot hold together, where the
-/// enumeration of the type domains decides it (decisions/048 J3). A problem
-/// beyond [`ENUMERATION_BOUND`] is left to `fslc check`.
-///
-/// # Errors
-///
-/// Returns [`RULE_CONFLICT_UNSATISFIABLE_GUARD`] with the conflicting rules.
-pub(super) fn check_rule_guards(
-    requirements: &fsl_syntax::SurfaceRequirements,
-) -> Result<(), CoreError> {
-    for problem in rule_guard_problems(requirements) {
-        if let GuardDecision::Unsatisfiable(core) = problem.decide_by_enumeration(ENUMERATION_BOUND)
-        {
-            return Err(CoreError {
-                diagnostic_code: Some(RULE_CONFLICT_UNSATISFIABLE_GUARD),
-                ..core_error(problem.unsatisfiable_message(&core), problem.span)
-            });
-        }
-    }
-    Ok(())
 }
 
 /// A name written for a rule property that a Kernel property cannot take.

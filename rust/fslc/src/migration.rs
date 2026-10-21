@@ -357,6 +357,8 @@ impl MigrationDiagnostic {
             "taxonomy": self.taxonomy.as_str(),
             "severity": if self.code == fsl_syntax::MISSING_EDITION_HEADER {
                 "info"
+            } else if self.code == fsl_syntax::MIXED_NAMES {
+                "warning"
             } else if edition == Edition::Fsl5 {
                 "error"
             } else {
@@ -775,6 +777,55 @@ struct IdOccurrence {
     id: String,
     span: Span,
     is_tag: bool,
+}
+
+/// `lint --strict-names`: each place a canonical name is written as itself
+/// in a document that also writes it as its glossary alias. Off by default,
+/// because mixing is how a document moves from one spelling to the other.
+#[must_use]
+pub fn mixed_names_diagnostics(source: &str, options: &ParseOptions) -> Vec<MigrationDiagnostic> {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, options)
+    else {
+        return Vec::new();
+    };
+    let Some(glossary) = requirements.items.iter().find_map(|item| match item {
+        fsl_syntax::RequirementsItem::Glossary(glossary) => Some(glossary),
+        _ => None,
+    }) else {
+        return Vec::new();
+    };
+    let via_alias = glossary
+        .uses
+        .iter()
+        .filter(|name| name.via_alias)
+        .map(|name| name.canonical.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    glossary
+        .uses
+        .iter()
+        .filter(|name| !name.via_alias && via_alias.contains(name.canonical.as_str()))
+        .filter_map(|name| {
+            let alias = glossary
+                .entries
+                .iter()
+                .find(|entry| entry.canonical.name == name.canonical)?
+                .alias
+                .clone();
+            Some(MigrationDiagnostic {
+                code: fsl_syntax::MIXED_NAMES,
+                taxonomy: Taxonomy::NonCanonical,
+                message: format!(
+                    "'{}' is written both as itself and as its alias '{alias}'; write one spelling",
+                    name.canonical
+                ),
+                span: name.span,
+                canonical_replacement: alias,
+                machine_applicable: false,
+                edits: Vec::new(),
+            })
+        })
+        .collect()
 }
 
 /// Report project-policy violations without changing source identity.

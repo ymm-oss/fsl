@@ -18,6 +18,7 @@ mod db;
 mod dispatch;
 mod domain;
 mod edition;
+mod glossary;
 mod identifier;
 mod lexer;
 mod literate;
@@ -71,6 +72,12 @@ pub use edition::{
     EditionHeader, MISSING_EDITION_HEADER, UNSUPPORTED_EDITION, document_edition, edition_header,
     first_significant_offset,
 };
+pub use glossary::{
+    ALIAS_COLLISION, ALIAS_IN_IMPLEMENTS, ALIAS_SHADOWS_KEYWORD, ALIAS_SHADOWS_NAME,
+    DUPLICATE_ALIAS, GLOSSARY_DIAGNOSTICS, Glossary, GlossaryEntry, GlossaryName,
+    KEYWORD_SPELLINGS, MISPLACED_GLOSSARY, MIXED_NAMES, NameUse, alias_at, document_glossary,
+    is_keyword_spelling,
+};
 pub use identifier::{
     CANONICAL_NAME_NOT_ASCII, FULLWIDTH_ASCII_IDENTIFIER, FULLWIDTH_SPACE, FULLWIDTH_SYMBOL,
     IDENTIFIER_DIAGNOSTICS, IdentifierRule, IdentifierSeverity, MIDDLE_DOT_IDENTIFIER,
@@ -91,14 +98,15 @@ pub use parser::{
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, ComposeItem, ConceptDeclaration, ControlAttribute,
-    CorrespondenceOrigin, EditionWarning, EventForm, GovernanceArtifactRef, GovernanceDelegateItem,
-    GovernanceItem, HelpfulAction, LValue, MapsClause, MetaTag, NextEditionRequirements, Param,
-    PreservationItem, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementBranch, RequirementsItem, RuleGuard, RuleProperty, SpecItem,
-    StateField, Statement, SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
-    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
-    TimeItem, TypeExpr, VerifyItem, stage_reference,
+    CorrespondenceOrigin, DecisionRow, DecisionTable, EditionWarning, EventForm,
+    GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
+    MapsClause, MetaTag, NextEditionRequirements, Param, PreservationItem, ProcessCover,
+    ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem, RefinementParam,
+    RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
+    RequirementsItem, RuleGuard, RuleProperty, SpecItem, StateField, Statement, SurfaceAgent,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    stage_reference,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

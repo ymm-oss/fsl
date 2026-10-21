@@ -29,9 +29,11 @@ mod cli_options;
 mod cli_output;
 mod code_audit;
 mod log_replay;
+mod name_display;
 mod process;
 mod property_selection;
 mod refinement;
+mod requirements_solver;
 mod spec_loading;
 mod strict_tags;
 mod verification;
@@ -309,6 +311,9 @@ struct MigrationOptions {
     default_edition: fsl_syntax::Edition,
     write: bool,
     project: Option<PathBuf>,
+    /// `lint --strict-names`: report `mixed_names` (read only behind the
+    /// next edition's gate).
+    strict_names: bool,
 }
 
 fn parse_migration_options(
@@ -320,8 +325,17 @@ fn parse_migration_options(
     let mut edition = None;
     let mut write = false;
     let mut project = None;
+    let mut strict_names = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--strict-names"
+                if !migrate
+                    && crate::parse_options()
+                        .unstable()
+                        .contains(fsl_syntax::UnstableFeature::Fsl5) =>
+            {
+                strict_names = true;
+            }
             // `migrate` defaults to the next edition, so an explicit
             // `current` is kept rather than read as an omitted flag.
             "--edition" => {
@@ -368,6 +382,7 @@ fn parse_migration_options(
         },
         write,
         project,
+        strict_names,
     })
 }
 
@@ -393,6 +408,13 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
                 &id_policy,
                 crate::parse_options(),
             ));
+        if options.strict_names {
+            plan.diagnostics
+                .extend(fslc_rust::migration::mixed_names_diagnostics(
+                    &source,
+                    crate::parse_options(),
+                ));
+        }
         plan.diagnostics
             .sort_by_key(|diagnostic| diagnostic.span.start.offset);
         finding_count += plan.diagnostics.len();
@@ -1087,7 +1109,7 @@ fn command() -> Result<(Value, i32), String> {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
-                "explain" => run_explain(path, options.depth, options.readable),
+                "explain" => run_explain(path, options.depth, options.readable, options.names),
                 "mutate" => run_mutate(
                     path,
                     options.depth,
@@ -5807,8 +5829,8 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
         crate::parse_options(),
     ) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
-            if let Some(rejected) = rule_guards_beyond_enumeration(source) {
-                return rejected;
+            if let Some(rejection) = requirements_solver::check(source, &model, &envelope) {
+                return rejection;
             }
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
@@ -5844,54 +5866,6 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
             }
         }
         Err(result) => result,
-    }
-}
-
-/// The rule-guard conflicts the lowering's enumeration leaves undecided
-/// (domains past `fsl_core::ENUMERATION_BOUND`), asked of the solver: the
-/// rejection envelope of the first, if any.
-fn rule_guards_beyond_enumeration(source: &str) -> Option<(Value, i32)> {
-    if crate::parse_options().unstable().is_empty() {
-        return None;
-    }
-    let Ok(fsl_syntax::ParsedDocument {
-        surface: fsl_syntax::SurfaceDocument::Requirements(requirements),
-        ..
-    }) = fsl_syntax::parse_document_with(
-        fsl_syntax::SourceFile::new(source),
-        crate::parse_options(),
-    )
-    else {
-        return None;
-    };
-    let problems = fsl_core::rule_guard_problems(&requirements);
-    if problems.is_empty() {
-        return None;
-    }
-    let mut solver = match fsl_solver_z3::Z3Solver::new() {
-        Ok(solver) => solver,
-        Err(error) => return Some((error_output("internal", &error.to_string()), 3)),
-    };
-    match block_on_native(fslc_rust::rule_guard_solver::unsatisfiable_rule_guard(
-        &problems,
-        &mut solver,
-    )) {
-        Ok(None) => None,
-        // Spelled as the lowering's enumeration reports the same conflict.
-        Ok(Some((message, span))) => Some((
-            fslc_rust::verification_output::render_semantic_error(
-                envelope(),
-                &format!("{message} at {}:{}", span.start.line, span.start.column),
-                None,
-                &fslc_rust::verification_output::DiagnosticClass::Core(
-                    fsl_core::CoreErrorKind::Semantics,
-                ),
-                Some(fsl_core::RULE_CONFLICT_UNSATISFIABLE_GUARD),
-                None,
-            ),
-            2,
-        )),
-        Err(error) => Some((error_output("internal", &error.to_string()), 3)),
     }
 }
 
@@ -9796,12 +9770,46 @@ fn readable_implements_text_from_source(
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
+fn run_explain(
+    path: &Path,
+    depth: usize,
+    readable: bool,
+    names: Option<name_display::NameSpelling>,
+) -> (Value, i32) {
     let source = match read_spec_source(path) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_explain_from_source(path, &source, depth, readable)
+    run_explain_from_source_with_names(path, &source, depth, readable, names)
+}
+
+/// [`run_explain_from_source`] spelled for a reader: a document with a
+/// glossary shows aliases unless `--names canonical` asks for the canonical
+/// names everywhere, including where explain quotes the source (a document
+/// without one always shows canonical names).
+fn run_explain_from_source_with_names(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    readable: bool,
+    names: Option<name_display::NameSpelling>,
+) -> (Value, i32) {
+    let (mut output, status) = run_explain_from_source(path, source, depth, readable);
+    // A glossary exists only behind the gate; without it nothing is reloaded.
+    let gated = parse_options()
+        .unstable()
+        .contains(fsl_syntax::UnstableFeature::Fsl5);
+    if gated
+        && status == 0
+        && let Ok((_, model)) = load_kernel_model_from_source(path, source)
+    {
+        name_display::respell(
+            &mut output,
+            model.names().glossary(),
+            names.unwrap_or(name_display::NameSpelling::Alias),
+        );
+    }
+    (output, status)
 }
 
 /// Explain one caller-owned root-source snapshot.

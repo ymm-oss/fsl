@@ -30,11 +30,13 @@ pub use fsl_syntax::{
 
 mod compose;
 mod db;
+mod decision_table;
 mod diagnostics;
 mod dialect;
 mod domain;
 mod domain_lowering;
 mod expr_text;
+mod finite_domain;
 mod model;
 mod naming;
 pub mod obligation;
@@ -43,6 +45,7 @@ mod partial_operation;
 mod public_kernel;
 mod refinement;
 mod reserved;
+mod resolve_aliases;
 mod rule_guards;
 mod trace;
 mod trace_json;
@@ -52,6 +55,9 @@ pub use compose::{
     FileResolver, FsResolver, lower_compose, lower_compose_with_options, parse_kernel_source,
     parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
     parse_kernel_source_with_options,
+};
+pub use decision_table::{
+    DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DecisionObligation,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
@@ -64,7 +70,7 @@ pub use dialect::{
     RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
     RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
     governance_contract, governance_contract_with_options, lower_ai_component, lower_business,
-    lower_db, lower_domain, lower_governance, lower_requirements, requirements_declared_ids,
+    lower_db, lower_domain, lower_governance, requirements_declared_ids,
     requirements_declared_ids_with_options, requirements_has_implements,
     requirements_has_implements_with_options, requirements_trace_contract,
     requirements_trace_contract_with_options, validate_ai_component, verify_scope_type_names,
@@ -73,13 +79,15 @@ pub use dialect::{
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
 pub use expr_text::{binder_text, expr_text, source_binder_text, source_expr_text};
+pub use finite_domain::{DOMAIN_BOUND, SolverObligation, solver_obligations};
 pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
     build_model, static_leadsto_bindings,
 };
 pub use naming::{
-    AmbiguousName, ComposeName, NameMap, PublicName, SyntheticName, unmapped_public_spelling,
+    AmbiguousName, ComposeName, Glossary, NameMap, PublicName, SyntheticName,
+    unmapped_public_spelling,
 };
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
@@ -108,10 +116,8 @@ pub use refinement::{
     requirements_implements, requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
-pub use rule_guards::{
-    ENUMERATION_BOUND, FiniteDomain, FiniteValue, GuardDecision, GuardProblem, ProblemGuard,
-    RULE_CONFLICT_UNSATISFIABLE_GUARD, rule_guard_problems,
-};
+pub use resolve_aliases::lower_requirements;
+pub use rule_guards::{GuardConflict, RULE_CONFLICT_UNSATISFIABLE_GUARD};
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
     fsl_value_json, internal_origin_json, origin_display_name, state_json, state_summary,

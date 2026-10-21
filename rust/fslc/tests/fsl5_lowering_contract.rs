@@ -14,10 +14,10 @@
 //!   to exactly the kernel of its expected lowering, compared by
 //!   `support/kernel_compare.rs`. The stages that add the syntax add the
 //!   sources to [`FSL5_SOURCES`]. A source written without some of its rules
-//!   (`fsl5_en_norules.fsl`, or e2e's `fsl5_en_req1.fsl` until decision
-//!   tables) is compared with a reduced lowering: `lowered.fsl` with only the
-//!   requires lines the missing rules contribute deleted by hand, a diff read
-//!   in review.
+//!   (`fsl5_en_norules.fsl`; e2e's `fsl5_en_req1.fsl` without its decision
+//!   table and `fsl5_en_decide.fsl` without its `rule` block) is compared
+//!   with a reduced lowering: `lowered.fsl` with only the requires lines the
+//!   missing declarations contribute deleted by hand, a diff read in review.
 //! - **R** (refinement both ways): `lowered.fsl` and the original refine each
 //!   other at depth 8, and so does every next-edition source K compares with
 //!   `lowered.fsl` itself.
@@ -85,7 +85,13 @@ const EXAMPLES: &[Example] = &[
 /// `every_fsl5_source_is_under_k` keeps a source from being added without K.
 const FSL5_SOURCES: &[(&str, &str, &str)] = &[
     ("e2e", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
+    ("e2e", "fsl5_en.fsl", "lowered.fsl"),
+    // The rule without the decision table: `lowered.fsl` minus the decide
+    // rows' requires lines.
     ("e2e", "fsl5_en_req1.fsl", "lowered_req1.fsl"),
+    // The decision table without the rule (S7): `lowered.fsl` minus REQ-1's
+    // requires line.
+    ("e2e", "fsl5_en_decide.fsl", "lowered_decide.fsl"),
     ("rejection", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
     ("rejection", "fsl5_en.fsl", "lowered.fsl"),
     ("rules", "fsl5_en.fsl", "lowered.fsl"),

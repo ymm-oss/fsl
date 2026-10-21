@@ -23,6 +23,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+mod decide;
 mod rules;
 
 use super::{Parser, join_span};
@@ -135,6 +136,7 @@ pub(super) struct Pending {
     concepts: Vec<ConceptSource>,
     events: Vec<EventDeclaration>,
     traces: Vec<(usize, TraceDeclaration)>,
+    decisions: Vec<decide::DecideDeclaration>,
     rules: Vec<(usize, rules::RuleDeclaration)>,
 }
 
@@ -207,6 +209,9 @@ impl Parser<'_> {
         {
             let event = self.event_declaration()?;
             pending.events.push(event);
+        } else if self.peek_ident("decide") {
+            let decision = self.decide_declaration()?;
+            pending.decisions.push(decision);
         } else if self.peek_ident("scenario") || self.peek_ident("forbidden") {
             let trace = self.trace_declaration()?;
             pending.traces.push((position, trace));
@@ -830,6 +835,16 @@ impl Pending {
                 })));
         }
 
+        // Decision tables, then rules: each adds its guards to the events'
+        // `rule_guards`, one `requires` line per table and per statement.
+        next.decisions = decide::apply(
+            self.decisions,
+            &mut transitions,
+            &signatures,
+            &entities,
+            &next.concepts,
+            &actors,
+        )?;
         let concepts = next.concepts.clone();
         let mut ruled = rules::apply(
             self.rules,

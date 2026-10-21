@@ -18,6 +18,8 @@
 //!   enumeration, and by the solver past the enumeration bound),
 //!   `implied_by_lifecycle`, `never_rule_without_forbidden`, phrase and name
 //!   errors, and that rules compose in any order.
+//! - With a decision table: a rule and a table row guarding one event are
+//!   two `requires` lines, and `decide_row_emptied` sees `never` rules.
 //! - What the lowering records: the origin's lowering steps and the
 //!   requirement annotations, and `deadline` as the requirement block's.
 
@@ -522,13 +524,13 @@ fn past_the_enumeration_bound_check_asks_the_solver() {
         "REQ-1 `allow Employee submits Claim only when input amount > 5`; REQ-1 `allow \
          Employee submits Claim only when input amount < 4`",
     );
-    // The same domain with a satisfiable pair passes.
+    // The same domain with a satisfiable guard passes. (No forbidden trace:
+    // replaying one over this domain is outside the solver question.)
     let (output, exit) = check_source(
         "unsat-solver-control",
         &claim_document(
             "  rule REQ-1 \"t\" {\n    allow Employee submits Claim only when input amount > 5\n  \
-             }\n  forbidden FB-1 \"t\" {\n    Employee submits c1 with amount 0\n    \
-             then rejected\n  }\n",
+             }\n",
             huge,
         ),
     );
@@ -923,4 +925,103 @@ fn an_invalid_property_name_is_invalid_rule_property_name() {
             message,
         );
     }
+}
+
+/// e2e's `fsl5_en.fsl` with its decide block replaced by `decide` and
+/// `rule` text, in a scratch copy of the e2e example (`implements` reads
+/// its business file); `Amount` widened to `0..5`.
+fn e2e_with(label: &str, decide_and_rules: &str) -> (Scratch, String) {
+    let scratch = Scratch::new(label, Some("e2e"));
+    let source =
+        fixture("e2e", "fsl5_en.fsl").replace("values Amount = 0..3", "values Amount = 0..5");
+    let start = source.find("  decide REQ-2-3").expect("decide block");
+    let end = start + source[start..].find("  }\n").expect("decide end") + 4;
+    let source = format!("{}{decide_and_rules}{}", &source[..start], &source[end..]);
+    scratch.write("doc.fsl", &source);
+    (scratch, source)
+}
+
+/// The guard model when a decision table and a rule guard the same event:
+/// each is its own `requires` line after the stage guard, the table's first
+/// (tables, then rules, each in source order), not one conjunction.
+#[test]
+fn a_decide_row_and_a_rule_on_one_event_are_two_requires_lines() {
+    let (scratch, _) = e2e_with(
+        "decide-and-rule",
+        "  decide REQ-2-3 \"t\" for Submitted Claim {\n    SmallClaim => System approves\n    \
+         LargeClaim => Manager approves or rejects\n  }\n  \
+         rule REQ-9 \"t\" {\n    never Manager rejects Claim when amount > 3\n  }\n",
+    );
+    let (kernel, exit) = fslc("kernel", &scratch.0, "doc.fsl");
+    assert_eq!(exit, 0, "{kernel:#}");
+    let reject = kernel["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|action| action["name"] == "reject")
+        .expect("reject");
+    let requires = reject["requires"].as_array().expect("requires");
+    let shape = requires
+        .iter()
+        .map(|guard| {
+            let (negated, guard) = if guard["kind"] == "not" {
+                ("not ", &guard["operand"])
+            } else {
+                ("", guard)
+            };
+            format!(
+                "{negated}{} {}",
+                guard["left"]["collection"]["name"]
+                    .as_str()
+                    .unwrap_or_default(),
+                guard["operator"].as_str().unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shape,
+        ["claim_stage ==", "claim_amount >", "not claim_amount >"],
+        "{requires:#?}"
+    );
+}
+
+/// `decide_row_emptied` sees the rules: a row that holds for some value on
+/// its own, but for none a `never` rule leaves its event, is the warning;
+/// the same rule on another region is not.
+#[test]
+fn a_row_a_never_rule_leaves_no_value_is_decide_row_emptied() {
+    let table = |never: &str| {
+        format!(
+            "  concept MidClaim = Claim where amount > AUTO_LIMIT and amount <= 3\n  \
+             concept BigClaim = Claim where amount > 3\n  \
+             decide REQ-2-3 \"t\" for Submitted Claim {{\n    SmallClaim => System approves\n    \
+             MidClaim => Manager approves or rejects\n    BigClaim => Manager rejects\n  }}\n  \
+             rule REQ-9 \"t\" {{\n    never Manager rejects Claim for {never}\n  }}\n"
+        )
+    };
+    let emptied = |label: &str, never: &str| {
+        let (scratch, _) = e2e_with(label, &table(never));
+        let (output, exit) = check(&scratch.0, "doc.fsl");
+        assert_eq!(
+            (output["result"].as_str(), exit),
+            (Some("ok"), 0),
+            "{output:#}"
+        );
+        output["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|warning| warning["code"] == "decide_row_emptied")
+            .map(|warning| warning["message"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        emptied("row-emptied-by-never", "BigClaim"),
+        [
+            "decision table 'REQ-2-3' for Submitted Claim: row 3 `BigClaim => Manager rejects` \
+          holds for no value the rules REQ-9 `never Manager rejects Claim for BigClaim` admit, \
+          so its events never take this row"
+        ]
+    );
+    assert!(emptied("row-not-emptied", "SmallClaim").is_empty());
 }

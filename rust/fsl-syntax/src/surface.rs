@@ -350,21 +350,24 @@ pub struct EventForm {
     pub rule_guards: Vec<RuleGuard>,
 }
 
-/// One guard a next-edition `rule` adds to an event: `allow`, `never` or
-/// `only after`.
+/// One guard a next-edition declaration adds to an event: a decision table
+/// (`decide`, the disjunction of the rows naming the event) or a rule
+/// statement (`allow`, `never`, `only after`). Each is one `requires` line
+/// of the event's action, after the stage guard, in the order the guards were
+/// added: decision tables first, then rule statements, each in source order.
 ///
 /// The condition is written over one instance of the event's entity: a field
-/// is spelled `Entity.field`, the entity's stage [`stage_reference`], and an
-/// input by its bare name.
+/// is spelled `Entity.field` (a rule may also spell it bare), the entity's
+/// stage [`stage_reference`], and an input by its bare name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuleGuard {
-    /// The statement kind (`allow`, `never` or `after`), which is also the
-    /// kind of the guard's lowering step.
+    /// `decide`, `allow`, `never` or `after`, which is also the kind of the
+    /// guard's lowering step.
     pub kind: &'static str,
-    /// The requirement id of the enclosing rule.
+    /// The requirement id of the enclosing table or rule.
     pub requirement: String,
     pub condition: Expr,
-    /// The statement as written, for the guard's origin.
+    /// The statement (or the table's rows) as written, for the guard's origin.
     pub detail: String,
     pub span: Span,
 }
@@ -643,6 +646,9 @@ pub enum TimeItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequirementsItem {
+    /// The next edition's `glossary` block, already applied to the rest of
+    /// the document (see [`crate::Glossary`]).
+    Glossary(crate::Glossary),
     Implements {
         name: String,
         path: String,
@@ -709,6 +715,38 @@ pub struct NextEditionRequirements {
     pub notes: Vec<EditionWarning>,
     /// The properties the rules declare, in source order.
     pub properties: Vec<RuleProperty>,
+    /// The decision tables, already folded into their events' guards; kept
+    /// for the exhaustiveness / overlap checks and the lowering's origins.
+    pub decisions: Vec<DecisionTable>,
+}
+
+/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionTable {
+    pub id: String,
+    pub text: String,
+    pub entity: String,
+    pub stage: String,
+    /// The rows in source order; an `otherwise` row is last.
+    pub rows: Vec<DecisionRow>,
+    /// `assuming Q`, over the entity's fields as `Entity.field` names.
+    pub assuming: Option<Expr>,
+    pub span: Span,
+}
+
+/// One row of a [`DecisionTable`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionRow {
+    /// The row as written, `SmallClaim => System approves`.
+    pub source: String,
+    /// The row's condition at the table's stage, over the entity's fields as
+    /// `Entity.field` names (concepts expanded, their stages decided).
+    pub condition: Expr,
+    /// The events the row's outcome names.
+    pub events: Vec<String>,
+    /// `true` for `otherwise`, whose condition negates every other row.
+    pub otherwise: bool,
+    pub span: Span,
 }
 
 /// `concept Name = Entity [in Stage, …] [where condition]`.
@@ -1809,6 +1847,15 @@ impl RequirementsItem {
     #[must_use]
     pub fn kernel_ast_v1(&self) -> Value {
         match self {
+            Self::Glossary(glossary) => json!([
+                "glossary",
+                glossary
+                    .entries
+                    .iter()
+                    .map(|entry| json!([entry.canonical.written(), entry.alias]))
+                    .collect::<Vec<_>>(),
+                glossary.span.python_loc()
+            ]),
             Self::Implements {
                 name,
                 path,
