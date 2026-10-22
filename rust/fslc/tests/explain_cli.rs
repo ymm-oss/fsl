@@ -310,3 +310,158 @@ fn explain_skeleton_authored_declarations_carry_no_generated_marker() {
         .unwrap_or_else(|| panic!("an authored 'accept' action in {value}"));
     assert!(accept.get("origin").is_none(), "{accept}");
 }
+
+/// `(stdout, exit)` of `fslc <args...>` run in the e2e fixture directory of
+/// the next edition, behind the gate when `gate`.
+fn run_fsl5_e2e(args: &[&str], gate: bool) -> (String, i32) {
+    run_fsl5("e2e", args, gate)
+}
+
+/// `(stdout, exit)` of `fslc <args...>` run in the fixture directory
+/// `tests/fixtures/fsl5/<example>`, behind the gate when `gate`.
+fn run_fsl5(example: &str, args: &[&str], gate: bool) -> (String, i32) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    command
+        .args(args)
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/fsl5")
+                .join(example),
+        )
+        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
+    if gate {
+        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
+    }
+    let output = command.output().expect("run native CLI");
+    (
+        String::from_utf8(output.stdout).expect("UTF-8 stdout"),
+        output.status.code().expect("native exit status"),
+    )
+}
+
+/// The readable block of one action, from its `  - name(` line up to the next
+/// action or section, without the final newline.
+fn readable_action<'t>(readable: &'t str, action: &str) -> &'t str {
+    let start = readable
+        .find(&format!("  - {action}("))
+        .unwrap_or_else(|| panic!("action {action} in {readable}"));
+    let rest = &readable[start..];
+    let end = rest[1..]
+        .find("\n  - ")
+        .map_or_else(|| rest.find("\n\n").unwrap_or(rest.len()), |end| end + 1);
+    &rest[..end]
+}
+
+/// fsl 5 plan §3 S10 explain, design draft B.8: in the e2e example each
+/// `requires` of `auto_approve` names where it came from: the stage guard the
+/// event's move, the amount guard row 1 of the decision table REQ-2-3. The
+/// golden was read and fixed by hand.
+#[test]
+fn explain_readable_names_the_origin_of_each_requires() {
+    let (readable, exit) = run_fsl5_e2e(&["explain", "--readable", "fsl5_en.fsl"], true);
+    assert_eq!(exit, 0, "{readable}");
+    assert_eq!(
+        readable_action(&readable, "auto_approve"),
+        "  - auto_approve(c: Claim) [fair]
+    event: System approves Claim Submitted -> Approved (fsl5_en.fsl:27)
+    requirement: REQ-2: Claims at or below AUTO_LIMIT are auto-approved by the system
+    requirement: REQ-2-3: Who handles a submitted claim
+    requirement: auto_approve: by System
+    requires:
+      - requires claim_stage[c] == Submitted  ← move Submitted -> Approved (fsl5_en.fsl:27)
+      - requires claim_amount[c] <= AUTO_LIMIT  ← decide REQ-2-3 for Submitted Claim row 1: SmallClaim => System approves (fsl5_en.fsl:37)
+    writes: claim_stage"
+    );
+}
+
+/// `value` without its `line` keys: the source lines of the three spellings
+/// of the e2e example differ.
+fn strip_lines(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(items) => items.iter_mut().for_each(strip_lines),
+        serde_json::Value::Object(object) => {
+            object.remove("line");
+            object.values_mut().for_each(strip_lines);
+        }
+        _ => {}
+    }
+}
+
+/// `explain --lowering` is the same correspondence as JSON, and it is the
+/// same for the example written in English, in Japanese keywords and aliases,
+/// and in particles: the lowering steps carry canonical names and English
+/// keywords (`--names canonical` shows them as recorded), only the source
+/// lines differ. Without the gate the option does not exist.
+#[test]
+fn explain_lowering_is_one_correspondence_for_every_spelling() {
+    fn lowering(file: &str) -> serde_json::Value {
+        let (stdout, exit) = run_fsl5_e2e(
+            &["explain", "--lowering", "--names", "canonical", file],
+            true,
+        );
+        assert_eq!(exit, 0, "{file}: {stdout}");
+        let mut value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+        strip_lines(&mut value);
+        value["lowering"].take()
+    }
+    let english = lowering("fsl5_en.fsl");
+    let auto_approve = english["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|action| action["action"] == "auto_approve")
+        .unwrap_or_else(|| panic!("auto_approve in {english}"));
+    assert_eq!(
+        auto_approve["requires"],
+        serde_json::json!([
+            {"index": 0, "expr": "claim_stage[c] == Submitted",
+             "origins": [{"kind": "move", "detail": "Submitted -> Approved"}]},
+            {"index": 1, "expr": "claim_amount[c] <= AUTO_LIMIT",
+             "origins": [{"kind": "decide",
+                          "detail": "REQ-2-3 for Submitted Claim row 1: SmallClaim => System approves"}]},
+        ])
+    );
+    for file in ["fsl5_ja_full.fsl", "fsl5_ja_particles.fsl"] {
+        assert_eq!(lowering(file), english, "{file}");
+    }
+    let (stdout, exit) = run_fsl5_e2e(&["explain", "--lowering", "original.fsl"], false);
+    assert_eq!(exit, 2, "{stdout}");
+    assert!(
+        stdout.contains("unknown explain option '--lowering'"),
+        "{stdout}"
+    );
+}
+
+/// The rules of the multi-entity example name their origins too: the guard
+/// that reads the resource `stock`, and the `has <role>` property, in
+/// canonical names whether the source is English or Japanese.
+#[test]
+fn explain_readable_names_resource_guard_and_role_property_origins() {
+    for file in ["fsl5_en.fsl", "fsl5_ja_full.fsl"] {
+        let (readable, exit) = run_fsl5(
+            "multi_entity",
+            &[
+                "explain",
+                "--readable",
+                "--depth",
+                "2",
+                "--names",
+                "canonical",
+                file,
+            ],
+            true,
+        );
+        assert_eq!(exit, 0, "{file}: {readable}");
+        for expected in [
+            "      - requires qty > 0 and stock >= qty  ← rule REQ-PLACE allow User places \
+             Order only when input qty > 0 and stock >= input qty",
+            "  - invariant BuyerKnownAfterPlace\n    body: ",
+            "    ← rule REQ-BUYER always Order not in Empty has buyer",
+        ] {
+            assert!(
+                readable.contains(expected),
+                "{file}: {expected:?} in {readable}"
+            );
+        }
+    }
+}

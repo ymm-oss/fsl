@@ -1,0 +1,4 @@
+interface:
+  display_name: "FSL Design"
+  short_description: "Verify design refinement with FSL."
+  default_prompt: "Use $fsl-design to model this design and check refinement."

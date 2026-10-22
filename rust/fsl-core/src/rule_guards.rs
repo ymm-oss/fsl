@@ -311,7 +311,7 @@ fn event_guards(
         .map(|guard| EventGuard {
             kind: guard.kind,
             requirement: guard.requirement.clone(),
-            detail: guard.detail.clone(),
+            detail: guard.written.clone(),
             condition: spell_fields(guard.condition.clone(), &field_names, &input_names, entity),
         })
         .collect();

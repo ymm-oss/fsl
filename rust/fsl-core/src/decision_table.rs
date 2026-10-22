@@ -557,7 +557,7 @@ fn table_label(table: &DecisionTable) -> String {
 }
 
 fn row_label(row: &DecisionRow, index: usize) -> String {
-    format!("row {} `{}`", index + 1, row.source)
+    format!("row {} `{}`", index + 1, row.written)
 }
 
 fn table_origin(table: &DecisionTable, id: &str) -> OriginChain {
@@ -598,6 +598,7 @@ mod tests {
             .into_iter()
             .map(|(source, condition)| DecisionRow {
                 source: source.to_owned(),
+                written: source.to_owned(),
                 condition,
                 events: vec!["e".to_owned()],
                 otherwise: false,
@@ -607,6 +608,7 @@ mod tests {
         if otherwise {
             rows.push(DecisionRow {
                 source: "otherwise => A v".to_owned(),
+                written: "otherwise => A v".to_owned(),
                 condition: Expr::Not(Box::new(rows[0].condition.clone())),
                 events: vec!["e".to_owned()],
                 otherwise: true,

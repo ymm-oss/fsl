@@ -14,7 +14,10 @@
 //! - acceptance 1 (K): each lowers to exactly the kernel of its canonical
 //!   twin;
 //! - acceptance 2: `kernel`, `testgen` and `explain --names canonical` print
-//!   only ASCII names (string literals, the requirement wording, aside);
+//!   only ASCII names (string literals, the requirement wording, aside), for
+//!   these fixtures and for the e2e example in Japanese keywords and in
+//!   particles ([`JAPANESE_KEYWORD_SOURCES`]), whose rule and decision-row
+//!   lowering steps are recorded in canonical names and English keywords;
 //! - acceptance 3: each glossary diagnostic, and an alias inside
 //!   `implements`, fails with its code at the offending text.
 
@@ -57,6 +60,18 @@ const SOURCES: &[Source] = &[
         twin: "original.fsl",
         twin_gated: false,
     },
+];
+
+/// The e2e example in the keyword table's Japanese keywords and in
+/// particles, and the multi-entity example (relations, a resource guard,
+/// `has <role>`) in Japanese keywords, all with the glossary's Japanese
+/// aliases (`tests/fixtures/fsl5/<example>/`). They lower to their
+/// `lowered.fsl` (`fsl5_lowering_contract.rs`); here only their outputs are
+/// scanned.
+const JAPANESE_KEYWORD_SOURCES: &[&str] = &[
+    "e2e/fsl5_ja_full.fsl",
+    "e2e/fsl5_ja_particles.fsl",
+    "multi_entity/fsl5_ja_full.fsl",
 ];
 
 impl Source {
@@ -106,27 +121,46 @@ fn json(stdout: &str) -> Value {
     serde_json::from_str(stdout).unwrap_or_else(|error| panic!("{error}: {stdout}"))
 }
 
+/// Keys whose values quote a source line (`weakening.source_text`): the
+/// author's keywords and particles stay as written there, so only its names
+/// are scanned ([`non_ascii_quoted_names`]).
+const QUOTE_KEYS: &[&str] = &["source_text"];
+
 /// Every object key, and every string outside [`PROSE_KEYS`], that is not
-/// ASCII.
+/// ASCII; in a [`QUOTE_KEYS`] value, every non-ASCII word that is not a
+/// keyword spelling or a particle.
 fn non_ascii_names(value: &Value) -> Vec<String> {
-    fn walk(value: &Value, prose: bool, found: &mut Vec<String>) {
+    fn walk(value: &Value, key: Option<&str>, found: &mut Vec<String>) {
+        let prose = key.is_some_and(|key| PROSE_KEYS.contains(&key));
+        let quote = key.is_some_and(|key| QUOTE_KEYS.contains(&key));
         match value {
+            Value::String(text) if quote => found.extend(non_ascii_quoted_names(text)),
             Value::String(text) if !prose && !text.is_ascii() => found.push(text.clone()),
-            Value::Array(items) => items.iter().for_each(|item| walk(item, prose, found)),
+            Value::Array(items) => items.iter().for_each(|item| walk(item, key, found)),
             Value::Object(object) => {
                 for (key, item) in object {
                     if !key.is_ascii() {
                         found.push(key.clone());
                     }
-                    walk(item, PROSE_KEYS.contains(&key.as_str()), found);
+                    walk(item, Some(key), found);
                 }
             }
             _ => {}
         }
     }
     let mut found = Vec::new();
-    walk(value, false, &mut found);
+    walk(value, None, &mut found);
     found
+}
+
+/// The non-ASCII words of a quoted source line that are names: every one
+/// but the keyword table's Japanese spellings and the particles. An alias
+/// left unrespelled is found here.
+fn non_ascii_quoted_names(text: &str) -> Vec<String> {
+    non_ascii_identifiers(text, &[])
+        .into_iter()
+        .filter(|word| !fsl_syntax::keywords::is_japanese_spelling(word))
+        .collect()
 }
 
 /// The prose strings of an envelope (see [`PROSE_KEYS`]).
@@ -268,6 +302,13 @@ fn implementations_see_only_ascii_canonical_names() {
             &source.path(),
             &source.context(),
             source.name.ends_with("_ja.fsl"),
+        );
+    }
+    for name in JAPANESE_KEYWORD_SOURCES {
+        assert_ascii_outputs(
+            &fixtures().join("fsl5").join(name),
+            &format!("fsl5/{name}"),
+            true,
         );
     }
 }
