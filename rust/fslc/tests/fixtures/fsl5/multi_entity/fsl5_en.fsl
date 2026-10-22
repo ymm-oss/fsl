@@ -1,0 +1,52 @@
+fsl 5
+// deadlock-ignore-rationale: like the original, an order stops once Refunded.
+// The design draft's fsl3_en.fsl. Changes: `qty` is both place's input and
+// a field of Order, so the rule and the set name the input as `input qty`
+// (decisions/046 Q6); REQ-BUYER's statement carries the name lowered.fsl
+// gives its invariant (`Name: always ...`); `verify` bounds one entity per
+// line. It lowers to lowered.fsl.
+requirements OrderWorkflow {
+  number Qty
+  actor User, Shop                     // User is an actor and an entity
+
+  entity User                          // no lifecycle: only an identity
+
+  entity Order {
+    qty: Qty = 0
+    lifecycle Empty -> Placed -> Approved -> Paid -> Packed -> Shipped -> Delivered
+              -> ReturnRequested -> Refunded
+  }
+  Order belongs to User as buyer via place   // the User who places it is its buyer
+
+  resource stock: Qty = 2              // one amount, of no entity
+
+  concept Settled = Order in Paid, Packed, Shipped, Delivered, ReturnRequested, Refunded
+
+  event place          = User places Order with qty      Empty -> Placed
+    set stock = stock - input qty
+  event approve        = Shop approves Order             Placed -> Approved
+  event pay            = User pays Order                 Approved -> Paid
+  event pack           = Shop packs Order                Paid -> Packed
+  event ship           = Shop ships Order                Packed -> Shipped
+  event deliver        = Shop delivers Order             Shipped -> Delivered
+  event request_return = User returns Order              Delivered -> ReturnRequested
+  event refund         = Shop refunds Order              ReturnRequested -> Refunded
+    set stock = stock + qty
+
+  rule REQ-PLACE "A user places an order for an in-stock quantity" {
+    allow User places Order only when input qty > 0 and stock >= input qty
+  }
+  rule REQ-BUYER "Every placed order has a buyer" {
+    BuyerKnownAfterPlace: always Order not in Empty has buyer
+  }
+
+  measure paid_count   = count Settled
+  measure refund_count = count Order in Refunded
+
+  goal RefundedOne "An order can be refunded" some Order can reach Refunded
+}
+verify {
+  instances Order = 2
+  instances User = 2
+  values Qty = 0..2
+}

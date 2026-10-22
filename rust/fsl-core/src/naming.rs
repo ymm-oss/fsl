@@ -111,10 +111,8 @@ pub(crate) fn process_field_state(process: &str, field: &str) -> String {
 /// over: the entity's first letter in lower case (`c` for `Claim`, `r` for
 /// `Request`). A `process` quantifies over `c`.
 pub(crate) fn entity_binder(entity: &str) -> String {
-    entity
-        .chars()
-        .next()
-        .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
+    // One rule with the parser, which names a relation event's input by it.
+    fsl_syntax::entity_binder(entity)
 }
 
 /// The invariant a next-edition decision table's `assuming Q` adds:
