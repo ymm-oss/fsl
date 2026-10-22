@@ -137,7 +137,7 @@ fn every_next_edition_fixture_is_indexed_in_full() {
             }
         }
     }
-    assert!(files.len() >= 9, "{files:?}");
+    assert!(files.len() >= 12, "{files:?}");
     for (path, source) in files {
         let index = DocumentIndex::build(&source, path.to_str(), &gated())
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
@@ -160,6 +160,65 @@ fn every_next_edition_fixture_is_indexed_in_full() {
             path.display()
         );
     }
+}
+
+/// The relations stage's declarations: a relation's role is a property of
+/// the entity, `resource` and `measure` declare variables, `goal` and
+/// `policy` properties; and the English and all-Japanese spellings of the
+/// multi-entity example declare the same canonical names.
+#[test]
+fn relations_resources_measures_goals_and_policies_declare_their_names() {
+    let fixtures = e2e().parent().expect("fsl5 fixtures").to_path_buf();
+    let read = |file: &str| {
+        let source = std::fs::read_to_string(fixtures.join(file)).expect("read fixture");
+        DocumentIndex::build(&source, Some(file), &gated())
+            .unwrap_or_else(|error| panic!("{file}: {error}"))
+    };
+    let declared = |index: &DocumentIndex| {
+        index
+            .symbols
+            .iter()
+            .map(|symbol| (symbol.name.clone(), symbol.role))
+            .collect::<BTreeSet<_>>()
+    };
+    let relations = read("relations/fsl5_en.fsl");
+    for expected in [
+        ("assignee", SymbolRole::Property),
+        ("desk_open", SymbolRole::Variable),
+        ("Resolved", SymbolRole::Property),
+        ("Closable", SymbolRole::Property),
+    ] {
+        assert!(
+            declared(&relations).contains(&(expected.0.to_owned(), expected.1)),
+            "{expected:?}"
+        );
+    }
+    // `has assignee` and the steps' `with assignee 1` use the role.
+    let role = relations
+        .symbols
+        .iter()
+        .find(|symbol| symbol.name == "assignee")
+        .expect("the role");
+    assert_eq!(
+        relations
+            .references_at(role.selection_range.start, false)
+            .len(),
+        4
+    );
+    let english = read("multi_entity/fsl5_en.fsl");
+    let japanese = read("multi_entity/fsl5_ja_full.fsl");
+    for expected in [
+        ("buyer", SymbolRole::Property),
+        ("stock", SymbolRole::Variable),
+        ("paid_count", SymbolRole::Variable),
+        ("RefundedOne", SymbolRole::Property),
+    ] {
+        assert!(
+            declared(&english).contains(&(expected.0.to_owned(), expected.1)),
+            "{expected:?}"
+        );
+    }
+    assert_eq!(declared(&japanese), declared(&english));
 }
 
 /// An alias is a use of its canonical name: definition goes from the alias

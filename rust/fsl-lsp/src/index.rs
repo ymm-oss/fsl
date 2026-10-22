@@ -450,6 +450,9 @@ impl DocumentIndex {
                             Some(Context::Struct) => Some(SymbolRole::Property),
                             _ => None,
                         }
+                    } else if lexicon == Lexicon::Next && relation_role(tokens, index) {
+                        projected_site = false;
+                        Some(SymbolRole::Property)
                     } else if enum_member || matches!(previous, Some("as" | "let")) {
                         projected_site = enum_member || previous == Some("let");
                         Some(SymbolRole::Variable)
@@ -459,7 +462,8 @@ impl DocumentIndex {
                     let scoped = matches!(role, Some(SymbolRole::Parameter))
                         || quantifier_binder
                         || pattern_binder
-                        || matches!(previous, Some("as" | "let"));
+                        || (matches!(previous, Some("as" | "let"))
+                            && role != Some(SymbolRole::Property));
                     let symbol_owner = scoped.then(|| owner.clone()).flatten();
                     if let Some(role) = role
                         && (!projected_site
@@ -1638,8 +1642,11 @@ pub(crate) fn is_keyword(value: &str) -> bool {
 
 /// The declaration keywords a next-edition requirements document adds or
 /// reads differently. `decide` opens a decision table whose `REQ-…` label is
-/// a requirement's, as `rule` and `scenario` do; `entity` with a body is read
-/// by [`walk_declaration_keyword`]. Each is the English spelling of an active
+/// a requirement's, as `rule` and `scenario` do; `resource` declares a state
+/// of no entity and `measure` a measure as `kpi` does; `entity` with a body
+/// is read by [`walk_declaration_keyword`], and the role a relation names
+/// (`E belongs to E2 as role via event`) by [`relation_role`]. `goal` and
+/// `policy` declare as in the published language. Each is the English spelling of an active
 /// declaration row of the keyword table (`next_declaration_keywords_are_the_tables`).
 const NEXT_DECLARATION_KEYWORDS: &[DeclarationKeyword] = &[
     DeclarationKeyword {
@@ -1665,6 +1672,16 @@ const NEXT_DECLARATION_KEYWORDS: &[DeclarationKeyword] = &[
     DeclarationKeyword {
         value: "scenario",
         role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "resource",
+        role: Some(SymbolRole::Variable),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "measure",
+        role: Some(SymbolRole::Variable),
         context: Some(Context::Other),
     },
 ];
@@ -1700,6 +1717,17 @@ fn walk_declaration_keyword(
         return Some((Some(SymbolRole::Type), Some(Context::Struct)));
     }
     declaration_keyword_in(lexicon, value)
+}
+
+/// Whether `tokens[index]` is the role a next-edition relation names:
+/// `E belongs to E2 as ROLE`, where the reading spells `belongs to` as two
+/// words in English and as one (`所属先`) in Japanese.
+fn relation_role(tokens: &[Token], index: usize) -> bool {
+    let before = |back: usize| index.checked_sub(back).and_then(|i| tokens.get(i));
+    token_ident(before(1)) == Some("as")
+        && token_ident(before(2)).is_some()
+        && (token_ident(before(3)) == Some("belongs to")
+            || (token_ident(before(3)) == Some("to") && token_ident(before(4)) == Some("belongs")))
 }
 
 /// The rows of the keyword table the parser reads. A reserved row is not a
