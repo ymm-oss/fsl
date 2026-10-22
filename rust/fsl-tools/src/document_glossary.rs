@@ -166,6 +166,21 @@ pub fn parse_glossary(text: &str) -> Result<Glossary, Vec<GlossaryIssue>> {
     })
 }
 
+/// The labels a requirements document's own declarations give (each event's
+/// phrase for its action, `action:<event>`), under the labels of `sidecar`,
+/// which win where both label one target. The sidecar's own section still
+/// lists only the sidecar's labels.
+pub(crate) fn with_source_labels(
+    sidecar: Option<&Glossary>,
+    locale: Locale,
+    mut labels: BTreeMap<String, String>,
+) -> Glossary {
+    if let Some(sidecar) = sidecar {
+        labels.extend(sidecar.labels.clone());
+    }
+    Glossary { locale, labels }
+}
+
 pub(crate) fn markdown_label(label: &str) -> String {
     let mut escaped = String::with_capacity(label.len());
     for character in label.chars() {

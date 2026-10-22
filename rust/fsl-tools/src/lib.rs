@@ -28,6 +28,7 @@ mod document_presentation;
 mod document_project;
 mod document_render;
 mod document_render_expr;
+mod document_views;
 mod domain;
 mod domain_codegen;
 mod domain_naming;
@@ -106,9 +107,11 @@ pub use document_presentation::Locale;
 pub use document_project::{
     DocumentDialect, DocumentInput, DocumentProjectionError, RCIR_SUPPORTED_DIALECTS,
     project_requirement_claims, project_requirement_claims_from_source,
+    project_requirement_claims_from_source_with_options, project_requirement_claims_with_options,
 };
 pub use document_render::{
     AppliedApproval, AppliedApprovals, RenderedDocument, render_requirements_document,
+    render_requirements_document_with_options,
 };
 pub use domain::{
     analyze_domain, assumptions as domain_assumptions, check_domain, domain_adapter_files,

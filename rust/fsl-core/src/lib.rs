@@ -59,6 +59,7 @@ pub use compose::{
 };
 pub use decision_table::{
     DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DecisionObligation,
+    DecisionTableResult, decision_table_results,
 };
 pub use declared_names::reject_declared_separator;
 pub use diagnostics::{
@@ -75,8 +76,8 @@ pub use dialect::{
     lower_db, lower_domain, lower_governance, requirements_declared_ids,
     requirements_declared_ids_with_options, requirements_has_implements,
     requirements_has_implements_with_options, requirements_trace_contract,
-    requirements_trace_contract_with_options, validate_ai_component, verify_scope_type_names,
-    verify_scope_type_names_with_options,
+    requirements_trace_contract_with_options, rule_property_names, validate_ai_component,
+    verify_scope_type_names, verify_scope_type_names_with_options,
 };
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};

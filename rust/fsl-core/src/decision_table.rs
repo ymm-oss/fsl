@@ -500,6 +500,55 @@ impl Tables {
     }
 }
 
+/// What the check-time enumeration found for one decision table, for a
+/// reader of the document (`fslc document`), which shows each table with its
+/// result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DecisionTableResult {
+    /// The rows were evaluated at every value of the fields they read.
+    Enumerated {
+        /// Some row holds at every value (or the table has `otherwise`).
+        exhaustive: bool,
+        /// The first two rows (by index) that hold at the same value.
+        overlap: Option<(usize, usize)>,
+        /// The rows that hold for no value.
+        empty_rows: Vec<usize>,
+    },
+    /// The table was not enumerated, for this reason; native `check`
+    /// discharges it with the solver.
+    Deferred(String),
+}
+
+/// The result of enumerating each decision table of `requirements` over
+/// `model`, in source order: `(table id, result)`.
+#[must_use]
+pub fn decision_table_results(
+    requirements: &SurfaceRequirements,
+    model: &KernelModel,
+) -> Vec<(String, DecisionTableResult)> {
+    let tables = Tables::of(requirements);
+    tables
+        .tables
+        .iter()
+        .map(|table| {
+            let result = match tables.verdict(table, model) {
+                Verdict::Checked {
+                    gap,
+                    overlap,
+                    empty,
+                    ..
+                } => DecisionTableResult::Enumerated {
+                    exhaustive: gap.is_none(),
+                    overlap: overlap.map(|(first, second, _)| (first, second)),
+                    empty_rows: empty,
+                },
+                Verdict::Deferred(reason) => DecisionTableResult::Deferred(reason),
+            };
+            (table.id.clone(), result)
+        })
+        .collect()
+}
+
 fn table_label(table: &DecisionTable) -> String {
     format!(
         "decision table '{}' for {} {}",

@@ -14,12 +14,13 @@ use fsl_core::{
     ActionDef, ActionGuard, Annotation, Annotations, FsResolver, INIT_TARGET, KernelModel,
     KernelSpec, OriginChain, ParamDef, PublicKernelVersion, RequirementLink, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TERMINAL_TARGET, TypeDef, TypeRef,
-    action_target, build_model, parse_kernel_source, property_target,
-    public_kernel_contract_for_version, public_kernel_expression, requirements_trace_contract,
+    action_target, build_model, parse_kernel_source_with_options, property_target,
+    public_kernel_contract_for_version, public_kernel_expression,
+    requirements_trace_contract_with_options,
 };
 use fsl_syntax::{
-    Expr, ParsedDocument, RequirementsItem, SourceFile, SourcePos, Span, SpecItem, SurfaceDocument,
-    VerifyItem, parse_document,
+    Expr, ParseOptions, ParsedDocument, RequirementsItem, SourceFile, SourcePos, Span, SpecItem,
+    SurfaceDocument, VerifyItem, parse_document_with,
 };
 use serde_json::{Value, json};
 
@@ -166,7 +167,28 @@ pub fn project_requirement_claims_from_source(
     source_path: Option<&str>,
     resolver_root: &Path,
 ) -> Result<RequirementClaimSet, DocumentProjectionError> {
-    let parsed = parse_document(SourceFile::new(source))
+    project_requirement_claims_from_source_with_options(
+        source,
+        source_path,
+        resolver_root,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`project_requirement_claims_from_source`] under explicit
+/// [`ParseOptions`]: the parse, the lowering and the trace contract all read
+/// `source` under the same options.
+///
+/// # Errors
+///
+/// As [`project_requirement_claims_from_source`].
+pub fn project_requirement_claims_from_source_with_options(
+    source: &str,
+    source_path: Option<&str>,
+    resolver_root: &Path,
+    options: &ParseOptions,
+) -> Result<RequirementClaimSet, DocumentProjectionError> {
+    let parsed = parse_document_with(SourceFile::new(source), options)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     if !matches!(
         &parsed.surface,
@@ -177,29 +199,33 @@ pub fn project_requirement_claims_from_source(
         });
     }
     let resolver = FsResolver::new(resolver_root);
-    let kernel = parse_kernel_source(source, &resolver)
+    let kernel = parse_kernel_source_with_options(source, &resolver, options)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     let model = build_model(kernel.clone())
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     let (dialect, implements_names, analysis_scope) =
         projection_context_from_parsed(&parsed, &model)?;
-    project_requirement_claims(&DocumentInput {
-        kernel: &kernel,
-        model: &model,
-        source,
-        source_path,
-        dialect,
-        implements_names,
-        analysis_scope,
-    })
+    project_requirement_claims_with_options(
+        &DocumentInput {
+            kernel: &kernel,
+            model: &model,
+            source,
+            source_path,
+            dialect,
+            implements_names,
+            analysis_scope,
+        },
+        options,
+    )
     .map_err(DocumentProjectionError::Other)
 }
 
 fn projection_context(
     source: &str,
     model: &KernelModel,
+    options: ParseOptions,
 ) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), DocumentProjectionError> {
-    let parsed = parse_document(SourceFile::new(source))
+    let parsed = parse_document_with(SourceFile::new(source), &options)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     projection_context_from_parsed(&parsed, model)
 }
@@ -856,10 +882,24 @@ pub(crate) fn project_trace_case_payload(
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
 ) -> Result<RequirementClaimSet, String> {
+    project_requirement_claims_with_options(input, &ParseOptions::stable())
+}
+
+/// [`project_requirement_claims`] with the trace contract read under
+/// explicit [`ParseOptions`], the options `input.source` was lowered under.
+///
+/// # Errors
+///
+/// As [`project_requirement_claims`].
+pub fn project_requirement_claims_with_options(
+    input: &DocumentInput<'_>,
+    options: &ParseOptions,
+) -> Result<RequirementClaimSet, String> {
     // Ungated here: the requirement-trace gate replays traces on
     // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
     // before every document command and fails closed on its refusal.
-    let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
+    let trace = requirements_trace_contract_with_options(input.source, options)
+        .map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(input, trace.as_ref())
 }
 
@@ -1278,9 +1318,10 @@ pub(crate) fn project_renderer_contract(
     source: &str,
     source_path: Option<&str>,
     trace: Option<&RequirementsTraceContract>,
+    options: ParseOptions,
 ) -> Result<RequirementClaimSet, String> {
     let (dialect, implements_names, analysis_scope) =
-        projection_context(source, model).map_err(|error| error.to_string())?;
+        projection_context(source, model, options).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(
         &DocumentInput {
             kernel,
