@@ -307,6 +307,34 @@ fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
     );
 }
 
+/// fsl 5 plan S11: in a requirements document written with Japanese
+/// keywords and an alias holding a character outside the BMP, a diagnostic
+/// after the alias on its line is published in UTF-16 code units (`𠮷` counts
+/// twice), at the word the CLI's character column names.
+#[test]
+fn a_diagnostic_after_japanese_keywords_and_an_astral_alias_counts_utf16_units() {
+    let text = "fsl 5\n要件 R {\n  用語集 {\n    Claim = 𠮷申請\n  }\n  \
+                エンティティ 𠮷申請 { 金額: Int = 0  ライフサイクル A -> B }\n}\n";
+    let diagnostics = published_diagnostics(text, Some("fsl5"));
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "canonical_name_not_ascii")
+        .unwrap_or_else(|| panic!("canonical_name_not_ascii published: {diagnostics:#?}"));
+    assert_eq!(error["severity"], 1, "{error:#}");
+    assert_eq!(
+        error["range"],
+        json!({"start":{"line":5,"character":16},"end":{"line":5,"character":18}}),
+        "{error:#}"
+    );
+    // Without the gate the first Japanese keyword is not a word.
+    let published = published_diagnostics(text, None);
+    assert_eq!(
+        published[0]["range"]["start"],
+        json!({"line":1,"character":0}),
+        "{published:#?}"
+    );
+}
+
 /// fsl 5 plan S1 acceptance 5: an `fsl 5` document whose first line is a
 /// Japanese `//` comment is served without a panic, and its migration
 /// diagnostics are errors, as `--edition next` makes them. The same body
