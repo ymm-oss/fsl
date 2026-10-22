@@ -1,0 +1,51 @@
+fsl 5
+// The forms of the relations stage that no design-draft example uses: a
+// `policy`, `always ... in ... has <role>`, a Bool resource that a rule
+// reads and an event sets, and scenario steps that name the instance a
+// relation records (`with <role> <instance>`). Its expected lowering,
+// lowered.fsl, is written by hand.
+requirements Support {
+  actor Agent
+
+  entity Agent
+
+  entity Ticket {
+    lifecycle Open -> Assigned -> Closed
+    lifecycle Assigned -> Escalated
+  }
+  Ticket belongs to Agent as assignee via take
+
+  resource desk_open: Bool = true
+
+  event take     = Agent takes Ticket      Open -> Assigned
+  event close    = Agent closes Ticket     Assigned -> Closed
+  event escalate = Agent escalates Ticket  Assigned -> Escalated
+    set desk_open = false
+
+  rule REQ-1 "A ticket is taken only while the desk is open" {
+    allow Agent takes Ticket only when desk_open
+  }
+  rule REQ-2 "A taken ticket keeps the agent who took it" {
+    always Ticket in Assigned, Closed, Escalated has assignee
+  }
+
+  policy Resolved "Every assigned ticket is eventually closed or escalated"
+    every Ticket in Assigned must eventually be Closed or Escalated
+  goal Closable "A ticket can be closed" some Ticket can reach Closed
+
+  scenario AC-1 "An agent takes and closes a ticket" {
+    Agent takes t1 with assignee 1
+    Agent closes t1
+    then t1 is Closed
+  }
+  forbidden FB-DESK-CLOSED "No ticket is taken once the desk has closed" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent takes t2 with assignee 0
+    then rejected
+  }
+}
+verify {
+  instances Ticket = 2
+  instances Agent = 2
+}

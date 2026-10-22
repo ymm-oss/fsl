@@ -10,6 +10,10 @@ use std::os::unix::fs::PermissionsExt as _;
 
 use serde_json::Value;
 
+#[path = "support/id_spelling.rs"]
+mod id_spelling;
+use id_spelling::compact_hyphen_runs;
+
 struct FixtureDir(PathBuf);
 
 static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -193,6 +197,40 @@ fn string_metadata_uses_typed_annotations_without_changing_public_kernel() {
     assert!(source.contains("@undecided(\"initial policy\")"));
     assert!(source.contains("@requirement(\"REQ-PUBLISH\", \"publishing is traceable\")"));
     assert!(!source.contains("\"REQ-READY:"));
+}
+
+#[test]
+fn migrate_writes_requirement_ids_as_written() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for fixture in [
+        "tests/fixtures/fsl5/e2e/original.fsl",
+        "../../examples/gallery/injected/bank__boundary_flip.fsl",
+    ] {
+        let original = text(&root.join(fixture));
+        let ids = compact_hyphen_runs(&original);
+        assert!(!ids.is_empty(), "{fixture} spells no IDs");
+        let directory = FixtureDir::new();
+        // original.fsl implements the business layer beside it.
+        directory.write(
+            "1_business.fsl",
+            &text(&root.join("tests/fixtures/fsl5/e2e/1_business.fsl")),
+        );
+        let path = directory.write("spec.fsl", &original);
+        let migrated = run(&[
+            "migrate",
+            path.to_str().expect("UTF-8 path"),
+            "--edition",
+            "next",
+            "--write",
+        ]);
+        assert!(
+            migrated.status.success(),
+            "{fixture}: {}",
+            String::from_utf8_lossy(&migrated.stdout)
+        );
+        assert_eq!(json(&migrated)["written"], true, "{fixture}");
+        assert_eq!(compact_hyphen_runs(&text(&path)), ids, "{fixture}");
+    }
 }
 
 #[test]
