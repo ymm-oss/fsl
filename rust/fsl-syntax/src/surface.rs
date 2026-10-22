@@ -707,6 +707,10 @@ pub struct NextEditionRequirements {
     /// The entities declared with a body, each desugared into a `process` of
     /// the same name.
     pub entities: Vec<String>,
+    /// For each entity of [`Self::entities`], in the same order, its final
+    /// stages: the stages no `lifecycle` edge leaves, in stage order. The
+    /// lowering derives the document's `terminal { }` from them.
+    pub final_stages: Vec<(String, Vec<String>)>,
     /// The concepts, expanded where a later construct uses them.
     pub concepts: Vec<ConceptDeclaration>,
     /// Warnings found while desugaring, in source order.

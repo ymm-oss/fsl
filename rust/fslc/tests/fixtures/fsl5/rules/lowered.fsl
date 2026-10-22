@@ -76,4 +76,8 @@ requirements OrderRules {
     add(0, 2) add(0, 1)
     expect rejected
   }
+
+  // The final stages of the lifecycle (stages no lifecycle edge leaves) are
+  // the terminal states, as a business document derives them from its sinks.
+  terminal { forall o: Order { order_stage[o] == Shipped } }
 }

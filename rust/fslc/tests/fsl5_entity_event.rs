@@ -461,3 +461,85 @@ fn an_actor_spelled_as_an_enum_member_is_a_warning() {
         "{found:#?}"
     );
 }
+
+/// A business layer of the claim document's entity with `stages` as given.
+fn business_with_stages(stages: &str) -> String {
+    format!(
+        "fsl 5\nbusiness ToBe {{\n  actor Employee, Manager\n  entity Claim\n  process Claim {{\n    \
+         stages {stages}\n    initial Draft\n    transition submit Draft -> Submitted by Employee\n    \
+         transition approve Submitted -> Approved by Manager\n    \
+         transition reject Submitted -> Rejected by Manager\n  }}\n}}\nverify {{\n  \
+         instances Claim = 1\n}}\n"
+    )
+}
+
+/// The claim document with an `implements` of `business_with_stages`.
+fn claim_implementing_to_be() -> String {
+    claim_document(EVENTS, "instances Claim = 1").replace(
+        "requirements R {\n",
+        "requirements R {\n  implements ToBe from \"tobe.fsl\" {\n    \
+         action submit(c, amount) -> submit(c)\n  }\n",
+    )
+}
+
+/// `check` of the claim document against a business layer with `stages`.
+fn check_against(label: &str, stages: &str) -> (Value, i32) {
+    let scratch = Scratch::new(label, None);
+    scratch.write("tobe.fsl", &business_with_stages(stages));
+    let file = scratch.write("doc.fsl", &claim_implementing_to_be());
+    check(&scratch.0, &file)
+}
+
+/// The stage enum of an entity lists its stages in the order they first
+/// appear in its `lifecycle` lines, and `implements` compares a stage enum
+/// both layers declare member by member. When the orders differ, the error
+/// names both orders and what to change, at the `implements` declaration.
+#[test]
+fn implements_over_another_stage_order_names_both_orders() {
+    let (output, exit) = check_against("same-order", "Draft, Submitted, Approved, Rejected");
+    assert_eq!(
+        (output["result"].as_str(), exit),
+        (Some("ok"), 0),
+        "{output:#}"
+    );
+
+    let (output, exit) = check_against("other-order", "Draft, Submitted, Rejected, Approved");
+    assert_eq!(
+        (output["result"].as_str(), exit),
+        (Some("error"), 2),
+        "{output:#}"
+    );
+    assert_eq!(output["loc"]["line"], 3, "{output:#}");
+    let message = output["message"].as_str().unwrap_or_default();
+    for expected in [
+        "'ClaimStage'",
+        "Draft, Submitted, Approved, Rejected",
+        "Draft, Submitted, Rejected, Approved",
+        "lifecycle",
+    ] {
+        assert!(message.contains(expected), "{message:?} lacks {expected:?}");
+    }
+}
+
+/// A stage only one layer has is named, so the reader sees which stage to
+/// add or drop rather than only that the enums differ.
+#[test]
+fn implements_over_other_stages_names_the_stages_one_side_lacks() {
+    let (output, exit) = check_against(
+        "other-stages",
+        "Draft, Submitted, Approved, Rejected, Cancelled",
+    );
+    assert_eq!(
+        (output["result"].as_str(), exit),
+        (Some("error"), 2),
+        "{output:#}"
+    );
+    let message = output["message"].as_str().unwrap_or_default();
+    for expected in [
+        "'ClaimStage'",
+        "Draft, Submitted, Approved, Rejected, Cancelled",
+        "only in 'ToBe': Cancelled",
+    ] {
+        assert!(message.contains(expected), "{message:?} lacks {expected:?}");
+    }
+}

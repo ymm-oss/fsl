@@ -2755,6 +2755,43 @@ mod tests {
         assert!(plain.get("fsl_edition").is_none(), "{plain:#}");
     }
 
+    /// fsl 5 plan S2 and S3, as native `check` reports them
+    /// (`fslc/tests/fsl5_unicode_lexing.rs`): the lexer's warnings are in the
+    /// Worker's `warnings`, and a business document's non-ASCII name is
+    /// `canonical_name_not_ascii`.
+    #[test]
+    fn the_worker_reports_lexical_warnings_and_non_ascii_names() {
+        let request = |source: &str| -> Request {
+            serde_json::from_value(json!({"cmd":"check","source":source,"unstable":["fsl5"]}))
+                .expect("request")
+        };
+        let source = "fsl 5\nrequirements R {\n  actor\u{3000}Employee\n  entity Claim {\n    \
+                      lifecycle Draft -> Done\n  }\n  \
+                      event finish = Employee finishes Claim Draft -> Done\n  \
+                      invariant Typed { true }\n}\nverify {\n  instances Claim = 1\n}\n";
+        let output = block_on(check(&request(source), TEST_SOLVER_VERSION));
+        assert_eq!(output["result"], "ok", "{output:#}");
+        let warnings = output["warnings"].as_array().expect("warnings array");
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning["code"] == "fullwidth_space"
+                    && warning["loc"] == json!({"line": 3, "column": 8})),
+            "{output:#}"
+        );
+
+        let business = "fsl 5\nbusiness B {\n  actor 顧客\n  entity Return\n  process Return {\n    \
+                        stages Requested, Approved\n    initial Requested\n    \
+                        transition approve Requested -> Approved by 顧客\n  }\n}\nverify {\n  \
+                        instances Return = 1\n}\n";
+        let output = block_on(check(&request(business), TEST_SOLVER_VERSION));
+        assert_eq!(output["result"], "error", "{output:#}");
+        assert_eq!(
+            output["diagnostic_code"], "canonical_name_not_ascii",
+            "{output:#}"
+        );
+    }
+
     /// fsl 5 plan S7, decisions/048 J3: a decision table's gap is found by
     /// enumerating the field's domain in fsl-core, so the Worker (which has
     /// no native solver) reports the same code and values as native `check`

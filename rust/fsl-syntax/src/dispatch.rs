@@ -222,7 +222,16 @@ pub(crate) fn parse_document_with_ids(
     let annotations = leading_annotations(&tokens, &mut cursor)?;
     let registration = select_frontend(&tokens, cursor, edition)?;
     let source = SourceFile { edition, ..source };
+    // A requirements document checks its names against its glossary itself;
+    // every other document read in the next edition has no glossary. The
+    // frontend's own errors come first, as they do in requirements.
+    let names = if edition == Edition::Fsl5 && registration.keyword != "requirements" {
+        crate::glossary::reject_non_ascii_names(&tokens[cursor..], registration.keyword)
+    } else {
+        Ok(())
+    };
     let (surface, ids) = (registration.parse)(source, tokens, cursor)?;
+    names?;
     Ok((
         ParsedDocument {
             keyword: registration.keyword,

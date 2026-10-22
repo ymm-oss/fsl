@@ -281,7 +281,13 @@ mod tests {
             assert_eq!(published.message, "unexpected character '経'");
             assert!(crate::lexical_warnings(&source, &options).is_empty());
         }
-        assert!(fsl5_surface(body).is_ok());
+        // Behind both, the lexer reads the name; a spec has no glossary, so
+        // the naming rule is what refuses it.
+        assert!(crate::lex_with(&format!("fsl 5\n{body}"), &gated()).is_ok());
+        assert_eq!(
+            fsl5_surface(body).unwrap_err().code(),
+            CANONICAL_NAME_NOT_ASCII
+        );
     }
 
     /// Acceptance 2: every code of the catalog is produced by its look-alike
@@ -299,15 +305,16 @@ mod tests {
                 "spec S { state { x: Int } init { x = 2 － 1 } }",
                 "spec S { state { x: Int } init { x = 2 - 1 } }",
             ),
+            // A non-ASCII name the document accepts is a glossary alias.
             (
                 MIDDLE_DOT_IDENTIFIER,
-                "spec S { state { 申請・承認: Int } }",
-                "spec S { state { 申請_承認: Int } }",
+                "requirements R { glossary { Claim = 申請・承認 } }",
+                "requirements R { glossary { Claim = 申請_承認 } }",
             ),
             (
                 MIXED_SCRIPT_IDENTIFIER,
                 "spec S { state { Сlaim: Int } }",
-                "spec S { state { Claim申請: Int } }",
+                "requirements R { glossary { Claim = Claim申請 } }",
             ),
             (
                 NON_ASCII_REQUIREMENT_ID,
@@ -316,8 +323,8 @@ mod tests {
             ),
             (
                 NON_NFC_IDENTIFIER,
-                "spec S { state { \u{304b}\u{3099}: Int } }",
-                "spec S { state { \u{304c}: Int } }",
+                "requirements R { glossary { Claim = \u{304b}\u{3099}\u{304f} } }",
+                "requirements R { glossary { Claim = \u{304c}\u{304f} } }",
             ),
             (
                 FULLWIDTH_SPACE,
@@ -392,15 +399,25 @@ mod tests {
         let nfc = "\u{304c}\u{304f}";
         let nfd = nfc.nfd().collect::<String>();
         assert_ne!(nfc, nfd);
-        let mixed = fsl5_surface(&format!(
-            "spec S {{ state {{ {nfc}: Int }} init {{ {nfd} = 0 }} }}"
-        ))
-        .unwrap();
-        let composed = fsl5_surface(&format!(
-            "spec S {{ state {{ {nfc}: Int }} init {{ {nfc} = 0 }} }}"
-        ))
-        .unwrap();
-        assert_eq!(mixed.kernel_ast_v1(), composed.kernel_ast_v1());
+        let tokens = |text: String| {
+            crate::lex_with(&format!("fsl 5\n{text}"), &gated())
+                .unwrap()
+                .into_iter()
+                .map(|token| token.kind)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            tokens(format!("spec S {{ state {{ {nfd}: Int }} }}")),
+            tokens(format!("spec S {{ state {{ {nfc}: Int }} }}"))
+        );
+        // A use in NFD resolves to the alias the glossary declares in NFC; a
+        // second name would have no glossary entry.
+        assert!(
+            fsl5_surface(&format!(
+                "requirements R {{ glossary {{ Claim = {nfc} }} entity {nfd} }}"
+            ))
+            .is_ok()
+        );
         assert_eq!(
             fsl5_warnings(&format!("spec S {{ state {{ {nfd}: Int }} }}")),
             vec![NON_NFC_IDENTIFIER]
