@@ -372,6 +372,181 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
     );
 }
 
+/// One `fslc-lsp` process driven request by request; notifications the
+/// server publishes in between (diagnostics) are skipped.
+struct Session {
+    child: std::process::Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    next_id: u64,
+}
+
+impl Session {
+    fn start() -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env_remove("FSLC_UNSTABLE")
+            .spawn()
+            .expect("spawn fslc-lsp");
+        let stdin = child.stdin.take().expect("child stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        let mut session = Self {
+            child,
+            stdin,
+            stdout,
+            next_id: 1,
+        };
+        session.request(
+            "initialize",
+            &json!({"processId":null,"rootUri":null,"capabilities":{}}),
+        );
+        send(
+            &mut session.stdin,
+            &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+        );
+        session
+    }
+
+    fn open(&mut self, uri: &str, text: &str) {
+        send(
+            &mut self.stdin,
+            &json!({
+                "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+                    "uri":uri,"languageId":"fsl","version":1,"text":text
+                }}
+            }),
+        );
+    }
+
+    fn request(&mut self, method: &str, params: &Value) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        send(
+            &mut self.stdin,
+            &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
+        );
+        loop {
+            let message = receive(&mut self.stdout);
+            if message["id"] == id {
+                return message["result"].clone();
+            }
+        }
+    }
+
+    fn finish(mut self) {
+        self.request("shutdown", &Value::Null);
+        send(
+            &mut self.stdin,
+            &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+        );
+        drop(self.stdin);
+        assert!(self.child.wait().expect("wait for fslc-lsp").success());
+    }
+}
+
+/// Issue 1362 over the protocol: a state variable (`rejected` in
+/// `specs/rate_limiter.fsl`), a struct field (`status` in
+/// `specs/order_workflow.fsl`) and an action used as an acceptance step
+/// (`respond(0)` in `examples/nfr/support_sla.fsl`) are spelled like index
+/// keywords. Each one's use navigates to its declaration, its references are
+/// every occurrence of the name, rename rewrites exactly those, and hover
+/// names the declaration's role. The documents are opened under a directory
+/// that does not exist, so no sibling file joins the workspace.
+#[test]
+fn keyword_spelled_names_navigate_rename_and_hover_like_any_other_name() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("repository root");
+    // (corpus file, name, a use as (line, character), its declaration, role,
+    // occurrences of the name including the declaration), positions 0-based.
+    let cases = [
+        (
+            "specs/rate_limiter.fsl",
+            "rejected",
+            (28, 15),
+            (11, 4),
+            "variable",
+            6,
+        ),
+        (
+            "specs/order_workflow.fsl",
+            "status",
+            (23, 14),
+            (6, 17),
+            "property",
+            16,
+        ),
+        (
+            "examples/nfr/support_sla.fsl",
+            "respond",
+            (77, 4),
+            (37, 16),
+            "function",
+            2,
+        ),
+    ];
+    let mut session = Session::start();
+    for (file, name, (use_line, use_character), (line, character), role, occurrences) in cases {
+        let text = std::fs::read_to_string(root.join(file)).expect("read corpus file");
+        let uri = format!("file:///nonexistent-fsl-lsp-1362/{file}");
+        session.open(&uri, &text);
+        let at_use = json!({
+            "textDocument":{"uri":uri},
+            "position":{"line":use_line,"character":use_character}
+        });
+        let declaration = json!({
+            "start":{"line":line,"character":character},
+            "end":{"line":line,"character":character + name.len()}
+        });
+
+        let definition = session.request("textDocument/definition", &at_use);
+        assert_eq!(definition["uri"], uri, "{file} {name}: {definition:#}");
+        assert_eq!(definition["range"], declaration, "{file} {name}");
+
+        let mut with_context = at_use.clone();
+        with_context["context"] = json!({"includeDeclaration":true});
+        let references = session.request("textDocument/references", &with_context);
+        let references = references.as_array().expect("references array");
+        assert_eq!(
+            references.len(),
+            occurrences,
+            "{file} {name}: {references:#?}"
+        );
+        let lines = text.lines().collect::<Vec<_>>();
+        for reference in references {
+            let start = &reference["range"]["start"];
+            let line =
+                lines[usize::try_from(start["line"].as_u64().expect("line")).expect("usize")];
+            let character =
+                usize::try_from(start["character"].as_u64().expect("character")).expect("usize");
+            assert_eq!(
+                &line[character..character + name.len()],
+                name,
+                "{file}: {reference}"
+            );
+        }
+
+        let mut rename = at_use.clone();
+        rename["newName"] = json!("renamed");
+        let edit = session.request("textDocument/rename", &rename);
+        let edits = edit["changes"][&uri].as_array().expect("rename edits");
+        assert_eq!(edits.len(), occurrences, "{file} {name}: {edit:#}");
+        assert!(edits.iter().all(|edit| edit["newText"] == "renamed"));
+
+        let hover = session.request("textDocument/hover", &at_use);
+        assert!(
+            hover["contents"]["value"]
+                .as_str()
+                .is_some_and(|value| value.ends_with(&format!("**{role}** `{name}`"))),
+            "{file} {name}: {hover:#}"
+        );
+    }
+    session.finish();
+}
+
 /// fsl 5 plan S7, decisions/048 J3: the language server, which has no
 /// solver, publishes a decision table's gap with the values native `check`
 /// reports, because fsl-core enumerates the field's domain.
