@@ -1,4 +1,4 @@
-Fixed (#9993): `fslc fmt` and `fslc migrate` print requirement-style IDs
+Fixed (#1392): `fslc fmt` and `fslc migrate` print requirement-style IDs
 the way they are written. They used to put spaces around each `-` of an ID
 outside `business` documents, so `requirement REQ-1`, `acceptance AC-1`,
 `forbidden FB-1`, `covers REQ-1` and governance references such as
