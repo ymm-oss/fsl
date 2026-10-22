@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Insurance claim design layer (M tier) — two-phase payment with inline `implements`.
+// Bounded domain: ClaimId/Amount/Day/LedgerCount range types only (no unbounded Int).
+requirements InsuranceClaimDesign {
+  implements InsuranceClaimM from "claims_M.fsl" {
+    enum abstraction claim_state DSt -> CSt {
+      DIntake       -> Intake
+      DAssessment   -> Assessment
+      DReturned     -> Returned
+      DReassessment -> Reassessment
+      DApproved     -> Approved
+      DPaySubmitted -> Paid
+      DPayConfirmed -> Posted
+      DWithdrawn    -> Withdrawn
+      DLapsed       -> Lapsed
+    }
+    map claim[c: ClaimId] = Claim {
+      st: abstract(claim_state, d[c].st),
+      days: d[c].days,
+      amount: d[c].amount,
+    }
+    map paid = paid_ghost
+    map posted = posted_ghost
+
+    action receive(c, a) -> receive(c, a)
+    action assess(c) -> assess(c)
+    action return_to_claimant(c) -> return_to_claimant(c)
+    action resubmit(c) -> resubmit(c)
+    action pay_submit(c) -> pay(c)
+    action pay_confirm(c) -> post_ledger(c)
+    action withdraw(c) -> withdraw(c)
+    action advance_day(c) -> advance_day(c)
+    action lapse(c) -> lapse(c)
+  }
+
+  type ClaimId = 0..1
+  type Amount = 0..3
+  type Day = 0..3
+  type LedgerCount = 0..2
+  const LAPSE_AFTER = 3
+
+  enum DSt {
+    DIntake, DAssessment, DReturned, DReassessment,
+    DApproved, DPaySubmitted, DPayConfirmed,
+    DWithdrawn, DLapsed
+  }
+
+  struct DClaim { st: DSt, amount: Amount, days: Day }
+
+  state {
+    d: Map<ClaimId, DClaim>,
+    paid_ghost: LedgerCount,
+    posted_ghost: LedgerCount,
+  }
+
+  init {
+    forall c: ClaimId { d[c] = DClaim { st: DIntake, amount: 0, days: 0 } }
+    paid_ghost = 0
+    posted_ghost = 0
+  }
+
+  fair action receive(c: ClaimId, a: Amount) {
+    requires d[c].st == DIntake
+    requires a > 0
+    d[c] = DClaim { st: DAssessment, amount: a, days: d[c].days }
+  }
+
+  fair action assess(c: ClaimId) {
+    requires d[c].st == DAssessment or d[c].st == DReassessment
+    d[c].st = DApproved
+  }
+
+  fair action return_to_claimant(c: ClaimId) {
+    requires d[c].st == DAssessment or d[c].st == DReassessment
+    d[c].st = DReturned
+  }
+
+  fair action resubmit(c: ClaimId) {
+    requires d[c].st == DReturned
+    d[c].st = DReassessment
+  }
+
+  fair action pay_submit(c: ClaimId) {
+    requires d[c].st == DApproved
+    requires paid_ghost < 2
+    d[c].st = DPaySubmitted
+    paid_ghost = paid_ghost + 1
+  }
+
+  fair action pay_confirm(c: ClaimId) {
+    requires d[c].st == DPaySubmitted
+    requires posted_ghost < 2
+    d[c].st = DPayConfirmed
+    posted_ghost = posted_ghost + 1
+  }
+
+  fair action withdraw(c: ClaimId) {
+    requires d[c].st == DIntake or d[c].st == DAssessment
+      or d[c].st == DReturned or d[c].st == DReassessment
+    d[c].st = DWithdrawn
+  }
+
+  fair action advance_day(c: ClaimId) {
+    requires d[c].st != DPaySubmitted and d[c].st != DPayConfirmed
+      and d[c].st != DWithdrawn and d[c].st != DLapsed
+    requires d[c].days < LAPSE_AFTER
+    d[c].days = d[c].days + 1
+  }
+
+  fair action lapse(c: ClaimId) {
+    requires d[c].st == DIntake or d[c].st == DAssessment
+      or d[c].st == DReturned or d[c].st == DReassessment
+    requires d[c].days >= LAPSE_AFTER
+    d[c].st = DLapsed
+  }
+
+  invariant PaidGhostConsistent {
+    paid_ghost == count(c: ClaimId where d[c].st == DPaySubmitted or d[c].st == DPayConfirmed)
+  }
+
+  invariant PostedGhostConsistent {
+    posted_ghost == count(c: ClaimId where d[c].st == DPayConfirmed)
+  }
+
+  acceptance AC-1 "Two-phase payment through ledger posting" {
+    receive(0, 1)
+    assess(0)
+    pay_submit(0)
+    pay_confirm(0)
+    expect d[0].st == DPayConfirmed and posted_ghost == 1
+  }
+
+  acceptance AC-2 "Statute of limitations after the waiting period" {
+    receive(1, 2)
+    advance_day(1)
+    advance_day(1)
+    advance_day(1)
+    lapse(1)
+    expect d[1].st == DLapsed
+  }
+}
