@@ -171,4 +171,8 @@ requirements AgenticRagToolApprovalSlice {
     execute_tool(0)
     expect rejected
   }
+
+  // The final stages of the lifecycle (stages no lifecycle edge leaves) are
+  // the terminal states, as a business document derives them from its sinks.
+  terminal { forall r: Request { request_stage[r] == ActionExecuted or request_stage[r] == Refused } }
 }

@@ -15,7 +15,7 @@ mod process_form;
 pub use process_form::{
     ConvertedEvent, ConvertedProcess, LEGACY_PROCESS_FORM, MIGRATE_MANUAL_REQUIRED, ManualRequired,
     ProcessFormConversion, ProcessFormOutcome, Site, convert_process_forms,
-    plan_process_conversion, process_form_contract,
+    ignore_derived_terminal, plan_process_conversion, process_form_contract,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -370,7 +370,13 @@ impl MigrationDiagnostic {
             "taxonomy": self.taxonomy.as_str(),
             "severity": if self.code == fsl_syntax::MISSING_EDITION_HEADER {
                 "info"
-            } else if self.code == fsl_syntax::MIXED_NAMES {
+            } else if [
+                fsl_syntax::MIXED_NAMES,
+                fsl_syntax::FULLWIDTH_SPACE,
+                fsl_syntax::NON_NFC_IDENTIFIER,
+            ]
+            .contains(&self.code)
+            {
                 "warning"
             } else if edition == Edition::Fsl5 {
                 "error"
@@ -858,6 +864,33 @@ pub fn mixed_names_diagnostics(source: &str, options: &ParseOptions) -> Vec<Migr
                 reason: None,
                 edits: Vec::new(),
             })
+        })
+        .collect()
+}
+
+/// The lexer's warnings (`fullwidth_space`, `non_nfc_identifier`) as lint
+/// findings: each carries the text that reads the same without it, which
+/// replaces the span without changing the document's meaning. Empty outside
+/// the next edition's identifier rule.
+#[must_use]
+pub fn lexical_warning_diagnostics(
+    source: &str,
+    options: &ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    fsl_syntax::lexical_warnings(source, options)
+        .into_iter()
+        .map(|warning| MigrationDiagnostic {
+            code: warning.code,
+            taxonomy: Taxonomy::NonCanonical,
+            message: warning.message,
+            span: warning.span,
+            canonical_replacement: warning.replacement.clone(),
+            machine_applicable: true,
+            reason: None,
+            edits: vec![SourceEdit {
+                span: warning.span,
+                replacement: warning.replacement,
+            }],
         })
         .collect()
 }

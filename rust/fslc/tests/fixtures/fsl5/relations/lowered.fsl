@@ -75,4 +75,8 @@ requirements Support {
     take(0, 0) escalate(0) take(1, 0)
     expect rejected
   }
+
+  // The final stages of the lifecycle (stages no lifecycle edge leaves) are
+  // the terminal states, as a business document derives them from its sinks.
+  terminal { forall t: Ticket { ticket_stage[t] == Closed or ticket_stage[t] == Escalated } }
 }

@@ -981,7 +981,15 @@ fn edition_5_rewrites_the_e2e_process_form_into_entity_events_and_rules_keeping_
     let checked = run_gated(&["check", path]);
     assert_eq!(checked.status.code(), Some(0), "{:#}", json(&checked));
     assert_eq!(json(&checked)["result"], "ok");
-    assert_eq!(located_free_kernel(&original), before);
+    // The edition derives the terminal states from the lifecycle's final
+    // stages, which the process form never did: the one difference.
+    let mut after = located_free_kernel(&original);
+    assert!(before["properties"]["terminal"].is_null(), "{before:#}");
+    let terminal = after["properties"]["terminal"].take().to_string();
+    for stage in ["\"Rejected\"", "\"Paid\""] {
+        assert!(terminal.contains(stage), "{stage} in {terminal}");
+    }
+    assert_eq!(after, before);
 
     let again = json(&run_gated(&["migrate", path, "--edition", "5"]));
     assert_eq!(again["changed"], 0, "{again:#}");

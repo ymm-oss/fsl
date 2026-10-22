@@ -1256,6 +1256,82 @@ fn append_requirement_action_maps(action: &RequirementAction, items: &mut Vec<Re
     }
 }
 
+/// An enum both layers of a next-edition `implements` declare is one type
+/// of the refinement, compared member by member in order. An entity's stage
+/// enum lists its stages in the order they first appear in the `lifecycle`
+/// lines, which a reader does not see as an order; name both lists and what
+/// to change instead of the refinement's bare "declared differently".
+fn check_shared_enums(
+    next: &fsl_syntax::NextEditionRequirements,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    span: Span,
+) -> Result<(), RefinementError> {
+    for (name, definition) in &abstraction.types {
+        let (Some(TypeDef::Enum { members: here, .. }), TypeDef::Enum { members: there, .. }) =
+            (implementation.types.get(name), definition)
+        else {
+            continue;
+        };
+        if here == there {
+            continue;
+        }
+        let abs = &abstraction.name;
+        let entity = next
+            .entities
+            .iter()
+            .find(|entity| crate::naming::process_stage_enum(entity) == *name);
+        let what = entity.map_or_else(
+            || format!("enum '{name}'"),
+            |entity| format!("stage enum '{name}' of entity '{entity}'"),
+        );
+        let (noun, here_order) = entity.map_or(("members", ""), |_| {
+            (
+                "stages",
+                " (the order they first appear in the lifecycle lines)",
+            )
+        });
+        let list = |members: &[String]| members.join(", ");
+        let only = |left: &[String], right: &[String]| {
+            left.iter()
+                .filter(|member| !right.contains(member))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let (here_only, abs_only) = (only(here, there), only(there, here));
+        let message = if here_only.is_empty() && abs_only.is_empty() {
+            let fix = if entity.is_some() {
+                format!(
+                    "write the lifecycle lines so that the stages first appear in the order of '{abs}', or reorder them there"
+                )
+            } else {
+                format!("declare the members in the order of '{abs}'")
+            };
+            format!(
+                "{what} lists its {noun} in another order than '{abs}' does: here {}{here_order}, in '{abs}' {}; implements compares them by position, so {fix}",
+                list(here),
+                list(there),
+            )
+        } else {
+            let mut sides = Vec::new();
+            if !here_only.is_empty() {
+                sides.push(format!("only here: {}", list(&here_only)));
+            }
+            if !abs_only.is_empty() {
+                sides.push(format!("only in '{abs}': {}", list(&abs_only)));
+            }
+            format!(
+                "{what} has other {noun} than in '{abs}': here {}{here_order}, in '{abs}' {} ({}); an enum both layers declare must list the same {noun} in the same order",
+                list(here),
+                list(there),
+                sides.join("; "),
+            )
+        };
+        return Err(refinement_error(message, Some(span)));
+    }
+    Ok(())
+}
+
 /// Resolve a requirements-layer `implements` declaration into the abstract
 /// model and its generated refinement mapping.
 ///
@@ -1386,6 +1462,9 @@ pub fn requirements_implements_with_bounds_with_options(
             ),
             Some(span),
         ));
+    }
+    if let Some(next) = &requirements.next {
+        check_shared_enums(next, implementation, &abstraction, span)?;
     }
     let mut items = vec![
         RefinementItem::Impl(implementation.name.clone()),

@@ -89,6 +89,25 @@ pub fn parse_kernel_source_with_options(
     kernel
         .annotations
         .extend(crate::SPEC_TARGET, parsed.annotations);
+    // The lexer's warnings (`fullwidth_space`, `non_nfc_identifier`) are
+    // about the document as written, ahead of every lowering warning. They
+    // only exist under the next edition's identifier rule.
+    let lexical = fsl_syntax::lexical_warnings(source, options)
+        .into_iter()
+        .map(|warning| {
+            json!({
+                "kind": warning.code,
+                "code": warning.code,
+                "severity": "warning",
+                "message": warning.message,
+                "loc": warning.span.python_loc(),
+                "replacement": warning.replacement,
+            })
+        })
+        .collect::<Vec<_>>();
+    if !lexical.is_empty() {
+        kernel.diagnostics.splice(0..0, lexical);
+    }
     Ok(kernel)
 }
 

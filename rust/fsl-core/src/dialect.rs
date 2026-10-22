@@ -2526,6 +2526,9 @@ pub(crate) fn lower_resolved_requirements(
             });
         }
     }
+    if let Some(terminal) = derived_requirements_terminal(&requirements, &processes, &binders) {
+        items.push(terminal);
+    }
     if let Some(next) = &requirements.next {
         for property in next_rules::lower_rule_properties(
             &next.properties,
@@ -3002,6 +3005,57 @@ pub(crate) fn lower_resolved_requirements(
     let domain_warnings = crate::finite_domain::check(&decision_tables, &rule_guards, &kernel)?;
     kernel.diagnostics.extend(domain_warnings);
     Ok(kernel)
+}
+
+/// The `terminal { }` of a next-edition requirements document that writes
+/// none, derived as a business document derives its own from its sink
+/// stages: an instance has stopped as intended in a final stage of its
+/// entity's lifecycle (one no `lifecycle` edge leaves, whether or not an
+/// event moves along that edge), and the document has when every instance
+/// of every entity with a lifecycle has. An entity without a lifecycle is no
+/// process and adds nothing, nor does a relation's role (a field). An entity
+/// whose lifecycle has no final stage never stops as intended. `None` for the
+/// published edition, whose requirements derive no terminal.
+fn derived_requirements_terminal(
+    requirements: &SurfaceRequirements,
+    processes: &[RequirementsProcess],
+    binders: &[String],
+) -> Option<SpecItem> {
+    let next = requirements.next.as_ref()?;
+    if requirements
+        .items
+        .iter()
+        .any(|item| matches!(item, RequirementsItem::Common(SpecItem::Terminal { .. })))
+    {
+        return None;
+    }
+    let mut span = None;
+    let conditions = processes
+        .iter()
+        .zip(binders)
+        .filter_map(|(process, binder)| {
+            let process = &process.process;
+            let (_, finals) = next
+                .final_stages
+                .iter()
+                .find(|(entity, _)| *entity == process.entity)?;
+            span.get_or_insert(process.span);
+            Some(Expr::Quantified {
+                quantifier: "forall".to_owned(),
+                binder: typed_binder(binder, &process.entity),
+                body: Box::new(or_all(
+                    finals
+                        .iter()
+                        .map(|stage| stage_is(process, binder, stage))
+                        .collect(),
+                )),
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(SpecItem::Terminal {
+        expr: Box::new(and_all(conditions)),
+        span: span?,
+    })
 }
 
 fn property_targets(item: &SpecItem) -> Vec<String> {

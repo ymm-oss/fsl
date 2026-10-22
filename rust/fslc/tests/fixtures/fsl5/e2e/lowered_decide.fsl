@@ -87,4 +87,8 @@ requirements ExpenseRequirements {
     submit(0, 2) reject(0)
     expect claim_stage[0] == Rejected
   }
+
+  // The final stages of the lifecycle (stages no lifecycle edge leaves) are
+  // the terminal states, as a business document derives them from its sinks.
+  terminal { forall c: Claim { claim_stage[c] == Rejected or claim_stage[c] == Paid } }
 }

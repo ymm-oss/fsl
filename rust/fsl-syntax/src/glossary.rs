@@ -533,6 +533,27 @@ pub(crate) fn reject_unaliased_non_ascii(tokens: &[Token]) -> Result<(), ParseEr
     Ok(())
 }
 
+/// Outside requirements no document has a glossary, so every name it writes
+/// is canonical: a name that is not ASCII is [`crate::CANONICAL_NAME_NOT_ASCII`]
+/// there. `keyword` is the document's declaration keyword, for the message.
+/// Keywords are English in these documents, so every non-ASCII word is a
+/// name.
+pub(crate) fn reject_non_ascii_names(tokens: &[Token], keyword: &str) -> Result<(), ParseError> {
+    match tokens.iter().find_map(|token| match &token.kind {
+        TokenKind::Ident(word) if !word.is_ascii() => Some((word, token.span)),
+        _ => None,
+    }) {
+        Some((word, span)) => Err(ParseError::coded(
+            crate::CANONICAL_NAME_NOT_ASCII,
+            format!(
+                "name '{word}' is not ASCII; a {keyword} document declares canonical names, which are ASCII: write an ASCII name (a Japanese name is an alias, in the glossary of a requirements document)"
+            ),
+            span,
+        )),
+        None => Ok(()),
+    }
+}
+
 /// When `tokens[index]` starts `implements NAME from "path" {`, the index
 /// just past the block's closing brace.
 pub(crate) fn implements_body_end(tokens: &[Token], index: usize) -> Option<usize> {
