@@ -197,6 +197,9 @@ pub enum SyntaxLValue {
 pub(crate) enum ExpressionMode {
     Kernel,
     Domain,
+    /// A kernel expression in a next-edition requirements body: `and` and
+    /// `or` may also be spelled as the keyword table's Japanese.
+    NextRequirements,
 }
 
 impl SyntaxExpr {
@@ -1262,7 +1265,14 @@ impl SyntaxParser<'_> {
             TokenKind::Ident(value) | TokenKind::Symbol(value) => value.as_str(),
             _ => return None,
         };
-        match spelling {
+        let operator = match (self.mode, &self.peek().kind) {
+            (ExpressionMode::NextRequirements, TokenKind::Ident(_)) => {
+                crate::keywords::english_of(crate::keywords::KeywordContext::Expression, spelling)
+                    .unwrap_or(spelling)
+            }
+            _ => spelling,
+        };
+        match operator {
             "=>" => Some(("=>".to_owned(), spelling.to_owned(), 1, 1)),
             "->" if self.mode == ExpressionMode::Domain => {
                 Some(("=>".to_owned(), spelling.to_owned(), 1, 1))

@@ -125,10 +125,10 @@ pub fn dialect_keyword_with(
     source: &str,
     options: &ParseOptions,
 ) -> Result<&'static str, ParseError> {
-    let (tokens, _) = document_tokens(source, *options)?;
+    let (tokens, edition) = document_tokens(source, *options)?;
     let mut cursor = 0;
     leading_annotations(&tokens, &mut cursor)?;
-    select_frontend(&tokens, cursor).map(|registration| registration.keyword)
+    select_frontend(&tokens, cursor, edition).map(|registration| registration.keyword)
 }
 
 /// The document's token stream without its edition header, and the edition
@@ -205,7 +205,7 @@ pub fn parse_document_with(
     let (tokens, edition) = document_tokens(source.source(), *options)?;
     let mut cursor = 0;
     let annotations = leading_annotations(&tokens, &mut cursor)?;
-    let registration = select_frontend(&tokens, cursor)?;
+    let registration = select_frontend(&tokens, cursor, edition)?;
     let source = SourceFile { edition, ..source };
     let surface = (registration.parse)(source, tokens, cursor)?;
     Ok(ParsedDocument {
@@ -216,12 +216,18 @@ pub fn parse_document_with(
     })
 }
 
+/// The frontend of the declaration at `cursor`. A next-edition document may
+/// open its requirements with the keyword table's Japanese `要件`.
 fn select_frontend(
     tokens: &[Token],
     cursor: usize,
+    edition: Edition,
 ) -> Result<&'static FrontendRegistration, ParseError> {
     let token = &tokens[cursor];
-    let keyword = declaration_identifier(tokens, cursor)?;
+    let mut keyword = declaration_identifier(tokens, cursor)?;
+    if edition == Edition::Fsl5 && keyword == crate::keywords::Kw::Requirements.japanese() {
+        keyword = crate::keywords::Kw::Requirements.english();
+    }
     FRONTENDS
         .iter()
         .find(|registration| registration.keyword == keyword)

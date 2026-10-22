@@ -1,0 +1,90 @@
+fsl 5
+// fsl5_en.fsl written in Japanese: the keyword table's Japanese keywords
+// (range B, at the English positions; `with` is the particle で after the
+// input and `is` is は), the glossary's Japanese aliases, and the particles
+// が (actor) and を (entity / instance) in every phrase. It lowers to
+// lowered.fsl, as fsl5_en.fsl and fsl5_ja_particles.fsl do.
+// English words that stay: the header, `implements … from` and the mapping
+// inside it (range A, written in canonical names), the event names (canonical
+// names that reach implementations), the REQ / AC ids, and the symbols.
+// The lifecycle is split as in fsl5_en.fsl, so that the stages first appear
+// in the order lowered.fsl's ClaimStage lists them (Rejected before Paid).
+要件 ExpenseRequirements {
+  用語集 {
+    ExpenseRequirements = 経費精算要件
+    Amount       = 金額
+    AUTO_LIMIT   = 自動承認上限
+    Employee     = 従業員
+    System       = システム
+    Manager      = 上長
+    Finance      = 経理
+    Claim        = 申請
+    Claim.amount = 申請金額
+    Draft        = 下書き
+    Submitted    = 提出済み
+    Approved     = 承認済み
+    Rejected     = 却下済み
+    Paid         = 支払済み
+    SmallClaim   = 少額申請
+    LargeClaim   = 高額申請
+    submits      = 提出する
+    approves     = 承認する
+    rejects      = 却下する
+    pays         = 支払う
+    paid_claims  = 支払件数
+  }
+
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, amount) -> submit(c)
+  }
+
+  数値 金額
+  定数 自動承認上限 = 1
+  アクター 従業員, システム, 上長, 経理
+
+  エンティティ 申請 {
+    申請金額: 金額 = 0
+    ライフサイクル 下書き -> 提出済み -> 承認済み
+    ライフサイクル 提出済み -> 却下済み
+    ライフサイクル 承認済み -> 支払済み
+  }
+
+  区分 少額申請 = 申請 のうち 申請金額 <= 自動承認上限
+  区分 高額申請 = 申請 のうち 申請金額 > 自動承認上限
+
+  出来事 submit       = 従業員 が 申請 を 提出する 申請金額 で   下書き -> 提出済み
+  出来事 auto_approve = システム が 申請 を 承認する             提出済み -> 承認済み
+  出来事 mgr_approve  = 上長 が 申請 を 承認する                 提出済み -> 承認済み
+  出来事 reject       = 上長 が 申請 を 却下する                 提出済み -> 却下済み
+  出来事 pay          = 経理 が 申請 を 支払う                   承認済み -> 支払済み
+    対応要件 REQ-4 "承認された申請だけが支払われる"
+
+  規則 REQ-1 "申請者は金額を入力して経費申請を提出する" {
+    許可 従業員 が 申請 を 提出する 条件 入力 申請金額 > 0
+  }
+
+  決定表 REQ-2-3 "提出された申請を誰が扱うか" 対象 提出済み 申請 {
+    少額申請 => システム が 承認する
+      対応要件 REQ-2 "自動承認上限以下の申請はシステムが自動承認する"
+    高額申請 => 上長 が 承認する または 却下する
+      対応要件 REQ-3 "自動承認上限を超える申請は上長が承認または却下する"
+  }
+
+  重要指標 支払件数 = 件数 申請 段階 支払済み
+
+  シナリオ AC-1 "承認の流れ: 少額の申請が自動承認され支払われる" {
+    従業員 が 申請1 を 申請金額 1 で 提出する
+    システム が 申請1 を 承認する
+    経理 が 申請1 を 支払う
+    結果 申請1 は 支払済み
+  }
+  シナリオ AC-2 "却下の流れ: 高額の申請が上長に却下される" {
+    従業員 が 申請1 を 申請金額 2 で 提出する
+    上長 が 申請1 を 却下する
+    結果 申請1 は 却下済み
+  }
+}
+検証 {
+  個数 申請 = 3
+  値域 金額 = 0..3
+}

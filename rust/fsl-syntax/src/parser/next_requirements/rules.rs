@@ -24,9 +24,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::{Parser, join_span};
 use super::{
-    Entity, EventSignature, UNKNOWN_EVENT_PHRASE, UNKNOWN_VERB, Word, actor_not_declared,
-    is_symbol, join_names, nearest, resolve_event_names,
+    Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, Roles, UNKNOWN_EVENT_PHRASE,
+    UNKNOWN_VERB, Word, actor_not_declared, check_marked_roles, is_symbol, join_names, nearest,
+    resolve_event_names,
 };
+use crate::keywords::{Kw, Particle};
 use crate::{
     Annotation, ConceptDeclaration, EditionWarning, Expr, NextEditionRequirements, ParseError,
     ProcessField, ProcessItem, QualifiedName, RequirementBlockItem, RequirementsItem, RuleGuard,
@@ -46,10 +48,12 @@ pub const INVALID_RULE_PROPERTY_NAME: &str = "invalid_rule_property_name";
 /// Same code as the core's check of the names an entity generates.
 pub const GENERATED_NAME_COLLISION: &str = "generated_name_collision";
 
-/// `Actor verb Entity` or `Actor Entity verb`, as read.
+/// `Actor verb Entity` or `Actor Entity verb`, as read; with particles
+/// (`Actor が Entity を verb`, any order) `words` is `[verb, entity]`.
 struct Phrase {
     actor: Word,
     words: [Word; 2],
+    particles: bool,
 }
 
 /// One conjunct of a concept expression: a concept, or `Stage Entity`.
@@ -165,23 +169,28 @@ impl Parser<'_> {
     }
 
     fn rule_statement(&mut self) -> Result<RuleStatement, ParseError> {
-        if self.eat_ident("allow") {
-            let phrase = self.phrase()?;
-            self.expect_ident_value("only")?;
-            return Ok(RuleStatement::Allow(phrase, self.rule_condition()?));
+        if self.eat_kw(Kw::Allow) {
+            let phrase = self.phrase(&[Kw::AllowOnlyWhen, Kw::AllowOnlyFor])?;
+            let condition = self.rule_condition(Kw::AllowOnlyWhen, Kw::AllowOnlyFor)?;
+            return Ok(RuleStatement::Allow(phrase, condition));
         }
-        if self.eat_ident("never") {
-            let phrase = self.phrase()?;
-            return Ok(RuleStatement::Never(phrase, self.rule_condition()?));
+        if self.eat_kw(Kw::Never) {
+            let phrase = self.phrase(&[Kw::NeverWhen, Kw::NeverFor])?;
+            let condition = self.rule_condition(Kw::NeverWhen, Kw::NeverFor)?;
+            return Ok(RuleStatement::Never(phrase, condition));
         }
-        if self.eat_ident("always") {
-            let second = &self.peek_n(1).kind;
-            if matches!(second, TokenKind::Ident(word) if word == "not" || word == "in") {
+        if self.eat_kw(Kw::Always) {
+            if self.peek_kw_at(1, Kw::AlwaysNotIn)
+                || self.peek_kw_at(1, Kw::AlwaysIn)
+                || matches!(&self.peek_n(1).kind, TokenKind::Ident(word) if word == "not")
+            {
                 let entity = self.word()?;
-                let negated = self.eat_ident("not");
-                self.expect_ident_value("in")?;
+                let negated = self.eat_kw(Kw::AlwaysNotIn);
+                if !negated {
+                    self.expect_kw(Kw::AlwaysIn)?;
+                }
                 let stages = self.word_list()?;
-                self.expect_ident_value("has")?;
+                self.expect_kw(Kw::AlwaysHas)?;
                 let has = self.expression(0)?;
                 return Ok(RuleStatement::AlwaysHas {
                     entity,
@@ -191,10 +200,10 @@ impl Parser<'_> {
                 });
             }
             let left = self.conjuncts()?;
-            self.expect_ident_value("is")?;
+            self.expect_kw(Kw::AlwaysIs)?;
             return Ok(RuleStatement::Always(left, self.conjuncts()?));
         }
-        if self.eat_ident("deadline") {
+        if self.eat_kw(Kw::Deadline) {
             let name = self.expect_ident()?;
             self.expect_symbol("<=")?;
             return Ok(RuleStatement::Deadline {
@@ -202,12 +211,11 @@ impl Parser<'_> {
                 bound: self.expression(0)?,
             });
         }
-        if matches!(&self.peek_n(1).kind, TokenKind::Ident(word) if word == "enters") {
+        if self.peek_kw_at(1, Kw::Enters) {
             let entity = self.word()?;
             self.bump();
             let target = self.word()?;
-            self.expect_ident_value("only")?;
-            self.expect_ident_value("from")?;
+            self.expect_kw(Kw::OnlyFrom)?;
             return Ok(RuleStatement::Enters {
                 entity,
                 target,
@@ -220,17 +228,69 @@ impl Parser<'_> {
                  `<phrase> only after <phrase>` or `<Entity> enters <Stage> only from …`",
             ));
         }
-        let later = self.phrase()?;
-        self.expect_ident_value("only")?;
-        self.expect_ident_value("after")?;
-        Ok(RuleStatement::After(later, self.phrase()?))
+        let later = self.phrase(&[Kw::OnlyAfter])?;
+        self.expect_kw(Kw::OnlyAfter)?;
+        Ok(RuleStatement::After(later, self.phrase(&[])?))
     }
 
-    fn phrase(&mut self) -> Result<Phrase, ParseError> {
-        Ok(Phrase {
-            actor: self.word()?,
-            words: [self.word()?, self.word()?],
-        })
+    /// `Actor verb Entity` / `Actor Entity verb`, or the same with particles
+    /// on one line up to one of `stops`.
+    fn phrase(&mut self, stops: &[Kw]) -> Result<Phrase, ParseError> {
+        if !self.phrase_has_particles(stops) {
+            return Ok(Phrase {
+                actor: self.word()?,
+                words: [self.word()?, self.word()?],
+                particles: false,
+            });
+        }
+        let start = self.peek().span;
+        let mut roles = Roles::default();
+        while matches!(self.peek().kind, TokenKind::Ident(_))
+            && self.peek().span.start.line == start.start.line
+            && !stops.iter().any(|stop| self.peek_kw(*stop))
+        {
+            let word = self.word()?;
+            match self.particle_here() {
+                Some(particle) => {
+                    self.bump();
+                    if particle == Particle::De {
+                        return Err(ParseError::coded(
+                            PARTICLE_ROLE_MISMATCH,
+                            format!(
+                                "'{}' takes で (input), but a rule's phrase names events by \
+                                 actor, verb and entity; state the input in the condition \
+                                 (`input {}`)",
+                                word.text, word.text
+                            ),
+                            word.span,
+                        ));
+                    }
+                    roles.mark(word, particle, "a rule phrase")?;
+                }
+                None => roles.unmarked(word)?,
+            }
+        }
+        let actor = roles.actor(start)?;
+        match (roles.verb, roles.object) {
+            (Some(verb), Some(object)) => Ok(Phrase {
+                actor,
+                words: [verb, object],
+                particles: true,
+            }),
+            (Some(word), None) => Err(ParseError::coded(
+                MIXED_PARTICLES,
+                format!(
+                    "a rule phrase names its entity with を and its verb without a particle; \
+                     '{}' is the only word without one",
+                    word.text
+                ),
+                word.span,
+            )),
+            (None, _) => Err(ParseError::new(
+                "this rule phrase names no verb: the word without a particle",
+                start,
+            )),
+        }
     }
 
     fn word_list(&mut self) -> Result<Vec<Word>, ParseError> {
@@ -241,15 +301,20 @@ impl Parser<'_> {
         Ok(words)
     }
 
-    /// `when <expression>` (inputs spelled `input name`) or
-    /// `for <concept expression>`.
-    fn rule_condition(&mut self) -> Result<Condition, ParseError> {
-        if self.eat_ident("when") {
+    /// `<when> <expression>` (inputs spelled `input name`) or
+    /// `<for> <concept expression>`: allow's `only when` / `only for`, never's
+    /// `when` / `for`.
+    fn rule_condition(&mut self, when: Kw, r#for: Kw) -> Result<Condition, ParseError> {
+        if self.eat_kw(when) {
             Ok(Condition::When(self.event_expression()?))
-        } else if self.eat_ident("for") {
+        } else if self.eat_kw(r#for) {
             Ok(Condition::For(self.conjuncts()?))
         } else {
-            Err(self.error("expected `when <condition>` or `for <concept>`"))
+            Err(self.error(&format!(
+                "expected {} <condition> or {} <concept>",
+                self.kw_spelling(when),
+                self.kw_spelling(r#for)
+            )))
         }
     }
 
@@ -262,21 +327,21 @@ impl Parser<'_> {
             let first = self.word()?;
             let next = self.peek();
             let same_line = next.span.start.line == first.span.start.line;
-            let conjunct = match &next.kind {
-                TokenKind::Ident(word)
-                    if same_line
-                        && !["and", "is"].contains(&word.as_str())
-                        && !matches!(&self.peek_n(1).kind, TokenKind::Ident(after) if after == "enters") =>
-                {
-                    Conjunct::Stage {
-                        stage: first,
-                        entity: self.word()?,
-                    }
+            let conjunct = if matches!(next.kind, TokenKind::Ident(_))
+                && same_line
+                && !self.peek_kw(Kw::And)
+                && !self.peek_kw(Kw::AlwaysIs)
+                && !self.peek_kw_at(1, Kw::Enters)
+            {
+                Conjunct::Stage {
+                    stage: first,
+                    entity: self.word()?,
                 }
-                _ => Conjunct::Concept(first),
+            } else {
+                Conjunct::Concept(first)
             };
             conjuncts.push(conjunct);
-            if !self.eat_ident("and") {
+            if !self.eat_kw(Kw::And) {
                 return Ok(conjuncts);
             }
         }
@@ -409,6 +474,16 @@ impl Scope<'_> {
     /// The entity a phrase is about and the events it names: every event
     /// with its actor, verb and entity (B.6: a phrase can name several).
     fn phrase(&self, phrase: &Phrase) -> Result<(String, Vec<&EventSignature>), ParseError> {
+        if phrase.particles {
+            let [verb, entity] = &phrase.words;
+            check_marked_roles(
+                &phrase.actor,
+                Some(entity),
+                Some(verb),
+                self.actors,
+                |word| self.entities.contains_key(word),
+            )?;
+        }
         if !self.actors.contains(phrase.actor.text.as_str()) {
             return Err(actor_not_declared(&phrase.actor, self.actors));
         }
@@ -975,7 +1050,7 @@ pub(in crate::parser) fn warn_unprobed(
 /// Whether the member starting here is a rule: `rule` followed by a
 /// requirement id.
 pub(in crate::parser) fn starts_rule(parser: &Parser<'_>) -> bool {
-    parser.peek_ident("rule")
+    parser.peek_kw(Kw::Rule)
         && matches!(
             parser.peek_n(1).kind,
             TokenKind::Ident(_) | TokenKind::Int(_)

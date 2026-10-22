@@ -1,0 +1,89 @@
+fsl 5
+// The design draft's fsl3_ja_particles.fsl, headed `fsl 5`: English keywords,
+// the glossary's Japanese aliases, and particles as separate words in every
+// phrase (が actor, を entity / instance, で input). With particles, the words
+// of a phrase may come in any order. It lowers to lowered.fsl, as fsl5_en.fsl
+// and fsl5_ja_full.fsl do.
+// Two changes from the draft, both as in fsl5_en.fsl: the rule names the
+// input as `input 申請金額` (the event's input and the field share the name,
+// decisions/046 Q6), and the lifecycle is split so that the stages first
+// appear in the order lowered.fsl's ClaimStage lists them.
+requirements ExpenseRequirements {
+  glossary {
+    ExpenseRequirements = 経費精算要件
+    Amount       = 金額
+    AUTO_LIMIT   = 自動承認上限
+    Employee     = 従業員
+    System       = システム
+    Manager      = 上長
+    Finance      = 経理
+    Claim        = 申請
+    Claim.amount = 申請金額
+    Draft        = 下書き
+    Submitted    = 提出済み
+    Approved     = 承認済み
+    Rejected     = 却下済み
+    Paid         = 支払済み
+    SmallClaim   = 少額申請
+    LargeClaim   = 高額申請
+    submits      = 提出する
+    approves     = 承認する
+    rejects      = 却下する
+    pays         = 支払う
+    paid_claims  = 支払件数
+  }
+
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, amount) -> submit(c)
+  }
+
+  number 金額
+  const 自動承認上限 = 1
+  actor 従業員, システム, 上長, 経理
+
+  entity 申請 {
+    申請金額: 金額 = 0
+    lifecycle 下書き -> 提出済み -> 承認済み
+    lifecycle 提出済み -> 却下済み
+    lifecycle 承認済み -> 支払済み
+  }
+
+  concept 少額申請 = 申請 where 申請金額 <= 自動承認上限
+  concept 高額申請 = 申請 where 申請金額 > 自動承認上限
+
+  event submit       = 従業員 が 申請 を 提出する 申請金額 で   下書き -> 提出済み
+  event auto_approve = システム が 申請 を 承認する             提出済み -> 承認済み
+  event mgr_approve  = 上長 が 申請 を 承認する                 提出済み -> 承認済み
+  event reject       = 上長 が 申請 を 却下する                 提出済み -> 却下済み
+  event pay          = 経理 が 申請 を 支払う                   承認済み -> 支払済み
+    covers REQ-4 "承認された申請だけが支払われる"
+
+  rule REQ-1 "申請者は金額を入力して経費申請を提出する" {
+    allow 従業員 が 申請 を 提出する only when input 申請金額 > 0
+  }
+
+  decide REQ-2-3 "提出された申請を誰が扱うか" for 提出済み 申請 {
+    少額申請 => システム が 承認する
+      covers REQ-2 "自動承認上限以下の申請はシステムが自動承認する"
+    高額申請 => 上長 が 承認する or 却下する
+      covers REQ-3 "自動承認上限を超える申請は上長が承認または却下する"
+  }
+
+  kpi 支払件数 = count 申請 in 支払済み
+
+  scenario AC-1 "承認の流れ: 少額の申請が自動承認され支払われる" {
+    従業員 が 申請1 を 申請金額 1 で 提出する
+    システム が 申請1 を 承認する
+    経理 が 申請1 を 支払う
+    then 申請1 は 支払済み
+  }
+  scenario AC-2 "却下の流れ: 高額の申請が上長に却下される" {
+    従業員 が 申請1 を 申請金額 2 で 提出する
+    上長 が 申請1 を 却下する
+    then 申請1 は 却下済み
+  }
+}
+verify {
+  instances 申請 = 3
+  values 金額 = 0..3
+}

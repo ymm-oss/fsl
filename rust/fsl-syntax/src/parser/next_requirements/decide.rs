@@ -19,7 +19,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{Entity, EventSignature, UNKNOWN_EVENT_PHRASE, Word, actor_not_declared, join_names};
+use super::{
+    Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, UNKNOWN_EVENT_PHRASE, Word,
+    actor_not_declared, join_names,
+};
+use crate::keywords::{Kw, Particle};
 use crate::parser::{Parser, join_span};
 use crate::{
     Annotation, ConceptDeclaration, DecisionRow, DecisionTable, Expr, ParseError, ProcessCover,
@@ -53,6 +57,8 @@ struct RowSource {
     condition: Condition,
     actor: Word,
     verbs: Vec<Word>,
+    /// Whether the outcome marks its actor with が.
+    particles: bool,
     covers: Vec<ProcessCover>,
     source: String,
     span: Span,
@@ -65,7 +71,7 @@ impl Parser<'_> {
         let start = self.bump().span;
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
-        self.expect_ident_value("for")?;
+        self.expect_kw(Kw::DecideFor)?;
         let stage = self.word()?;
         let entity = self.word()?;
         self.expect_symbol("{")?;
@@ -85,7 +91,7 @@ impl Parser<'_> {
                 start,
             ));
         }
-        let assuming = if self.eat_ident("assuming") {
+        let assuming = if self.eat_kw(Kw::Assuming) {
             Some(self.expression(0)?)
         } else {
             None
@@ -105,13 +111,13 @@ impl Parser<'_> {
     /// `otherwise`.
     fn decide_row(&mut self) -> Result<RowSource, ParseError> {
         let start = self.peek().span;
-        let condition = if self.eat_ident("otherwise") {
+        let condition = if self.eat_kw(Kw::Otherwise) {
             Condition::Otherwise
         } else {
             let first = self.word()?;
-            if self.peek_ident("and") {
+            if self.peek_kw(Kw::And) {
                 let mut concepts = vec![first];
-                while self.eat_ident("and") {
+                while self.eat_kw(Kw::And) {
                     concepts.push(self.word()?);
                 }
                 Condition::Concepts(concepts)
@@ -122,18 +128,24 @@ impl Parser<'_> {
             }
         };
         self.expect_symbol("=>")?;
-        let actor = self.word()?;
-        let mut verbs = vec![self.word()?];
-        while self.eat_ident("or") {
-            verbs.push(self.word()?);
-        }
+        let particles = self.phrase_has_particles(&[Kw::Covers]);
+        let (actor, verbs) = if particles {
+            self.marked_row_outcome()?
+        } else {
+            let actor = self.word()?;
+            let mut verbs = vec![self.word()?];
+            while self.eat_kw(Kw::RowOr) {
+                verbs.push(self.word()?);
+            }
+            (actor, verbs)
+        };
         let end = self.last_span();
         let source = self.source[start.start.offset..end.end.offset]
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
         let mut covers = Vec::new();
-        while self.peek_ident("covers") {
+        while self.peek_kw(Kw::Covers) {
             let cover_start = self.bump().span;
             let id = self.req_id()?;
             let (text, text_span) = self.expect_string_with_span()?;
@@ -147,10 +159,61 @@ impl Parser<'_> {
             condition,
             actor,
             verbs,
+            particles,
             covers,
             source,
             span: join_span(start, end),
         })
+    }
+
+    /// A row's outcome written with particles, on the row's line: the actor
+    /// marked が and the verbs, without particles, joined by `or`. The table
+    /// names the entity, so no word takes を.
+    fn marked_row_outcome(&mut self) -> Result<(Word, Vec<Word>), ParseError> {
+        let start = self.peek().span;
+        let mut actor: Option<Word> = None;
+        let mut verbs = Vec::new();
+        while matches!(self.peek().kind, TokenKind::Ident(_))
+            && self.peek().span.start.line == start.start.line
+            && !self.peek_kw(Kw::Covers)
+        {
+            if !verbs.is_empty() && self.eat_kw(Kw::RowOr) {
+                continue;
+            }
+            let word = self.word()?;
+            match self.particle_here() {
+                Some(Particle::Ga) if actor.is_none() => {
+                    self.bump();
+                    actor = Some(word);
+                }
+                Some(particle) => {
+                    return Err(ParseError::coded(
+                        PARTICLE_ROLE_MISMATCH,
+                        format!(
+                            "'{}' takes {} ({}), but a decision table row names only its actor \
+                             (が) and verbs; the table names the entity",
+                            word.text,
+                            particle.spelling(),
+                            particle.role()
+                        ),
+                        word.span,
+                    ));
+                }
+                None => verbs.push(word),
+            }
+        }
+        let Some(actor) = actor else {
+            return Err(ParseError::coded(
+                MIXED_PARTICLES,
+                "this row's outcome marks words with particles but not its actor; write \
+                 `<actor> が <verb>`",
+                start,
+            ));
+        };
+        if verbs.is_empty() {
+            return Err(ParseError::new("this row's outcome names no verb", start));
+        }
+        Ok((actor, verbs))
     }
 }
 
@@ -407,6 +470,21 @@ pub(super) fn apply(
         let mut row_covers = Vec::new();
         for row in decision.rows {
             if !actors.contains(row.actor.text.as_str()) {
+                if row.particles
+                    && let Some(verb) = row
+                        .verbs
+                        .iter()
+                        .find(|verb| actors.contains(verb.text.as_str()))
+                {
+                    return Err(ParseError::coded(
+                        PARTICLE_ROLE_MISMATCH,
+                        format!(
+                            "'{}' takes が (actor), but '{}' is the actor; write `{} が`",
+                            row.actor.text, verb.text, verb.text
+                        ),
+                        row.actor.span,
+                    ));
+                }
                 return Err(actor_not_declared(&row.actor, actors));
             }
             let mut named = Vec::new();
