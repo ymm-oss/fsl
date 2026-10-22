@@ -14,7 +14,10 @@
 //! - acceptance 1 (K): each lowers to exactly the kernel of its canonical
 //!   twin;
 //! - acceptance 2: `kernel`, `testgen` and `explain --names canonical` print
-//!   only ASCII names (string literals, the requirement wording, aside);
+//!   only ASCII names (string literals, the requirement wording, aside), for
+//!   these fixtures and for the e2e example in Japanese keywords and in
+//!   particles ([`JAPANESE_KEYWORD_SOURCES`]), whose rule and decision-row
+//!   lowering steps are recorded in canonical names and English keywords;
 //! - acceptance 3: each glossary diagnostic, and an alias inside
 //!   `implements`, fails with its code at the offending text.
 
@@ -58,6 +61,12 @@ const SOURCES: &[Source] = &[
         twin_gated: false,
     },
 ];
+
+/// The e2e example in the keyword table's Japanese keywords and in
+/// particles, both with the glossary's Japanese aliases
+/// (`tests/fixtures/fsl5/e2e/`). They lower to `lowered.fsl`
+/// (`fsl5_lowering_contract.rs`); here only their outputs are scanned.
+const JAPANESE_KEYWORD_SOURCES: &[&str] = &["fsl5_ja_full.fsl", "fsl5_ja_particles.fsl"];
 
 impl Source {
     fn path(&self) -> PathBuf {
@@ -268,6 +277,13 @@ fn implementations_see_only_ascii_canonical_names() {
             &source.path(),
             &source.context(),
             source.name.ends_with("_ja.fsl"),
+        );
+    }
+    for name in JAPANESE_KEYWORD_SOURCES {
+        assert_ascii_outputs(
+            &fixtures().join("fsl5/e2e").join(name),
+            &format!("fsl5/e2e/{name}"),
+            true,
         );
     }
 }

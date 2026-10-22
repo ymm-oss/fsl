@@ -10,12 +10,17 @@
 //! (`always`) or a transition property (`enters`) quantified over the
 //! entity, named by [`crate::naming::rule_property_name`]. Both carry the
 //! rule's requirement.
+//!
+//! The stage guard itself, an event's first `requires`, has an origin whose
+//! step is `move` (`Submitted -> Approved`, or `in Submitted` for an event
+//! that keeps its stage), so every `requires` of an event's action names
+//! where it came from (`fslc explain`).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use fsl_syntax::{
-    Annotation, Expr, ProcessTransition, RequirementBlockItem, RequirementsItem, RuleGuard,
-    RuleProperty, SpecItem,
+    Annotation, EventForm, Expr, ProcessTransition, RequirementBlockItem, RequirementsItem,
+    RuleGuard, RuleProperty, SpecItem,
 };
 
 use super::{
@@ -70,6 +75,34 @@ pub(super) fn guard_origin(transition: &ProcessTransition, guard: &RuleGuard) ->
         guard.kind,
         &guard.detail,
     )
+}
+
+/// The origin of the stage guard of `transition`'s action: the event's
+/// move, `Source -> Target` or `in Source`.
+pub(super) fn move_origin(transition: &ProcessTransition, event: &EventForm) -> OriginChain {
+    OriginChain {
+        id: OriginId(format!(
+            "requirements:move:{}:{}",
+            transition.name, transition.span.start.offset
+        )),
+        dialect: "requirements".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(transition.span),
+            dialect: "requirements".to_owned(),
+            declaration_path: vec![transition.name.clone()],
+        }),
+        secondary: Vec::new(),
+        lowering_steps: vec![LoweringStep {
+            kind: "move".to_owned(),
+            detail: Some(if event.moves {
+                format!("{} -> {}", transition.source, transition.target)
+            } else {
+                format!("in {}", transition.source)
+            }),
+        }],
+        generated: true,
+    }
 }
 
 /// A name written for a rule property that a Kernel property cannot take.

@@ -28,7 +28,7 @@ use super::{
     UNKNOWN_VERB, Word, actor_not_declared, check_marked_roles, is_symbol, join_names, nearest,
     resolve_event_names,
 };
-use crate::keywords::{Kw, Particle};
+use crate::keywords::{KeywordContext, Kw, Particle, english_of};
 use crate::{
     Annotation, ConceptDeclaration, EditionWarning, Expr, NextEditionRequirements, ParseError,
     ProcessField, ProcessItem, QualifiedName, RequirementBlockItem, RequirementsItem, RuleGuard,
@@ -63,7 +63,9 @@ enum Conjunct {
 }
 
 enum Condition {
-    When(Expr),
+    /// The expression, and its text in canonical names and English keywords
+    /// ([`Parser::canonical_text`]).
+    When(Expr, String),
     For(Vec<Conjunct>),
 }
 
@@ -82,6 +84,8 @@ enum RuleStatement {
         negated: bool,
         stages: Vec<Word>,
         has: Expr,
+        /// `has`'s text, as [`Condition::When`]'s.
+        has_text: String,
     },
     Deadline {
         name: String,
@@ -93,7 +97,9 @@ struct Located {
     /// The property name written before the statement (`Name: …`).
     name: Option<Word>,
     statement: RuleStatement,
-    /// The statement as written, whitespace collapsed.
+    /// The statement as written, whitespace collapsed, for the parser's
+    /// own diagnostics. The guards and properties carry
+    /// [`Scope::statement_text`] instead.
     detail: String,
     span: Span,
 }
@@ -191,12 +197,14 @@ impl Parser<'_> {
                 }
                 let stages = self.word_list()?;
                 self.expect_kw(Kw::AlwaysHas)?;
+                let from = self.cursor;
                 let has = self.expression(0)?;
                 return Ok(RuleStatement::AlwaysHas {
                     entity,
                     negated,
                     stages,
                     has,
+                    has_text: self.canonical_text(from),
                 });
             }
             let left = self.conjuncts()?;
@@ -306,7 +314,9 @@ impl Parser<'_> {
     /// `when` / `for`.
     fn rule_condition(&mut self, when: Kw, r#for: Kw) -> Result<Condition, ParseError> {
         if self.eat_kw(when) {
-            Ok(Condition::When(self.event_expression()?))
+            let from = self.cursor;
+            let expression = self.event_expression()?;
+            Ok(Condition::When(expression, self.canonical_text(from)))
         } else if self.eat_kw(r#for) {
             Ok(Condition::For(self.conjuncts()?))
         } else {
@@ -346,6 +356,53 @@ impl Parser<'_> {
             }
         }
     }
+}
+
+impl Parser<'_> {
+    /// The tokens read since `from` in canonical names and English keywords:
+    /// aliases are already resolved on the tokens, a Japanese keyword of an
+    /// expression (`入力`, `かつ`, `または`) is spelled in English through the
+    /// keyword table, and the space between two tokens is one space. An
+    /// English source reads as written, whitespace collapsed.
+    fn canonical_text(&self, from: usize) -> String {
+        let mut text = String::new();
+        let mut previous: Option<Span> = None;
+        for token in &self.tokens[from..self.cursor] {
+            let written = &self.source[token.span.start.offset..token.span.end.offset];
+            let spelled = match &token.kind {
+                TokenKind::Ident(word) => english_of(KeywordContext::RuleExpression, word)
+                    .or_else(|| english_of(KeywordContext::Expression, word))
+                    .unwrap_or(word),
+                _ => written,
+            };
+            if previous.is_some_and(|previous| previous.end.offset < token.span.start.offset) {
+                text.push(' ');
+            }
+            text.push_str(spelled);
+            previous = Some(token.span);
+        }
+        text
+    }
+}
+
+/// `C {and C}` in canonical names and English keywords.
+fn conjuncts_text(conjuncts: &[Conjunct]) -> String {
+    conjuncts
+        .iter()
+        .map(|conjunct| match conjunct {
+            Conjunct::Concept(name) => name.text.clone(),
+            Conjunct::Stage { stage, entity } => format!("{} {}", stage.text, entity.text),
+        })
+        .collect::<Vec<_>>()
+        .join(&format!(" {} ", Kw::And.english()))
+}
+
+fn words_text(words: &[Word]) -> String {
+    words
+        .iter()
+        .map(|word| word.text.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// What the rules leave for the rest of the desugaring.
@@ -631,6 +688,93 @@ impl Scope<'_> {
                 }),
         }
     }
+
+    /// `phrase` as `Actor verb Entity`, in whichever order and with whatever
+    /// particles it was written; the verb and the entity are told apart as
+    /// [`Self::phrase`] tells them.
+    fn phrase_text(&self, phrase: &Phrase) -> String {
+        let [first, second] = &phrase.words;
+        let (verb, entity) = if phrase.particles
+            || self.entities.contains_key(&second.text)
+            || !self.entities.contains_key(&first.text)
+        {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        format!("{} {} {}", phrase.actor.text, verb.text, entity.text)
+    }
+
+    /// `statement` in canonical names and English keywords, the detail of the
+    /// lowering step of each guard or property it lowers to: one text however
+    /// the source spelled it (aliases, Japanese keywords, particles, word
+    /// order). `None` for `deadline`, which lowers to no guard or property.
+    fn statement_text(&self, statement: &RuleStatement) -> Option<String> {
+        let condition = |condition: &Condition, when: Kw, r#for: Kw| match condition {
+            Condition::When(_, text) => format!("{} {text}", when.english()),
+            Condition::For(conjuncts) => {
+                format!("{} {}", r#for.english(), conjuncts_text(conjuncts))
+            }
+        };
+        Some(match statement {
+            RuleStatement::Allow(phrase, guard) => format!(
+                "{} {} {}",
+                Kw::Allow.english(),
+                self.phrase_text(phrase),
+                condition(guard, Kw::AllowOnlyWhen, Kw::AllowOnlyFor)
+            ),
+            RuleStatement::Never(phrase, guard) => format!(
+                "{} {} {}",
+                Kw::Never.english(),
+                self.phrase_text(phrase),
+                condition(guard, Kw::NeverWhen, Kw::NeverFor)
+            ),
+            RuleStatement::After(later, earlier) => format!(
+                "{} {} {}",
+                self.phrase_text(later),
+                Kw::OnlyAfter.english(),
+                self.phrase_text(earlier)
+            ),
+            RuleStatement::Enters {
+                entity,
+                target,
+                sources,
+            } => format!(
+                "{} {} {} {} {}",
+                entity.text,
+                Kw::Enters.english(),
+                target.text,
+                Kw::OnlyFrom.english(),
+                words_text(sources)
+            ),
+            RuleStatement::Always(left, right) => format!(
+                "{} {} {} {}",
+                Kw::Always.english(),
+                conjuncts_text(left),
+                Kw::AlwaysIs.english(),
+                conjuncts_text(right)
+            ),
+            RuleStatement::AlwaysHas {
+                entity,
+                negated,
+                stages,
+                has_text,
+                ..
+            } => format!(
+                "{} {} {} {} {} {has_text}",
+                Kw::Always.english(),
+                entity.text,
+                if *negated {
+                    Kw::AlwaysNotIn.english()
+                } else {
+                    Kw::AlwaysIn.english()
+                },
+                words_text(stages),
+                Kw::AlwaysHas.english()
+            ),
+            RuleStatement::Deadline { .. } => return None,
+        })
+    }
 }
 
 fn transition_mut<'t>(
@@ -732,6 +876,7 @@ pub(in crate::parser) fn apply(
         } in rule.statements
         {
             let never = matches!(statement, RuleStatement::Never(..));
+            let text = scope.statement_text(&statement).unwrap_or_default();
             match statement {
                 RuleStatement::Allow(phrase, condition)
                 | RuleStatement::Never(phrase, condition) => {
@@ -739,7 +884,7 @@ pub(in crate::parser) fn apply(
                     let entity = &scope.entities[&entity_name];
                     for event in events {
                         let condition = match &condition {
-                            Condition::When(expression) => resolve_event_names(
+                            Condition::When(expression, _) => resolve_event_names(
                                 expression.clone(),
                                 &event.inputs,
                                 entity,
@@ -766,7 +911,7 @@ pub(in crate::parser) fn apply(
                                 kind: if never { "never" } else { "allow" },
                                 requirement: rule.id.clone(),
                                 condition,
-                                detail: detail.clone(),
+                                detail: text.clone(),
                                 span,
                             },
                         );
@@ -854,7 +999,7 @@ pub(in crate::parser) fn apply(
                                 kind: "after",
                                 requirement: rule.id.clone(),
                                 condition: Expr::Var(format!("{entity_name}.{ghost}")),
-                                detail: detail.clone(),
+                                detail: text.clone(),
                                 span,
                             },
                         );
@@ -917,7 +1062,7 @@ pub(in crate::parser) fn apply(
                         requirement_span: rule.span,
                         entity: entity.text.clone(),
                         condition: binary("=>", stage_is(&entity.text, &target.text), before),
-                        detail,
+                        detail: text.clone(),
                         span,
                     });
                 }
@@ -936,7 +1081,7 @@ pub(in crate::parser) fn apply(
                         requirement_span: rule.span,
                         entity: entity_name,
                         condition,
-                        detail,
+                        detail: text.clone(),
                         span,
                     });
                 }
@@ -945,6 +1090,7 @@ pub(in crate::parser) fn apply(
                     negated,
                     stages,
                     has,
+                    ..
                 } => {
                     for stage in &stages {
                         scope.stage(&entity, stage)?;
@@ -982,7 +1128,7 @@ pub(in crate::parser) fn apply(
                             in_stages,
                             field_names(has, declared, &entity.text),
                         ),
-                        detail,
+                        detail: text.clone(),
                         span,
                     });
                 }

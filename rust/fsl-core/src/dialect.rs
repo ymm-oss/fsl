@@ -2346,6 +2346,12 @@ pub(crate) fn lower_resolved_requirements(
                 stage_is(&process.process, binder, &transition.source),
                 transition.span,
             )];
+            if let Some(event) = event {
+                extra_origins.push((
+                    crate::action_guard_target(&transition.name, 0),
+                    next_rules::move_origin(transition, event),
+                ));
+            }
             if let Some(guard) = &transition.guard {
                 body.push(ActionItem::Requires(
                     substitute_expr(guard.clone(), &replacements),

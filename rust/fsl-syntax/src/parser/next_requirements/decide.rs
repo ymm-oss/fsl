@@ -60,8 +60,30 @@ struct RowSource {
     /// Whether the outcome marks its actor with が.
     particles: bool,
     covers: Vec<ProcessCover>,
+    /// The row in canonical names and English keywords ([`row_text`]).
     source: String,
     span: Span,
+}
+
+/// A row `cexpr => Actor verb {or verb}` in canonical names and English
+/// keywords, without particles: the row's text in its table's lowering
+/// steps and diagnostics, the same however the source spelled it.
+fn row_text(condition: &Condition, actor: &Word, verbs: &[Word]) -> String {
+    let condition = match condition {
+        Condition::Concepts(concepts) => concepts
+            .iter()
+            .map(|concept| concept.text.as_str())
+            .collect::<Vec<_>>()
+            .join(&format!(" {} ", Kw::And.english())),
+        Condition::Stage(stage, entity) => format!("{} {}", stage.text, entity.text),
+        Condition::Otherwise => Kw::Otherwise.english().to_owned(),
+    };
+    let verbs = verbs
+        .iter()
+        .map(|verb| verb.text.as_str())
+        .collect::<Vec<_>>()
+        .join(&format!(" {} ", Kw::RowOr.english()));
+    format!("{condition} => {} {verbs}", actor.text)
 }
 
 impl Parser<'_> {
@@ -140,10 +162,7 @@ impl Parser<'_> {
             (actor, verbs)
         };
         let end = self.last_span();
-        let source = self.source[start.start.offset..end.end.offset]
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let source = row_text(&condition, &actor, &verbs);
         let mut covers = Vec::new();
         while self.peek_kw(Kw::Covers) {
             let cover_start = self.bump().span;
@@ -586,8 +605,9 @@ pub(super) fn apply(
             if guard != Expr::Bool(true) {
                 let detail = rows
                     .iter()
-                    .filter(|row| row.events.contains(&event.name))
-                    .map(|row| row.source.as_str())
+                    .enumerate()
+                    .filter(|(_, row)| row.events.contains(&event.name))
+                    .map(|(index, row)| format!("row {}: {}", index + 1, row.source))
                     .collect::<Vec<_>>()
                     .join(" | ");
                 transition
@@ -600,7 +620,7 @@ pub(super) fn apply(
                         requirement: decision.id.clone(),
                         condition: guard,
                         detail: format!(
-                            "for {} {}: {detail}",
+                            "for {} {} {detail}",
                             decision.stage.text, decision.entity.text
                         ),
                         span: decision.span,
