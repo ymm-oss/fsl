@@ -90,7 +90,7 @@ Each row was reproduced with `fslc 4.11.0`, and each row that starts with
 | `fsl 5` `check`: `ok`, `warnings[].code: "decide_row_emptied"` | a decision row holds for no value of the fields: its outcome can never be chosen | the row's concepts are wrong or the source is; fix or ask |
 | `fsl 5` `check`: `ok`, `warnings[].code: "lifecycle_edge_without_event"` | a lifecycle edge no event moves along: a stage may be unreachable | add the event the source states, or remove the edge |
 | `fsl 5` `check`: `warnings[]` with `severity: "info"`, `code: "implied_by_lifecycle"` | an `only after` / `enters … only from` rule the lifecycle already gives | not a failure; keep the rule if the source states it |
-| `fsl 5` `mutate --by-requirement`: a rule's or decision table's ID with `kills: 0`, `warning: "empty_formalization"` | kills are credited to the ID of the property that caught the mutant (`mutants[].killed_by`); an `allow` / `never` / decision row is a guard, not a property, and a kill by a `forbidden` trace is credited to no ID | read the mutants of the event's guards in `mutants[]` (`target: "request requires #2"`): killed ones show `killed_by` (a property name, `forbidden`, `acceptance`). Only a surviving guard mutant is a weak check |
+| `fsl 5` `mutate --by-requirement`: a decision row's or an event's `covers` ID with `kills: 0`, `warning: "empty_formalization"` | a rule's or decision table's ID counts every killed mutant of the guards it adds (`allow` / `never` / `only after` / the table's guard) besides the kills of the properties it names; a `covers` ID counts only the kills of what carries it (a property, the refinement of its event's action), not those of the guards | read the mutants of the event's guards in `mutants[]` (`target: "request requires #2"`): killed ones show `killed_by` (a property name, `forbidden`, `acceptance`). Only a surviving guard mutant is a weak check |
 
 ## 3. Reading the deciding fields per result
 
@@ -168,8 +168,9 @@ apart from the original.
   bound no action reaches); `notes` says to review them by hand.
 - `--by-requirement` fills `by_requirement` with kills per requirement ID; it
   stays `{}` on an untagged spec. An ID with few or no kills has a weak check
-  — except, in a file headed `fsl 5`, the ID of a rule or decision table whose
-  statements are guards (§2): read its guard mutants instead.
+  — except, in a file headed `fsl 5`, a decision row's or an event's `covers`
+  ID (§2): read the mutants of its event's guards instead. A rule's or
+  decision table's ID counts the killed mutants of its guards.
 - What to add for a real survivor, when the source states the rule:
   - a guard mutant survives → a `forbidden` trace that calls the action where
     the guard must reject it;
