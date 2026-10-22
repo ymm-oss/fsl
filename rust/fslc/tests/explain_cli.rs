@@ -314,11 +314,19 @@ fn explain_skeleton_authored_declarations_carry_no_generated_marker() {
 /// `(stdout, exit)` of `fslc <args...>` run in the e2e fixture directory of
 /// the next edition, behind the gate when `gate`.
 fn run_fsl5_e2e(args: &[&str], gate: bool) -> (String, i32) {
+    run_fsl5("e2e", args, gate)
+}
+
+/// `(stdout, exit)` of `fslc <args...>` run in the fixture directory
+/// `tests/fixtures/fsl5/<example>`, behind the gate when `gate`.
+fn run_fsl5(example: &str, args: &[&str], gate: bool) -> (String, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .args(args)
         .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fsl5/e2e"),
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/fsl5")
+                .join(example),
         )
         .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
     if gate {
@@ -422,4 +430,38 @@ fn explain_lowering_is_one_correspondence_for_every_spelling() {
         stdout.contains("unknown explain option '--lowering'"),
         "{stdout}"
     );
+}
+
+/// The rules of the multi-entity example name their origins too: the guard
+/// that reads the resource `stock`, and the `has <role>` property, in
+/// canonical names whether the source is English or Japanese.
+#[test]
+fn explain_readable_names_resource_guard_and_role_property_origins() {
+    for file in ["fsl5_en.fsl", "fsl5_ja_full.fsl"] {
+        let (readable, exit) = run_fsl5(
+            "multi_entity",
+            &[
+                "explain",
+                "--readable",
+                "--depth",
+                "2",
+                "--names",
+                "canonical",
+                file,
+            ],
+            true,
+        );
+        assert_eq!(exit, 0, "{file}: {readable}");
+        for expected in [
+            "      - requires qty > 0 and stock >= qty  ← rule REQ-PLACE allow User places \
+             Order only when input qty > 0 and stock >= input qty",
+            "  - invariant BuyerKnownAfterPlace\n    body: ",
+            "    ← rule REQ-BUYER always Order not in Empty has buyer",
+        ] {
+            assert!(
+                readable.contains(expected),
+                "{file}: {expected:?} in {readable}"
+            );
+        }
+    }
 }

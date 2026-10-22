@@ -19,15 +19,17 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use fsl_syntax::{
-    Annotation, EventForm, Expr, ProcessTransition, RequirementBlockItem, RequirementsItem,
-    RuleGuard, RuleProperty, SpecItem,
+    AggregateKind, Annotation, Binder, EventForm, Expr, MeasureDeclaration, ProcessTransition,
+    RequirementBlockItem, RequirementsItem, RuleGuard, RuleProperty, SpecItem,
 };
 
 use super::{
     GENERATED_NAME_COLLISION, Process, RequirementsProcess, core_error, meta, process_field_state,
-    stage_access, typed_binder,
+    qualified, stage_access, typed_binder,
 };
-use crate::{CoreError, LoweringStep, OriginChain, OriginId, OriginSite, property_target};
+use crate::{
+    CoreError, LoweringStep, OriginChain, OriginId, OriginSite, ProjectionDef, property_target,
+};
 
 /// The replacement that reads the stage of `process`'s instance `binder`
 /// where a rule condition spells it [`fsl_syntax::stage_reference`].
@@ -298,4 +300,56 @@ pub(super) fn lower_rule_properties(
         });
     }
     Ok(lowered)
+}
+
+/// The projections `measures` declare: each counts the instances of its
+/// entity, bound as the entity's binder, that satisfy its condition (the
+/// concept's stages and `where`). Like a `kpi`'s, a measure's projection
+/// adds no state.
+///
+/// # Errors
+///
+/// Returns an error for a measure over an entity without a lifecycle.
+pub(super) fn measure_projections(
+    measures: &[MeasureDeclaration],
+    processes: &[RequirementsProcess],
+    binders: &[String],
+) -> Result<Vec<ProjectionDef>, CoreError> {
+    measures
+        .iter()
+        .map(|measure| {
+            let Some((process, binder)) = processes
+                .iter()
+                .zip(binders)
+                .find(|(process, _)| process.process.entity == measure.entity)
+            else {
+                return Err(core_error(
+                    format!(
+                        "measure '{}': entity '{}' has no lifecycle",
+                        measure.name, measure.entity
+                    ),
+                    measure.span,
+                ));
+            };
+            let condition = crate::substitute_expr(
+                measure.condition.clone(),
+                &property_replacements(process, binder),
+            );
+            Ok(ProjectionDef {
+                name: measure.name.clone(),
+                entity: measure.entity.clone(),
+                stage: measure.counted.clone(),
+                expr: Expr::Aggregate {
+                    kind: AggregateKind::Count,
+                    binder: Binder::Typed {
+                        name: binder.clone(),
+                        type_name: qualified(&measure.entity),
+                        where_expr: Some(Box::new(condition)),
+                    },
+                    value: None,
+                },
+                span: measure.span,
+            })
+        })
+        .collect()
 }

@@ -1,0 +1,78 @@
+// The intended lowering of fsl5_en.fsl in today's syntax, written by hand.
+//
+//   Ticket belongs to Agent as assignee via take
+//       -> state ticket_assignee: Map<Ticket, Option<Agent>> (none); take
+//          takes the Agent that does it, a: Agent, and records some(a)
+//   resource desk_open: Bool = true
+//       -> state desk_open (true); escalate sets it
+//   rule REQ-1 { allow Agent takes Ticket only when desk_open }
+//       -> take requires desk_open
+//   rule REQ-2 { always Ticket in Assigned, Closed, Escalated has assignee }
+//       -> invariant REQ_2_always: the role is set (`!= none`)
+//   policy Resolved ... every Ticket in Assigned must eventually be ...
+//       -> leadsTo Resolved, as the business dialect lowers it
+//   goal Closable ... some Ticket can reach Closed
+//       -> reachable Closable
+requirements Support {
+  type Agent = 0..1
+  type Ticket = 0..1
+  enum TicketStage { Open, Assigned, Closed, Escalated }
+
+  state {
+    ticket_stage: Map<Ticket, TicketStage>,
+    ticket_assignee: Map<Ticket, Option<Agent>>,
+    desk_open: Bool
+  }
+  init {
+    forall t: Ticket {
+      ticket_stage[t] = Open
+      ticket_assignee[t] = none
+    }
+    desk_open = true
+  }
+
+  requirement REQ-1 "A ticket is taken only while the desk is open" {
+    fair action take(t: Ticket, a: Agent) {
+      requires ticket_stage[t] == Open
+      requires desk_open
+      ticket_stage[t] = Assigned
+      ticket_assignee[t] = some(a)
+    }
+  }
+  fair action close(t: Ticket) {
+    requires ticket_stage[t] == Assigned
+    ticket_stage[t] = Closed
+  }
+  fair action escalate(t: Ticket) {
+    requires ticket_stage[t] == Assigned
+    ticket_stage[t] = Escalated
+    desk_open = false
+  }
+
+  requirement REQ-2 "A taken ticket keeps the agent who took it" {
+    invariant REQ_2_always {
+      forall t: Ticket {
+        ticket_stage[t] == Assigned or ticket_stage[t] == Closed or ticket_stage[t] == Escalated
+          => ticket_assignee[t] != none
+      }
+    }
+  }
+
+  leadsTo Resolved {
+    forall t: Ticket {
+      ticket_stage[t] == Assigned ~> ticket_stage[t] == Closed or ticket_stage[t] == Escalated
+    }
+  }
+  reachable Closable {
+    exists t: Ticket { ticket_stage[t] == Closed }
+  }
+
+  acceptance AC-1 "An agent takes and closes a ticket" {
+    take(0, 1) close(0)
+    expect ticket_stage[0] == Closed
+  }
+  forbidden FB-DESK-CLOSED "No ticket is taken once the desk has closed" {
+    take(0, 0) escalate(0) take(1, 0)
+    expect rejected
+  }
+}

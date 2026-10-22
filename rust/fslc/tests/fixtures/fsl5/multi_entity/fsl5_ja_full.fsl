@@ -1,0 +1,69 @@
+fsl 5
+// deadlock-ignore-rationale: like the original, an order stops once Refunded.
+// fsl5_en.fsl written in Japanese, as the design draft's fsl3_ja_opt3.fsl
+// does (English canonical names with the glossary's Japanese aliases), with
+// the keyword table's Japanese keywords and the particles が and を. The
+// relation reads as three column names: 所属先 (belongs to), 役名 (as) and
+// 契機 (via). It lowers to lowered.fsl, as fsl5_en.fsl does.
+// English words that stay: the header, the event names (canonical names
+// that reach implementations), the property name, the REQ ids and the
+// symbols.
+要件 OrderWorkflow {
+  用語集 {
+    OrderWorkflow = 注文業務
+    Qty = 数量型
+    User = 利用者  Shop = 店舗
+    Order = 注文   Order.qty = 数量   Order.buyer = 購入者
+    stock = 在庫
+    Empty = 空  Placed = 受注  Approved = 承認済み  Paid = 支払済み  Packed = 梱包済み
+    Shipped = 出荷済み  Delivered = 配達済み  ReturnRequested = 返品依頼中  Refunded = 返金済み
+    Settled = 決済済み
+    places = 注文する  approves = 承認する  pays = 支払う  packs = 梱包する  ships = 出荷する
+    delivers = 配達する  returns = 返品する  refunds = 返金する
+    paid_count = 支払件数  refund_count = 返金件数  RefundedOne = 返金できる
+  }
+
+  数値 数量型
+  アクター 利用者, 店舗
+
+  エンティティ 利用者
+
+  エンティティ 注文 {
+    数量: 数量型 = 0
+    ライフサイクル 空 -> 受注 -> 承認済み -> 支払済み -> 梱包済み -> 出荷済み -> 配達済み
+                   -> 返品依頼中 -> 返金済み
+  }
+  注文 所属先 利用者 役名 購入者 契機 place
+
+  資源 在庫: 数量型 = 2
+
+  区分 決済済み = 注文 段階 支払済み, 梱包済み, 出荷済み, 配達済み, 返品依頼中, 返金済み
+
+  出来事 place          = 利用者 が 注文 を 注文する 数量 で   空 -> 受注
+    更新 在庫 = 在庫 - 入力 数量
+  出来事 approve        = 店舗 が 注文 を 承認する             受注 -> 承認済み
+  出来事 pay            = 利用者 が 注文 を 支払う             承認済み -> 支払済み
+  出来事 pack           = 店舗 が 注文 を 梱包する             支払済み -> 梱包済み
+  出来事 ship           = 店舗 が 注文 を 出荷する             梱包済み -> 出荷済み
+  出来事 deliver        = 店舗 が 注文 を 配達する             出荷済み -> 配達済み
+  出来事 request_return = 利用者 が 注文 を 返品する           配達済み -> 返品依頼中
+  出来事 refund         = 店舗 が 注文 を 返金する             返品依頼中 -> 返金済み
+    更新 在庫 = 在庫 + 数量
+
+  規則 REQ-PLACE "利用者は在庫の範囲で数量を指定して注文する" {
+    許可 利用者 が 注文 を 注文する 条件 入力 数量 > 0 かつ 在庫 >= 入力 数量
+  }
+  規則 REQ-BUYER "受注後の注文には必ず購入者がいる" {
+    BuyerKnownAfterPlace: 常に 注文 段階以外 空 必須 購入者
+  }
+
+  指標 支払件数 = 件数 決済済み
+  指標 返金件数 = 件数 注文 段階 返金済み
+
+  目標 返金できる "注文は返金まで進める" いずれかの 注文 到達可能 返金済み
+}
+検証 {
+  個数 注文 = 2
+  個数 利用者 = 2
+  値域 数量型 = 0..2
+}

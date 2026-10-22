@@ -52,6 +52,103 @@ struct PrecedenceLowering {
     histories_by_destination: BTreeMap<(String, String), Vec<String>>,
 }
 
+/// A `goal` as the `reachable` property it states, over each entity's
+/// process and the name its instance is bound to (`process_of`). The
+/// business dialect binds `c`; next-edition requirements bind the entity's
+/// binder.
+fn lower_goal<'p>(
+    goal: &BusinessItem,
+    process_of: &dyn Fn(&str) -> Option<(&'p Process, String)>,
+) -> Result<SpecItem, CoreError> {
+    let BusinessItem::Goal {
+        id,
+        text,
+        body,
+        span,
+        annotations: goal_annotations,
+        ..
+    } = goal
+    else {
+        unreachable!("a goal");
+    };
+    let process = |case_name: &str| {
+        process_of(case_name)
+            .ok_or_else(|| core_error(format!("entity '{case_name}' has no process"), *span))
+    };
+    let expr = match body {
+        BusinessGoalBody::Expr(expr) => expr.clone(),
+        BusinessGoalBody::SomeStage { case_name, stage } => {
+            let (process, binder) = process(case_name)?;
+            Expr::Quantified {
+                quantifier: "exists".to_owned(),
+                binder: typed_binder(&binder, case_name),
+                body: Box::new(stage_is(process, &binder, stage)),
+            }
+        }
+        BusinessGoalBody::AllStage { case_name, stages } => {
+            let (process, binder) = process(case_name)?;
+            Expr::Quantified {
+                quantifier: "forall".to_owned(),
+                binder: typed_binder(&binder, case_name),
+                body: Box::new(or_all(
+                    stages
+                        .iter()
+                        .map(|stage| stage_is(process, &binder, stage))
+                        .collect(),
+                )),
+            }
+        }
+    };
+    Ok(SpecItem::Reachable {
+        name: id.clone(),
+        expr: Box::new(expr),
+        span: *span,
+        meta: meta(id, text),
+        annotations: goal_annotations.clone(),
+    })
+}
+
+/// A `policy … every E in S must eventually be T {or T}` as the `leadsTo` it
+/// states over instance `binder` of `process`.
+fn eventually_policy(policy: &BusinessItem, process: &Process, binder: &str) -> SpecItem {
+    let BusinessItem::Policy {
+        id,
+        text,
+        body,
+        span,
+        annotations,
+        ..
+    } = policy
+    else {
+        unreachable!("a policy");
+    };
+    let BusinessPolicyBody::Eventually {
+        case_name,
+        source_stage,
+        target_stages,
+    } = body.as_ref()
+    else {
+        unreachable!("an eventually policy");
+    };
+    SpecItem::LeadsTo {
+        name: id.clone(),
+        binders: vec![typed_binder(binder, case_name)],
+        before: Box::new(stage_is(process, binder, source_stage)),
+        after: Box::new(or_all(
+            target_stages
+                .iter()
+                .map(|stage| stage_is(process, binder, stage))
+                .collect(),
+        )),
+        span: *span,
+        meta: meta(id, text),
+        decreases: None,
+        within: None,
+        helpful: Vec::new(),
+        annotations: annotations.clone(),
+    }
+}
+
 fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
     let BusinessItem::Kpi {
         name,
@@ -1375,31 +1472,11 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 helpful: Vec::new(),
                 annotations: policy_annotations.clone(),
             },
-            BusinessPolicyBody::Eventually {
-                case_name,
-                source_stage,
-                target_stages,
-            } => {
+            BusinessPolicyBody::Eventually { case_name, .. } => {
                 let process = by_name.get(case_name.as_str()).ok_or_else(|| {
                     core_error(format!("entity '{case_name}' has no process"), *span)
                 })?;
-                SpecItem::LeadsTo {
-                    name: id.clone(),
-                    binders: vec![typed_binder("c", case_name)],
-                    before: Box::new(stage_is(process, "c", source_stage)),
-                    after: Box::new(or_all(
-                        target_stages
-                            .iter()
-                            .map(|stage| stage_is(process, "c", stage))
-                            .collect(),
-                    )),
-                    span: *span,
-                    meta: meta(id, text),
-                    decreases: None,
-                    within: None,
-                    helpful: Vec::new(),
-                    annotations: policy_annotations.clone(),
-                }
+                eventually_policy(policy, process, "c")
             }
             BusinessPolicyBody::Precedence {
                 case_name,
@@ -1478,52 +1555,11 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         });
     }
     for goal in goals {
-        let BusinessItem::Goal {
-            id,
-            text,
-            body,
-            span,
-            annotations: goal_annotations,
-            ..
-        } = goal
-        else {
-            unreachable!();
-        };
-        let expr = match body {
-            BusinessGoalBody::Expr(expr) => expr.clone(),
-            BusinessGoalBody::SomeStage { case_name, stage } => {
-                let process = by_name.get(case_name.as_str()).ok_or_else(|| {
-                    core_error(format!("entity '{case_name}' has no process"), *span)
-                })?;
-                Expr::Quantified {
-                    quantifier: "exists".to_owned(),
-                    binder: typed_binder("c", case_name),
-                    body: Box::new(stage_is(process, "c", stage)),
-                }
-            }
-            BusinessGoalBody::AllStage { case_name, stages } => {
-                let process = by_name.get(case_name.as_str()).ok_or_else(|| {
-                    core_error(format!("entity '{case_name}' has no process"), *span)
-                })?;
-                Expr::Quantified {
-                    quantifier: "forall".to_owned(),
-                    binder: typed_binder("c", case_name),
-                    body: Box::new(or_all(
-                        stages
-                            .iter()
-                            .map(|stage| stage_is(process, "c", stage))
-                            .collect(),
-                    )),
-                }
-            }
-        };
-        items.push(SpecItem::Reachable {
-            name: id.clone(),
-            expr: Box::new(expr),
-            span: *span,
-            meta: meta(id, text),
-            annotations: goal_annotations.clone(),
-        });
+        items.push(lower_goal(goal, &|case_name| {
+            by_name
+                .get(case_name)
+                .map(|process| (*process, "c".to_owned()))
+        })?);
     }
     let projections = business
         .items
@@ -1659,7 +1695,11 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
 #[derive(Clone)]
 struct RequirementsProcess {
     process: Process,
+    /// The declared fields, then the next edition's relation roles.
     fields: Vec<ProcessField>,
+    /// The fields of `fields` that are relation roles: their state holds an
+    /// `Option` of their type, initially `none`.
+    roles: BTreeSet<String>,
 }
 
 fn requirements_processes(
@@ -1697,6 +1737,25 @@ fn requirements_processes(
                     }
                 }
             }
+            let mut fields = fields
+                .as_ref()
+                .map_or_else(Vec::new, |fields| fields.fields.clone());
+            let mut roles = BTreeSet::new();
+            for relation in requirements
+                .next
+                .iter()
+                .flat_map(|next| &next.relations)
+                .filter(|relation| relation.entity == name.name())
+            {
+                fields.push(ProcessField {
+                    name: relation.role.clone(),
+                    type_name: qualified(&relation.target),
+                    initial: Some(Expr::None),
+                    span: relation.span,
+                    type_span: relation.span,
+                });
+                roles.insert(relation.role.clone());
+            }
             Ok(RequirementsProcess {
                 process: Process {
                     name: process_symbol(name),
@@ -1715,9 +1774,8 @@ fn requirements_processes(
                     transitions,
                     span: *span,
                 },
-                fields: fields
-                    .as_ref()
-                    .map_or_else(Vec::new, |fields| fields.fields.clone()),
+                fields,
+                roles,
             })
         })
         .collect()
@@ -2018,8 +2076,8 @@ fn process_binders(
 
 /// Refuse a next-edition entity whose generated names
 /// ([`crate::naming::entity_generated_names`]) meet a name declared in
-/// `declared` or generated for an earlier entity, or whose binder meets one of
-/// its fields or event inputs.
+/// `declared`, a resource, or a name generated for an earlier entity, or
+/// whose binder meets one of its fields or event inputs.
 fn check_generated_names(
     next: &fsl_syntax::NextEditionRequirements,
     declared: &[SpecItem],
@@ -2042,6 +2100,8 @@ fn check_generated_names(
             _ => {}
         }
     }
+    // A resource is declared state, like the document's own.
+    taken.extend(next.resources.iter().map(|resource| resource.name.clone()));
     let collision = |name: &str, entity: &str, span, what: &str| CoreError {
         diagnostic_code: Some(GENERATED_NAME_COLLISION),
         ..core_error(
@@ -2264,6 +2324,11 @@ pub(crate) fn lower_resolved_requirements(
             } else {
                 TypeExpr::Name(field.type_name.name.clone())
             };
+            let field_ty = if process.roles.contains(&field.name) {
+                TypeExpr::Option(Box::new(field_ty))
+            } else {
+                field_ty
+            };
             state.push(StateField::generated(
                 process_field_state(process_name, &field.name),
                 TypeExpr::Map(
@@ -2290,6 +2355,27 @@ pub(crate) fn lower_resolved_requirements(
             binder: typed_binder(binder, &process.process.entity),
             statements: init_body,
             span: process.process.span,
+        });
+    }
+    let resources = requirements
+        .next
+        .iter()
+        .flat_map(|next| &next.resources)
+        .collect::<Vec<_>>();
+    for resource in &resources {
+        state.push(StateField::generated(
+            resource.name.clone(),
+            if resource.type_name.name == "Bool" {
+                TypeExpr::Bool
+            } else {
+                TypeExpr::Name(resource.type_name.name.clone())
+            },
+            resource.span,
+        ));
+        init.push(Statement::Assign {
+            target: LValue::Var(resource.name.clone()),
+            value: resource.initial.clone(),
+            span: resource.span,
         });
     }
     if !state.is_empty() {
@@ -2379,11 +2465,19 @@ pub(crate) fn lower_resolved_requirements(
                 }));
             }
             for (field, expression) in &transition.assignments {
-                body.push(ActionItem::Statement(Statement::Assign {
-                    target: LValue::Index(
+                // An event's `set` of a resource writes the one variable.
+                let target = if event.is_some()
+                    && resources.iter().any(|resource| resource.name == *field)
+                {
+                    LValue::Var(field.clone())
+                } else {
+                    LValue::Index(
                         process_field_state(&process.process.name, field),
                         Expr::Var(binder.clone()),
-                    ),
+                    )
+                };
+                body.push(ActionItem::Statement(Statement::Assign {
+                    target,
                     value: substitute_expr(expression.clone(), &replacements),
                     span: transition.span,
                 }));
@@ -2440,6 +2534,28 @@ pub(crate) fn lower_resolved_requirements(
             extra_annotations.push((property.target.clone(), property.annotation));
             extra_origins.push((property.target, property.origin));
             items.push(property.item);
+        }
+        let process_of = |entity: &str| {
+            processes
+                .iter()
+                .zip(&binders)
+                .find(|(process, _)| process.process.entity == entity)
+        };
+        for goal in &next.goals {
+            items.push(match goal {
+                BusinessItem::Policy { span, body, .. } => {
+                    let BusinessPolicyBody::Eventually { case_name, .. } = body.as_ref() else {
+                        unreachable!("a next-edition policy is an eventually policy");
+                    };
+                    let (process, binder) = process_of(case_name).ok_or_else(|| {
+                        core_error(format!("entity '{case_name}' has no lifecycle"), *span)
+                    })?;
+                    eventually_policy(goal, &process.process, binder)
+                }
+                _ => lower_goal(goal, &|entity| {
+                    process_of(entity).map(|(process, binder)| (&process.process, binder.clone()))
+                })?,
+            });
         }
     }
     let mut deadlines = Vec::new();
@@ -2827,7 +2943,7 @@ pub(crate) fn lower_resolved_requirements(
         .iter()
         .map(|process| process.process.clone())
         .collect::<Vec<_>>();
-    let projections = requirements
+    let mut projections = requirements
         .items
         .iter()
         .filter_map(|item| match item {
@@ -2836,6 +2952,13 @@ pub(crate) fn lower_resolved_requirements(
         })
         .map(|item| kpi_projection(item, &stage_processes))
         .collect::<Result<Vec<_>, _>>()?;
+    if let Some(next) = &requirements.next {
+        projections.extend(next_rules::measure_projections(
+            &next.measures,
+            &processes,
+            &binders,
+        )?);
+    }
     let mut origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
     for (target, origin) in extra_origins {
         origins.bind(target, origin);

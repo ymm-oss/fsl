@@ -6,6 +6,8 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use crate::dispatch::parse_document_with_ids;
+use crate::parser::IdSpelling;
 use crate::{
     Edition, LexError, ParseError, ParseOptions, SourceFile, Span, TokenKind, parse_document_with,
 };
@@ -117,6 +119,15 @@ pub enum FormatError {
         message: String,
         span: Span,
     },
+    /// The printed document would not spell a requirement-style identifier
+    /// (`REQ-1`, `AC-1`, `CTRL-1`) as written, or would read a different
+    /// one. A formatter defect: nothing is emitted. `span` locates the
+    /// identifier in the input (in the output for one the input lacks).
+    RespelledIdentifier {
+        identifier: String,
+        printed: String,
+        span: Span,
+    },
 }
 
 impl FormatError {
@@ -125,7 +136,7 @@ impl FormatError {
         match self {
             Self::Lex(error) => error.span,
             Self::Parse(error) => error.span,
-            Self::Unsafe { span, .. } => *span,
+            Self::Unsafe { span, .. } | Self::RespelledIdentifier { span, .. } => *span,
         }
     }
 }
@@ -138,6 +149,15 @@ impl fmt::Display for FormatError {
             Self::Unsafe { message, span, .. } => write!(
                 formatter,
                 "{message} at {}:{}",
+                span.start.line, span.start.column
+            ),
+            Self::RespelledIdentifier {
+                identifier,
+                printed,
+                span,
+            } => write!(
+                formatter,
+                "formatting would print identifier '{identifier}' as '{printed}' at {}:{}",
                 span.start.line, span.start.column
             ),
         }
@@ -310,14 +330,53 @@ pub fn format_source_with(
             .collect(),
     )?;
     let tree = lossless_document_with(&rewritten, options);
-    let parsed =
-        parse_document_with(SourceFile::new(&rewritten), options).map_err(FormatError::Parse)?;
-    let compact_hyphens = business_id_hyphen_offsets(&tree, parsed.keyword);
+    let (_, read) = parse_document_with_ids(SourceFile::new(&rewritten), *options)
+        .map_err(FormatError::Parse)?;
+    let compact_hyphens = read
+        .iter()
+        .flat_map(|id| id.hyphens.iter().copied())
+        .collect();
     let mut formatter = Formatter::new(compact_hyphens);
     formatter.write(tree.nodes());
     let output = formatter.finish();
-    parse_document_with(SourceFile::new(&output), options).map_err(FormatError::Parse)?;
+    let (_, printed) =
+        parse_document_with_ids(SourceFile::new(&output), *options).map_err(FormatError::Parse)?;
+    check_identifier_spellings(&read, &printed, &output)?;
     Ok(output)
+}
+
+/// Refuse an output in which a requirement-style identifier is not printed
+/// exactly as its value (`REQ-1`, never `REQ - 1`) or the identifiers read
+/// differ from the input's, so a formatter regression fails loudly instead of
+/// writing a document whose IDs no longer read as the author wrote them.
+fn check_identifier_spellings(
+    read: &[IdSpelling],
+    printed: &[IdSpelling],
+    output: &str,
+) -> Result<(), FormatError> {
+    for (index, input) in read.iter().enumerate() {
+        let (value, text) = printed.get(index).map_or(("", ""), |id| {
+            (
+                id.value.as_str(),
+                &output[id.span.start.offset..id.span.end.offset],
+            )
+        });
+        if value != input.value || text != input.value {
+            return Err(FormatError::RespelledIdentifier {
+                identifier: input.value.clone(),
+                printed: text.to_owned(),
+                span: input.span,
+            });
+        }
+    }
+    if let Some(extra) = printed.get(read.len()) {
+        return Err(FormatError::RespelledIdentifier {
+            identifier: String::new(),
+            printed: extra.value.clone(),
+            span: extra.span,
+        });
+    }
+    Ok(())
 }
 
 /// Plan the syntax-only canonical rewrites shared by formatting and migration.
@@ -642,80 +701,6 @@ fn plan_domain_enum(
     Ok(replacements)
 }
 
-fn business_id_hyphen_offsets(tree: &LosslessDocument, dialect: &str) -> BTreeSet<usize> {
-    if dialect != "business" {
-        return BTreeSet::new();
-    }
-    let tokens = tree
-        .nodes()
-        .iter()
-        .filter(|node| matches!(node.kind, LosslessKind::Token(_)))
-        .collect::<Vec<_>>();
-    let mut offsets = BTreeSet::new();
-    let mut brace_depth = 0_usize;
-    let mut business_started = false;
-    for (index, token) in tokens.iter().enumerate() {
-        let Some(keyword) = token.ident().filter(|_| brace_depth == 1) else {
-            match token.symbol() {
-                Some("{") => {
-                    brace_depth += 1;
-                    business_started = true;
-                }
-                Some("}") => {
-                    brace_depth = brace_depth.saturating_sub(1);
-                    if business_started && brace_depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            continue;
-        };
-        if matches!(keyword, "control" | "policy" | "goal") {
-            collect_id_hyphens(&tokens, index + 1, &mut offsets);
-        } else if keyword == "satisfies" {
-            let mut cursor = index + 1;
-            loop {
-                cursor = collect_id_hyphens(&tokens, cursor, &mut offsets);
-                if tokens.get(cursor).and_then(|token| token.symbol()) != Some(",") {
-                    break;
-                }
-                cursor += 1;
-            }
-        }
-    }
-    offsets
-}
-
-fn collect_id_hyphens(
-    tokens: &[&LosslessNode],
-    start: usize,
-    offsets: &mut BTreeSet<usize>,
-) -> usize {
-    let Some(first) = tokens.get(start) else {
-        return start;
-    };
-    if !matches!(
-        first.kind,
-        LosslessKind::Token(TokenKind::Ident(_) | TokenKind::Int(_))
-    ) {
-        return start;
-    }
-    let mut cursor = start + 1;
-    while tokens.get(cursor).and_then(|token| token.symbol()) == Some("-")
-        && tokens.get(cursor + 1).is_some_and(|token| {
-            matches!(
-                token.kind,
-                LosslessKind::Token(TokenKind::Ident(_) | TokenKind::Int(_))
-            )
-        })
-    {
-        offsets.insert(tokens[cursor].span.start.offset);
-        cursor += 2;
-    }
-    cursor
-}
-
 struct Formatter {
     output: String,
     indent: usize,
@@ -989,6 +974,59 @@ mod tests {
                 .iter()
                 .any(|node| matches!(node.kind, LosslessKind::LineComment))
         );
+    }
+
+    const SPACED_IDS: &str = "requirements Bank {
+  state { balance: Int }
+  init { balance = 0 }
+  requirement BANK - WITHDRAW \"withdrawals keep the balance\" {
+    action withdraw() { balance = balance-1 }
+  }
+  forbidden BANK-FB - 1 \"an empty withdrawal is rejected\" {
+    withdraw()
+    expect rejected
+  }
+}
+";
+
+    #[test]
+    fn identifiers_print_as_their_value_and_subtraction_keeps_its_spaces() {
+        let formatted = format_source(SPACED_IDS, Edition::Fsl4).expect("format");
+        assert!(formatted.contains("requirement BANK-WITHDRAW \"withdrawals"));
+        assert!(formatted.contains("forbidden BANK-FB-1 \"an empty"));
+        assert!(formatted.contains("balance = balance - 1"));
+    }
+
+    #[test]
+    fn an_output_that_respells_an_identifier_is_refused() {
+        let options = ParseOptions::stable();
+        let source = format_source(SPACED_IDS, Edition::Fsl4).expect("format");
+        let (_, read) = parse_document_with_ids(SourceFile::new(&source), options).expect("parse");
+        assert_eq!(
+            read.iter().map(|id| id.value.as_str()).collect::<Vec<_>>(),
+            ["BANK-WITHDRAW", "BANK-FB-1"]
+        );
+        assert_eq!(check_identifier_spellings(&read, &read, &source), Ok(()));
+
+        let spaced = source.replace("BANK-FB-1", "BANK-FB - 1");
+        let (_, printed) =
+            parse_document_with_ids(SourceFile::new(&spaced), options).expect("parse");
+        assert_eq!(
+            check_identifier_spellings(&read, &printed, &spaced),
+            Err(FormatError::RespelledIdentifier {
+                identifier: "BANK-FB-1".to_owned(),
+                printed: "BANK-FB - 1".to_owned(),
+                span: read[1].span,
+            })
+        );
+
+        let renamed = source.replace("BANK-FB-1", "BANK-FB-2");
+        let (_, printed) =
+            parse_document_with_ids(SourceFile::new(&renamed), options).expect("parse");
+        assert!(matches!(
+            check_identifier_spellings(&read, &printed, &renamed),
+            Err(FormatError::RespelledIdentifier { identifier, .. }) if identifier == "BANK-FB-1"
+        ));
     }
 
     #[test]
