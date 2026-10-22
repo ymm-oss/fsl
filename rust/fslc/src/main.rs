@@ -28,6 +28,7 @@ mod causal;
 mod cli_options;
 mod cli_output;
 mod code_audit;
+mod decide_solver;
 mod log_replay;
 mod name_display;
 mod process;
@@ -5880,6 +5881,9 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
         crate::parse_options(),
     ) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
+            if let Some(rejection) = decide_solver::check(source, &model, &envelope) {
+                return rejection;
+            }
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
             output.insert("spec".to_owned(), json!(model.name));

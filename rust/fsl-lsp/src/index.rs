@@ -6,6 +6,8 @@ use std::fmt;
 use fsl_syntax::{Span, Token, TokenKind};
 use lsp_types::{Position, Range};
 
+use crate::ast_projection::DeclarationAuthority;
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SymbolRole {
     Namespace,
@@ -87,6 +89,31 @@ enum Context {
     Other,
 }
 
+/// A block on the walk's stack, or the declaration whose block is about to
+/// open.
+#[derive(Clone, Debug)]
+struct Scope {
+    context: Context,
+    owner: Option<String>,
+    /// Whether the AST projection covers the declarations written here. It
+    /// does not inside a declaration it leaves out — a process `transition`,
+    /// `process`, `acceptance`, ... — nor in the body of
+    /// `implements NAME from "path" { ... }`, whose `action impl(args) ->
+    /// abs(args)` maps an action instead of declaring one; there the walk
+    /// alone decides, as it does in a document without a projection.
+    projected: bool,
+}
+
+impl Scope {
+    const fn new(context: Context, owner: Option<String>, projected: bool) -> Self {
+        Self {
+            context,
+            owner,
+            projected,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DeclarationKeyword {
     value: &'static str,
@@ -97,6 +124,14 @@ struct DeclarationKeyword {
 impl DocumentIndex {
     /// Build an editor projection only after the authoritative Rust frontend accepts the source.
     ///
+    /// For a `spec`, `requirements` or `compose` document read in the
+    /// published edition the declarations come from the parsed AST
+    /// (`crate::ast_projection`): the token walk proposes each declaration
+    /// site, the AST decides whether a name is declared there and with which
+    /// role and owner, and a word spelled like an index keyword is a name
+    /// wherever the AST declares it (`reads_as_declared_name`). Every other
+    /// document is indexed by the token walk alone.
+    ///
     /// # Errors
     ///
     /// Returns the compiler parse diagnostic for invalid source.
@@ -106,25 +141,39 @@ impl DocumentIndex {
         _path: Option<&str>,
         parse_options: &fsl_syntax::ParseOptions,
     ) -> Result<Self, IndexError> {
-        let refinement = if fslc_rust::frontend_output::is_ai_project(source)
+        let parsed = if fslc_rust::frontend_output::is_ai_project(source)
             || fsl_syntax::is_causal_source(source)
         {
-            false
+            None
         } else {
-            matches!(
+            Some(
                 fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), parse_options)
-                    .map_err(|error| IndexError(error.to_string()))?
-                    .surface,
-                fsl_syntax::SurfaceDocument::Refinement(_)
+                    .map_err(|error| IndexError(error.to_string()))?,
             )
         };
+        let refinement = parsed.as_ref().is_some_and(|parsed| {
+            matches!(parsed.surface, fsl_syntax::SurfaceDocument::Refinement(_))
+        });
+        // An `fsl 5` document's surface already reads glossary aliases as
+        // their canonical names and desugars new forms, so its declarations
+        // need not be spelled where its tokens are; it keeps the token walk
+        // until the language server serves that edition.
+        let mut authority = parsed
+            .as_ref()
+            .filter(|parsed| parsed.edition == fsl_syntax::Edition::Fsl4)
+            .and_then(|parsed| crate::ast_projection::ast_declarations(&parsed.surface))
+            .map(DeclarationAuthority::new);
+        drop(parsed);
         let tokens = fsl_syntax::lex_with(source, parse_options)
             .map_err(|error| IndexError(error.to_string()))?;
         let mut symbols = Vec::new();
         let mut references = Vec::new();
-        let mut contexts: Vec<(Context, Option<String>)> = Vec::new();
+        let document_projected = authority.is_some();
+        let mut contexts: Vec<Scope> = Vec::new();
         let mut expected: Option<(SymbolRole, Option<Context>)> = None;
-        let mut awaiting_block: Option<(Context, Option<String>)> = None;
+        // The declaration keyword that armed `expected`.
+        let mut armed_by: Option<&str> = None;
+        let mut awaiting_block: Option<Scope> = None;
         let mut list_role: Option<(SymbolRole, Option<Context>)> = None;
         let mut in_annotation = false;
         let mut declaration_offsets = BTreeSet::new();
@@ -143,12 +192,36 @@ impl DocumentIndex {
                     // is what `unindexed_identifiers` requires of them.
                     if !in_annotation {
                         if let Some((role, context)) = expected.take() {
-                            add_symbol(source, token, name, role, None, &mut symbols);
-                            declaration_offsets.insert(token.span.start.offset);
+                            let enclosing = contexts
+                                .last()
+                                .map_or(document_projected, |scope| scope.projected);
+                            let projected = enclosing
+                                && armed_by.is_some_and(
+                                    crate::ast_projection::projects_declaration_keyword,
+                                );
+                            let declared = !projected
+                                || authority
+                                    .as_mut()
+                                    .is_none_or(|authority| authority.locate(name, role, None));
+                            if declared {
+                                add_symbol(source, token, name, role, None, &mut symbols);
+                                declaration_offsets.insert(token.span.start.offset);
+                            } else {
+                                references.push(Reference {
+                                    name: name.clone(),
+                                    range: span_range(source, token.span),
+                                    qualifier: None,
+                                    owner: contexts.last().and_then(|scope| scope.owner.clone()),
+                                    target_spec: None,
+                                });
+                            }
+                            let opens_projected = enclosing
+                                && armed_by
+                                    .is_some_and(crate::ast_projection::opens_projected_block);
                             awaiting_block = context.map(|context| {
                                 let owner = matches!(context, Context::Action | Context::Other)
                                     .then(|| name.clone());
-                                (context, owner)
+                                Scope::new(context, owner, opens_projected)
                             });
                             continue;
                         }
@@ -162,29 +235,41 @@ impl DocumentIndex {
                         // name.
                         let builtin_call = matches!(name.as_str(), "reachable" | "domain")
                             && token_symbol(tokens.get(index + 1)) == Some("(");
+                        if name == "implements" && token_symbol(tokens.get(index + 4)) == Some("{")
+                        {
+                            let inherited = contexts.last().and_then(|scope| scope.owner.clone());
+                            awaiting_block = Some(Scope::new(Context::Other, inherited, false));
+                        }
                         if !builtin_call && let Some((role, context)) = declaration_keyword(name) {
                             expected = role.map(|role| (role, context));
+                            armed_by = Some(name);
                             list_role = (name == "actor").then_some(expected).flatten();
                             if role.is_none() {
-                                awaiting_block = context.map(|context| (context, None));
+                                let enclosing = contexts
+                                    .last()
+                                    .map_or(document_projected, |scope| scope.projected);
+                                awaiting_block =
+                                    context.map(|context| Scope::new(context, None, enclosing));
                             }
                             continue;
                         }
                     }
-                    if is_keyword(name) {
+                    if is_keyword(name)
+                        && !authority.as_ref().is_some_and(|authority| {
+                            reads_as_declared_name(authority, &tokens, index, name)
+                        })
+                    {
                         continue;
                     }
 
                     let next_is_colon = token_symbol(tokens.get(index + 1)) == Some(":");
                     let previous = token_ident(index.checked_sub(1).and_then(|i| tokens.get(i)));
-                    let context = awaiting_block
-                        .as_ref()
-                        .map(|(context, _)| *context)
-                        .or_else(|| contexts.last().map(|(context, _)| *context));
+                    let scope = awaiting_block.as_ref().or_else(|| contexts.last());
+                    let context = scope.map(|scope| scope.context);
                     let owner = awaiting_block
                         .as_ref()
-                        .and_then(|(_, owner)| owner.clone())
-                        .or_else(|| contexts.last().and_then(|(_, owner)| owner.clone()));
+                        .and_then(|scope| scope.owner.clone())
+                        .or_else(|| contexts.last().and_then(|scope| scope.owner.clone()));
                     let enum_member = matches!(context, Some(Context::Enum))
                         && (token_symbol(index.checked_sub(1).and_then(|i| tokens.get(i)))
                             == Some("{")
@@ -196,12 +281,16 @@ impl DocumentIndex {
                     // local name regardless of the enclosing declaration
                     // context and regardless of whether it uses the `name: T`
                     // or `name in ...` binder form.
+                    // `action count(x: T)` declares an action named like the
+                    // aggregate; its parameter list is not an aggregate.
                     let binder_after_aggregate_paren =
                         token_symbol(index.checked_sub(1).and_then(|i| tokens.get(i))) == Some("(")
                             && matches!(
                                 token_ident(index.checked_sub(2).and_then(|i| tokens.get(i))),
                                 Some("count" | "sum" | "unique" | "exactlyOne")
-                            );
+                            )
+                            && token_ident(index.checked_sub(3).and_then(|i| tokens.get(i)))
+                                .is_none_or(|word| declaration_keyword(word).is_none());
                     let quantifier_binder = matches!(previous, Some("forall" | "exists"))
                         || binder_after_aggregate_paren;
                     // `x is some(v)` binds `v` for the rest of the guarded
@@ -212,9 +301,15 @@ impl DocumentIndex {
                                 == Some("some")
                             && token_ident(index.checked_sub(3).and_then(|i| tokens.get(i)))
                                 == Some("is");
+                    // Parameters, state variables, struct fields, enum members
+                    // and `let` bindings are projected from the AST; expression
+                    // binders and `as` names are not.
+                    let mut projected_site =
+                        scope.map_or(document_projected, |scope| scope.projected);
                     let role = if in_annotation {
                         None
                     } else if quantifier_binder || pattern_binder {
+                        projected_site = false;
                         Some(SymbolRole::Variable)
                     } else if next_is_colon {
                         match context {
@@ -224,23 +319,23 @@ impl DocumentIndex {
                             _ => None,
                         }
                     } else if enum_member || matches!(previous, Some("as" | "let")) {
+                        projected_site = enum_member || previous == Some("let");
                         Some(SymbolRole::Variable)
                     } else {
                         None
                     };
-                    if let Some(role) = role {
-                        let scoped = matches!(role, SymbolRole::Parameter)
-                            || quantifier_binder
-                            || pattern_binder
-                            || matches!(previous, Some("as" | "let"));
-                        add_symbol(
-                            source,
-                            token,
-                            name,
-                            role,
-                            scoped.then_some(owner).flatten(),
-                            &mut symbols,
-                        );
+                    let scoped = matches!(role, Some(SymbolRole::Parameter))
+                        || quantifier_binder
+                        || pattern_binder
+                        || matches!(previous, Some("as" | "let"));
+                    let symbol_owner = scoped.then(|| owner.clone()).flatten();
+                    if let Some(role) = role
+                        && (!projected_site
+                            || authority.as_mut().is_none_or(|authority| {
+                                authority.locate(name, role, symbol_owner.as_deref())
+                            }))
+                    {
+                        add_symbol(source, token, name, role, symbol_owner, &mut symbols);
                         declaration_offsets.insert(token.span.start.offset);
                     } else {
                         references.push(Reference {
@@ -278,8 +373,11 @@ impl DocumentIndex {
                     }
                 }
                 TokenKind::Symbol(symbol) if symbol == "{" => {
-                    let inherited = contexts.last().and_then(|(_, owner)| owner.clone());
-                    contexts.push(awaiting_block.take().unwrap_or((Context::Other, inherited)));
+                    let inherited = contexts.last().map_or_else(
+                        || Scope::new(Context::Other, None, document_projected),
+                        |scope| Scope::new(Context::Other, scope.owner.clone(), scope.projected),
+                    );
+                    contexts.push(awaiting_block.take().unwrap_or(inherited));
                     list_role = None;
                 }
                 TokenKind::Symbol(symbol) if symbol == "}" => {
@@ -290,7 +388,10 @@ impl DocumentIndex {
                 }
                 TokenKind::Symbol(symbol)
                     if symbol == ";"
-                        && !matches!(awaiting_block, Some((Context::Action | Context::Top, _))) =>
+                        && !matches!(
+                            awaiting_block.as_ref().map(|scope| scope.context),
+                            Some(Context::Action | Context::Top)
+                        ) =>
                 {
                     awaiting_block = None;
                     list_role = None;
@@ -1180,6 +1281,54 @@ pub(crate) fn is_keyword(value: &str) -> bool {
     declaration_keyword(value).is_some() || INDEX_KEYWORDS.contains(&value)
 }
 
+/// Literals in every expression; the checker rejects a declaration so named
+/// (issue #570), so the index never reads one as a name.
+const LITERAL_WORDS: &[&str] = &["true", "false", "none"];
+
+/// Whether the identifier at `tokens[index]`, spelled like an index keyword,
+/// is a name in a document whose declarations the AST decides (issue 1362).
+///
+/// FSL reserves none of these words, so a word the AST declares is a name —
+/// its declaration in a state, field, member, parameter or `let` position,
+/// and its uses. The exceptions are the positions where the grammar reads the
+/// word as a keyword whatever the document declares:
+///
+/// - a call `word(...)` when the document declares no action or `def` so
+///   named (the aggregate `count(...)`, `sum(...)`, `old(...)`, ...), and a
+///   collection method `.word(...)` always;
+/// - `expect rejected }`, which closes a `forbidden` block;
+/// - a clause keyword followed on its own line by the name, number or string
+///   it introduces (`age NAME[...]` and `urgent NAME` in a `time` block,
+///   `kpi K = count NAME in ...`). A name used in an expression is followed
+///   by an operator, a bracket, a separator or a keyword instead.
+fn reads_as_declared_name(
+    authority: &DeclarationAuthority,
+    tokens: &[Token],
+    index: usize,
+    name: &str,
+) -> bool {
+    if LITERAL_WORDS.contains(&name) || !authority.declares(name) {
+        return false;
+    }
+    let token = &tokens[index];
+    let previous = index.checked_sub(1).and_then(|i| tokens.get(i));
+    let next = tokens.get(index + 1);
+    if token_symbol(next) == Some("(") {
+        return token_symbol(previous) != Some(".") && authority.declares_function(name);
+    }
+    if token_ident(previous) == Some("expect") && token_symbol(next) == Some("}") {
+        return false;
+    }
+    !next.is_some_and(|next| {
+        next.span.start.line == token.span.start.line
+            && match &next.kind {
+                TokenKind::Ident(word) => !is_keyword(word),
+                TokenKind::Int(_) | TokenKind::String(_) => true,
+                _ => false,
+            }
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn recognized_keywords() -> impl Iterator<Item = &'static str> {
     DECLARATION_KEYWORDS
@@ -1688,6 +1837,175 @@ mod tests {
             .find(|symbol| symbol.name == "Case")
             .expect("Case must be declared by `entity Case`");
         assert_eq!(case.role, SymbolRole::Type);
+    }
+
+    /// Issue #1362's other half: a name being declared does not turn every
+    /// token so spelled into a use of it. Where the grammar reads the word
+    /// as a keyword whatever the document declares — an aggregate
+    /// `count(...)`, a collection method `.add(...)`, the `age NAME` clause
+    /// of a `time` block, the `expect rejected` that closes a `forbidden`
+    /// block — it stays a keyword, so rename never rewrites syntax. The same
+    /// words as plain expressions, calls of the declared action and the
+    /// acceptance's `expect rejected == 1` are uses.
+    #[test]
+    fn a_declared_keyword_spelled_name_leaves_the_grammars_keyword_uses_alone() {
+        let source = r#"requirements Clash {
+  type Id = 0..1
+  state { count: Int, rejected: Int, age: Int, cases: Set<Id> }
+  init { count = 0  rejected = 0  age = 0  cases = Set {} }
+  action add(c: Id) {
+    requires count(i: Id where cases.contains(i)) == count
+    cases = cases.add(c)
+    rejected = rejected + age
+  }
+  time {
+    urgent add
+    age waited[c: Id] while cases.contains(c)
+  }
+  forbidden FB-1 "nothing is rejected twice" {
+    add(0)
+    expect rejected
+  }
+  acceptance AC-1 "one add is one rejection" {
+    add(0)
+    expect rejected == 1
+  }
+}"#;
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid requirements");
+        let referenced = |name: &str| {
+            let mut lines = index
+                .references
+                .iter()
+                .filter(|reference| reference.name == name)
+                .map(|reference| reference.range.start.line + 1)
+                .collect::<Vec<_>>();
+            lines.dedup();
+            lines
+        };
+        // Line 6's first `count` is the aggregate, line 7's `add` the method,
+        // line 12's `age` the clause and line 16's `rejected` the keyword.
+        assert_eq!(referenced("count"), vec![4, 6]);
+        assert_eq!(referenced("add"), vec![11, 15, 19]);
+        assert_eq!(referenced("age"), vec![4, 8]);
+        assert_eq!(referenced("rejected"), vec![4, 8, 20]);
+        let count_uses = index
+            .references
+            .iter()
+            .filter(|reference| reference.name == "count")
+            .count();
+        assert_eq!(count_uses, 2, "{:?}", index.references);
+        assert!(index.unindexed_identifiers().is_empty());
+        assert!(index.misprojected_declarations().is_empty());
+    }
+
+    /// The AST decides only the declarations it projects. A process
+    /// transition's input (`with a: Amount`) and the mapped action of an
+    /// `implements` block are left out of the projection, so the walk still
+    /// declares them and their uses still resolve.
+    #[test]
+    fn declarations_the_projection_leaves_out_keep_the_walks_index() {
+        let source = r#"requirements Expense {
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, a) -> submit(c)
+  }
+  number Amount
+  process Claim with amount: Amount = 0 {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+      with a: Amount
+      when a > 0
+      set amount = a
+  }
+}"#;
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("valid requirements");
+        let input = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "a" && symbol.selection_range.start.line == 9)
+            .unwrap_or_else(|| panic!("the transition input is declared: {:?}", index.symbols));
+        assert_eq!(input.role, SymbolRole::Parameter);
+        assert_eq!(input.owner.as_deref(), Some("submit"));
+        for (line, character) in [(10, 11), (11, 19)] {
+            assert_eq!(
+                index.definition_at(Position::new(line, character)),
+                Some(input),
+                "the use at {line}:{character}"
+            );
+        }
+        assert!(
+            index
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "submit" && symbol.selection_range.start.line == 2),
+            "{:?}",
+            index.symbols
+        );
+        assert!(index.misprojected_declarations().is_empty());
+    }
+
+    /// Inside `until NAME { P until Q }` the second `until` is the operator,
+    /// not a declaration. The walk read it as one and declared the first name
+    /// of `Q` — a use of the state variable `req` — as a property, and every
+    /// `req` in the document then resolved to that phantom. The AST declares
+    /// no such property, so the name stays a use of the state variable, also
+    /// inside a `requirement` block, whose properties the AST projects.
+    #[test]
+    fn the_until_operator_declares_nothing() {
+        let body = "  type Id = 0..1
+  state { req: Map<Id, Bool> }
+  init { forall i: Id { req[i] = false } }
+  action on(i: Id) { req[i] = true }";
+        let property = "until Stays { (req[0] == false) until (req[0] == true) }";
+        for source in [
+            format!("spec Hold {{\n{body}\n  {property}\n}}"),
+            format!("requirements Hold {{\n{body}\n  requirement REQ-1 \"t\" {{ {property} }}\n}}"),
+        ] {
+            let index = DocumentIndex::build(&source, None, &fsl_syntax::ParseOptions::stable())
+                .expect("valid source");
+            let declarations = index
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.name == "req")
+                .map(|symbol| (symbol.role, symbol.selection_range.start.line))
+                .collect::<Vec<_>>();
+            assert_eq!(declarations, vec![(SymbolRole::Variable, 2)], "{source}");
+            let state = index.symbols.iter().find(|symbol| symbol.name == "req");
+            let uses = index
+                .references
+                .iter()
+                .filter(|reference| reference.name == "req")
+                .collect::<Vec<_>>();
+            assert_eq!(uses.len(), 4, "{source}: {uses:?}");
+            assert!(
+                uses.iter()
+                    .all(|reference| index.definition_at(reference.range.start) == state)
+            );
+        }
+    }
+
+    /// `true`, `false` and `none` are literals in every expression, so the
+    /// checker rejects a declaration so named (issue #570). The index never
+    /// treats them as names, even where the parser accepted the declaration.
+    #[test]
+    fn literal_words_are_never_names() {
+        let source = "spec Literal {
+  state { true: Bool }
+  init { true = false }
+  invariant Holds { true }
+}";
+        let index = DocumentIndex::build(source, None, &fsl_syntax::ParseOptions::stable())
+            .expect("parsed");
+        assert!(
+            !index.symbols.iter().any(|symbol| symbol.name == "true")
+                && !index
+                    .references
+                    .iter()
+                    .any(|reference| reference.name == "true"),
+            "{index:?}"
+        );
     }
 
     /// Issue #551 evidence, reduced from `examples/annotations/annotated_domain.fsl`.
