@@ -524,6 +524,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
+        Ordinary,
+        "rust/fslc/src/verification_output.rs",
+        890,
+        "enabled_step_instance",
+        ResultOption
+    ),
+    entry!(
         Verdict,
         "rust/fslc/src/verification_output.rs",
         781,
