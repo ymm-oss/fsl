@@ -1123,7 +1123,7 @@ fn render_operation(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .model
         .actions
         .iter()
-        .find(|action| ctx.model.action_key(&action.name) == key);
+        .find(|action| ctx.model.action_display_name(&action.name) == key);
     let name = action.map_or_else(
         || ctx.model.names().public_action(key).into_string(),
         |action| ctx.model.action_display_name(&action.name),

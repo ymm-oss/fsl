@@ -310,7 +310,17 @@ fn boundary_cases(
     let actions = required_array(kernel_root, "actions", "kernel")?;
     for action in actions {
         let action_object = required_object(action, "kernel action")?;
-        let action_name = required_str(action_object, "name", "kernel action")?;
+        // The Public Kernel keeps the internal name (`submit__b1` for a branch
+        // split); conformance vectors carry the public one (`submit.b1`,
+        // #1256). No model is in reach, and testplan rejects compose, so the
+        // string rule is the public spelling.
+        let action_name = fsl_core::unmapped_public_spelling(required_str(
+            action_object,
+            "name",
+            "kernel action",
+        )?);
+        let action_name = action_name.as_str();
+        let mut vector_checked = false;
         for guard in required_array(action_object, "guards", "kernel action")? {
             let guard_object = required_object(guard, "guard")?;
             if guard_object.get("kind").and_then(Value::as_str) != Some("requires") {
@@ -329,6 +339,15 @@ fn boundary_cases(
                 ">" => (threshold + 1, threshold),
                 _ => continue,
             };
+            if !vector_checked {
+                vector_checked = true;
+                if !names_action(vectors, action_name) {
+                    return Err(format!(
+                        "kernel action '{action_name}' has a boundary guard but no conformance \
+                         vector names it, so its boundary cases cannot be selected"
+                    ));
+                }
+            }
             if let Some((index, vector)) =
                 find_vector(vectors, "s0", action_name, &param, accept_value, "ok")
             {
@@ -438,6 +457,16 @@ fn comparison_threshold(expression: &Value) -> Result<Option<(String, String, i6
         return Ok(None);
     };
     Ok(Some((param, operator.to_owned(), literal)))
+}
+
+fn names_action(vectors: &[Value], action_name: &str) -> bool {
+    vectors.iter().any(|vector| {
+        vector
+            .get("action")
+            .and_then(|action| action.get("name"))
+            .and_then(Value::as_str)
+            == Some(action_name)
+    })
 }
 
 fn find_vector<'a>(

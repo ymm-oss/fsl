@@ -188,7 +188,10 @@ impl KernelModel {
                         member: member.clone(),
                     })
                     .collect()),
-                _ => Err(model_error(format!("type '{name}' is not a finite scalar"))),
+                _ => Err(model_error(format!(
+                    "type '{}' is not a finite scalar",
+                    shown(name)
+                ))),
             },
             _ => Err(model_error("type is not a finite scalar")),
         }
@@ -263,7 +266,7 @@ impl KernelModel {
                         type_name: name.clone(),
                         member: member.clone(),
                     })
-                    .ok_or_else(|| model_error(format!("enum '{name}' has no members"))),
+                    .ok_or_else(|| model_error(format!("enum '{}' has no members", shown(name)))),
                 Some(TypeDef::Struct { fields }) => Ok(Value::Struct {
                     type_name: name.clone(),
                     fields: fields
@@ -271,7 +274,7 @@ impl KernelModel {
                         .map(|(field, ty)| Ok((field.clone(), self.default_value(ty)?)))
                         .collect::<Result<_, ModelError>>()?,
                 }),
-                None => Err(model_error(format!("unknown type '{name}'"))),
+                None => Err(model_error(format!("unknown type '{}'", shown(name)))),
             },
             TypeRef::Map(key, value) => Ok(Value::Map(
                 self.map_key_values(key)?
@@ -308,7 +311,7 @@ impl KernelModel {
             LValue::Var(name) => self
                 .state_type(name)
                 .cloned()
-                .ok_or_else(|| model_error(format!("unknown update target '{name}'"))),
+                .ok_or_else(|| model_error(format!("unknown update target '{}'", shown(name)))),
             LValue::Index(name, _) => match self.state_type(name) {
                 Some(TypeRef::Map(_, value) | TypeRef::Relation(_, value)) => {
                     Ok(value.as_ref().clone())
@@ -316,7 +319,10 @@ impl KernelModel {
                 Some(_) => Err(model_error(
                     "indexed update target requires Map or Relation",
                 )),
-                None => Err(model_error(format!("unknown update target '{name}'"))),
+                None => Err(model_error(format!(
+                    "unknown update target '{}'",
+                    shown(name)
+                ))),
             },
             LValue::Field(base, field) => {
                 let TypeRef::Named(name) = self.state_lvalue_type(base)? else {
@@ -377,24 +383,10 @@ impl KernelModel {
         self.names.public_action(name).into_string()
     }
 
-    /// See [`crate::NameMap::public_action_key`].
-    #[must_use]
-    pub fn action_key(&self, name: &str) -> String {
-        self.names.public_action_key(name).into_string()
-    }
-
     /// See [`crate::NameMap::public_violation`].
     #[must_use]
     pub fn action_scoped_display_name(&self, name: &str, action: Option<&str>) -> String {
         self.names.public_violation(name, action).into_string()
-    }
-
-    /// See [`crate::NameMap::compose_public_name`].
-    #[must_use]
-    pub fn compose_public_name(&self, name: &str) -> Option<String> {
-        self.names
-            .compose_public_name(name)
-            .map(crate::PublicName::into_string)
     }
 
     /// Give a model rebuilt from this model's lowered surface spec (a mutant
@@ -560,7 +552,10 @@ fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelErro
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
             Some(Value::Int(value)) => Ok(*value),
-            _ => Err(model_error(format!("'{name}' is not an integer constant"))),
+            _ => Err(model_error(format!(
+                "'{}' is not an integer constant",
+                shown(name)
+            ))),
         },
         Expr::Neg(value) => static_leadsto_int(value, model)?
             .checked_neg()
@@ -806,7 +801,7 @@ impl ModelBuilder {
                         if state.iter().any(|(existing, _)| existing == &field.name) {
                             return Err(model_error(format!(
                                 "duplicate state variable '{}'",
-                                field.name
+                                shown(&field.name)
                             ))
                             .with_origin(self.origins.diagnostic_origin(&state_target(&field.name)))
                             // The redeclaration, not the first binding: the
@@ -824,7 +819,7 @@ impl ModelBuilder {
                         if !self.legal_state_type(&resolved) {
                             return Err(model_error(format!(
                                 "state variable '{}' has unsupported state type",
-                                field.name
+                                shown(&field.name)
                             ))
                             .with_origin(origin)
                             .at(field.span));
@@ -833,7 +828,7 @@ impl ModelBuilder {
                             if let Some(form) = unsupported_inline_form(initializer) {
                                 return Err(model_error(format!(
                                     "inline initializer for '{}' does not allow {form}; use init",
-                                    field.name
+                                    shown(&field.name)
                                 ))
                                 .with_origin(Some(source_origin(
                                     &field.name,
@@ -843,8 +838,9 @@ impl ModelBuilder {
                             }
                             if let Some(name) = first_state_reference(initializer, &state_names) {
                                 return Err(model_error(format!(
-                                    "inline initializer for '{}' must not read state root '{name}'",
-                                    field.name
+                                    "inline initializer for '{}' must not read state root '{}'",
+                                    shown(&field.name),
+                                    shown(&name)
                                 ))
                                 .with_origin(Some(source_origin(
                                     &field.name,
@@ -855,7 +851,7 @@ impl ModelBuilder {
                             if let Some(conflict_span) = explicit_init_writes.get(&field.name) {
                                 return Err(model_error(format!(
                                     "state root '{}' is assigned by both an inline initializer and init",
-                                    field.name
+                                    shown(&field.name)
                                 ))
                                 .with_origin(Some(source_origin(
                                     &field.name,
@@ -902,9 +898,8 @@ impl ModelBuilder {
                 } => {
                     let origin = self.origins.diagnostic_origin(&action_target(name));
                     if !action_names.insert(name) {
-                        return Err(
-                            model_error(format!("duplicate action '{name}'")).with_origin(origin)
-                        );
+                        return Err(model_error(format!("duplicate action '{}'", shown(name)))
+                            .with_origin(origin));
                     }
                     let mut action = self
                         .action(name, params, items, *span, *fair, meta.clone())
@@ -1102,7 +1097,8 @@ impl ModelBuilder {
                 let origin = error.span.map(type_diagnostic_origin);
                 if let Some((name, _)) = inline_initializers.get(&index) {
                     model_error(format!(
-                        "invalid inline initializer for '{name}': {}",
+                        "invalid inline initializer for '{}': {}",
+                        shown(name),
                         error.message
                     ))
                     .with_origin(origin)
@@ -1138,7 +1134,7 @@ impl ModelBuilder {
         for item in &self.spec.items {
             if let SpecItem::Const { name, value } = item {
                 if self.consts.contains_key(name) {
-                    return Err(model_error(format!("duplicate const '{name}'")));
+                    return Err(model_error(format!("duplicate const '{}'", shown(name))));
                 }
                 let value = eval_const(value, &self.consts)?;
                 self.consts.insert(name.clone(), value);
@@ -1327,7 +1323,7 @@ impl ModelBuilder {
 
     fn insert_type(&mut self, name: &str, definition: TypeDef) -> Result<(), ModelError> {
         if self.types.insert(name.to_owned(), definition).is_some() {
-            Err(model_error(format!("duplicate type '{name}'")))
+            Err(model_error(format!("duplicate type '{}'", shown(name))))
         } else {
             Ok(())
         }
@@ -1754,7 +1750,7 @@ fn resolve_type(
         TypeExpr::Bool => TypeRef::Bool,
         TypeExpr::Name(name) => {
             if !types.contains_key(name) {
-                return Err(model_error(format!("unknown type '{name}'")));
+                return Err(model_error(format!("unknown type '{}'", shown(name))));
             }
             TypeRef::Named(name.clone())
         }
@@ -2277,7 +2273,7 @@ fn eval_const_typed(
             Some(value @ Value::Int(_)) => Ok(typed(ConstType::Int, value)),
             Some(value @ Value::Bool(_)) => Ok(typed(ConstType::Bool, value)),
             Some(_) => Err(model_error("unsupported constant value type")),
-            None => Err(model_error(format!("unknown constant '{name}'"))),
+            None => Err(model_error(format!("unknown constant '{}'", shown(name)))),
         },
         Expr::Neg(value) => {
             let value = eval_const_typed(value, consts, evaluate)?;
@@ -2510,8 +2506,10 @@ fn reject_duplicate_property_names(spec: &SurfaceSpec) -> Result<(), ModelError>
         for name in names {
             if let Some((first_kind, first_span)) = seen.get(&name) {
                 return Err(model_error(format!(
-                    "duplicate property name '{name}': {kind} reuses the name of the {first_kind} declared at {}:{}",
-                    first_span.start.line, first_span.start.column
+                    "duplicate property name '{}': {kind} reuses the name of the {first_kind} declared at {}:{}",
+                    shown(&name),
+                    first_span.start.line,
+                    first_span.start.column
                 ))
                 .at(span));
             }
@@ -2519,6 +2517,12 @@ fn reject_duplicate_property_names(spec: &SurfaceSpec) -> Result<(), ModelError>
         }
     }
     Ok(())
+}
+
+/// A Kernel name as a diagnostic shows it: the public spelling every output
+/// uses (`acct.bal` for the compose component state `acct__bal`).
+fn shown(name: &str) -> String {
+    crate::unmapped_public_spelling(name)
 }
 
 fn model_error(message: impl Into<String>) -> ModelError {
@@ -2536,7 +2540,8 @@ fn model_error(message: impl Into<String>) -> ModelError {
 fn reject_map_int_key(name: &str, ty: &TypeExpr, span: Span) -> Result<(), ModelError> {
     if contains_map_int_key(ty) {
         return Err(model_error(format!(
-            "Map<Int, ...> on '{name}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
+            "Map<Int, ...> on '{}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`",
+            shown(name)
         ))
         .at(span));
     }

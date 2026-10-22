@@ -1919,18 +1919,31 @@ compose OrderSystem {
   component.
 - `internal <alias>.<action>` — excludes that action from interleaving.
 - An ordinary `action` (without `=`) can also be written (a glue action).
-- JSON display: the physical name `alias__x` is output as `alias.x` (state keys,
-  action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
-  A component action's public name is built from its alias and its action name,
-  so `use X as a__b` with action `c` is `a__b.c`. Every command that names a
-  component action — verify, sweep, scenarios, explain, testgen, conformance,
-  mutate, refine, diff, html, ledger, analyze (including graph IDs such as
-  `action:a__b.c`), `check --strict-tags` warnings, and `replay` output including `state_mismatch.action` — uses
-  this `alias.action` form, including in names derived from the action such as
-  `_requires_failed_a__b.c`. State keys keep the rule above, so the state `n` of
-  `use X as a__b` is shown as `a.b__n` (the frozen Python reference shows
-  `a__b.n`). A v1 `replay` trace may write a component action as `alias.action` or as
-  the older `alias__action`; both name the same action (see
+- Names and `__`: a name you declare in a `spec`, `requirements`, `business`, or
+  `compose` document (a spec, action, parameter, `let`, state variable, property,
+  type, const, enum member, struct field, process, stage, actor, or `use` alias)
+  must not contain `__`. `fslc check` rejects one at the declaration
+  (`kind:"name"`, exit 2); a compose component's declaration is reported at the
+  parent's `use`. `__` is reserved for the names lowering generates: the
+  physical name `alias__x` of a compose component declaration and the split
+  `submit__b1` of a requirements `branches` action. A generated name may still
+  be referenced, as a refinement mapping does with `submit__b1`.
+- JSON display: a generated name is published with `.` in place of its `__`,
+  in one spelling for every output: the physical name `alias__x` is `alias.x`,
+  and a branch split `submit__b1` is `submit.b1` (state keys, action names,
+  invariant / reachable names, diagnostics, traces, scenarios, and the Monitor —
+  all of them). A component declaration's public name is built from its alias
+  and its own name. Every command that names one — verify (including
+  `cost.properties[].name`), sweep, scenarios, explain, testgen, conformance
+  (including outcome names such as `acct.Inv`), testplan, mutate (targets and the
+  dead-action note), refine, diff, html, ledger, analyze (including graph IDs
+  such as `action:acct.go` and `action:submit.b1`), `check --strict-tags`
+  warnings, and `replay` output including `state_mismatch.action` — uses this
+  form, including in names derived from an action such as
+  `_requires_failed_acct.go`. Only the Public Kernel (`fslc kernel`) keeps the
+  internal name. A v1 `replay` trace may write a generated action in its public
+  spelling or as its internal name (`acct.go` or `acct__go`, `submit.b1` or
+  `submit__b1`); both name the same action (see
   `docs/design/DESIGN-replay-trace.md`). The native implementation owns all of
   these spellings, and the names the engines build such as `_partial_<action>`
   and `_bounds_<state>`, in one module, `rust/fsl-core/src/naming.rs`.
@@ -2463,8 +2476,9 @@ verify {
   behavior that needs explicit kernel state. That fallback still supports
   `struct` / `state` / `init`, `fair action`, `branches`, and explicit `maps`.
   `branches` automatically splits an action by each when condition (displayed as
-  `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
-  correspondence to the upper layer.
+  `submit[a <= AUTO_LIMIT]` in mutation targets; the split actions are
+  `submit.b1`, `submit.b2`, … in every other output), and the `maps` clause
+  provides the action correspondence to the upper layer.
 - `terminal { <expr> }` is allowed at the top level of a `requirements` spec
   and lowers to the kernel (§6) — there is exactly one `terminal` block per
   spec, same as the kernel. `stage(c)` is available in all requirements

@@ -129,6 +129,28 @@ const ALLOWED: &[Allowed] = &[
         reason: "`type_ref_text` renders a type with no model parameter",
     },
     Allowed {
+        path: "rust/fsl-core/src/typecheck.rs",
+        kind: Kind::UnmappedSpelling,
+        needle: "unmapped_public_spelling(",
+        reason: "`shown`: type-check diagnostics name identifiers and types read from an \
+                 expression; the string rule is the public spelling of every name a \
+                 checked document can produce (#1256)",
+    },
+    Allowed {
+        path: "rust/fsl-core/src/model.rs",
+        kind: Kind::UnmappedSpelling,
+        needle: "unmapped_public_spelling(",
+        reason: "`shown`: model-build diagnostics, raised while the model (and its \
+                 `NameMap`) is still being built",
+    },
+    Allowed {
+        path: "rust/fsl-tools/src/testplan.rs",
+        kind: Kind::UnmappedSpelling,
+        needle: "unmapped_public_spelling(",
+        reason: "testplan matches Public Kernel action names to conformance vectors; it \
+                 rejects compose, so the string rule is the public spelling (#1256)",
+    },
+    Allowed {
         path: "rust/fsl-tools/src/testgen.rs",
         kind: Kind::UnmappedSpelling,
         needle: "unmapped_public_spelling(",
@@ -144,7 +166,8 @@ const ALLOWED: &[Allowed] = &[
         path: "rust/fslc/src/main.rs",
         kind: Kind::UnmappedSpelling,
         needle: "unmapped_public_spelling(",
-        reason: "`enum_member` and the statement-root collector receive no model",
+        reason: "`enum_member`, the statement-root collector, and `tag_lvalue_text` \
+                 (the assignment root beside `expr_text`) receive no model",
     },
     Allowed {
         path: "rust/fslc/src/main.rs",
