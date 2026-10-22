@@ -2187,6 +2187,36 @@ fn event_origin(
     }
 }
 
+/// The requirement of the action of a next-edition event without `covers`:
+/// the first ID a decision table row's `covers`, a `rule` or a decision
+/// table attached to the event (its requirement annotations, in source
+/// order), a row's `covers` before its table's own ID. `None` when nothing
+/// names the event. Unlike a process-form transition, the event never gets
+/// the `by <actor>` note: the actor is not a requirement.
+fn event_requirement(
+    transition: &ProcessTransition,
+    decision_ids: &BTreeSet<String>,
+) -> Option<MetaTag> {
+    let requirements = transition
+        .annotations
+        .source_order()
+        .iter()
+        .filter_map(|annotation| match annotation {
+            Annotation::Requirement { id, text, span } => Some((id, text, *span)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    requirements
+        .iter()
+        .find(|(id, _, _)| !decision_ids.contains(*id))
+        .or_else(|| requirements.first())
+        .map(|(id, text, span)| MetaTag {
+            id: (*id).clone(),
+            text: (*text).clone(),
+            span: Some(*span),
+        })
+}
+
 /// Lower the requirements dialect into the shared kernel, after name
 /// resolution ([`crate::lower_requirements`]) replaced every glossary alias.
 ///
@@ -2295,6 +2325,12 @@ pub(crate) fn lower_resolved_requirements(
     if let Some(next) = &requirements.next {
         check_generated_names(next, &items, &processes, &binders)?;
     }
+    let decision_ids = requirements
+        .next
+        .iter()
+        .flat_map(|next| &next.decisions)
+        .map(|table| table.id.clone())
+        .collect::<BTreeSet<_>>();
     for process in &processes {
         items.push(SpecItem::Enum {
             name: process_enum(&process.process.name),
@@ -2485,7 +2521,10 @@ pub(crate) fn lower_resolved_requirements(
                 }));
             }
             let metadata = transition.covers.as_ref().map_or_else(
-                || meta(&transition.name, format!("by {}", transition.actor)),
+                || match event {
+                    Some(_) => event_requirement(transition, &decision_ids),
+                    None => meta(&transition.name, format!("by {}", transition.actor)),
+                },
                 |cover| {
                     extra_annotations.push((
                         crate::action_target(&transition.name),

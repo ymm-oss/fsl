@@ -41,20 +41,39 @@ requirements AgenticRagToolApprovalSlice {
     }
   }
 
+  // REQ-5 の rule が名指さない event は、どの要件にも属さない（要件の帰属は
+  // fsl 5 の source が書いた ID だけ）。
+  // event grant_operator = Admin grants Request   in New   set role = Operator
+  fair action grant_operator(r: Request) {
+    requires request_stage[r] == New
+    request_role[r] = Operator
+  }
+  // event prepare_tool_ready = Retriever prepares Request   New -> EvidenceReady
+  //   set evidence = Adequate, needs_tool = true
+  fair action prepare_tool_ready(r: Request) {
+    requires request_stage[r] == New
+    request_stage[r] = EvidenceReady
+    request_evidence[r] = Adequate
+    request_needs_tool[r] = true
+  }
+  // event deny_tool = Operator denies Request   ToolApproval -> Refused   set approval = Denied
+  fair action deny_tool(r: Request) {
+    requires request_stage[r] == ToolApproval
+    request_stage[r] = Refused
+    request_approval[r] = Denied
+  }
+  // fault event downgrade_approval = Fault downgrades Request  in ToolApproved  set approval = Requested
+  action downgrade_approval(r: Request) {
+    requires request_stage[r] == ToolApproved
+    request_approval[r] = Requested
+  }
+  // fault event revoke_operator = Fault revokes Request  in ToolApproved  set role = Public
+  action revoke_operator(r: Request) {
+    requires request_stage[r] == ToolApproved
+    request_role[r] = Public
+  }
+
   requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
-    // event grant_operator = Admin grants Request   in New   set role = Operator
-    fair action grant_operator(r: Request) {
-      requires request_stage[r] == New
-      request_role[r] = Operator
-    }
-    // event prepare_tool_ready = Retriever prepares Request   New -> EvidenceReady
-    //   set evidence = Adequate, needs_tool = true
-    fair action prepare_tool_ready(r: Request) {
-      requires request_stage[r] == New
-      request_stage[r] = EvidenceReady
-      request_evidence[r] = Adequate
-      request_needs_tool[r] = true
-    }
     // event request_tool_approval = Agent requests Request   EvidenceReady -> ToolApproval
     //   set approval = Requested
     // rule: allow Agent requests Request only for ToolNeeded
@@ -72,22 +91,6 @@ requirements AgenticRagToolApprovalSlice {
       requires request_role[r] == Operator
       request_stage[r] = ToolApproved
       request_approval[r] = Approved
-    }
-    // event deny_tool = Operator denies Request   ToolApproval -> Refused   set approval = Denied
-    fair action deny_tool(r: Request) {
-      requires request_stage[r] == ToolApproval
-      request_stage[r] = Refused
-      request_approval[r] = Denied
-    }
-    // fault event downgrade_approval = Fault downgrades Request  in ToolApproved  set approval = Requested
-    action downgrade_approval(r: Request) {
-      requires request_stage[r] == ToolApproved
-      request_approval[r] = Requested
-    }
-    // fault event revoke_operator = Fault revokes Request  in ToolApproved  set role = Public
-    action revoke_operator(r: Request) {
-      requires request_stage[r] == ToolApproved
-      request_role[r] = Public
     }
     // fault event make_waiting_but_approved = Fault forges Request  in ToolApproval  set approval = Approved
     // rule: allow Fault forges Request only for OperatorHeld
@@ -121,11 +124,12 @@ requirements AgenticRagToolApprovalSlice {
         )
       }
     }
+  }
 
-    // goal CanExecuteTool: some Request can reach ActionExecuted
-    reachable CanExecuteTool {
-      exists r: Request { request_stage[r] == ActionExecuted }
-    }
+  // goal CanExecuteTool: some Request can reach ActionExecuted
+  @requirement("CanExecuteTool", "副作用toolを実行できる")
+  reachable CanExecuteTool {
+    exists r: Request { request_stage[r] == ActionExecuted }
   }
 
   acceptance AC-TOOL "operator承認後に副作用toolを実行できる" {

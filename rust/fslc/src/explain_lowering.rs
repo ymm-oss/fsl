@@ -120,22 +120,6 @@ pub(crate) fn guard_requirements(model: &KernelModel, action: &str, index: usize
         .collect()
 }
 
-/// Whether the requirement `id` / `text` of `action` is the note the
-/// lowering gives the action of an event that covers no requirement: the
-/// event's own name with `by <actor>`. It names the actor; it is neither a
-/// requirement nor the author's wording. Only an action lowered from a
-/// next-edition event has one.
-pub(crate) fn is_actor_note(
-    model: &KernelModel,
-    action: &str,
-    id: &str,
-    text: Option<&str>,
-) -> bool {
-    id == action
-        && text.is_some_and(|text| text.starts_with("by "))
-        && !steps(model, &action_target(action), &["event"]).is_empty()
-}
-
 /// The readable lines naming the event an action lowers from:
 /// `event: System approves Claim Submitted -> Approved (claims.fsl:27)`.
 pub(crate) fn action_lines(model: &KernelModel, action: &str) -> Vec<String> {

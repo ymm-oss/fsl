@@ -14,6 +14,7 @@
 //   decide REQ-2/REQ-3 for Submitted Claim { SmallClaim => ...  LargeClaim => ... }
 //       -> auto_approve に requires claim_amount[c] <= AUTO_LIMIT
 //          mgr_approve / reject に requires claim_amount[c] > AUTO_LIMIT
+//          要件は行の covers（REQ-2 / REQ-3）と表の ID（REQ-2-3, @requirement）
 //   scenario AC-n -> acceptance AC-n（名前付きインスタンスは出現順に 0 から）
 // ════════════════════════════════════════════════════════════════
 requirements ExpenseRequirements {
@@ -50,6 +51,7 @@ requirements ExpenseRequirements {
   requirement REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system" {
     // event auto_approve = System approves Claim   Submitted -> Approved
     // decide row: SmallClaim => System approves
+    @requirement("REQ-2-3", "Who handles a submitted claim")
     fair action auto_approve(c: Claim) {
       requires claim_stage[c] == Submitted
       requires claim_amount[c] <= AUTO_LIMIT
@@ -59,11 +61,13 @@ requirements ExpenseRequirements {
 
   requirement REQ-3 "Claims above AUTO_LIMIT are approved or rejected by a manager" {
     // decide row: LargeClaim => Manager approves or rejects
+    @requirement("REQ-2-3", "Who handles a submitted claim")
     fair action mgr_approve(c: Claim) {
       requires claim_stage[c] == Submitted
       requires claim_amount[c] > AUTO_LIMIT
       claim_stage[c] = Approved
     }
+    @requirement("REQ-2-3", "Who handles a submitted claim")
     fair action reject(c: Claim) {
       requires claim_stage[c] == Submitted
       requires claim_amount[c] > AUTO_LIMIT

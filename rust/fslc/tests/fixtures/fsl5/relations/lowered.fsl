@@ -58,11 +58,13 @@ requirements Support {
     }
   }
 
+  @requirement("Resolved", "Every assigned ticket is eventually closed or escalated")
   leadsTo Resolved {
     forall t: Ticket {
       ticket_stage[t] == Assigned ~> ticket_stage[t] == Closed or ticket_stage[t] == Escalated
     }
   }
+  @requirement("Closable", "A ticket can be closed")
   reachable Closable {
     exists t: Ticket { ticket_stage[t] == Closed }
   }
