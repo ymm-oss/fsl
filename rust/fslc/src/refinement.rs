@@ -569,7 +569,7 @@ pub(crate) fn run_refine(
                             "checked_to_depth": depth,
                             "actions": actions
                                 .iter()
-                                .map(|action| implementation.action_key(action))
+                                .map(|action| implementation.action_display_name(action))
                                 .collect::<Vec<_>>(),
                         }),
                     )

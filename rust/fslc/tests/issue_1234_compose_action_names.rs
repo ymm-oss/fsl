@@ -14,6 +14,16 @@
 //!
 //! Detectors fail on `origin/main` (458040f3); the negative and non-compose
 //! controls are preservation controls that pass before and after.
+//!
+//! #1256 (decisions 051) later made check reject a declared name containing
+//! `__`, including a `use` alias. The fixtures that used alias `a__b` to tell
+//! the structural name apart from the string rule now use `ab`: with no `__`
+//! inside an alias the two spellings coincide, so these tests guard against an
+//! internal `ab__go` leaking rather than against a misparse. The glue actions
+//! `z__a` are `za`, alias `p__q` is gone, and `issue_1256_public_names.rs`
+//! covers the rejection and the generated (branch) names that still carry
+//! `__`. Detector notes below that name `a__b` describe the fixture as it was
+//! when the defect was found.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -244,7 +254,7 @@ fn unknown_unqualified_misaliased_and_internal_actions_are_rejected() {
     }
 }
 
-/// Preservation: a non-compose action keeps exact Kernel-name matching.
+/// Preservation: a non-compose action matches its Kernel name.
 #[test]
 fn non_compose_actions_keep_exact_matching() {
     let output = fslc(&[
@@ -256,36 +266,17 @@ fn non_compose_actions_keep_exact_matching() {
     assert_eq!(output.status.code(), Some(0), "{:#}", json_of(&output));
     assert_eq!(json_of(&output)["result"], "conformant");
 
-    let dir = scratch_dir("plain");
-    let spec = dir.join("plain.fsl");
-    std::fs::write(
-        &spec,
-        "spec PlainDunder {\n  state { n: 0..1 }\n  init { n = 0 }\n  action foo__bar() {\n    requires n < 1\n    n = n + 1\n  }\n}\n",
-    )
-    .expect("write spec");
-    let spec = spec.to_str().expect("utf-8 path");
-    let trace = |action: &str, n: i64| {
-        v1_trace(
-            "PlainDunder",
-            &json!({"n": 0}),
-            vec![(json!(action), json!({}), json!({"n": n}))],
-        )
-    };
-
-    let (output, status) = replay(spec, &trace("foo__bar", 1), "plain-exact");
-    assert_eq!(status, 0, "{output:#}");
-    assert_eq!(output["result"], "conformant", "{output:#}");
-
-    let (output, status) = replay(spec, &trace("foo__bar", 0), "plain-mismatch");
-    assert_eq!(status, 1, "{output:#}");
-    assert_eq!(output["violation"]["action"], "foo__bar", "{output:#}");
-
-    let (output, status) = replay(spec, &trace("foo.bar", 1), "plain-dot");
-    assert_eq!(status, 1, "{output:#}");
-    assert_eq!(output["violation"]["kind"], "bad_call", "{output:#}");
+    // A declared `foo__bar` is rejected since #1256; the generated
+    // `submit__b1` that still carries `__` is covered by
+    // `issue_1256_public_names.rs`.
 }
 
-fn write_alias_fixture(dir: &Path) {
+/// #1256: the two structures that shared `a__b__c` (alias `a__b` with action
+/// `c`, alias `a` with action `b__c`) are both rejected at the declaration,
+/// so a checked model never holds two internal names with one public name.
+#[test]
+fn double_underscore_alias_and_component_action_are_rejected_at_check() {
+    let dir = scratch_dir("alias");
     std::fs::write(
         dir.join("counter.fsl"),
         "spec Counter {\n  state { n: 0..2 }\n  init { n = 0 }\n  action c() {\n    requires n < 2\n    n = n + 1\n  }\n}\n",
@@ -302,67 +293,31 @@ fn write_alias_fixture(dir: &Path) {
     )
     .expect("write compose");
     std::fs::write(
-        dir.join("collide.fsl"),
-        "compose AliasCollision {\n  use Counter as a__b from \"counter.fsl\"\n  use Other as a from \"other.fsl\"\n}\n",
+        dir.join("component.fsl"),
+        "compose ComponentAction {\n  use Other as a from \"other.fsl\"\n}\n",
     )
     .expect("write compose");
-}
-
-/// Detector: on 458040f3 alias `a__b` with action `c` was published as
-/// `a.b__c`; the structural name (and the frozen Python reference) is `a__b.c`.
-#[test]
-fn double_underscore_alias_is_named_from_structure() {
-    let dir = scratch_dir("alias");
-    write_alias_fixture(&dir);
-    let spec = dir.join("alias.fsl");
-    let spec = spec.to_str().expect("utf-8 path");
-
-    let output = fslc(&["conformance", spec, "--depth", "1"]);
-    assert_eq!(output.status.code(), Some(0), "{:#}", json_of(&output));
-    let conformance = json_of(&output);
-    let names = conformance["vectors"]
-        .as_array()
-        .expect("vectors")
-        .iter()
-        .filter_map(|vector| vector["action"]["name"].as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(names, ["a__b.c"].into_iter().collect());
-
-    // State keys still use the string rule (`a.b__n`, unlike Python's
-    // `a__b.n`); they are outside #1234, so the trace reuses the keys
-    // conformance printed instead of pinning them.
-    let initial = &conformance["states"][0]["state"];
-    let vector = &conformance["vectors"][0];
-    assert_eq!(vector["state"], "s0", "{conformance:#}");
-    let stepped = &vector["outcome"]["state"];
-    for spelling in ["a__b.c", "a__b__c"] {
-        let trace = v1_trace(
-            "DoubleUnderscoreAlias",
-            initial,
-            vec![(json!(spelling), json!({}), stepped.clone())],
+    for (file, name, line, column) in [
+        ("alias.fsl", "a__b", 2, 18),
+        ("other.fsl", "b__c", 4, 10),
+        // A component's declaration is reported at the parent's `use`.
+        ("component.fsl", "b__c", 2, 3),
+    ] {
+        let output = fslc(&["check", &path_arg(&dir, file)]);
+        let value = json_of(&output);
+        assert_eq!(output.status.code(), Some(2), "{file}: {value:#}");
+        assert!(
+            value["message"]
+                .as_str()
+                .is_some_and(|message| message.contains(&format!("'{name}' contains '__'"))),
+            "{file}: {value:#}"
         );
-        let (output, status) = replay(spec, &trace, "alias-replay");
-        assert_eq!(status, 0, "{spelling}: {output:#}");
-        assert_eq!(output["result"], "conformant", "{output:#}");
+        assert_eq!(
+            value["loc"],
+            json!({"line": line, "column": column}),
+            "{file}: {value:#}"
+        );
     }
-}
-
-/// Preservation: the two structures that share `a__b__c` cannot coexist, so a
-/// checked model never holds an ambiguous replay table.
-#[test]
-fn colliding_internal_names_are_rejected_before_replay() {
-    let dir = scratch_dir("collide");
-    write_alias_fixture(&dir);
-    let spec = dir.join("collide.fsl");
-    let output = fslc(&["check", spec.to_str().expect("utf-8 path")]);
-    assert_eq!(output.status.code(), Some(2), "{:#}", json_of(&output));
-    assert!(
-        json_of(&output)["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("duplicate action")),
-        "{:#}",
-        json_of(&output)
-    );
 }
 
 /// Detector: on 458040f3 `verify` (`cost.properties[].name`), `conformance`
@@ -444,16 +399,16 @@ const TAGGED: &str = "spec Tagged {\n  state { n: 0..20 }\n  init { n = 0 }\n  a
 /// One invariant, reachable, and leadsTo per alias, so `acct` and `acct2`
 /// key every per-property list.
 const RANKED_COMPONENT: &str = "spec Rc {\n  state { n: 0..2 }\n  init { n = 0 }\n  fair action go() {\n    requires n < 2\n    n = n + 1\n  }\n  fair action back() {\n    requires n == 2\n    n = 0\n  }\n  invariant Inv { n <= 2 }\n  reachable Top { n == 2 }\n  leadsTo Back { n == 2 ~> n == 0 }\n}\n";
-/// Glue action `z__a` is published `z.a` (string rule), component `z.go` is
-/// `z.go`: their internal names sort `z__a` after `z.go`'s key.
-const RANKED: &str = "compose Ranked {\n  use Rc as acct from \"rc.fsl\"\n  use Rc as acct2 from \"rc.fsl\"\n  use Rc as z from \"rc.fsl\"\n  action z__a() {\n    requires z__n == 0\n    z__n = 1\n  }\n}\n";
-/// Aliases `p__q`, `p`, `p2` publish `p.q__Back`, `p.Back`, `p2.Back`, whose
-/// internal names `p__q__Back`, `p__Back`, `p2__Back` sort the other way.
-const ORD: &str = "compose Ord {\n  use Rc as p__q from \"rc.fsl\"\n  use Rc as p from \"rc.fsl\"\n  use Rc as p2 from \"rc.fsl\"\n}\n";
-/// Glue `z__a` and component `z.b` move the two counters in opposite
+/// Glue action `za` beside component `z.go`.
+const RANKED: &str = "compose Ranked {\n  use Rc as acct from \"rc.fsl\"\n  use Rc as acct2 from \"rc.fsl\"\n  use Rc as z from \"rc.fsl\"\n  action za() {\n    requires z__n == 0\n    z__n = 1\n  }\n}\n";
+/// Aliases `p`, `p2` publish `p.Back`, `p2.Back`, whose internal names
+/// `p__Back`, `p2__Back` sort the other way.
+const ORD: &str =
+    "compose Ord {\n  use Rc as p from \"rc.fsl\"\n  use Rc as p2 from \"rc.fsl\"\n}\n";
+/// Glue `za` and component `z.b` move the two counters in opposite
 /// directions, a weighted-sum conservation candidate over both actions.
 const PAIR: &str = "spec Pair {\n  state { x: Int, y: Int }\n  init {\n    x = 0\n    y = 0\n  }\n  action b() {\n    x = x - 1\n    y = y + 1\n  }\n}\n";
-const CONSERVE: &str = "compose Conserve {\n  use Pair as z from \"pair.fsl\"\n  action z__a() {\n    z__x = z__x + 1\n    z__y = z__y - 1\n  }\n}\n";
+const CONSERVE: &str = "compose Conserve {\n  use Pair as z from \"pair.fsl\"\n  action za() {\n    z__x = z__x + 1\n    z__y = z__y - 1\n  }\n}\n";
 /// `left` and `right` are always enabled and disagree on `Low`: a divergent
 /// choice the `@undecided` on `left` acknowledges.
 const CHOICE: &str = "spec Choice {\n  state { x: 0..2 }\n  init { x = 0 }\n  @undecided(\"which branch wins is still open\")\n  action left() {\n    x = 1\n  }\n  action right() {\n    x = 2\n  }\n  invariant Low { x <= 1 }\n}\n";
@@ -485,17 +440,17 @@ fn write_dunder_fixture(dir: &Path) {
         ("tagged.fsl", TAGGED.to_owned()),
         ("ens.fsl", ENSURES.to_owned()),
         ("safediv.fsl", SAFE_DIVIDER.to_owned()),
-        ("ensures.fsl", compose("Ensures", &[("Ens", "a__b", "ens.fsl")])),
+        ("ensures.fsl", compose("Ensures", &[("Ens", "ab", "ens.fsl")])),
         (
             "safe.fsl",
-            compose("Safe", &[("SafeDiv", "a__b", "safediv.fsl")]),
+            compose("Safe", &[("SafeDiv", "ab", "safediv.fsl")]),
         ),
         (
             "dunder.fsl",
             compose(
                 "Dunder",
                 &[
-                    ("Counter", "a__b", "counter.fsl"),
+                    ("Counter", "ab", "counter.fsl"),
                     ("Counter", "acct", "counter.fsl"),
                     ("Counter", "acct2", "counter.fsl"),
                 ],
@@ -503,7 +458,7 @@ fn write_dunder_fixture(dir: &Path) {
         ),
         (
             "partial.fsl",
-            compose("Partial", &[("Divider", "a__b", "divider.fsl")]),
+            compose("Partial", &[("Divider", "ab", "divider.fsl")]),
         ),
         (
             "calc.fsl",
@@ -511,11 +466,11 @@ fn write_dunder_fixture(dir: &Path) {
         ),
         (
             "split.fsl",
-            compose("Split", &[("Splitter", "a__b", "splitter.fsl")]),
+            compose("Split", &[("Splitter", "ab", "splitter.fsl")]),
         ),
         (
             "tagcomp.fsl",
-            compose("TagComp", &[("Tagged", "a__b", "tagged.fsl")]),
+            compose("TagComp", &[("Tagged", "ab", "tagged.fsl")]),
         ),
         (
             "split-map.fsl",
@@ -552,7 +507,7 @@ fn write_dunder_fixture(dir: &Path) {
             compose(
                 "Review",
                 &[
-                    ("Choice", "a__b", "choice.fsl"),
+                    ("Choice", "ab", "choice.fsl"),
                     ("Loop", "acct", "loop.fsl"),
                     ("FairLoop", "acct2", "fairloop.fsl"),
                 ],
@@ -567,14 +522,13 @@ fn path_arg(dir: &Path, file: &str) -> String {
     dir.join(file).to_str().expect("utf-8 path").to_owned()
 }
 
-/// Wrong spellings of a fixture component action in `text`: the string-rule
-/// `a.b__go`, the internal `a__b__go` / `acct__go` / `acct2__go`, and names
-/// derived from them. State keys (`a.b__n`) and property names are not
-/// action names and are not reported.
+/// Wrong spellings of a fixture component action in `text`: the internal
+/// `ab__go` / `acct__go` / `acct2__go`, and names derived from them. State
+/// keys and property names are not action names and are not reported.
 fn wrong_action_spellings(text: &str) -> Vec<String> {
     let mut found = Vec::new();
     for action in FIXTURE_ACTIONS {
-        for alias in ["a__b", "acct", "acct2", "calc"] {
+        for alias in ["ab", "acct", "acct2", "calc"] {
             for wrong in [
                 format!("{alias}__{action}"),
                 format!("{}__{action}", alias.replacen("__", ".", 1)),
@@ -737,7 +691,7 @@ fn guard_division_by_zero_outcome_is_named_from_the_action() {
         "2",
     ]);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"_partial_a__b.div\""), "{stdout}");
+    assert!(stdout.contains("\"_partial_ab.div\""), "{stdout}");
     assert_eq!(wrong_action_spellings(&stdout), Vec::<String>::new());
 }
 
@@ -749,7 +703,8 @@ type Probe<'a> = (Vec<&'a str>, i32, Option<&'a str>, Vec<&'a str>);
 /// some outputs printed the internal `a__b__go`; both differ from the
 /// structural `a__b.go`. Each command is judged on its own (a failure does not
 /// hide the next one): it must exit as expected, print the structural name
-/// where it names a component action, and print no wrong spelling.
+/// where it names a component action, and print no wrong spelling. The alias
+/// is `ab` since #1256 (see the module note).
 #[test]
 #[allow(clippy::too_many_lines)]
 fn every_command_names_double_underscore_alias_actions_structurally() {
@@ -775,13 +730,13 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
         .as_array()
         .expect("vectors")
         .iter()
-        .find(|vector| vector["state"] == "s0" && vector["action"]["name"] == "a__b.go")
-        .unwrap_or_else(|| panic!("no a__b.go vector: {conformance:#}"));
+        .find(|vector| vector["state"] == "s0" && vector["action"]["name"] == "ab.go")
+        .unwrap_or_else(|| panic!("no ab.go vector: {conformance:#}"));
     let after_go = go["outcome"]["state"].clone();
     let counter_key = go["outcome"]["changes"]
         .as_object()
         .and_then(|changes| changes.keys().next())
-        .expect("a__b.go changes one key")
+        .expect("ab.go changes one key")
         .clone();
     let mut overshoot = after_go.clone();
     overshoot[&counter_key] = json!(3);
@@ -795,16 +750,16 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
     for (file, contents) in [
         (
             "mismatch.jsonl",
-            log(&[("a__b.go", &after_go), ("a__b.go", &overshoot)]),
+            log(&[("ab.go", &after_go), ("ab.go", &overshoot)]),
         ),
-        ("requires.jsonl", log(&[("a__b.reset", &initial)])),
+        ("requires.jsonl", log(&[("ab.reset", &initial)])),
         (
             "requires.json",
-            json!([{"action": "a__b.reset", "params": {}}]).to_string(),
+            json!([{"action": "ab.reset", "params": {}}]).to_string(),
         ),
         (
             "badcall.json",
-            json!([{"action": "a__b__go", "params": {"x": 1}}]).to_string(),
+            json!([{"action": "ab__go", "params": {"x": 1}}]).to_string(),
         ),
     ] {
         std::fs::write(dir.join(file), contents).expect("write log");
@@ -824,19 +779,19 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             vec!["testgen", &dunder, "--depth", "4", "-o", &generated],
             0,
             Some(&generated),
-            vec!["a__b.go"],
+            vec!["ab.go"],
         ),
         (
             vec!["verify", &dunder, "--depth", "4", "--no-cache"],
             0,
             None,
-            vec!["\"a__b.go\"", "action 'a__b.stuck' is never enabled"],
+            vec!["\"ab.go\"", "action 'ab.stuck' is never enabled"],
         ),
         (
             vec!["verify", &dunder, "--engine", "induction", "--no-cache"],
             0,
             None,
-            vec!["\"a__b.go\""],
+            vec!["\"ab.go\""],
         ),
         (
             vec![
@@ -850,19 +805,19 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             ],
             0,
             None,
-            vec!["\"a__b.go\""],
+            vec!["\"ab.go\""],
         ),
         (
             vec!["verify", &split, "--depth", "3", "--no-cache"],
             1,
             None,
-            vec!["\"_partial_a__b.split\"", "\"a__b.drop\""],
+            vec!["\"_partial_ab.split\"", "\"ab.drop\""],
         ),
         (
             vec!["verify", &split, "--engine", "induction", "--no-cache"],
             1,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec![
@@ -876,19 +831,19 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             ],
             1,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec!["verify", &ensures, "--depth", "3", "--no-cache"],
             1,
             None,
-            vec!["\"invariant\": \"a__b.inc\""],
+            vec!["\"invariant\": \"ab.inc\""],
         ),
         (
             vec!["verify", &ensures, "--engine", "induction", "--no-cache"],
             1,
             None,
-            vec!["\"invariant\": \"a__b.inc\""],
+            vec!["\"invariant\": \"ab.inc\""],
         ),
         (
             vec![
@@ -902,136 +857,133 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             ],
             1,
             None,
-            vec!["\"invariant\": \"a__b.inc\""],
+            vec!["\"invariant\": \"ab.inc\""],
         ),
         (
             vec!["verify", &safe, "--depth", "3", "--no-cache"],
             0,
             None,
-            vec!["action 'a__b.reset' has a requires clause that is always true"],
+            vec!["action 'ab.reset' has a requires clause that is always true"],
         ),
         (
             vec!["verify", &safe, "--engine", "induction", "--no-cache"],
             1,
             None,
-            vec!["\"invariant\": \"_partial_a__b.split\""],
+            vec!["\"invariant\": \"_partial_ab.split\""],
         ),
         (
             vec!["sweep", &dunder, "--depth", "2..3"],
             0,
             None,
-            vec!["\"a__b.go\""],
+            vec!["\"ab.go\""],
         ),
         (
             vec!["scenarios", &dunder, "--depth", "4"],
             0,
             None,
-            vec!["\"a__b.go\""],
+            vec!["\"ab.go\""],
         ),
         (
             vec!["conformance", &dunder, "--depth", "2"],
             0,
             None,
-            vec!["\"a__b.go\""],
+            vec!["\"ab.go\""],
         ),
         (
             vec!["conformance", &partial, "--depth", "2"],
             0,
             None,
-            vec!["\"_partial_a__b.div\"", "\"_requires_failed_a__b.bump\""],
+            vec!["\"_partial_ab.div\"", "\"_requires_failed_ab.bump\""],
         ),
         (
             vec!["conformance", &split, "--depth", "2"],
             0,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec!["explain", &dunder, "--depth", "4"],
             0,
             None,
-            vec!["\"a__b.go\""],
+            vec!["\"ab.go\""],
         ),
         (
             vec!["explain", &partial, "--depth", "3"],
             0,
             None,
-            vec!["\"_partial_a__b.div\""],
+            vec!["\"_partial_ab.div\""],
         ),
         (
             vec!["explain", &split, "--depth", "3"],
             0,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec!["mutate", &dunder, "--depth", "3"],
             0,
             None,
-            vec!["\"a__b.go requires #1\"", "\"killed_by\": \"a__b.go\""],
+            vec!["\"ab.go requires #1\"", "\"killed_by\": \"ab.go\""],
         ),
         (
             vec!["mutate", &split, "--depth", "3"],
             1,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec!["analyze", &dunder],
             0,
             None,
-            vec!["\"action:a__b.go\"", "\"guard:a__b.go:0\""],
+            vec!["\"action:ab.go\"", "\"guard:ab.go:0\""],
         ),
         (
             vec!["analyze", &tagcomp, "--profile", "ai-review"],
             0,
             None,
-            vec!["\"action:a__b.bump\""],
+            vec!["\"action:ab.bump\""],
         ),
         (
             vec!["analyze", &tagcomp, "--export", "tag-review"],
             0,
             None,
-            vec!["a__b.bump"],
+            vec!["ab.bump"],
         ),
         (
             vec!["html", &dunder, "-o", &report],
             0,
             Some(&report),
-            vec!["a__b.go"],
+            vec!["ab.go"],
         ),
         (
             vec!["ledger", &dunder, "--depth", "3", "-o", &ledger],
             0,
             Some(&ledger),
-            vec!["a__b.stuck"],
+            vec!["ab.stuck"],
         ),
         (
             vec!["check", &review, "--strict-tags"],
             0,
             None,
-            vec!["\"name\": \"a__b.right\""],
+            vec!["\"name\": \"ab.right\""],
         ),
         (
             vec!["analyze", &review, "--profile", "ai-review"],
             0,
             None,
-            vec![
-                "\"action:a__b.left\"",
-                "\"declaration\": \"action a__b.left\"",
-            ],
+            vec!["\"action:ab.left\"", "\"declaration\": \"action ab.left\""],
         ),
         (
             vec!["html", &review, "-o", &review_report],
             1,
             Some(&review_report),
-            vec!["action a__b.left"],
+            vec!["action ab.left"],
         ),
         (
             vec!["ledger", &review, "--depth", "2", "-o", &review_ledger],
             1,
             Some(&review_ledger),
-            vec!["a__b.left"],
+            vec!["ab.left"],
         ),
         (
             vec!["refine", &ranked, &ranked, &ranked_map, "--depth", "3"],
@@ -1043,19 +995,19 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             vec!["refine", &safe, &safe, &safe_map, "--depth", "3"],
             0,
             None,
-            vec!["\"a__b.split\": \"a__b.split\""],
+            vec!["\"ab.split\": \"ab.split\""],
         ),
         (
             vec!["diff", &split, &split],
             1,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec!["refine", &split, &split, &split_map, "--depth", "3"],
             1,
             None,
-            vec!["\"_partial_a__b.split\""],
+            vec!["\"_partial_ab.split\""],
         ),
         (
             vec![
@@ -1068,7 +1020,7 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             ],
             1,
             None,
-            vec!["\"action\": \"a__b.go\""],
+            vec!["\"action\": \"ab.go\""],
         ),
         (
             vec![
@@ -1081,19 +1033,19 @@ fn every_command_names_double_underscore_alias_actions_structurally() {
             ],
             1,
             None,
-            vec!["\"a__b.reset\""],
+            vec!["\"ab.reset\""],
         ),
         (
             vec!["replay", &dunder, "--trace", &requires_trace],
             1,
             None,
-            vec!["\"name\": \"_requires_failed_a__b.reset\""],
+            vec!["\"name\": \"_requires_failed_ab.reset\""],
         ),
         (
             vec!["replay", &dunder, "--trace", &badcall_trace],
             1,
             None,
-            vec!["\"action\": \"a__b.go\""],
+            vec!["\"action\": \"ab.go\""],
         ),
     ];
     let mut failures = Vec::new();
@@ -1148,18 +1100,18 @@ fn write_project_fixtures(dir: &Path) {
         (
             &implementation,
             "design.fsl",
-            "compose ChainCompose {\n  use ChainDesign as a__b from \"component.fsl\"\n}\n",
+            "compose ChainCompose {\n  use ChainDesign as ab from \"component.fsl\"\n}\n",
         ),
         (
             &implementation,
             "design_refines_requirements.fsl",
-            "refinement ChainComposeRefinesRequirements {\n  impl ChainCompose\n  abs ChainRequirements\n\n  map req[i: Item] = if a__b__design[i] == DDone then RDone else RDraft\n\n  action a__b__prepare(i) -> stutter\n  action a__b__finish(i) -> finish(i)\n}\n",
+            "refinement ChainComposeRefinesRequirements {\n  impl ChainCompose\n  abs ChainRequirements\n\n  map req[i: Item] = if ab__design[i] == DDone then RDone else RDraft\n\n  action ab__prepare(i) -> stutter\n  action ab__finish(i) -> finish(i)\n}\n",
         ),
         (&abstraction, "tagged.fsl", TAGGED),
         (
             &abstraction,
             "requirements.fsl",
-            "compose TagComp {\n  use Tagged as a__b from \"tagged.fsl\"\n}\n",
+            "compose TagComp {\n  use Tagged as ab from \"tagged.fsl\"\n}\n",
         ),
         (
             &abstraction,
@@ -1169,7 +1121,7 @@ fn write_project_fixtures(dir: &Path) {
         (
             &abstraction,
             "map.fsl",
-            "refinement ImplRefinesTagComp {\n  impl Impl\n  abs TagComp\n\n  map a__b__n = m\n\n  action step() -> a__b__bump()\n}\n",
+            "refinement ImplRefinesTagComp {\n  impl Impl\n  abs TagComp\n\n  map ab__n = m\n\n  action step() -> ab__bump()\n}\n",
         ),
         (
             &abstraction,
@@ -1214,8 +1166,8 @@ fn project_traceability_graph_edges_end_at_published_action_nodes() {
     write_project_fixtures(&dir);
     let mut failures = Vec::new();
     for (project, action_node) in [
-        ("impl", "design:action:a__b.finish"),
-        ("abs", "requirements:action:a__b.bump"),
+        ("impl", "design:action:ab.finish"),
+        ("abs", "requirements:action:ab.bump"),
     ] {
         let manifest = path_arg(&dir.join(project), "fsl-project.toml");
         let output = fslc(&["analyze", &manifest, "--projection", "traceability_graph"]);
@@ -1306,7 +1258,7 @@ fn compose_layer_projections_end_every_edge_at_a_node() {
                 "--projection",
                 "impact_graph",
                 "--focus",
-                "action:a__b.finish",
+                "action:ab.finish",
             ],
             true,
         ),
@@ -1367,17 +1319,17 @@ fn leadsto_scenarios_and_warnings_are_ordered_by_the_name_they_print() {
         misordered(
             "scenarios reach_*",
             &names(&deep, "reach_"),
-            &["reach_p.Top", "reach_p.q__Top", "reach_p2.Top"],
+            &["reach_p.Top", "reach_p2.Top"],
         ),
         misordered(
             "scenarios respond_*",
             &names(&deep, "respond_"),
-            &["respond_p.Back", "respond_p.q__Back", "respond_p2.Back"],
+            &["respond_p.Back", "respond_p2.Back"],
         ),
         misordered(
             "leadsTo warnings",
             &warned(&shallow),
-            &["p.Back", "p.q__Back", "p2.Back"],
+            &["p.Back", "p2.Back"],
         ),
     ]
     .into_iter()
@@ -1469,7 +1421,7 @@ fn every_list_is_ordered_by_the_name_it_prints() {
         misordered(
             "verify action_coverage",
             &object_keys(&verify["action_coverage"]),
-            &["z.a", "z.go"],
+            &["z.go", "za"],
         ),
         misordered(
             "induction k_used",
@@ -1484,7 +1436,7 @@ fn every_list_is_ordered_by_the_name_it_prints() {
         misordered(
             "refine action_map",
             &object_keys(&refine["action_map"]),
-            &["acct.back", "acct2.back", "z.a"],
+            &["acct.back", "acct2.back", "za"],
         ),
         misordered(
             "refine progress",
@@ -1494,7 +1446,7 @@ fn every_list_is_ordered_by_the_name_it_prints() {
         misordered(
             "conservation action_net_effects",
             &effects,
-            &["action:z.b", "action:z__a"],
+            &["action:z.b", "action:za"],
         ),
     ]
     .into_iter()
@@ -1535,10 +1487,10 @@ fn ai_review_joins_component_actions_by_published_node_id() {
     };
     let mut failures = Vec::new();
     let acknowledged = of_kind("divergent_choice").into_iter().any(|finding| {
-        involves(finding, "action:a__b.left")
-            && involves(finding, "action:a__b.right")
+        involves(finding, "action:ab.left")
+            && involves(finding, "action:ab.right")
             && finding["acknowledged"] == true
-            && finding["acknowledged_by"][0]["declaration"] == "action a__b.left"
+            && finding["acknowledged_by"][0]["declaration"] == "action ab.left"
     });
     if !acknowledged {
         failures.push("left/right divergent choice is not acknowledged".to_owned());
@@ -1576,14 +1528,14 @@ fn rejected_lemma_names_the_violation_from_the_action() {
         "--engine",
         "induction",
         "--lemma",
-        "a__b__q >= 0",
+        "ab__q >= 0",
         "--no-cache",
     ]);
     assert_eq!(output.status.code(), Some(1), "{:#}", json_of(&output));
     let verify = json_of(&output);
     let proof = &verify["lemmas"][0]["proof"];
     assert_eq!(proof["result"], "violated", "{verify:#}");
-    assert_eq!(proof["invariant"], "_partial_a__b.split", "{verify:#}");
+    assert_eq!(proof["invariant"], "_partial_ab.split", "{verify:#}");
     assert_eq!(
         wrong_action_spellings(&String::from_utf8_lossy(&output.stdout)),
         Vec::<String>::new()
@@ -1604,11 +1556,11 @@ fn causal_observation_rejects_a_compose_companion() {
     for (file, source) in [
         (
             "companion.fsl",
-            "compose IncidentCompose {\n  use IncidentSystem as a__b from \"incident_system.fsl\"\n}\n",
+            "compose IncidentCompose {\n  use IncidentSystem as ab from \"incident_system.fsl\"\n}\n",
         ),
         (
             "causal.fsl",
-            "causal ComposeIncident {\n  uses ops from \"companion.fsl\"\n\n  timebase day\n  horizon 365\n\n  clock ops_clock {\n    kernel ops\n    1 tick = 1 day\n  }\n\n  variable guardrails {\n    role intervention\n    binds action ops.a__b__deploy_guardrails\n  }\n\n  variable mttr {\n    role outcome\n    observes state ops.a__b__mttr_hours\n    cadence 7\n  }\n\n  claim C guardrails -> mttr {\n    version 1\n    status active\n    polarity negative\n    lag 1..45\n    persists 1..90\n    basis hypothesis\n  }\n\n  expectation E_Visible {\n    trigger action ops.a__b__deploy_guardrails\n    response predicate ops { a__b__guardrails >= 1 }\n    within 1\n    clock ops_clock\n    derived_from_claim C\n  }\n}\n",
+            "causal ComposeIncident {\n  uses ops from \"companion.fsl\"\n\n  timebase day\n  horizon 365\n\n  clock ops_clock {\n    kernel ops\n    1 tick = 1 day\n  }\n\n  variable guardrails {\n    role intervention\n    binds action ops.ab__deploy_guardrails\n  }\n\n  variable mttr {\n    role outcome\n    observes state ops.ab__mttr_hours\n    cadence 7\n  }\n\n  claim C guardrails -> mttr {\n    version 1\n    status active\n    polarity negative\n    lag 1..45\n    persists 1..90\n    basis hypothesis\n  }\n\n  expectation E_Visible {\n    trigger action ops.ab__deploy_guardrails\n    response predicate ops { ab__guardrails >= 1 }\n    within 1\n    clock ops_clock\n    derived_from_claim C\n  }\n}\n",
         ),
         (
             "log-map.fsl",
@@ -1616,7 +1568,7 @@ fn causal_observation_rejects_a_compose_companion() {
         ),
         (
             "log.jsonl",
-            "{\"action\":\"a__b.deploy_guardrails\",\"params\":{},\"state\":{\"a.b__guardrails\":1,\"a.b__alert_precision\":3,\"a.b__mttr_hours\":24}}\n",
+            "{\"action\":\"ab.deploy_guardrails\",\"params\":{},\"state\":{\"ab.guardrails\":1,\"ab.alert_precision\":3,\"ab.mttr_hours\":24}}\n",
         ),
         (
             "scope.json",
@@ -1650,55 +1602,16 @@ fn causal_observation_rejects_a_compose_companion() {
     );
 }
 
-/// Detector (r2 F3): a non-compose state named `a__b__c` is published
-/// `a.b__c`. On 458040f3 testgen passed that public name through the string
-/// rule a second time (`a.b.c`) and rejected its own walk with "unknown state
-/// fields" (exit 2); every target now generates a scaffold keyed `a.b__c`.
+/// A generated action whose name contains `__` (a requirements branch split
+/// `step__b1`) is printed with `.`, so a keyed list orders it by that form:
+/// `step.b1` before `step2`, although `step2` sorts first internally.
 #[test]
-fn non_compose_state_with_two_separators_generates_every_target() {
-    let dir = scratch_dir("two-separators");
-    let spec = dir.join("state.fsl");
-    std::fs::write(
-        &spec,
-        "spec S {\n  state { a__b__c: 0..1 }\n  init { a__b__c = 0 }\n  action go() {\n    requires a__b__c < 1\n    a__b__c = 1\n  }\n}\n",
-    )
-    .expect("write spec");
-    let mut failures = Vec::new();
-    for target in ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"] {
-        let path = dir.join(format!("state.{target}"));
-        let output = fslc(&[
-            "testgen",
-            spec.to_str().expect("utf-8 path"),
-            "--target",
-            target,
-            "-o",
-            path.to_str().expect("utf-8 path"),
-        ]);
-        if output.status.code() != Some(0) {
-            failures.push(format!(
-                "{target}: exit {:?}: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stdout)
-            ));
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        if !text.contains("a.b__c") || text.contains("a.b.c") {
-            failures.push(format!("{target}: state key is not a.b__c"));
-        }
-    }
-    assert!(failures.is_empty(), "{failures:#?}");
-}
-
-/// A non-compose action whose name contains `__` is printed with `.`, so a
-/// keyed list orders it by that form: `step.a` before `step2`.
-#[test]
-fn non_compose_separator_names_are_ordered_by_the_printed_name() {
+fn generated_separator_names_are_ordered_by_the_printed_name() {
     let dir = scratch_dir("non-compose-order");
     let spec = dir.join("order.fsl");
     std::fs::write(
         &spec,
-        "spec Order {\n  state { n: 0..2 }\n  init { n = 0 }\n  action step2() {\n    requires n < 2\n    n = n + 1\n  }\n  action step__a() {\n    requires n > 0\n    n = n - 1\n  }\n  invariant Inv { n <= 2 }\n}\n",
+        "requirements Order {\n  type C = 0..1\n  state { n: 0..2 }\n  init { n = 0 }\n  requirement REQ-1 \"steps\" {\n    action step2() {\n      requires n < 2\n      n = n + 1\n    }\n    action step(c: C) {\n      requires n > 0\n      branches {\n        when c == 0 { n = n - 1 } maps stutter\n        when c == 1 { n = 0 } maps stutter\n      }\n    }\n    invariant Inv { n <= 2 }\n  }\n}\n",
     )
     .expect("write spec");
     let output = fslc(&[
@@ -1711,7 +1624,7 @@ fn non_compose_separator_names_are_ordered_by_the_printed_name() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(
         object_keys(&json_of(&output)["action_coverage"]),
-        ["step.a", "step2"]
+        ["step.b1", "step.b2", "step2"]
     );
 }
 
@@ -1723,7 +1636,7 @@ const UNDEFINED: &str = "spec Undef {\n  type K = 0..1\n  type V = 0..1\n  type 
 /// Detector: the definedness error of BMC (and the induction base case) named
 /// the internal `a__b__read` / `a__b__inc` for a compose component action,
 /// after the merge of #1240 brought that error to actions without a partial
-/// operation. Control: a non-compose action `foo__inc` keeps its exact name.
+/// operation. Control: a non-compose action `inc` keeps its name.
 #[test]
 fn bmc_definedness_error_names_the_component_action_structurally() {
     let dir = scratch_dir("bmc-definedness");
@@ -1739,31 +1652,27 @@ fn bmc_definedness_error_names_the_component_action_structurally() {
     std::fs::write(dir.join("inc.fsl"), &only_inc).expect("write component");
     std::fs::write(
         dir.join("guard.fsl"),
-        "compose Guard {\n  use Undef as a__b from \"undef.fsl\"\n}\n",
+        "compose Guard {\n  use Undef as ab from \"undef.fsl\"\n}\n",
     )
     .expect("write compose");
     std::fs::write(
         dir.join("body.fsl"),
-        "compose Body {\n  use Undef as a__b from \"inc.fsl\"\n}\n",
+        "compose Body {\n  use Undef as ab from \"inc.fsl\"\n}\n",
     )
     .expect("write compose");
-    std::fs::write(
-        dir.join("plain.fsl"),
-        only_inc.replace("action inc()", "action foo__inc()"),
-    )
-    .expect("write spec");
+    std::fs::write(dir.join("plain.fsl"), &only_inc).expect("write spec");
     let cases = [
         (
             "guard.fsl",
-            "action 'a__b.read' guard evaluation has a non-partial failure",
+            "action 'ab.read' guard evaluation has a non-partial failure",
         ),
         (
             "body.fsl",
-            "action 'a__b.inc' body evaluation has a non-partial failure",
+            "action 'ab.inc' body evaluation has a non-partial failure",
         ),
         (
             "plain.fsl",
-            "action 'foo__inc' body evaluation has a non-partial failure",
+            "action 'inc' body evaluation has a non-partial failure",
         ),
     ];
     for (file, message) in cases {

@@ -1840,21 +1840,33 @@ compose OrderSystem {
   コンポーネントで変換をモデル化してください。
 - `internal <alias>.<action>` — その action をインターリービングから除外します。
 - (`=` のない)通常の `action` も書けます(グルー action)。
-- JSON の表示: 物理名 `alias__x` は `alias.x` として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
-  コンポーネントの action の公開名は alias と action 名から作るので、
-  `use X as a__b` の action `c` は `a__b.c` です。コンポーネントの action を名指す
-  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
-  mutate、refine、diff、html、ledger、analyze(`action:a__b.c` のようなグラフの ID を
-  含む)、`check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力 — がこの `alias.action` 形を
-  使います。`_requires_failed_a__b.c` のように action から作る名前も同じです。
-  状態のキーは上の規則のままなので、`use X as a__b` の状態 `n` は `a.b__n` と
-  表示されます(凍結した Python 参照実装では `a__b.n`)。
-  v1 の `replay` トレースでは、コンポーネントの action を `alias.action` と書いても
-  旧来の `alias__action` と書いてもかまいません。どちらも同じ action を指します
-  (`docs/design/DESIGN-replay-trace.md` を参照)。ネイティブ実装では、これらの
-  綴りと、`_partial_<action>`・`_bounds_<state>` のようにエンジンが作る名前を、
-  1 つのモジュール `rust/fsl-core/src/naming.rs` が持ちます。
+- 名前と `__`: `spec`・`requirements`・`business`・`compose` の文書で宣言する名前
+  (spec、action、パラメータ、`let`、状態変数、property、型、const、enum の
+  メンバー、struct のフィールド、process、stage、actor、`use` の alias)には
+  `__` を含められません。`fslc check` は宣言の位置で拒否します(`kind:"name"`、
+  exit 2)。compose のコンポーネントの宣言は、親の `use` の位置で報告します。
+  `__` は lowering が作る名前のためにとってあります。compose のコンポーネントの
+  宣言の物理名 `alias__x` と、requirements の `branches` の action を分けた
+  `submit__b1` です。作られた名前を参照することはできます(refinement の対応が
+  `submit__b1` を参照するように)。
+- JSON の表示: 作られた名前は `__` を `.` に置き換えた 1 つの綴りで、すべての
+  出力に出ます。物理名 `alias__x` は `alias.x`、`branches` で分けた
+  `submit__b1` は `submit.b1` です(状態のキー、action 名、invariant /
+  reachable 名、診断、トレース、シナリオ、Monitor — すべて)。コンポーネントの
+  宣言の公開名は alias と宣言の名前から作ります。それを名指すすべてのコマンド
+  — verify(`cost.properties[].name` を含む)、sweep、scenarios、explain、
+  testgen、conformance(`acct.Inv` のような outcome の名前を含む)、testplan、
+  mutate(target と死 action の注記)、refine、diff、html、ledger、
+  analyze(`action:acct.go`・`action:submit.b1` のようなグラフの ID を含む)、
+  `check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力
+  — がこの形を使います。`_requires_failed_acct.go` のように action から作る
+  名前も同じです。内部名のまま出すのは Public Kernel(`fslc kernel`)だけです。
+  v1 の `replay` トレースでは、作られた action を公開の綴りで書いても内部名で
+  書いてもかまいません(`acct.go` と `acct__go`、`submit.b1` と `submit__b1`)。
+  どちらも同じ action を指します(`docs/design/DESIGN-replay-trace.md` を参照)。
+  ネイティブ実装では、これらの綴りと、`_partial_<action>`・`_bounds_<state>` の
+  ようにエンジンが作る名前を、1 つのモジュール `rust/fsl-core/src/naming.rs` が
+  持ちます。
 
 ```bash
 fslc check  specs/order_system.fsl
@@ -2368,8 +2380,9 @@ verify {
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
   `struct` / `state` / `init`、`fair action`、`branches`、明示の `maps` をサポート
   します。`branches` は action を各 when 条件で自動的に分割し
-  (`submit[a <= AUTO_LIMIT]` と表示されます)、`maps` 節が上位レイヤーへの action
-  の対応を提供します。
+  (mutation の target では `submit[a <= AUTO_LIMIT]`、それ以外の出力では分けた
+  action を `submit.b1`・`submit.b2` … と表示します)、`maps` 節が上位レイヤーへの
+  action の対応を提供します。
 - `terminal { <expr> }` は `requirements` spec のトップレベルで許され、カーネルへ
   lowering されます(§6) — カーネルと同じく、spec ごとに `terminal` ブロックは
   ちょうど 1 つです。`stage(c)` は、`c` が型付きのエンティティパラメータまたは

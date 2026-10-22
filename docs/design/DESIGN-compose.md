@@ -94,12 +94,12 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    component declaration from a glue one). The table is the model's
    `fsl_core::NameMap` (`rust/fsl-core/src/naming.rs`), which is also the only
    place that spells the `alias__name` physical name and the names the engines
-   build (`fsl_core::SyntheticName`). The
-   physical name `alias__name` is not injective (`a__b` + `c` and `a` + `b__c`
-   both give `a__b__c`; the two cannot coexist because the physical names would be
-   duplicate actions), so the public action name `alias.name` is built from this
-   pair and never parsed back out of the physical name: `use X as a__b` with
-   action `c` is `a__b.c`, as in the frozen Python reference. A name derived from
+   build (`fsl_core::SyntheticName`). No declared name contains `__` (#1256:
+   check rejects one, `fsl_core::reject_declared_separator`, before lowering),
+   so the physical name `alias__name` has one reading. Before #1256 it did not
+   (`a__b` + `c` and `a` + `b__c` both gave `a__b__c`); the public name
+   `alias.name` is still built from the pair, for an action, a state variable,
+   and a property alike, and never parsed back out of the physical name. A name derived from
    an action (`_requires_failed_<action>`, `_partial_<action>`, an `ensures`
    violation) is rebuilt from the action that
    produced it, so the alias boundary comes from the same pair. Every output of
@@ -118,10 +118,9 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    keeps `action:alias__name` in these IDs; this is an intended difference
    (decision 4 of #1234 makes the key `.` as well). Keyed lists are ordered by
    the name they print, sorted with the same function that renders the key, so
-   a glue action `z__a` (printed `z.a`) sorts before `z.b`. A v1
-   replay trace resolves a component action through the same table, accepting
-   `alias.name` and the pre-#1234 `alias__name`; sync and glue actions keep exact
-   physical-name matching. Public Kernel export (`kernel`, `typestate`) and the
+   `acct.Inv` sorts before `acct2.Inv`. A v1 replay trace resolves an action by
+   its public spelling or its physical name (`NameMap::resolve_action`), so a
+   component action is `alias.name` or the pre-#1234 `alias__name`. Public Kernel export (`kernel`, `typestate`) and the
    RCIR document projection reject compose, so they print no component names.
    State-key, state-graph-ID, and property display still uses the string rule
    above, so with a `__` alias a state variable is shown as `a.b__n` while Python
