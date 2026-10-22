@@ -1,4 +1,4 @@
-Fixed (#9994): replaying a requirements document's `acceptance` and
+Fixed (#1391): replaying a requirements document's `acceptance` and
 `forbidden` traces no longer holds memory in proportion to the
 `verify { values }` scope of an action parameter. Each trace step used to list
 every enabled instance of every action, so a published requirements spec with,
