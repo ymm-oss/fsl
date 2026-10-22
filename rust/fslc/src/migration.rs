@@ -6,7 +6,17 @@ use fsl_syntax::{
     RequirementActionItem, RequirementsItem, SourceEdit, Span, SurfaceDocument, TokenKind,
     canonical_rewrites_with, lossless_document_with, source_position, source_span,
 };
+use std::path::Path;
+
 use serde_json::{Map, Value, json};
+
+mod process_form;
+
+pub use process_form::{
+    ConvertedEvent, ConvertedProcess, LEGACY_PROCESS_FORM, MIGRATE_MANUAL_REQUIRED, ManualRequired,
+    ProcessFormConversion, ProcessFormOutcome, Site, convert_process_forms,
+    plan_process_conversion, process_form_contract,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IdKind {
@@ -345,6 +355,9 @@ pub struct MigrationDiagnostic {
     pub span: Span,
     pub canonical_replacement: String,
     pub machine_applicable: bool,
+    /// Why a [`MIGRATE_MANUAL_REQUIRED`] finding cannot be rewritten, as a
+    /// stable word (`None` for every other finding).
+    pub reason: Option<&'static str>,
     pub edits: Vec<SourceEdit>,
 }
 
@@ -381,6 +394,9 @@ impl MigrationDiagnostic {
                 "replacement": edit.replacement,
             })).collect::<Vec<_>>(),
         });
+        if let Some(reason) = self.reason {
+            value["reason"] = json!(reason);
+        }
         if self.edits.len() == 1 {
             value["suggestion"] = json!({
                 "kind":"replace",
@@ -403,11 +419,22 @@ pub struct MigrationPlan {
 }
 
 impl MigrationPlan {
+    /// A finding the planner recognizes but cannot machine-apply, other
+    /// than [`MIGRATE_MANUAL_REQUIRED`].
     #[must_use]
     pub fn refused(&self) -> bool {
+        self.diagnostics.iter().any(|diagnostic| {
+            !diagnostic.machine_applicable && diagnostic.code != MIGRATE_MANUAL_REQUIRED
+        })
+    }
+
+    /// A process form the next edition cannot take that the migrator cannot
+    /// rewrite ([`MIGRATE_MANUAL_REQUIRED`]).
+    #[must_use]
+    pub fn manual_required(&self) -> bool {
         self.diagnostics
             .iter()
-            .any(|diagnostic| !diagnostic.machine_applicable)
+            .any(|diagnostic| diagnostic.code == MIGRATE_MANUAL_REQUIRED)
     }
 }
 
@@ -467,6 +494,7 @@ pub fn plan_migration(
                 span: rewrite.span,
                 canonical_replacement: rewrite.canonical_replacement,
                 machine_applicable: true,
+                reason: None,
                 edits: rewrite.edits,
             }
         })),
@@ -501,6 +529,7 @@ pub fn plan_migration(
                 span,
                 canonical_replacement,
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             });
         }
@@ -679,6 +708,7 @@ pub fn missing_edition_header(
         span,
         canonical_replacement: header.clone(),
         machine_applicable: true,
+        reason: None,
         edits: vec![SourceEdit {
             span,
             replacement: format!("{header}\n"),
@@ -700,6 +730,7 @@ fn unsupported_double_ampersands(source: &str) -> Vec<MigrationDiagnostic> {
                 span,
                 canonical_replacement: "and".to_owned(),
                 machine_applicable: false,
+                reason: None,
                 edits: vec![SourceEdit {
                     span,
                     replacement: "and".to_owned(),
@@ -718,6 +749,7 @@ fn unsupported_double_ampersands(source: &str) -> Vec<MigrationDiagnostic> {
                 span,
                 canonical_replacement: "or".to_owned(),
                 machine_applicable: false,
+                reason: None,
                 edits: vec![SourceEdit {
                     span,
                     replacement: "or".to_owned(),
@@ -822,6 +854,7 @@ pub fn mixed_names_diagnostics(source: &str, options: &ParseOptions) -> Vec<Migr
                 span: name.span,
                 canonical_replacement: alias,
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             })
         })
@@ -858,6 +891,7 @@ pub fn id_policy_diagnostics(
                 span: occurrence.span,
                 canonical_replacement: expected,
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             }
         })
@@ -1170,6 +1204,7 @@ fn metadata_diagnostics(source: &str, options: ParseOptions) -> Vec<MigrationDia
                 span: node.span,
                 canonical_replacement: "move the comment, then use a typed annotation".to_owned(),
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             });
             continue;
@@ -1190,6 +1225,7 @@ fn metadata_diagnostics(source: &str, options: ParseOptions) -> Vec<MigrationDia
             span: node.span,
             canonical_replacement: replacement,
             machine_applicable: true,
+            reason: None,
             edits: vec![
                 SourceEdit {
                     span: Span {
@@ -1238,6 +1274,7 @@ fn default_diagnostics(
                 span: diagnostic_span,
                 canonical_replacement: warning.get("canonical_replacement")?.as_str()?.to_owned(),
                 machine_applicable: true,
+                reason: None,
                 edits: vec![SourceEdit {
                     span: source_span(source, start, end),
                     replacement,
@@ -1330,6 +1367,7 @@ fn action_map_diagnostic(
                     span: branch.maps.span,
                     canonical_replacement: "write an explicit refinement correspondence".to_owned(),
                     machine_applicable: false,
+                    reason: None,
                     edits: Vec::new(),
                 });
             }
@@ -1348,6 +1386,7 @@ fn action_map_diagnostic(
             canonical_replacement: "move the mapping to an explicit implements or refinement block"
                 .to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1363,6 +1402,7 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "remove the duplicate after choosing one correspondence".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1376,6 +1416,7 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "write an explicit correspondence".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1392,6 +1433,7 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "move the comment, then rerun migrate".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1405,6 +1447,7 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "write an explicit correspondence".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1419,6 +1462,7 @@ fn action_map_diagnostic(
         span: source_span(source, maps.span.start.offset, maps_end),
         canonical_replacement: replacement.clone(),
         machine_applicable: true,
+        reason: None,
         edits: vec![
             SourceEdit {
                 span: source_span(source, maps.span.start.offset, maps_end),
@@ -1539,6 +1583,163 @@ fn matching_symbol_index(
         }
     }
     None
+}
+
+/// Whether [`kernel_contract`] keeps the kernel's `origin` records.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Origins {
+    /// Keep them (every rewrite but a process-form conversion).
+    Kept,
+    /// Drop them: a converted process form's events carry their own
+    /// lowering origins, which name the new form, not a different meaning.
+    Ignored,
+}
+
+/// The location-free checked Public Kernel a migration must keep: the
+/// kernel contract without spans, source nodes and the singular legacy
+/// requirement projection, plus each target's typed annotations.
+///
+/// # Errors
+///
+/// Returns the parse, model or `implements` error of `source`.
+pub fn kernel_contract(
+    source: &str,
+    path: &Path,
+    options: &ParseOptions,
+    origins: Origins,
+) -> Result<Value, String> {
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        path.to_string_lossy(),
+        options,
+    )
+    .map_err(|error| error.to_string())?;
+    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    if matches!(
+        fsl_syntax::parse_surface_document_with(source, options),
+        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
+    ) {
+        fsl_core::requirements_implements_with_options(source, &resolver, &model, options)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path.to_string_lossy(),
+        source_dialect(source, options),
+    )
+    .map_err(|error| error.to_string())?;
+    remove_migration_locations(&mut contract);
+    remove_legacy_metadata_projection(&mut contract);
+    if origins == Origins::Ignored {
+        remove_origins(&mut contract);
+    }
+    Ok(json!({
+        "kernel": contract,
+        "annotations": migration_annotation_contract(&model),
+    }))
+}
+
+fn remove_migration_locations(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for key in ["span", "source_node_id", "source_node_ids", "reverse_index"] {
+                object.remove(key);
+            }
+            object.values_mut().for_each(remove_migration_locations);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_migration_locations),
+        _ => {}
+    }
+}
+
+fn remove_legacy_metadata_projection(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("requirement");
+            if let Some(Value::Object(origin)) = object.get_mut("origin") {
+                origin.remove("declaration");
+            }
+            object
+                .values_mut()
+                .for_each(remove_legacy_metadata_projection);
+        }
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(remove_legacy_metadata_projection),
+        _ => {}
+    }
+}
+
+fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
+    let mut targets = vec!["spec".to_owned(), "init".to_owned()];
+    targets.extend(
+        model
+            .actions
+            .iter()
+            .map(|action| fsl_core::action_target(&action.name)),
+    );
+    for (kind, properties) in [
+        ("invariant", &model.invariants),
+        ("trans", &model.transitions),
+        ("reachable", &model.reachables),
+    ] {
+        targets.extend(
+            properties
+                .iter()
+                .map(|property| fsl_core::property_target(kind, &property.name)),
+        );
+    }
+    targets.extend(
+        model
+            .leadstos
+            .iter()
+            .map(|property| fsl_core::property_target("leadsTo", &property.name)),
+    );
+    targets.sort();
+    targets.dedup();
+    Value::Object(
+        targets
+            .into_iter()
+            .filter_map(|target| {
+                let mut annotations = model
+                    .annotations_for(&target)
+                    .source_order()
+                    .iter()
+                    .map(fsl_syntax::Annotation::render_source)
+                    .collect::<Vec<_>>();
+                annotations.sort();
+                (!annotations.is_empty()).then(|| (target, json!(annotations)))
+            })
+            .collect(),
+    )
+}
+
+fn remove_origins(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("origin");
+            object.values_mut().for_each(remove_origins);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_origins),
+        _ => {}
+    }
+}
+
+/// The Public Kernel's dialect name for `source`'s root keyword.
+#[must_use]
+pub fn source_dialect<'a>(source: &'a str, options: &ParseOptions) -> &'a str {
+    match fsl_syntax::dialect_keyword_with(source, options) {
+        Ok("spec") => "kernel",
+        Ok("dbsystem") => "db",
+        Ok("ai_component") => "ai-component",
+        Ok("agent") => "ai-agent",
+        Ok(keyword) => keyword,
+        Err(_) => "unknown",
+    }
 }
 
 #[cfg(test)]
