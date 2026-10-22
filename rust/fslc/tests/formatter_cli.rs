@@ -8,6 +8,10 @@ use std::{collections::BTreeMap, ffi::OsStr};
 
 use serde_json::Value;
 
+#[path = "support/id_spelling.rs"]
+mod id_spelling;
+use id_spelling::compact_hyphen_runs;
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -177,6 +181,40 @@ verify { instances Case = 3 }
     assert!(formatted.contains("goal GOAL-REPRO-001"));
     assert!(formatted.contains("policy POL-ARITH-001"));
     assert!(formatted.contains("2 - 1 == 1"));
+}
+
+#[test]
+fn fmt_prints_requirement_ids_as_written() {
+    for (path, features) in [
+        ("examples/e2e/2_requirements.fsl", None),
+        ("examples/nfr/support_sla.fsl", None),
+        ("examples/gallery/injected/bank__guard_weakening.fsl", None),
+        ("examples/consulting/governance_controls.fsl", None),
+        ("examples/e2e/1_business.fsl", None),
+        (
+            "rust/fslc/tests/fixtures/fsl5/e2e/fsl5_en.fsl",
+            Some("fsl5"),
+        ),
+    ] {
+        let source = fs::read_to_string(root().join(path)).expect("corpus source");
+        let ids = compact_hyphen_runs(&source);
+        assert!(!ids.is_empty(), "{path} spells no IDs");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        command.args(["fmt", path]).current_dir(root());
+        if let Some(features) = features {
+            command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
+        } else {
+            command.env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
+        }
+        let formatted = command.output().expect("run fslc");
+        assert!(
+            formatted.status.success(),
+            "{path}: {}",
+            String::from_utf8_lossy(&formatted.stdout)
+        );
+        let formatted = String::from_utf8(formatted.stdout).expect("formatted UTF-8");
+        assert_eq!(compact_hyphen_runs(&formatted), ids, "{path}");
+    }
 }
 
 fn fsl_files(directory: &Path, output: &mut Vec<PathBuf>) {
