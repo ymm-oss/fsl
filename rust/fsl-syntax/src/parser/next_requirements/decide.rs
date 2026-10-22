@@ -60,8 +60,32 @@ struct RowSource {
     /// Whether the outcome marks its actor with が.
     particles: bool,
     covers: Vec<ProcessCover>,
+    /// The row in canonical names and English keywords ([`row_text`]).
     source: String,
+    /// The row as written, whitespace collapsed.
+    written: String,
     span: Span,
+}
+
+/// A row `cexpr => Actor verb {or verb}` in canonical names and English
+/// keywords, without particles: the row's text in its table's lowering
+/// steps and diagnostics, the same however the source spelled it.
+fn row_text(condition: &Condition, actor: &Word, verbs: &[Word]) -> String {
+    let condition = match condition {
+        Condition::Concepts(concepts) => concepts
+            .iter()
+            .map(|concept| concept.text.as_str())
+            .collect::<Vec<_>>()
+            .join(&format!(" {} ", Kw::And.english())),
+        Condition::Stage(stage, entity) => format!("{} {}", stage.text, entity.text),
+        Condition::Otherwise => Kw::Otherwise.english().to_owned(),
+    };
+    let verbs = verbs
+        .iter()
+        .map(|verb| verb.text.as_str())
+        .collect::<Vec<_>>()
+        .join(&format!(" {} ", Kw::RowOr.english()));
+    format!("{condition} => {} {verbs}", actor.text)
 }
 
 impl Parser<'_> {
@@ -150,7 +174,8 @@ impl Parser<'_> {
             object: None,
             inputs: Vec::new(),
         });
-        let source = self.source[start.start.offset..end.end.offset]
+        let source = row_text(&condition, &actor, &verbs);
+        let written = self.source[start.start.offset..end.end.offset]
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -175,6 +200,7 @@ impl Parser<'_> {
             particles,
             covers,
             source,
+            written,
             span: join_span(start, end),
         })
     }
@@ -545,6 +571,7 @@ pub(super) fn apply(
             row_covers.push(row.covers);
             rows.push(DecisionRow {
                 source: row.source,
+                written: row.written,
                 condition,
                 events: named,
                 otherwise: matches!(row.condition, Condition::Otherwise),
@@ -597,12 +624,16 @@ pub(super) fn apply(
                 unreachable!("every event signature has its transition");
             };
             if guard != Expr::Bool(true) {
-                let detail = rows
-                    .iter()
-                    .filter(|row| row.events.contains(&event.name))
-                    .map(|row| row.source.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" | ");
+                let numbered = |text: fn(&DecisionRow) -> &str| {
+                    rows.iter()
+                        .enumerate()
+                        .filter(|(_, row)| row.events.contains(&event.name))
+                        .map(|(index, row)| format!("row {}: {}", index + 1, text(row)))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                };
+                let detail = numbered(|row| &row.source);
+                let written = numbered(|row| &row.written);
                 transition
                     .event
                     .as_mut()
@@ -613,7 +644,11 @@ pub(super) fn apply(
                         requirement: decision.id.clone(),
                         condition: guard,
                         detail: format!(
-                            "for {} {}: {detail}",
+                            "for {} {} {detail}",
+                            decision.stage.text, decision.entity.text
+                        ),
+                        written: format!(
+                            "for {} {} {written}",
                             decision.stage.text, decision.entity.text
                         ),
                         span: decision.span,

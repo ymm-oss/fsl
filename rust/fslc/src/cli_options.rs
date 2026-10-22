@@ -574,6 +574,8 @@ pub(crate) struct MutationFamilyOptions {
     pub(crate) min_kill_rate: Option<f64>,
     /// `explain --names`, read only behind the next edition's gate.
     pub(crate) names: Option<crate::name_display::NameSpelling>,
+    /// `explain --lowering`, read only behind the next edition's gate.
+    pub(crate) lowering: bool,
 }
 
 impl MutationFamilyOptions {
@@ -589,14 +591,16 @@ impl MutationFamilyOptions {
         let mut fail_on_survivors = false;
         let mut min_kill_rate = None;
         let mut names = None;
+        let mut lowering = false;
+        let next_edition = || {
+            crate::process::parse_options()
+                .unstable()
+                .contains(fsl_syntax::UnstableFeature::Fsl5)
+        };
         while let Some(option) = args.next() {
             match option.as_str() {
-                "--names"
-                    if command == "explain"
-                        && crate::process::parse_options()
-                            .unstable()
-                            .contains(fsl_syntax::UnstableFeature::Fsl5) =>
-                {
+                "--lowering" if command == "explain" && next_edition() => lowering = true,
+                "--names" if command == "explain" && next_edition() => {
                     names = Some(crate::name_display::NameSpelling::parse(
                         &required_option_value(&mut args, "--names")?,
                     )?);
@@ -647,6 +651,9 @@ impl MutationFamilyOptions {
             || format!("fslc {command} requires a spec"),
             |option| format!("unknown {command} option '{option}'"),
         )?;
+        if lowering && readable {
+            return Err("explain --lowering prints JSON; drop --readable".to_owned());
+        }
         Ok(Self {
             path,
             depth,
@@ -659,6 +666,7 @@ impl MutationFamilyOptions {
             fail_on_survivors,
             min_kill_rate,
             names,
+            lowering,
         })
     }
 }

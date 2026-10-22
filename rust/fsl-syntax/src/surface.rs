@@ -367,8 +367,15 @@ pub struct RuleGuard {
     /// The requirement id of the enclosing table or rule.
     pub requirement: String,
     pub condition: Expr,
-    /// The statement (or the table's rows) as written, for the guard's origin.
+    /// The statement (or the table's numbered rows, `for Submitted Claim row
+    /// 1: SmallClaim => System approves`), for the guard's origin: in
+    /// canonical names and English keywords, without particles, however the
+    /// source spelled it, so no alias or Japanese word reaches the Kernel's
+    /// provenance.
     pub detail: String,
+    /// The statement (or the rows) as written, whitespace collapsed: the
+    /// text diagnostics and the document quote. Never an origin's detail.
+    pub written: String,
     pub span: Span,
 }
 
@@ -388,8 +395,11 @@ pub struct RuleProperty {
     pub requirement_span: Span,
     pub entity: String,
     pub condition: Expr,
-    /// The statement as written, for the property's origin.
+    /// The statement in canonical names and English keywords, for the
+    /// property's origin (see [`RuleGuard::detail`]).
     pub detail: String,
+    /// The statement as written (see [`RuleGuard::written`]).
+    pub written: String,
     pub span: Span,
 }
 
@@ -803,8 +813,11 @@ pub struct DecisionTable {
 /// One row of a [`DecisionTable`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionRow {
-    /// The row as written, `SmallClaim => System approves`.
+    /// The row in canonical names and English keywords, without particles,
+    /// `SmallClaim => System approves` (see [`RuleGuard::detail`]).
     pub source: String,
+    /// The row as written, whitespace collapsed (see [`RuleGuard::written`]).
+    pub written: String,
     /// The row's condition at the table's stage, over the entity's fields as
     /// `Entity.field` names (concepts expanded, their stages decided).
     pub condition: Expr,

@@ -47,6 +47,7 @@ struct Lifecycle<'a> {
 struct Statement<'a> {
     requirement: &'a str,
     kind: &'a str,
+    /// The statement as the source wrote it (`RuleGuard::written`).
     detail: &'a str,
     /// The event a guard is added to; `None` for a property.
     event: Option<&'a str>,
@@ -407,9 +408,9 @@ impl<'a> RequirementsViews<'a> {
         let mut rows = vec![header.to_owned(), "|---|---|---|".to_owned()];
         for (index, row) in table.rows.iter().enumerate() {
             let condition = row
-                .source
+                .written
                 .split_once("=>")
-                .map_or(row.source.as_str(), |(condition, _)| condition.trim());
+                .map_or(row.written.as_str(), |(condition, _)| condition.trim());
             let outcome = row
                 .events
                 .iter()
@@ -547,7 +548,7 @@ impl<'a> RequirementsViews<'a> {
                     statements.push(Statement {
                         requirement: &guard.requirement,
                         kind: guard.kind,
-                        detail: &guard.detail,
+                        detail: &guard.written,
                         event: Some(&event.name),
                         name: None,
                         lowered: requires.map_or(&guard.condition, |requires| &requires[index + 1]),
@@ -569,7 +570,7 @@ impl<'a> RequirementsViews<'a> {
                 statements.push(Statement {
                     requirement: &property.requirement,
                     kind: property.kind,
-                    detail: &property.detail,
+                    detail: &property.written,
                     event: None,
                     name: Some(name),
                     lowered,

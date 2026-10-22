@@ -28,6 +28,7 @@ mod causal;
 mod cli_options;
 mod cli_output;
 mod code_audit;
+mod explain_lowering;
 mod log_replay;
 mod name_display;
 mod process;
@@ -1107,7 +1108,13 @@ fn command() -> Result<(Value, i32), String> {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
-                "explain" => run_explain(path, options.depth, options.readable, options.names),
+                "explain" => run_explain(
+                    path,
+                    options.depth,
+                    options.readable,
+                    options.names,
+                    options.lowering,
+                ),
                 "mutate" => run_mutate(
                     path,
                     options.depth,
@@ -9826,12 +9833,27 @@ fn run_explain(
     depth: usize,
     readable: bool,
     names: Option<name_display::NameSpelling>,
+    lowering: bool,
 ) -> (Value, i32) {
     let source = match read_spec_source(path) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_explain_from_source_with_names(path, &source, depth, readable, names)
+    run_explain_from_source_with_names(path, &source, depth, readable, names, lowering)
+}
+
+/// `explain --lowering`: only where each lowered `requires` and property
+/// came from ([`explain_lowering::lowering`]).
+fn run_explain_lowering_from_source(path: &Path, source: &str) -> (Value, i32) {
+    let (_kernel, model) = match load_kernel_model_from_source(path, source) {
+        Ok(loaded) => loaded,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("explained"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("lowering".to_owned(), explain_lowering::lowering(&model));
+    (Value::Object(output), 0)
 }
 
 /// [`run_explain_from_source`] spelled for a reader: a document with a
@@ -9844,8 +9866,13 @@ fn run_explain_from_source_with_names(
     depth: usize,
     readable: bool,
     names: Option<name_display::NameSpelling>,
+    lowering: bool,
 ) -> (Value, i32) {
-    let (mut output, status) = run_explain_from_source(path, source, depth, readable);
+    let (mut output, status) = if lowering {
+        run_explain_lowering_from_source(path, source)
+    } else {
+        run_explain_from_source(path, source, depth, readable)
+    };
     // A glossary exists only behind the gate; without it nothing is reloaded.
     let gated = parse_options()
         .unstable()
@@ -9933,6 +9960,11 @@ fn run_explain_from_source(
         );
     }
     if readable {
+        // Where each lowered `requires` and property came from, for a
+        // next-edition document (read only behind the gate).
+        let next_edition = parse_options()
+            .unstable()
+            .contains(fsl_syntax::UnstableFeature::Fsl5);
         let mut text = format!("Spec: {} (depth {depth})\n", model.name);
         text.push_str(
             "Counterfactual scope: invariant/reachable (leadsTo liveness skipped; use verify)\n",
@@ -10000,6 +10032,11 @@ fn run_explain_from_source(
                     let _ = writeln!(text, "    branch: {detail}");
                 }
             }
+            if next_edition {
+                for line in explain_lowering::action_lines(&model, &action.name) {
+                    let _ = writeln!(text, "    {line}");
+                }
+            }
             for requirement in action
                 .annotations
                 .requirements()
@@ -10017,11 +10054,16 @@ fn run_explain_from_source(
             }
             if !action.requires.is_empty() {
                 text.push_str("    requires:\n");
-                for requirement in &action.requires {
+                for (index, requirement) in action.requires.iter().enumerate() {
                     let _ = writeln!(
                         text,
-                        "      - requires {}",
-                        fslc_rust::expr_text(requirement)
+                        "      - requires {}{}",
+                        fslc_rust::expr_text(requirement),
+                        if next_edition {
+                            explain_lowering::requires_suffix(&model, &action.name, index)
+                        } else {
+                            String::new()
+                        }
                     );
                 }
             }
@@ -10060,6 +10102,11 @@ fn run_explain_from_source(
                     model.names().public_property(name).into_string()
                 );
                 let _ = writeln!(text, "    body: {body}");
+                if next_edition {
+                    for line in explain_lowering::property_lines(&model, kind, name) {
+                        let _ = writeln!(text, "    {line}");
+                    }
+                }
             }
         }
         let checks = model
