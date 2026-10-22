@@ -444,6 +444,11 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
                 &id_policy,
                 crate::parse_options(),
             ));
+        plan.diagnostics
+            .extend(fslc_rust::migration::lexical_warning_diagnostics(
+                &source,
+                crate::parse_options(),
+            ));
         if options.strict_names {
             plan.diagnostics
                 .extend(fslc_rust::migration::mixed_names_diagnostics(
@@ -817,7 +822,10 @@ fn validate_migration_semantics(
         fslc_rust::migration::kernel_contract(source, path, crate::parse_options(), origins)
     };
     let before = contract(before)?;
-    let after = contract(after)?;
+    let mut after = contract(after)?;
+    if origins == fslc_rust::migration::Origins::Ignored {
+        fslc_rust::migration::ignore_derived_terminal(&before, &mut after);
+    }
     if before == after {
         Ok(())
     } else {

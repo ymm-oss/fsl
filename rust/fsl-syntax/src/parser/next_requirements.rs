@@ -1226,6 +1226,16 @@ impl Pending {
                 ));
             }
             next.entities.push(declaration.name.text.clone());
+            let entity = &entities[&declaration.name.text];
+            next.final_stages.push((
+                declaration.name.text.clone(),
+                entity
+                    .stages
+                    .iter()
+                    .filter(|stage| entity.edges.iter().all(|(from, _, _)| from != *stage))
+                    .cloned()
+                    .collect(),
+            ));
         }
 
         let plain_entities = items

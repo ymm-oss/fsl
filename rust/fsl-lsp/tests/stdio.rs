@@ -282,24 +282,22 @@ fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
     assert_eq!(warning["range"], range(2, 13, 14), "{warning:#}");
     assert_eq!(warning["data"]["replacement"], " ");
 
-    // With the gate the header selects the wider identifier rule for every
-    // parse, so the document is valid; without it `𠮷` is a lexer error.
-    assert!(
-        gated.iter().all(|diagnostic| diagnostic["severity"] != 1),
-        "{gated:#?}"
-    );
     let error_at = |text: &str, unstable: Option<&str>| {
         let diagnostics = published_diagnostics(text, unstable);
         diagnostics
             .iter()
             .find(|diagnostic| diagnostic["severity"] == 1)
-            .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"))["range"]
+            .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"))
             .clone()
     };
-    assert_eq!(error_at(text, None), range(2, 10, 12));
-    let unknown_type = "fsl 5\nspec S {\n  state { 𠮷野\u{3000}: Nope }\n}\n";
-    // The field declaration: it ends after `Nope` at 20 UTF-16 units (19 chars).
-    assert_eq!(error_at(unknown_type, Some("fsl5")), range(2, 10, 20));
+    // With the gate the header selects the wider identifier rule, so the
+    // lexer reads `𠮷野`; a spec has no glossary, so the name is refused as
+    // not ASCII. Its range ends after `𠮷野` at 13 UTF-16 units (12 chars).
+    let error = error_at(text, Some("fsl5"));
+    assert_eq!(error["code"], "canonical_name_not_ascii", "{error:#}");
+    assert_eq!(error["range"], range(2, 10, 13), "{error:#}");
+    // Without the gate `𠮷` is a lexer error.
+    assert_eq!(error_at(text, None)["range"], range(2, 10, 12));
     assert!(
         published_diagnostics(text, None)
             .iter()

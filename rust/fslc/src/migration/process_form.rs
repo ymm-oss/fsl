@@ -28,6 +28,7 @@ use fsl_syntax::{
     BusinessItem, Edition, LosslessKind, Param, ParseOptions, ProcessItem, ProcessTransition,
     RequirementsItem, Span, SurfaceDocument, Token, TokenKind, UnstableFeature, source_span,
 };
+use serde_json::Value;
 
 use super::{MigrationDiagnostic, Origins, Taxonomy, kernel_contract, missing_edition_header};
 
@@ -219,7 +220,10 @@ pub fn convert_process_forms(
 
 /// The migration contract of a process-form rewrite: `before` and `after`
 /// check, and their kernels are equal without locations and origins (the
-/// events carry their own lowering origins).
+/// events carry their own lowering origins). Where `before` has no
+/// `terminal { }`, `after` has the one this edition derives from the
+/// lifecycles' final stages (as a business document derives its own), which
+/// the process form never derived: that terminal is not compared.
 ///
 /// # Errors
 ///
@@ -233,12 +237,13 @@ pub fn process_form_contract(
 ) -> Result<(), (&'static str, String)> {
     let before = kernel_contract(before, path, options, Origins::Ignored)
         .map_err(|error| (CONVERTED_FORM_INVALID, error))?;
-    let after = kernel_contract(after, path, options, Origins::Ignored).map_err(|error| {
+    let mut after = kernel_contract(after, path, options, Origins::Ignored).map_err(|error| {
         (
             CONVERTED_FORM_INVALID,
             format!("the rewritten entity / event / rule members do not check: {error}"),
         )
     })?;
+    ignore_derived_terminal(&before, &mut after);
     if before == after {
         Ok(())
     } else {
@@ -248,6 +253,19 @@ pub fn process_form_contract(
              process; rewrite the process by hand"
                 .to_owned(),
         ))
+    }
+}
+
+/// Where the process form's kernel `before` has no terminal, forget the one
+/// the rewritten `after` derives from its lifecycles' final stages, so the
+/// rewrite contract compares everything else.
+pub fn ignore_derived_terminal(before: &Value, after: &mut Value) {
+    if before["kernel"]["properties"]["terminal"].is_null()
+        && let Some(properties) = after
+            .pointer_mut("/kernel/properties")
+            .and_then(Value::as_object_mut)
+    {
+        properties.insert("terminal".to_owned(), Value::Null);
     }
 }
 
