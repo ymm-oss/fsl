@@ -6,15 +6,15 @@
 //!
 //! - `mutate --by-requirement`: a rule or a decision table whose statements
 //!   are guards is formalized by those guards, so each killed mutant of such
-//!   a guard counts for the rule's or table's ID. The note `by <actor>` the
-//!   lowering gives an event's action names the actor; it is not a
-//!   requirement ID.
+//!   a guard counts for the rule's or table's ID. An event's name is not a
+//!   requirement ID: the lowering gives an event's action the IDs the author
+//!   wrote, never a note naming its actor.
 //! - `lint`: the ID policy applies to the ID every declaration of the
 //!   document starts with (`rule`, `decide`, `covers`, `scenario`,
 //!   `forbidden`, `goal`, `policy`), in English or Japanese keywords.
 //! - `explain --readable` of a document with a glossary shows the aliases
 //!   wherever a name is shown: in each `requires`, in a property's body and
-//!   in an event's actor note, as everywhere else.
+//!   in an event's phrase, as everywhere else.
 //!
 //! The fixtures are the returns example of the next skills, in English and
 //! in Japanese with a glossary, in `fixtures/fsl5_outputs` (outside
@@ -137,7 +137,7 @@ fn mutate_by_requirement_credits_rule_and_table_ids_with_their_guard_kills() {
             "{id}: {by_requirement:?}"
         );
     }
-    // An event's actor note (`request: by Customer`) is not a requirement.
+    // An event's name is not a requirement ID (no `request: by Customer`).
     let explained = json(&["explain", "--lowering"], &path);
     let events = explained["lowering"]["actions"]
         .as_array()
@@ -269,7 +269,7 @@ fn strings(value: &Value, key: Option<&str>, found: &mut Vec<String>) {
 }
 
 #[test]
-fn explain_with_a_glossary_shows_aliases_in_guards_bodies_and_actor_notes() {
+fn explain_with_a_glossary_shows_aliases_in_guards_bodies_and_events() {
     let path = fixture("returns_ja.fsl");
     let source = std::fs::read_to_string(&path).expect("fixture");
     let (aliased, wording) = glossary_and_wording(&source);
@@ -286,12 +286,14 @@ fn explain_with_a_glossary_shows_aliases_in_guards_bodies_and_actor_notes() {
         "{readable}"
     );
     for line in [
-        "requirement: request: by 顧客",
+        "event: 顧客 申請する 返品 下書き -> 申請済み",
         "- requires return_stage[r] == 下書き  ← move 下書き -> 申請済み",
         "body: forall r: 返品 { return_stage[r] != 下書き => return_amount[r] > 0 }",
     ] {
         assert!(readable.contains(line), "{line}: {readable}");
     }
+    // The requirements shown are the IDs the author wrote, never the event.
+    assert!(!readable.contains("requirement: request:"), "{readable}");
 
     let mut found = Vec::new();
     strings(&json(&["explain"], &path), None, &mut found);
@@ -305,7 +307,7 @@ fn explain_with_a_glossary_shows_aliases_in_guards_bodies_and_actor_notes() {
     let (readable, exit) = fslc(&["explain", "--readable", "--names", "canonical"], &path);
     assert_eq!(exit, 0, "{readable}");
     for line in [
-        "requirement: request: by Customer",
+        "event: Customer requests Return Draft -> Requested",
         "- requires return_stage[r] == Draft  ← move Draft -> Requested",
         "body: forall r: Return { return_stage[r] != Draft => return_amount[r] > 0 }",
     ] {

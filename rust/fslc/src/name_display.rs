@@ -13,9 +13,7 @@
 //! rendering. Free text (a requirement's own wording, a reason) is the
 //! author's and is left as written. A `text` is free text only in a
 //! requirement reference (`{"id", "text"}`); elsewhere (a blamed guard or
-//! effect, a violated conjunct) it is an expression. The note `by <actor>`
-//! the lowering gives an event's action is generated, not the author's, so
-//! its actor is respelled too.
+//! effect, a violated conjunct) it is an expression.
 
 use serde_json::{Map, Value};
 
@@ -44,98 +42,78 @@ const FREE_TEXT_KEYS: &[&str] = &["reason", "recommended_action"];
 /// The key of a requirement reference's wording, prose only there.
 const REQUIREMENT_TEXT_KEY: &str = "text";
 
-/// Respell `output` (an `explain` envelope) in `spelling`. `generated` are
-/// the requirement texts the lowering wrote (an event's actor note): names,
-/// respelled like the rest.
-pub(crate) fn respell(
-    output: &mut Value,
-    glossary: &fsl_core::Glossary,
-    spelling: NameSpelling,
-    generated: &[String],
-) {
+/// Respell `output` (an `explain` envelope) in `spelling`.
+pub(crate) fn respell(output: &mut Value, glossary: &fsl_core::Glossary, spelling: NameSpelling) {
     if glossary.is_empty() {
         return;
     }
-    let free = FreeText { generated };
     let mut prose = Vec::new();
-    free.collect(output, None, false, &mut prose);
+    collect_prose(output, None, false, &mut prose);
     prose.sort_by_key(|text| std::cmp::Reverse(text.len()));
     prose.dedup();
     let rename = |word: &str| match spelling {
         NameSpelling::Alias => glossary.alias(word).map(str::to_owned),
         NameSpelling::Canonical => glossary.canonical(word).map(str::to_owned),
     };
-    free.respell(output, None, false, &rename, &prose);
+    respell_value(output, None, false, &rename, &prose);
 }
 
-/// Which string values of an envelope are prose.
-struct FreeText<'a> {
-    generated: &'a [String],
+/// Whether a string under `key` is prose; `reference` tells whether the
+/// object holding it is a requirement reference (has an `id`).
+fn is_prose(key: Option<&str>, reference: bool) -> bool {
+    key.is_some_and(|key| {
+        FREE_TEXT_KEYS.contains(&key) || (reference && key == REQUIREMENT_TEXT_KEY)
+    })
+}
+
+fn collect_prose(value: &Value, key: Option<&str>, reference: bool, prose: &mut Vec<String>) {
+    match value {
+        Value::String(text) if is_prose(key, reference) => {
+            prose.push(text.clone());
+        }
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| collect_prose(item, key, reference, prose)),
+        Value::Object(object) => {
+            let reference = object.contains_key("id");
+            object
+                .iter()
+                .for_each(|(key, item)| collect_prose(item, Some(key), reference, prose));
+        }
+        _ => {}
+    }
 }
 
 type Rename<'a> = dyn Fn(&str) -> Option<String> + 'a;
 
-impl FreeText<'_> {
-    /// Whether the string `text` under `key` is prose; `reference` tells
-    /// whether the object holding it is a requirement reference (has an
-    /// `id`).
-    fn is_prose(&self, key: Option<&str>, reference: bool, text: &str) -> bool {
-        key.is_some_and(|key| {
-            FREE_TEXT_KEYS.contains(&key)
-                || (reference
-                    && key == REQUIREMENT_TEXT_KEY
-                    && !self.generated.iter().any(|generated| generated == text))
-        })
-    }
-
-    fn collect(&self, value: &Value, key: Option<&str>, reference: bool, prose: &mut Vec<String>) {
-        match value {
-            Value::String(text) if self.is_prose(key, reference, text) => {
-                prose.push(text.clone());
+fn respell_value(
+    value: &mut Value,
+    key: Option<&str>,
+    reference: bool,
+    rename: &Rename<'_>,
+    prose: &[String],
+) {
+    match value {
+        Value::String(text) => {
+            if !is_prose(key, reference) {
+                *text = respell_text(text, rename, prose);
             }
-            Value::Array(items) => items
-                .iter()
-                .for_each(|item| self.collect(item, key, reference, prose)),
-            Value::Object(object) => {
-                let reference = object.contains_key("id");
-                object
-                    .iter()
-                    .for_each(|(key, item)| self.collect(item, Some(key), reference, prose));
-            }
-            _ => {}
         }
-    }
-
-    fn respell(
-        &self,
-        value: &mut Value,
-        key: Option<&str>,
-        reference: bool,
-        rename: &Rename<'_>,
-        prose: &[String],
-    ) {
-        match value {
-            Value::String(text) => {
-                if !self.is_prose(key, reference, text) {
-                    *text = respell_text(text, rename, prose);
-                }
-            }
-            Value::Array(items) => items
-                .iter_mut()
-                .for_each(|item| self.respell(item, key, reference, rename, prose)),
-            Value::Object(object) => {
-                let reference = object.contains_key("id");
-                let respelled = std::mem::take(object)
-                    .into_iter()
-                    .map(|(key, mut item)| {
-                        self.respell(&mut item, Some(&key), reference, rename, prose);
-                        (respell_text(&key, rename, &[]), item)
-                    })
-                    .collect::<Map<_, _>>();
-                *object = respelled;
-            }
-            _ => {}
+        Value::Array(items) => items
+            .iter_mut()
+            .for_each(|item| respell_value(item, key, reference, rename, prose)),
+        Value::Object(object) => {
+            let reference = object.contains_key("id");
+            let respelled = std::mem::take(object)
+                .into_iter()
+                .map(|(key, mut item)| {
+                    respell_value(&mut item, Some(&key), reference, rename, prose);
+                    (respell_text(&key, rename, &[]), item)
+                })
+                .collect::<Map<_, _>>();
+            *object = respelled;
         }
+        _ => {}
     }
 }
 
