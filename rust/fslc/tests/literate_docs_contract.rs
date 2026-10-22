@@ -377,3 +377,83 @@ fn marked_doc_fences_check_and_the_unmarked_surface_is_reported() {
         }
     }
 }
+
+/// Every `.md` under `dir`, recursively, in path order.
+fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let mut entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+        .map(|entry| entry.expect("directory entry").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            markdown_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            out.push(path);
+        }
+    }
+}
+
+/// The first line inside the first fence whose info string starts with the
+/// token `fsl`, as `fslc`'s literate extractor finds it.
+fn first_fsl_line(markdown: &str) -> Option<&str> {
+    let mut lines = markdown.lines();
+    while let Some(line) = lines.next() {
+        let info = line.trim_start().trim_start_matches(['`', '~']);
+        if info.len() + 3 <= line.trim_start().len()
+            && info.split_whitespace().next() == Some("fsl")
+        {
+            return lines.next();
+        }
+    }
+    None
+}
+
+/// fsl 5 plan §3 S13 (decisions/043 stage 1 gate over decisions/048 J4's
+/// `skills-next/`): the next-edition skills are held to a stricter fence
+/// rule than `docs/` and `skills/`. Every `fsl` fence there must be marked
+/// and must check with the next edition enabled (`--every-fence`: an
+/// unmarked one fails instead of being skipped), and each document's first
+/// `fsl` fence opens with the `fsl 5` header, so no example there is read as
+/// the earlier edition.
+#[test]
+fn next_edition_skill_fences_all_check_under_the_next_edition() {
+    let root = workspace_root();
+    let skills = root.join("skills-next");
+    let mut documents = Vec::new();
+    markdown_files(&skills, &mut documents);
+    let mut headed = 0;
+    for document in &documents {
+        let text = std::fs::read_to_string(document).expect("read skill document");
+        if let Some(first) = first_fsl_line(&text) {
+            assert_eq!(
+                first.trim(),
+                "fsl 5",
+                "{}: the first fsl fence must open with the `fsl 5` header",
+                document.display()
+            );
+            headed += 1;
+        }
+    }
+    assert!(headed >= 5, "only {headed} skill documents hold fsl fences");
+
+    let script = root.join("tools/check-doc-fences.py");
+    let output = std::process::Command::new("python3")
+        .arg(&script)
+        .args(["check", "--every-fence", "skills-next"])
+        .args(["--fslc", env!("CARGO_BIN_EXE_fslc")])
+        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
+        .current_dir(&root)
+        .output()
+        .unwrap_or_else(|error| panic!("run {}: {error}", script.display()));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "check-doc-fences.py --every-fence skills-next failed\n{stdout}{stderr}"
+    );
+    assert!(
+        stdout.contains(" 0 fsl fences unmarked") && stdout.contains(" 0 failures"),
+        "the report must state no unmarked fence and no failure: {stdout}"
+    );
+}

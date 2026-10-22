@@ -30,9 +30,16 @@ Rules the gate enforces and reports:
   the line count never changes (the extracted-temp-file approach measured a
   149-line drift)
 
+``--every-fence`` holds a scope to a stricter rule: there every ``fsl`` fence
+must be marked, so an unmarked one is a failure at its line rather than a
+skipped fragment, and a partial snippet takes the info string
+``fsl-fragment`` (which no checker reads; the summary counts them).
+``skills-next/`` is checked this way.
+
 Usage::
 
     python3 tools/check-doc-fences.py check [PATH ...]   # default: docs/ and skills/
+    python3 tools/check-doc-fences.py check --every-fence PATH ...
     python3 tools/check-doc-fences.py selftest
 
 ``fslc`` is taken from ``--fslc``, then ``$FSLC``, then ``PATH``.  A missing
@@ -99,6 +106,32 @@ def fsl_fences(text: str) -> list[Fence]:
     return fences
 
 
+def fragment_fences(text: str) -> int:
+    """Opening fences whose first info-string token is ``fsl-fragment``."""
+    count = 0
+    open_fence: tuple[str, int] | None = None
+    for line in text.split("\n"):
+        trimmed = line.strip()
+        if open_fence is not None:
+            ch, run = open_fence
+            if trimmed and set(trimmed) == {ch} and len(trimmed) >= run:
+                open_fence = None
+            continue
+        found = _opening(trimmed)
+        if found is None:
+            continue
+        ch, run, info = found
+        open_fence = (ch, run)
+        tokens = info.split()
+        count += bool(tokens) and tokens[0] == FRAGMENT_LANG
+    return count
+
+
+UNMARKED_UNDER_EVERY_FENCE = (
+    "unmarked fsl fence: mark it `fsl check`, or write a fragment as `fsl-fragment`"
+)
+
+
 def rename_unmarked(text: str, fences: list[Fence]) -> str:
     """Turn unmarked ``fsl`` fences into non-``fsl`` ones without moving a line."""
     unmarked = {f.line for f in fences if not f.marked}
@@ -132,14 +165,24 @@ def run_fslc(fslc: str, target: Path) -> tuple[int, dict | None, str]:
     return proc.returncode, payload, proc.stderr.strip()
 
 
-def check_document(fslc: str, path: Path, display: str) -> tuple[int, int, list[Failure]]:
-    """Return (marked, unmarked, failures) for one document."""
+def check_document(
+    fslc: str, path: Path, display: str, every_fence: bool = False
+) -> tuple[int, int, list[Failure]]:
+    """Return (marked, unmarked, failures) for one document.
+
+    With ``every_fence`` an unmarked ``fsl`` fence is a failure at its line.
+    """
     text = path.read_text(encoding="utf-8")
     fences = fsl_fences(text)
     marked = sum(1 for f in fences if f.marked)
     unmarked = len(fences) - marked
+    strict = (
+        [Failure(display, f.line, UNMARKED_UNDER_EVERY_FENCE) for f in fences if not f.marked]
+        if every_fence
+        else []
+    )
     if marked == 0:
-        return 0, unmarked, []
+        return 0, unmarked, strict
     target, temp = path, None
     if unmarked:
         temp = path.with_name(f".{path.stem}.fence-gate-{os.getpid()}.md")
@@ -151,14 +194,14 @@ def check_document(fslc: str, path: Path, display: str) -> tuple[int, int, list[
         if temp is not None:
             temp.unlink(missing_ok=True)
     if code == 0 and payload is not None and payload.get("result") == "ok":
-        return marked, unmarked, []
+        return marked, unmarked, strict
     if payload is None:
-        return marked, unmarked, [Failure(display, None, f"fslc exit {code}, no JSON: {stderr[:200]}")]
+        return marked, unmarked, [*strict, Failure(display, None, f"fslc exit {code}, no JSON: {stderr[:200]}")]
     line = (payload.get("loc") or {}).get("line")
     message = str(payload.get("message", payload.get("result")))
     if temp is not None:
         message = message.replace(temp.name, path.name)
-    return marked, unmarked, [Failure(display, line, f"{payload.get('kind', 'error')}: {message}")]
+    return marked, unmarked, [*strict, Failure(display, line, f"{payload.get('kind', 'error')}: {message}")]
 
 
 def documents(scopes: Iterable[str]) -> list[Path]:
@@ -177,23 +220,31 @@ def display_name(path: Path) -> str:
         return path.as_posix()
 
 
-def check(fslc: str, scopes: Iterable[str], out=sys.stdout) -> int:
+def check(fslc: str, scopes: Iterable[str], out=sys.stdout, every_fence: bool = False) -> int:
     docs = documents(scopes)
-    checked = skipped = with_marked = with_fsl = 0
+    checked = skipped = with_marked = with_fsl = fragments = 0
     failures: list[Failure] = []
     for path in docs:
-        marked, unmarked, bad = check_document(fslc, path, display_name(path))
+        marked, unmarked, bad = check_document(fslc, path, display_name(path), every_fence)
         checked += marked
         skipped += unmarked
         with_marked += bool(marked)
         with_fsl += bool(marked or unmarked)
         failures.extend(bad)
+        if every_fence:
+            fragments += fragment_fences(path.read_text(encoding="utf-8"))
     for failure in failures:
         print(f"check-doc-fences: FAIL {failure.render()}", file=out)
+    unmarked_report = (
+        f"{skipped} fsl fences unmarked (each a failure under --every-fence); "
+        f"{fragments} fsl-fragment fences (not checked); "
+        if every_fence
+        else f"{skipped} fsl fences skipped (unmarked, NOT verified); "
+    )
     print(
         f"check-doc-fences: {len(docs)} documents, {with_fsl} with fsl fences; "
         f"{checked} fences checked in {with_marked} documents, "
-        f"{skipped} fsl fences skipped (unmarked, NOT verified); "
+        f"{unmarked_report}"
         f"{len(failures)} failures",
         file=out,
     )
@@ -262,6 +313,21 @@ def selftest(fslc: str) -> int:
         marked, skipped, bad = check_document(fslc, doc("plain.md", "```fsl\nnot a spec\n```\n"), "plain.md")
         expect("unmarked-only document is skipped and counted", (marked, skipped, bad) == (0, 1, []))
 
+        # --every-fence: an unmarked fence fails at its own line, beside a
+        # marked good spec that still passes; a fsl-fragment fence is neither
+        # checked nor a failure; without the flag the same document passes.
+        text = f"```fsl check\n{GOOD}```\n\n```fsl-fragment\nnot a spec\n```\n\n```fsl\nnot a spec\n```\n"
+        want = 1 + text.split("\n").index("```fsl")
+        strict_doc = doc("strict.md", text)
+        _, _, bad = check_document(fslc, strict_doc, "strict.md", every_fence=True)
+        expect("--every-fence fails an unmarked fence at its line",
+               [(f.line, f.message) for f in bad] == [(want, UNMARKED_UNDER_EVERY_FENCE)])
+        _, _, bad = check_document(fslc, strict_doc, "strict.md")
+        expect("without --every-fence the unmarked fence is skipped", not bad)
+        expect("fsl-fragment fences are counted", fragment_fences(text) == 1)
+        _, _, bad = check_document(fslc, doc("strict-only.md", "```fsl\nx\n```\n"), "strict-only.md", every_fence=True)
+        expect("--every-fence fails a document with no marked fence", len(bad) == 1)
+
         # No temp file left behind.
         expect("no temp file left", not [p for p in root.iterdir() if p.name.startswith(".")])
 
@@ -278,14 +344,19 @@ def main(argv: list[str]) -> int:
     parser.add_argument("command", choices=("check", "selftest"))
     parser.add_argument("paths", nargs="*", default=list(DEFAULT_SCOPES))
     parser.add_argument("--fslc", default=os.environ.get("FSLC") or "fslc")
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--every-fence",
+        action="store_true",
+        help="every fsl fence must be marked `fsl check` (an unmarked one fails)",
+    )
+    args = parser.parse_intermixed_args(argv)
     fslc = shutil.which(args.fslc) or (args.fslc if Path(args.fslc).is_file() else None)
     if fslc is None:
         print(f"check-doc-fences: fslc not found ({args.fslc}); refusing to pass", file=sys.stderr)
         return 2
     if args.command == "selftest":
         return selftest(fslc)
-    return check(fslc, args.paths)
+    return check(fslc, args.paths, every_fence=args.every_fence)
 
 
 if __name__ == "__main__":

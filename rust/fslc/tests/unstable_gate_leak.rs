@@ -5,6 +5,12 @@
 //! variable and the next edition's header must not appear in anything
 //! published to users. Internal design notes under `docs/design/` are the one
 //! exception. This check is removed when the gate is lifted.
+//!
+//! The next edition's skills live in `skills-next/` (decisions/048 J4), which
+//! is not published: they are about the `fsl 5` header, so they are not
+//! scanned for it. They move into `skills/` unchanged when the gate is
+//! lifted, so the gate variable, which would then be a stale instruction, is
+//! kept out of them too, and the release must not package them before then.
 
 use std::path::{Path, PathBuf};
 
@@ -141,5 +147,66 @@ fn leak_detector_flags_the_variable_and_the_header_only() {
         "fsl  4.5",
     ] {
         assert!(leaks_in_text(clean).is_empty(), "{clean:?}");
+    }
+}
+
+/// The directory of the next edition's skills (decisions/048 J4).
+const NEXT_SKILLS: &str = "skills-next";
+
+/// How the release workflow lists the skill directories it packages and
+/// declares (`.github/workflows/release.yml`).
+const BUNDLE_LISTING: &str = "find skills -mindepth 1 -maxdepth 1 -type d";
+
+/// decisions/048 J4 and J1 for `skills-next/`: the gate variable appears in
+/// none of its files (they are the material `skills/` becomes when the gate
+/// is lifted), and neither the release workflow nor the installer can
+/// package it: every skill directory listing in the release workflow is the
+/// exact `find skills -mindepth 1 -maxdepth 1 -type d` of the bundle, and
+/// neither file names `skills-next`.
+#[test]
+fn next_edition_skills_stay_unpackaged_and_never_name_the_gate() {
+    let root = root();
+    let mut files = Vec::new();
+    collect(&root, &root.join(NEXT_SKILLS), &mut files);
+    assert!(files.len() >= 8, "scan floor: only {} files", files.len());
+    let mut failures = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).expect("read next-edition skill");
+        for (index, line) in text.lines().enumerate() {
+            if line.contains(GATE_VARIABLE) {
+                failures.push(format!(
+                    "{}:{}: {}",
+                    file.strip_prefix(&root).expect("under root").display(),
+                    index + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "the gate variable leaked into {NEXT_SKILLS}/ (the edition header is enough):\n{}",
+        failures.join("\n")
+    );
+
+    let release = std::fs::read_to_string(root.join(".github/workflows/release.yml"))
+        .expect("read the release workflow");
+    let listings = release
+        .lines()
+        .filter(|line| line.contains("find skills"))
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    assert!(
+        listings.len() >= 3
+            && listings.iter().all(|line| line.starts_with(BUNDLE_LISTING)
+                && !line[BUNDLE_LISTING.len()..].contains("skills")),
+        "every skill listing of the release must be `{BUNDLE_LISTING}`: {listings:#?}"
+    );
+    for published in [".github/workflows/release.yml", "install.sh"] {
+        let text = std::fs::read_to_string(root.join(published)).expect("read release file");
+        assert!(
+            !text.contains(NEXT_SKILLS),
+            "{published} names {NEXT_SKILLS}/, which must not be packaged before the gate is lifted"
+        );
     }
 }
