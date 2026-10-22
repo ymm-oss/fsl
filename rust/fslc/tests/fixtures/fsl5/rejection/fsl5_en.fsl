@@ -1,8 +1,7 @@
 fsl 5
-// The design draft's fsl3_en.fsl, rules included. The `goal` (a later
-// stage's syntax) is written as the `reachable` it lowers to, and the two
-// property statements carry the names lowered.fsl gives their properties
-// (`Name: always ...`); everything else is the draft's text. It lowers to
+// The design draft's fsl3_en.fsl, rules and goal included. The two property
+// statements carry the names lowered.fsl gives their properties (`Name:
+// always ...`); everything else is the draft's text. It lowers to
 // lowered.fsl.
 requirements AgenticRagToolApprovalSlice {
   enum Evidence { Missing, Adequate, Inadequate }
@@ -53,11 +52,7 @@ requirements AgenticRagToolApprovalSlice {
     ExecutionComesFromApprovedStage: Request enters ActionExecuted only from ToolApproved
   }
 
-  requirement GOAL "副作用toolを実行できる" {
-    reachable CanExecuteTool {
-      exists r: Request { request_stage[r] == ActionExecuted }
-    }
-  }
+  goal CanExecuteTool "副作用toolを実行できる" some Request can reach ActionExecuted
 
   scenario AC-TOOL "operator承認後に副作用toolを実行できる" {
     Admin grants req1
