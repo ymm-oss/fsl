@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! Drift control for #1285 stage 1: acceptance / forbidden traces reach a
-//! consumer only through the requirement-trace gate, or through a read that
-//! names itself unchecked.
+//! Drift control for #1285: acceptance / forbidden traces reach a consumer
+//! only through the requirement-trace gate, or through a read that names
+//! itself unchecked (stage 1), and every consumer that reports a result about
+//! those traces fails closed through `require_trace_gate` (stage 2).
 //!
 //! The mechanism is the type: `RequirementsTraceContract`'s fields are private
 //! (its cases are readable only through `unchecked_acceptance` /
@@ -46,43 +47,43 @@ const INVENTORY: &[(&str, &str, usize, &str)] = &[
         "fsl-tools/src/document_project.rs",
         PARSE,
         1,
-        "document claims (#1243): fsl-tools does not depend on fsl-runtime, which the gate replays on",
+        "document claims: fsl-tools does not depend on fsl-runtime, which the gate replays on; fslc runs document_trace_gate first",
     ),
     (
         "fsl-tools/src/document_project.rs",
         "unchecked",
         4,
-        "document claims (#1243): one claim per declared case",
+        "document claims: one claim per declared case, after fslc's document_trace_gate passed",
     ),
     (
         "fsl-tools/src/document_render.rs",
         PARSE,
         1,
-        "document render (#1243): fsl-tools does not depend on fsl-runtime, which the gate replays on",
+        "document render: fsl-tools does not depend on fsl-runtime, which the gate replays on; fslc runs document_trace_gate first",
     ),
     (
         "fsl-tools/src/document_render.rs",
         "unchecked",
         2,
-        "document render (#1243): finds the case a claim renders",
+        "document render: finds the case a claim renders, after fslc's document_trace_gate passed",
     ),
     (
         "fslc/src/main.rs",
         PARSE,
         2,
-        "analyze project graph (#1243), diff OLD forbidden replay (#1239)",
+        "analyze graph projecting a contract the gate refused (its cases marked trace_gate: unchecked), diff OLD forbidden replay (#1239)",
     ),
     (
         "fslc/src/main.rs",
         "unchecked",
         6,
-        "the two ungated consumers above, and mutate attributing a gate rejection to its case's requirements",
+        "the analyze graph's unchecked cases, the diff OLD replay, and mutate attributing a gate rejection to its case's requirements",
     ),
     (
         "fslc/src/strict_tags.rs",
         PARSE,
         1,
-        "check --strict-tags referenced ids",
+        "check / verify --strict-tags referenced ids: runs only on an ok / verified / proved result, which passed the gate (under --instances / --values the scoped gate may skip a case, so the full gate is not re-run here)",
     ),
     (
         "fslc/src/strict_tags.rs",
@@ -205,29 +206,87 @@ fn every_ungated_trace_read_is_inventoried() {
     );
 }
 
-/// Explain, html, and ledger embed the scenarios envelope even when it is a
-/// gate failure (#1242). That discard stays in one named helper instead of a
-/// `let (scenarios, _) = run_scenarios_mode_from_source(..)` at each caller.
+/// `require_trace_gate(` calls per product file: each consumer that reports a
+/// result about acceptance / forbidden cases fails closed on a gate refusal
+/// (#1285 stage 2, #1242, #1243). `(workspace-relative file, count, consumers)`.
+const FAIL_CLOSED: &[(&str, usize, &str)] = &[
+    ("fslc/src/check_stages.rs", 1, "check"),
+    (
+        "fslc/src/main.rs",
+        6,
+        "document (generate / claims / check, requirements_document approval), scenarios / testgen, explain / html, mutate, ledger (and ledger approval), verify",
+    ),
+    ("fslc/src/source_diagnostic.rs", 1, "LSP diagnostics"),
+    (
+        "fslc/src/spec_loading.rs",
+        1,
+        "the process-parse-options wrapper",
+    ),
+    ("fslc/src/verification.rs", 1, "verify engines"),
+];
+
 #[test]
-fn the_scenarios_status_is_discarded_only_by_name() {
+fn every_trace_consumer_fails_closed_through_the_helper() {
+    let root = workspace();
+    let found = product_sources()
+        .into_iter()
+        .filter_map(|path| {
+            let count = calls(&product_text(&path), "require_trace_gate");
+            let relative = path
+                .strip_prefix(&root)
+                .expect("source under workspace")
+                .to_string_lossy()
+                .replace('\\', "/");
+            (count > 0).then_some((relative, count))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let expected = FAIL_CLOSED
+        .iter()
+        .map(|(file, count, consumers)| {
+            assert!(!consumers.is_empty(), "{file} must name its consumers");
+            ((*file).to_owned(), *count)
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        found, expected,
+        "a trace consumer gained or lost its fail-closed gate. A consumer that \
+         reports a result about acceptance / forbidden cases calls \
+         require_trace_gate and reports its refusal (exit 2)"
+    );
+}
+
+/// Explain, html, and ledger build their witnesses from the checked contract
+/// they hold, so the scenarios status is never dropped before the gate
+/// (#1242): no caller drops `run_scenarios_mode_from_source`'s status, and the
+/// scenarios body is reachable only with a contract the gate handed out.
+#[test]
+fn witnesses_are_built_only_from_a_checked_contract() {
     let text = product_text(&workspace().join("fslc/src/main.rs"));
     let compact = text.split_whitespace().collect::<String>();
     assert_eq!(
         compact
             .matches(",_)=run_scenarios_mode_from_source(")
-            .count(),
+            .count()
+            + compact
+                .matches("_status)=run_scenarios_mode_from_source(")
+                .count(),
         0,
-        "a caller drops run_scenarios_mode_from_source's status anonymously; \
-         use scenarios_discarding_gate_status"
+        "a caller drops run_scenarios_mode_from_source's status, which may be a gate refusal"
+    );
+    assert!(
+        compact.contains("fnscenarios_from_checked_traces(path:&Path,source:&str,model:&KernelModel,trace_contract:Option<&CheckedTraceContract>,"),
+        "the scenarios body takes the checked contract"
     );
     assert_eq!(
-        compact
-            .matches("let(scenarios,_discarded_status)=run_scenarios_mode_from_source(")
-            .count(),
-        1,
-        "scenarios_discarding_gate_status is the one place that drops the status"
+        calls(&text, "scenarios_from_checked_traces"),
+        2,
+        "run_scenarios_mode_from_source (after its gate) and witness_scenarios are its only callers"
     );
-    assert_eq!(calls(&text, "scenarios_discarding_gate_status"), 2);
+    assert_eq!(
+        calls(&text, "witness_scenarios"),
+        2,
+        "explain and ledger, each after require_trace_gate"
+    );
 }
 
 #[test]

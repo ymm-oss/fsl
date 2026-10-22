@@ -170,9 +170,9 @@ fn a_number_final_step_outside_the_values_scope_is_not_a_rejection() {
 /// verifies, so each exited 0 before #1229 except `counterexample export`
 /// (exit 2, nothing to export) — detector (mutation: classify the scope error
 /// only on the `check` path). The error itself is asserted for `verify`,
-/// `sweep`, `counterexample export`, `testgen`, `mutate`, and `chain`'s
-/// `detail`; for `html` and `ledger` only the exit status and the written
-/// report. `scenarios` is in another test; `explain` and `approval` are not
+/// `sweep`, `counterexample export`, `testgen`, `mutate`, `html`, `ledger`,
+/// and `chain`'s `detail`; `html` and `ledger` write no report (#1242,
+/// #1243). `scenarios` is in another test; `explain` and `approval` are not
 /// run here.
 #[test]
 fn an_out_of_scope_final_step_exits_2_in_verify_at_depth_2_and_three_engines_and_seven_listed_commands()
@@ -204,16 +204,16 @@ fn an_out_of_scope_final_step_exits_2_in_verify_at_depth_2_and_three_engines_and
     }
     assert!(!directory.join("cx.json").exists());
     assert!(!directory.join("t.py").exists());
-    // The reports still write their artifact, but fold the gate's verdict
-    // into the exit status.
+    // The reports print the same error and write nothing (#1242, #1243).
     for args in [
         &["html", "spec.fsl", "--depth", "2", "-o", "report.html"][..],
         &["ledger", "spec.fsl", "--depth", "2", "-o", "ledger.md"],
     ] {
         let (output, status) = run(&directory, args);
-        assert_eq!(status, 2, "{args:?}: {output:#}");
+        assert_outside_scope(&output, status, 9, "Qty", [0, 3]);
     }
-    assert!(directory.join("report.html").exists());
+    assert!(!directory.join("report.html").exists());
+    assert!(!directory.join("ledger.md").exists());
     std::fs::write(
         directory.join("fsl-project.toml"),
         "[requirements]\nfile = \"spec.fsl\"\ndepth = 2\n",
@@ -224,17 +224,7 @@ fn an_out_of_scope_final_step_exits_2_in_verify_at_depth_2_and_three_engines_and
     assert_eq!(output["failed"], json!(["requirements"]), "{output:#}");
     let detail = &output["layers"][0]["detail"];
     assert_outside_scope(detail, status, 9, "Qty", [0, 3]);
-    let ledger = std::fs::read_to_string(directory.join("ledger.md")).expect("read ledger");
     let _ = std::fs::remove_dir_all(&directory);
-    let entry = ledger
-        .split("### FB-1")
-        .nth(1)
-        .and_then(|rest| rest.split("```").next())
-        .unwrap_or_else(|| panic!("no FB-1 finding in ledger:\n{ledger}"));
-    // `fslc ledger` names the scope, not an accepted or unresolved step.
-    assert!(entry.contains("検証の範囲の外"), "{entry}");
-    assert!(!entry.contains("許容されている"), "{entry}");
-    assert!(!entry.contains("action を指していない"), "{entry}");
 }
 
 /// Boundary — detector (mutation: test only the upper end of the scope).

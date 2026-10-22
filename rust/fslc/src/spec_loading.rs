@@ -7,7 +7,7 @@ use std::path::Path;
 
 use fsl_core::{FslValue, KernelModel, KernelSpec, TypeDef, TypeRef};
 use fslc_rust::spec_load::{SemanticDiagnostic, SpecLoadError, kernel_load_error};
-use fslc_rust::verification_output::{DiagnosticClass, TraceGate};
+use fslc_rust::verification_output::{CheckedTraceContract, DiagnosticClass, TraceGate};
 use serde_json::{Map, Value};
 
 use crate::cli_options::ScopeBounds;
@@ -24,19 +24,25 @@ pub(crate) fn validate_specialized_document_from_source(
     )
 }
 
-pub(crate) fn validate_requirement_traces_from_source(
-    _path: &Path,
-    source: &str,
-    model: &KernelModel,
-) -> Result<TraceGate, String> {
-    validate_requirement_trace_source(source, model)
-}
-
 pub(crate) fn validate_requirement_trace_source(
     source: &str,
     model: &KernelModel,
 ) -> Result<TraceGate, String> {
     fslc_rust::verification_output::validate_requirement_trace_source(
+        &envelope(),
+        source,
+        model,
+        crate::process::parse_options(),
+    )
+}
+
+/// [`fslc_rust::verification_output::require_trace_gate`] under the process
+/// parse options: the checked contract, or the envelope to report (exit 2).
+pub(crate) fn require_trace_gate(
+    source: &str,
+    model: &KernelModel,
+) -> Result<Option<CheckedTraceContract>, Value> {
+    fslc_rust::verification_output::require_trace_gate(
         &envelope(),
         source,
         model,

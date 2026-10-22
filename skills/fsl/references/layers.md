@@ -396,11 +396,13 @@ verify {
   error with `out_of_scope_argument` — widen the scope or move the argument
   inside it. A last step naming no action or no variant of that arity is a
   `kind: "forbidden"` error with a `message`, not a rejection. On any of these
-  errors every command that runs this check exits 2 with no verdict, scenario,
-  or test, except `explain`, which exits 0 with no witnesses (known gap #1242),
-  `approval create --kind ledger`, which exits 0 and records a ledger that
-  lists the error, and `approval check` of a ledger record, which reports
-  `drifted` (exit 0). `fslc diff` replays the forbidden too but reports a
+  errors every command that reports a result about the acceptance / forbidden
+  cases exits 2 with this error and no verdict, scenario, test, explanation,
+  report, ledger, document, or approval record (`explain`, `html`, `ledger`,
+  the `document` commands, and `approval create` / `check` included), and the
+  language server shows it as an `FSL-REQUIREMENT-TRACE` error. `fslc analyze`
+  still graphs the cases, marked `"trace_gate": "unchecked"`. `fslc diff`
+  replays the forbidden too but reports a
   finding whose exit status follows `--forbid`. Under a `--instances` /
   `--values` override that alone removed the argument, the forbidden is
   `forbidden_skipped`, with the exit status of the rest of the spec (0 when it

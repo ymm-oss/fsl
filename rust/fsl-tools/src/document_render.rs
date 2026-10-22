@@ -107,8 +107,9 @@ pub fn render_requirements_document(
     evidence: Option<&AppliedEvidence<'_>>,
     approvals: Option<&AppliedApprovals<'_>>,
 ) -> Result<RenderedDocument, String> {
-    // Ungated (#1243): the requirement-trace gate replays traces on
-    // `fsl-runtime`, which this crate does not depend on.
+    // Ungated here: the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
+    // before every document command and fails closed on its refusal.
     let trace = requirements_trace_contract(source).map_err(|error| error.to_string())?;
     validate_render_inputs(claims, kernel, model, source, trace.as_ref())?;
     let mut ctx = Ctx {
