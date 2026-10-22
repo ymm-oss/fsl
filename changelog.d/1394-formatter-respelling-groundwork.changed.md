@@ -1,4 +1,4 @@
-Changed (#9991): the formatter can respell a requirements document through
+Changed (#1394): the formatter can respell a requirements document through
 the parser's record of where each keyword and phrase was written: keywords
 through the internal keyword table, names through the glossary, and the word
 order of phrases whose role markers it adds or removes; a respelled document
