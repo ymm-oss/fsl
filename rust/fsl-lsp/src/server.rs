@@ -382,9 +382,24 @@ fn publish_diagnostics(
     let trace_gate = model.as_ref().map_or_else(Vec::new, |model| {
         fslc_rust::source_diagnostic::trace_gate_diagnostics(&source, model, &state.parse_options)
     });
+    // `check`'s last stage: the requirements checks the enumeration deferred,
+    // asked once the trace gate passes (decisions/048 J3).
+    let requirements = match &model {
+        Some(model)
+            if trace_gate.is_empty()
+                && state
+                    .parse_options
+                    .unstable()
+                    .contains(fsl_syntax::UnstableFeature::Fsl5) =>
+        {
+            requirements_diagnostics(&source, model, state.parse_options)
+        }
+        _ => Vec::new(),
+    };
     let mut items = source_diagnostics
         .into_iter()
         .chain(trace_gate)
+        .chain(requirements)
         .map(|item| to_lsp_diagnostic(&source, item, edition))
         .chain(
             fsl_syntax::lexical_warnings(&source, &state.parse_options)
@@ -410,6 +425,44 @@ fn publish_diagnostics(
         .into(),
     )?;
     Ok(())
+}
+
+/// The requirements checks of `source` asked of native Z3, on a thread of
+/// their own: Z3 keeps one context per thread, and the model it returns (the
+/// counterexample a message quotes) depends on what that context was asked
+/// before, so a fresh thread answers each publish as a fresh `fslc check`
+/// process does, with the same message.
+fn requirements_diagnostics(
+    source: &str,
+    model: &fsl_core::KernelModel,
+    options: fsl_syntax::ParseOptions,
+) -> Vec<SourceDiagnostic> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            // The main thread's default, which the lowering stages run on.
+            .stack_size(8 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                block_on_native(fslc_rust::source_diagnostic::solver_diagnostics(
+                    source,
+                    model,
+                    &options,
+                    &mut || fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string()),
+                ))
+            })
+            .expect("spawn the requirements solver thread")
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+/// Run a future of the native solver, which never yields `Pending`.
+fn block_on_native<F: std::future::Future>(future: F) -> F::Output {
+    let mut future = std::pin::pin!(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    match future.as_mut().poll(&mut context) {
+        std::task::Poll::Ready(result) => result,
+        std::task::Poll::Pending => panic!("native Z3 backend unexpectedly yielded Pending"),
+    }
 }
 
 fn analysis_diagnostics_enabled() -> bool {

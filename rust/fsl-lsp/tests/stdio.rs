@@ -213,6 +213,15 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
 /// Open `text` in a fresh server with the unstable gate set or unset and
 /// return the diagnostics the server publishes for it.
 fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
+    published_diagnostics_each(&[text], unstable)
+        .pop()
+        .expect("one publish")
+}
+
+/// Open the first of `texts` in a fresh server with the unstable gate set or
+/// unset, replace the document's text with each of the others in turn, and
+/// return the diagnostics the server publishes for each.
+fn published_diagnostics_each(texts: &[&str], unstable: Option<&str>) -> Vec<Vec<Value>> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
     command
         .stdin(Stdio::piped())
@@ -237,16 +246,38 @@ fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
         &mut stdin,
         &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    send(
-        &mut stdin,
-        &json!({
-            "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
-                "uri":"file:///tmp/fsl-lsp-astral.fsl","languageId":"fsl","version":1,"text":text
-            }}
-        }),
-    );
-    let published = receive(&mut stdout);
-    assert_eq!(published["method"], "textDocument/publishDiagnostics");
+    let uri = "file:///tmp/fsl-lsp-astral.fsl";
+    let mut published = Vec::new();
+    for (version, text) in texts.iter().enumerate() {
+        if version == 0 {
+            send(
+                &mut stdin,
+                &json!({
+                    "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+                        "uri":uri,"languageId":"fsl","version":1,"text":text
+                    }}
+                }),
+            );
+        } else {
+            send(
+                &mut stdin,
+                &json!({
+                    "jsonrpc":"2.0","method":"textDocument/didChange","params":{
+                        "textDocument":{"uri":uri,"version":version + 1},
+                        "contentChanges":[{"text":text}]
+                    }
+                }),
+            );
+        }
+        let publish = receive(&mut stdout);
+        assert_eq!(publish["method"], "textDocument/publishDiagnostics");
+        published.push(
+            publish["params"]["diagnostics"]
+                .as_array()
+                .expect("diagnostics array")
+                .clone(),
+        );
+    }
     send(
         &mut stdin,
         &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
@@ -258,10 +289,80 @@ fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
     );
     drop(stdin);
     assert!(child.wait().expect("wait for fslc-lsp").success());
-    published["params"]["diagnostics"]
-        .as_array()
-        .expect("diagnostics array")
-        .clone()
+    published
+}
+
+/// decisions/048 J3: a decision table the enumeration leaves to the solver
+/// (a domain past the bound; a condition reading a resource) is published as
+/// the error native `check` reports for it, code, location and message
+/// alike, where the server used to publish none. The document is published
+/// four times: native Z3 answers a question asked again in one context with
+/// another counterexample by the third or fourth time, and no publish may
+/// depend on the questions before it.
+#[test]
+fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fslc/tests/fixtures/fsl5_solver");
+    let options = fsl_syntax::ParseOptions::with_unstable(
+        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+    );
+    for file in ["large_domain.fsl", "resource_condition.fsl"] {
+        let text = std::fs::read_to_string(fixtures.join(file)).expect("read fixture");
+        let resolver = fsl_core::FsResolver::new(&fixtures);
+        // On a thread of its own, as a fresh `fslc check` process asks it.
+        let native = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let mut z3 =
+                        || fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string());
+                    let mut future = std::pin::pin!(fslc_rust::check_stages::run_check_stages(
+                        &text,
+                        file,
+                        file,
+                        &resolver,
+                        &serde_json::Map::new,
+                        &options,
+                        &mut z3,
+                    ));
+                    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+                    match future.as_mut().poll(&mut context) {
+                        std::task::Poll::Ready(Err((output, 2))) => output,
+                        other => panic!("native check must reject {file}: {other:?}"),
+                    }
+                })
+                .join()
+                .expect("native check thread")
+        });
+        assert_eq!(
+            native["diagnostic_code"], "decide_not_exhaustive",
+            "{native:#}"
+        );
+        for diagnostics in published_diagnostics_each(&[text.as_str(); 4], Some("fsl5")) {
+            let error = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic["severity"] == 1)
+                .unwrap_or_else(|| panic!("{file}: an error is published: {diagnostics:#?}"));
+            assert_eq!(
+                (
+                    &error["code"],
+                    &error["message"],
+                    error["range"]["start"]["line"]
+                        .as_u64()
+                        .map(|line| line + 1),
+                    error["range"]["start"]["character"]
+                        .as_u64()
+                        .map(|column| column + 1),
+                ),
+                (
+                    &native["diagnostic_code"],
+                    &native["message"],
+                    native["loc"]["line"].as_u64(),
+                    native["loc"]["column"].as_u64(),
+                ),
+                "{file}: {error:#}"
+            );
+        }
+    }
 }
 
 /// fsl 5 plan S2 acceptance 4: on a line holding a character outside the

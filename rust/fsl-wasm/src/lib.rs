@@ -196,7 +196,46 @@ fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Va
     Ok((model, diagnostics))
 }
 
+/// A z3js solver for one question of the requirements checks; each question
+/// resets the bridge's one global solver when it is answered.
+#[allow(clippy::unnecessary_wraps)]
+fn z3js_solver() -> Result<fsl_solver_z3js::Z3JsSolver, String> {
+    Ok(fsl_solver_z3js::Z3JsSolver::new())
+}
+
+/// The requirements checks the enumeration deferred, asked of the Worker's
+/// solver after its load the way native `verify` asks them after its own
+/// (decisions/048 J3): the rejection `check` reports, or the loaded model.
+async fn reject_refuted_requirements<S: fsl_solver::SmtSolver>(
+    request: &Request,
+    solver_version: &str,
+    loaded: Result<(KernelModel, Vec<Value>), Value>,
+    new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+) -> Result<(KernelModel, Vec<Value>), Value> {
+    let (model, diagnostics) = loaded?;
+    match fslc_rust::requirements_solver::refute(
+        &request.source,
+        &model,
+        &request.parse_options(),
+        new_solver,
+    )
+    .await
+    {
+        Some(rejection) => Err(rejection.render(envelope(solver_version))),
+        None => Ok((model, diagnostics)),
+    }
+}
+
 async fn check(request: &Request, solver_version: &str) -> Value {
+    check_with(request, solver_version, &mut z3js_solver).await
+}
+
+/// [`check`] with the solver of its requirements stage passed in.
+async fn check_with<S: fsl_solver::SmtSolver>(
+    request: &Request,
+    solver_version: &str,
+    new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+) -> Value {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
@@ -209,7 +248,10 @@ async fn check(request: &Request, solver_version: &str) -> Value {
         &resolver,
         &|| envelope(solver_version),
         &request.parse_options(),
-    ) {
+        new_solver,
+    )
+    .await
+    {
         Ok(checked) => checked,
         Err((output, _)) => return output,
     };
@@ -447,13 +489,26 @@ fn add_frontend_metadata(
 }
 
 async fn verify(request: &Request, solver_version: &str) -> Value {
-    let output = verify_kernel(request, solver_version).await;
+    verify_with(request, solver_version, &mut z3js_solver).await
+}
+
+/// [`verify`] with the solver of the requirements checks passed in.
+async fn verify_with<S: fsl_solver::SmtSolver>(
+    request: &Request,
+    solver_version: &str,
+    new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+) -> Value {
+    let output = verify_kernel(request, solver_version, new_solver).await;
     let output = fold_governance(request, solver_version, output).await;
     apply_edition(request, solver_version, output)
 }
 
 #[allow(clippy::too_many_lines)]
-async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
+async fn verify_kernel<S: fsl_solver::SmtSolver>(
+    request: &Request,
+    solver_version: &str,
+    new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+) -> Value {
     let started = performance_now();
     // The stages ahead of the solver follow native `run_verify_from_source`
     // in its order (issue #1163): surface parse and the Agent rejection,
@@ -498,7 +553,13 @@ async fn verify_kernel(request: &Request, solver_version: &str) -> Value {
             None,
         );
     }
-    let loaded = build(request, solver_version);
+    let loaded = reject_refuted_requirements(
+        request,
+        solver_version,
+        build(request, solver_version),
+        new_solver,
+    )
+    .await;
     let implements = match &loaded {
         Ok((model, _)) => {
             match fslc_rust::verification_output::validate_requirement_trace_source(
@@ -796,10 +857,12 @@ mod tests {
         VerifyReplay,
         VerifyReachableDiagnostics,
         VerifyImplements,
+        CheckRequirementsSolver,
+        VerifyRequirementsSolver,
     }
 
     impl ErrorRoute {
-        const COUNT: usize = 21;
+        const COUNT: usize = 23;
 
         const ALL: [Self; Self::COUNT] = [
             Self::CheckAiProject,
@@ -823,6 +886,8 @@ mod tests {
             Self::VerifyReplay,
             Self::VerifyReachableDiagnostics,
             Self::VerifyImplements,
+            Self::CheckRequirementsSolver,
+            Self::VerifyRequirementsSolver,
         ];
 
         /// Adding a variant to `ErrorRoute` breaks this match, which is the only
@@ -869,6 +934,8 @@ mod tests {
                 Self::CheckAgent => 18,
                 Self::VerifyAgent => 19,
                 Self::VerifySpecializedDocument => 20,
+                Self::CheckRequirementsSolver => 21,
+                Self::VerifyRequirementsSolver => 22,
             }
         }
     }
@@ -1039,6 +1106,18 @@ mod tests {
             route: ErrorRoute::VerifySpecializedDocument,
             coverage: RouteCoverage::Compared {
                 cell: "check_rejects_invalid_specialized_documents_like_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::CheckRequirementsSolver,
+            coverage: RouteCoverage::Compared {
+                cell: "requirements_the_solver_refutes_are_rejected_like_native",
+            },
+        },
+        RouteRegistration {
+            route: ErrorRoute::VerifyRequirementsSolver,
+            coverage: RouteCoverage::Compared {
+                cell: "requirements_the_solver_refutes_are_rejected_like_native",
             },
         },
     ];
@@ -1322,6 +1401,101 @@ mod tests {
             worker, native,
             "Worker/native verify implements envelope diverged for {fixture}"
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_z3() -> Result<fsl_solver_z3::Z3Solver, String> {
+        fsl_solver_z3::Z3Solver::new().map_err(|failure| failure.to_string())
+    }
+
+    /// decisions/048 J3: a decision table the enumeration leaves to the
+    /// solver (a domain past the bound; a condition reading a resource) is
+    /// rejected by the Worker's `check` and `verify` with the envelope native
+    /// `check`'s shared stages render, where both used to accept it. The
+    /// browser bridge exists only in a Worker, so here the questions go to
+    /// native Z3 through the same solver parameter, each run on a thread of
+    /// its own: native Z3 keeps one context per thread, and the model it
+    /// returns (the counterexample in the message) depends on what that
+    /// context was asked before, as it does for a fresh `fslc` process.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn requirements_the_solver_refutes_are_rejected_like_native() {
+        fn fresh<T: Send>(run: impl FnOnce() -> T + Send) -> T {
+            std::thread::scope(|scope| scope.spawn(run).join().expect("solver thread"))
+        }
+        let diagnostic = |output: &Value| {
+            json!({
+                "result": output["result"],
+                "kind": output["kind"],
+                "diagnostic_code": output["diagnostic_code"],
+                "message": output["message"],
+                "loc": output["loc"],
+            })
+        };
+        for (fixture, source) in [
+            (
+                "large_domain.fsl",
+                include_str!("../../fslc/tests/fixtures/fsl5_solver/large_domain.fsl"),
+            ),
+            (
+                "resource_condition.fsl",
+                include_str!("../../fslc/tests/fixtures/fsl5_solver/resource_condition.fsl"),
+            ),
+        ] {
+            let request = |cmd: &str| Request {
+                cmd: cmd.to_owned(),
+                source: source.to_owned(),
+                source_file: fixture.to_owned(),
+                files: BTreeMap::new(),
+                options: Options {
+                    depth: 3,
+                    ..Options::default()
+                },
+                unstable: vec!["fsl5".to_owned()],
+            };
+            let check_request = request("check");
+            let resolver = MemoryResolver {
+                files: BTreeMap::new(),
+            };
+            let (native, status) = fresh(|| {
+                block_on(fslc_rust::check_stages::run_check_stages(
+                    &check_request.source,
+                    &check_request.source_file,
+                    &check_request.source_file,
+                    &resolver,
+                    &|| envelope(TEST_SOLVER_VERSION),
+                    &check_request.parse_options(),
+                    &mut native_z3,
+                ))
+            })
+            .expect_err("native check rejects the fixture");
+            assert_eq!(status, 2, "{fixture}: {native:#}");
+            assert_eq!(
+                native["diagnostic_code"], "decide_not_exhaustive",
+                "{fixture}: {native:#}"
+            );
+            let worker = fresh(|| {
+                block_on(check_with(
+                    &check_request,
+                    TEST_SOLVER_VERSION,
+                    &mut native_z3,
+                ))
+            });
+            assert_eq!(worker, native, "Worker/native check diverged for {fixture}");
+            let verify_request = request("verify");
+            let worker = fresh(|| {
+                block_on(verify_with(
+                    &verify_request,
+                    TEST_SOLVER_VERSION,
+                    &mut native_z3,
+                ))
+            });
+            assert_eq!(
+                diagnostic(&worker),
+                diagnostic(&native),
+                "Worker verify/native check diverged for {fixture}: {worker:#}"
+            );
+        }
     }
 
     #[test]

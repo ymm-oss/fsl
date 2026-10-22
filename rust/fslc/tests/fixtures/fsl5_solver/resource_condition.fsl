@@ -1,0 +1,34 @@
+fsl 5
+// decisions/048 J3: the table's concepts read the resource `budget`, which
+// the enumeration does not evaluate, so the solver decides it although the
+// domain is small. No row holds at amount = budget + 1: every command that
+// needs a valid spec rejects the document with `decide_not_exhaustive`.
+requirements ResourceCondition {
+  number Amount
+  actor Employee, System, Manager
+
+  entity Claim {
+    amount: Amount = 0
+    lifecycle Draft -> Submitted -> Approved
+    lifecycle Submitted -> Rejected
+  }
+
+  resource budget: Amount = 5
+
+  concept Affordable = Claim where amount <= budget
+  concept Expensive  = Claim where amount > budget + 1
+
+  event submit       = Employee submits Claim with amount  Draft -> Submitted
+  event auto_approve = System approves Claim               Submitted -> Approved
+  event mgr_approve  = Manager approves Claim              Submitted -> Approved
+  event reject       = Manager rejects Claim               Submitted -> Rejected
+
+  decide T "Who handles a submitted claim" for Submitted Claim {
+    Affordable => System approves
+    Expensive  => Manager approves or rejects
+  }
+}
+verify {
+  instances Claim = 1
+  values Amount = 0..20
+}

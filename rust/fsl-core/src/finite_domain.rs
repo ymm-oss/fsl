@@ -11,8 +11,10 @@
 //! language server and the browser Worker report the same diagnostics as the
 //! CLI. One whose domain product exceeds [`DOMAIN_BOUND`], or whose
 //! expressions read something the enumeration does not evaluate, is deferred:
-//! [`solver_obligations`] hands it to native `check`, which asks the solver
-//! the same question over the same domains.
+//! [`solver_obligations`] hands it to the surface that loaded the spec (the
+//! CLI's commands, the language server, the browser Worker), which asks its
+//! solver the same question over the same domains and rejects the spec as
+//! `check` does.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -332,8 +334,8 @@ pub enum SolverObligation {
     Guards(crate::rule_guards::GuardConflict),
 }
 
-/// The checks of `requirements` that enumeration could not decide, for the
-/// native `check` to discharge with the solver.
+/// The checks of `requirements` that enumeration could not decide, for each
+/// surface that accepts the spec to discharge with its solver.
 #[must_use]
 pub fn solver_obligations(
     requirements: &SurfaceRequirements,

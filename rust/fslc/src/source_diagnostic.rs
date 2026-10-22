@@ -134,6 +134,40 @@ pub fn trace_gate_diagnostics(
     }
 }
 
+/// The requirements checks the finite-domain enumeration deferred, asked of
+/// the solver `new_solver` makes, on a model [`diagnostics_with_model`]
+/// built: none when every one holds, otherwise the one error `check` reports
+/// for the first it refutes, at its location (decisions/048 J3). `check`
+/// asks them after the requirement-trace gate, so a surface showing
+/// [`trace_gate_diagnostics`] asks them only when that gate passes.
+pub async fn solver_diagnostics<S: fsl_solver::SmtSolver>(
+    source: &str,
+    model: &fsl_core::KernelModel,
+    options: &fsl_syntax::ParseOptions,
+    new_solver: &mut crate::requirements_solver::NewSolver<'_, S>,
+) -> Vec<SourceDiagnostic> {
+    crate::requirements_solver::refute(source, model, options, new_solver)
+        .await
+        .map(|rejection| {
+            let diagnostic = rejection.diagnostic();
+            SourceDiagnostic {
+                kind: crate::verification_output::diagnostic_kind(
+                    &diagnostic.message,
+                    &diagnostic.class,
+                ),
+                code: rejection.code.to_owned(),
+                message: diagnostic.message,
+                span: rejection.span,
+                located: true,
+                hint: None,
+                quick_fix: None,
+                class: diagnostic.class,
+            }
+        })
+        .into_iter()
+        .collect()
+}
+
 fn trace_refusal_diagnostic(source: &str, refusal: &serde_json::Value) -> SourceDiagnostic {
     let field = |name: &str| refusal.get(name).and_then(serde_json::Value::as_str);
     let rejected = match field("kind") {

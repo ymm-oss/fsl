@@ -12,6 +12,12 @@
 //! now call [`run_check_stages`] with their own resolver and envelope, and
 //! only compose the success envelope (warnings, `implements`, `governance`)
 //! themselves.
+//!
+//! The last stage asks a solver the requirements checks the finite-domain
+//! enumeration deferred ([`crate::requirements_solver`], decisions/048 J3).
+//! The lowering stages are synchronous; this one is not, because the Worker's
+//! solver answers through a promise, so [`run_check_stages`] is `async` and
+//! each surface passes its own solver (native Z3, or the Worker's z3js).
 
 use fsl_core::{FileResolver, KernelModel, KernelSpec};
 use serde_json::{Map, Value, json};
@@ -34,6 +40,9 @@ pub struct CheckedSpec {
 /// literate input). `resolver` reads imports and `envelope` produces the
 /// surface's base envelope for every rendered result.
 ///
+/// `new_solver` makes the solver of the requirements stage, once per
+/// question; it is not called for a spec that has none.
+///
 /// `Err` carries a finished envelope and exit status: a rejection, or the
 /// complete result of a document `check` does not lower to a Kernel model (a
 /// legacy AI project or an Agent).
@@ -42,23 +51,34 @@ pub struct CheckedSpec {
 ///
 /// Returns the rendered envelope and exit status of the first stage that ends
 /// the check.
-pub fn run_check_stages(
+pub async fn run_check_stages<S: fsl_solver::SmtSolver>(
     source: &str,
     source_path: &str,
     display_path: &str,
     resolver: &dyn FileResolver,
     envelope: &dyn Fn() -> Map<String, Value>,
     options: &fsl_syntax::ParseOptions,
+    new_solver: &mut crate::requirements_solver::NewSolver<'_, S>,
 ) -> Result<CheckedSpec, (Value, i32)> {
-    check_stages(
+    let checked = match check_stages(
         source,
         source_path,
         display_path,
         resolver,
         envelope,
         *options,
-    )
-    .map_err(|(mut output, status)| {
+    ) {
+        Ok(checked) => {
+            match crate::requirements_solver::refute(source, &checked.model, options, new_solver)
+                .await
+            {
+                Some(rejection) => Err((rejection.render(envelope()), 2)),
+                None => Ok(checked),
+            }
+        }
+        Err(failure) => Err(failure),
+    };
+    checked.map_err(|(mut output, status)| {
         display_alias(&mut output, source, *options);
         (output, status)
     })

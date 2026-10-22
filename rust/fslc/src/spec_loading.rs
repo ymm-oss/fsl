@@ -50,6 +50,80 @@ pub(crate) fn require_trace_gate(
     )
 }
 
+/// A native Z3 solver for one question of the requirements checks
+/// ([`fslc_rust::requirements_solver`]).
+pub(crate) fn z3_solver() -> Result<fsl_solver_z3::Z3Solver, String> {
+    fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string())
+}
+
+/// The questions of [`reject_refuted_requirements`] already asked in this
+/// process: a source, the model it was asked of, and the answer.
+type AskedRequirements = Vec<(
+    String,
+    KernelModel,
+    Option<fslc_rust::requirements_solver::Rejection>,
+)>;
+
+/// Reject `source` when the solver refutes a requirements check the
+/// finite-domain enumeration deferred (decisions/048 J3), with the diagnostic
+/// `check` reports. Every native command that loads a spec passes through
+/// here (or through `check`'s shared stages), so a spec `check` rejects is
+/// rejected by all of them.
+///
+/// A command may load one spec more than once (`verify` lowers it again for
+/// the compose warnings); the answer for a source and model already asked is
+/// reused, so the solver runs once per question. Without the `fsl5` gate
+/// nothing is asked or kept.
+pub(crate) fn reject_refuted_requirements(
+    source: &str,
+    model: &KernelModel,
+) -> Result<(), SpecLoadError> {
+    static ASKED: std::sync::Mutex<AskedRequirements> = std::sync::Mutex::new(Vec::new());
+    let options = crate::process::parse_options();
+    if !options
+        .unstable()
+        .contains(fsl_syntax::UnstableFeature::Fsl5)
+    {
+        return Ok(());
+    }
+    let mut asked = ASKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let rejection =
+        if let Some((_, _, rejection)) = asked
+            .iter()
+            .find(|(asked_source, asked_model, _)| asked_source == source && asked_model == model)
+        {
+            rejection.clone()
+        } else {
+            let rejection = crate::process::block_on_native(
+                fslc_rust::requirements_solver::refute(source, model, options, &mut z3_solver),
+            );
+            asked.push((source.to_owned(), model.clone(), rejection.clone()));
+            rejection
+        };
+    rejection.map_or(Ok(()), |rejection| Err(rejection.load_error()))
+}
+
+/// The declared model of `source` without [`reject_refuted_requirements`],
+/// for a command that verifies a scoped model (`--instances`/`--values`) and
+/// reads the declared one only beside it: the scoped load asks the solver of
+/// the model the command verifies, and asking it of this one too would run
+/// it a second time.
+pub(crate) fn load_declared_model_beside_scope(
+    path: &Path,
+    source: &str,
+) -> Result<KernelModel, SpecLoadError> {
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    fslc_rust::check_stages::load_kernel_model(
+        source,
+        &path.to_string_lossy(),
+        &fsl_core::FsResolver::new(base),
+        crate::process::parse_options(),
+    )
+    .map(|(_, model)| model)
+}
+
 pub(crate) fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
     load_kernel_model(path).map(|(_, _, model)| model)
 }
@@ -92,12 +166,14 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    fslc_rust::check_stages::load_kernel_model(
+    let (kernel, model) = fslc_rust::check_stages::load_kernel_model(
         source,
         &path.to_string_lossy(),
         resolver,
         crate::process::parse_options(),
-    )
+    )?;
+    reject_refuted_requirements(source, &model)?;
+    Ok((kernel, model))
 }
 
 /// Read a spec file, classifying a read failure as `io` rather than letting the
@@ -394,7 +470,11 @@ pub(crate) fn load_model_scoped_from_source(
             ));
         }
     };
-    fsl_core::build_model(kernel).map_err(|error| {
+    let model = fsl_core::build_model(kernel).map_err(|error| {
         SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
-    })
+    })?;
+    // Asked of the scoped model: the overrides narrow the domains the
+    // lowering enumerated, and so the ones the solver is asked over.
+    reject_refuted_requirements(source, &model)?;
+    Ok(model)
 }
