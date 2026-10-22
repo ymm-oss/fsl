@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Declarations projected from the authoritative surface AST (issue 552, B).
+//! Declarations projected from the authoritative surface AST (issue 552).
 //!
-//! `DocumentIndex::build` derives its symbols by walking tokens. This module
-//! is the other half of the structure `docs/design/DESIGN-rust-lsp.md` describes: it
-//! reads the declarations the parser accepted — name, role and owning scope —
-//! straight from `fsl_syntax::SurfaceDocument`, without looking at a token.
-//! `DocumentIndex::role_scope_mismatches` compares the two, so a token
-//! heuristic that declares a name with the wrong role or in the wrong scope
-//! fails the corpus test instead of silently degrading hover, completion and
-//! rename. The index itself does not read this projection yet.
+//! This module reads the declarations the parser accepted — name, role and
+//! owning scope — straight from `fsl_syntax::SurfaceDocument`, without
+//! looking at a token. It is the half of the structure
+//! `docs/design/DESIGN-rust-lsp.md` describes that decides *what* is
+//! declared; the token walk in `DocumentIndex::build` only finds *where*.
+//!
+//! For a covered document `DocumentIndex::build` hands the projection to the
+//! walk as a [`DeclarationAuthority`]: a name in a position the projection
+//! covers becomes a symbol only when the AST declares that name with that
+//! role and owner, and a word spelled like an index keyword (`status`,
+//! `count`, ...) is read as a name wherever the AST declares it (issue 1362).
+//! `DocumentIndex::role_scope_mismatches` then checks the other direction —
+//! that every projected declaration was located — so the corpus test fails
+//! when the walk cannot find a declaration the parser accepted.
 //!
 //! Coverage is the spec family — `spec`, `requirements` and `compose` — whose
-//! declarations share `SpecItem`. Other dialects return `None`. Extending the
-//! projection dialect by dialect is the migration path to issue 552's option
-//! C, where the index takes its declarations from here and keeps tokens only
-//! for spans the AST does not retain.
+//! declarations share `SpecItem`. Other dialects return `None` and are
+//! indexed by the token walk alone.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
@@ -104,6 +109,97 @@ pub fn ast_declarations(document: &SurfaceDocument) -> Option<Vec<AstDeclaration
         _ => return None,
     }
     Some(out)
+}
+
+/// The declaration keywords whose name [`ast_declarations`] projects. In a
+/// covered document the name after one of these is declared only when the
+/// AST declares it; the name after any other declaration keyword
+/// (`requirement REQ-1`, `acceptance`, `process`, `actor`, ...) is a label or
+/// belongs to a projection that does not exist yet, so the walk alone
+/// decides it.
+const PROJECTED_DECLARATION_KEYWORDS: &[&str] = &[
+    "spec",
+    "requirements",
+    "compose",
+    "const",
+    "def",
+    "type",
+    "number",
+    "entity",
+    "enum",
+    "struct",
+    "action",
+    "invariant",
+    "trans",
+    "reachable",
+    "until",
+    "unless",
+    "leadsTo",
+];
+
+pub(crate) fn projects_declaration_keyword(keyword: &str) -> bool {
+    PROJECTED_DECLARATION_KEYWORDS.contains(&keyword)
+}
+
+/// Whether the block a declaration keyword opens holds projected
+/// declarations: those of a projected declaration, and a `requirement`
+/// block, whose label is not projected but whose actions and properties are.
+pub(crate) fn opens_projected_block(keyword: &str) -> bool {
+    projects_declaration_keyword(keyword) || keyword == "requirement"
+}
+
+/// The projected declarations of one document, consumed as the token walk
+/// locates them.
+#[derive(Debug)]
+pub(crate) struct DeclarationAuthority {
+    /// How many declarations of each (name, role, owner) are still unlocated.
+    remaining: BTreeMap<(String, SymbolRole, Option<String>), usize>,
+    names: BTreeSet<String>,
+    functions: BTreeSet<String>,
+}
+
+impl DeclarationAuthority {
+    pub(crate) fn new(declarations: Vec<AstDeclaration>) -> Self {
+        let mut authority = Self {
+            remaining: BTreeMap::new(),
+            names: BTreeSet::new(),
+            functions: BTreeSet::new(),
+        };
+        for declaration in declarations {
+            if declaration.role == SymbolRole::Function {
+                authority.functions.insert(declaration.name.clone());
+            }
+            authority.names.insert(declaration.name.clone());
+            *authority
+                .remaining
+                .entry((declaration.name, declaration.role, declaration.owner))
+                .or_default() += 1;
+        }
+        authority
+    }
+
+    /// Whether the document declares `name` anywhere.
+    pub(crate) fn declares(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+
+    /// Whether the document declares an action or `def` named `name`.
+    pub(crate) fn declares_function(&self, name: &str) -> bool {
+        self.functions.contains(name)
+    }
+
+    /// Locate one unlocated declaration of `name` with `role` and `owner`;
+    /// `false` when the AST declares no such name there.
+    pub(crate) fn locate(&mut self, name: &str, role: SymbolRole, owner: Option<&str>) -> bool {
+        let key = (name.to_owned(), role, owner.map(str::to_owned));
+        match self.remaining.get_mut(&key) {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 fn spec_item(item: &SpecItem, out: &mut Vec<AstDeclaration>) {
@@ -243,26 +339,6 @@ pub struct RoleScopeMismatch {
     pub expected: AstDeclaration,
     /// The role and owner of every index symbol with the same name.
     pub found: Vec<(SymbolRole, Option<String>)>,
-    /// The name is spelled like a word the index treats as a keyword.
-    pub keyword_spelled: bool,
-}
-
-impl RoleScopeMismatch {
-    /// FSL has no reserved words, but the index's token walk skips every
-    /// identifier spelled like one of its keywords (`status`, `count`, `age`,
-    /// ...) except the name right after a declaration keyword. A state
-    /// variable, struct field, enum member, parameter or `let` binding so
-    /// spelled therefore gets no declaration at all.
-    ///
-    /// This is the one structural limitation of the token walk that the LSP
-    /// still ships; repairing it changes index output and belongs to issue
-    /// 552's option C. Anything else — a wrong role, a wrong owner, or a
-    /// missing name that is not keyword-spelled or that follows its own
-    /// declaration keyword — is drift the corpus test rejects.
-    #[must_use]
-    pub fn is_keyword_spelled_positional_name(&self) -> bool {
-        self.keyword_spelled && !self.expected.introduced_by_keyword && self.found.is_empty()
-    }
 }
 
 impl fmt::Display for RoleScopeMismatch {
@@ -306,7 +382,11 @@ impl DocumentIndex {
     /// check does not share the heuristic's blind spots.
     ///
     /// Each expected declaration consumes one matching symbol, so a name the
-    /// AST declares twice must be declared twice.
+    /// AST declares twice must be declared twice. The index declares a
+    /// projected name only where the walk locates it with the AST's role and
+    /// owner, so for a covered document a mismatch is a declaration the walk
+    /// could not locate — and therefore one hover, definition and rename
+    /// cannot reach.
     #[must_use]
     pub fn role_scope_mismatches(&self, expected: &[AstDeclaration]) -> Vec<RoleScopeMismatch> {
         let mut available = self
@@ -334,7 +414,6 @@ impl DocumentIndex {
                         .filter(|symbol| symbol.name == declaration.name)
                         .map(|symbol| (symbol.role, symbol.owner.clone()))
                         .collect(),
-                    keyword_spelled: crate::index::is_keyword(&declaration.name),
                 })
             })
             .collect()
@@ -435,27 +514,63 @@ mod tests {
         );
     }
 
+    /// Issue 1362: FSL reserves none of the index's keywords, so a name
+    /// spelled like one (`status`, `owner`, `severity`, `evidence`,
+    /// `rejected`, `time`, `age`, `count`) in a state, field, member,
+    /// parameter or `let` position is declared like any other name, and each
+    /// of its uses — a field access, a struct literal field, a call of a
+    /// keyword-spelled `def` — resolves to that declaration.
     #[test]
-    fn only_a_keyword_spelled_name_in_list_position_is_the_known_limitation() {
-        // `status` is in the index keyword set and `push` is a sequence
-        // builtin; FSL reserves neither. `push` follows its own declaration
-        // keyword and is declared; `status` sits in the state list and is not.
-        let source = "spec S {
-  state { status: Int }
-  init { status = 0 }
-  action push() { status = 1 }
+    fn keyword_spelled_names_in_every_list_and_binder_position_are_names() {
+        let source = "spec Contextual {
+  type Id = 0..1
+  enum Level { low, severity }
+  struct Case { owner: Id }
+  state { status: Level, cases: Map<Id, Case> }
+  init {
+    status = low
+    forall i: Id { cases[i] = Case { owner: 0 } }
+  }
+  def age(evidence: Id) = evidence + 1
+  action count(rejected: Id) {
+    let time = rejected
+    requires cases[time].owner == 0
+    status = severity
+  }
+  invariant Kept { age(0) >= 0 and (status == low or status == severity) }
 }";
         let (expected, index) = parse(source);
-        let found = index.role_scope_mismatches(&expected);
+        assert_eq!(index.role_scope_mismatches(&expected), Vec::new());
+
+        let spelled = [
+            "status", "owner", "severity", "evidence", "rejected", "time", "age", "count",
+        ];
+        let mut uses = 0;
+        for token in fsl_syntax::lex(source).expect("lex") {
+            let fsl_syntax::TokenKind::Ident(name) = &token.kind else {
+                continue;
+            };
+            if !spelled.contains(&name.as_str()) {
+                continue;
+            }
+            let position = crate::index::span_range(source, token.span).start;
+            let definition = index
+                .definition_at(position)
+                .unwrap_or_else(|| panic!("`{name}` at {position:?} resolves to nothing"));
+            assert_eq!(&definition.name, name, "at {position:?}");
+            uses += 1;
+        }
+        assert_eq!(uses, 20);
+        let status = index
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == "status")
+            .expect("status declared");
         assert_eq!(
-            found
-                .iter()
-                .map(|mismatch| (
-                    mismatch.expected.name.as_str(),
-                    mismatch.is_keyword_spelled_positional_name()
-                ))
-                .collect::<Vec<_>>(),
-            vec![("status", true)]
+            index
+                .references_at(status.selection_range.start, true)
+                .len(),
+            5
         );
     }
 }
