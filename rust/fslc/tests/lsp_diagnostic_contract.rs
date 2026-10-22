@@ -85,6 +85,79 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
     std::fs::remove_dir_all(directory).expect("remove diagnostic fixture directory");
 }
 
+/// fsl 5 plan S11: a requirements document written with the keyword
+/// table's Japanese keywords and a glossary alias holding a character outside
+/// the BMP. Behind the gate the CLI and the language server report the same
+/// diagnostic, and the CLI's character column and the shared span's byte
+/// offset name the same word, the one the server converts to UTF-16. Without
+/// the gate the Japanese keyword is a lexical error at the same place for
+/// both.
+#[test]
+fn japanese_keyword_diagnostics_share_cli_and_lsp_identity() {
+    let directory = std::env::temp_dir().join(format!(
+        "fsl-lsp-japanese-keyword-diagnostics-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create fixture directory");
+    let source = "fsl 5\n要件 R {\n  用語集 {\n    Claim = 𠮷申請\n  }\n  \
+                  エンティティ 𠮷申請 { 金額: Int = 0  ライフサイクル A -> B }\n}\n";
+    let path = directory.join("japanese.fsl");
+    std::fs::write(&path, source).expect("write fixture");
+    let path = path.to_str().expect("UTF-8 fixture path");
+    let gated = fsl_syntax::ParseOptions::with_unstable(
+        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+    );
+    for (unstable, options, code, location, word) in [
+        (
+            Some("fsl5"),
+            gated,
+            "canonical_name_not_ascii",
+            (6, 16),
+            "金額",
+        ),
+        (
+            None,
+            fsl_syntax::ParseOptions::stable(),
+            "FSL-PARSE",
+            (2, 1),
+            "要件",
+        ),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        command
+            .args(["check", path])
+            .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
+        if let Some(features) = unstable {
+            command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
+        }
+        let output = command.output().expect("run native check");
+        assert_eq!(output.status.code(), Some(2), "{unstable:?}");
+        let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
+        let resolver = fsl_core::FsResolver::new(Path::new(&directory));
+        let shared = fslc_rust::source_diagnostic::diagnostics(source, path, &resolver, &options)
+            .into_iter()
+            .find(|diagnostic| diagnostic.kind != "migration")
+            .expect("shared source diagnostic");
+        assert_eq!(cli["kind"], shared.kind, "{unstable:?}");
+        assert_eq!(cli["message"], shared.message, "{unstable:?}");
+        assert_eq!(cli["diagnostic_code"], code, "{unstable:?}");
+        assert_eq!(shared.code, code, "{unstable:?}");
+        assert_eq!(cli["loc"], shared.span.python_loc(), "{unstable:?}");
+        assert_eq!(
+            (shared.span.start.line, shared.span.start.column),
+            location,
+            "{unstable:?}"
+        );
+        assert!(
+            source.is_char_boundary(shared.span.start.offset)
+                && source[shared.span.start.offset..].starts_with(word),
+            "{unstable:?}: the span starts at byte {}",
+            shared.span.start.offset
+        );
+    }
+    std::fs::remove_dir_all(directory).expect("remove fixture directory");
+}
+
 #[test]
 fn distinctness_unproved_diagnostic_shares_cli_and_lsp_identity() {
     let fixture = format!(

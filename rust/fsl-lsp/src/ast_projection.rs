@@ -287,8 +287,8 @@ fn requirements_item(item: &RequirementsItem, out: &mut Vec<AstDeclaration>) {
         // Requirement, acceptance and forbidden IDs (`REQ-1`) are labels, not
         // identifiers; `process`/`kpi` and `time` belong to the business
         // projection, which is not covered yet. A glossary declares no
-        // name: its aliases resolve to names declared elsewhere (the
-        // language server's alias support is a later stage).
+        // name: its aliases resolve to names declared elsewhere, and the
+        // index reads them as those names (`index::read_tokens`).
         RequirementsItem::Glossary(_)
         | RequirementsItem::Implements { .. }
         | RequirementsItem::Acceptance { .. }
