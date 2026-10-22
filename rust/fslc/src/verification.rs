@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use fsl_core::{FslValue, KernelExpr, KernelModel};
 use fslc_rust::spec_load::SpecLoadError;
-use fslc_rust::verification_output::TraceGate;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -24,7 +23,7 @@ use crate::refinement::{
 use crate::spec_loading::{
     load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
-    load_state_snapshot, read_spec_source, validate_requirement_traces_from_source,
+    load_state_snapshot, read_spec_source, require_trace_gate,
     validate_specialized_document_from_source,
 };
 use crate::strict_tags::add_strict_tag_warnings;
@@ -2389,12 +2388,11 @@ fn prepare_cli_verification_from_source(
         }
         _ => Vec::new(),
     };
-    if !has_scope && let Ok(model) = &snapshot_model {
-        match validate_requirement_traces_from_source(path, source, model) {
-            Ok(TraceGate::Rejected { failure, .. }) => return Err((failure, 2)),
-            Ok(TraceGate::Passed(_) | TraceGate::NotRequirements) => {}
-            Err(error) => return Err((semantic_error_output(&error), 2)),
-        }
+    if !has_scope
+        && let Ok(model) = &snapshot_model
+        && let Err(refusal) = require_trace_gate(source, model)
+    {
+        return Err((refusal, 2));
     }
     // A scenario skipped as out of the overridden scope was not evaluated,
     // and the envelope says so instead of reading as if it had passed

@@ -106,6 +106,79 @@ pub fn diagnostics_with_model(
     }
 }
 
+/// The code of a diagnostic reporting an acceptance / forbidden trace the
+/// requirement-trace gate rejected.
+pub const REQUIREMENT_TRACE_CODE: &str = "FSL-REQUIREMENT-TRACE";
+
+/// The requirement-trace gate on a model [`diagnostics_with_model`] built, as
+/// editor diagnostics: none when the gate passes or `source` declares no
+/// traces, otherwise the one error `check` reports, at its location (#1243).
+///
+/// A rejected trace keeps the `kind` `check` reports (`acceptance`,
+/// `forbidden`, `forbidden_setup`) under [`REQUIREMENT_TRACE_CODE`]; a trace
+/// that cannot be parsed or replayed is a semantics diagnostic.
+#[must_use]
+pub fn trace_gate_diagnostics(
+    source: &str,
+    model: &fsl_core::KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Vec<SourceDiagnostic> {
+    match crate::verification_output::require_trace_gate(
+        &serde_json::Map::new(),
+        source,
+        model,
+        options,
+    ) {
+        Ok(_checked) => Vec::new(),
+        Err(refusal) => vec![trace_refusal_diagnostic(source, &refusal)],
+    }
+}
+
+fn trace_refusal_diagnostic(source: &str, refusal: &serde_json::Value) -> SourceDiagnostic {
+    let field = |name: &str| refusal.get(name).and_then(serde_json::Value::as_str);
+    let rejected = match field("kind") {
+        Some("acceptance") => Some(("acceptance", "acceptance")),
+        Some("forbidden") => Some(("forbidden", "forbidden")),
+        Some("forbidden_setup") => Some(("forbidden_setup", "forbidden")),
+        _ => None,
+    };
+    let (kind, code, message) = match rejected {
+        Some((kind, label)) => {
+            let mut message = format!(
+                "{label} '{}' does not pass the requirement-trace gate",
+                field("id").unwrap_or_default()
+            );
+            if let Some(detail) = field("message").or_else(|| field("hint")) {
+                message.push_str(": ");
+                message.push_str(detail);
+            }
+            (kind, REQUIREMENT_TRACE_CODE, message)
+        }
+        None => (
+            "semantics",
+            "FSL-SEMANTIC",
+            field("message").unwrap_or_default().to_owned(),
+        ),
+    };
+    let loc = refusal.get("loc").and_then(|loc| {
+        let number = |name: &str| loc.get(name)?.as_u64().and_then(|n| u32::try_from(n).ok());
+        Some((number("line")?, number("column")?))
+    });
+    SourceDiagnostic {
+        kind,
+        code: code.to_owned(),
+        message,
+        span: loc.map_or_else(
+            || point_span(source, 1, 1),
+            |(line, column)| point_span(source, line, column),
+        ),
+        located: loc.is_some(),
+        hint: None,
+        quick_fix: None,
+        class: DiagnosticClass::Message,
+    }
+}
+
 fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnostic {
     let diagnostic = crate::spec_load::SemanticDiagnostic::from_core_error(error);
     SourceDiagnostic {
