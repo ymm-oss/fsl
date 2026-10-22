@@ -328,7 +328,7 @@ pub fn process_form_contract(
     path: &Path,
     options: &ParseOptions,
 ) -> Result<bool, (&'static str, String)> {
-    let before = kernel_contract(before, path, options, Origins::Ignored)
+    let mut before = kernel_contract(before, path, options, Origins::Ignored)
         .map_err(|error| (CONVERTED_FORM_INVALID, error))?;
     let mut after = kernel_contract(after, path, options, Origins::Ignored).map_err(|error| {
         (
@@ -337,6 +337,7 @@ pub fn process_form_contract(
         )
     })?;
     let derived_terminal = ignore_derived_terminal(&before, &mut after);
+    ignore_generated_actor_notes(&mut before, &after);
     if before == after {
         Ok(derived_terminal)
     } else {
@@ -365,6 +366,37 @@ pub fn ignore_derived_terminal(before: &Value, after: &mut Value) -> bool {
     } else {
         false
     }
+}
+
+/// Forget the requirement annotation the process form generates for a
+/// transition without `covers` (`@requirement("<action>", "by <actor>")`)
+/// wherever the rewritten `after` does not carry it: an event carries only
+/// the requirement IDs its author wrote, so the note is not part of the
+/// rewrite.
+pub fn ignore_generated_actor_notes(before: &mut Value, after: &Value) {
+    let Some(annotations) = before.get_mut("annotations").and_then(Value::as_object_mut) else {
+        return;
+    };
+    annotations.retain(|target, list| {
+        let Some(action) = target.strip_prefix("action:") else {
+            return true;
+        };
+        let note_prefix = format!("@requirement({action:?}, \"by ");
+        let kept = &after["annotations"][target];
+        if let Value::Array(list) = list {
+            list.retain(|annotation| {
+                annotation.as_str().is_none_or(|text| {
+                    !text.starts_with(&note_prefix)
+                        || kept
+                            .as_array()
+                            .is_some_and(|after| after.contains(annotation))
+                })
+            });
+            !list.is_empty()
+        } else {
+            true
+        }
+    });
 }
 
 fn manual_finding(reason: &'static str, message: String, span: Span) -> MigrationDiagnostic {

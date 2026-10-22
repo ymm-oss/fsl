@@ -15,7 +15,8 @@ mod process_form;
 pub use process_form::{
     ConvertedEvent, ConvertedProcess, DERIVED_TERMINAL_ADDED, LEGACY_PROCESS_FORM,
     MIGRATE_MANUAL_REQUIRED, ManualRequired, ProcessFormConversion, ProcessFormOutcome, Site,
-    convert_process_forms, ignore_derived_terminal, plan_process_conversion, process_form_contract,
+    convert_process_forms, ignore_derived_terminal, ignore_generated_actor_notes,
+    plan_process_conversion, process_form_contract,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
