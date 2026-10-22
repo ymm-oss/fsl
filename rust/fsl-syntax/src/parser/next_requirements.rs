@@ -19,6 +19,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+mod decide;
+
 use super::{Parser, join_span};
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
 use crate::{
@@ -129,6 +131,7 @@ pub(super) struct Pending {
     concepts: Vec<ConceptSource>,
     events: Vec<EventDeclaration>,
     traces: Vec<(usize, TraceDeclaration)>,
+    decisions: Vec<decide::DecideDeclaration>,
 }
 
 fn is_symbol(token: &Token, symbol: &str) -> bool {
@@ -200,6 +203,9 @@ impl Parser<'_> {
         {
             let event = self.event_declaration()?;
             pending.events.push(event);
+        } else if self.peek_ident("decide") {
+            let decision = self.decide_declaration()?;
+            pending.decisions.push(decision);
         } else if self.peek_ident("scenario") || self.peek_ident("forbidden") {
             let trace = self.trace_declaration()?;
             pending.traces.push((position, trace));
@@ -818,6 +824,15 @@ impl Pending {
                     }),
                 })));
         }
+
+        next.decisions = decide::apply(
+            self.decisions,
+            &mut transitions,
+            &signatures,
+            &entities,
+            &next.concepts,
+            &actors,
+        )?;
 
         let mut generated = Vec::new();
         for (position, declaration) in self.entities {

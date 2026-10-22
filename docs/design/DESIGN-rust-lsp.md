@@ -108,15 +108,29 @@ next token is not an identifier (builtin calls, annotations, block-opening `unti
 `action` inside a `refinement` document, where `action impl(args) -> abs` maps rather than declares.
 
 A third property compares the index with the parser instead of with the index's own keyword table
-(issue #552, option B). `rust/fsl-lsp/src/ast_projection.rs` reads each accepted declaration's
-name, role, and owning scope (the action or `def` for its parameters and `let` bindings) from the
-surface AST, and `role_scope_mismatches` requires the index to declare each one with the same role
-and owner. It covers the `spec`, `requirements`, and `compose` dialects, which share `SpecItem`;
-other dialects are not projected yet. One known limitation is tolerated by rule, not by site: FSL
-reserves no words, but the token walk skips identifiers spelled like its keywords (`status`,
-`count`, `age`, ...) everywhere except directly after a declaration keyword, so a state variable,
-struct field, enum member, parameter, or `let` binding so spelled has no declaration. Repairing
-that changes index output and belongs to deriving declarations from this projection (option C).
+(issue #552). `rust/fsl-lsp/src/ast_projection.rs` reads each accepted declaration's name, role,
+and owning scope (the action or `def` for its parameters and `let` bindings) from the surface AST.
+It covers the `spec`, `requirements`, and `compose` dialects, which share `SpecItem`; other
+dialects (`business`, `governance`, `refinement`, `domain`, `dbsystem`, `ai_component`, `agent`,
+`causal`) are not projected and are indexed by the token walk alone.
+
+For a covered document read in the published edition the projection decides the declarations
+(option C): the walk proposes each declaration site and its span, and a name at a site the
+projection covers becomes a symbol only when the AST declares that name with that role and owner;
+otherwise it is a reference. The walk alone still decides what the projection leaves out —
+expression binders (`forall`, aggregates, `is some(v)`), `as` names, requirement / acceptance /
+forbidden IDs, `process` / `transition` / `kpi` / `time` items, and the mapped actions of an
+`implements` block. `role_scope_mismatches` checks the other direction, so the corpus test fails
+when the walk cannot locate a declaration the parser accepted; nothing is tolerated.
+
+FSL reserves no words, so in a covered document a word spelled like an index keyword (`status`,
+`count`, `age`, `evidence`, `owner`, `rejected`, `severity`, `respond`, ...) is a name wherever the
+AST declares it: its declaration in a state, field, member, parameter, or `let` position, and its
+uses (issue #1362). It stays a keyword where the grammar reads one whatever the document declares:
+a call `word(...)` when no action or `def` is so named (`count(...)`, `old(...)`), a collection
+method `.word(...)`, the `expect rejected` that closes a `forbidden` block, and a clause keyword
+followed on its own line by the name, number, or string it introduces (`age NAME[...]`,
+`urgent NAME`, `kpi K = count NAME in ...`). The literals `true`, `false`, and `none` are never names.
 
 Open buffers take precedence over files on disk. Imports and workspace references load through a
 document resolver that first consults the store and then the filesystem relative to the owning

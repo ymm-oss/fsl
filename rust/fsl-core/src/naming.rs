@@ -117,6 +117,22 @@ pub(crate) fn entity_binder(entity: &str) -> String {
         .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
 }
 
+/// The invariant a next-edition decision table's `assuming Q` adds:
+/// `_decide_REQ_2_3_assuming` for table `REQ-2-3`.
+pub(crate) fn decide_assumption_invariant(table: &str) -> String {
+    let safe = table
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("_decide_{safe}_assuming")
+}
+
 /// Every declaration name a next-edition entity lowers to: its stage enum,
 /// its stage state, and one state per field.
 pub(crate) fn entity_generated_names<'a>(

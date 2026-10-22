@@ -30,6 +30,7 @@ pub use fsl_syntax::{
 
 mod compose;
 mod db;
+mod decision_table;
 mod declared_names;
 mod diagnostics;
 mod dialect;
@@ -53,6 +54,10 @@ pub use compose::{
     FileResolver, FsResolver, lower_compose, lower_compose_with_options, parse_kernel_source,
     parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
     parse_kernel_source_with_options,
+};
+pub use decision_table::{
+    DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DOMAIN_BOUND, DecisionObligation,
+    decision_solver_obligations,
 };
 pub use declared_names::reject_declared_separator;
 pub use diagnostics::{
