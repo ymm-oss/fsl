@@ -48,7 +48,7 @@ pub enum KeywordContext {
     Entity,
     /// `concept Name = Entity [in S…] [where …]`.
     Concept,
-    /// `R belongs to E as r via n` (reserved until the relations stage).
+    /// `R belongs to E as r via n`.
     Relation,
     /// `[fault] event name = phrase [with …] S -> T | in S [set …] [covers …]`.
     Event,
@@ -70,10 +70,9 @@ pub enum KeywordContext {
     Decide,
     /// A decision table row's outcome: `Actor verb {or verb}`.
     DecideRow,
-    /// `goal ID "text" some E can reach S` (reserved until the goals stage).
+    /// `goal ID "text" some E can reach S`.
     Goal,
-    /// `policy ID "text" every E in S must eventually be T {or T}`
-    /// (reserved until the goals stage).
+    /// `policy ID "text" every E in S must eventually be T {or T}`.
     Policy,
     /// `measure` / `kpi name = count E in S`.
     Measure,
@@ -235,10 +234,14 @@ const fn after(
 use KeywordContext as C;
 
 /// The table, in the order of the proposal's §5. Rows the parser does not
-/// read yet are [`Status::Reserved`]: the relations, `resource`, `measure`,
-/// `goal`, `policy` and `assume` / `out of scope` rows are range B but come
-/// with their stages; `environment`, `only as` and `because` are reserved by
-/// the proposal itself.
+/// read yet are [`Status::Reserved`]: the `assume` / `out of scope` rows are
+/// range B but come with their stage; `environment`, `only as` and `because`
+/// are reserved by the proposal itself (decisions/048 J7).
+///
+/// The relation `R belongs to E as r via n` reads in Japanese as three
+/// column names, `R 所属先 E 役名 r 契機 n` (Order, belongs to: User, role:
+/// buyer, by: place), fixed from the multi-entity example: a verb (`属する`)
+/// would stand after its object, not where `belongs to` does.
 pub const KEYWORDS: &[Keyword] = &[
     // §5.1 file and structure
     row(Kw::Requirements, C::Document, "requirements", "要件"),
@@ -259,10 +262,10 @@ pub const KEYWORDS: &[Keyword] = &[
     row(Kw::Concept, C::Declaration, "concept", "区分"),
     row(Kw::ConceptIn, C::Concept, "in", "段階"),
     row(Kw::ConceptWhere, C::Concept, "where", "のうち"),
-    reserved(Kw::Resource, C::Declaration, "resource", "資源"),
-    reserved(Kw::BelongsTo, C::Relation, "belongs to", "所属先"),
-    reserved(Kw::RelationAs, C::Relation, "as", "役名"),
-    reserved(Kw::RelationVia, C::Relation, "via", "契機"),
+    row(Kw::Resource, C::Declaration, "resource", "資源"),
+    row(Kw::BelongsTo, C::Relation, "belongs to", "所属先"),
+    row(Kw::RelationAs, C::Relation, "as", "役名"),
+    row(Kw::RelationVia, C::Relation, "via", "契機"),
     // §5.3 events
     row(Kw::Event, C::Declaration, "event", "出来事"),
     row(Kw::Fault, C::Event, "fault", "異常"),
@@ -297,20 +300,20 @@ pub const KEYWORDS: &[Keyword] = &[
     row(Kw::Otherwise, C::Decide, "otherwise", "それ以外"),
     row(Kw::Assuming, C::Decide, "assuming", "仮定"),
     // §5.5 goals, policies, measures
-    reserved(Kw::Goal, C::Declaration, "goal", "目標"),
-    reserved(Kw::GoalSome, C::Goal, "some", "いずれかの"),
-    reserved(Kw::CanReach, C::Goal, "can reach", "到達可能"),
-    reserved(Kw::Policy, C::Declaration, "policy", "方針"),
-    reserved(Kw::PolicyEvery, C::Policy, "every", "すべての"),
-    reserved(Kw::PolicyIn, C::Policy, "in", "段階"),
-    reserved(
+    row(Kw::Goal, C::Declaration, "goal", "目標"),
+    row(Kw::GoalSome, C::Goal, "some", "いずれかの"),
+    row(Kw::CanReach, C::Goal, "can reach", "到達可能"),
+    row(Kw::Policy, C::Declaration, "policy", "方針"),
+    row(Kw::PolicyEvery, C::Policy, "every", "すべての"),
+    row(Kw::PolicyIn, C::Policy, "in", "段階"),
+    row(
         Kw::MustEventuallyBe,
         C::Policy,
         "must eventually be",
         "いずれ必ず",
     ),
-    reserved(Kw::PolicyOr, C::Policy, "or", "または"),
-    reserved(Kw::Measure, C::Declaration, "measure", "指標"),
+    row(Kw::PolicyOr, C::Policy, "or", "または"),
+    row(Kw::Measure, C::Declaration, "measure", "指標"),
     row(Kw::Kpi, C::Declaration, "kpi", "重要指標"),
     row(Kw::Count, C::Measure, "count", "件数"),
     row(Kw::MeasureIn, C::Measure, "in", "段階"),
@@ -599,6 +602,29 @@ mod tests {
                 keyword.japanese
             );
         }
+    }
+
+    /// The relations stage reads its rows (`belongs to … as … via`,
+    /// `resource`, `measure`, `goal`, `policy`); what stays reserved is the
+    /// `assume` / `out of scope` stage's and the words the proposal reserves
+    /// (decisions/048 J7: `only as` comes later).
+    #[test]
+    fn only_later_words_are_reserved() {
+        let reserved = KEYWORDS
+            .iter()
+            .filter(|keyword| keyword.status == Status::Reserved)
+            .map(|keyword| keyword.kw)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            reserved,
+            BTreeSet::from([
+                Kw::Assume,
+                Kw::OutOfScope,
+                Kw::Environment,
+                Kw::AllowOnlyAs,
+                Kw::Because,
+            ])
+        );
     }
 
     #[test]

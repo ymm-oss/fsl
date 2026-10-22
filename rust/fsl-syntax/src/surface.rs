@@ -718,6 +718,69 @@ pub struct NextEditionRequirements {
     /// The decision tables, already folded into their events' guards; kept
     /// for the exhaustiveness / overlap checks and the lowering's origins.
     pub decisions: Vec<DecisionTable>,
+    /// The relations, in source order. Each role is also a data field of
+    /// its entity's `process`, written by the relation's event.
+    pub relations: Vec<RelationDeclaration>,
+    /// The resources: state that belongs to no entity, in source order.
+    pub resources: Vec<ResourceDeclaration>,
+    /// The measures, in source order.
+    pub measures: Vec<MeasureDeclaration>,
+    /// The `goal` and `policy` declarations, as the business items of the
+    /// same form ([`BusinessGoalBody::SomeStage`] and
+    /// [`BusinessPolicyBody::Eventually`]), in source order.
+    pub goals: Vec<BusinessItem>,
+}
+
+/// `Entity belongs to Target as role via event`: each instance of `entity`
+/// records, in its field `role` (`Option<Target>`, initially `none`), the
+/// instance of `target` that did `event`. The event's actor is `target`, and
+/// the event takes that instance as its first input, named
+/// [`entity_binder`] of `target` (decisions/048 J7: only the event that
+/// makes the relation takes the actor's instance).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelationDeclaration {
+    pub entity: String,
+    pub target: String,
+    pub role: String,
+    pub event: String,
+    pub span: Span,
+}
+
+/// `resource name: Type = initial`: one state variable of the whole
+/// document, which events `set`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceDeclaration {
+    pub name: String,
+    pub type_name: QualifiedName,
+    pub initial: Expr,
+    pub span: Span,
+}
+
+/// `measure name = count Concept` or `count Entity in Stage, …`: the number
+/// of instances of `entity` satisfying `condition`, a projection that adds
+/// no state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MeasureDeclaration {
+    pub name: String,
+    pub entity: String,
+    /// What is counted, the projection's stage: the concept (`Settled`) or
+    /// the stages after `in` (`Refunded`, `Paid, Packed`).
+    pub counted: String,
+    /// The condition over one instance: fields spelled `Entity.field`, the
+    /// stage [`stage_reference`].
+    pub condition: Expr,
+    pub span: Span,
+}
+
+/// The name a next-edition entity's instance is bound to where the lowering
+/// quantifies over the entity or takes an instance of it: the entity's first
+/// letter in lower case (`c` for `Claim`, `u` for `User`).
+#[must_use]
+pub fn entity_binder(entity: &str) -> String {
+    entity
+        .chars()
+        .next()
+        .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
 }
 
 /// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
