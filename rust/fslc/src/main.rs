@@ -9881,10 +9881,31 @@ fn run_explain_from_source_with_names(
         && status == 0
         && let Ok((_, model)) = load_kernel_model_from_source(path, source)
     {
+        let actor_notes = model
+            .actions
+            .iter()
+            .flat_map(|action| {
+                action
+                    .annotations
+                    .requirements()
+                    .expect("checked model annotations are valid")
+                    .into_iter()
+                    .filter(|requirement| {
+                        explain_lowering::is_actor_note(
+                            &model,
+                            &action.name,
+                            &requirement.id,
+                            requirement.text.as_deref(),
+                        )
+                    })
+                    .filter_map(|requirement| requirement.text)
+            })
+            .collect::<Vec<_>>();
         name_display::respell(
             &mut output,
             model.names().glossary(),
             names.unwrap_or(name_display::NameSpelling::Alias),
+            &actor_notes,
         );
     }
     (output, status)
@@ -10957,18 +10978,30 @@ fn requirement_kill_index(
     trace_contract: Option<&CheckedTraceContract>,
 ) -> Map<String, Value> {
     let mut result = Map::new();
+    // The actor note of a next-edition event's action (`request: by
+    // Customer`) names the actor, not a requirement, so it gets no entry.
+    for action in &model.actions {
+        for requirement in action
+            .annotations
+            .requirements()
+            .expect("checked model annotations are valid")
+        {
+            if !explain_lowering::is_actor_note(
+                model,
+                &action.name,
+                &requirement.id,
+                requirement.text.as_deref(),
+            ) {
+                result.entry(requirement.id).or_insert(json!({"kills":0}));
+            }
+        }
+    }
     for annotations in model
-        .actions
+        .invariants
         .iter()
+        .chain(&model.transitions)
+        .chain(&model.reachables)
         .map(|item| &item.annotations)
-        .chain(
-            model
-                .invariants
-                .iter()
-                .chain(&model.transitions)
-                .chain(&model.reachables)
-                .map(|item| &item.annotations),
-        )
         .chain(model.leadstos.iter().map(|item| &item.annotations))
     {
         for requirement in annotation_requirement_ids(annotations) {
@@ -11806,11 +11839,24 @@ fn run_mutate_with(
                 public.insert("killers".to_owned(), json!(killers));
             }
         }
+        // A killed mutant of a guard a next-edition rule or decision table
+        // added also counts for that rule's or table's ID: the guard is how
+        // the requirement is formalized, whichever oracle caught the change.
         let killer_requirements = match outcome {
             MutationOracle::Killed {
                 killer_requirements,
                 ..
-            } => killer_requirements,
+            } => {
+                let mut credited = killer_requirements;
+                if let (Some(action), Some(index)) = (mutant.action.as_deref(), mutant.guard) {
+                    for requirement in explain_lowering::guard_requirements(&model, action, index) {
+                        if !credited.contains(&requirement) {
+                            credited.push(requirement);
+                        }
+                    }
+                }
+                credited
+            }
             _ => Vec::new(),
         };
         for requirement in killer_requirements {

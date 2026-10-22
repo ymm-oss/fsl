@@ -910,10 +910,31 @@ fn id_occurrences(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
     };
     let mut occurrences = Vec::new();
     let document = fsl_syntax::dialect_keyword_with(source, &options).ok();
+    let next_requirements = document == Some("requirements")
+        && matches!(
+            fsl_syntax::edition_header(source, &options),
+            Ok(Some(header)) if header.edition == Edition::Fsl5
+        );
     for (index, token) in tokens.iter().enumerate() {
         let TokenKind::Ident(keyword) = &token.kind else {
             continue;
         };
+        if next_requirements && let Some(kind) = next_requirements_id_kind(keyword) {
+            if let Some((id, span, next)) = requirement_id_at(source, &tokens, index + 1)
+                && matches!(
+                    tokens.get(next).map(|token| &token.kind),
+                    Some(TokenKind::String(_))
+                )
+            {
+                occurrences.push(IdOccurrence {
+                    kind,
+                    id,
+                    span,
+                    is_tag: false,
+                });
+            }
+            continue;
+        }
         if keyword == "requirement"
             && index
                 .checked_sub(1)
@@ -980,6 +1001,27 @@ fn id_occurrences(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
     }
     occurrences.extend(legacy_requirement_ids(source, options));
     occurrences
+}
+
+/// The kind of the ID a declaration of a next-edition requirements document
+/// starts with, `keyword ID "text"`, in either spelling: a `rule`, a
+/// decision table and a row's or an event's `covers` declare a requirement, a
+/// `scenario` an acceptance trace, a `forbidden` a forbidden one, and `goal`
+/// and `policy` their own kinds.
+fn next_requirements_id_kind(keyword: &str) -> Option<IdKind> {
+    use fsl_syntax::keywords::Kw;
+    [
+        (Kw::Rule, IdKind::Requirement),
+        (Kw::Decide, IdKind::Requirement),
+        (Kw::Covers, IdKind::Requirement),
+        (Kw::Scenario, IdKind::Acceptance),
+        (Kw::Forbidden, IdKind::Forbidden),
+        (Kw::Goal, IdKind::Goal),
+        (Kw::Policy, IdKind::Policy),
+    ]
+    .into_iter()
+    .find(|(kw, _)| keyword == kw.english() || keyword == kw.japanese())
+    .map(|(_, kind)| kind)
 }
 
 fn governance_reference_at(

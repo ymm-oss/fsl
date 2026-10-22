@@ -1,0 +1,71 @@
+fsl 5
+// The returns example of skills-next/fsl-requirements/SKILL.md: two rules
+// whose statements are a guard and a property, a decision table, a goal, a
+// policy, scenarios and forbidden traces, each under a canonical ID.
+requirements ReturnRequirements {
+  number Amount
+  const AUTO_LIMIT = 1
+  actor Customer, System, Manager, Finance
+
+  entity Return {
+    amount: Amount = 0
+    lifecycle Draft -> Requested -> Approved -> Refunded
+    lifecycle Requested -> Rejected
+  }
+
+  concept SmallReturn = Return where amount <= AUTO_LIMIT
+  concept LargeReturn = Return where amount > AUTO_LIMIT
+
+  event request      = Customer requests Return with amount   Draft -> Requested
+  event auto_approve = System approves Return                Requested -> Approved
+  event mgr_approve  = Manager approves Return               Requested -> Approved
+  event reject       = Manager rejects Return                Requested -> Rejected
+  event refund       = Finance refunds Return                Approved -> Refunded
+
+  rule REQ-RET-001 "A return is requested with a positive amount" {
+    allow Customer requests Return only when input amount > 0
+  }
+
+  decide REQ-RET-002 "Who decides a requested return" for Requested Return {
+    SmallReturn => System approves
+      covers REQ-RET-003 "Returns at or below AUTO_LIMIT are approved by the system"
+    LargeReturn => Manager approves or rejects
+      covers REQ-RET-004 "Returns above AUTO_LIMIT are approved or rejected by a manager"
+  }
+
+  rule REQ-RET-005 "A requested return keeps a positive amount" {
+    AmountPositive: always Return not in Draft has amount > 0
+  }
+
+  terminal { forall r: Return { stage(r) == Refunded or stage(r) == Rejected } }
+
+  measure refunded_returns = count Return in Refunded
+  goal GOAL-RET-001 "A return can be refunded" some Return can reach Refunded
+  policy POL-RET-001 "Every requested return is eventually decided"
+    every Return in Requested must eventually be Approved or Rejected
+
+  scenario AC-RET-001 "A small return is approved by the system and refunded" {
+    Customer requests r1 with amount 1
+    System approves r1
+    Finance refunds r1
+    then r1 is Refunded
+  }
+  scenario AC-RET-002 "A large return is rejected by a manager" {
+    Customer requests r1 with amount 2
+    Manager rejects r1
+    then r1 is Rejected
+  }
+  forbidden FB-RET-001 "A return of zero is not requested" {
+    Customer requests r1 with amount 0
+    then rejected
+  }
+  forbidden FB-RET-002 "A manager does not decide a small return" {
+    Customer requests r1 with amount 1
+    Manager approves r1
+    then rejected
+  }
+}
+verify {
+  instances Return = 2
+  values Amount = 0..3
+}

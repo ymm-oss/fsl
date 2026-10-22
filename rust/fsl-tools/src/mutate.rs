@@ -17,6 +17,9 @@ pub struct BuiltinMutant {
     pub target: String,
     pub requirement: Option<MetaTag>,
     pub action: Option<String>,
+    /// The 0-based index, among the action's `requires`, of the guard this
+    /// mutant changes; `None` for a mutant of anything else.
+    pub guard: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -785,6 +788,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                             target: format!("type {name} {bound}"),
                             requirement: None,
                             action: None,
+                            guard: None,
                         });
                     }
                 }
@@ -803,6 +807,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                         target: mutation_target(&format!("const {name}"), &mutation),
                         requirement: None,
                         action: None,
+                        guard: None,
                     });
                 }
             }
@@ -825,6 +830,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                         target: mutation.target,
                         requirement: None,
                         action: Some("init".to_owned()),
+                        guard: None,
                     });
                 }
             }
@@ -856,6 +862,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                 target: target.clone(),
                                 requirement: meta.clone(),
                                 action: Some(label.clone()),
+                                guard: Some(require_number - 1),
                             });
                             let mut negated = spec.clone();
                             if let SpecItem::Action { items, .. } = &mut negated.items[item_index] {
@@ -871,6 +878,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                 target: target.clone(),
                                 requirement: meta.clone(),
                                 action: Some(label.clone()),
+                                guard: Some(require_number - 1),
                             });
                             for mutation in expr_mutations(expr, &enums) {
                                 let mut mutated = spec.clone();
@@ -887,6 +895,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                     target: mutation_target(&target, &mutation),
                                     requirement: meta.clone(),
                                     action: Some(label.clone()),
+                                    guard: Some(require_number - 1),
                                 });
                             }
                         }
@@ -912,6 +921,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                     ),
                                     requirement: meta.clone(),
                                     action: Some(label.clone()),
+                                    guard: None,
                                 });
                             }
                         }
@@ -941,6 +951,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                             target: mutation.target,
                             requirement: meta.clone(),
                             action: Some(label.clone()),
+                            guard: None,
                         });
                     }
                 }
@@ -963,6 +974,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                         target: format!("{label} fair"),
                         requirement: meta.clone(),
                         action: Some(label),
+                        guard: None,
                     });
                 }
             }

@@ -31,6 +31,9 @@ const STEPS: &[&str] = &[
 /// The steps whose detail is a rule statement (`REQ-1 allow …`).
 const RULE_STEPS: &[&str] = &["allow", "never", "after", "always", "enters"];
 
+/// The steps a rule or a decision table adds to an event's guard.
+const GUARD_STEPS: &[&str] = &["decide", "allow", "never", "after"];
+
 /// One next-edition lowering step, with the origin site it was read from.
 struct Step<'a> {
     lowering: &'a LoweringStep,
@@ -96,6 +99,41 @@ fn steps<'m>(model: &'m KernelModel, target: &str, kinds: &[&str]) -> Vec<Step<'
                 })
         })
         .collect()
+}
+
+/// The IDs of the rules and decision tables the `index`-th `requires` of
+/// `action` came from: each such guard's origin is declared under the ID of
+/// its rule or table. Empty for a guard of any other origin, so a document in
+/// the earlier forms has none.
+pub(crate) fn guard_requirements(model: &KernelModel, action: &str, index: usize) -> Vec<String> {
+    model
+        .origins()
+        .origins_for(&action_guard_target(action, index))
+        .iter()
+        .filter(|origin| {
+            origin
+                .lowering_steps
+                .iter()
+                .any(|step| GUARD_STEPS.contains(&step.kind.as_str()))
+        })
+        .filter_map(|origin| origin.primary.as_ref()?.declaration_path.first().cloned())
+        .collect()
+}
+
+/// Whether the requirement `id` / `text` of `action` is the note the
+/// lowering gives the action of an event that covers no requirement: the
+/// event's own name with `by <actor>`. It names the actor; it is neither a
+/// requirement nor the author's wording. Only an action lowered from a
+/// next-edition event has one.
+pub(crate) fn is_actor_note(
+    model: &KernelModel,
+    action: &str,
+    id: &str,
+    text: Option<&str>,
+) -> bool {
+    id == action
+        && text.is_some_and(|text| text.starts_with("by "))
+        && !steps(model, &action_target(action), &["event"]).is_empty()
 }
 
 /// The readable lines naming the event an action lowers from:
