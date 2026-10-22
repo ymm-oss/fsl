@@ -129,12 +129,25 @@ pub fn parse_surface_document_with(
     crate::parse_document_with(crate::SourceFile::new(source), options).map(|parsed| parsed.surface)
 }
 
+/// One requirement-style identifier (`REQ-1`, `AC-PAY-2`, `CTRL-1`) read by
+/// the shared parser: its value, the span from its first to its last
+/// component, and the offset of each `-` joining the components. The
+/// formatter prints these hyphens without spaces so an ID reads as written.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct IdSpelling {
+    pub(crate) value: String,
+    pub(crate) span: Span,
+    pub(crate) hyphens: Vec<usize>,
+}
+
+/// Parse a shared-grammar document and return, beside it, every identifier
+/// read by [`Parser::req_id`] in source order.
 pub(crate) fn parse_shared_tokens(
     source: &str,
     tokens: Vec<Token>,
     cursor: usize,
     edition: Edition,
-) -> Result<SurfaceDocument, ParseError> {
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
     let mut parser = Parser::new(source, tokens, cursor);
     parser.edition = edition;
     let document = if parser.peek_ident("spec") {
@@ -157,7 +170,7 @@ pub(crate) fn parse_shared_tokens(
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after surface document"));
     }
-    Ok(document)
+    Ok((document, parser.ids))
 }
 
 struct Parser<'a> {
@@ -167,6 +180,8 @@ struct Parser<'a> {
     pending_annotations: Annotations,
     /// The edition the document is read in ([`crate::SourceFile::edition`]).
     edition: Edition,
+    /// Every identifier [`Self::req_id`] has read, in source order.
+    ids: Vec<IdSpelling>,
     /// Whether keywords are read through the keyword table, in English or in
     /// Japanese ([`crate::keywords`]): only in the body of a next-edition
     /// requirements document. Otherwise only the English spelling is read.
@@ -188,6 +203,7 @@ impl<'a> Parser<'a> {
             cursor,
             pending_annotations: Annotations::default(),
             edition: Edition::Fsl4,
+            ids: Vec::new(),
             keywords: false,
             spellings: crate::SourceSpellings::default(),
             published_item: false,
@@ -2346,6 +2362,7 @@ impl<'a> Parser<'a> {
             }
         };
         let mut end = token.span.end;
+        let mut hyphens = Vec::new();
         while self.peek_symbol("-") {
             let component = match &self.peek_n(1).kind {
                 TokenKind::Ident(component) => component.clone(),
@@ -2354,7 +2371,7 @@ impl<'a> Parser<'a> {
                     .to_owned(),
                 _ => break,
             };
-            self.bump();
+            hyphens.push(self.bump().span.start.offset);
             end = self.bump().span.end;
             value.push('-');
             value.push_str(&component);
@@ -2371,6 +2388,14 @@ impl<'a> Parser<'a> {
                 },
             ));
         }
+        self.ids.push(IdSpelling {
+            value: value.clone(),
+            span: Span {
+                start: token.span.start,
+                end,
+            },
+            hyphens,
+        });
         Ok(value)
     }
 
