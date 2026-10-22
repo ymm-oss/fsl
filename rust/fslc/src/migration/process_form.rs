@@ -69,6 +69,11 @@ const UNRECOGNIZED: &str = "unrecognized_process_layout";
 const CONVERTED_FORM_INVALID: &str = "converted_form_invalid";
 /// The rewritten document's checked kernel differs from the original's.
 const KERNEL_CHANGED: &str = "kernel_changed";
+/// The rewrite of a process form without `terminal { }` has the terminal
+/// states this edition derives from the lifecycles' final stages, which the
+/// process form never derived: the one kernel difference the rewrite
+/// contract allows, reported so the changed deadlock verdict is no surprise.
+pub const DERIVED_TERMINAL_ADDED: &str = "derived_terminal_added";
 
 /// Where a [`MIGRATE_MANUAL_REQUIRED`] finding points: a process by its
 /// position among the document's processes, or one of its transitions.
@@ -185,14 +190,17 @@ pub fn convert_process_forms(
         Err(findings) => return manual(findings),
     };
     let converted = conversion.render(migrated, options);
-    if let Err((reason, message)) = process_form_contract(migrated, &converted, path, options) {
-        return manual(vec![ManualRequired {
-            reason,
-            message,
-            site: Site::Process(0),
-        }]);
-    }
-    let findings = conversion
+    let derived_terminal = match process_form_contract(migrated, &converted, path, options) {
+        Ok(derived_terminal) => derived_terminal,
+        Err((reason, message)) => {
+            return manual(vec![ManualRequired {
+                reason,
+                message,
+                site: Site::Process(0),
+            }]);
+        }
+    };
+    let mut findings = conversion
         .processes
         .iter()
         .enumerate()
@@ -211,11 +219,95 @@ pub fn convert_process_forms(
             reason: None,
             edits: Vec::new(),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if derived_terminal {
+        findings.extend(derived_terminal_finding(
+            &converted,
+            *options,
+            locate(Site::Process(0)),
+        ));
+    }
     ProcessFormOutcome::Converted {
         source: converted,
         findings,
     }
+}
+
+/// The [`DERIVED_TERMINAL_ADDED`] finding of the rewritten document
+/// `converted`: each entity with the final stages its terminal states are
+/// derived from, and the `terminal { }` that writes the same states out.
+fn derived_terminal_finding(
+    converted: &str,
+    options: ParseOptions,
+    span: Span,
+) -> Option<MigrationDiagnostic> {
+    let Ok(SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(converted, &options)
+    else {
+        return None;
+    };
+    let finals = &requirements.next.as_ref()?.final_stages;
+    if finals.is_empty() {
+        return None;
+    }
+    let named = finals
+        .iter()
+        .map(|(entity, stages)| {
+            if stages.is_empty() {
+                format!("'{entity}' has no final stage")
+            } else {
+                format!("'{entity}' in {}", stages.join(" or "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let conditions = finals
+        .iter()
+        .map(|(entity, stages)| {
+            let binder = entity
+                .chars()
+                .next()
+                .filter(char::is_ascii_alphabetic)
+                .map_or_else(
+                    || "x".to_owned(),
+                    |first| first.to_ascii_lowercase().to_string(),
+                );
+            let body = if stages.is_empty() {
+                "false".to_owned()
+            } else {
+                stages
+                    .iter()
+                    .map(|stage| format!("stage({binder}) == {stage}"))
+                    .collect::<Vec<_>>()
+                    .join(" or ")
+            };
+            format!("forall {binder}: {entity} {{ {body} }}")
+        })
+        .collect::<Vec<_>>();
+    let terminal = if conditions.len() == 1 {
+        conditions.concat()
+    } else {
+        conditions
+            .iter()
+            .map(|condition| format!("({condition})"))
+            .collect::<Vec<_>>()
+            .join(" and ")
+    };
+    Some(MigrationDiagnostic {
+        code: DERIVED_TERMINAL_ADDED,
+        taxonomy: Taxonomy::UnsupportedInEdition,
+        message: format!(
+            "the process form declares no terminal states, and this edition derives them from \
+             the final lifecycle stages ({named}): a state where every instance has stopped in \
+             a final stage is no longer a deadlock, so verify's deadlock verdict may change; \
+             write 'terminal {{ … }}' to state other terminal states"
+        ),
+        span,
+        canonical_replacement: format!("terminal {{ {terminal} }}"),
+        machine_applicable: true,
+        reason: None,
+        edits: Vec::new(),
+    })
 }
 
 /// The migration contract of a process-form rewrite: `before` and `after`
@@ -228,13 +320,14 @@ pub fn convert_process_forms(
 /// # Errors
 ///
 /// Returns the reason word and the message when `after` does not parse or
-/// check, or its kernel differs from `before`'s.
+/// check, or its kernel differs from `before`'s. `Ok(true)` when the kernels
+/// are equal but for the derived terminal `after` adds.
 pub fn process_form_contract(
     before: &str,
     after: &str,
     path: &Path,
     options: &ParseOptions,
-) -> Result<(), (&'static str, String)> {
+) -> Result<bool, (&'static str, String)> {
     let before = kernel_contract(before, path, options, Origins::Ignored)
         .map_err(|error| (CONVERTED_FORM_INVALID, error))?;
     let mut after = kernel_contract(after, path, options, Origins::Ignored).map_err(|error| {
@@ -243,9 +336,9 @@ pub fn process_form_contract(
             format!("the rewritten entity / event / rule members do not check: {error}"),
         )
     })?;
-    ignore_derived_terminal(&before, &mut after);
+    let derived_terminal = ignore_derived_terminal(&before, &mut after);
     if before == after {
-        Ok(())
+        Ok(derived_terminal)
     } else {
         Err((
             KERNEL_CHANGED,
@@ -258,14 +351,19 @@ pub fn process_form_contract(
 
 /// Where the process form's kernel `before` has no terminal, forget the one
 /// the rewritten `after` derives from its lifecycles' final stages, so the
-/// rewrite contract compares everything else.
-pub fn ignore_derived_terminal(before: &Value, after: &mut Value) {
+/// rewrite contract compares everything else. Returns whether `after` had
+/// such a terminal.
+pub fn ignore_derived_terminal(before: &Value, after: &mut Value) -> bool {
     if before["kernel"]["properties"]["terminal"].is_null()
         && let Some(properties) = after
             .pointer_mut("/kernel/properties")
             .and_then(Value::as_object_mut)
     {
-        properties.insert("terminal".to_owned(), Value::Null);
+        properties
+            .insert("terminal".to_owned(), Value::Null)
+            .is_some_and(|terminal| !terminal.is_null())
+    } else {
+        false
     }
 }
 

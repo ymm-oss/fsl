@@ -1102,7 +1102,8 @@ fn dropping_one_guard_in_the_process_form_converter_fails_the_kernel_contract() 
     let faithful = conversion.render(&source, &options);
     assert_eq!(
         fslc_rust::migration::process_form_contract(&source, &faithful, &path, &options),
-        Ok(())
+        Ok(true),
+        "equal but for the derived terminal"
     );
 
     let mut faulty = conversion;
@@ -1120,5 +1121,135 @@ fn dropping_one_guard_in_the_process_form_converter_fails_the_kernel_contract() 
     let (reason, _) =
         fslc_rust::migration::process_form_contract(&source, &dropped, &path, &options)
             .expect_err("a dropped guard changes the kernel");
+    assert_eq!(reason, "kernel_changed");
+}
+
+fn example(name: &str) -> String {
+    text(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(name),
+    )
+}
+
+fn findings_with_code<'a>(migrated: &'a Value, code: &str) -> Vec<&'a Value> {
+    migrated["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter(|finding| finding["code"] == code)
+        .collect()
+}
+
+/// decisions 053: the edition derives the terminal states of a process form
+/// without `terminal { }` from its lifecycle's final stages, which changes
+/// verify's deadlock verdict on the e2e requirements. The migration says so,
+/// in the plan and when it writes, without changing its exit status.
+#[test]
+fn edition_5_migration_reports_the_terminal_it_derives_for_a_process_form_without_one() {
+    let directory = FixtureDir::new();
+    directory.write("1_business.fsl", &example("e2e/1_business.fsl"));
+    let source = example("e2e/2_requirements.fsl");
+    assert!(
+        !source.contains("terminal"),
+        "the e2e process form has none"
+    );
+    let path = directory.write("2_requirements.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    let mut reported = Vec::new();
+    for write in [false, true] {
+        let mut args = vec!["migrate", path, "--edition", "5"];
+        if write {
+            args.push("--write");
+        }
+        let output = run_gated(&args);
+        let migrated = json(&output);
+        assert_eq!(output.status.code(), Some(0), "{migrated:#}");
+        assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+        assert_eq!(migrated["written"], write, "{migrated:#}");
+        let added = findings_with_code(&migrated, "derived_terminal_added");
+        assert_eq!(added.len(), 1, "{migrated:#}");
+        let finding = added[0];
+        assert_eq!(finding["severity"], "info", "{finding:#}");
+        assert_eq!(finding["machine_applicable"], true, "{finding:#}");
+        assert_eq!(finding["loc"]["line"], 34, "at the process: {finding:#}");
+        let message = finding["message"].as_str().expect("message");
+        for expected in ["'Claim' in Rejected or Paid", "deadlock"] {
+            assert!(message.contains(expected), "{expected:?} in {message}");
+        }
+        assert_eq!(
+            finding["canonical_replacement"],
+            "terminal { forall c: Claim { stage(c) == Rejected or stage(c) == Paid } }"
+        );
+        reported.push(finding.clone());
+    }
+    assert_eq!(
+        reported[0], reported[1],
+        "the plan reports what --write does"
+    );
+
+    // The written document is the edition's own form: nothing more to derive.
+    let again = json(&run_gated(&["migrate", path, "--edition", "5"]));
+    assert_eq!(again["changed"], 0, "{again:#}");
+    assert!(
+        findings_with_code(&again, "derived_terminal_added").is_empty(),
+        "{again:#}"
+    );
+}
+
+/// A process form that writes its terminal states keeps them: the rewrite
+/// adds no terminal and reports none.
+#[test]
+fn edition_5_migration_of_a_process_form_with_terminal_reports_no_derived_terminal() {
+    let directory = FixtureDir::new();
+    let source = example("requirements_stage.fsl");
+    assert!(source.contains("terminal {"), "the fixture writes one");
+    let path = directory.write("requirements_stage.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    for write in [false, true] {
+        let mut args = vec!["migrate", path, "--edition", "5"];
+        if write {
+            args.push("--write");
+        }
+        let output = run_gated(&args);
+        let migrated = json(&output);
+        assert_eq!(output.status.code(), Some(0), "{migrated:#}");
+        assert_eq!(
+            findings_with_code(&migrated, "legacy_process_form").len(),
+            1,
+            "the process is rewritten: {migrated:#}"
+        );
+        assert!(
+            findings_with_code(&migrated, "derived_terminal_added").is_empty(),
+            "{migrated:#}"
+        );
+    }
+}
+
+/// The derived terminal is the one kernel difference the process-form
+/// contract forgives, and only where the process form wrote no terminal: a
+/// rewrite that changed a written terminal fails it.
+#[test]
+fn the_process_form_contract_compares_a_terminal_the_process_form_writes() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/requirements_stage.fsl");
+    let source = text(&path);
+    let options = fslc_rust::unstable_gate::from_value(Some(EDITION_GATE));
+    let conversion = fslc_rust::migration::plan_process_conversion(&source, &options)
+        .expect("the process form is rewritable")
+        .expect("the document has a process");
+    let faithful = conversion.render(&source, &options);
+    assert_eq!(
+        fslc_rust::migration::process_form_contract(&source, &faithful, &path, &options),
+        Ok(false),
+        "equal, terminal included"
+    );
+
+    let written = "forall c: Claim { stage(c) == Approved or stage(c) == Rejected }";
+    assert_eq!(faithful.matches(written).count(), 1, "{faithful}");
+    let narrowed = faithful.replace(written, "forall c: Claim { stage(c) == Approved }");
+    let (reason, _) =
+        fslc_rust::migration::process_form_contract(&source, &narrowed, &path, &options)
+            .expect_err("a changed written terminal changes the kernel");
     assert_eq!(reason, "kernel_changed");
 }
