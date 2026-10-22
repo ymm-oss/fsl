@@ -24,6 +24,17 @@
 //! - **M** (the check can fail): one rule of `lowered.fsl` weakened makes R
 //!   fail and K differ; one rule statement taken out of a complete
 //!   next-edition source does the same.
+//! - **T** (requirement attribution): K leaves out the requirement IDs
+//!   (`requirement`, `annotations`, `meta`), because their origins differ.
+//!   T compares what K leaves out: every complete next-edition source gives
+//!   each action and property of its kernel the requirement IDs
+//!   `lowered.fsl` gives it, in the annotations and in the kernel's
+//!   `requirement`, and `fslc ledger` lists the same requirements with the
+//!   same status. The IDs are the ones the author wrote (a `requirement`
+//!   block or `@requirement` in `lowered.fsl`; `covers`, `rule`, `decide`,
+//!   `goal` and `policy` in the source), never a note the lowering makes up.
+//!   A reduced source is not under T: the requirement it leaves out is
+//!   absent by design.
 //!
 //! The `rules` example has no original: its `lowered.fsl` is the hand-written
 //! expectation for the rule statements no design-draft example uses, held to
@@ -36,6 +47,7 @@
 //!
 //! Acceptance scenarios do not reach the kernel and are not part of K.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -387,7 +399,9 @@ fn k_fsl5_sources_lower_to_the_lowered_kernel() {
 
 /// A no-rules lowering differs from `lowered.fsl` by deleted `requires`
 /// lines only: every other line of `lowered.fsl` is kept, in order, and every
-/// deleted line is a `requires`.
+/// deleted line is a `requires`, or the `@requirement` of a decision table the
+/// reduced source leaves out (not under K, and a reduced source is not under
+/// T).
 #[test]
 fn norules_lowerings_only_delete_requires_lines() {
     for &(example, _, lowering) in FSL5_SOURCES {
@@ -403,11 +417,12 @@ fn norules_lowerings_only_delete_requires_lines() {
             if kept.peek() == Some(&line) {
                 kept.next();
             } else {
+                let line = line.trim_start();
                 assert!(
-                    line.trim_start().starts_with("requires "),
+                    line.starts_with("requires ") || line.starts_with("@requirement("),
                     "{example}/{lowering} deletes a line that is not a requires: {line:?}"
                 );
-                deleted += 1;
+                deleted += usize::from(line.starts_with("requires "));
             }
         }
         assert_eq!(
@@ -417,6 +432,143 @@ fn norules_lowerings_only_delete_requires_lines() {
         );
         assert!(deleted > 0, "{example}/{lowering} deletes nothing");
     }
+}
+
+/// The requirement IDs of every target of `file`'s kernel model that has
+/// one (`action:submit`, `property:invariant:…`), from its annotations.
+fn annotated_requirements(
+    dir: &Path,
+    file: &str,
+    fsl5: bool,
+) -> BTreeMap<String, BTreeSet<String>> {
+    let source = std::fs::read_to_string(dir.join(file)).expect("read source");
+    let options = if fsl5 {
+        fsl_syntax::ParseOptions::with_unstable(
+            fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+        )
+    } else {
+        fsl_syntax::ParseOptions::default()
+    };
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        &source,
+        &fsl_core::FsResolver::new(dir.to_path_buf()),
+        file,
+        &options,
+    )
+    .unwrap_or_else(|error| panic!("lower {file}: {error:?}"));
+    fsl_core::build_model(kernel)
+        .unwrap_or_else(|error| panic!("model of {file}: {error:?}"))
+        .requirement_targets()
+        .into_iter()
+        .map(|(target, links)| (target, links.into_iter().map(|link| link.id).collect()))
+        .collect()
+}
+
+/// The `requirement` id of every action and property of a Public Kernel v2,
+/// by model target (`action:submit`, `property:invariant:…`), `None` where it
+/// has none.
+fn kernel_requirements(kernel: &Value) -> BTreeMap<String, Option<String>> {
+    let id = |item: &Value| item["requirement"]["id"].as_str().map(str::to_owned);
+    let name = |item: &Value| item["name"].as_str().expect("name").to_owned();
+    let mut requirements = BTreeMap::new();
+    for action in kernel["actions"].as_array().expect("actions") {
+        requirements.insert(format!("action:{}", name(action)), id(action));
+    }
+    for (group, kind) in [
+        ("invariants", "invariant"),
+        ("transitions", "trans"),
+        ("reachables", "reachable"),
+        ("leads_to", "leadsTo"),
+    ] {
+        for property in kernel["properties"][group].as_array().expect("properties") {
+            requirements.insert(format!("property:{kind}:{}", name(property)), id(property));
+        }
+    }
+    requirements
+}
+
+/// The rows of `fslc ledger <file>`'s risk table, one per requirement ID:
+/// `(ID, status)`, in order. The whole-spec row (`（仕様全体）`) is left out:
+/// it holds the findings of no requirement, such as the warnings only a
+/// next-edition source has.
+fn ledger_rows(dir: &Path, file: &str, fsl5: bool) -> Vec<(String, String)> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    command
+        .args(["ledger", file])
+        .current_dir(dir)
+        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
+    if fsl5 {
+        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
+    }
+    let output = command.output().expect("run fslc ledger");
+    let ledger = String::from_utf8(output.stdout).expect("UTF-8 ledger");
+    assert!(output.status.success(), "ledger {file}: {ledger}");
+    let table = ledger
+        .split_once("## リスク一覧")
+        .and_then(|(_, rest)| rest.split("\n## ").next())
+        .unwrap_or_else(|| panic!("ledger {file} has a risk table: {ledger}"));
+    table
+        .lines()
+        .filter_map(|line| {
+            let cells = line.split('|').map(str::trim).collect::<Vec<_>>();
+            (cells.len() > 4 && cells[1] != "要件ID" && !cells[1].starts_with("---"))
+                .then(|| (cells[1].to_owned(), cells[3].to_owned()))
+        })
+        .filter(|(id, _)| id != "（仕様全体）")
+        .collect()
+}
+
+#[test]
+fn t_fsl5_sources_attribute_the_requirements_of_the_lowered_kernel() {
+    let mut checked = 0;
+    for &(example, source, lowering) in FSL5_SOURCES {
+        if lowering != "lowered.fsl" {
+            continue;
+        }
+        let dir = example_dir(example);
+        let annotated = annotated_requirements(&dir, source, true);
+        assert_eq!(
+            annotated,
+            annotated_requirements(&dir, lowering, false),
+            "{example}/{source}: requirement annotations against {lowering}"
+        );
+        // The kernel's one `requirement` of a target is one of its annotated
+        // IDs; an action's is the one `lowered.fsl`'s requirement block gives
+        // it. (A `trans` or an `@requirement` in `lowered.fsl` reaches the
+        // annotations only, so properties are held to the first check.)
+        let kernel = kernel_requirements(&kernel_compare::kernel_v2_fsl5(&dir.join(source)));
+        for (target, id) in &kernel {
+            if let Some(id) = id {
+                assert!(
+                    annotated.get(target).is_some_and(|ids| ids.contains(id)),
+                    "{example}/{source}: {target} has requirement {id}, not annotated: {annotated:?}"
+                );
+            }
+        }
+        let actions = |requirements: BTreeMap<String, Option<String>>| {
+            requirements
+                .into_iter()
+                .filter(|(target, _)| target.starts_with("action:"))
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(
+            actions(kernel),
+            actions(kernel_requirements(&kernel_compare::kernel_v2(
+                &dir.join(lowering)
+            ))),
+            "{example}/{source}: the actions' kernel `requirement` against {lowering}"
+        );
+        // The ledger lists the same requirements, each with the same status.
+        let expected = ledger_rows(&dir, lowering, false);
+        assert!(!expected.is_empty(), "{example}/{lowering}: no ledger rows");
+        assert_eq!(
+            ledger_rows(&dir, source, true),
+            expected,
+            "{example}/{source}: ledger rows against {lowering}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "not vacuous: a complete source is listed");
 }
 
 #[test]

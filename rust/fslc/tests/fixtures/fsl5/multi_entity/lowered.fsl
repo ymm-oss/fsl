@@ -51,30 +51,30 @@ requirements OrderWorkflow {
     }
   }
 
-  requirement REQ-FLOW "An order is approved, paid, packed, shipped and delivered in order" {
-    fair action approve(o: Order) { requires order_stage[o] == Placed     order_stage[o] = Approved }
-    fair action pay(o: Order)     { requires order_stage[o] == Approved   order_stage[o] = Paid }
-    fair action pack(o: Order)    { requires order_stage[o] == Paid       order_stage[o] = Packed }
-    fair action ship(o: Order)    { requires order_stage[o] == Packed     order_stage[o] = Shipped }
-    fair action deliver(o: Order) { requires order_stage[o] == Shipped    order_stage[o] = Delivered }
+  // 以下の event は、どの rule も名指さないので要件に属さない（要件の帰属は
+  // fsl 5 の source が書いた ID だけ）。
+  fair action approve(o: Order) { requires order_stage[o] == Placed     order_stage[o] = Approved }
+  fair action pay(o: Order)     { requires order_stage[o] == Approved   order_stage[o] = Paid }
+  fair action pack(o: Order)    { requires order_stage[o] == Paid       order_stage[o] = Packed }
+  fair action ship(o: Order)    { requires order_stage[o] == Packed     order_stage[o] = Shipped }
+  fair action deliver(o: Order) { requires order_stage[o] == Shipped    order_stage[o] = Delivered }
+  fair action request_return(o: Order) { requires order_stage[o] == Delivered  order_stage[o] = ReturnRequested }
+  // event refund = Shop refunds Order  ReturnRequested -> Refunded  set stock = stock + qty
+  fair action refund(o: Order) {
+    requires order_stage[o] == ReturnRequested
+    order_stage[o] = Refunded
+    stock = stock + order_qty[o]
   }
 
-  requirement REQ-RETURN "A delivered order can be returned and refunded; the stock comes back" {
-    fair action request_return(o: Order) { requires order_stage[o] == Delivered  order_stage[o] = ReturnRequested }
-    // event refund = Shop refunds Order  ReturnRequested -> Refunded  set stock = stock + qty
-    fair action refund(o: Order) {
-      requires order_stage[o] == ReturnRequested
-      order_stage[o] = Refunded
-      stock = stock + order_qty[o]
+  requirement REQ-BUYER "Every placed order has a buyer" {
+    // rule: always Order not in Empty has buyer
+    invariant BuyerKnownAfterPlace {
+      forall o: Order { order_stage[o] != Empty => order_buyer[o] != none }
     }
   }
 
-  // rule: always Order not in Empty has buyer
-  invariant BuyerKnownAfterPlace {
-    forall o: Order { order_stage[o] != Empty => order_buyer[o] != none }
-  }
-
   // goal RefundedOne: some Order can reach Refunded
+  @requirement("RefundedOne", "An order can be refunded")
   reachable RefundedOne {
     exists o: Order { order_stage[o] == Refunded }
   }

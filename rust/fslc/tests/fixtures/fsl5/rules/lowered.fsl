@@ -42,11 +42,14 @@ requirements OrderRules {
     }
   }
 
+  // `only after User pays Order` guards ship; pay only sets the ghost, and
+  // no rule names it, so it belongs to no requirement.
+  fair action pay(o: Order) {
+    requires order_stage[o] == Packed
+    order_did_pay[o] = true
+  }
+
   requirement REQ-1 "An order ships only after it is paid" {
-    fair action pay(o: Order) {
-      requires order_stage[o] == Packed
-      order_did_pay[o] = true
-    }
     fair action ship(o: Order) {
       requires order_stage[o] == Packed
       requires order_did_pay[o]

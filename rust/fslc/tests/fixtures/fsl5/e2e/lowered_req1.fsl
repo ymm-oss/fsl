@@ -14,6 +14,7 @@
 //   decide REQ-2/REQ-3 for Submitted Claim { SmallClaim => ...  LargeClaim => ... }
 //       -> auto_approve に requires claim_amount[c] <= AUTO_LIMIT
 //          mgr_approve / reject に requires claim_amount[c] > AUTO_LIMIT
+//          要件は行の covers（REQ-2 / REQ-3）と表の ID（REQ-2-3, @requirement）
 //   scenario AC-n -> acceptance AC-n（名前付きインスタンスは出現順に 0 から）
 // ════════════════════════════════════════════════════════════════
 requirements ExpenseRequirements {
