@@ -1,0 +1,105 @@
+fsl 5
+// The design draft's fsl3_en.fsl, rules included. The `goal` (a later
+// stage's syntax) is written as the `reachable` it lowers to, and the two
+// property statements carry the names lowered.fsl gives their properties
+// (`Name: always ...`); everything else is the draft's text. It lowers to
+// lowered.fsl.
+requirements AgenticRagToolApprovalSlice {
+  enum Evidence { Missing, Adequate, Inadequate }
+  enum Approval { NoApproval, Requested, Approved, Denied }
+  enum Role { Public, Operator }
+  actor Admin, Retriever, Agent, Operator, Fault
+
+  entity Request {
+    evidence: Evidence = Missing
+    approval: Approval = NoApproval
+    role: Role = Public
+    needs_tool: Bool = false
+    lifecycle New -> EvidenceReady -> ToolApproval -> ToolApproved -> ActionExecuted
+    lifecycle ToolApproval -> Refused
+  }
+
+  concept ToolNeeded         = Request where needs_tool
+  concept OperatorHeld       = Request where role == Operator
+  concept ExplicitlyApproved = Request where approval == Approved
+
+  event grant_operator        = Admin grants Request          in New
+    set role = Operator
+  event prepare_tool_ready    = Retriever prepares Request    New -> EvidenceReady
+    set evidence = Adequate, needs_tool = true
+  event request_tool_approval = Agent requests Request        EvidenceReady -> ToolApproval
+    set approval = Requested
+  event approve_tool          = Operator approves Request     ToolApproval -> ToolApproved
+    set approval = Approved
+  event deny_tool             = Operator denies Request       ToolApproval -> Refused
+    set approval = Denied
+  event execute_tool          = Agent executes Request        ToolApproved -> ActionExecuted
+
+  // Not the regular path: fault events build the states the forbidden
+  // traces probe, and are not fair.
+  fault event downgrade_approval        = Fault downgrades Request  in ToolApproved
+    set approval = Requested
+  fault event revoke_operator           = Fault revokes Request     in ToolApproved
+    set role = Public
+  fault event make_waiting_but_approved = Fault forges Request      in ToolApproval
+    set approval = Approved
+
+  rule REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
+    allow Agent requests Request only for ToolNeeded
+    allow Operator approves Request only for OperatorHeld
+    allow Fault forges Request only for OperatorHeld
+    allow Agent executes Request only for ExplicitlyApproved and OperatorHeld
+    ToolExecutionApproved: always ActionExecuted Request is ExplicitlyApproved and OperatorHeld
+    ExecutionComesFromApprovedStage: Request enters ActionExecuted only from ToolApproved
+  }
+
+  requirement GOAL "副作用toolを実行できる" {
+    reachable CanExecuteTool {
+      exists r: Request { request_stage[r] == ActionExecuted }
+    }
+  }
+
+  scenario AC-TOOL "operator承認後に副作用toolを実行できる" {
+    Admin grants req1
+    Retriever prepares req1
+    Agent requests req1
+    Operator approves req1
+    Agent executes req1
+    then req1 is ActionExecuted
+  }
+
+  forbidden FB-PUBLIC-APPROVE "非operatorは承認できない" {
+    Retriever prepares req1
+    Agent requests req1
+    Operator approves req1
+    then rejected
+  }
+  forbidden FB-EXECUTE-BEFORE-APPROVAL "承認待ちから直接実行できない" {
+    Admin grants req1
+    Retriever prepares req1
+    Agent requests req1
+    Agent executes req1
+    then rejected
+  }
+  forbidden FB-EXECUTE-WITH-DOWNGRADED-APPROVAL "承認状態を戻した後は実行できない" {
+    Admin grants req1
+    Retriever prepares req1
+    Agent requests req1
+    Operator approves req1
+    Fault downgrades req1
+    Agent executes req1
+    then rejected
+  }
+  forbidden FB-EXECUTE-WITH-PUBLIC-ROLE "operator権限を失った後は実行できない" {
+    Admin grants req1
+    Retriever prepares req1
+    Agent requests req1
+    Operator approves req1
+    Fault revokes req1
+    Agent executes req1
+    then rejected
+  }
+}
+verify {
+  instances Request = 1
+}

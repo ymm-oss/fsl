@@ -15,9 +15,9 @@
 //!
 //! The domains are enumerated here, so the language server and the browser
 //! Worker report the same diagnostics as the CLI. A table whose fields'
-//! domain product exceeds [`DOMAIN_BOUND`], or whose condition reads
+//! domain product exceeds [`crate::DOMAIN_BOUND`], or whose condition reads
 //! something other than the entity's fields, constants and enum members, is
-//! not enumerated: [`decision_solver_obligations`] hands it to the native
+//! not enumerated: [`crate::solver_obligations`] hands it to the native
 //! `check`, which asks the solver.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -29,8 +29,8 @@ use fsl_syntax::{
 use serde_json::{Value, json};
 
 use crate::{
-    CoreError, CoreErrorKind, FslValue, KernelModel, KernelSpec, LoweringStep, OriginChain,
-    OriginId, OriginSite, TypeRef,
+    CoreError, CoreErrorKind, FslValue, KernelModel, LoweringStep, OriginChain, OriginId,
+    OriginSite,
 };
 
 /// No row of a decision table holds for some value of the fields.
@@ -40,11 +40,9 @@ pub const DECIDE_OVERLAP: &str = "decide_overlap";
 /// Warning: a row of a decision table holds for no value.
 pub const DECIDE_ROW_EMPTIED: &str = "decide_row_emptied";
 
-/// The largest product of field-domain sizes a table is enumerated over
-/// (decisions/048 J3); a larger table goes to the solver.
-pub const DOMAIN_BOUND: u128 = 1_000_000;
+use crate::finite_domain::{Assignment, display, domains, enumerate, evaluate, names};
 
-/// One proof the solver discharges for a table [`DOMAIN_BOUND`] keeps from
+/// One proof the solver discharges for a table [`crate::DOMAIN_BOUND`] keeps from
 /// enumeration: `property` is an invariant over the whole state that holds
 /// exactly when the table passes that check.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,9 +66,6 @@ pub(crate) struct Tables {
     fields: BTreeMap<String, Vec<ProcessField>>,
 }
 
-/// One value per field a table reads, by `Entity.field` name.
-type Assignment = BTreeMap<String, FslValue>;
-
 /// The result of enumerating one table.
 enum Verdict {
     Checked {
@@ -91,15 +86,6 @@ fn binary(op: &str, left: Expr, right: Expr) -> Expr {
         op: op.to_owned(),
         left: Box::new(left),
         right: Box::new(right),
-    }
-}
-
-fn display(value: &FslValue) -> String {
-    match value {
-        FslValue::Int(value) => value.to_string(),
-        FslValue::Bool(value) => value.to_string(),
-        FslValue::Enum { member, .. } => member.clone(),
-        other => format!("{other:?}"),
     }
 }
 
@@ -272,14 +258,7 @@ impl Tables {
     ///
     /// Returns [`DECIDE_NOT_EXHAUSTIVE`] or [`DECIDE_OVERLAP`] for the first
     /// table that fails.
-    pub(crate) fn check(&self, kernel: &KernelSpec) -> Result<Vec<Value>, CoreError> {
-        if self.tables.is_empty() {
-            return Ok(Vec::new());
-        }
-        // A model error is reported by the stage that builds the model.
-        let Ok(model) = crate::build_model(kernel.clone()) else {
-            return Ok(Vec::new());
-        };
+    pub(crate) fn check(&self, model: &KernelModel) -> Result<Vec<Value>, CoreError> {
         let mut warnings = Vec::new();
         for table in &self.tables {
             let Verdict::Checked {
@@ -287,7 +266,7 @@ impl Tables {
                 overlap,
                 empty,
                 constants,
-            } = self.verdict(table, &model)
+            } = self.verdict(table, model)
             else {
                 continue;
             };
@@ -355,8 +334,13 @@ impl Tables {
         Ok(warnings)
     }
 
+    /// Whether the document has no table.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.tables.is_empty()
+    }
+
     /// The tables [`Self::check`] did not enumerate, as solver obligations.
-    fn obligations(&self, model: &KernelModel) -> Vec<DecisionObligation> {
+    pub(crate) fn obligations(&self, model: &KernelModel) -> Vec<DecisionObligation> {
         let mut obligations = Vec::new();
         for table in &self.tables {
             let Verdict::Deferred(reason) = self.verdict(table, model) else {
@@ -425,9 +409,9 @@ impl Tables {
     }
 
     /// Enumerate `table` over the domains of the fields it reads.
-    #[allow(clippy::too_many_lines)]
     fn verdict(&self, table: &DecisionTable, model: &KernelModel) -> Verdict {
         let prefix = format!("{}.", table.entity);
+        let is_field = |name: &str| name.starts_with(&prefix);
         let mut read = BTreeSet::new();
         let mut constants = BTreeMap::new();
         for expression in table
@@ -436,82 +420,57 @@ impl Tables {
             .map(|row| &row.condition)
             .chain(&table.assuming)
         {
-            if let Err(reason) = names(expression, &prefix, model, &mut read, &mut constants) {
+            if let Err(reason) = names(expression, &is_field, model, &mut read, &mut constants) {
                 return Verdict::Deferred(reason);
             }
         }
-        let mut domains = Vec::new();
-        let mut size: u128 = 1;
-        for field in self.fields.get(&table.entity).into_iter().flatten() {
-            let name = format!("{prefix}{}", field.name);
-            if !read.contains(&name) {
-                continue;
-            }
-            let ty = match field.type_name.name.as_str() {
-                "Bool" if field.type_name.namespace.is_none() => TypeRef::Bool,
-                "Int" if field.type_name.namespace.is_none() => {
-                    return Verdict::Deferred(format!(
-                        "field '{}' is an unbounded Int",
-                        field.name
-                    ));
-                }
-                _ => TypeRef::Named(field.type_name.namespace.as_ref().map_or_else(
-                    || field.type_name.name.clone(),
-                    |namespace| format!("{namespace}.{}", field.type_name.name),
-                )),
-            };
-            let Ok(values) = model.domain_values(&ty) else {
-                return Verdict::Deferred(format!("field '{}' has no finite domain", field.name));
-            };
-            size = size.saturating_mul(values.len() as u128);
-            domains.push((name, values));
-        }
-        if size > DOMAIN_BOUND {
-            return Verdict::Deferred(format!(
-                "its fields take {size} values, more than the {DOMAIN_BOUND} enumerated"
-            ));
-        }
+        let wanted = self
+            .fields
+            .get(&table.entity)
+            .into_iter()
+            .flatten()
+            .filter_map(|field| {
+                let name = format!("{prefix}{}", field.name);
+                read.contains(&name)
+                    .then(|| (name, &field.type_name, format!("field '{}'", field.name)))
+            })
+            .collect::<Vec<_>>();
+        let domains = match domains(model, &wanted, "fields") {
+            Ok(domains) => domains,
+            Err(reason) => return Verdict::Deferred(reason),
+        };
         let rows = &table.rows;
+        let otherwise = rows.iter().any(|row| row.otherwise);
         let mut gap = None;
         let mut overlap = None;
         let mut taken = vec![false; rows.len()];
-        let mut assignment = domains
-            .iter()
-            .map(|(name, values)| (name.clone(), values[0].clone()))
-            .collect::<Assignment>();
-        let mut odometer = vec![0usize; domains.len()];
-        if domains.iter().any(|(_, values)| values.is_empty()) {
-            return Verdict::Deferred("a field's domain is empty".to_owned());
-        }
-        loop {
-            let holds = |expression: &Expr| evaluate(expression, &assignment, model);
+        let enumerated = enumerate(&domains, &Assignment::new(), |assignment| {
+            let holds = |expression: &Expr| evaluate(expression, assignment, model);
             let admitted = match table.assuming.as_ref().map(holds) {
                 None | Some(Ok(FslValue::Bool(true))) => true,
                 Some(Ok(FslValue::Bool(false))) => false,
-                Some(Ok(_)) => return Verdict::Deferred("`assuming` is not Boolean".to_owned()),
-                Some(Err(reason)) => return Verdict::Deferred(reason),
+                Some(Ok(_)) => return Err("`assuming` is not Boolean".to_owned()),
+                Some(Err(reason)) => return Err(reason),
             };
             if admitted {
                 let mut holding = Vec::new();
                 for (index, row) in rows.iter().enumerate() {
-                    match holds(&row.condition) {
-                        Ok(FslValue::Bool(true)) => {
+                    match holds(&row.condition)? {
+                        FslValue::Bool(true) => {
                             taken[index] = true;
                             if !row.otherwise {
                                 holding.push(index);
                             }
                         }
-                        Ok(FslValue::Bool(false)) => {}
-                        Ok(_) => {
-                            return Verdict::Deferred(format!(
+                        FslValue::Bool(false) => {}
+                        _ => {
+                            return Err(format!(
                                 "the condition of row {} is not Boolean",
                                 index + 1
                             ));
                         }
-                        Err(reason) => return Verdict::Deferred(reason),
                     }
                 }
-                let otherwise = rows.iter().any(|row| row.otherwise);
                 if holding.is_empty() && !otherwise && gap.is_none() {
                     gap = Some(assignment.clone());
                 }
@@ -521,33 +480,22 @@ impl Tables {
                     overlap = Some((first, second, assignment.clone()));
                 }
             }
-            // Advance the odometer, last field fastest.
-            let mut position = domains.len();
-            loop {
-                if position == 0 {
-                    let empty = taken
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, taken)| !**taken)
-                        .map(|(index, _)| index)
-                        .collect();
-                    return Verdict::Checked {
-                        gap,
-                        overlap,
-                        empty,
-                        constants,
-                    };
-                }
-                position -= 1;
-                odometer[position] += 1;
-                let (name, values) = &domains[position];
-                if odometer[position] < values.len() {
-                    assignment.insert(name.clone(), values[odometer[position]].clone());
-                    break;
-                }
-                odometer[position] = 0;
-                assignment.insert(name.clone(), values[0].clone());
-            }
+            Ok(true)
+        });
+        if let Err(reason) = enumerated {
+            return Verdict::Deferred(reason);
+        }
+        let empty = taken
+            .iter()
+            .enumerate()
+            .filter(|(_, taken)| !**taken)
+            .map(|(index, _)| index)
+            .collect();
+        Verdict::Checked {
+            gap,
+            overlap,
+            empty,
+            constants,
         }
     }
 }
@@ -579,150 +527,10 @@ fn table_origin(table: &DecisionTable, id: &str) -> OriginChain {
     }
 }
 
-/// Record the fields (`prefix…` names) and constants `expression` reads, or
-/// say why it cannot be enumerated.
-fn names(
-    expression: &Expr,
-    prefix: &str,
-    model: &KernelModel,
-    fields: &mut BTreeSet<String>,
-    constants: &mut BTreeMap<String, FslValue>,
-) -> Result<(), String> {
-    let mut recurse = |expression: &Expr| names(expression, prefix, model, fields, constants);
-    match expression {
-        Expr::Num(_) | Expr::Bool(_) | Expr::EnumMember { .. } => Ok(()),
-        Expr::Var(name) if name.starts_with(prefix) => {
-            fields.insert(name.clone());
-            Ok(())
-        }
-        Expr::Var(name) => {
-            if let Some(value) = model.consts.get(name) {
-                constants.insert(name.clone(), value.clone());
-                Ok(())
-            } else if model.enum_members.contains_key(name) {
-                Ok(())
-            } else {
-                Err(format!(
-                    "it reads '{name}', which is not a field of the entity"
-                ))
-            }
-        }
-        Expr::Binary { left, right, .. } | Expr::BinaryNamed { left, right, .. } => {
-            recurse(left)?;
-            recurse(right)
-        }
-        Expr::Neg(value) | Expr::Not(value) | Expr::UnaryNamed { expr: value, .. } => {
-            recurse(value)
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            recurse(condition)?;
-            recurse(then_expr)?;
-            recurse(else_expr)
-        }
-        _ => Err("its condition uses an expression the enumeration does not evaluate".to_owned()),
-    }
-}
-
-/// `expression` at one value of the fields.
-fn evaluate(
-    expression: &Expr,
-    assignment: &Assignment,
-    model: &KernelModel,
-) -> Result<FslValue, String> {
-    let recurse = |expression: &Expr| evaluate(expression, assignment, model);
-    let int = |value: FslValue| match value {
-        FslValue::Int(value) => Ok(value),
-        other => Err(format!("expected an integer, found {other:?}")),
-    };
-    let boolean = |value: FslValue| match value {
-        FslValue::Bool(value) => Ok(value),
-        other => Err(format!("expected a Boolean, found {other:?}")),
-    };
-    let overflow = || "integer overflow".to_owned();
-    Ok(match expression {
-        Expr::Num(value) => FslValue::Int(*value),
-        Expr::Bool(value) => FslValue::Bool(*value),
-        Expr::EnumMember { type_name, member } => FslValue::Enum {
-            type_name: type_name.clone(),
-            member: member.clone(),
-        },
-        Expr::Var(name) => assignment
-            .get(name)
-            .or_else(|| model.consts.get(name))
-            .or_else(|| model.enum_members.get(name))
-            .cloned()
-            .ok_or_else(|| format!("'{name}' has no value"))?,
-        Expr::Neg(value) => {
-            FslValue::Int(int(recurse(value)?)?.checked_neg().ok_or_else(overflow)?)
-        }
-        Expr::Not(value) => FslValue::Bool(!boolean(recurse(value)?)?),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            if boolean(recurse(condition)?)? {
-                recurse(then_expr)?
-            } else {
-                recurse(else_expr)?
-            }
-        }
-        Expr::UnaryNamed { name, expr, .. } if name == "abs" => {
-            FslValue::Int(int(recurse(expr)?)?.checked_abs().ok_or_else(overflow)?)
-        }
-        Expr::BinaryNamed { name, left, right } if name == "min" || name == "max" => {
-            let (left, right) = (int(recurse(left)?)?, int(recurse(right)?)?);
-            FslValue::Int(if name == "min" {
-                left.min(right)
-            } else {
-                left.max(right)
-            })
-        }
-        Expr::Binary { op, left, right } => match op.as_str() {
-            "and" => FslValue::Bool(boolean(recurse(left)?)? && boolean(recurse(right)?)?),
-            "or" => FslValue::Bool(boolean(recurse(left)?)? || boolean(recurse(right)?)?),
-            "=>" => FslValue::Bool(!boolean(recurse(left)?)? || boolean(recurse(right)?)?),
-            "==" => FslValue::Bool(recurse(left)? == recurse(right)?),
-            "!=" => FslValue::Bool(recurse(left)? != recurse(right)?),
-            _ => {
-                let (left, right) = (int(recurse(left)?)?, int(recurse(right)?)?);
-                match op.as_str() {
-                    "<" => FslValue::Bool(left < right),
-                    "<=" => FslValue::Bool(left <= right),
-                    ">" => FslValue::Bool(left > right),
-                    ">=" => FslValue::Bool(left >= right),
-                    "+" => FslValue::Int(left.checked_add(right).ok_or_else(overflow)?),
-                    "-" => FslValue::Int(left.checked_sub(right).ok_or_else(overflow)?),
-                    "*" => FslValue::Int(left.checked_mul(right).ok_or_else(overflow)?),
-                    "/" if right != 0 => FslValue::Int(left.div_euclid(right)),
-                    "%" if right != 0 => FslValue::Int(left.rem_euclid(right)),
-                    _ => return Err(format!("operator '{op}' is not evaluated here")),
-                }
-            }
-        },
-        _ => return Err("expression is not evaluated here".to_owned()),
-    })
-}
-
-/// The checks of `requirements`' decision tables that enumeration could not
-/// decide, for the native `check` to discharge with the solver.
-#[must_use]
-pub fn decision_solver_obligations(
-    requirements: &SurfaceRequirements,
-    model: &KernelModel,
-) -> Vec<DecisionObligation> {
-    Tables::of(requirements).obligations(model)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::finite_domain::DOMAIN_BOUND;
 
     fn span() -> Span {
         let position = fsl_syntax::SourcePos {

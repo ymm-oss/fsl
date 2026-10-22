@@ -16,10 +16,15 @@
 //!
 //! The process form itself is not part of this edition
 //! (`mixed_requirements_forms`, decisions/046 Q2).
+//!
+//! `rule` blocks (fsl 5 plan §3 S6) are read and applied by [`rules`]: their
+//! guards land on the desugared events' [`EventForm::rule_guards`], their
+//! properties on [`NextEditionRequirements::properties`].
 
 use std::collections::{BTreeMap, BTreeSet};
 
 mod decide;
+mod rules;
 
 use super::{Parser, join_span};
 use crate::syntax_expr::{ExpressionMode, parse_tokens_expression};
@@ -132,6 +137,7 @@ pub(super) struct Pending {
     events: Vec<EventDeclaration>,
     traces: Vec<(usize, TraceDeclaration)>,
     decisions: Vec<decide::DecideDeclaration>,
+    rules: Vec<(usize, rules::RuleDeclaration)>,
 }
 
 fn is_symbol(token: &Token, symbol: &str) -> bool {
@@ -209,6 +215,9 @@ impl Parser<'_> {
         } else if self.peek_ident("scenario") || self.peek_ident("forbidden") {
             let trace = self.trace_declaration()?;
             pending.traces.push((position, trace));
+        } else if rules::starts_rule(self) {
+            let rule = self.rule_declaration()?;
+            pending.rules.push((position, rule));
         } else {
             return Ok(false);
         }
@@ -821,10 +830,13 @@ impl Pending {
                         verb,
                         fair: !event.fault,
                         moves,
+                        rule_guards: Vec::new(),
                     }),
                 })));
         }
 
+        // Decision tables, then rules: each adds its guards to the events'
+        // `rule_guards`, one `requires` line per table and per statement.
         next.decisions = decide::apply(
             self.decisions,
             &mut transitions,
@@ -833,8 +845,20 @@ impl Pending {
             &next.concepts,
             &actors,
         )?;
+        let concepts = next.concepts.clone();
+        let mut ruled = rules::apply(
+            self.rules,
+            &rules::Scope {
+                actors: &actors,
+                entities: &entities,
+                concepts: &concepts,
+                events: &signatures,
+            },
+            &mut transitions,
+            &mut next,
+        )?;
 
-        let mut generated = Vec::new();
+        let mut generated = std::mem::take(&mut ruled.generated);
         for (position, declaration) in self.entities {
             let entity = &entities[&declaration.name.text];
             for (from, to, span) in &entity.edges {
@@ -872,8 +896,15 @@ impl Pending {
                 declaration.name.span,
             )
             .map_err(|error| ParseError::new(error.message, error.span))?;
-            let fields = (!declaration.fields.is_empty()).then_some(ProcessFields {
-                fields: declaration.fields,
+            let mut fields = declaration.fields;
+            fields.extend(
+                ruled
+                    .ghosts
+                    .remove(&declaration.name.text)
+                    .unwrap_or_default(),
+            );
+            let fields = (!fields.is_empty()).then_some(ProcessFields {
+                fields,
                 span: declaration.span,
             });
             generated.push((
@@ -904,8 +935,11 @@ impl Pending {
             merged.push(item);
         }
         merged.extend(generated.map(|(_, item)| item));
+        rules::warn_unprobed(&ruled, &merged, &mut next);
         next.warnings
             .sort_by_key(|warning| (warning.span.start.line, warning.span.start.column));
+        next.notes
+            .sort_by_key(|note| (note.span.start.line, note.span.start.column));
         Ok((merged, next))
     }
 }

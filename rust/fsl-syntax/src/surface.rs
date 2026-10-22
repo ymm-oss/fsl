@@ -346,6 +346,58 @@ pub struct EventForm {
     pub fair: bool,
     /// `false` for `in S`: the event keeps its stage and writes none.
     pub moves: bool,
+    /// The guards rules add to the event, in source order.
+    pub rule_guards: Vec<RuleGuard>,
+}
+
+/// One guard a next-edition declaration adds to an event: a decision table
+/// (`decide`, the disjunction of the rows naming the event) or a rule
+/// statement (`allow`, `never`, `only after`). Each is one `requires` line
+/// of the event's action, after the stage guard, in the order the guards were
+/// added: decision tables first, then rule statements, each in source order.
+///
+/// The condition is written over one instance of the event's entity: a field
+/// is spelled `Entity.field` (a rule may also spell it bare), the entity's
+/// stage [`stage_reference`], and an input by its bare name.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuleGuard {
+    /// `decide`, `allow`, `never` or `after`, which is also the kind of the
+    /// guard's lowering step.
+    pub kind: &'static str,
+    /// The requirement id of the enclosing table or rule.
+    pub requirement: String,
+    pub condition: Expr,
+    /// The statement (or the table's rows) as written, for the guard's origin.
+    pub detail: String,
+    pub span: Span,
+}
+
+/// One property a next-edition `rule` declares: `always …` (an invariant) or
+/// `… enters … only from …` (a transition property), over every instance of
+/// `entity`, optionally named (`Name: always …`). The condition is spelled as in [`RuleGuard`]; a transition
+/// property reads the previous state with `old(…)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuleProperty {
+    /// `always` or `enters`, the kind of the property's lowering step.
+    pub kind: &'static str,
+    /// The name written before the statement (`Name: always …`); `None`
+    /// when the core generates one.
+    pub name: Option<String>,
+    pub requirement: String,
+    pub requirement_text: String,
+    pub requirement_span: Span,
+    pub entity: String,
+    pub condition: Expr,
+    /// The statement as written, for the property's origin.
+    pub detail: String,
+    pub span: Span,
+}
+
+/// How a rule condition reads the stage of the entity instance it is about.
+/// No identifier contains a space, so the spelling meets no declared name.
+#[must_use]
+pub fn stage_reference(entity: &str) -> String {
+    format!("{entity} stage")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -659,6 +711,10 @@ pub struct NextEditionRequirements {
     pub concepts: Vec<ConceptDeclaration>,
     /// Warnings found while desugaring, in source order.
     pub warnings: Vec<EditionWarning>,
+    /// Informational notes found while desugaring, in source order.
+    pub notes: Vec<EditionWarning>,
+    /// The properties the rules declare, in source order.
+    pub properties: Vec<RuleProperty>,
     /// The decision tables, already folded into their events' guards; kept
     /// for the exhaustiveness / overlap checks and the lowering's origins.
     pub decisions: Vec<DecisionTable>,
