@@ -229,7 +229,7 @@ fn property_name<'a>(
                 format!(
                     "rule {} `{}` {verb} the property '{name}', which is already \
                      declared; rename one of them",
-                    property.requirement, property.detail
+                    property.requirement, property.written
                 ),
                 property.span,
             )

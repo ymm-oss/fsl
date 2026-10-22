@@ -373,6 +373,9 @@ pub struct RuleGuard {
     /// source spelled it, so no alias or Japanese word reaches the Kernel's
     /// provenance.
     pub detail: String,
+    /// The statement (or the rows) as written, whitespace collapsed: the
+    /// text diagnostics and the document quote. Never an origin's detail.
+    pub written: String,
     pub span: Span,
 }
 
@@ -395,6 +398,8 @@ pub struct RuleProperty {
     /// The statement in canonical names and English keywords, for the
     /// property's origin (see [`RuleGuard::detail`]).
     pub detail: String,
+    /// The statement as written (see [`RuleGuard::written`]).
+    pub written: String,
     pub span: Span,
 }
 
@@ -811,6 +816,8 @@ pub struct DecisionRow {
     /// The row in canonical names and English keywords, without particles,
     /// `SmallClaim => System approves` (see [`RuleGuard::detail`]).
     pub source: String,
+    /// The row as written, whitespace collapsed (see [`RuleGuard::written`]).
+    pub written: String,
     /// The row's condition at the table's stage, over the entity's fields as
     /// `Entity.field` names (concepts expanded, their stages decided).
     pub condition: Expr,

@@ -971,6 +971,7 @@ pub(in crate::parser) fn apply(
                                 requirement: rule.id.clone(),
                                 condition,
                                 detail: text.clone(),
+                                written: detail.clone(),
                                 span,
                             },
                         );
@@ -1061,6 +1062,7 @@ pub(in crate::parser) fn apply(
                                 requirement: rule.id.clone(),
                                 condition: Expr::Var(format!("{entity_name}.{ghost}")),
                                 detail: text.clone(),
+                                written: detail.clone(),
                                 span,
                             },
                         );
@@ -1124,6 +1126,7 @@ pub(in crate::parser) fn apply(
                         entity: entity.text.clone(),
                         condition: binary("=>", stage_is(&entity.text, &target.text), before),
                         detail: text.clone(),
+                        written: detail.clone(),
                         span,
                     });
                 }
@@ -1143,6 +1146,7 @@ pub(in crate::parser) fn apply(
                         entity: entity_name,
                         condition,
                         detail: text.clone(),
+                        written: detail.clone(),
                         span,
                     });
                 }
@@ -1197,6 +1201,7 @@ pub(in crate::parser) fn apply(
                             field_names(has, declared, &entity.text),
                         ),
                         detail: text.clone(),
+                        written: detail.clone(),
                         span,
                     });
                 }
