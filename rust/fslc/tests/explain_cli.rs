@@ -366,7 +366,6 @@ fn explain_readable_names_the_origin_of_each_requires() {
     event: System approves Claim Submitted -> Approved (fsl5_en.fsl:27)
     requirement: REQ-2: Claims at or below AUTO_LIMIT are auto-approved by the system
     requirement: REQ-2-3: Who handles a submitted claim
-    requirement: auto_approve: by System
     requires:
       - requires claim_stage[c] == Submitted  ← move Submitted -> Approved (fsl5_en.fsl:27)
       - requires claim_amount[c] <= AUTO_LIMIT  ← decide REQ-2-3 for Submitted Claim row 1: SmallClaim => System approves (fsl5_en.fsl:37)
