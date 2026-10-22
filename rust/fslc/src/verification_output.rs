@@ -1367,6 +1367,39 @@ pub fn validate_requirement_trace_source(
     )
 }
 
+/// The requirement-trace gate for a consumer that reads acceptance /
+/// forbidden cases and must not report a result for a spec whose traces the
+/// gate refuses (#1285 stage 2, #1242, #1243).
+///
+/// Returns the checked contract (`None` when `source` is not a requirements
+/// document), or the envelope the consumer reports instead of its own output,
+/// with exit status 2: the gate's failure for a rejected trace, or a
+/// semantics error for a trace that cannot be parsed or replayed.
+///
+/// # Errors
+///
+/// Returns that envelope whenever the gate does not pass.
+pub fn require_trace_gate(
+    envelope: &Map<String, Value>,
+    source: &str,
+    model: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<CheckedTraceContract>, Value> {
+    match validate_requirement_trace_source(envelope, source, model, options) {
+        Ok(TraceGate::Passed(contract)) => Ok(Some(contract)),
+        Ok(TraceGate::NotRequirements) => Ok(None),
+        Ok(TraceGate::Rejected { failure, .. }) => Err(failure),
+        Err(message) => Err(render_semantic_error(
+            envelope.clone(),
+            &message,
+            None,
+            &DiagnosticClass::Message,
+            None,
+            None,
+        )),
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn validate_requirement_trace_contract(
     envelope: &Map<String, Value>,
@@ -1556,7 +1589,7 @@ fn validate_requirement_trace_contract(
                         json!({
                             "kind": violation.kind,
                             "name": model.names().public_violation(&violation.name, None).into_string(),
-                            "action": model.names().legacy_action_spelling(&instance.action).into_string(),
+                            "action": model.names().public_action(&instance.action).into_string(),
                             "params": params,
                         }),
                     );
@@ -3176,7 +3209,7 @@ fn solver_vacuity_warnings(model: &KernelModel, result: &BmcResult) -> Vec<Value
 }
 
 fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
-    let label = model.action_display_name(finding.name());
+    let label = model.names().public_name(finding.name()).into_string();
     let (message, hint) = match finding {
         VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
             let names = frozen_vars
@@ -3477,8 +3510,8 @@ fn violation_blame_json(
     json!({"conjuncts": [conjunct]})
 }
 
-/// Serialize solver cost, publishing compose component names the way every
-/// other field of the envelope does.
+/// Serialize solver cost, publishing every name the way every other field of
+/// the envelope does (a branch split `submit__b1` as `submit.b1`, #1256).
 ///
 /// # Panics
 ///
@@ -3494,9 +3527,9 @@ pub fn cost_json(model: &KernelModel, cost: fsl_solver::VerificationCost<'_>) ->
     {
         if let Some(public) = property["name"]
             .as_str()
-            .and_then(|name| model.compose_public_name(name))
+            .map(|name| model.names().public_name(name))
         {
-            property["name"] = json!(public);
+            property["name"] = json!(public.into_string());
         }
     }
     // The solver orders properties by internal `(kind, name)`; the published

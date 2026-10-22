@@ -162,7 +162,7 @@ pub fn conformance_vectors_for_version(
                         "kind":violation.kind,
                         "name":model
                             .names()
-                            .public_violation_key(&violation.name, action)
+                            .public_violation(&violation.name, Some(action))
                             .as_str(),
                         "state_changed":after != before,"state":after,
                         "attempted_state":attempted

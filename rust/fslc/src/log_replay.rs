@@ -268,18 +268,14 @@ pub(crate) fn untyped_replay_binder_enum_mapping_span(
 }
 
 /// Whether a JSONL log action selects `action` under `maps auto`: its public
-/// name, or the [`display`] spelling `maps auto` matched before #1234.
+/// name, which is also the spelling `maps auto` matched before #1234 now that
+/// no declared name contains `__` (#1256).
 pub(crate) fn log_action_matches(
     model: &KernelModel,
     action: &fsl_core::ActionDef,
     source: &str,
 ) -> bool {
     model.action_display_name(&action.name) == source
-        || model
-            .names()
-            .legacy_action_spelling(&action.name)
-            .into_string()
-            == source
 }
 
 pub(crate) fn parse_params(

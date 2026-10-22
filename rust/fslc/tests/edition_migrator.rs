@@ -858,3 +858,259 @@ fn refinement_dialect_is_still_not_a_standalone_lint_migrate_target() {
         Some(0)
     );
 }
+
+// Requirements `process` forms under `--edition 5` (fsl 5 plan §3 S9): the
+// migration rewrites them into `entity` / `event` / `rule … allow`, keeps the
+// checked kernel, and refuses what it cannot rewrite without touching a file.
+
+const EDITION_GATE: &str = "fsl5";
+
+fn run_gated(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, EDITION_GATE)
+        .output()
+        .expect("run fslc")
+}
+
+fn e2e_fixture(name: &str) -> String {
+    std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fsl5/e2e")
+            .join(name),
+    )
+    .expect("read e2e fixture")
+}
+
+/// `fslc kernel` of `path` without what a rewrite may move: locations,
+/// source nodes, origins and the singular legacy requirement projection.
+fn located_free_kernel(path: &Path) -> Value {
+    fn strip(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                for key in [
+                    "span",
+                    "source_node_id",
+                    "source_node_ids",
+                    "reverse_index",
+                    "origin",
+                    "requirement",
+                ] {
+                    object.remove(key);
+                }
+                object.values_mut().for_each(strip);
+            }
+            Value::Array(values) => values.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let output = run_gated(&["kernel", path.to_str().expect("UTF-8 path")]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let mut kernel = json(&output);
+    strip(&mut kernel);
+    kernel
+}
+
+#[test]
+fn edition_5_rewrites_the_e2e_process_form_into_entity_events_and_rules_keeping_the_kernel() {
+    let directory = FixtureDir::new();
+    directory.write("1_business.fsl", &e2e_fixture("1_business.fsl"));
+    let original_source = e2e_fixture("original.fsl");
+    let original = directory.write("original.fsl", &original_source);
+    let path = original.to_str().expect("UTF-8 path");
+    let before = located_free_kernel(&original);
+
+    // Without the gate `--edition 5` is refused, and the default edition
+    // rewrites no process.
+    let ungated = run(&["migrate", path, "--edition", "5"]);
+    assert_eq!(ungated.status.code(), Some(2));
+    let ungated = json(&run(&["migrate", path]));
+    assert!(
+        ungated["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .all(|finding| finding["code"] != "legacy_process_form"),
+        "{ungated:#}"
+    );
+    assert_eq!(text(&original), original_source);
+
+    let output = run_gated(&["migrate", path, "--edition", "5", "--write"]);
+    let migrated = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{migrated:#}");
+    assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+    let findings = migrated["files"][0]["findings"]
+        .as_array()
+        .expect("findings");
+    let process = findings
+        .iter()
+        .find(|finding| finding["code"] == "legacy_process_form")
+        .unwrap_or_else(|| panic!("no process finding: {migrated:#}"));
+    assert_eq!(process["loc"]["line"], 34, "{process:#}");
+
+    let rewritten = text(&original);
+    assert!(rewritten.contains("\nfsl 5\nrequirements"), "{rewritten}");
+    for expected in [
+        "  actor Employee, System, Manager, Finance\n",
+        "  entity Claim {\n    amount: Amount = 0\n    lifecycle Draft -> Submitted -> Approved\n    \
+         lifecycle Submitted -> Rejected\n    lifecycle Approved -> Paid\n  }\n",
+        "  event submit = Employee submit Claim with a: Amount Draft -> Submitted\n    set amount = a\n",
+        "  event pay = Finance pay Claim Approved -> Paid\n",
+        "    allow Employee submit Claim only when a > 0\n",
+        "    allow Manager mgr_approve Claim only when amount > AUTO_LIMIT\n    \
+         allow Manager reject Claim only when amount > AUTO_LIMIT\n",
+    ] {
+        assert!(
+            rewritten.contains(expected),
+            "missing {expected:?} in:\n{rewritten}"
+        );
+    }
+    assert!(
+        rewritten
+            .lines()
+            .map(str::trim_start)
+            .all(|line| { !line.starts_with("process ") && !line.starts_with("transition ") }),
+        "{rewritten}"
+    );
+
+    let checked = run_gated(&["check", path]);
+    assert_eq!(checked.status.code(), Some(0), "{:#}", json(&checked));
+    assert_eq!(json(&checked)["result"], "ok");
+    assert_eq!(located_free_kernel(&original), before);
+
+    let again = json(&run_gated(&["migrate", path, "--edition", "5"]));
+    assert_eq!(again["changed"], 0, "{again:#}");
+}
+
+#[test]
+fn edition_5_process_forms_it_cannot_rewrite_are_manual_required_and_no_file_is_written() {
+    let cases = [
+        (
+            "guard_without_requirement",
+            6,
+            "requirements Guarded {\n  number Amount\n  process Claim with amount: Amount = 0 {\n    \
+             stages Draft, Submitted\n    initial Draft\n    transition submit Draft -> Submitted by Employee\n      \
+             with a: Amount\n      when a > 0\n      set amount = a\n  }\n}\n\
+             verify {\n  instances Claim = 2\n  values Amount = 0..2\n}\n",
+        ),
+        (
+            "input_shares_field_name",
+            6,
+            "requirements Shadow {\n  number Amount\n  process Claim with amount: Amount = 0 {\n    \
+             stages Draft, Submitted\n    initial Draft\n    transition submit Draft -> Submitted by Employee\n      \
+             with amount: Amount\n      set amount = amount\n      covers REQ-1 \"submit\"\n  }\n}\n\
+             verify {\n  instances Claim = 2\n  values Amount = 0..2\n}\n",
+        ),
+        (
+            "process_entity_shared",
+            2,
+            "requirements Shared {\n  process claims.Claim {\n    stages Draft, Paid\n    initial Draft\n    \
+             transition pay Draft -> Paid by Finance\n  }\n  process legacy.Claim {\n    stages Open, Closed\n    \
+             initial Open\n    transition close Open -> Closed by Clerk\n  }\n}\n\
+             verify { instances Claim = 2 }\n",
+        ),
+        (
+            "initial_not_first_stage",
+            2,
+            "requirements Late {\n  process Claim {\n    stages Paid, Draft\n    initial Draft\n    \
+             transition pay Draft -> Paid by Finance\n  }\n}\nverify { instances Claim = 2 }\n",
+        ),
+        (
+            "transition_annotation",
+            6,
+            "requirements Annotated {\n  process Claim {\n    stages Draft, Paid\n    initial Draft\n    \
+             @requirement(\"REQ-PAY\", \"payment closes the claim\")\n    \
+             transition pay Draft -> Paid by Finance\n  }\n}\nverify { instances Claim = 1 }\n",
+        ),
+    ];
+    let directory = FixtureDir::new();
+    let convertible_source = "requirements Plain {\n  process Claim {\n    stages Draft, Paid\n    \
+                              initial Draft\n    transition pay Draft -> Paid by Finance\n  }\n}\n\
+                              verify { instances Claim = 1 }\n";
+    let convertible = directory.write("convertible.fsl", convertible_source);
+    for (reason, line, source) in cases {
+        let path = directory.write(&format!("{reason}.fsl"), source);
+        let path = path.as_path();
+        let checked = run(&["check", path.to_str().expect("UTF-8 path")]);
+        assert_eq!(
+            checked.status.code(),
+            Some(0),
+            "{reason}: {:#}",
+            json(&checked)
+        );
+
+        let output = run_gated(&[
+            "migrate",
+            convertible.to_str().expect("UTF-8 path"),
+            path.to_str().expect("UTF-8 path"),
+            "--edition",
+            "5",
+            "--write",
+        ]);
+        let migrated = json(&output);
+        assert_eq!(output.status.code(), Some(1), "{reason}: {migrated:#}");
+        assert_eq!(migrated["result"], "migrate_manual_required", "{reason}");
+        assert_eq!(migrated["written"], false, "{reason}");
+        let manual = migrated["files"][1]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .filter(|finding| finding["code"] == "migrate_manual_required")
+            .collect::<Vec<_>>();
+        assert!(!manual.is_empty(), "{reason}: {migrated:#}");
+        assert!(
+            manual.iter().all(
+                |finding| finding["reason"] == reason && finding["machine_applicable"] == false
+            ),
+            "{reason}: {migrated:#}"
+        );
+        assert_eq!(manual[0]["loc"]["line"], line, "{reason}: {migrated:#}");
+        assert_eq!(migrated["files"][1]["changed"], false, "{reason}");
+        assert_eq!(text(path), source, "{reason}: the file is left as it was");
+        assert_eq!(
+            text(&convertible),
+            convertible_source,
+            "{reason}: no other input of the run is written"
+        );
+    }
+}
+
+/// Acceptance 3: the migration's own kernel contract is what stops a wrong
+/// rewrite. A converter that dropped one guard yields a document that still
+/// checks, so only the contract can tell.
+#[test]
+fn dropping_one_guard_in_the_process_form_converter_fails_the_kernel_contract() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/e2e/2_requirements.fsl");
+    let source = text(&path);
+    let options = fslc_rust::unstable_gate::from_value(Some(EDITION_GATE));
+    let conversion = fslc_rust::migration::plan_process_conversion(&source, &options)
+        .expect("the e2e process form is rewritable")
+        .expect("the e2e document has a process");
+    let faithful = conversion.render(&source, &options);
+    assert_eq!(
+        fslc_rust::migration::process_form_contract(&source, &faithful, &path, &options),
+        Ok(())
+    );
+
+    let mut faulty = conversion;
+    let event = faulty.processes[0]
+        .events
+        .iter_mut()
+        .find(|event| event.name == "mgr_approve")
+        .expect("mgr_approve event");
+    assert!(event.guard.take().is_some(), "mgr_approve is guarded");
+    let dropped = faulty.render(&source, &options);
+    assert!(
+        !dropped.contains("allow Manager mgr_approve Claim"),
+        "{dropped}"
+    );
+    let (reason, _) =
+        fslc_rust::migration::process_form_contract(&source, &dropped, &path, &options)
+            .expect_err("a dropped guard changes the kernel");
+    assert_eq!(reason, "kernel_changed");
+}

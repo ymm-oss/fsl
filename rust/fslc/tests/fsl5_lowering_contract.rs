@@ -86,6 +86,10 @@ const EXAMPLES: &[Example] = &[
 const FSL5_SOURCES: &[(&str, &str, &str)] = &[
     ("e2e", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
     ("e2e", "fsl5_en.fsl", "lowered.fsl"),
+    // fsl5_en.fsl in Japanese aliases with particles (English keywords), and
+    // in Japanese keywords too (S5): the three lower to the one kernel.
+    ("e2e", "fsl5_ja_particles.fsl", "lowered.fsl"),
+    ("e2e", "fsl5_ja_full.fsl", "lowered.fsl"),
     // The rule without the decision table: `lowered.fsl` minus the decide
     // rows' requires lines.
     ("e2e", "fsl5_en_req1.fsl", "lowered_req1.fsl"),

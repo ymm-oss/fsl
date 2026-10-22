@@ -265,7 +265,7 @@ pub fn undecided_records(model: &KernelModel) -> Vec<UndecidedRecord> {
     for action in &model.actions {
         for (reason, span) in action.annotations.undecided() {
             output.push(record(
-                &format!("action {}", model.action_key(&action.name)),
+                &format!("action {}", model.action_display_name(&action.name)),
                 &crate::action_node_id(model, &action.name),
                 reason,
                 span,

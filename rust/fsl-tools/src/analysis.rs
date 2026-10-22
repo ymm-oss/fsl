@@ -353,7 +353,7 @@ pub fn structural_review_findings(tsg: &Value) -> Vec<Value> {
 /// compose component action is `action:alias.action` everywhere.
 #[must_use]
 pub fn action_node_id(model: &KernelModel, name: &str) -> String {
-    format!("action:{}", model.action_key(name))
+    format!("action:{}", model.action_display_name(name))
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -986,7 +986,7 @@ impl<'a> Builder<'a> {
             }
         }
         for action in &self.model.actions {
-            let name = &self.model.action_key(&action.name);
+            let name = &self.model.action_display_name(&action.name);
             let label = self.model.action_display_name(&action.name);
             let action_id = action_node_id(self.model, &action.name);
             let mut value = node(

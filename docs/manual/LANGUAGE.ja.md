@@ -1840,21 +1840,33 @@ compose OrderSystem {
   コンポーネントで変換をモデル化してください。
 - `internal <alias>.<action>` — その action をインターリービングから除外します。
 - (`=` のない)通常の `action` も書けます(グルー action)。
-- JSON の表示: 物理名 `alias__x` は `alias.x` として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
-  コンポーネントの action の公開名は alias と action 名から作るので、
-  `use X as a__b` の action `c` は `a__b.c` です。コンポーネントの action を名指す
-  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
-  mutate、refine、diff、html、ledger、analyze(`action:a__b.c` のようなグラフの ID を
-  含む)、`check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力 — がこの `alias.action` 形を
-  使います。`_requires_failed_a__b.c` のように action から作る名前も同じです。
-  状態のキーは上の規則のままなので、`use X as a__b` の状態 `n` は `a.b__n` と
-  表示されます(凍結した Python 参照実装では `a__b.n`)。
-  v1 の `replay` トレースでは、コンポーネントの action を `alias.action` と書いても
-  旧来の `alias__action` と書いてもかまいません。どちらも同じ action を指します
-  (`docs/design/DESIGN-replay-trace.md` を参照)。ネイティブ実装では、これらの
-  綴りと、`_partial_<action>`・`_bounds_<state>` のようにエンジンが作る名前を、
-  1 つのモジュール `rust/fsl-core/src/naming.rs` が持ちます。
+- 名前と `__`: `spec`・`requirements`・`business`・`compose` の文書で宣言する名前
+  (spec、action、パラメータ、`let`、状態変数、property、型、const、enum の
+  メンバー、struct のフィールド、process、stage、actor、`use` の alias)には
+  `__` を含められません。`fslc check` は宣言の位置で拒否します(`kind:"name"`、
+  exit 2)。compose のコンポーネントの宣言は、親の `use` の位置で報告します。
+  `__` は lowering が作る名前のためにとってあります。compose のコンポーネントの
+  宣言の物理名 `alias__x` と、requirements の `branches` の action を分けた
+  `submit__b1` です。作られた名前を参照することはできます(refinement の対応が
+  `submit__b1` を参照するように)。
+- JSON の表示: 作られた名前は `__` を `.` に置き換えた 1 つの綴りで、すべての
+  出力に出ます。物理名 `alias__x` は `alias.x`、`branches` で分けた
+  `submit__b1` は `submit.b1` です(状態のキー、action 名、invariant /
+  reachable 名、診断、トレース、シナリオ、Monitor — すべて)。コンポーネントの
+  宣言の公開名は alias と宣言の名前から作ります。それを名指すすべてのコマンド
+  — verify(`cost.properties[].name` を含む)、sweep、scenarios、explain、
+  testgen、conformance(`acct.Inv` のような outcome の名前を含む)、testplan、
+  mutate(target と死 action の注記)、refine、diff、html、ledger、
+  analyze(`action:acct.go`・`action:submit.b1` のようなグラフの ID を含む)、
+  `check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力
+  — がこの形を使います。`_requires_failed_acct.go` のように action から作る
+  名前も同じです。内部名のまま出すのは Public Kernel(`fslc kernel`)だけです。
+  v1 の `replay` トレースでは、作られた action を公開の綴りで書いても内部名で
+  書いてもかまいません(`acct.go` と `acct__go`、`submit.b1` と `submit__b1`)。
+  どちらも同じ action を指します(`docs/design/DESIGN-replay-trace.md` を参照)。
+  ネイティブ実装では、これらの綴りと、`_partial_<action>`・`_bounds_<state>` の
+  ようにエンジンが作る名前を、1 つのモジュール `rust/fsl-core/src/naming.rs` が
+  持ちます。
 
 ```bash
 fslc check  specs/order_system.fsl
@@ -2368,8 +2380,9 @@ verify {
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
   `struct` / `state` / `init`、`fair action`、`branches`、明示の `maps` をサポート
   します。`branches` は action を各 when 条件で自動的に分割し
-  (`submit[a <= AUTO_LIMIT]` と表示されます)、`maps` 節が上位レイヤーへの action
-  の対応を提供します。
+  (mutation の target では `submit[a <= AUTO_LIMIT]`、それ以外の出力では分けた
+  action を `submit.b1`・`submit.b2` … と表示します)、`maps` 節が上位レイヤーへの
+  action の対応を提供します。
 - `terminal { <expr> }` は `requirements` spec のトップレベルで許され、カーネルへ
   lowering されます(§6) — カーネルと同じく、spec ごとに `terminal` ブロックは
   ちょうど 1 つです。`stage(c)` は、`c` が型付きのエンティティパラメータまたは
@@ -3029,15 +3042,15 @@ DESIGN-*.md があります)。
   (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
   深さが違反に届けば `violated`(exit 1)、届かなければ `verified`(exit 0)、
   `--engine induction` ではその判定です。この検査を走らせる他のコマンドも exit 2 で
-  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力せず、`html` と
-  `ledger` はレポートを書き出します)。ただし次の 3 つは exit 2 に
-  なりません。`explain` は exit 0 のままで witness はありません(既知の欠落 #1242:
-  `explain` は gate のエラーを捨て、`html` の witness 欄も同じです)。
-  `approval create --kind ledger` は exit 0 で、エラーを載せた ledger を記録します。
-  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
-  `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
-  #1243 で扱います)。以前に作った ledger の記録の `approval check` は `drifted`
-  (exit 0)です。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力しません)。
+  **#1242 / #1243 から(破壊的変更)** `explain`、`html`、`ledger`、`document` の各コマンド、
+  どの種類の `approval create` / `check` も同じで、gate のエラーを出力し、レポート・ledger・
+  文書・記録を書き出しません(以前は `explain` が exit 0 で witness なし、`html` と `ledger` は
+  レポートを書き出し、`document` の各コマンドはその case を claim として出し、
+  `approval create --kind ledger` / `requirements_document` は承認を記録し、ledger の記録の
+  `approval check` は `drifted`(exit 0)でした)。言語サーバーはこのエラーを
+  `FSL-REQUIREMENT-TRACE` の診断として示し、`fslc analyze` はその case をグラフに出したうえで
+  各ノードに `"trace_gate": "unchecked"` を付けます。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
   出力の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
   scenario の `rejected_by`(testgen が assert します)は、
@@ -3066,20 +3079,14 @@ DESIGN-*.md があります)。
   検証が通れば exit 0、通らなければ exit 1 で、`scenarios`、`testgen`、
   `counterexample export`、`approval create` は exit 2 になることもありました。
   今は `check`、`verify`(どのエンジンでも)、`sweep`、`chain`、`scenarios`、`testgen`、
-  `mutate` の baseline、`counterexample export`、`html`、`ledger`、
-  `approval create --kind scenarios` / `html` が exit 2 になり、仕様の残りの
-  部分についての判定・反例・scenario・テスト・mutant を報告しません。`html`、`ledger`、
-  `approval create --kind html` の stdout は生成結果(`result: "generated"`)で、エラーは
-  レポートの中に載ります(`html` と `ledger` はレポートを書き出します)。`chain` はエラーを
-  `[requirements]` 層の `detail` に載せ、それ以外はエラー(`error` / `kind: "forbidden"`)を
-  出力します。以前に作った `scenarios` / `html` の記録の `approval check` は
-  exit 2 です。exit 2 にならないのは次の 3 つです。`explain` は exit 0 のままで、witness は
-  ありません(既知の欠落 #1242: `explain` は gate のエラーを捨て、`html` の witness 欄も
-  同じです)。`approval create --kind ledger` は exit 0 で、エラーを載せた ledger を
-  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
-  その ledger が実時間の `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる
-  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の `approval check` は
-  `drifted`(exit 0)です。
+  `mutate` の baseline、`counterexample export`、`explain`、`html`、`ledger`、`document` の
+  各コマンド、どの種類の `approval create` / `check` も exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant・説明・レポート・ledger・文書・記録を
+  報告しません。`chain` はエラーを `[requirements]` 層の `detail` に載せ、それ以外はエラー
+  (`error` / `kind: "forbidden"`)を出力し、言語サーバーは `FSL-REQUIREMENT-TRACE` の診断として
+  示します(`explain`、`html`、`ledger`、`document` の各コマンド、
+  `approval create --kind ledger` / `requirements_document`、ledger の記録の
+  `approval check` は #1242 / #1243 からです。変更前と変更後は設計ノートの §2.1 にあります)。
   `fslc diff` はどちらのステップでも forbidden の判定を変えるので、
   `--forbid unknown` の exit が変わることがあります。各コマンドの変更前と変更後の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。

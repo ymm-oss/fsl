@@ -1919,18 +1919,31 @@ compose OrderSystem {
   component.
 - `internal <alias>.<action>` — excludes that action from interleaving.
 - An ordinary `action` (without `=`) can also be written (a glue action).
-- JSON display: the physical name `alias__x` is output as `alias.x` (state keys,
-  action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
-  A component action's public name is built from its alias and its action name,
-  so `use X as a__b` with action `c` is `a__b.c`. Every command that names a
-  component action — verify, sweep, scenarios, explain, testgen, conformance,
-  mutate, refine, diff, html, ledger, analyze (including graph IDs such as
-  `action:a__b.c`), `check --strict-tags` warnings, and `replay` output including `state_mismatch.action` — uses
-  this `alias.action` form, including in names derived from the action such as
-  `_requires_failed_a__b.c`. State keys keep the rule above, so the state `n` of
-  `use X as a__b` is shown as `a.b__n` (the frozen Python reference shows
-  `a__b.n`). A v1 `replay` trace may write a component action as `alias.action` or as
-  the older `alias__action`; both name the same action (see
+- Names and `__`: a name you declare in a `spec`, `requirements`, `business`, or
+  `compose` document (a spec, action, parameter, `let`, state variable, property,
+  type, const, enum member, struct field, process, stage, actor, or `use` alias)
+  must not contain `__`. `fslc check` rejects one at the declaration
+  (`kind:"name"`, exit 2); a compose component's declaration is reported at the
+  parent's `use`. `__` is reserved for the names lowering generates: the
+  physical name `alias__x` of a compose component declaration and the split
+  `submit__b1` of a requirements `branches` action. A generated name may still
+  be referenced, as a refinement mapping does with `submit__b1`.
+- JSON display: a generated name is published with `.` in place of its `__`,
+  in one spelling for every output: the physical name `alias__x` is `alias.x`,
+  and a branch split `submit__b1` is `submit.b1` (state keys, action names,
+  invariant / reachable names, diagnostics, traces, scenarios, and the Monitor —
+  all of them). A component declaration's public name is built from its alias
+  and its own name. Every command that names one — verify (including
+  `cost.properties[].name`), sweep, scenarios, explain, testgen, conformance
+  (including outcome names such as `acct.Inv`), testplan, mutate (targets and the
+  dead-action note), refine, diff, html, ledger, analyze (including graph IDs
+  such as `action:acct.go` and `action:submit.b1`), `check --strict-tags`
+  warnings, and `replay` output including `state_mismatch.action` — uses this
+  form, including in names derived from an action such as
+  `_requires_failed_acct.go`. Only the Public Kernel (`fslc kernel`) keeps the
+  internal name. A v1 `replay` trace may write a generated action in its public
+  spelling or as its internal name (`acct.go` or `acct__go`, `submit.b1` or
+  `submit__b1`); both name the same action (see
   `docs/design/DESIGN-replay-trace.md`). The native implementation owns all of
   these spellings, and the names the engines build such as `_partial_<action>`
   and `_bounds_<state>`, in one module, `rust/fsl-core/src/naming.rs`.
@@ -2463,8 +2476,9 @@ verify {
   behavior that needs explicit kernel state. That fallback still supports
   `struct` / `state` / `init`, `fair action`, `branches`, and explicit `maps`.
   `branches` automatically splits an action by each when condition (displayed as
-  `submit[a <= AUTO_LIMIT]`), and the `maps` clause provides the action
-  correspondence to the upper layer.
+  `submit[a <= AUTO_LIMIT]` in mutation targets; the split actions are
+  `submit.b1`, `submit.b2`, … in every other output), and the `maps` clause
+  provides the action correspondence to the upper layer.
 - `terminal { <expr> }` is allowed at the top level of a `requirements` spec
   and lowers to the kernel (§6) — there is exactly one `terminal` block per
   spec, same as the kernel. `stage(c)` is available in all requirements
@@ -3130,15 +3144,16 @@ DESIGN-*.md).
   when the depth reached the violation, `verified` (exit 0) when it did not;
   with `--engine induction`, its own verdict. Every other command that runs this
   check exits 2 too (`scenarios` and `testgen` with no scenario and no test
-  file; `html` and `ledger` still write their report), except three:
-  `explain` still exits 0 with no witnesses (known gap #1242: `explain`
-  discards the gate's error, and so does the witnesses section of `html`);
-  `approval create --kind ledger` exits 0 with a record of the ledger, which
-  lists the error — where the depth reached the violation it used to exit 2
-  only because that ledger embeds wall-clock `elapsed_s` (whether a ledger
-  whose forbidden gate fails may be approved is tracked by #1243); and
-  `approval check` of a ledger record created before reports `drifted`
-  (exit 0). `fslc diff` reports the violation (below).
+  file). **Since #1242 / #1243 (breaking)** that includes `explain`, `html`,
+  `ledger`, the `document` commands, and `approval create` / `check` of every
+  kind: each prints the gate's error and writes no report, ledger, document,
+  or record (before, `explain` exited 0 with no witnesses, `html` and `ledger`
+  wrote their report, the `document` commands rendered the case as a claim,
+  `approval create --kind ledger` / `requirements_document` recorded an
+  approval, and `approval check` of a ledger record reported `drifted`,
+  exit 0). The language server shows the error as an `FSL-REQUIREMENT-TRACE`
+  diagnostic, and `fslc analyze` still graphs the cases, each node marked
+  `"trace_gate": "unchecked"`. `fslc diff` reports the violation (below).
   The measured before/after of each command, exit status and output, is in
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1.
   The scenario's `rejected_by` (asserted by testgen) is
@@ -3170,21 +3185,17 @@ DESIGN-*.md).
   not, while `scenarios`, `testgen`, `counterexample export`, and `approval
   create` could also exit 2. Now `check`, `verify` (every engine), `sweep`,
   `chain`, `scenarios`, `testgen`, the `mutate` baseline, `counterexample
-  export`, `html`, `ledger`, and `approval create --kind scenarios` / `html`
-  exit 2 and report no verdict, counterexample, scenario, test, or mutant for
-  the rest of the spec. `html`, `ledger`, and `approval create --kind html`
-  print the generated result (`result: "generated"`) with the error inside
-  the report (`html` and `ledger` still write their report); `chain` reports
-  it as the `[requirements]` layer's `detail`; the others print the error
-  (`error` / `kind: "forbidden"`). `approval check` of a `scenarios` or `html` record created
-  before exits 2. Three do not exit 2: `explain` still exits 0, with no
-  witnesses (known gap #1242: `explain` discards the gate's error, and so
-  does the witnesses section of `html`); `approval create --kind ledger`
-  exits 0 with a record of the ledger, which lists the error — on a spec
-  whose rest has a violation it used to exit 2 only because that ledger
-  embeds wall-clock `elapsed_s` (whether a ledger whose forbidden gate fails
-  may be approved is tracked by #1243); and `approval check` of a ledger record
-  created before reports `drifted` (exit 0). `fslc diff` changes forbidden
+  export`, `explain`, `html`, `ledger`, the `document` commands, and
+  `approval create` / `check` of every kind exit 2 and report no verdict,
+  counterexample, scenario, test, mutant, explanation, report, ledger,
+  document, or record for the rest of the spec. `chain` reports the error as
+  the `[requirements]` layer's `detail`; the others print it (`error` /
+  `kind: "forbidden"`), and the language server shows it as an
+  `FSL-REQUIREMENT-TRACE` diagnostic (`explain`, `html`, `ledger`, the
+  `document` commands, `approval create --kind ledger` /
+  `requirements_document`, and `approval check` of a ledger record only
+  since #1242 / #1243; §2.1 of the design note has their before and after).
+  `fslc diff` changes forbidden
   verdicts for both steps, which can change a `--forbid unknown` exit. The
   before/after of every command, measured, is in
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1.

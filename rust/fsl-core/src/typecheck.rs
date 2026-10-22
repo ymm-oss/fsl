@@ -40,6 +40,27 @@ fn error(message: impl Into<String>) -> TypecheckError {
     }
 }
 
+/// A Kernel name as a diagnostic shows it: the public spelling every output
+/// uses (`acct.bal` for the compose component state `acct__bal`).
+fn shown(name: &str) -> String {
+    crate::unmapped_public_spelling(name)
+}
+
+/// `ty` with every named type respelled by [`shown`], for a message that
+/// prints the type's debug form.
+fn shown_type(ty: &TypeRef) -> TypeRef {
+    let boxed = |ty: &TypeRef| Box::new(shown_type(ty));
+    match ty {
+        TypeRef::Named(name) => TypeRef::Named(shown(name)),
+        TypeRef::Map(key, value) => TypeRef::Map(boxed(key), boxed(value)),
+        TypeRef::Relation(left, right) => TypeRef::Relation(boxed(left), boxed(right)),
+        TypeRef::Set(item) => TypeRef::Set(boxed(item)),
+        TypeRef::Seq(item, length) => TypeRef::Seq(boxed(item), *length),
+        TypeRef::Option(item) => TypeRef::Option(boxed(item)),
+        TypeRef::Int | TypeRef::Bool | TypeRef::Range(..) => ty.clone(),
+    }
+}
+
 pub(crate) fn unknown_span() -> Span {
     let position = SourcePos {
         offset: 0,
@@ -102,7 +123,10 @@ pub(crate) fn resolve(model: &KernelModel, ty: &TypeRef) -> Result<TypeRef, Type
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain { lo, hi, .. }) => Ok(TypeRef::Range(*lo, *hi)),
             Some(TypeDef::Enum { .. } | TypeDef::Struct { .. }) => Ok(ty.clone()),
-            None => Err(error(format!("public Kernel cannot resolve type '{name}'"))),
+            None => Err(error(format!(
+                "public Kernel cannot resolve type '{}'",
+                shown(name)
+            ))),
         },
         _ => Ok(ty.clone()),
     }
@@ -129,7 +153,7 @@ pub(crate) fn binder_type(
                 "Bool" => Ok(TypeRef::Bool),
                 "Int" => Ok(TypeRef::Int),
                 _ if model.types.contains_key(&name) => Ok(TypeRef::Named(name)),
-                _ => Err(error(format!("unknown type '{name}'"))),
+                _ => Err(error(format!("unknown type '{}'", shown(&name)))),
             }
         }
         Binder::Range { lo, hi, .. } => {
@@ -243,7 +267,10 @@ fn infer_type_inner(
                     owners.join(", ")
                 ))
             } else {
-                error(format!("public Kernel cannot type identifier '{name}'"))
+                error(format!(
+                    "public Kernel cannot type identifier '{}'",
+                    shown(name)
+                ))
             }
         }),
         Expr::EnumMember { type_name, member } => match model.types.get(type_name) {
@@ -251,10 +278,13 @@ fn infer_type_inner(
                 Ok(TypeRef::Named(type_name.clone()))
             }
             Some(TypeDef::Enum { .. }) => {
-                Err(error(format!("unknown enum member '{type_name}.{member}'")))
+                Err(error(format!(
+                    "unknown enum member '{}.{member}'",
+                    shown(type_name)
+                )))
             }
-            Some(_) => Err(error(format!("'{type_name}' is not an enum"))),
-            None => Err(error(format!("unknown enum type '{type_name}'"))),
+            Some(_) => Err(error(format!("'{}' is not an enum", shown(type_name)))),
+            None => Err(error(format!("unknown enum type '{}'", shown(type_name)))),
         },
         Expr::Call { name, .. } => Err(error(format!(
             "unlowered predicate call '{name}' in public Kernel"
@@ -273,7 +303,9 @@ fn infer_type_inner(
                 Some(TypeDef::Struct { fields }) => fields
                     .iter()
                     .find_map(|(candidate, ty)| (candidate == field).then(|| ty.clone()))
-                    .ok_or_else(|| error(format!("unknown struct field '{name}.{field}'"))),
+                    .ok_or_else(|| {
+                        error(format!("unknown struct field '{}.{field}'", shown(&name)))
+                    }),
                 _ => Err(error("public Kernel field access requires struct")),
             }
         }
@@ -364,7 +396,9 @@ pub(crate) fn expression_type(
         && !types_compatible(&ty, expected, model).map_err(|error| error.with_span(span))?
     {
         return Err(error(format!(
-            "expression of type {ty:?} is not assignable to {expected:?}"
+            "expression of type {:?} is not assignable to {:?}",
+            shown_type(&ty),
+            shown_type(expected)
         ))
         .with_span(span));
     }
@@ -427,12 +461,12 @@ pub(crate) fn struct_field_type(
     field: &str,
 ) -> Result<TypeRef, TypecheckError> {
     let Some(TypeDef::Struct { fields }) = model.types.get(name) else {
-        return Err(error(format!("unknown struct '{name}'")));
+        return Err(error(format!("unknown struct '{}'", shown(name))));
     };
     fields
         .iter()
         .find_map(|(candidate, ty)| (candidate == field).then(|| ty.clone()))
-        .ok_or_else(|| error(format!("unknown struct field '{name}.{field}'")))
+        .ok_or_else(|| error(format!("unknown struct field '{}.{field}'", shown(name))))
 }
 
 pub(crate) fn ensure_assignable(
@@ -486,7 +520,9 @@ pub(crate) fn ensure_assignable(
         Ok(())
     } else {
         Err(error(format!(
-            "expression of type {actual:?} is not assignable to {expected:?}"
+            "expression of type {:?} is not assignable to {:?}",
+            shown_type(&actual),
+            shown_type(expected)
         ))
         .with_span(span))
     }
@@ -751,7 +787,7 @@ fn static_public_int(expr: &Expr, model: &KernelModel) -> Result<i64, TypecheckE
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
             Some(crate::FslValue::Int(value)) => Ok(*value),
-            _ => Err(error(format!("'{name}' is not an integer const"))),
+            _ => Err(error(format!("'{}' is not an integer const", shown(name)))),
         },
         Expr::Neg(value) => static_public_int(value, model)?
             .checked_neg()
@@ -1045,7 +1081,7 @@ fn validate_lvalue(
             let (TypeRef::Map(key, _) | TypeRef::Relation(key, _)) = resolve(
                 model,
                 env.get(name)
-                    .ok_or_else(|| error(format!("unknown update target '{name}'")))?,
+                    .ok_or_else(|| error(format!("unknown update target '{}'", shown(name))))?,
             )?
             else {
                 return Err(error("indexed update target requires Map or Relation"));
@@ -1069,7 +1105,7 @@ fn validate_map_key_const_shadowing(
             let (TypeRef::Map(key, _) | TypeRef::Relation(key, _)) = resolve(
                 model,
                 env.get(name)
-                    .ok_or_else(|| error(format!("unknown update target '{name}'")))?,
+                    .ok_or_else(|| error(format!("unknown update target '{}'", shown(name))))?,
             )?
             else {
                 return Ok(());
@@ -1295,15 +1331,16 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
             else {
                 return Err(error(format!(
                     "leadsTo '{}' helpful action '{}' is not declared",
-                    leadsto.name, helper.action
+                    shown(&leadsto.name),
+                    shown(&helper.action)
                 ))
                 .with_span(helper.span));
             };
             if helper.args.len() != action.params.len() {
                 return Err(error(format!(
                     "leadsTo '{}' helpful action '{}' expects {} argument(s), got {}",
-                    leadsto.name,
-                    helper.action,
+                    shown(&leadsto.name),
+                    shown(&helper.action),
                     action.params.len(),
                     helper.args.len()
                 ))

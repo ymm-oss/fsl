@@ -207,8 +207,9 @@ of failing `initial_state_mismatch` against an arbitrary default value for
 that variable. A compose spec's component action is written `alias.action`
 (the name testgen, conformance, and the Monitor emit); the older
 `alias__action` is still accepted for the same action, and replay output,
-including `state_mismatch.action`, always uses `alias.action`. Sync actions and
-non-compose actions match their exact name only. Bare arrays/`{events}` are the
+including `state_mismatch.action`, always uses `alias.action`. A requirements
+`branches` split is likewise `submit.b1` (the name conformance emits) or
+`submit__b1`, echoed as `submit.b1`. Any other action matches its exact name. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input.
 
@@ -386,7 +387,9 @@ properties, acceptance/forbidden scenarios, and traceability metadata.
 `--projection action_state_graph`, `action_dependency_graph`,
 `impact_graph --focus NODE`, `requirement_property_graph`, and
 `property_state_graph` summarize deterministic components/SCCs/cycles, degree,
-and metrics over that graph. It accepts multiple files/directories in batch mode;
+and metrics over that graph. An acceptance / forbidden node of a spec whose
+traces the requirement-trace gate refuses is still projected but carries
+`"trace_gate": "unchecked"`: it is not a checked claim. It accepts multiple files/directories in batch mode;
 directories expand recursively to sorted `*.fsl` files (the `*.fsl` filter applies
 only to that expansion — an explicitly named file is always kept, whatever its
 extension) and partial failures stay visible in `files[]`/`errors[]`; a batch
@@ -397,8 +400,9 @@ graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
 node's TSG `label` is its `fsl_core::unmapped_public_spelling` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
 reports); `--focus` accepts either a node's raw id or its displayed name. A
-compose component action and its clauses use the action's public name in both
-id and label (`action:a__b.c`, `guard:a__b.c:0`, label `a__b.c`).
+compose component action or a `branches` split and its clauses use the
+action's public name in both id and label (`action:acct.go`, `guard:acct.go:0`,
+label `acct.go`; `action:submit.b1`).
 `action_dependency_graph`'s `enables`/`conflicts_with` edges carry every
 shared read/write state bridge for the action pair in `states` (plural);
 `state` (singular) is only the first one, kept for backward compatibility.
@@ -448,7 +452,11 @@ reader can decide approve/reject/risk-accept from. It is a presentation layer
 (no new verification): the `trace_type` discriminator drives a per-finding
 business translation, governance columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
-positive form. Raw JSON is demoted to a collapsed appendix. `--impl-log
+positive form. A spec whose acceptance / forbidden traces the requirement-trace
+gate refuses (the `kind: "acceptance"` / `"forbidden"` / `"forbidden_setup"`
+error of `check`) gets that error and exit 2 instead of a ledger, as it does
+from `explain`, `html`, the `document` commands, and `approval create` /
+`check`; fix the case it names first. Raw JSON is demoted to a collapsed appendix. `--impl-log
 <trace.json>` folds a `run_replay` conformance row into the ledger, but a
 replay **error** (missing file, malformed JSON, wrong-spec trace,
 schema-invalid trace) fails the whole `ledger` command through the standard

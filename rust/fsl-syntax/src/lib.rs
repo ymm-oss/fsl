@@ -20,6 +20,7 @@ mod domain;
 mod edition;
 mod glossary;
 mod identifier;
+pub mod keywords;
 mod lexer;
 mod literate;
 mod lossless;

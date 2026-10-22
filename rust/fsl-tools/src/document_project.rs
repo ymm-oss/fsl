@@ -438,7 +438,10 @@ fn push_action_claim(
 ) {
     let _ = dialect;
     let target = action_target(&action.name);
-    let claim_id = format!("action:{}#operation", model.action_key(&action.name));
+    let claim_id = format!(
+        "action:{}#operation",
+        model.action_display_name(&action.name)
+    );
     let links = model.requirements_for(&target);
     let kind_ids = kind_ids_from(model.annotations_for(&target));
     let requirement_ids = record_links(&links, &kind_ids, &claim_id, source_path, agg);
@@ -468,7 +471,8 @@ fn push_action_claim(
         .collect();
     let fairness = if action.fair { "weak" } else { "none" };
 
-    let subject_core = json!({"action": model.action_key(&action.name), "parameters": parameters});
+    let subject_core =
+        json!({"action": model.action_display_name(&action.name), "parameters": parameters});
     let enablement = json!({"mode": "all", "expressions": expressions});
     let effects = json!({"commit": "simultaneous", "reads": "pre_state", "statements": statements});
     let postconditions_value = Value::Array(postconditions);
@@ -498,7 +502,7 @@ fn push_action_claim(
             kind: ClaimKind::Operation,
             requirements: requirement_ids,
             subject: json!({
-                "action": model.action_key(&action.name),
+                "action": model.action_display_name(&action.name),
                 "display_name": model.action_display_name(&action.name),
                 "parameters": parameters,
             }),
@@ -852,8 +856,9 @@ pub(crate) fn project_trace_case_payload(
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
 ) -> Result<RequirementClaimSet, String> {
-    // Ungated (#1243): the requirement-trace gate replays traces on
-    // `fsl-runtime`, which this crate does not depend on.
+    // Ungated here: the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
+    // before every document command and fails closed on its refusal.
     let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(input, trace.as_ref())
 }
