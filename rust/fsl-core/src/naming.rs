@@ -148,6 +148,46 @@ pub(crate) fn entity_generated_names<'a>(
     names
 }
 
+/// The property an unnamed next-edition rule statement lowers to: the
+/// requirement id with every character that cannot appear in a name spelled
+/// `_`, then the statement kind, then the statement's ordinal among the
+/// requirement's unnamed statements of that kind when it is not the first. `REQ_5_always` is the
+/// first `always` of rule `REQ-5`, `REQ_5_always_2` its second.
+pub(crate) fn rule_property_name(requirement: &str, kind: &str, ordinal: usize) -> String {
+    let mut name = requirement
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if name.starts_with(|first: char| first.is_ascii_digit()) {
+        name.insert_str(0, "REQ_");
+    }
+    if ordinal > 1 {
+        format!("{name}_{kind}_{ordinal}")
+    } else {
+        format!("{name}_{kind}")
+    }
+}
+
+/// Why a name written for a rule property (`Name: always …`) cannot be a
+/// Kernel property name, or `None` when it can: a literal reads as itself in
+/// every expression, and `__` is the compose separator a public spelling
+/// reads back as `.`.
+pub(crate) fn invalid_rule_property_name(name: &str) -> Option<&'static str> {
+    if crate::reserved::is_reserved(name) {
+        Some("is a literal")
+    } else if name.contains("__") {
+        Some("contains `__`, which a published name reads as a separator")
+    } else {
+        None
+    }
+}
+
 /// A name an engine builds for a violation or an implicit property.
 ///
 /// [`Self::internal`] is the only spelling and [`Self::parse_internal`] the

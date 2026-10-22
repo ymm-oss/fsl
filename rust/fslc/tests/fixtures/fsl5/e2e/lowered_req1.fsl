@@ -1,0 +1,88 @@
+// ════════════════════════════════════════════════════════════════
+// fsl3_en.fsl / fsl3_ja_opt1.fsl / fsl3_ja_opt3.fsl が「意図する lowering」を、
+// 今の構文（2.x の requirements、kernel-wrapper form）で書き下したもの。
+//
+// 対応（新構文の行 -> この spec の行）:
+//   entity Claim { amount: Amount = 0  lifecycle ... }
+//       -> enum ClaimStage / state claim_stage, claim_amount / init
+//   event <name> = <Actor> <verb> Claim [with amount] <From> -> <To>
+//       -> fair action <name>(c: Claim[, amount: Amount])
+//          requires claim_stage[c] == <From>; claim_stage[c] = <To>
+//          （Actor は kernel に入らない — 今の process 形と同じ）
+//   rule REQ-1 { Employee submits Claim only when amount > 0 }
+//       -> submit の requires amount > 0（amount は入力）
+//   decide REQ-2/REQ-3 for Submitted Claim { SmallClaim => ...  LargeClaim => ... }
+//       -> auto_approve に requires claim_amount[c] <= AUTO_LIMIT
+//          mgr_approve / reject に requires claim_amount[c] > AUTO_LIMIT
+//   scenario AC-n -> acceptance AC-n（名前付きインスタンスは出現順に 0 から）
+// ════════════════════════════════════════════════════════════════
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, amount) -> submit(c)
+  }
+
+  type Claim = 0..2
+  type Amount = 0..3
+  const AUTO_LIMIT = 1
+  enum ClaimStage { Draft, Submitted, Approved, Rejected, Paid }
+
+  state {
+    claim_stage: Map<Claim, ClaimStage>,
+    claim_amount: Map<Claim, Amount>
+  }
+  init {
+    forall c: Claim {
+      claim_stage[c] = Draft
+      claim_amount[c] = 0
+    }
+  }
+
+  requirement REQ-1 "The applicant submits an expense claim by entering an amount" {
+    // event submit = Employee submits Claim with amount   Draft -> Submitted
+    // rule REQ-1    Employee submits Claim only when amount > 0
+    fair action submit(c: Claim, amount: Amount) {
+      requires claim_stage[c] == Draft
+      requires amount > 0
+      claim_stage[c] = Submitted
+      claim_amount[c] = amount
+    }
+  }
+
+  requirement REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system" {
+    // event auto_approve = System approves Claim   Submitted -> Approved
+    // decide row: SmallClaim => System approves
+    fair action auto_approve(c: Claim) {
+      requires claim_stage[c] == Submitted
+      claim_stage[c] = Approved
+    }
+  }
+
+  requirement REQ-3 "Claims above AUTO_LIMIT are approved or rejected by a manager" {
+    // decide row: LargeClaim => Manager approves or rejects
+    fair action mgr_approve(c: Claim) {
+      requires claim_stage[c] == Submitted
+      claim_stage[c] = Approved
+    }
+    fair action reject(c: Claim) {
+      requires claim_stage[c] == Submitted
+      claim_stage[c] = Rejected
+    }
+  }
+
+  requirement REQ-4 "Only approved claims are paid" {
+    // event pay = Finance pays Claim   Approved -> Paid
+    fair action pay(c: Claim) {
+      requires claim_stage[c] == Approved
+      claim_stage[c] = Paid
+    }
+  }
+
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect claim_stage[0] == Paid
+  }
+  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+    submit(0, 2) reject(0)
+    expect claim_stage[0] == Rejected
+  }
+}

@@ -103,9 +103,10 @@ pub use surface::{
     MapsClause, MetaTag, NextEditionRequirements, Param, PreservationItem, ProcessCover,
     ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem, RefinementParam,
     RequirementAction, RequirementActionItem, RequirementBlockItem, RequirementBranch,
-    RequirementsItem, SpecItem, StateField, Statement, SurfaceAgent, SurfaceBusiness,
-    SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements,
-    SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    RequirementsItem, RuleGuard, RuleProperty, SpecItem, StateField, Statement, SurfaceAgent,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    stage_reference,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

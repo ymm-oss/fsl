@@ -1,0 +1,79 @@
+// The intended lowering of fsl5_en.fsl in today's syntax, written by hand.
+//
+//   entity Order { qty ... lifecycle ... }
+//       -> enum OrderStage / state order_stage, order_qty / init
+//   rule REQ-1 { Shop ships Order only after User pays Order }
+//       -> ghost state order_did_pay (false), set by pay, required by ship
+//   rule REQ-2 { never Shop packs Order when qty == 0 }
+//       -> pack requires not (order_qty[o] == 0)
+//   rule REQ-2 { never User adds Order for Large }
+//       -> add requires not (order_qty[o] > 1): the concept reads the field,
+//          not add's input of the same name
+//   rule REQ-3 { always Order in Shipped has qty > 0 }
+//       -> invariant REQ_3_always
+requirements OrderRules {
+  type Order = 0..0
+  type Qty = 0..2
+  enum OrderStage { Open, Packed, Shipped }
+
+  state {
+    order_stage: Map<Order, OrderStage>,
+    order_qty: Map<Order, Qty>,
+    order_did_pay: Map<Order, Bool>
+  }
+  init {
+    forall o: Order {
+      order_stage[o] = Open
+      order_qty[o] = 0
+      order_did_pay[o] = false
+    }
+  }
+
+  requirement REQ-2 "An empty order is not packed, and a large one takes no more items" {
+    fair action add(o: Order, qty: Qty) {
+      requires order_stage[o] == Open
+      requires not (order_qty[o] > 1)
+      order_qty[o] = qty
+    }
+    fair action pack(o: Order) {
+      requires order_stage[o] == Open
+      requires not (order_qty[o] == 0)
+      order_stage[o] = Packed
+    }
+  }
+
+  requirement REQ-1 "An order ships only after it is paid" {
+    fair action pay(o: Order) {
+      requires order_stage[o] == Packed
+      order_did_pay[o] = true
+    }
+    fair action ship(o: Order) {
+      requires order_stage[o] == Packed
+      requires order_did_pay[o]
+      order_stage[o] = Shipped
+    }
+  }
+
+  requirement REQ-3 "A shipped order has items" {
+    invariant REQ_3_always {
+      forall o: Order { order_stage[o] == Shipped => order_qty[o] > 0 }
+    }
+  }
+
+  acceptance AC-1 "A paid order ships" {
+    add(0, 1) pack(0) pay(0) ship(0)
+    expect order_stage[0] == Shipped
+  }
+  forbidden FB-SHIP-UNPAID "An unpaid order does not ship" {
+    add(0, 1) pack(0) ship(0)
+    expect rejected
+  }
+  forbidden FB-PACK-EMPTY "An empty order is not packed" {
+    pack(0)
+    expect rejected
+  }
+  forbidden FB-ADD-LARGE "A large order takes no more items" {
+    add(0, 2) add(0, 1)
+    expect rejected
+  }
+}

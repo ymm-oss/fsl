@@ -7,7 +7,8 @@
 //! A row is `Concept {and Concept} => Actor verb {or verb} {covers ID "text"}`
 //! (or `Stage Entity => …`). Every event that leaves the table's stage must be
 //! named by a row (`decide_event_not_listed`), and each such event gets, as a
-//! guard, the disjunction of the conditions of the rows that name it;
+//! guard (one `decide` entry of the event's `rule_guards`, so one `requires`
+//! line per table), the disjunction of the conditions of the rows that name it;
 //! `otherwise` is the conjunction of the other rows' negations. The concepts
 //! are expanded here, so the condition reads the entity's fields as
 //! `Entity.field` names (which an event input cannot shadow) and a concept's
@@ -22,7 +23,7 @@ use super::{Entity, EventSignature, UNKNOWN_EVENT_PHRASE, Word, actor_not_declar
 use crate::parser::{Parser, join_span};
 use crate::{
     Annotation, ConceptDeclaration, DecisionRow, DecisionTable, Expr, ParseError, ProcessCover,
-    ProcessItem, Span, TokenKind,
+    ProcessItem, RuleGuard, Span, TokenKind,
 };
 
 /// An event that leaves a decision table's stage but no row names.
@@ -505,10 +506,27 @@ pub(super) fn apply(
                 unreachable!("every event signature has its transition");
             };
             if guard != Expr::Bool(true) {
-                transition.guard = Some(match transition.guard.take() {
-                    Some(existing) => binary("and", existing, guard),
-                    None => guard,
-                });
+                let detail = rows
+                    .iter()
+                    .filter(|row| row.events.contains(&event.name))
+                    .map(|row| row.source.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                transition
+                    .event
+                    .as_mut()
+                    .expect("a decision table guards an event")
+                    .rule_guards
+                    .push(RuleGuard {
+                        kind: "decide",
+                        requirement: decision.id.clone(),
+                        condition: guard,
+                        detail: format!(
+                            "for {} {}: {detail}",
+                            decision.stage.text, decision.entity.text
+                        ),
+                        span: decision.span,
+                    });
             }
             transition.annotations.push(Annotation::Requirement {
                 id: decision.id.clone(),
