@@ -194,6 +194,33 @@ impl KernelModel {
         }
     }
 
+    /// Whether `value` is one of [`KernelModel::domain_values`]`(ty)`,
+    /// decided without listing the domain.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`ModelError`] [`KernelModel::domain_values`] returns for
+    /// `ty`.
+    pub fn domain_contains(&self, ty: &TypeRef, value: &Value) -> Result<bool, ModelError> {
+        let in_range =
+            |lo: i64, hi: i64| matches!(value, Value::Int(value) if lo <= *value && *value <= hi);
+        match ty {
+            TypeRef::Bool => Ok(matches!(value, Value::Bool(_))),
+            TypeRef::Range(lo, hi) => Ok(in_range(*lo, *hi)),
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Domain { lo, hi, .. }) => Ok(in_range(*lo, *hi)),
+                Some(TypeDef::Enum { members, .. }) => Ok(matches!(
+                    value,
+                    Value::Enum { type_name, member }
+                        if type_name == name && members.contains(member)
+                )),
+                // Not a finite scalar: `domain_values`' own error.
+                _ => self.domain_values(ty).map(|_| false),
+            },
+            _ => self.domain_values(ty).map(|_| false),
+        }
+    }
+
     /// Enumerate the concrete Monitor compatibility domain for map keys.
     ///
     /// Legacy `Map<Int, _>` uses `0..max(consts)` (or `0..1` without integer

@@ -871,25 +871,50 @@ pub fn requirement_step_match(
             .map_err(|error| error.to_string())?,
         );
     }
-    let enabled = monitor.enabled().map_err(|error| error.to_string())?;
-    for action in requirement_actions_by_name(monitor, step)
+    let actions = requirement_actions_by_name(monitor, step)
         .into_iter()
-        .filter(|action| action.params.len() == arguments.len())
-    {
-        let params = action
-            .params
+        .filter(|action| action.params.len() == arguments.len());
+    let instance =
+        enabled_step_instance(monitor, actions, &arguments).map_err(|error| error.to_string())?;
+    Ok((arguments, instance))
+}
+
+/// The enabled instance of the first of `actions` (in order) called with
+/// `arguments`, as a search of [`fsl_runtime::Monitor::enabled`] finds it.
+///
+/// Only the instances the step names are collected: listing every enabled
+/// instance held one entry per value of a parameter domain, so a step over
+/// a large `values` scope exhausted memory. Every guard is still evaluated
+/// ([`fsl_runtime::Monitor::enabled_where`]), so a guard that cannot be
+/// evaluated fails as before.
+fn enabled_step_instance<'a>(
+    monitor: &fsl_runtime::Monitor,
+    actions: impl IntoIterator<Item = &'a ActionDef>,
+    arguments: &[FslValue],
+) -> Result<Option<fsl_runtime::EnabledAction>, fsl_runtime::RuntimeError> {
+    let calls = actions
+        .into_iter()
+        .map(|action| {
+            let params = action
+                .params
+                .iter()
+                .zip(arguments)
+                .map(|(param, value)| (param.name().to_owned(), value.clone()))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            (action.name.as_str(), params)
+        })
+        .collect::<Vec<_>>();
+    let enabled = monitor.enabled_where(|action, params| {
+        calls
             .iter()
-            .zip(&arguments)
-            .map(|(param, value)| (param.name().to_owned(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if let Some(instance) = enabled
+            .any(|(name, call)| *name == action && call == params)
+    })?;
+    Ok(calls.iter().find_map(|(name, params)| {
+        enabled
             .iter()
-            .find(|instance| instance.action == action.name && instance.params == params)
-        {
-            return Ok((arguments, Some(instance.clone())));
-        }
-    }
-    Ok((arguments, None))
+            .find(|instance| instance.action == *name && instance.params == *params)
+            .cloned()
+    }))
 }
 
 fn requirement_actions_by_name<'a>(
@@ -919,9 +944,8 @@ fn argument_in_checked_domain(
     Ok(match parameter {
         ParamDef::Typed { ty, .. } => monitor
             .model
-            .domain_values(ty)
-            .map_err(|error| error.to_string())?
-            .contains(value),
+            .domain_contains(ty, value)
+            .map_err(|error| error.to_string())?,
         ParamDef::Range { lo, hi, .. } => matches!(
             value,
             FslValue::Int(value) if lo <= value && value <= hi
@@ -1242,24 +1266,8 @@ pub fn requirement_step_match_values(
             step.name
         )));
     }
-    let enabled = monitor
-        .enabled()
-        .map_err(|error| RequirementStepRelationError::Replay(error.to_string()))?;
-    for action in matching_actions {
-        let params = action
-            .params
-            .iter()
-            .zip(arguments.iter())
-            .map(|(param, value)| (param.name().to_owned(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if let Some(instance) = enabled
-            .iter()
-            .find(|instance| instance.action == action.name && instance.params == params)
-        {
-            return Ok(Some(instance.clone()));
-        }
-    }
-    Ok(None)
+    enabled_step_instance(monitor, matching_actions, arguments)
+        .map_err(|error| RequirementStepRelationError::Replay(error.to_string()))
 }
 
 fn requirement_step_json(step: &fsl_core::RequirementsTraceStep, arguments: &[FslValue]) -> Value {
@@ -1886,9 +1894,7 @@ fn parameter_admits(model: &KernelModel, parameter: &ParamDef, value: &FslValue)
         // A domain that cannot be enumerated is not evidence of an
         // out-of-scope reference; treat it as admitting the value so the
         // failure stays a hard one.
-        ParamDef::Typed { ty, .. } => model
-            .domain_values(ty)
-            .map_or(true, |values| values.contains(value)),
+        ParamDef::Typed { ty, .. } => model.domain_contains(ty, value).unwrap_or(true),
         ParamDef::Range { lo, hi, .. } => {
             matches!(value, FslValue::Int(value) if lo <= value && value <= hi)
         }
