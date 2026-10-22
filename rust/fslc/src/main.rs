@@ -201,6 +201,8 @@ struct FmtOptions {
     paths: Vec<PathBuf>,
     check: bool,
     edition: Option<fsl_syntax::Edition>,
+    /// `--lang` / `--names`, read only behind the next edition's gate.
+    respelling: fsl_syntax::Respelling,
 }
 
 fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, String> {
@@ -208,10 +210,31 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
     let mut paths = Vec::new();
     let mut check = false;
     let mut edition = None;
+    let mut respelling = fsl_syntax::Respelling::default();
+    let gated = crate::parse_options()
+        .unstable()
+        .contains(fsl_syntax::UnstableFeature::Fsl5);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check = true,
             "--edition" => edition = parse_edition(&mut args)?,
+            "--lang" if gated => {
+                respelling.language =
+                    Some(match required_option_value(&mut args, "--lang")?.as_str() {
+                        "ja" => fsl_syntax::KeywordLanguage::Japanese,
+                        "en" => fsl_syntax::KeywordLanguage::English,
+                        _ => return Err("--lang must be ja or en".to_owned()),
+                    });
+            }
+            "--names" if gated => {
+                respelling.names = Some(
+                    match required_option_value(&mut args, "--names")?.as_str() {
+                        "alias" => fsl_syntax::NameForm::Alias,
+                        "canonical" => fsl_syntax::NameForm::Canonical,
+                        _ => return Err("--names must be alias or canonical".to_owned()),
+                    },
+                );
+            }
             option if option.starts_with('-') && option != "-" => {
                 return Err(format!("unknown fmt option '{option}'"));
             }
@@ -234,6 +257,7 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
         paths,
         check,
         edition,
+        respelling,
     })
 }
 
@@ -257,18 +281,30 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
             Ok(edition) => edition,
             Err(error) => return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2),
         };
-        let formatted =
-            match fsl_syntax::format_source_with(&source, edition, crate::parse_options()) {
-                Ok(formatted) => formatted,
-                Err(fsl_syntax::FormatError::Parse(error)) => {
-                    return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
-                }
-                Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
-            };
-        if let Err(error) = validate_fmt_semantics(&source, path) {
+        let formatted = match fsl_syntax::format_source_respelled(
+            &source,
+            edition,
+            crate::parse_options(),
+            options.respelling,
+        ) {
+            Ok(formatted) => formatted,
+            Err(fsl_syntax::FormatError::Parse(error)) => {
+                return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
+            }
+            Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
+        };
+        // The document fmt reads: the one parse error it repairs (a particle
+        // written onto its word) repaired.
+        let read = fsl_syntax::space_particles(&source, crate::parse_options());
+        if let Err(error) = validate_fmt_semantics(&read, path) {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
         if let Err(error) = validate_fmt_semantics(&formatted, path) {
+            return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
+        }
+        if options.respelling != fsl_syntax::Respelling::default()
+            && let Err(error) = validate_respelled_kernel(&read, &formatted, path)
+        {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
         let changed = source != formatted;
@@ -939,6 +975,40 @@ fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
     fsl_core::build_model(kernel)
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+/// The contract of `fmt --lang` / `--names`: the respelled document lowers
+/// to the same checked kernel, apart from locations and lowering origins
+/// (which quote the source as written).
+fn validate_respelled_kernel(before: &str, after: &str, path: &Path) -> Result<(), String> {
+    if path.as_os_str() == "-" {
+        return Ok(());
+    }
+    let comparable = |source: &str| {
+        migration_kernel_contract(source, path).map(|mut contract| {
+            remove_key(&mut contract, "origin");
+            contract
+        })
+    };
+    if comparable(before)? == comparable(after)? {
+        Ok(())
+    } else {
+        Err(format!(
+            "respelling changed the checked Public Kernel for '{}'; nothing was written",
+            path.display()
+        ))
+    }
+}
+
+fn remove_key(value: &mut Value, key: &str) {
+    match value {
+        Value::Object(object) => {
+            object.remove(key);
+            object.values_mut().for_each(|value| remove_key(value, key));
+        }
+        Value::Array(values) => values.iter_mut().for_each(|value| remove_key(value, key)),
+        _ => {}
+    }
 }
 
 fn print_cli_metadata() -> bool {

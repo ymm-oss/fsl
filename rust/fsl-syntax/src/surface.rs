@@ -718,6 +718,9 @@ pub struct NextEditionRequirements {
     /// The decision tables, already folded into their events' guards; kept
     /// for the exhaustiveness / overlap checks and the lowering's origins.
     pub decisions: Vec<DecisionTable>,
+    /// Where the document spelled its keywords and phrases, for the
+    /// formatter.
+    pub spellings: crate::SourceSpellings,
 }
 
 /// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.

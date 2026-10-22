@@ -4,6 +4,7 @@
 use std::fmt;
 
 mod next_requirements;
+pub(crate) use next_requirements::particles_without_space;
 
 use crate::annotation_parse;
 use crate::keywords::{Kw, Position};
@@ -170,6 +171,13 @@ struct Parser<'a> {
     /// Japanese ([`crate::keywords`]): only in the body of a next-edition
     /// requirements document. Otherwise only the English spelling is read.
     keywords: bool,
+    /// Where keywords and phrases were spelled, recorded while `keywords`
+    /// holds ([`crate::SourceSpellings`]).
+    spellings: crate::SourceSpellings,
+    /// Inside a published item of a next-edition document (`requirement`,
+    /// `acceptance`, `process`, `action`, `time`, `implements`): its
+    /// expressions keep English words.
+    published_item: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -181,6 +189,8 @@ impl<'a> Parser<'a> {
             pending_annotations: Annotations::default(),
             edition: Edition::Fsl4,
             keywords: false,
+            spellings: crate::SourceSpellings::default(),
+            published_item: false,
         }
     }
 
@@ -487,6 +497,7 @@ impl<'a> Parser<'a> {
         // while the word is still spelled as written.
         if next_edition {
             let glossary = if self.peek_kw(Kw::Glossary) {
+                self.note_kw(Kw::Glossary, self.peek().span);
                 Some(crate::glossary::parse_glossary(
                     &self.tokens,
                     &mut self.cursor,
@@ -518,11 +529,26 @@ impl<'a> Parser<'a> {
                 self.expect_no_pending_annotations()?;
                 continue;
             }
-            let item = self.requirements_item()?;
+            // The published items keep the kernel's English words; the
+            // vocabulary (`const`, `type`, `kpi`, …) is range B.
+            self.published_item = ![
+                Kw::Kpi,
+                Kw::Const,
+                Kw::Type,
+                Kw::Enum,
+                Kw::Entity,
+                Kw::Number,
+            ]
+            .into_iter()
+            .any(|keyword| self.peek_kw(keyword));
+            let item = self.requirements_item();
+            self.published_item = false;
+            let item = item?;
             self.expect_no_pending_annotations()?;
             items.push(item);
         }
         if self.peek_kw(Kw::Verify) {
+            self.note_kw(Kw::Verify, self.peek().span);
             items.push(RequirementsItem::Common(self.verify_bounds()?));
         }
         if next_edition {
@@ -530,7 +556,27 @@ impl<'a> Parser<'a> {
             crate::glossary::reject_unaliased_non_ascii(&self.tokens[body_start..])?;
         }
         let (items, next) = if next_edition {
-            let (items, next) = next.desugar(items)?;
+            let (items, mut next) = next.desugar(items)?;
+            let parsed = std::mem::take(&mut self.spellings);
+            let spellings = &mut next.spellings;
+            spellings.keywords = parsed.keywords;
+            spellings.phrases.extend(parsed.phrases);
+            spellings.checks = parsed.checks;
+            spellings.statements = parsed.statements;
+            spellings.expressions = parsed.expressions;
+            spellings
+                .keywords
+                .sort_by_key(|keyword| keyword.span.start.offset);
+            spellings
+                .phrases
+                .sort_by_key(|phrase| phrase.span.start.offset);
+            spellings
+                .checks
+                .sort_by_key(|check| check.span.start.offset);
+            spellings.statements.sort_by_key(|span| span.start.offset);
+            spellings
+                .expressions
+                .sort_by_key(|expression| expression.span.start.offset);
             (items, Some(next))
         } else {
             (items, None)
@@ -1027,7 +1073,7 @@ impl<'a> Parser<'a> {
             return self.business_process();
         }
         if self.peek_kw(Kw::Kpi) {
-            let span = self.bump().span;
+            let span = self.bump_kw(Kw::Kpi);
             let name = self.expect_ident()?;
             self.expect_symbol("=")?;
             self.expect_kw(Kw::Count)?;
@@ -1490,7 +1536,7 @@ impl<'a> Parser<'a> {
     #[allow(clippy::too_many_lines)]
     fn spec_item(&mut self) -> Result<SpecItem, ParseError> {
         if self.peek_kw(Kw::Const) {
-            self.bump();
+            self.bump_kw(Kw::Const);
             let name = self.expect_ident()?;
             self.expect_symbol("=")?;
             return Ok(SpecItem::Const {
@@ -1508,7 +1554,7 @@ impl<'a> Parser<'a> {
             false
         };
         if self.peek_kw(Kw::Type) {
-            self.bump();
+            self.bump_kw(Kw::Type);
             let name = self.expect_ident()?;
             self.expect_symbol("=")?;
             let lo = self.expression(0)?;
@@ -1522,7 +1568,7 @@ impl<'a> Parser<'a> {
             });
         }
         if self.peek_kw(Kw::Enum) {
-            self.bump();
+            self.bump_kw(Kw::Enum);
             let name = self.expect_ident()?;
             self.expect_symbol("{")?;
             let (members, member_spans) = self.ident_list_with_spans("}")?;
@@ -1545,12 +1591,12 @@ impl<'a> Parser<'a> {
         }
         if self.peek_kw(Kw::Entity) || self.peek_kw(Kw::Number) {
             let entity = self.peek_kw(Kw::Entity);
-            let token = self.bump().clone();
+            let span = self.bump_kw(if entity { Kw::Entity } else { Kw::Number });
             let name = self.expect_ident()?;
             return Ok(if entity {
-                SpecItem::Entity(name, token.span)
+                SpecItem::Entity(name, span)
             } else {
-                SpecItem::Number(name, token.span)
+                SpecItem::Number(name, span)
             });
         }
         if self.peek_ident("state") {
@@ -2013,11 +2059,13 @@ impl<'a> Parser<'a> {
             let name = self.expect_ident()?;
             self.expect_symbol("=")?;
             if self.spells_kw(&kind, Kw::Instances) {
+                self.note_kw(Kw::Instances, token.span);
                 let TokenKind::Int(value) = self.bump().clone().kind else {
                     return Err(self.error("instances bound must be an integer"));
                 };
                 items.push(VerifyItem::Instances(name, value, token.span));
             } else if self.spells_kw(&kind, Kw::Values) {
+                self.note_kw(Kw::Values, token.span);
                 let lo = self.expression(0)?;
                 self.expect_symbol("..")?;
                 items.push(VerifyItem::Values(
@@ -2119,10 +2167,12 @@ impl<'a> Parser<'a> {
             min_binding_power, 0,
             "shared parser owns recursive precedence"
         );
+        let start = self.cursor;
         let mut cursor = self.cursor;
         let expression =
             parse_tokens_expression(&self.tokens, &mut cursor, self.expression_mode(), false)?;
         self.cursor = cursor;
+        self.note_expression(start);
         expression.into_kernel()
     }
 
@@ -2383,13 +2433,49 @@ impl<'a> Parser<'a> {
 
     /// Consume the keyword `kw` when it starts here.
     fn eat_kw(&mut self, kw: Kw) -> bool {
-        let Some(count) = self.kw_tokens_at(0, kw) else {
-            return false;
-        };
+        self.eat_kw_span(kw).is_some()
+    }
+
+    /// Consume the keyword `kw` when it starts here, recording where it was
+    /// spelled; its span.
+    fn eat_kw_span(&mut self, kw: Kw) -> Option<Span> {
+        let count = self.kw_tokens_at(0, kw)?;
+        let start = self.peek().span;
         for _ in 0..count {
             self.bump();
         }
-        true
+        let span = join_span(start, self.last_span());
+        self.note_kw(kw, span);
+        Some(span)
+    }
+
+    /// Consume the keyword `kw`, which the caller has seen here
+    /// ([`Self::peek_kw`]); its span.
+    fn bump_kw(&mut self, kw: Kw) -> Span {
+        self.eat_kw_span(kw)
+            .expect("bump_kw follows a successful peek_kw")
+    }
+
+    /// Record that `kw` was spelled at `span`, where keywords are read
+    /// through the table.
+    fn note_kw(&mut self, kw: Kw, span: Span) {
+        if self.keywords {
+            self.spellings
+                .keywords
+                .push(crate::KeywordSpelling { kw, span });
+        }
+    }
+
+    /// Record the extent of an expression read from token `start` up to the
+    /// cursor, where keywords are read through the table.
+    fn note_expression(&mut self, start: usize) {
+        if self.keywords && self.cursor > start {
+            let span = join_span(self.tokens[start].span, self.tokens[self.cursor - 1].span);
+            self.spellings.expressions.push(crate::ExpressionSpelling {
+                span,
+                member: !self.published_item,
+            });
+        }
     }
 
     fn expect_kw(&mut self, kw: Kw) -> Result<(), ParseError> {

@@ -106,6 +106,8 @@ pub enum UnsafeFormatKind {
     EditOutsideUtf8Boundary,
     /// Edits whose spans overlap.
     OverlappingEdits,
+    /// A phrase that a respelling reorders has a comment inside it.
+    PhraseInteriorComment,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -298,9 +300,13 @@ pub fn format_source(source: &str, edition: Edition) -> Result<String, FormatErr
 /// As [`format_source`].
 pub fn format_source_with(
     source: &str,
-    _edition: Edition,
+    edition: Edition,
     options: &ParseOptions,
 ) -> Result<String, FormatError> {
+    // A particle written onto its word is the one parse error fmt repairs:
+    // the space is the whole fix (`particle_needs_space`).
+    let spaced = crate::space_particles(source, options);
+    let source = spaced.as_str();
     let rewrites = canonical_rewrites_with(source, options)?;
     let rewritten = apply_source_edits(
         source,
@@ -313,11 +319,83 @@ pub fn format_source_with(
     let parsed =
         parse_document_with(SourceFile::new(&rewritten), options).map_err(FormatError::Parse)?;
     let compact_hyphens = business_id_hyphen_offsets(&tree, parsed.keyword);
+    // The edition's layout applies to a document read in it.
+    let next_edition = edition == Edition::Fsl5 && parsed.edition == Edition::Fsl5;
+    let continuations = if next_edition {
+        continuation_offsets(&tree, &parsed.surface)
+    } else {
+        BTreeSet::new()
+    };
     let mut formatter = Formatter::new(compact_hyphens);
+    formatter.continuations = continuations;
     formatter.write(tree.nodes());
-    let output = formatter.finish();
+    let mut output = formatter.finish();
+    if matches!(crate::edition_header(&output, options), Ok(Some(_))) {
+        // The header is the first significant line; nothing but comments
+        // comes before it, and no blank line opens the document.
+        let blank = output.len() - output.trim_start_matches('\n').len();
+        output.drain(..blank);
+    }
     parse_document_with(SourceFile::new(&output), options).map_err(FormatError::Parse)?;
     Ok(output)
+}
+
+/// [`format_source_with`] after the respelling `respelling` (`fmt --lang`,
+/// `fmt --names`) of a next-edition requirements document.
+///
+/// # Errors
+///
+/// As [`format_source_with`] and [`crate::respell_source`];
+/// [`crate::RESPELL_NOT_APPLICABLE`] when `edition` is not the next one.
+pub fn format_source_respelled(
+    source: &str,
+    edition: Edition,
+    options: &ParseOptions,
+    respelling: crate::Respelling,
+) -> Result<String, FormatError> {
+    if respelling == crate::Respelling::default() {
+        return format_source_with(source, edition, options);
+    }
+    let spaced = crate::space_particles(source, options);
+    let respelled = if edition == Edition::Fsl5 {
+        crate::respell_source(&spaced, options, respelling)?
+    } else {
+        return Err(crate::respell::not_applicable(source));
+    };
+    format_source_with(&respelled, edition, options)
+}
+
+/// The start offsets of the tokens that begin a line a next-edition
+/// statement continues on (an event's `covers`, a decision table row's):
+/// the formatter indents them one level deeper than the statement.
+fn continuation_offsets(
+    tree: &LosslessDocument,
+    surface: &crate::SurfaceDocument,
+) -> BTreeSet<usize> {
+    let crate::SurfaceDocument::Requirements(requirements) = surface else {
+        return BTreeSet::new();
+    };
+    let Some(next) = &requirements.next else {
+        return BTreeSet::new();
+    };
+    let statements = &next.spellings.statements;
+    let mut offsets = BTreeSet::new();
+    let mut previous_line = 0;
+    for node in tree.nodes() {
+        if !matches!(node.kind, LosslessKind::Token(_)) {
+            continue;
+        }
+        let offset = node.span.start.offset;
+        if node.span.start.line > previous_line
+            && statements
+                .iter()
+                .any(|span| span.start.offset < offset && offset < span.end.offset)
+        {
+            offsets.insert(offset);
+        }
+        previous_line = node.span.end.line;
+    }
+    offsets
 }
 
 /// Plan the syntax-only canonical rewrites shared by formatting and migration.
@@ -727,6 +805,9 @@ struct Formatter {
     compact_hyphens: BTreeSet<usize>,
     type_argument_depth: usize,
     source_line_break: bool,
+    /// Tokens that start a line a statement continues on: indented one level
+    /// more ([`continuation_offsets`]).
+    continuations: BTreeSet<usize>,
 }
 
 impl Formatter {
@@ -742,6 +823,7 @@ impl Formatter {
             compact_hyphens,
             type_argument_depth: 0,
             source_line_break: false,
+            continuations: BTreeSet::new(),
         }
     }
 
@@ -797,6 +879,9 @@ impl Formatter {
         self.flush_pending();
         let at_line_start = self.line_start;
         self.write_indent();
+        if at_line_start && self.continuations.contains(&span.start.offset) {
+            self.output.push_str("  ");
+        }
         let compact_hyphen = matches!(kind, TokenKind::Symbol(symbol) if symbol == "-")
             && self.compact_hyphens.contains(&span.start.offset);
         let previous_compact_hyphen = self
@@ -1039,6 +1124,26 @@ mod tests {
                 Err(FormatError::Parse(error)) if error.code() == "FSL-DIALECT-UNKNOWN"
             ));
         }
+    }
+
+    /// With a header, only comments come before it and no blank line opens
+    /// the document; without the gate the published layout is kept.
+    #[test]
+    fn formatter_opens_a_headed_document_with_its_header_line() {
+        let gated = ParseOptions::with_unstable(
+            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
+        );
+        let body = "domain D {   type Status = Draft | Done; }";
+        let plain = format_source(body, Edition::Fsl4).expect("format");
+        let source = format!("\n\n// note\n\n\nfsl   5\n\n\n{body}");
+        let once = format_source_with(&source, Edition::Fsl5, &gated).expect("format");
+        assert_eq!(once, format!("// note\n\nfsl 5\n\n{plain}"));
+        let published = format_source(&format!("\n\n{body}"), Edition::Fsl4).expect("format");
+        assert_eq!(
+            published,
+            format!("\n{plain}"),
+            "the published layout is unchanged"
+        );
     }
 
     #[test]
