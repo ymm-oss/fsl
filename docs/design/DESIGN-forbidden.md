@@ -93,13 +93,14 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     verified, they exited 0 before; `counterexample export` already exited 2 (nothing to
     export). When it was violated, `check` still exited 0, `approval create` exited 2,
     and the others except `explain` exited 1 (`verify`, `html`, and `counterexample export` with its
-    counterexample). The exceptions: `explain` still exits 0 with `witnesses: []` (known
-    gap #1242; where the rest verified, it listed the forbidden's witness);
-    `approval create --kind ledger` exits 0 with a record of a ledger listing the error
-    (where the rest verified, it created one before too; where it was violated, it exited
-    2 only because that ledger embeds wall-clock `elapsed_s`, and whether such a ledger
-    may be approved is tracked by #1243); and `approval check` of a ledger record created
-    before reports `drifted` (exit 0). In `fslc mutate`, a mutant that
+    counterexample). The exceptions at #1229: `explain` kept exiting 0 with `witnesses: []`
+    (where the rest verified, it listed the forbidden's witness); `approval create --kind
+    ledger` exited 0 with a record of a ledger listing the error (where the rest verified,
+    it created one before too; where it was violated, it exited 2 only because that ledger
+    embeds wall-clock `elapsed_s`); and `approval check` of a ledger record created before
+    reported `drifted` (exit 0). Since #1242 / #1243 they, `html`, `ledger`, and the
+    `document` commands print the gate's error with exit 2 (§2.1, "Consumers of the
+    gate"). In `fslc mutate`, a mutant that
     narrows an `entity` / `number` scope (`type_bound_hi_minus1` / `type_bound_lo_plus1`
     on that type) so that a forbidden final step falls outside it is now killed with
     `killed_by: "forbidden"` where it survived, so kill rates can shift toward
@@ -188,16 +189,16 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
       (`violated`) without a test file on every #1213 spec measured in §2.1, even at `--depth 1`,
       because its own check reached the violation (`checked_to_depth: 21` on the
       eleven-step spec).
-    - Three commands do not exit 2. `explain` still exits 0, but where `scenarios` used to
-      succeed its `witnesses` (and the `html` witnesses section) become empty (a known gap
-      tracked by issue #1242). `approval create --kind ledger` exits 0 with a record of a
-      ledger that lists the error: when its depth reached the violation it used to exit 2,
-      only because that ledger embeds wall-clock `elapsed_s` and so never matched a fresh
-      rendering, and otherwise it exited 0 (not folding the verdict into the status is
-      the #592 design; whether a ledger whose forbidden gate fails may be approved is
-      tracked by issue #1243). `approval check` of a ledger record created before reports
-      `drifted` (exit 0). §2.1 has the measured exit status and output of each command
-      before and after.
+    - At #1213 three commands did not exit 2. `explain` kept exiting 0, but where
+      `scenarios` used to succeed its `witnesses` (and the `html` witnesses section) became
+      empty. `approval create --kind ledger` exited 0 with a record of a ledger that lists
+      the error: when its depth reached the violation it used to exit 2, only because that
+      ledger embeds wall-clock `elapsed_s` and so never matched a fresh rendering, and
+      otherwise it exited 0 (not folding the verdict into the status is the #592 design).
+      `approval check` of a ledger record created before reported `drifted` (exit 0).
+      Since #1242 / #1243 all three exit 2 with the gate's error (§2.1, "Consumers of the
+      gate"). §2.1 has the measured exit status and output of each command before and
+      after.
     - `fslc mutate`: the requirement oracle (`apply_requirement_mutation_oracle`) runs on
       mutants the bounded oracle leaves clean. Such a mutant whose forbidden last step is
       now enabled and violates is killed with `killed_by: "forbidden"` (and the forbidden's
@@ -268,14 +269,15 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     theirs; `approval create --kind html` creates no record). `chain` prints `kind:
     "chain"` with `failed: ["requirements"]` and the error as that layer's `detail`. The
     others print `error` / `kind: "forbidden"` with that `message`. `approval check` of a
-    `scenarios` or `html` record created before exits 2. Three commands do not exit 2:
-    `explain` still exits 0, with `witnesses: []` (a known gap tracked by issue #1242);
-    `approval create --kind ledger` exits 0 with a record of the ledger, which now lists the
-    error — on a spec whose rest has a violation it used to exit 2, only because that
-    ledger embeds wall-clock `elapsed_s` and so never matched a fresh rendering (not
-    folding the verdict into the status is the #592 design; whether a ledger whose
-    forbidden gate fails may be approved is tracked by issue #1243); and `approval check`
-    of a ledger record created before reports `drifted` (exit 0). Fix
+    `scenarios` or `html` record created before exits 2. At #1212 three commands did not
+    exit 2: `explain` kept exiting 0, with `witnesses: []`; `approval create --kind ledger`
+    exited 0 with a record of the ledger, which then listed the error — on a spec whose
+    rest has a violation it used to exit 2, only because that ledger embeds wall-clock
+    `elapsed_s` and so never matched a fresh rendering (not folding the verdict into the
+    status is the #592 design); and `approval check` of a ledger record created before
+    reported `drifted` (exit 0). Since #1242 / #1243 they exit 2 with the gate's error, and
+    `html` and `ledger` print it instead of a generated result (§2.1, "Consumers of the
+    gate"). Fix
     the step's action name or arguments. Corpus sweep (#1212): no `.fsl` under `specs/`,
     `examples/`, `rust/fslc/tests/fixtures/` or `tests/fixtures/` has such a step (§6).
 - `loc`: an error that carries `failed_step` (`forbidden_setup`, and a `kind: "forbidden"`
@@ -297,15 +299,13 @@ dispatch, are:
 
 - the gate: `check` (`check_stages.rs`); `verify` on every engine, `sweep`, and the layers of
   `chain` (`prepare_cli_verification_from_source` / `run_verify_from_source`); `scenarios`,
-  `testgen`, and `explain` (`run_scenarios_mode_from_source`; `explain` discards that exit
-  status and reads only its `scenarios` array, so a gate error leaves it at exit 0 with
-  `witnesses: []`, and `html`, which embeds `explain`, with an empty witnesses section — a
-  known gap tracked by issue #1242);
+  `testgen`, and `explain` (`run_scenarios_mode_from_source`; since #1242 `explain` runs
+  the gate itself and builds its witnesses from the checked contract, and `html` embeds
+  `explain`);
   `html` and `ledger`; `approval create` / `check` with `--kind scenarios`, `html`, or
-  `ledger`, which render that artifact (the ledger rendering for approval does not fold
-  the verification into its status, so `--kind ledger` exits 0 with a record of a ledger
-  that lists the error, whether or not the rest of the spec verifies — issue #1243; `--kind
-  requirements_document` renders no verification and never runs the gate);
+  `ledger`, which render that artifact, and, since #1243, with `--kind
+  requirements_document`, which renders a document; the `document` commands (since
+  #1243); and the language server (since #1243);
   `counterexample export`; `mutate` (the baseline `verify` and
   `apply_requirement_mutation_oracle`); and the Worker's `check` / `verify`
   (`rust/fsl-wasm/src/lib.rs`). `db check`, `compat check`, `domain check` / `testgen`, and
@@ -314,6 +314,27 @@ dispatch, are:
   requirements document, so they cannot change;
 - the `diff` judgment: `diff`, `diff --git`, and `approval diff` (which runs `diff` with no
   `--forbid`, so its exit stays 0).
+
+**Consumers of the gate (#1285).** Acceptance / forbidden cases are readable only from
+`CheckedTraceContract`, which only the gate constructs, or through accessors named
+`unchecked_*` (stage 1). A consumer that reports a result about the cases calls
+`require_trace_gate` (`verification_output.rs`), which returns the checked contract or the
+envelope to report instead — the gate's failure, or a `semantics` error for a trace that
+cannot be parsed or replayed — with exit 2 (stage 2). `issue_1285_trace_contract_gate.rs`
+pins both the unchecked reads and the `require_trace_gate` calls per file.
+
+| consumer | reads the cases through | on a refused trace |
+|---|---|---|
+| `check`, `verify` (every engine), `sweep`, `chain`, `scenarios`, `testgen`, `mutate`, `counterexample export` | `require_trace_gate` | the gate's error, exit 2 (`chain`: its `[requirements]` layer's `detail`) |
+| Worker `check` / `verify` | `validate_requirement_trace_source` (its own envelope) | the native error, exit 2 |
+| `explain`, `html` | `require_trace_gate`; the witnesses come from the checked contract (`witness_scenarios`) | the gate's error, exit 2; `html` writes no report (#1242) |
+| `ledger`; `approval create` / `check --kind ledger` | `require_trace_gate` | the gate's error, exit 2; no ledger, no record (#1243) |
+| `document generate` / `claims` / `check`; `approval create` / `check --kind requirements_document` | `document_trace_gate`, which runs `require_trace_gate` before `fsl-tools` projects and renders (`fsl-tools` does not depend on `fsl-runtime`, so it re-reads the cases unchecked after the gate passed) | the gate's error, exit 2 (#1243) |
+| language server | `trace_gate_diagnostics` (`source_diagnostic.rs`) on the model it built | one error diagnostic, code `FSL-REQUIREMENT-TRACE`, `data.kind` as `check`'s `kind`, at the error's `loc` (#1243) |
+| `analyze` graphs (`add_scenario_items`) | `validate_requirement_trace_source`; a refused contract's cases through the unchecked accessors | still projected, each `acceptance:<id>` / `forbidden:<id>` node marked `"trace_gate": "unchecked"`; exit status unchanged. A contract that does not parse projects no case |
+| `check` / `verify --strict-tags` (referenced requirement ids) | an unchecked re-parse | not reached: it runs only on an `ok` / `verified` / `proved` result, which passed the gate. Under `--instances` / `--values` that was the scoped gate, which may skip a case the full gate rejects, so the full gate is not re-run |
+| `diff` (OLD forbidden) | an unchecked re-parse and its own replay | a finding, not an error (#1239) |
+| `no_user_invariants` suppression | `unchecked_forbidden` | any forbidden suppresses the warning; `check` reports the refusal itself |
 
 Measured with debug `fslc` binaries (`cargo build -p fslc-rust --bin fslc`), each built in
 its own materialized tree: main at `458040f3`, #1212 on top of it, and #1213 on top of #1212.

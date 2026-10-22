@@ -488,8 +488,8 @@ fn run_in(directory: &Path, args: &[&str]) -> (Value, i32) {
 /// Migration: on a final step that names no action, `verify` (BMC at
 /// `--depth 3`, and `--engine induction`), `counterexample export`,
 /// `scenarios`, `testgen`, `mutate`, `sweep`, and the `[requirements]` layer
-/// of `chain` stop with the `kind: "forbidden"` error, and `html` and `ledger`
-/// exit 2 while still writing their report. `check` is pinned by
+/// of `chain` stop with the `kind: "forbidden"` error, and so do `html` and
+/// `ledger`, which write no report (#1242, #1243). `check` is pinned by
 /// `a_final_step_naming_no_callable_action_is_not_a_rejection`; `explain` and
 /// `approval` are not run here. On this Wallet, which verifies, `verify`, `mutate`,
 /// `sweep`, `chain`, `html` and `ledger` used to exit 0; `scenarios` /
@@ -524,6 +524,8 @@ fn an_unknown_final_action_exits_2_in_verify_at_depth_3_and_induction_and_eight_
         ],
         &["mutate", "wallet.fsl", "--depth", "3"],
         &["sweep", "wallet.fsl", "--depth", "1..3"],
+        &["html", "wallet.fsl", "--depth", "3", "-o", "report.html"],
+        &["ledger", "wallet.fsl", "--depth", "3", "-o", "ledger.md"],
     ] {
         let (output, status) = run_in(&directory, args);
         assert_eq!(status, 2, "{args:?}: {output:#}");
@@ -534,7 +536,7 @@ fn an_unknown_final_action_exits_2_in_verify_at_depth_3_and_induction_and_eight_
         );
         assert!(output.get("scenarios").is_none(), "{args:?}: {output:#}");
     }
-    for artifact in ["cx.json", "t.py"] {
+    for artifact in ["cx.json", "t.py", "report.html", "ledger.md"] {
         assert!(!directory.join(artifact).exists(), "{artifact} written");
     }
     std::fs::write(
@@ -553,70 +555,47 @@ fn an_unknown_final_action_exits_2_in_verify_at_depth_3_and_induction_and_eight_
         output["layers"][0]["detail"]["kind"], "forbidden",
         "{output:#}"
     );
-    // The generated reports still write their artifact, but fold the gate's
-    // verdict into the exit status.
-    for (args, artifact) in [
-        (
-            &["html", "wallet.fsl", "--depth", "3", "-o", "report.html"][..],
-            "report.html",
-        ),
-        (
-            &["ledger", "wallet.fsl", "--depth", "3", "-o", "ledger.md"],
-            "ledger.md",
-        ),
-    ] {
-        let (output, status) = run_in(&directory, args);
-        assert_eq!(status, 2, "{args:?}: {output:#}");
-        assert!(directory.join(artifact).exists(), "{artifact} not written");
-    }
     let _ = std::fs::remove_dir_all(&directory);
 }
 
-fn ledger_entry(final_step: &str, name: &str) -> (String, i32) {
+/// `fslc ledger`'s output for the Wallet with `final_step`; it must write no
+/// ledger, since the gate refuses every one of these traces (#1243).
+fn ledger_refusal(final_step: &str, name: &str) -> (Value, i32) {
     let directory = scratch(name);
     write_spec(&directory, final_step);
-    let (_, status) = run_in(
+    let (output, status) = run_in(
         &directory,
         &["ledger", "wallet.fsl", "--depth", "3", "-o", "ledger.md"],
     );
-    let content = std::fs::read_to_string(directory.join("ledger.md")).expect("read ledger");
+    let written = directory.join("ledger.md").exists();
     let _ = std::fs::remove_dir_all(&directory);
-    let entry = content
-        .split("### FB-1")
-        .nth(1)
-        .unwrap_or_else(|| panic!("no FB-1 finding in ledger:\n{content}"))
-        .split("```")
-        .next()
-        .unwrap_or_default()
-        .to_owned();
-    (entry, status)
+    assert!(!written, "{final_step}: ledger written for a refused trace");
+    (output, status)
 }
 
 /// `fslc ledger` summarized every `trace_type: forbidden` error as an accepted
-/// final step and advised adding a guard (C5, review r1 minor-5).
+/// final step and advised adding a guard (C5, review r1 minor-5). It now
+/// reports the gate's own error, which tells the three apart.
 #[test]
 fn ledger_distinguishes_an_unknown_final_action_from_an_accepted_one() {
-    let (entry, status) = ledger_entry("withdrew(60)", "ledger-unknown");
-    assert_eq!(status, 2, "{entry}");
-    assert!(
-        entry.contains("unknown action 'withdrew' in forbidden"),
-        "{entry}"
+    let (output, status) = ledger_refusal("withdrew(60)", "ledger-unknown");
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], "forbidden", "{output:#}");
+    assert_eq!(
+        output["message"], "unknown action 'withdrew' in forbidden",
+        "{output:#}"
     );
-    assert!(!entry.contains("accepted_trace"), "{entry}");
-    assert!(!entry.contains("許容"), "{entry}");
-    assert!(!entry.contains("ガードを追加"), "{entry}");
+    assert!(output.get("accepted_trace").is_none(), "{output:#}");
 
-    let (entry, status) = ledger_entry("withdraw(500)\n    withdraw(1)", "ledger-setup");
-    assert_eq!(status, 2, "{entry}");
-    assert!(entry.contains("前提"), "{entry}");
-    assert!(!entry.contains("accepted_trace"), "{entry}");
-    assert!(!entry.contains("許容"), "{entry}");
+    let (output, status) = ledger_refusal("withdraw(500)\n    withdraw(1)", "ledger-setup");
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], "forbidden_setup", "{output:#}");
+    assert!(output.get("accepted_trace").is_none(), "{output:#}");
 
-    // Control: an accepted final step keeps the accepted-step summary.
-    let (entry, status) = ledger_entry("withdraw(30)", "ledger-accepted");
-    assert_eq!(status, 2, "{entry}");
-    assert!(
-        entry.contains("禁止フローが仕様上許容されている（accepted_trace あり）"),
-        "{entry}"
-    );
+    // Control: an accepted final step is reported as accepted.
+    let (output, status) = ledger_refusal("withdraw(30)", "ledger-accepted");
+    assert_eq!(status, 2, "{output:#}");
+    assert_eq!(output["kind"], "forbidden", "{output:#}");
+    assert_eq!(output["accepted_step"], 1, "{output:#}");
+    assert!(output["accepted_trace"].is_array(), "{output:#}");
 }

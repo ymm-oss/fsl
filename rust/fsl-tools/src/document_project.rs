@@ -856,8 +856,9 @@ pub(crate) fn project_trace_case_payload(
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
 ) -> Result<RequirementClaimSet, String> {
-    // Ungated (#1243): the requirement-trace gate replays traces on
-    // `fsl-runtime`, which this crate does not depend on.
+    // Ungated here: the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
+    // before every document command and fails closed on its refusal.
     let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(input, trace.as_ref())
 }

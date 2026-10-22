@@ -1367,6 +1367,39 @@ pub fn validate_requirement_trace_source(
     )
 }
 
+/// The requirement-trace gate for a consumer that reads acceptance /
+/// forbidden cases and must not report a result for a spec whose traces the
+/// gate refuses (#1285 stage 2, #1242, #1243).
+///
+/// Returns the checked contract (`None` when `source` is not a requirements
+/// document), or the envelope the consumer reports instead of its own output,
+/// with exit status 2: the gate's failure for a rejected trace, or a
+/// semantics error for a trace that cannot be parsed or replayed.
+///
+/// # Errors
+///
+/// Returns that envelope whenever the gate does not pass.
+pub fn require_trace_gate(
+    envelope: &Map<String, Value>,
+    source: &str,
+    model: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<CheckedTraceContract>, Value> {
+    match validate_requirement_trace_source(envelope, source, model, options) {
+        Ok(TraceGate::Passed(contract)) => Ok(Some(contract)),
+        Ok(TraceGate::NotRequirements) => Ok(None),
+        Ok(TraceGate::Rejected { failure, .. }) => Err(failure),
+        Err(message) => Err(render_semantic_error(
+            envelope.clone(),
+            &message,
+            None,
+            &DiagnosticClass::Message,
+            None,
+            None,
+        )),
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn validate_requirement_trace_contract(
     envelope: &Map<String, Value>,

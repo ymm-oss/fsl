@@ -49,8 +49,10 @@ pub(crate) fn referenced_requirement_ids(
                 .map(|requirement| requirement.id),
         );
     }
-    // Ungated (#1243): a parse failure adds nothing, and a case the gate would
-    // reject still counts as referencing its requirements.
+    // Ungated: `--strict-tags` runs only on an ok / verified / proved result,
+    // which already passed the gate. Under `--instances` / `--values` that was
+    // the scoped gate, which may skip a case the full gate would reject, so
+    // the full gate is not re-run here.
     if let Ok(Some(contract)) =
         fsl_core::requirements_trace_contract_with_options(source, crate::process::parse_options())
     {
