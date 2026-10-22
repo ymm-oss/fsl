@@ -501,6 +501,69 @@ fn document_in_english_shows_canonical_names_for_a_japanese_source() {
     assert!(!english.lines().any(|line| line == "### Glossary"));
 }
 
+const MULTI_ENTITY_JA: &str = "rust/fslc/tests/fixtures/fsl5/multi_entity/fsl5_ja_full.fsl";
+const RELATIONS: &str = "rust/fslc/tests/fixtures/fsl5/relations/fsl5_en.fsl";
+
+/// The relations stage's declarations are in the overview: the relation,
+/// the resource, the measures and the goal of the multi-entity example under
+/// their aliases (with the keyword table's column words), and the same
+/// lines under canonical names in English.
+#[test]
+fn document_shows_relations_resources_measures_and_goals() {
+    let markdown = gated_markdown(MULTI_ENTITY_JA, "ja");
+    for line in [
+        "### 関係",
+        "| エンティティ | 所属先 | 役名 | 契機 |",
+        "| 注文 | 利用者 | 購入者 | `place` |",
+        "### 資源",
+        "| 在庫（`stock`） | 数量型 | `2` |",
+        "### 指標",
+        "| 支払件数（`paid_count`） | 注文 | 決済済み |",
+        "| 返金件数（`refund_count`） | 注文 | 返金済み |",
+        "### 目標",
+        "- **返金できる**（`RefundedOne`）: 注文は返金まで進める — いずれかの 注文 が 返金済み に到達できる",
+        "| `place` | 利用者 | 注文 | 注文する | 空 | 受注 | u（利用者）, 数量 | REQ-PLACE |",
+    ] {
+        assert!(
+            markdown.lines().any(|candidate| candidate == line),
+            "missing `{line}`:\n{markdown}"
+        );
+    }
+    let ids = mermaid_ids(&mermaid_lines(&markdown));
+    assert!(ids.contains(&"ReturnRequested"));
+    assert!(ids.iter().all(|id| is_ascii_identifier(id)), "{ids:?}");
+
+    let english = gated_markdown(MULTI_ENTITY_JA, "en");
+    for line in [
+        "| Order | User | buyer | `place` |",
+        "| `stock` | Qty | `2` |",
+        "| `paid_count` | Order | Settled |",
+        "- **RefundedOne**: 注文は返金まで進める — some Order can reach Refunded",
+    ] {
+        assert!(
+            english.lines().any(|candidate| candidate == line),
+            "missing `{line}`:\n{english}"
+        );
+    }
+}
+
+/// A policy reads as its sentence: every instance in the source stage must
+/// eventually reach one of the targets.
+#[test]
+fn document_shows_policies_in_either_language() {
+    let english = gated_markdown(RELATIONS, "en");
+    assert!(english.contains(
+        "### Policies\n\n- **Resolved**: Every assigned ticket is eventually closed or escalated — \
+         every Ticket in Assigned must eventually be Closed or Escalated"
+    ));
+    assert!(english.contains("| Ticket | Agent | assignee | `take` |"));
+    let japanese = gated_markdown(RELATIONS, "ja");
+    assert!(japanese.contains(
+        "### 方針\n\n- **Resolved**: Every assigned ticket is eventually closed or escalated — \
+         すべての Ticket は Assigned から いずれ必ず Closed または Escalated になる"
+    ));
+}
+
 /// The projection reads the document under the gate's options, so the
 /// forbidden traces of a document written with rules are claims (the
 /// published-language reading rejected the whole document).

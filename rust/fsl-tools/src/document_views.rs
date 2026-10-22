@@ -26,9 +26,9 @@ use std::collections::BTreeMap;
 use fsl_core::{DecisionTableResult, KernelModel, decision_table_results, source_expr_text};
 use fsl_syntax::keywords::Kw;
 use fsl_syntax::{
-    Annotation, BusinessItem, DecisionTable, Expr, Param, ParseOptions, ProcessItem,
-    ProcessTransition, RequirementsItem, SourceFile, SurfaceDocument, SurfaceRequirements,
-    parse_document_with,
+    Annotation, BusinessGoalBody, BusinessItem, BusinessPolicyBody, DecisionTable, Expr, Param,
+    ParseOptions, ProcessItem, ProcessTransition, RequirementsItem, SourceFile, SurfaceDocument,
+    SurfaceRequirements, parse_document_with,
 };
 
 use crate::document::RequirementClaimSet;
@@ -111,6 +111,18 @@ impl<'a> RequirementsViews<'a> {
                 Locale::En => format!("{shown} (`{canonical}`)"),
             }
         }
+    }
+
+    fn is_entity(&self, name: &str) -> bool {
+        self.requirements
+            .items
+            .iter()
+            .any(|item| matches!(item, RequirementsItem::Common(fsl_syntax::SpecItem::Entity(entity, _)) if entity == name))
+            || self
+                .requirements
+                .next
+                .as_ref()
+                .is_some_and(|next| next.entities.iter().any(|entity| entity == name))
     }
 
     fn keyword(&self, kw: Kw) -> &'static str {
@@ -226,6 +238,10 @@ impl<'a> RequirementsViews<'a> {
         if let Some(part) = self.rules_part(claims) {
             parts.push(part);
         }
+        parts.extend(self.relations_part());
+        parts.extend(self.resources_part());
+        parts.extend(self.measures_part());
+        parts.extend(self.goals_part());
         if let Some(part) = self.glossary_part() {
             parts.push(part);
         }
@@ -302,6 +318,12 @@ impl<'a> RequirementsViews<'a> {
                     .inputs
                     .iter()
                     .map(|param| match param {
+                        // The instance a relation's event records, typed by
+                        // the related entity.
+                        Param::Typed(name, ty) if self.is_entity(&ty.name) => match self.locale {
+                            Locale::Ja => format!("{name}（{}）", self.name(&ty.name)),
+                            Locale::En => format!("{name} ({})", ty.name),
+                        },
                         Param::Typed(name, _) | Param::Range(name, _, _) => self.name(name),
                     })
                     .collect::<Vec<_>>();
@@ -611,6 +633,211 @@ impl<'a> RequirementsViews<'a> {
             parts.push(items.join("\n\n"));
         }
         Some(parts.join("\n\n"))
+    }
+
+    /// `Entity belongs to Target as role via event`, one row each.
+    fn relations_part(&self) -> Option<String> {
+        let relations = &self.requirements.next.as_ref()?.relations;
+        if relations.is_empty() {
+            return None;
+        }
+        let (heading, header) = match self.locale {
+            Locale::Ja => (
+                "関係",
+                format!(
+                    "| エンティティ | {} | {} | {} |",
+                    Kw::BelongsTo.japanese(),
+                    Kw::RelationAs.japanese(),
+                    Kw::RelationVia.japanese()
+                ),
+            ),
+            Locale::En => ("Relations", "| Entity | Belongs to | As | Via |".to_owned()),
+        };
+        let mut rows = vec![header, "|---|---|---|---|".to_owned()];
+        for relation in relations {
+            rows.push(format!(
+                "| {} | {} | {} | `{}` |",
+                cell(&self.name(&relation.entity)),
+                cell(&self.name(&relation.target)),
+                cell(&self.name(&relation.role)),
+                relation.event
+            ));
+        }
+        Some(format!("### {heading}\n\n{}", rows.join("\n")))
+    }
+
+    /// `resource name: Type = initial`, one row each.
+    fn resources_part(&self) -> Option<String> {
+        let resources = &self.requirements.next.as_ref()?.resources;
+        if resources.is_empty() {
+            return None;
+        }
+        let (heading, header) = match self.locale {
+            Locale::Ja => (Kw::Resource.japanese(), "| 名前 | 型 | 初期値 |"),
+            Locale::En => ("Resources", "| Name | Type | Initial value |"),
+        };
+        let mut rows = vec![header.to_owned(), "|---|---|---|".to_owned()];
+        for resource in resources {
+            rows.push(format!(
+                "| {} | {} | `{}` |",
+                self.name_with_canonical(&resource.name),
+                cell(&self.name(&resource.type_name.name)),
+                cell(&source_expr_text(self.model, &resource.initial).replace('`', "'"))
+            ));
+        }
+        Some(format!("### {heading}\n\n{}", rows.join("\n")))
+    }
+
+    /// `measure name = count …` and `kpi name = count Entity in Stage`, one
+    /// row each.
+    fn measures_part(&self) -> Option<String> {
+        let mut counted: Vec<(&str, &str, Vec<&str>)> = self
+            .requirements
+            .next
+            .as_ref()?
+            .measures
+            .iter()
+            .map(|measure| {
+                (
+                    measure.name.as_str(),
+                    measure.entity.as_str(),
+                    measure.counted.split(", ").collect(),
+                )
+            })
+            .collect();
+        for item in &self.requirements.items {
+            if let RequirementsItem::Kpi(BusinessItem::Kpi {
+                name,
+                case_name,
+                stage,
+                ..
+            }) = item
+            {
+                counted.push((name, case_name, vec![stage.as_str()]));
+            }
+        }
+        if counted.is_empty() {
+            return None;
+        }
+        let (heading, header) = match self.locale {
+            Locale::Ja => (
+                Kw::Measure.japanese(),
+                format!("| 名前 | エンティティ | {}の対象 |", Kw::Count.japanese()),
+            ),
+            Locale::En => ("Measures", "| Name | Entity | Counted |".to_owned()),
+        };
+        let separator = match self.locale {
+            Locale::Ja => "、",
+            Locale::En => ", ",
+        };
+        let mut rows = vec![header, "|---|---|---|".to_owned()];
+        for (name, entity, what) in counted {
+            rows.push(format!(
+                "| {} | {} | {} |",
+                self.name_with_canonical(name),
+                cell(&self.name(entity)),
+                cell(
+                    &what
+                        .iter()
+                        .map(|name| self.name(name))
+                        .collect::<Vec<_>>()
+                        .join(separator)
+                )
+            ));
+        }
+        Some(format!("### {heading}\n\n{}", rows.join("\n")))
+    }
+
+    /// The `goal` and `policy` declarations, each as one sentence.
+    fn goals_part(&self) -> Option<String> {
+        let goals = &self.requirements.next.as_ref()?.goals;
+        let ja = matches!(self.locale, Locale::Ja);
+        let mut goal_lines = Vec::new();
+        let mut policy_lines = Vec::new();
+        for item in goals {
+            match item {
+                BusinessItem::Goal { id, text, body, .. } => {
+                    let statement = match body {
+                        BusinessGoalBody::SomeStage { case_name, stage } if ja => format!(
+                            "{} {} が {} に到達できる",
+                            Kw::GoalSome.japanese(),
+                            self.name(case_name),
+                            self.name(stage)
+                        ),
+                        BusinessGoalBody::SomeStage { case_name, stage } => {
+                            format!("some {case_name} can reach {stage}")
+                        }
+                        _ => String::new(),
+                    };
+                    goal_lines.push(self.goal_line(id, text, &statement));
+                }
+                BusinessItem::Policy { id, text, body, .. } => {
+                    let statement = match body.as_ref() {
+                        BusinessPolicyBody::Eventually {
+                            case_name,
+                            source_stage,
+                            target_stages,
+                        } => {
+                            let targets = target_stages
+                                .iter()
+                                .map(|stage| self.name(stage))
+                                .collect::<Vec<_>>()
+                                .join(&format!(" {} ", self.keyword(Kw::PolicyOr)));
+                            if ja {
+                                format!(
+                                    "{} {} は {} から {} {} になる",
+                                    Kw::PolicyEvery.japanese(),
+                                    self.name(case_name),
+                                    self.name(source_stage),
+                                    Kw::MustEventuallyBe.japanese(),
+                                    targets
+                                )
+                            } else {
+                                format!(
+                                    "every {case_name} in {source_stage} must eventually be {targets}"
+                                )
+                            }
+                        }
+                        _ => String::new(),
+                    };
+                    policy_lines.push(self.goal_line(id, text, &statement));
+                }
+                _ => {}
+            }
+        }
+        let mut parts = Vec::new();
+        if !goal_lines.is_empty() {
+            let heading = if ja { Kw::Goal.japanese() } else { "Goals" };
+            parts.push(format!("### {heading}\n\n{}", goal_lines.join("\n")));
+        }
+        if !policy_lines.is_empty() {
+            let heading = if ja {
+                Kw::Policy.japanese()
+            } else {
+                "Policies"
+            };
+            parts.push(format!("### {heading}\n\n{}", policy_lines.join("\n")));
+        }
+        (!parts.is_empty()).then(|| parts.join("\n\n"))
+    }
+
+    /// `- **id**（alias）: text — statement`.
+    fn goal_line(&self, id: &str, text: &str, statement: &str) -> String {
+        let shown = self.name(id);
+        let name = if shown == id {
+            format!("**{id}**")
+        } else {
+            match self.locale {
+                Locale::Ja => format!("**{}**（`{id}`）", markdown_label(&shown)),
+                Locale::En => format!("**{}** (`{id}`)", markdown_label(&shown)),
+            }
+        };
+        let text = markdown_label(text);
+        if statement.is_empty() {
+            format!("- {name}: {text}")
+        } else {
+            format!("- {name}: {text} — {statement}")
+        }
     }
 
     fn glossary_part(&self) -> Option<String> {
