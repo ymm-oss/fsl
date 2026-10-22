@@ -12,11 +12,24 @@
 //! `fsl5/e2e/fsl5_ja_full.fsl`, failing `check` with its code at the text it
 //! names, including a phrase that marks some words and not others
 //! (decisions/048 J9).
+//!
+//! It also holds the requirements skill's side of the table (fsl 5 plan §3
+//! S13, decisions/045 addendum): the keyword table that
+//! `skills-next/fsl-requirements/references/keywords.md` prints is rendered
+//! from [`KEYWORDS`] and [`PARTICLES`], and the skill's English example and
+//! its Japanese spelling are one spec.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use fsl_syntax::keywords::{
+    KEYWORDS, KeywordContext, PARTICLES, Position, SHARED_JAPANESE, Status,
+};
 use serde_json::Value;
+
+#[path = "support/kernel_compare.rs"]
+mod kernel_compare;
 
 fn e2e() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fsl5/e2e")
@@ -255,5 +268,183 @@ fn japanese_keywords_are_read_in_next_edition_requirements_only() {
         (output["result"].as_str(), exit),
         (Some("error"), 2),
         "{output:#}"
+    );
+}
+
+fn repository() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root")
+        .to_owned()
+}
+
+/// Where in a requirements spec the rows of `context` are read, as the
+/// skill's table heads them. Exhaustive on purpose: a new context does not
+/// compile until it has a heading.
+const fn context_heading(context: KeywordContext) -> &'static str {
+    match context {
+        KeywordContext::Document => "Blocks of the file",
+        KeywordContext::Declaration => "The leading word of a member of `requirements`",
+        KeywordContext::Verify => "Inside `verify { }`",
+        KeywordContext::Entity => "Inside `entity Name { }`",
+        KeywordContext::Concept => "`concept C = E in S, … | where cond`",
+        KeywordContext::Relation => "`R belongs to E as role via event`",
+        KeywordContext::Event => {
+            "`[fault] event name = phrase [with …] A -> B | in S [set …] [covers …]`"
+        }
+        KeywordContext::RuleExpression => "Inside a rule's or an event's expression",
+        KeywordContext::Allow => "`allow P only when X | only for C`",
+        KeywordContext::Never => "`never P when X | for C`",
+        KeywordContext::After => "`P only after Q`",
+        KeywordContext::Enters => "`E enters T only from S, …`",
+        KeywordContext::Always => "`always C1 is C2`, `always E [not] in S, … has X`",
+        KeywordContext::Deadline => "`deadline age <= bound` in a rule",
+        KeywordContext::Decide => {
+            "`decide ID \"text\" for S E { … [otherwise => …] } [assuming Q]`"
+        }
+        KeywordContext::DecideRow => "A decision row's outcome `Actor verb {or verb}`",
+        KeywordContext::Goal => "`goal ID \"text\" some E can reach S`",
+        KeywordContext::Policy => "`policy ID \"text\" every E in S must eventually be T {or T}`",
+        KeywordContext::Measure => "`measure m = count C | count E in S, …`",
+        KeywordContext::Scenario => "`scenario` / `forbidden` steps and their `then`",
+        KeywordContext::Expression => "Boolean operators of an expression",
+    }
+}
+
+/// The Markdown table the skill prints between its markers, rendered from
+/// the parser's table: one section per context in table order, then the
+/// shared Japanese words and the particles.
+fn render_keyword_table() -> String {
+    let mut contexts: Vec<KeywordContext> = Vec::new();
+    for keyword in KEYWORDS {
+        if !contexts.contains(&keyword.context) {
+            contexts.push(keyword.context);
+        }
+    }
+    let mut out = String::new();
+    for context in contexts {
+        writeln!(out, "\n**{}**\n", context_heading(context)).expect("write");
+        out.push_str("| English | Japanese | Note |\n|---|---|---|\n");
+        for keyword in KEYWORDS.iter().filter(|keyword| keyword.context == context) {
+            let mut notes = Vec::new();
+            if keyword.position == Position::After {
+                notes.push("after the word it marks".to_owned());
+            }
+            if keyword.status == Status::Reserved {
+                notes.push("reserved: not read yet".to_owned());
+            }
+            writeln!(
+                out,
+                "| `{}` | `{}` | {} |",
+                keyword.english,
+                keyword.japanese,
+                notes.join("; ")
+            )
+            .expect("write");
+        }
+    }
+    out.push_str(
+        "\n**Japanese words shared by several places** (each means the same in all of them)\n\n",
+    );
+    out.push_str("| Japanese | English |\n|---|---|\n");
+    for (japanese, english) in SHARED_JAPANESE {
+        let english = english
+            .iter()
+            .map(|word| format!("`{word}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(out, "| `{japanese}` | {english} |").expect("write");
+    }
+    out.push_str("\n**Particles** (a word of their own, after the word they mark)\n\n");
+    out.push_str("| Particle | Marks |\n|---|---|\n");
+    for (particle, spelling) in PARTICLES {
+        writeln!(out, "| `{spelling}` | {} |", particle.role()).expect("write");
+    }
+    out
+}
+
+const TABLE_BEGIN: &str = "<!-- keyword-table:begin (generated; do not edit by hand) -->\n";
+const TABLE_END: &str = "<!-- keyword-table:end -->\n";
+
+/// fsl 5 plan §3 S13 (decisions/045 addendum: skills are English-canonical
+/// and print the keyword table): the table in the requirements skill is the
+/// parser's table, rendered, so it can neither miss nor invent a keyword.
+/// `FSLC_SKILLS_KEYWORDS_UPDATE=1` rewrites the generated block after the
+/// table changed; the diff is then reviewed like any other.
+#[test]
+fn the_requirements_skill_prints_the_parser_keyword_table() {
+    let path = repository().join("skills-next/fsl-requirements/references/keywords.md");
+    let text = std::fs::read_to_string(&path).expect("read the skill's keyword table");
+    let begin = text.find(TABLE_BEGIN).expect("begin marker") + TABLE_BEGIN.len();
+    let end = text.find(TABLE_END).expect("end marker");
+    let expected = render_keyword_table();
+    if std::env::var_os("FSLC_SKILLS_KEYWORDS_UPDATE").is_some_and(|value| value == "1") {
+        let updated = format!("{}{expected}{}", &text[..begin], &text[end..]);
+        std::fs::write(&path, updated).expect("rewrite the skill's keyword table");
+        return;
+    }
+    assert!(
+        text[begin..end] == expected,
+        "{} is not the parser's keyword table; run this test with \
+         FSLC_SKILLS_KEYWORDS_UPDATE=1 and review the diff.\nexpected:\n{expected}",
+        path.display()
+    );
+}
+
+/// The `fsl` fences of a Markdown document, joined as `fslc check` joins a
+/// literate file's fences.
+fn fenced_fsl(markdown: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if inside {
+            if trimmed.starts_with("```") {
+                inside = false;
+            } else {
+                out.push_str(line);
+                out.push('\n');
+            }
+        } else if trimmed
+            .strip_prefix("```")
+            .is_some_and(|info| info.split_whitespace().next() == Some("fsl"))
+        {
+            inside = true;
+        }
+    }
+    out
+}
+
+/// fsl 5 plan §3 S13: the requirements skill's English example and its
+/// Japanese spelling in the glossary reference (aliases, Japanese keywords,
+/// particles) are one spec: their kernels are equal without spans, origins
+/// and annotations. A change to one example that is not made to the other
+/// fails here.
+#[test]
+fn the_requirements_skill_example_reads_the_same_in_japanese() {
+    let skill = repository().join("skills-next/fsl-requirements");
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fsl5_keywords/skill-example");
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("create scratch directory");
+    let mut kernels = Vec::new();
+    for (document, file) in [
+        ("SKILL.md", "english.fsl"),
+        ("references/glossary.md", "japanese.fsl"),
+    ] {
+        let markdown = std::fs::read_to_string(skill.join(document)).expect("read the skill");
+        let source = fenced_fsl(&markdown);
+        assert!(
+            source.starts_with("fsl 5\n"),
+            "{document} holds no next-edition example"
+        );
+        let path = directory.join(file);
+        std::fs::write(&path, source).expect("write the example");
+        kernels.push(kernel_compare::kernel_v2_fsl5(&path));
+    }
+    kernel_compare::assert_same_kernel(
+        &kernels[0],
+        &kernels[1],
+        "fsl-requirements SKILL.md example against its Japanese spelling",
     );
 }
