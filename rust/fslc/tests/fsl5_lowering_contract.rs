@@ -27,7 +27,12 @@
 //!
 //! The `rules` example has no original: its `lowered.fsl` is the hand-written
 //! expectation for the rule statements no design-draft example uses, held to
-//! K (and to M on the source) only.
+//! K (and to M on the source) only. So is `relations`, for the forms of the
+//! relations stage (S8) that no design-draft example uses: a `policy`,
+//! `always … in … has <role>`, a resource a rule reads.
+//!
+//! A measure lowers to a projection, which the Public Kernel does not carry;
+//! `fsl5_relations.rs` checks it.
 //!
 //! Acceptance scenarios do not reach the kernel and are not part of K.
 
@@ -99,6 +104,12 @@ const FSL5_SOURCES: &[(&str, &str, &str)] = &[
     ("rejection", "fsl5_en_norules.fsl", "lowered_norules.fsl"),
     ("rejection", "fsl5_en.fsl", "lowered.fsl"),
     ("rules", "fsl5_en.fsl", "lowered.fsl"),
+    // S8: the relation, the resource, the measures and the goal, in English
+    // and in Japanese keywords with the glossary's aliases. The rule `always
+    // … has buyer` is the one S6 left to this stage.
+    ("multi_entity", "fsl5_en.fsl", "lowered.fsl"),
+    ("multi_entity", "fsl5_ja_full.fsl", "lowered.fsl"),
+    ("relations", "fsl5_en.fsl", "lowered.fsl"),
 ];
 
 /// For each complete next-edition source (K against `lowered.fsl`): one rule
@@ -111,6 +122,22 @@ const FSL5_WEAKENINGS: &[(&str, &str, Option<&str>)] = &[
         Some("refinement_failed"),
     ),
     ("rules", "never User adds Order for Large", None),
+    // Without the rule, `place` can take more than the stock.
+    (
+        "multi_entity",
+        "allow User places Order only when input qty > 0 and stock >= input qty",
+        Some("impl_violated"),
+    ),
+    (
+        "multi_entity",
+        "BuyerKnownAfterPlace: always Order not in Empty has buyer",
+        None,
+    ),
+    (
+        "relations",
+        "always Ticket in Assigned, Closed, Escalated has assignee",
+        None,
+    ),
 ];
 
 fn example_dir(name: &str) -> PathBuf {
@@ -272,7 +299,8 @@ fn r_complete_fsl5_sources_and_the_original_refine_each_other() {
 }
 
 /// M for the next-edition sources: a complete source without one rule
-/// statement no longer lowers to `lowered.fsl`, and no longer refines the
+/// statement (and without its `rule` block when that was the block's only
+/// statement) no longer lowers to `lowered.fsl`, and no longer refines the
 /// original.
 #[test]
 fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
@@ -293,7 +321,7 @@ fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
         let text = std::fs::read_to_string(dir.join(source)).expect("read source");
         let line = format!("    {statement}\n");
         assert_eq!(text.matches(&line).count(), 1, "{example}: {statement}");
-        std::fs::write(dir.join("weakened.fsl"), text.replacen(&line, "", 1))
+        std::fs::write(dir.join("weakened.fsl"), without_statement(&text, &line))
             .expect("write weakened source");
         let difference = kernel_compare::difference(
             &kernel_compare::kernel_v2(&dir.join(lowering)),
@@ -323,6 +351,26 @@ fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
             );
         }
     }
+}
+
+/// `text` without `line`, and without the `rule` block `line` was the only
+/// statement of (a rule has at least one).
+fn without_statement(text: &str, line: &str) -> String {
+    let lines = text
+        .split_inclusive('\n')
+        .filter(|candidate| *candidate != line)
+        .collect::<Vec<_>>();
+    let mut kept = String::new();
+    let mut index = 0;
+    while index < lines.len() {
+        if lines[index].starts_with("  rule ") && lines.get(index + 1) == Some(&"  }\n") {
+            index += 2;
+            continue;
+        }
+        kept.push_str(lines[index]);
+        index += 1;
+    }
+    kept
 }
 
 #[test]

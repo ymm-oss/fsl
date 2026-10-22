@@ -464,3 +464,82 @@ fn place_read_chain_keeps_the_bottom_up_failure_order() {
         FslValue::Int(2)
     );
 }
+
+/// `enabled` lists instances action by action, each action's parameters as
+/// an odometer whose first parameter varies slowest. The bindings are
+/// generated one at a time (a large `values` scope is never listed), and this
+/// order is the one the listed product had.
+#[test]
+fn enabled_lists_parameter_bindings_first_parameter_slowest() {
+    let model = model(
+        "spec Order { type Small = 0..1 enum Color { Red, Blue } state { n: 0..3 } init { n = 0 } "
+            .to_owned()
+            + "action pick(a: Small, c: Color, b: Bool, r in 2..3) { requires n == 0 n = 1 } "
+            + "action skip() { requires n == 0 n = 2 } }",
+    );
+    let monitor = fsl_runtime::Monitor::new(model).expect("initialize monitor");
+    let listed = monitor
+        .enabled()
+        .expect("enabled actions")
+        .into_iter()
+        .map(|instance| {
+            let params = ["a", "c", "b", "r"]
+                .iter()
+                .filter_map(|name| instance.params.get(*name))
+                .map(|value| match value {
+                    FslValue::Int(value) => value.to_string(),
+                    FslValue::Bool(value) => value.to_string(),
+                    FslValue::Enum { member, .. } => member.clone(),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{}({params})", instance.action)
+        })
+        .collect::<Vec<_>>();
+    let mut expected = Vec::new();
+    for a in ["0", "1"] {
+        for c in ["Red", "Blue"] {
+            for b in ["false", "true"] {
+                for r in ["2", "3"] {
+                    expected.push(format!("pick({a},{c},{b},{r})"));
+                }
+            }
+        }
+    }
+    expected.push("skip()".to_owned());
+    assert_eq!(listed, expected);
+}
+
+/// `enabled_where` keeps only the instances its filter accepts, and still
+/// evaluates every other instance's guards: a guard that is undefined for an
+/// instance the filter rejects fails it exactly as it fails `enabled`, so a
+/// requirements trace step matched through it keeps the full listing's
+/// errors.
+#[test]
+fn enabled_where_filters_instances_but_keeps_every_guard_error() {
+    let total = model(
+        "spec Pick { type X = 0..2 state { n: 0..3 } init { n = 0 } ".to_owned()
+            + "action a(x: X) { requires n == 0 n = 1 } "
+            + "action b() { requires n == 0 n = 2 } }",
+    );
+    let monitor = fsl_runtime::Monitor::new(total).expect("initialize monitor");
+    let kept = monitor
+        .enabled_where(|action, params| action == "a" && params["x"] == FslValue::Int(2))
+        .expect("enabled actions");
+    let all = monitor.enabled().expect("enabled actions");
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(Some(&kept[0]), all.get(2), "{all:?}");
+
+    let undefined = model(
+        "spec Undefined { type X = 0..2 state { n: 0..3 } init { n = 0 } ".to_owned()
+            + "action a(x: X) { requires 10 / x > 0 n = 1 } "
+            + "action b() { requires n == 0 n = 2 } }",
+    );
+    let monitor = fsl_runtime::Monitor::new(undefined).expect("initialize monitor");
+    let listed = monitor.enabled().expect_err("a(0) divides by zero");
+    let filtered = monitor
+        .enabled_where(|action, _| action == "b")
+        .expect_err("a(0) divides by zero");
+    assert_eq!(filtered.to_string(), listed.to_string());
+}

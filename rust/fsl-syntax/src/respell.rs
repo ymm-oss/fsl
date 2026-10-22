@@ -498,10 +498,15 @@ mod tests {
     /// English in a published item kept in the document (range B).
     #[test]
     fn expression_keywords_are_translated_only_in_members() {
-        let source = REJECTION.replace(
-            "request_stage[r] == ActionExecuted }",
-            "request_stage[r] == ActionExecuted and true }",
+        // A published item kept in the document, beside the members.
+        let source = REJECTION.replacen(
+            "  scenario AC-TOOL",
+            "  requirement GOAL \"x\" {\n    reachable CanExecuteTool {\n      exists r: \
+             Request { request_stage[r] == ActionExecuted and true }\n    }\n  }\n\n  \
+             scenario AC-TOOL",
+            1,
         );
+        assert_ne!(source, REJECTION);
         let respelled = respell_source(&source, &gated(), japanese()).expect("respell");
         assert!(
             respelled.contains("対象 ExplicitlyApproved かつ OperatorHeld"),

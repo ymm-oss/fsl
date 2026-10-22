@@ -135,12 +135,19 @@ fn languages(fixture: &str) -> (&'static str, &'static str) {
 #[test]
 fn fmt_lang_and_names_round_trips_are_identities_and_keep_the_kernel() {
     let sources = next_edition_sources();
-    for required in ["fsl5_en.fsl", "fsl5_ja_particles.fsl", "fsl5_ja_full.fsl"] {
+    for (example, required) in [
+        ("e2e", "fsl5_en.fsl"),
+        ("e2e", "fsl5_ja_particles.fsl"),
+        ("e2e", "fsl5_ja_full.fsl"),
+        ("multi_entity", "fsl5_en.fsl"),
+        ("multi_entity", "fsl5_ja_full.fsl"),
+        ("relations", "fsl5_en.fsl"),
+    ] {
         assert!(
-            sources
-                .iter()
-                .any(|(directory, file)| directory == &e2e() && file == required),
-            "{required} is not among the fixtures"
+            sources.iter().any(|(directory, file)| {
+                directory == &fixtures().join(example) && file == required
+            }),
+            "{example}/{required} is not among the fixtures"
         );
     }
     for (example, fixture) in &sources {
@@ -226,25 +233,17 @@ fn the_japanese_fixtures_are_each_others_translation() {
     );
 }
 
-/// With the glossary's names, `--lang en --names canonical` writes every
-/// keyword, name and phrase in English. What stays Japanese is the author's:
-/// strings, comments, the glossary's right sides, and the scenarios'
-/// instance labels (`申請1`, not glossary names), whose steps keep their
-/// particles.
-#[test]
-fn lang_en_names_canonical_writes_the_document_in_english() {
-    let directory = scratch("english");
+/// `fixture` (all Japanese) written with `--lang en --names canonical`,
+/// which keeps its kernel; every non-ASCII word outside strings, comments
+/// and the glossary's right sides is one of `allowed`.
+fn english_of(directory: &Path, fixture: &Path, allowed: &[&str]) -> String {
     let (english, path) = fmt(
-        &directory,
+        directory,
         "full.fsl",
-        &read(&e2e().join("fsl5_ja_full.fsl")),
+        &read(fixture),
         &["--lang", "en", "--names", "canonical"],
     );
-    same_kernel(
-        &e2e().join("fsl5_ja_full.fsl"),
-        &path,
-        "--lang en --names canonical",
-    );
+    same_kernel(fixture, &path, "--lang en --names canonical");
     let mut in_glossary = false;
     for line in english.lines() {
         let code = line.split("//").next().unwrap_or_default();
@@ -258,10 +257,44 @@ fn lang_en_names_canonical_writes_the_document_in_english() {
         }
         for word in code.split_whitespace().filter(|word| !word.is_ascii()) {
             assert!(
-                ["申請1", "が", "を", "で", "は"].contains(&word),
+                allowed.contains(&word),
                 "'{word}' in an English document: {line}"
             );
         }
+    }
+    english
+}
+
+/// With the glossary's names, `--lang en --names canonical` writes every
+/// keyword, name and phrase in English. What stays Japanese is the author's:
+/// strings, comments, the glossary's right sides, and the scenarios'
+/// instance labels (`申請1`, not glossary names), whose steps keep their
+/// particles. The relations, resources, measures and goals of
+/// `multi_entity` are written in English too.
+#[test]
+fn lang_en_names_canonical_writes_the_document_in_english() {
+    let english = english_of(
+        &scratch("english"),
+        &e2e().join("fsl5_ja_full.fsl"),
+        &["申請1", "が", "を", "で", "は"],
+    );
+    let multi_entity = fixtures().join("multi_entity");
+    let orders = english_of(
+        &scratch_of("english-orders", &multi_entity),
+        &multi_entity.join("fsl5_ja_full.fsl"),
+        &[],
+    );
+    for line in [
+        "  Order belongs to User as buyer via place
+",
+        "  resource stock: Qty = 2
+",
+        "  measure refund_count = count Order in Refunded
+",
+        "some Order can reach Refunded
+",
+    ] {
+        assert!(orders.contains(line), "{line}: {orders}");
     }
     assert!(
         english

@@ -59,7 +59,7 @@ struct Phrase {
 }
 
 /// One conjunct of a concept expression: a concept, or `Stage Entity`.
-enum Conjunct {
+pub(super) enum Conjunct {
     Concept(Word),
     Stage { stage: Word, entity: Word },
 }
@@ -474,6 +474,29 @@ impl Scope<'_> {
         })
     }
 
+    /// That `stage` is a stage of the lifecycle of `entity`.
+    pub(super) fn stage_of(&self, entity: &Word, stage: &Word) -> Result<(), ParseError> {
+        self.stage(entity, stage)
+    }
+
+    /// `entity` is in one of `stages`: `in S1, S2`.
+    pub(super) fn stages_condition(
+        &self,
+        entity: &Word,
+        stages: &[Word],
+    ) -> Result<Expr, ParseError> {
+        for stage in stages {
+            self.stage(entity, stage)?;
+        }
+        Ok(any_of(
+            stages
+                .iter()
+                .map(|stage| stage_is(&entity.text, &stage.text)),
+            "or",
+        )
+        .expect("a stage"))
+    }
+
     fn stage(&self, entity: &Word, stage: &Word) -> Result<(), ParseError> {
         if self.entity(entity)?.has_stage(&stage.text) {
             Ok(())
@@ -588,7 +611,11 @@ impl Scope<'_> {
 
     /// The condition a conjunction of concepts and `Stage Entity` terms
     /// states about one instance of `entity`.
-    fn concept_condition(&self, conjuncts: &[Conjunct], entity: &str) -> Result<Expr, ParseError> {
+    pub(super) fn concept_condition(
+        &self,
+        conjuncts: &[Conjunct],
+        entity: &str,
+    ) -> Result<Expr, ParseError> {
         let mut terms = Vec::new();
         for conjunct in conjuncts {
             let (about, term) = match conjunct {
@@ -984,6 +1011,13 @@ pub(in crate::parser) fn apply(
                         scope.stage(&entity, stage)?;
                     }
                     let declared = scope.entity(&entity)?;
+                    // `has <role>`: the relation is set.
+                    let has = match has {
+                        Expr::Var(role) if declared.roles.contains(&role) => {
+                            binary("!=", Expr::Var(role), Expr::None)
+                        }
+                        other => other,
+                    };
                     let in_stages = if negated {
                         any_of(
                             stages.iter().map(|stage| {

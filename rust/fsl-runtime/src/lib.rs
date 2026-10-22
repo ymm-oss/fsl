@@ -1093,11 +1093,35 @@ impl Monitor {
     /// Returns [`RuntimeError`] when parameter domains or guards cannot be
     /// evaluated concretely.
     pub fn enabled(&self) -> Result<Vec<EnabledAction>, RuntimeError> {
+        self.enabled_where(|_, _| true)
+    }
+
+    /// The [`Monitor::enabled`] instances that `keep` accepts, in the same
+    /// order, with the same errors.
+    ///
+    /// Every instance's guards are still evaluated, so a guard that cannot
+    /// be evaluated fails here exactly as it fails [`Monitor::enabled`];
+    /// only the instances `keep` rejects (by action name and parameters) are
+    /// not collected. A caller that looks for one call (a requirements trace
+    /// step) therefore holds that call alone, not every instance of a large
+    /// parameter domain.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when parameter domains or guards cannot be
+    /// evaluated concretely.
+    pub fn enabled_where(
+        &self,
+        mut keep: impl FnMut(&str, &Bindings) -> bool,
+    ) -> Result<Vec<EnabledAction>, RuntimeError> {
         let mut enabled = Vec::new();
         for action in &self.model.actions {
             for params in action_parameter_bindings(action, &self.model)? {
+                // The guards first: an instance `keep` rejects still fails
+                // here when its guard cannot be evaluated.
                 if let Some(bindings) =
                     evaluate_action_guards(action, &params, &self.state, &self.model)?
+                    && keep(&action.name, &params)
                 {
                     enabled.push(EnabledAction {
                         action: action.name.clone(),
@@ -4116,27 +4140,114 @@ fn check_state_selected_inner(
     Ok(None)
 }
 
+/// One parameter's finite domain, in [`KernelModel::domain_values`] order,
+/// without listing an integer range.
+enum ParameterDomain {
+    /// `lo..=hi`; empty when `lo > hi`.
+    Ints(i64, i64),
+    Values(Vec<Value>),
+}
+
+impl ParameterDomain {
+    fn of(param: &ParamDef, model: &KernelModel) -> Result<Self, RuntimeError> {
+        Ok(match param {
+            ParamDef::Typed { ty, .. } => match ty {
+                TypeRef::Range(lo, hi) => Self::Ints(*lo, *hi),
+                TypeRef::Named(name) => match model.types.get(name) {
+                    Some(TypeDef::Domain { lo, hi, .. }) => Self::Ints(*lo, *hi),
+                    _ => Self::Values(model.domain_values(ty)?),
+                },
+                _ => Self::Values(model.domain_values(ty)?),
+            },
+            ParamDef::Range { lo, hi, .. } => Self::Ints(*lo, *hi),
+        })
+    }
+
+    /// The number of values; an `i128` holds every `lo..=hi` count.
+    fn len(&self) -> i128 {
+        match self {
+            Self::Ints(lo, hi) => (i128::from(*hi) - i128::from(*lo) + 1).max(0),
+            Self::Values(values) => i128::try_from(values.len()).unwrap_or(i128::MAX),
+        }
+    }
+
+    /// The value at `index`, which is below [`ParameterDomain::len`].
+    fn value(&self, index: i128) -> Value {
+        match self {
+            Self::Ints(lo, _) => Value::Int(
+                i64::try_from(i128::from(*lo) + index).expect("an index below len() is in lo..=hi"),
+            ),
+            Self::Values(values) => {
+                values[usize::try_from(index).expect("an index below len()")].clone()
+            }
+        }
+    }
+}
+
+/// Every parameter binding of one action, generated one at a time: the first
+/// parameter varies slowest, the last fastest. Each parameter's domain is
+/// resolved before the first binding, so a domain that cannot be enumerated
+/// fails as it did when the whole product was listed up front, and an
+/// integer range is never listed (a forbidden or acceptance step over a
+/// large `values` scope stays in constant memory).
+struct ParameterBindings {
+    names: Vec<String>,
+    domains: Vec<ParameterDomain>,
+    /// The next binding's index per parameter; `None` once exhausted.
+    next: Option<Vec<i128>>,
+}
+
+impl Iterator for ParameterBindings {
+    type Item = Bindings;
+
+    fn next(&mut self) -> Option<Bindings> {
+        let indices = self.next.as_mut()?;
+        let binding = self
+            .names
+            .iter()
+            .zip(&self.domains)
+            .zip(indices.iter())
+            .map(|((name, domain), index)| (name.clone(), domain.value(*index)))
+            .collect();
+        let mut position = indices.len();
+        loop {
+            if position == 0 {
+                self.next = None;
+                break;
+            }
+            position -= 1;
+            indices[position] += 1;
+            if indices[position] < self.domains[position].len() {
+                break;
+            }
+            indices[position] = 0;
+        }
+        Some(binding)
+    }
+}
+
 fn action_parameter_bindings(
     action: &ActionDef,
     model: &KernelModel,
-) -> Result<Vec<Bindings>, RuntimeError> {
-    let mut bindings = vec![Bindings::new()];
-    for param in &action.params {
-        let values = match param {
-            ParamDef::Typed { ty, .. } => model.domain_values(ty)?,
-            ParamDef::Range { lo, hi, .. } => (*lo..=*hi).map(Value::Int).collect(),
-        };
-        let mut next = Vec::new();
-        for existing in bindings {
-            for value in &values {
-                let mut candidate = existing.clone();
-                candidate.insert(param.name().to_owned(), value.clone());
-                next.push(candidate);
-            }
-        }
-        bindings = next;
-    }
-    Ok(bindings)
+) -> Result<ParameterBindings, RuntimeError> {
+    let domains = action
+        .params
+        .iter()
+        .map(|param| ParameterDomain::of(param, model))
+        .collect::<Result<Vec<_>, _>>()?;
+    let next = domains
+        .iter()
+        .all(|domain| domain.len() > 0)
+        .then(|| vec![0; domains.len()]);
+    Ok(ParameterBindings {
+        names: action
+            .params
+            .iter()
+            .map(|param| param.name().to_owned())
+            .collect(),
+        domains,
+        next,
+    })
 }
 
 /// Whether `value` belongs to `parameter`'s declared domain (its type, or its

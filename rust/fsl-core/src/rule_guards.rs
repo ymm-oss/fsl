@@ -63,6 +63,11 @@ struct EventGuards {
     stage: String,
     span: Span,
     fields: Vec<ProcessField>,
+    /// The entity's relation roles: fields whose state is an `Option`,
+    /// which the enumeration leaves to the solver.
+    roles: Vec<String>,
+    /// The document's resources, read as themselves.
+    resources: Vec<(String, QualifiedName)>,
     inputs: Vec<(String, QualifiedName)>,
     guards: Vec<EventGuard>,
 }
@@ -140,12 +145,23 @@ impl EventGuards {
             .iter()
             .map(|(name, _)| name.as_str())
             .collect::<BTreeSet<_>>();
-        let is_variable =
-            |name: &str| name.starts_with(&prefix) || inputs.contains(name) || name == marker;
+        let is_variable = |name: &str| {
+            name.starts_with(&prefix)
+                || inputs.contains(name)
+                || name == marker
+                || self.resources.iter().any(|(resource, _)| resource == name)
+        };
         let mut read = BTreeSet::new();
         let mut constants = BTreeMap::new();
         for condition in conditions {
             names(condition, &is_variable, model, &mut read, &mut constants)?;
+        }
+        if let Some(role) = self
+            .roles
+            .iter()
+            .find(|role| read.contains(&format!("{prefix}{role}")))
+        {
+            return Err(format!("it reads the relation '{role}'"));
         }
         let mut wanted = Vec::new();
         for field in &self.fields {
@@ -157,6 +173,11 @@ impl EventGuards {
         for (name, type_name) in &self.inputs {
             if read.contains(name) {
                 wanted.push((name.clone(), type_name, format!("input '{name}'")));
+            }
+        }
+        for (name, type_name) in &self.resources {
+            if read.contains(name) {
+                wanted.push((name.clone(), type_name, format!("resource '{name}'")));
             }
         }
         domains(model, &wanted, "fields and inputs")
@@ -257,9 +278,16 @@ impl EventGuards {
 fn event_guards(
     entity: &str,
     fields: &[ProcessField],
+    next: &fsl_syntax::NextEditionRequirements,
     transition: &fsl_syntax::ProcessTransition,
     event: &fsl_syntax::EventForm,
 ) -> EventGuards {
+    let roles = next
+        .relations
+        .iter()
+        .filter(|relation| relation.entity == entity)
+        .map(|relation| relation.role.clone())
+        .collect::<Vec<_>>();
     let inputs = transition
         .inputs
         .iter()
@@ -271,6 +299,7 @@ fn event_guards(
     let field_names = fields
         .iter()
         .map(|field| field.name.as_str())
+        .chain(roles.iter().map(String::as_str))
         .collect::<BTreeSet<_>>();
     let input_names = inputs
         .iter()
@@ -292,6 +321,12 @@ fn event_guards(
         stage: transition.source.clone(),
         span: transition.span,
         fields: fields.to_vec(),
+        roles,
+        resources: next
+            .resources
+            .iter()
+            .map(|resource| (resource.name.clone(), resource.type_name.clone()))
+            .collect(),
         inputs,
         guards,
     }
@@ -305,9 +340,9 @@ impl RuleGuards {
             .as_ref()
             .map(|next| next.decisions.clone())
             .unwrap_or_default();
-        if requirements.next.is_none() {
+        let Some(next) = &requirements.next else {
             return Self { events, tables };
-        }
+        };
         for item in &requirements.items {
             let RequirementsItem::Process(BusinessItem::Process {
                 name,
@@ -327,7 +362,7 @@ impl RuleGuards {
                     && let Some(event) = &transition.event
                     && !event.rule_guards.is_empty()
                 {
-                    events.push(event_guards(name.name(), fields, transition, event));
+                    events.push(event_guards(name.name(), fields, next, transition, event));
                 }
             }
         }
@@ -517,13 +552,12 @@ impl GuardConflict {
         let mut replacements = event
             .fields
             .iter()
+            .map(|field| field.name.as_str())
+            .chain(event.roles.iter().map(String::as_str))
             .map(|field| {
                 (
-                    format!("{}.{}", event.entity, field.name),
-                    read(crate::naming::process_field_state(
-                        &event.entity,
-                        &field.name,
-                    )),
+                    format!("{}.{field}", event.entity),
+                    read(crate::naming::process_field_state(&event.entity, field)),
                 )
             })
             .collect::<HashMap<_, _>>();

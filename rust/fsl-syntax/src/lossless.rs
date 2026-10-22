@@ -361,7 +361,7 @@ pub fn format_source_with(
     }
     let (_, printed) =
         parse_document_with_ids(SourceFile::new(&output), *options).map_err(FormatError::Parse)?;
-    check_identifier_spellings(&read, &printed, &output)?;
+    check_identifier_spellings(&read, &rewritten, &printed, &output)?;
     Ok(output)
 }
 
@@ -424,22 +424,28 @@ fn continuation_offsets(
 }
 
 /// Refuse an output in which a requirement-style identifier is not printed
-/// exactly as its value (`REQ-1`, never `REQ - 1`) or the identifiers read
+/// exactly as written without spaces (`REQ-1`, never `REQ - 1`; an alias
+/// that names a next-edition goal stays the alias) or the identifiers read
 /// differ from the input's, so a formatter regression fails loudly instead of
 /// writing a document whose IDs no longer read as the author wrote them.
 fn check_identifier_spellings(
     read: &[IdSpelling],
+    input: &str,
     printed: &[IdSpelling],
     output: &str,
 ) -> Result<(), FormatError> {
-    for (index, input) in read.iter().enumerate() {
+    for (index, id) in read.iter().enumerate() {
+        let written = input[id.span.start.offset..id.span.end.offset]
+            .split_whitespace()
+            .collect::<String>();
         let (value, text) = printed.get(index).map_or(("", ""), |id| {
             (
                 id.value.as_str(),
                 &output[id.span.start.offset..id.span.end.offset],
             )
         });
-        if value != input.value || text != input.value {
+        let input = id;
+        if value != input.value || text != written {
             return Err(FormatError::RespelledIdentifier {
                 identifier: input.value.clone(),
                 printed: text.to_owned(),
@@ -1091,13 +1097,16 @@ mod tests {
             read.iter().map(|id| id.value.as_str()).collect::<Vec<_>>(),
             ["BANK-WITHDRAW", "BANK-FB-1"]
         );
-        assert_eq!(check_identifier_spellings(&read, &read, &source), Ok(()));
+        assert_eq!(
+            check_identifier_spellings(&read, &source, &read, &source),
+            Ok(())
+        );
 
         let spaced = source.replace("BANK-FB-1", "BANK-FB - 1");
         let (_, printed) =
             parse_document_with_ids(SourceFile::new(&spaced), options).expect("parse");
         assert_eq!(
-            check_identifier_spellings(&read, &printed, &spaced),
+            check_identifier_spellings(&read, &source, &printed, &spaced),
             Err(FormatError::RespelledIdentifier {
                 identifier: "BANK-FB-1".to_owned(),
                 printed: "BANK-FB - 1".to_owned(),
@@ -1109,7 +1118,7 @@ mod tests {
         let (_, printed) =
             parse_document_with_ids(SourceFile::new(&renamed), options).expect("parse");
         assert!(matches!(
-            check_identifier_spellings(&read, &printed, &renamed),
+            check_identifier_spellings(&read, &source, &printed, &renamed),
             Err(FormatError::RespelledIdentifier { identifier, .. }) if identifier == "BANK-FB-1"
         ));
     }

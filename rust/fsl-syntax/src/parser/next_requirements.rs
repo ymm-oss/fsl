@@ -21,6 +21,12 @@
 //! guards land on the desugared events' [`EventForm::rule_guards`], their
 //! properties on [`NextEditionRequirements::properties`].
 //!
+//! Relations, resources, measures, goals and policies (S8) are read by
+//! [`relations`]: a relation's role becomes a field of its entity that the
+//! relation's event records (with the actor's instance as a new first
+//! input), a resource's `set` writes one variable, and the rest is kept on
+//! [`NextEditionRequirements`] for the core to lower.
+//!
 //! Keywords are read through the keyword table (S5, [`crate::keywords`]), in
 //! English or in Japanese. A phrase (an event declaration's, a rule's, a
 //! decision table row's outcome, a scenario step) may mark its words with the
@@ -32,6 +38,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod decide;
+mod relations;
 mod rules;
 
 use super::{Parser, join_span};
@@ -172,6 +179,10 @@ pub(super) struct Pending {
     traces: Vec<(usize, TraceDeclaration)>,
     decisions: Vec<decide::DecideDeclaration>,
     rules: Vec<(usize, rules::RuleDeclaration)>,
+    relations: Vec<relations::RelationSource>,
+    resources: Vec<relations::ResourceSource>,
+    measures: Vec<relations::MeasureSource>,
+    goals: Vec<relations::GoalSource>,
 }
 
 fn is_symbol(token: &Token, symbol: &str) -> bool {
@@ -499,6 +510,21 @@ impl Parser<'_> {
         } else if rules::starts_rule(self) {
             let rule = self.rule_declaration()?;
             pending.rules.push((position, rule));
+        } else if relations::starts_relation(self) {
+            let relation = self.relation_declaration()?;
+            pending.relations.push(relation);
+        } else if self.peek_kw(Kw::Resource) {
+            let resource = self.resource_declaration()?;
+            pending.resources.push(resource);
+        } else if self.peek_kw(Kw::Measure) {
+            let measure = self.measure_declaration()?;
+            pending.measures.push(measure);
+        } else if self.peek_kw(Kw::Goal) {
+            let goal = self.goal_declaration()?;
+            pending.goals.push(goal);
+        } else if self.peek_kw(Kw::Policy) {
+            let policy = self.policy_declaration()?;
+            pending.goals.push(policy);
         } else {
             return Ok(false);
         }
@@ -522,11 +548,14 @@ impl Parser<'_> {
         let mut lifecycles = Vec::new();
         while !self.eat_symbol("}") {
             if self.peek_kw(Kw::Lifecycle) && !is_symbol(self.peek_n(1), ":") {
-                self.bump_kw(Kw::Lifecycle);
+                let start = self.bump_kw(Kw::Lifecycle);
                 let mut stages = vec![self.word()?];
                 while self.eat_symbol("->") {
                     stages.push(self.word()?);
                 }
+                self.spellings
+                    .statements
+                    .push(join_span(start, self.last_span()));
                 lifecycles.push(stages);
                 continue;
             }
@@ -1040,7 +1069,11 @@ impl Parser<'_> {
 struct Entity {
     stages: Vec<String>,
     edges: Vec<(String, String, Span)>,
+    /// The declared fields and the relations' roles, each with its type (a
+    /// role's is the related entity; its field is an `Option` of it).
     fields: BTreeMap<String, QualifiedName>,
+    /// The fields of `fields` that are relation roles.
+    roles: BTreeSet<String>,
 }
 
 impl Entity {
@@ -1058,6 +1091,9 @@ struct EventSignature {
     from: String,
     to: String,
     inputs: Vec<String>,
+    /// The roles of the relations the event makes: a scenario step gives
+    /// each one's instance as an input named by the role, before `inputs`.
+    roles: Vec<String>,
 }
 
 /// A scenario instance name: its entity, number and simulated stage.
@@ -1179,6 +1215,7 @@ impl Pending {
                         stages,
                         edges,
                         fields,
+                        roles: BTreeSet::new(),
                     },
                 )
                 .is_some()
@@ -1190,6 +1227,38 @@ impl Pending {
             }
             next.entities.push(declaration.name.text.clone());
         }
+
+        let plain_entities = items
+            .iter()
+            .filter_map(|item| match item {
+                RequirementsItem::Common(SpecItem::Entity(name, _)) => Some(name.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        let event_entities = self
+            .events
+            .iter()
+            .filter_map(|event| {
+                event
+                    .words
+                    .iter()
+                    .find(|word| entities.contains_key(&word.text))
+                    .map(|entity| (event.name.text.clone(), entity.text.clone()))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let relation_events = relations::resolve(
+            self.relations,
+            self.resources,
+            &mut entities,
+            &plain_entities,
+            &event_entities,
+            &mut next,
+        )?;
+        let resources = next
+            .resources
+            .iter()
+            .map(|resource| resource.name.clone())
+            .collect::<BTreeSet<_>>();
 
         for ConceptSource {
             name,
@@ -1323,6 +1392,16 @@ impl Pending {
             let mut assignments = Vec::new();
             let mut input_names = Vec::new();
             for (input, type_name, _) in &event.inputs {
+                if entity.roles.contains(&input.text) {
+                    return Err(ParseError::new(
+                        format!(
+                            "input '{}' of event '{}' is a relation role of '{}'; the event that \
+                             makes the relation records it",
+                            input.text, event.name.text, entity_name.text
+                        ),
+                        input.span,
+                    ));
+                }
                 let field = entity.fields.get(&input.text);
                 let Some(type_name) = type_name.clone().or_else(|| field.cloned()) else {
                     return Err(ParseError::new(
@@ -1340,11 +1419,65 @@ impl Pending {
                 params.push(Param::Typed(input.text.clone(), type_name));
                 input_names.push(input.text.clone());
             }
-            for (field, expression) in event.sets {
-                if !entity.fields.contains_key(&field.text) {
+            let mut roles = Vec::new();
+            for (index, (role, target)) in relation_events
+                .get(&event.name.text)
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                if event.actor.text != *target {
                     return Err(ParseError::new(
                         format!(
-                            "event '{}' sets '{}', which is not a field of '{}'",
+                            "'{}' belongs to '{target}' via '{}', but the actor of '{}' is '{}'; \
+                             the event that makes a relation is done by the related entity",
+                            entity_name.text, event.name.text, event.name.text, event.actor.text
+                        ),
+                        event.actor.span,
+                    ));
+                }
+                let binder = crate::entity_binder(target);
+                if params.iter().any(|param| {
+                    matches!(param, Param::Typed(name, _) | Param::Range(name, _, _) if *name == binder)
+                }) {
+                    return Err(ParseError::coded(
+                        rules::GENERATED_NAME_COLLISION,
+                        format!(
+                            "event '{}' takes the '{target}' that makes the relation '{role}' as \
+                             its input '{binder}', which it already has; rename the input",
+                            event.name.text
+                        ),
+                        event.span,
+                    ));
+                }
+                params.insert(
+                    index,
+                    Param::Typed(
+                        binder.clone(),
+                        QualifiedName {
+                            namespace: None,
+                            name: target.clone(),
+                        },
+                    ),
+                );
+                assignments.push((role.clone(), Expr::Some(Box::new(Expr::Var(binder)))));
+                roles.push(role.clone());
+            }
+            for (field, expression) in event.sets {
+                if entity.roles.contains(&field.text) {
+                    return Err(ParseError::new(
+                        format!(
+                            "event '{}' sets the relation role '{}'; only the relation's event \
+                             records it",
+                            event.name.text, field.text
+                        ),
+                        field.span,
+                    ));
+                }
+                if !entity.fields.contains_key(&field.text) && !resources.contains(&field.text) {
+                    return Err(ParseError::new(
+                        format!(
+                            "event '{}' sets '{}', which is not a field of '{}' or a resource",
                             event.name.text, field.text, entity_name.text
                         ),
                         field.span,
@@ -1378,6 +1511,7 @@ impl Pending {
                 from: from.clone(),
                 to: to.clone(),
                 inputs: input_names,
+                roles,
             });
             transitions
                 .entry(entity_name.text.clone())
@@ -1413,17 +1547,14 @@ impl Pending {
             &actors,
         )?;
         let concepts = next.concepts.clone();
-        let mut ruled = rules::apply(
-            self.rules,
-            &rules::Scope {
-                actors: &actors,
-                entities: &entities,
-                concepts: &concepts,
-                events: &signatures,
-            },
-            &mut transitions,
-            &mut next,
-        )?;
+        let scope = rules::Scope {
+            actors: &actors,
+            entities: &entities,
+            concepts: &concepts,
+            events: &signatures,
+        };
+        let mut ruled = rules::apply(self.rules, &scope, &mut transitions, &mut next)?;
+        relations::apply(self.measures, self.goals, &scope, &mut next)?;
 
         let mut generated = std::mem::take(&mut ruled.generated);
         for (position, declaration) in self.entities {
@@ -1839,6 +1970,19 @@ fn desugar_trace(
             .map(|(name, value, _)| (name.text.clone(), (name, value)))
             .collect::<BTreeMap<_, _>>();
         let mut args = vec![Expr::Num(state.number)];
+        for role in &chosen.roles {
+            let Some((_, value)) = given.remove(role) else {
+                return Err(ParseError::new(
+                    format!(
+                        "step {phrase} {} makes the relation '{role}' of event '{}'; give the \
+                         related instance (`with {role} <number>`)",
+                        instance.text, chosen.name
+                    ),
+                    span,
+                ));
+            };
+            args.push(value);
+        }
         for input in &chosen.inputs {
             let Some((_, value)) = given.remove(input) else {
                 return Err(ParseError::new(
