@@ -1,4 +1,4 @@
-Fixed (#9988): a requirements decision table or rule guard whose check the
+Fixed (#1402): a requirements decision table or rule guard whose check the
 solver decides (because its fields take more than 1000000 values together,
 or because its condition reads a resource or a relation role) was checked
 only by `fslc check`. `verify`, `kernel`, `testgen`, `document`,
