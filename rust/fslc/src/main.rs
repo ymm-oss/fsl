@@ -820,10 +820,11 @@ fn validate_migration_semantics(
     let contract = |source| {
         fslc_rust::migration::kernel_contract(source, path, crate::parse_options(), origins)
     };
-    let before = contract(before)?;
+    let mut before = contract(before)?;
     let mut after = contract(after)?;
     if origins == fslc_rust::migration::Origins::Ignored {
         fslc_rust::migration::ignore_derived_terminal(&before, &mut after);
+        fslc_rust::migration::ignore_generated_actor_notes(&mut before, &after);
     }
     if before == after {
         Ok(())

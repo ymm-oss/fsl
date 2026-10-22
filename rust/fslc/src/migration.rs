@@ -13,9 +13,10 @@ use serde_json::{Map, Value, json};
 mod process_form;
 
 pub use process_form::{
-    ConvertedEvent, ConvertedProcess, LEGACY_PROCESS_FORM, MIGRATE_MANUAL_REQUIRED, ManualRequired,
-    ProcessFormConversion, ProcessFormOutcome, Site, convert_process_forms,
-    ignore_derived_terminal, plan_process_conversion, process_form_contract,
+    ConvertedEvent, ConvertedProcess, DERIVED_TERMINAL_ADDED, LEGACY_PROCESS_FORM,
+    MIGRATE_MANUAL_REQUIRED, ManualRequired, ProcessFormConversion, ProcessFormOutcome, Site,
+    convert_process_forms, ignore_derived_terminal, ignore_generated_actor_notes,
+    plan_process_conversion, process_form_contract,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -368,7 +369,9 @@ impl MigrationDiagnostic {
             "code": self.code,
             "kind": self.code,
             "taxonomy": self.taxonomy.as_str(),
-            "severity": if self.code == fsl_syntax::MISSING_EDITION_HEADER {
+            "severity": if [fsl_syntax::MISSING_EDITION_HEADER, DERIVED_TERMINAL_ADDED]
+                .contains(&self.code)
+            {
                 "info"
             } else if [
                 fsl_syntax::MIXED_NAMES,

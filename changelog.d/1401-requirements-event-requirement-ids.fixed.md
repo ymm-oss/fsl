@@ -1,4 +1,4 @@
-Fixed (#9989): in the requirements groundwork, an event that names no
+Fixed (#1401): in the requirements groundwork, an event that names no
 requirement with `covers` no longer gets a requirement made from its own name
 and actor (`submit: by Employee`). Its action carries the requirement IDs the
 document attaches to it: the rules that guard it, and the decision table and
