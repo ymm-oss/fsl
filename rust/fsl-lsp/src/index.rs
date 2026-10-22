@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
+use fsl_syntax::keywords::{KEYWORDS, Keyword, Particle, Status};
 use fsl_syntax::{Span, Token, TokenKind};
 use lsp_types::{Position, Range};
 
@@ -38,16 +39,70 @@ pub struct Symbol {
     pub role: SymbolRole,
     pub range: Range,
     pub selection_range: Range,
+    /// The glossary alias the declaration is written as; `None` when it is
+    /// written as its canonical name, [`Symbol::name`].
+    pub alias: Option<String>,
     pub(crate) owner: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Reference {
+    /// The canonical name the use reads, also where it is written as an alias.
     pub name: String,
     pub range: Range,
     pub qualifier: Option<String>,
+    /// The glossary alias the use is written as; `None` when it is written as
+    /// its canonical name.
+    pub alias: Option<String>,
     pub(crate) owner: Option<String>,
     pub(crate) target_spec: Option<String>,
+}
+
+impl Reference {
+    /// The specification a mapping's name belongs to (`impl` / `abs` of a
+    /// refinement, the implemented layer of `implements`), when it is not
+    /// this document.
+    #[must_use]
+    pub fn target_spec(&self) -> Option<&str> {
+        self.target_spec.as_deref()
+    }
+}
+
+/// One `Canonical = alias` line of a next-edition document's `glossary`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GlossaryRow {
+    /// The left side as written: `Claim` or `Claim.amount`.
+    pub canonical: String,
+    /// The name the alias reads as (the field name of a qualified row).
+    pub name: String,
+    pub alias: String,
+    /// The left side's range (`Claim.amount` whole).
+    pub canonical_range: Range,
+    pub alias_range: Range,
+}
+
+/// Which words a document's index reads as keywords.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Lexicon {
+    /// The published language: the declaration keywords and the index's
+    /// keyword list.
+    #[default]
+    Published,
+    /// A next-edition (`fsl 5`) requirements document: the published words,
+    /// and every active row of the keyword table in English and in Japanese,
+    /// and the particles. Its glossary aliases read as their canonical names.
+    Next,
+}
+
+/// A keyword or particle at a position of a next-edition document, with the
+/// rows of the keyword table it spells.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct KeywordUse {
+    pub word: String,
+    pub range: Range,
+    /// The active rows spelled by the word, in English or in Japanese.
+    pub rows: Vec<&'static Keyword>,
+    pub particle: Option<Particle>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,6 +118,11 @@ pub struct DocumentIndex {
     source: String,
     parse_options: fsl_syntax::ParseOptions,
     refinement: bool,
+    lexicon: Lexicon,
+    glossary: Vec<GlossaryRow>,
+    /// The action names an `implements` mapping of a next-edition document
+    /// maps (`action impl(args) -> abs(args)`): uses, not declarations.
+    mapped: HashSet<(u32, u32)>,
     pub symbols: Vec<Symbol>,
     pub references: Vec<Reference>,
     pub imports: Vec<ImportBinding>,
@@ -130,7 +190,11 @@ impl DocumentIndex {
     /// site, the AST decides whether a name is declared there and with which
     /// role and owner, and a word spelled like an index keyword is a name
     /// wherever the AST declares it (`reads_as_declared_name`). Every other
-    /// document is indexed by the token walk alone.
+    /// document is indexed by the token walk alone; a next-edition
+    /// requirements document ([`Lexicon::Next`]) through `read_tokens`, which
+    /// reads each glossary alias as its canonical name and each Japanese
+    /// keyword as its English spelling, so an alias is a use of the canonical
+    /// declaration and a keyword or particle is never a name.
     ///
     /// # Errors
     ///
@@ -156,16 +220,29 @@ impl DocumentIndex {
         });
         // An `fsl 5` document's surface already reads glossary aliases as
         // their canonical names and desugars new forms, so its declarations
-        // need not be spelled where its tokens are; it keeps the token walk
-        // until the language server serves that edition.
+        // need not be spelled where its tokens are; it keeps the token walk,
+        // which reads a next-edition requirements document through
+        // `read_tokens` (aliases as canonical names, Japanese keywords as
+        // English ones).
         let mut authority = parsed
             .as_ref()
             .filter(|parsed| parsed.edition == fsl_syntax::Edition::Fsl4)
             .and_then(|parsed| crate::ast_projection::ast_declarations(&parsed.surface))
             .map(DeclarationAuthority::new);
+        let (lexicon, glossary) = match parsed
+            .as_ref()
+            .map(|parsed| (parsed.edition, &parsed.surface))
+        {
+            Some((
+                fsl_syntax::Edition::Fsl5,
+                fsl_syntax::SurfaceDocument::Requirements(requirements),
+            )) => (Lexicon::Next, glossary_rows(source, &requirements.items)),
+            _ => (Lexicon::Published, Vec::new()),
+        };
         drop(parsed);
-        let tokens = fsl_syntax::lex_with(source, parse_options)
+        let reading = read_tokens(source, *parse_options, lexicon, &glossary)
             .map_err(|error| IndexError(error.to_string()))?;
+        let tokens = &reading.tokens;
         let mut symbols = Vec::new();
         let mut references = Vec::new();
         let document_projected = authority.is_some();
@@ -177,10 +254,54 @@ impl DocumentIndex {
         let mut list_role: Option<(SymbolRole, Option<Context>)> = None;
         let mut in_annotation = false;
         let mut declaration_offsets = BTreeSet::new();
+        // A next-edition entity's `lifecycle A -> B`: whether a stage name
+        // comes next, and the stages of the entity declared so far.
+        let mut stage_expected = false;
+        let mut entity_stages = BTreeSet::new();
 
         for (index, token) in tokens.iter().enumerate() {
             match &token.kind {
                 TokenKind::Ident(name) => {
+                    // A name written as an alias is a name, whatever its
+                    // canonical name is spelled like.
+                    let aliased = reading.aliased.contains_key(&token.span.start.offset);
+                    if lexicon == Lexicon::Next && !in_annotation {
+                        if stage_expected {
+                            let owner = contexts.last().and_then(|scope| scope.owner.clone());
+                            if entity_stages.insert(name.clone()) {
+                                add_symbol(
+                                    source,
+                                    token,
+                                    name,
+                                    SymbolRole::Variable,
+                                    None,
+                                    &mut symbols,
+                                );
+                                declaration_offsets.insert(token.span.start.offset);
+                            } else {
+                                references.push(Reference {
+                                    name: name.clone(),
+                                    range: span_range(source, token.span),
+                                    qualifier: None,
+                                    alias: None,
+                                    owner,
+                                    target_spec: None,
+                                });
+                            }
+                            stage_expected = token_symbol(tokens.get(index + 1)) == Some("->");
+                            continue;
+                        }
+                        if !aliased
+                            && name == "lifecycle"
+                            && token_symbol(tokens.get(index + 1)) != Some(":")
+                            && contexts
+                                .last()
+                                .is_some_and(|scope| scope.context == Context::Struct)
+                        {
+                            stage_expected = true;
+                            continue;
+                        }
+                    }
                     // `@name(args)` is an annotation, never a declaration. Its
                     // name path collides head-on with `declaration_keyword`
                     // (`@requirement("R", "t")` against the real
@@ -211,6 +332,7 @@ impl DocumentIndex {
                                     name: name.clone(),
                                     range: span_range(source, token.span),
                                     qualifier: None,
+                                    alias: None,
                                     owner: contexts.last().and_then(|scope| scope.owner.clone()),
                                     target_spec: None,
                                 });
@@ -235,12 +357,21 @@ impl DocumentIndex {
                         // name.
                         let builtin_call = matches!(name.as_str(), "reachable" | "domain")
                             && token_symbol(tokens.get(index + 1)) == Some("(");
-                        if name == "implements" && token_symbol(tokens.get(index + 4)) == Some("{")
+                        if !aliased
+                            && name == "implements"
+                            && token_symbol(tokens.get(index + 4)) == Some("{")
                         {
                             let inherited = contexts.last().and_then(|scope| scope.owner.clone());
                             awaiting_block = Some(Scope::new(Context::Other, inherited, false));
                         }
-                        if !builtin_call && let Some((role, context)) = declaration_keyword(name) {
+                        if !aliased
+                            && !builtin_call
+                            && let Some((role, context)) =
+                                walk_declaration_keyword(lexicon, tokens, index, name)
+                        {
+                            if lexicon == Lexicon::Next && name == "entity" {
+                                entity_stages.clear();
+                            }
                             expected = role.map(|role| (role, context));
                             armed_by = Some(name);
                             list_role = (name == "actor").then_some(expected).flatten();
@@ -254,9 +385,10 @@ impl DocumentIndex {
                             continue;
                         }
                     }
-                    if is_keyword(name)
+                    if !aliased
+                        && is_keyword_in(lexicon, name)
                         && !authority.as_ref().is_some_and(|authority| {
-                            reads_as_declared_name(authority, &tokens, index, name)
+                            reads_as_declared_name(authority, tokens, index, name)
                         })
                     {
                         continue;
@@ -290,7 +422,7 @@ impl DocumentIndex {
                                 Some("count" | "sum" | "unique" | "exactlyOne")
                             )
                             && token_ident(index.checked_sub(3).and_then(|i| tokens.get(i)))
-                                .is_none_or(|word| declaration_keyword(word).is_none());
+                                .is_none_or(|word| declaration_keyword_in(lexicon, word).is_none());
                     let quantifier_binder = matches!(previous, Some("forall" | "exists"))
                         || binder_after_aggregate_paren;
                     // `x is some(v)` binds `v` for the rest of the guarded
@@ -318,6 +450,9 @@ impl DocumentIndex {
                             Some(Context::Struct) => Some(SymbolRole::Property),
                             _ => None,
                         }
+                    } else if lexicon == Lexicon::Next && relation_role(tokens, index) {
+                        projected_site = false;
+                        Some(SymbolRole::Property)
                     } else if enum_member || matches!(previous, Some("as" | "let")) {
                         projected_site = enum_member || previous == Some("let");
                         Some(SymbolRole::Variable)
@@ -327,7 +462,8 @@ impl DocumentIndex {
                     let scoped = matches!(role, Some(SymbolRole::Parameter))
                         || quantifier_binder
                         || pattern_binder
-                        || matches!(previous, Some("as" | "let"));
+                        || (matches!(previous, Some("as" | "let"))
+                            && role != Some(SymbolRole::Property));
                     let symbol_owner = scoped.then(|| owner.clone()).flatten();
                     if let Some(role) = role
                         && (!projected_site
@@ -341,7 +477,8 @@ impl DocumentIndex {
                         references.push(Reference {
                             name: name.clone(),
                             range: span_range(source, token.span),
-                            qualifier: qualifier_at(&tokens, index),
+                            qualifier: qualifier_at(tokens, index),
+                            alias: None,
                             owner,
                             target_spec: None,
                         });
@@ -367,7 +504,8 @@ impl DocumentIndex {
                     // only a non-keyword name re-arms the pending role. A
                     // comma between annotation arguments separates no list.
                     let continues_list = !in_annotation
-                        && token_ident(tokens.get(index + 1)).is_some_and(|next| !is_keyword(next));
+                        && token_ident(tokens.get(index + 1))
+                            .is_some_and(|next| !is_keyword_in(lexicon, next));
                     if continues_list && let Some(pending) = list_role {
                         expected = Some(pending);
                     }
@@ -404,13 +542,39 @@ impl DocumentIndex {
             !declaration_offsets.contains(&offset_at_position(source, reference.range.start))
         });
         if refinement {
-            apply_refinement_hints(source, &tokens, &mut symbols, &mut references);
+            apply_refinement_hints(source, tokens, &mut symbols, &mut references);
         }
-        let imports = import_bindings(source, &tokens);
+        let mut mapped = HashSet::new();
+        if lexicon == Lexicon::Next {
+            apply_implements_hints(source, tokens, &mut symbols, &mut references, &mut mapped);
+            let aliased = reading
+                .aliased
+                .iter()
+                .map(|(offset, alias)| {
+                    let start = position_at_offset(source, *offset);
+                    ((start.line, start.character), alias)
+                })
+                .collect::<HashMap<_, _>>();
+            let written = |range: Range| {
+                aliased
+                    .get(&(range.start.line, range.start.character))
+                    .map(|alias| (*alias).clone())
+            };
+            for symbol in &mut symbols {
+                symbol.alias = written(symbol.selection_range);
+            }
+            for reference in &mut references {
+                reference.alias = written(reference.range);
+            }
+        }
+        let imports = import_bindings(source, tokens);
         Ok(Self {
             source: source.to_owned(),
             parse_options: *parse_options,
             refinement,
+            lexicon,
+            glossary,
+            mapped,
             symbols,
             references,
             imports,
@@ -487,6 +651,107 @@ impl DocumentIndex {
         self.imports.iter().find(|binding| binding.alias == alias)
     }
 
+    /// Which words the document reads as keywords.
+    #[must_use]
+    pub const fn lexicon(&self) -> Lexicon {
+        self.lexicon
+    }
+
+    /// The rows of the document's `glossary`, in source order; empty without
+    /// one.
+    #[must_use]
+    pub fn glossary(&self) -> &[GlossaryRow] {
+        &self.glossary
+    }
+
+    /// The glossary rows whose alias reads as `name`.
+    pub fn glossary_rows_for<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a GlossaryRow> {
+        self.glossary.iter().filter(move |row| row.name == name)
+    }
+
+    /// Whether `value` is a keyword of this document (in a next-edition
+    /// requirements document, in English or Japanese, or a particle).
+    #[must_use]
+    pub fn is_keyword(&self, value: &str) -> bool {
+        is_keyword_in(self.lexicon, value)
+    }
+
+    /// `(alias, canonical name)` when the name at `position` is written as a
+    /// glossary alias.
+    #[must_use]
+    pub fn written_alias_at(&self, position: Position) -> Option<(&str, &str)> {
+        self.symbol_at(position)
+            .and_then(|symbol| Some((symbol.alias.as_deref()?, symbol.name.as_str())))
+            .or_else(|| {
+                let reference = self.reference_at(position)?;
+                Some((reference.alias.as_deref()?, reference.name.as_str()))
+            })
+    }
+
+    /// The ranges where the document writes `alias`: the glossary's right
+    /// side and every name written so.
+    #[must_use]
+    pub fn alias_ranges(&self, alias: &str) -> Vec<Range> {
+        let mut ranges = self
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.alias.as_deref() == Some(alias))
+            .map(|symbol| symbol.selection_range)
+            .chain(
+                self.references
+                    .iter()
+                    .filter(|reference| reference.alias.as_deref() == Some(alias))
+                    .map(|reference| reference.range),
+            )
+            .collect::<Vec<_>>();
+        ranges.sort_by_key(|range| (range.start.line, range.start.character));
+        ranges.dedup();
+        ranges
+    }
+
+    /// The keyword or particle at `position` of a next-edition requirements
+    /// document, with the keyword-table rows it spells.
+    #[must_use]
+    pub fn keyword_at(&self, position: Position) -> Option<KeywordUse> {
+        if self.lexicon != Lexicon::Next {
+            return None;
+        }
+        let tokens = fsl_syntax::lex_with(&self.source, &self.parse_options).ok()?;
+        let token = tokens.iter().find(|token| {
+            matches!(token.kind, TokenKind::Ident(_))
+                && contains(span_range(&self.source, token.span), position)
+        })?;
+        let TokenKind::Ident(word) = &token.kind else {
+            return None;
+        };
+        if self.symbol_at(position).is_some() || self.reference_at(position).is_some() {
+            return None;
+        }
+        let rows = active_rows()
+            .filter(|keyword| {
+                keyword.japanese == word
+                    || keyword.english == word
+                    || keyword.english.split(' ').any(|part| part == word)
+            })
+            .collect::<Vec<_>>();
+        let particle = fsl_syntax::keywords::particle(word);
+        (!rows.is_empty() || particle.is_some()).then(|| KeywordUse {
+            word: word.clone(),
+            range: span_range(&self.source, token.span),
+            rows,
+            particle,
+        })
+    }
+
+    fn reading(&self) -> Result<Reading, fsl_syntax::LexError> {
+        read_tokens(
+            &self.source,
+            self.parse_options,
+            self.lexicon,
+            &self.glossary,
+        )
+    }
+
     /// Return declaration-name positions the index failed to declare.
     ///
     /// A declaration keyword that owns a name (`action`, `invariant`, `entity`,
@@ -516,9 +781,10 @@ impl DocumentIndex {
                 )
             })
             .collect::<HashSet<_>>();
-        fsl_syntax::lex_with(&self.source, &self.parse_options).map_or_else(
+        self.reading().map_or_else(
             |_| Vec::new(),
-            |tokens| {
+            |reading| {
+                let tokens = &reading.tokens;
                 tokens
                     .iter()
                     .enumerate()
@@ -526,16 +792,19 @@ impl DocumentIndex {
                         let TokenKind::Ident(keyword) = &token.kind else {
                             return None;
                         };
-                        if self.refinement && keyword == "action" {
+                        if (self.refinement && keyword == "action")
+                            || reading.aliased.contains_key(&token.span.start.offset)
+                        {
                             return None;
                         }
-                        declaration_keyword(keyword)?.0?;
+                        walk_declaration_keyword(self.lexicon, tokens, index, keyword)?.0?;
                         let name = tokens.get(index + 1)?;
                         let TokenKind::Ident(name_text) = &name.kind else {
                             return None;
                         };
                         let position = span_range(&self.source, name.span).start;
-                        (!declared.contains(&(position.line, position.character))).then(|| {
+                        let key = (position.line, position.character);
+                        (!declared.contains(&key) && !self.mapped.contains(&key)).then(|| {
                             format!(
                                 "{}:{}: `{keyword} {name_text}` declares nothing",
                                 position.line + 1,
@@ -566,17 +835,19 @@ impl DocumentIndex {
                     .map(|reference| (reference.range.start.line, reference.range.start.character)),
             )
             .collect::<HashSet<_>>();
-        fsl_syntax::lex_with(&self.source, &self.parse_options).map_or_else(
+        self.reading().map_or_else(
             |_| Vec::new(),
-            |tokens| {
-                tokens
-                    .into_iter()
+            |reading| {
+                reading
+                    .tokens
+                    .iter()
                     .filter_map(|token| {
                         let TokenKind::Ident(name) = &token.kind else {
                             return None;
                         };
                         let position = span_range(&self.source, token.span).start;
-                        (!is_keyword(name)
+                        let aliased = reading.aliased.contains_key(&token.span.start.offset);
+                        ((aliased || !is_keyword_in(self.lexicon, name))
                             && !covered.contains(&(position.line, position.character)))
                         .then(|| format!("{}:{}:{name}", position.line + 1, position.character + 1))
                     })
@@ -606,78 +877,15 @@ fn apply_refinement_hints(
     for (index, token) in tokens.iter().enumerate() {
         match token_ident(Some(token)) {
             Some(k @ ("impl" | "abs")) => set_spec_ref(source, tokens, index, k, specs, references),
-            Some("map") => {
-                let end = refinement_item_end(tokens, index + 1);
-                let owner = format!("map:{}", token.span.start.offset);
-                if let Some(target) = tokens.get(index + 1) {
-                    update_reference(source, target, None, abstraction.clone(), references);
-                }
-                let equals = (index + 1..end)
-                    .find(|position| token_symbol(tokens.get(*position)) == Some("="));
-                let binder = (index + 1..equals.unwrap_or(end)).find(|position| {
-                    token_symbol(tokens.get(position + 1)) == Some(":")
-                        && token_ident(tokens.get(*position)).is_some()
-                });
-                if let Some(position) = binder {
-                    promote_local_symbol(source, &tokens[position], &owner, symbols, references);
-                }
-                if let Some(equals) = equals {
-                    for item in tokens.iter().take(end).skip(equals + 1) {
-                        let Some(name) = token_ident(Some(item)) else {
-                            continue;
-                        };
-                        let local = binder.and_then(|position| token_ident(tokens.get(position)))
-                            == Some(name);
-                        update_reference(
-                            source,
-                            item,
-                            local.then(|| owner.clone()),
-                            (!local).then(|| implementation.clone()).flatten(),
-                            references,
-                        );
-                    }
-                }
-            }
-            Some("action") => {
-                let end = refinement_item_end(tokens, index + 1);
-                let owner = format!("action:{}", token.span.start.offset);
-                if let Some(name) = tokens.get(index + 1) {
-                    demote_to_reference(
-                        source,
-                        name,
-                        None,
-                        implementation.clone(),
-                        symbols,
-                        references,
-                    );
-                }
-                let arrow = (index + 1..end)
-                    .find(|position| token_symbol(tokens.get(*position)) == Some("->"));
-                let open = (index + 1..arrow.unwrap_or(end))
-                    .find(|position| token_symbol(tokens.get(*position)) == Some("("));
-                let close = open.and_then(|open| {
-                    (open + 1..arrow.unwrap_or(end))
-                        .find(|position| token_symbol(tokens.get(*position)) == Some(")"))
-                });
-                if let (Some(open), Some(close)) = (open, close) {
-                    for item in tokens.iter().take(close).skip(open + 1) {
-                        if token_ident(Some(item)).is_some() {
-                            promote_local_symbol(source, item, &owner, symbols, references);
-                        }
-                    }
-                }
-                if let Some(arrow) = arrow {
-                    if let Some(target) = tokens.get(arrow + 1)
-                        && token_ident(Some(target)) != Some("stutter")
-                    {
-                        update_reference(source, target, None, abstraction.clone(), references);
-                    }
-                    for item in tokens.iter().take(end).skip(arrow + 2) {
-                        if token_ident(Some(item)).is_some() {
-                            update_reference(source, item, Some(owner.clone()), None, references);
-                        }
-                    }
-                }
+            Some("map" | "action") => {
+                apply_mapping_item(
+                    source,
+                    tokens,
+                    index,
+                    (implementation.as_ref(), abstraction.as_ref()),
+                    symbols,
+                    references,
+                );
             }
             Some("respond") => {
                 apply_progress_response_hint(
@@ -691,6 +899,152 @@ fn apply_refinement_hints(
             }
             _ => {}
         }
+    }
+}
+
+/// A next-edition document's `implements NAME from "path" { … }` is a
+/// mapping like a refinement file's, from this document (the
+/// implementation) to the specification `NAME` (the abstraction): its
+/// `action impl(args) -> abs(args)` uses this document's event `impl` and
+/// `NAME`'s action `abs`, and binds its own parameters. The mapped action
+/// names are recorded in `mapped`.
+fn apply_implements_hints(
+    source: &str,
+    tokens: &[Token],
+    symbols: &mut Vec<Symbol>,
+    references: &mut Vec<Reference>,
+    mapped: &mut HashSet<(u32, u32)>,
+) {
+    for (index, token) in tokens.iter().enumerate() {
+        if token_ident(Some(token)) != Some("implements")
+            || token_ident(tokens.get(index + 2)) != Some("from")
+            || token_symbol(tokens.get(index + 4)) != Some("{")
+        {
+            continue;
+        }
+        let abstraction = token_ident(tokens.get(index + 1)).map(str::to_owned);
+        let open = index + 4;
+        let mut depth = 0_usize;
+        let close = (open..tokens.len())
+            .find(|position| {
+                match token_symbol(tokens.get(*position)) {
+                    Some("{") => depth += 1,
+                    Some("}") => depth -= 1,
+                    _ => {}
+                }
+                depth == 0
+            })
+            .unwrap_or(tokens.len());
+        let body = &tokens[open + 1..close];
+        for (item, word) in body.iter().enumerate() {
+            if let Some(keyword @ ("map" | "action")) = token_ident(Some(word)) {
+                apply_mapping_item(
+                    source,
+                    body,
+                    item,
+                    (None, abstraction.as_ref()),
+                    symbols,
+                    references,
+                );
+                if keyword == "action"
+                    && let Some(name) = body.get(item + 1)
+                {
+                    let start = span_range(source, name.span).start;
+                    mapped.insert((start.line, start.character));
+                }
+            }
+        }
+    }
+}
+
+/// One `map` or `action` item of a mapping between an implementation and an
+/// abstraction, at `tokens[index]`; `specs` names the two (`None` is this
+/// document).
+fn apply_mapping_item(
+    source: &str,
+    tokens: &[Token],
+    index: usize,
+    specs: (Option<&String>, Option<&String>),
+    symbols: &mut Vec<Symbol>,
+    references: &mut Vec<Reference>,
+) {
+    let (implementation, abstraction) = specs;
+    let token = &tokens[index];
+    match token_ident(Some(token)) {
+        Some("map") => {
+            let end = refinement_item_end(tokens, index + 1);
+            let owner = format!("map:{}", token.span.start.offset);
+            if let Some(target) = tokens.get(index + 1) {
+                update_reference(source, target, None, abstraction.cloned(), references);
+            }
+            let equals =
+                (index + 1..end).find(|position| token_symbol(tokens.get(*position)) == Some("="));
+            let binder = (index + 1..equals.unwrap_or(end)).find(|position| {
+                token_symbol(tokens.get(position + 1)) == Some(":")
+                    && token_ident(tokens.get(*position)).is_some()
+            });
+            if let Some(position) = binder {
+                promote_local_symbol(source, &tokens[position], &owner, symbols, references);
+            }
+            if let Some(equals) = equals {
+                for item in tokens.iter().take(end).skip(equals + 1) {
+                    let Some(name) = token_ident(Some(item)) else {
+                        continue;
+                    };
+                    let local =
+                        binder.and_then(|position| token_ident(tokens.get(position))) == Some(name);
+                    update_reference(
+                        source,
+                        item,
+                        local.then(|| owner.clone()),
+                        (!local).then(|| implementation.cloned()).flatten(),
+                        references,
+                    );
+                }
+            }
+        }
+        Some("action") => {
+            let end = refinement_item_end(tokens, index + 1);
+            let owner = format!("action:{}", token.span.start.offset);
+            if let Some(name) = tokens.get(index + 1) {
+                demote_to_reference(
+                    source,
+                    name,
+                    None,
+                    implementation.cloned(),
+                    symbols,
+                    references,
+                );
+            }
+            let arrow =
+                (index + 1..end).find(|position| token_symbol(tokens.get(*position)) == Some("->"));
+            let open = (index + 1..arrow.unwrap_or(end))
+                .find(|position| token_symbol(tokens.get(*position)) == Some("("));
+            let close = open.and_then(|open| {
+                (open + 1..arrow.unwrap_or(end))
+                    .find(|position| token_symbol(tokens.get(*position)) == Some(")"))
+            });
+            if let (Some(open), Some(close)) = (open, close) {
+                for item in tokens.iter().take(close).skip(open + 1) {
+                    if token_ident(Some(item)).is_some() {
+                        promote_local_symbol(source, item, &owner, symbols, references);
+                    }
+                }
+            }
+            if let Some(arrow) = arrow {
+                if let Some(target) = tokens.get(arrow + 1)
+                    && token_ident(Some(target)) != Some("stutter")
+                {
+                    update_reference(source, target, None, abstraction.cloned(), references);
+                }
+                for item in tokens.iter().take(end).skip(arrow + 2) {
+                    if token_ident(Some(item)).is_some() {
+                        update_reference(source, item, Some(owner.clone()), None, references);
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -810,6 +1164,7 @@ fn demote_to_reference(
             name: name.to_owned(),
             range,
             qualifier: None,
+            alias: None,
             owner,
             target_spec,
         });
@@ -1154,6 +1509,10 @@ fn declaration_keyword(value: &str) -> Option<(Option<SymbolRole>, Option<Contex
         .map(|keyword| (keyword.role, keyword.context))
 }
 
+/// The published language's words the walk reads as keywords. A
+/// next-edition requirements document also reads the keyword table's
+/// ([`is_keyword_in`]); they are read from the table, not copied here, so a
+/// row a later stage activates is a keyword as soon as the parser reads it.
 const INDEX_KEYWORDS: &[&str] = &[
     "use",
     "as",
@@ -1281,6 +1640,188 @@ pub(crate) fn is_keyword(value: &str) -> bool {
     declaration_keyword(value).is_some() || INDEX_KEYWORDS.contains(&value)
 }
 
+/// The declaration keywords a next-edition requirements document adds or
+/// reads differently. `decide` opens a decision table whose `REQ-…` label is
+/// a requirement's, as `rule` and `scenario` do; `resource` declares a state
+/// of no entity and `measure` a measure as `kpi` does; `entity` with a body
+/// is read by [`walk_declaration_keyword`], and the role a relation names
+/// (`E belongs to E2 as role via event`) by [`relation_role`]. `goal` and
+/// `policy` declare as in the published language. Each is the English spelling of an active
+/// declaration row of the keyword table (`next_declaration_keywords_are_the_tables`).
+const NEXT_DECLARATION_KEYWORDS: &[DeclarationKeyword] = &[
+    DeclarationKeyword {
+        value: "concept",
+        role: Some(SymbolRole::Type),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "event",
+        role: Some(SymbolRole::Function),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "rule",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "decide",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "scenario",
+        role: Some(SymbolRole::Property),
+        context: Some(Context::Other),
+    },
+    DeclarationKeyword {
+        value: "resource",
+        role: Some(SymbolRole::Variable),
+        context: None,
+    },
+    DeclarationKeyword {
+        value: "measure",
+        role: Some(SymbolRole::Variable),
+        context: Some(Context::Other),
+    },
+];
+
+fn declaration_keyword_in(
+    lexicon: Lexicon,
+    value: &str,
+) -> Option<(Option<SymbolRole>, Option<Context>)> {
+    (lexicon == Lexicon::Next)
+        .then(|| {
+            NEXT_DECLARATION_KEYWORDS
+                .iter()
+                .find(|keyword| keyword.value == value)
+                .map(|keyword| (keyword.role, keyword.context))
+        })
+        .flatten()
+        .or_else(|| declaration_keyword(value))
+}
+
+/// The declaration keyword `tokens[index]` (spelled `value`) starts, read in
+/// `lexicon`. A next-edition `entity Name { … }` declares its fields like a
+/// struct's and its lifecycle's stages.
+fn walk_declaration_keyword(
+    lexicon: Lexicon,
+    tokens: &[Token],
+    index: usize,
+    value: &str,
+) -> Option<(Option<SymbolRole>, Option<Context>)> {
+    if lexicon == Lexicon::Next
+        && value == "entity"
+        && token_symbol(tokens.get(index + 2)) == Some("{")
+    {
+        return Some((Some(SymbolRole::Type), Some(Context::Struct)));
+    }
+    declaration_keyword_in(lexicon, value)
+}
+
+/// Whether `tokens[index]` is the role a next-edition relation names:
+/// `E belongs to E2 as ROLE`, where the reading spells `belongs to` as two
+/// words in English and as one (`所属先`) in Japanese.
+fn relation_role(tokens: &[Token], index: usize) -> bool {
+    let before = |back: usize| index.checked_sub(back).and_then(|i| tokens.get(i));
+    token_ident(before(1)) == Some("as")
+        && token_ident(before(2)).is_some()
+        && (token_ident(before(3)) == Some("belongs to")
+            || (token_ident(before(3)) == Some("to") && token_ident(before(4)) == Some("belongs")))
+}
+
+/// The rows of the keyword table the parser reads. A reserved row is not a
+/// keyword yet, so a word spelled like it is a name.
+fn active_rows() -> impl Iterator<Item = &'static Keyword> {
+    KEYWORDS
+        .iter()
+        .filter(|keyword| keyword.status == Status::Active)
+}
+
+/// Whether `value` is a keyword of a document read in `lexicon`: in a
+/// next-edition requirements document also each word of an active row's
+/// English spelling, the row's Japanese spelling, and a particle.
+pub(crate) fn is_keyword_in(lexicon: Lexicon, value: &str) -> bool {
+    is_keyword(value)
+        || (lexicon == Lexicon::Next
+            && (fsl_syntax::keywords::particle(value).is_some()
+                || active_rows().any(|keyword| {
+                    keyword.japanese == value
+                        || keyword.english == value
+                        || keyword.english.split(' ').any(|word| word == value)
+                })))
+}
+
+/// The English spelling the walk reads a Japanese keyword as. A Japanese
+/// word shared by rows of different contexts (`条件`) is read as the first
+/// row's English; every row it spells is a keyword and none declares.
+fn english_spelling(japanese: &str) -> Option<&'static str> {
+    active_rows()
+        .find(|keyword| keyword.japanese == japanese)
+        .map(|keyword| keyword.english)
+}
+
+/// The tokens the walk reads, and the alias each name was written as, by
+/// byte offset.
+struct Reading {
+    tokens: Vec<Token>,
+    aliased: BTreeMap<usize, String>,
+}
+
+/// Lex `source` for the walk. In a next-edition requirements document each
+/// glossary alias reads as its canonical name and each Japanese keyword as
+/// its English spelling, the way the parser reads them, so the walk reads
+/// one language. A particle stays as written: it is a keyword there.
+fn read_tokens(
+    source: &str,
+    options: fsl_syntax::ParseOptions,
+    lexicon: Lexicon,
+    glossary: &[GlossaryRow],
+) -> Result<Reading, fsl_syntax::LexError> {
+    let mut tokens = fsl_syntax::lex_with(source, &options)?;
+    let mut aliased = BTreeMap::new();
+    if lexicon == Lexicon::Next {
+        let canonical_of = glossary
+            .iter()
+            .map(|row| (row.alias.as_str(), row.name.as_str()))
+            .collect::<HashMap<_, _>>();
+        for token in &mut tokens {
+            let TokenKind::Ident(word) = &mut token.kind else {
+                continue;
+            };
+            if let Some(canonical) = canonical_of.get(word.as_str()) {
+                let written = std::mem::replace(word, (*canonical).to_owned());
+                aliased.insert(token.span.start.offset, written);
+            } else if let Some(english) = english_spelling(word) {
+                english.clone_into(word);
+            }
+        }
+    }
+    Ok(Reading { tokens, aliased })
+}
+
+fn glossary_rows(source: &str, items: &[fsl_syntax::RequirementsItem]) -> Vec<GlossaryRow> {
+    items
+        .iter()
+        .find_map(|item| match item {
+            fsl_syntax::RequirementsItem::Glossary(glossary) => Some(glossary),
+            _ => None,
+        })
+        .map_or_else(Vec::new, |glossary| {
+            glossary
+                .entries
+                .iter()
+                .map(|entry| GlossaryRow {
+                    canonical: entry.canonical.written(),
+                    name: entry.canonical.name.clone(),
+                    alias: entry.alias.clone(),
+                    canonical_range: span_range(source, entry.canonical_span),
+                    alias_range: span_range(source, entry.alias_span),
+                })
+                .collect()
+        })
+}
+
 /// Literals in every expression; the checker rejects a declaration so named
 /// (issue #570), so the index never reads one as a name.
 const LITERAL_WORDS: &[&str] = &["true", "false", "none"];
@@ -1351,6 +1892,7 @@ fn add_symbol(
         role,
         range,
         selection_range: range,
+        alias: None,
         owner,
     });
 }
@@ -1524,6 +2066,50 @@ mod tests {
             }
         }
         assert!(recognized_keywords().all(is_keyword));
+    }
+
+    /// The declaration keywords a next-edition requirements document adds
+    /// are the keyword table's: each is the English spelling of an active
+    /// declaration row, every active declaration row declares a name in
+    /// either language, and the walk reads its Japanese spelling as its
+    /// English one. A row a later stage activates (`resource`, `measure`)
+    /// fails here until the walk declares its name.
+    #[test]
+    fn next_declaration_keywords_are_the_tables() {
+        use fsl_syntax::keywords::KeywordContext;
+        let declaration_rows =
+            || active_rows().filter(|keyword| keyword.context == KeywordContext::Declaration);
+        for keyword in NEXT_DECLARATION_KEYWORDS {
+            assert!(
+                declaration_rows().any(|row| row.english == keyword.value),
+                "{} is no active declaration row",
+                keyword.value
+            );
+        }
+        for row in declaration_rows() {
+            assert!(
+                declaration_keyword_in(Lexicon::Next, row.english)
+                    .is_some_and(|(role, _)| role.is_some()),
+                "{:?} `{}` declares no name",
+                row.kw,
+                row.english
+            );
+            assert_eq!(
+                english_spelling(row.japanese),
+                Some(row.english),
+                "{:?}",
+                row.kw
+            );
+        }
+        // The published language reads none of them differently.
+        for keyword in NEXT_DECLARATION_KEYWORDS {
+            assert_ne!(
+                declaration_keyword(keyword.value),
+                Some((keyword.role, keyword.context)),
+                "{} is the published mapping",
+                keyword.value
+            );
+        }
     }
 
     #[test]

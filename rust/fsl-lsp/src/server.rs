@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crossbeam_channel::Sender;
@@ -256,26 +257,11 @@ fn handle_request(sender: &Sender<Message>, state: &ServerState, request: &Reque
             ok(request, result)
         }),
         "textDocument/hover" => parse_request::<HoverParams>(request).map(|params| {
-            let uri = &params.text_document_position_params.text_document.uri;
-            let result =
-                definition_location(state, uri, params.text_document_position_params.position)
-                    .and_then(|location| {
-                        let index = index_for_uri(state, &location.uri)?;
-                        let symbol = index.symbol_at(location.range.start)?;
-                        let snippet =
-                            source_line(index.source(), symbol.selection_range.start.line);
-                        Some(Hover {
-                            contents: HoverContents::Markup(MarkupContent {
-                                kind: MarkupKind::Markdown,
-                                value: format!(
-                                    "```fsl\n{snippet}\n```\n**{}** `{}`",
-                                    symbol.role.detail(),
-                                    symbol.name
-                                ),
-                            }),
-                            range: Some(symbol.selection_range),
-                        })
-                    });
+            let result = hover(
+                state,
+                &params.text_document_position_params.text_document.uri,
+                params.text_document_position_params.position,
+            );
             ok(request, result)
         }),
         "textDocument/references" => parse_request::<ReferenceParams>(request).map(|params| {
@@ -303,11 +289,10 @@ fn handle_request(sender: &Sender<Message>, state: &ServerState, request: &Reque
                     .into_iter()
                     .map(|(name, role)| completion_item(name, role))
                     .collect::<Vec<_>>();
-                items.extend(KEYWORDS.iter().map(|keyword| CompletionItem {
-                    label: (*keyword).to_owned(),
-                    kind: Some(CompletionItemKind::KEYWORD),
-                    ..CompletionItem::default()
-                }));
+                if completion_index.is_none() {
+                    items.extend(alias_completion_items(&index));
+                }
+                items.extend(keyword_completion_items(index.lexicon()));
                 CompletionResponse::Array(items)
             });
             ok(request, result)
@@ -324,35 +309,12 @@ fn handle_request(sender: &Sender<Message>, state: &ServerState, request: &Reque
             })
         }
         "textDocument/rename" => parse_request::<RenameParams>(request).map(|params| {
-            let uri = &params.text_document_position.text_document.uri;
-            let result = valid_identifier_in(state, uri, &params.new_name)
-                .then(|| {
-                    let locations = workspace_references(
-                        state,
-                        uri,
-                        params.text_document_position.position,
-                        true,
-                    );
-                    if locations.is_empty()
-                        || !locations
-                            .iter()
-                            .map(|location| &location.uri)
-                            .collect::<std::collections::HashSet<_>>()
-                            .into_iter()
-                            .all(|edited| valid_identifier_in(state, edited, &params.new_name))
-                    {
-                        return None;
-                    }
-                    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-                    for location in locations {
-                        changes
-                            .entry(location.uri)
-                            .or_default()
-                            .push(TextEdit::new(location.range, params.new_name.clone()));
-                    }
-                    Some(WorkspaceEdit::new(changes))
-                })
-                .flatten();
+            let result = rename(
+                state,
+                &params.text_document_position.text_document.uri,
+                params.text_document_position.position,
+                &params.new_name,
+            );
             ok(request, result)
         }),
         "textDocument/codeAction" => parse_request::<CodeActionParams>(request).map(|params| {
@@ -677,6 +639,267 @@ fn workspace_references(
     locations
 }
 
+fn hover(state: &ServerState, uri: &Url, position: Position) -> Option<Hover> {
+    let index = index_for_uri(state, uri)?;
+    if let Some(keyword) = index.keyword_at(position) {
+        return Some(markdown_hover(keyword_hover(&keyword), keyword.range));
+    }
+    let written = index
+        .written_alias_at(position)
+        .map(|(alias, canonical)| (alias.to_owned(), canonical.to_owned()));
+    let declared = definition_location(state, uri, position).and_then(|location| {
+        let target = index_for_uri(state, &location.uri)?;
+        let symbol = target.symbol_at(location.range.start)?.clone();
+        Some((target, symbol))
+    });
+    if let Some((target, symbol)) = declared {
+        let snippet = source_line(target.source(), symbol.selection_range.start.line);
+        let mut value = format!(
+            "```fsl\n{snippet}\n```\n**{}** `{}`",
+            symbol.role.detail(),
+            symbol.name
+        );
+        value.push_str(&glossary_hover(&index, &target, &symbol.name));
+        return Some(markdown_hover(value, symbol.selection_range));
+    }
+    // A name the glossary aliases but nothing declares (a verb).
+    let reference = index.reference_at(position)?;
+    let mut value = match written {
+        Some((alias, canonical)) => format!("**alias** `{alias}` of `{canonical}`"),
+        None if index.glossary_rows_for(&reference.name).next().is_some() => {
+            format!("**name** `{}`", reference.name)
+        }
+        None => return None,
+    };
+    value.push_str(&glossary_hover(&index, &index, &reference.name));
+    Some(markdown_hover(value, reference.range))
+}
+
+fn markdown_hover(value: String, range: lsp_types::Range) -> Hover {
+    Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: Some(range),
+    }
+}
+
+/// The glossary rows of `name`: the current document's, or else the
+/// declaring document's.
+fn glossary_hover(current: &DocumentIndex, target: &DocumentIndex, name: &str) -> String {
+    let mut rows = current.glossary_rows_for(name).collect::<Vec<_>>();
+    if rows.is_empty() {
+        rows = target.glossary_rows_for(name).collect();
+    }
+    rows.iter().fold(String::new(), |mut value, row| {
+        let _ = write!(
+            value,
+            "\n\nalias `{}` · glossary `{} = {}`",
+            row.alias, row.canonical, row.alias
+        );
+        value
+    })
+}
+
+/// A keyword's spellings in both languages, one line per row of the keyword
+/// table it spells, and a particle's role.
+fn keyword_hover(keyword: &crate::KeywordUse) -> String {
+    let mut value = String::new();
+    if !keyword.rows.is_empty() {
+        let _ = writeln!(value, "**keyword** `{}`", keyword.word);
+        for row in &keyword.rows {
+            let _ = write!(
+                value,
+                "\n- `{}` · `{}` ({:?})",
+                row.english, row.japanese, row.context
+            );
+        }
+    }
+    if let Some(particle) = keyword.particle {
+        if !value.is_empty() {
+            value.push_str("\n\n");
+        }
+        let _ = write!(
+            value,
+            "**particle** `{}` marks the {}",
+            particle.spelling(),
+            particle.role()
+        );
+    }
+    value
+}
+
+/// The keywords completion offers: the published starters, and in a
+/// next-edition requirements document every active row of the keyword table
+/// in English and in Japanese, each with its other spelling as the detail.
+fn keyword_completion_items(lexicon: crate::Lexicon) -> Vec<CompletionItem> {
+    let mut labels = KEYWORDS
+        .iter()
+        .map(|keyword| ((*keyword).to_owned(), Vec::<&str>::new()))
+        .collect::<Vec<_>>();
+    if lexicon == crate::Lexicon::Next {
+        for row in fsl_syntax::keywords::KEYWORDS
+            .iter()
+            .filter(|row| row.status == fsl_syntax::keywords::Status::Active)
+        {
+            for (label, other) in [(row.english, row.japanese), (row.japanese, row.english)] {
+                match labels.iter_mut().find(|(known, _)| known == label) {
+                    Some((_, details)) => {
+                        if !details.contains(&other) {
+                            details.push(other);
+                        }
+                    }
+                    None => labels.push((label.to_owned(), vec![other])),
+                }
+            }
+        }
+    }
+    labels
+        .into_iter()
+        .map(|(label, details)| CompletionItem {
+            label,
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: (!details.is_empty()).then(|| details.join(" / ")),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+/// The glossary's aliases, each with its canonical name as the detail.
+fn alias_completion_items(index: &DocumentIndex) -> Vec<CompletionItem> {
+    index
+        .glossary()
+        .iter()
+        .map(|row| {
+            let role = index
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == row.name)
+                .map(|symbol| symbol.role);
+            CompletionItem {
+                detail: Some(row.canonical.clone()),
+                ..role.map_or_else(
+                    || CompletionItem {
+                        label: row.alias.clone(),
+                        kind: Some(CompletionItemKind::VARIABLE),
+                        ..CompletionItem::default()
+                    },
+                    |role| completion_item(&row.alias, role),
+                )
+            }
+        })
+        .collect()
+}
+
+/// Rename the name at `position`. Written as a glossary alias, the alias is
+/// renamed: the glossary's right side and every place the document writes
+/// it. Written as its canonical name, the canonical name is renamed: every
+/// place any document of the workspace writes it — the glossary's left side
+/// and other files' mapping tables included — but no alias.
+fn rename(
+    state: &ServerState,
+    uri: &Url,
+    position: Position,
+    new_name: &str,
+) -> Option<WorkspaceEdit> {
+    let index = index_for_uri(state, uri)?;
+    if let Some((alias, _)) = index.written_alias_at(position) {
+        let source = source_for_uri(state, uri)?;
+        let rule = fsl_syntax::IdentifierRule::for_source(&source, &state.parse_options);
+        if !valid_alias(&index, alias, new_name, rule) {
+            return None;
+        }
+        let edits = index
+            .alias_ranges(alias)
+            .into_iter()
+            .map(|range| TextEdit::new(range, new_name.to_owned()))
+            .collect();
+        return Some(WorkspaceEdit::new(HashMap::from([(uri.clone(), edits)])));
+    }
+    if !valid_identifier_in(state, uri, new_name) {
+        return None;
+    }
+    let mut written = HashMap::<Url, Option<DocumentIndex>>::new();
+    let mut locations = workspace_references(state, uri, position, true)
+        .into_iter()
+        .filter(|location| {
+            written
+                .entry(location.uri.clone())
+                .or_insert_with(|| index_for_uri(state, &location.uri))
+                .as_ref()
+                .is_none_or(|edited| edited.written_alias_at(location.range.start).is_none())
+        })
+        .collect::<Vec<_>>();
+    if locations.is_empty() {
+        locations = undeclared_glossary_name(&index, uri, position);
+    }
+    if locations.is_empty()
+        || !locations
+            .iter()
+            .map(|location| &location.uri)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .all(|edited| valid_identifier_in(state, edited, new_name))
+    {
+        return None;
+    }
+    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+    for location in locations {
+        changes
+            .entry(location.uri)
+            .or_default()
+            .push(TextEdit::new(location.range, new_name.to_owned()));
+    }
+    Some(WorkspaceEdit::new(changes))
+}
+
+/// A canonical name the glossary aliases but nothing declares (a verb): its
+/// canonical spellings in the document.
+fn undeclared_glossary_name(index: &DocumentIndex, uri: &Url, position: Position) -> Vec<Location> {
+    let Some(name) = index
+        .reference_at(position)
+        .filter(|reference| index.definition_at(reference.range.start).is_none())
+        .map(|reference| reference.name.clone())
+    else {
+        return Vec::new();
+    };
+    if index.glossary_rows_for(&name).next().is_none() {
+        return Vec::new();
+    }
+    index
+        .references
+        .iter()
+        .filter(|reference| {
+            reference.name == name
+                && reference.alias.is_none()
+                && index.definition_at(reference.range.start).is_none()
+        })
+        .map(|reference| Location::new(uri.clone(), reference.range))
+        .collect()
+}
+
+/// Whether `value` may replace the alias `old`: an identifier under the
+/// document's rule that is spelled like no keyword (English or Japanese, any
+/// context, reserved rows included, or a particle), no canonical or declared
+/// name, and no other alias (`alias_shadows_keyword`, `alias_shadows_name`,
+/// `alias_collision`).
+fn valid_alias(
+    index: &DocumentIndex,
+    old: &str,
+    value: &str,
+    rule: fsl_syntax::IdentifierRule,
+) -> bool {
+    rule.accepts(value)
+        && !fsl_syntax::is_keyword_spelling(value)
+        && !index.is_keyword(value)
+        && !index.glossary().iter().any(|row| {
+            (row.alias == value && row.alias != old)
+                || row.canonical.split('.').any(|name| name == value)
+        })
+        && !index.symbols.iter().any(|symbol| symbol.name == value)
+}
+
 fn workspace_uris(state: &ServerState, current: &Url) -> Vec<Url> {
     let mut uris = state.documents.keys().cloned().collect::<HashSet<_>>();
     for root in &state.roots {
@@ -937,11 +1160,25 @@ fn source_line(source: &str, line: u32) -> &str {
 
 /// Whether `value` reads as one identifier in the document at `uri`, whose
 /// edition and the server's options decide the identifier rule.
+///
+/// A canonical name of a next-edition requirements document is ASCII
+/// (`canonical_name_not_ascii`), spelled like none of its keywords in either
+/// language, and like none of its aliases.
 fn valid_identifier_in(state: &ServerState, uri: &Url, value: &str) -> bool {
-    let rule = source_for_uri(state, uri).map_or(fsl_syntax::IdentifierRule::Ascii, |source| {
-        fsl_syntax::IdentifierRule::for_source(&source, &state.parse_options)
-    });
-    valid_identifier(value, rule)
+    let Some(source) = source_for_uri(state, uri) else {
+        return valid_identifier(value, fsl_syntax::IdentifierRule::Ascii);
+    };
+    match DocumentIndex::build(&source, None, &state.parse_options) {
+        Ok(index) if index.lexicon() == crate::Lexicon::Next => {
+            fsl_syntax::IdentifierRule::Ascii.accepts(value)
+                && !index.is_keyword(value)
+                && !index.glossary().iter().any(|row| row.alias == value)
+        }
+        _ => valid_identifier(
+            value,
+            fsl_syntax::IdentifierRule::for_source(&source, &state.parse_options),
+        ),
+    }
 }
 
 fn valid_identifier(value: &str, rule: fsl_syntax::IdentifierRule) -> bool {
@@ -993,6 +1230,8 @@ fn offset_at_position(source: &str, position: Position) -> usize {
 mod tests {
     use super::*;
     use lsp_server::RequestId;
+
+    const KEYWORDS_STARTERS: &[&str] = KEYWORDS;
     use lsp_types::Range;
 
     fn fixture_root(name: &str) -> PathBuf {
@@ -1364,6 +1603,475 @@ mod tests {
                 "rename validation recognizes {keyword:?}, but completion neither offers it nor records a reasoned exclusion"
             );
         }
+    }
+
+    /// A next-edition requirements document with a glossary (Japanese
+    /// aliases), a Japanese keyword, particles, an `implements` mapping to
+    /// `b.fsl`, and a refinement file mapping its event; `b.fsl` is in the
+    /// published language.
+    const FSL5_A: &str = "fsl 5
+requirements ExpenseRequirements {
+  glossary {
+    Claim = 申請
+    Claim.amount = 申請金額
+    Submitted = 提出済み
+    submits = 提出する
+  }
+  implements ExpenseToBe from \"b.fsl\" {
+    action submit(c, amount) -> submit(c)
+  }
+  number Amount
+  actor Employee
+  エンティティ 申請 {
+    申請金額: Amount = 0
+    lifecycle Draft -> 提出済み
+  }
+  concept Large = 申請 where 申請金額 > 0
+  event submit = Employee が Claim を 提出する amount で Draft -> Submitted
+  scenario AC-1 \"t\" {
+    Employee submits claim1 with amount 1
+    then claim1 is 提出済み
+  }
+}
+verify {
+  instances Claim = 1
+  values Amount = 0..1
+}
+";
+    const FSL5_B: &str = "business ExpenseToBe {
+  actor Employee
+  entity Claim
+  process Claim {
+    stages Draft, Submitted
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+  }
+}
+verify { instances Claim = 1 }
+";
+    const FSL5_R: &str = "refinement Mapping {
+  impl ExpenseRequirements
+  abs ExpenseToBe
+  action submit(c, amount) -> submit(c)
+}
+";
+
+    fn gated() -> fsl_syntax::ParseOptions {
+        fsl_syntax::ParseOptions::with_unstable(
+            fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+        )
+    }
+
+    /// The UTF-16 position of the `nth` (0-based) `needle` on `line`.
+    fn at(source: &str, line: u32, needle: &str, nth: usize) -> Position {
+        let text = source.lines().nth(line as usize).expect("line");
+        let byte = text
+            .match_indices(needle)
+            .nth(nth)
+            .unwrap_or_else(|| panic!("{needle} on line {line}"))
+            .0;
+        Position::new(
+            line,
+            u32::try_from(text[..byte].encode_utf16().count()).expect("fits"),
+        )
+    }
+
+    struct Fsl5Workspace {
+        root: PathBuf,
+        state: ServerState,
+        a: Url,
+        b: Url,
+    }
+
+    impl Fsl5Workspace {
+        fn new(name: &str) -> Self {
+            let root = fixture_root(name);
+            let a = fixture_uri(&root, "a.fsl", FSL5_A);
+            let b = fixture_uri(&root, "b.fsl", FSL5_B);
+            let r = fixture_uri(&root, "r.fsl", FSL5_R);
+            let documents = [(&a, FSL5_A), (&b, FSL5_B), (&r, FSL5_R)]
+                .into_iter()
+                .map(|(uri, text)| {
+                    (
+                        uri.clone(),
+                        OpenDocument {
+                            text: text.to_owned(),
+                            version: 1,
+                        },
+                    )
+                })
+                .collect();
+            Self {
+                root,
+                state: ServerState {
+                    documents,
+                    roots: Vec::new(),
+                    parse_options: gated(),
+                },
+                a,
+                b,
+            }
+        }
+
+        fn at(uri: &Url, position: Position) -> serde_json::Value {
+            serde_json::json!({"textDocument":{"uri":uri},"position":position})
+        }
+
+        fn hover(&self, position: Position) -> String {
+            request(
+                &self.state,
+                "textDocument/hover",
+                Self::at(&self.a, position),
+            )["contents"]["value"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        }
+
+        /// The rename's edits as `(file name, start)`, sorted.
+        fn rename(&self, position: Position, new_name: &str) -> Option<Vec<(String, Position)>> {
+            let mut params = Self::at(&self.a, position);
+            params["newName"] = serde_json::json!(new_name);
+            let edit = request(&self.state, "textDocument/rename", params);
+            if edit.is_null() {
+                return None;
+            }
+            let edit: WorkspaceEdit = serde_json::from_value(edit).expect("workspace edit");
+            let mut edits = edit
+                .changes
+                .unwrap_or_default()
+                .into_iter()
+                .flat_map(|(uri, edits)| {
+                    let file = uri.path().rsplit('/').next().unwrap_or_default().to_owned();
+                    edits.into_iter().map(move |edit| {
+                        assert_eq!(edit.new_text, new_name);
+                        (file.clone(), edit.range.start)
+                    })
+                })
+                .collect::<Vec<_>>();
+            edits.sort_by_key(|(file, start)| (file.clone(), start.line, start.character));
+            Some(edits)
+        }
+    }
+
+    impl Drop for Fsl5Workspace {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// fsl 5 plan S11: an alias navigates to its canonical declaration and
+    /// hovers with its glossary row; a keyword hovers with its other
+    /// spelling and a particle with its role.
+    #[test]
+    fn fsl5_aliases_and_keywords_navigate_and_hover() {
+        let workspace = Fsl5Workspace::new("fsl5-hover");
+        let a = FSL5_A;
+        let definition = request(
+            &workspace.state,
+            "textDocument/definition",
+            Fsl5Workspace::at(&workspace.a, at(a, 17, "申請", 0)),
+        );
+        assert_eq!(definition["uri"], workspace.a.as_str());
+        assert_eq!(
+            definition["range"]["start"],
+            serde_json::to_value(at(a, 13, "申請", 0)).expect("position")
+        );
+        let alias = workspace.hover(at(a, 17, "申請", 0));
+        assert!(
+            alias.contains("**type** `Claim`") && alias.contains("glossary `Claim = 申請`"),
+            "{alias}"
+        );
+        let field = workspace.hover(at(a, 17, "申請金額", 0));
+        assert!(
+            field.contains("**property** `amount`")
+                && field.contains("glossary `Claim.amount = 申請金額`"),
+            "{field}"
+        );
+        let japanese = workspace.hover(at(a, 13, "エンティティ", 0));
+        assert!(
+            japanese.contains("**keyword** `エンティティ`")
+                && japanese.contains("`entity` · `エンティティ`"),
+            "{japanese}"
+        );
+        let english = workspace.hover(at(a, 15, "lifecycle", 0));
+        assert!(
+            english.contains("`lifecycle` · `ライフサイクル`"),
+            "{english}"
+        );
+        let particle = workspace.hover(at(a, 18, "が", 0));
+        assert!(
+            particle.contains("**particle** `が` marks the actor"),
+            "{particle}"
+        );
+        let with = workspace.hover(at(a, 18, "で", 0));
+        assert!(
+            with.contains("`with` · `で`") && with.contains("**particle** `で` marks the input"),
+            "{with}"
+        );
+        let verb = workspace.hover(at(a, 18, "提出する", 0));
+        assert!(
+            verb.starts_with("**alias** `提出する` of `submits`")
+                && verb.contains("glossary `submits = 提出する`"),
+            "{verb}"
+        );
+        let canonical_verb = workspace.hover(at(a, 20, "submits", 0));
+        assert!(
+            canonical_verb.starts_with("**name** `submits`")
+                && canonical_verb.contains("glossary `submits = 提出する`"),
+            "{canonical_verb}"
+        );
+        assert_eq!(workspace.hover(at(a, 20, "claim1", 0)), "");
+    }
+
+    /// fsl 5 plan S11: the references of a name are its spellings as the
+    /// canonical name and as the alias; completion offers both languages'
+    /// keywords and the aliases, each with its counterpart as the detail, in
+    /// a next-edition requirements document only.
+    #[test]
+    fn fsl5_references_and_completion_cover_both_spellings() {
+        let workspace = Fsl5Workspace::new("fsl5-completion");
+        let a = FSL5_A;
+        let references = request(
+            &workspace.state,
+            "textDocument/references",
+            serde_json::json!({
+                "textDocument":{"uri":workspace.a},
+                "position":at(a, 18, "Claim", 0),
+                "context":{"includeDeclaration":true}
+            }),
+        );
+        let mut starts = references
+            .as_array()
+            .expect("references")
+            .iter()
+            .map(|location| {
+                assert_eq!(location["uri"], workspace.a.as_str());
+                serde_json::from_value::<Position>(location["range"]["start"].clone())
+                    .expect("position")
+            })
+            .collect::<Vec<_>>();
+        starts.sort_by_key(|position| (position.line, position.character));
+        assert_eq!(
+            starts,
+            vec![
+                at(a, 3, "Claim", 0),
+                at(a, 3, "申請", 0),
+                at(a, 4, "Claim", 0),
+                at(a, 13, "申請", 0),
+                at(a, 17, "申請", 0),
+                at(a, 18, "Claim", 0),
+                at(a, 25, "Claim", 0),
+            ]
+        );
+
+        let completion = |uri: &Url| {
+            request(
+                &workspace.state,
+                "textDocument/completion",
+                Fsl5Workspace::at(uri, Position::new(1, 0)),
+            )
+            .as_array()
+            .expect("completion items")
+            .iter()
+            .map(|item| {
+                (
+                    item["label"].as_str().expect("label").to_owned(),
+                    item["detail"].as_str().map(str::to_owned),
+                )
+            })
+            .collect::<Vec<_>>()
+        };
+        let offered = completion(&workspace.a);
+        for (label, detail) in [
+            ("エンティティ", "entity"),
+            ("rule", "規則"),
+            ("条件", "only when / when"),
+            ("申請", "Claim"),
+            ("申請金額", "Claim.amount"),
+            ("提出する", "submits"),
+        ] {
+            assert!(
+                offered.contains(&(label.to_owned(), Some(detail.to_owned()))),
+                "{label}: {offered:?}"
+            );
+        }
+        let published = completion(&workspace.b);
+        for label in ["エンティティ", "rule", "lifecycle", "申請"] {
+            assert!(
+                published.iter().all(|(offered, _)| offered != label),
+                "{label}: {published:?}"
+            );
+        }
+    }
+
+    /// fsl 5 plan S11: renaming an alias rewrites the glossary's right side
+    /// and the alias's occurrences; renaming a canonical name rewrites its
+    /// canonical occurrences, the glossary's left side and other files'
+    /// mapping tables, never an alias. A new alias is spelled like no keyword
+    /// and no name; a new canonical name of the document is ASCII.
+    #[test]
+    fn fsl5_rename_keeps_aliases_and_canonical_names_apart() {
+        let workspace = Fsl5Workspace::new("fsl5-rename");
+        let a = FSL5_A;
+        let file = |name: &str, position: Position| (name.to_owned(), position);
+        assert_eq!(
+            workspace.rename(at(a, 17, "申請", 0), "請求"),
+            Some(vec![
+                file("a.fsl", at(a, 3, "申請", 0)),
+                file("a.fsl", at(a, 13, "申請", 0)),
+                file("a.fsl", at(a, 17, "申請", 0)),
+            ])
+        );
+        assert_eq!(
+            workspace.rename(at(a, 21, "提出済み", 0), "提出後"),
+            Some(vec![
+                file("a.fsl", at(a, 5, "提出済み", 0)),
+                file("a.fsl", at(a, 15, "提出済み", 0)),
+                file("a.fsl", at(a, 21, "提出済み", 0)),
+            ])
+        );
+        for taken in [
+            "エンティティ",
+            "資源",
+            "が",
+            "entity",
+            "Claim",
+            "申請金額",
+            "Amount",
+        ] {
+            assert_eq!(
+                workspace.rename(at(a, 17, "申請", 0), taken),
+                None,
+                "{taken}"
+            );
+        }
+
+        assert_eq!(
+            workspace.rename(at(a, 18, "Claim", 0), "Expense"),
+            Some(vec![
+                file("a.fsl", at(a, 3, "Claim", 0)),
+                file("a.fsl", at(a, 4, "Claim", 0)),
+                file("a.fsl", at(a, 18, "Claim", 0)),
+                file("a.fsl", at(a, 25, "Claim", 0)),
+            ])
+        );
+        for invalid in ["請求", "エンティティ", "lifecycle", "申請"] {
+            assert_eq!(
+                workspace.rename(at(a, 18, "Claim", 0), invalid),
+                None,
+                "{invalid}"
+            );
+        }
+        // The event: its declaration, the left side of this document's
+        // mapping, and the implementation side of the refinement file — not
+        // the right side of either mapping, which names b.fsl's action.
+        assert_eq!(
+            workspace.rename(at(a, 18, "submit", 0), "file"),
+            Some(vec![
+                file("a.fsl", at(a, 9, "submit", 0)),
+                file("a.fsl", at(a, 18, "submit", 0)),
+                file("r.fsl", at(FSL5_R, 3, "submit", 0)),
+            ])
+        );
+        // A verb is declared nowhere: its canonical spellings in the document.
+        assert_eq!(
+            workspace.rename(at(a, 20, "submits", 0), "files"),
+            Some(vec![
+                file("a.fsl", at(a, 6, "submits", 0)),
+                file("a.fsl", at(a, 20, "submits", 0)),
+            ])
+        );
+    }
+
+    /// The keyword population of a next-edition requirements document is
+    /// the keyword table's: every spelling of an active row, in English (each
+    /// word of it) and in Japanese, is a keyword that completion offers and a
+    /// rename may not take, and so is every particle except that completion
+    /// does not offer a particle on its own. A reserved row is not read yet,
+    /// so its spellings are names unless an active row or the published
+    /// language spells them. A published document reads none of the table's
+    /// Japanese spellings and completes exactly the published starters.
+    #[test]
+    fn next_edition_keyword_population_is_the_keyword_tables() {
+        use crate::Lexicon;
+        use crate::index::{is_keyword, is_keyword_in};
+        use fsl_syntax::keywords::{KEYWORDS, PARTICLES, Status};
+
+        let offered = |lexicon| {
+            keyword_completion_items(lexicon)
+                .into_iter()
+                .map(|item| item.label)
+                .collect::<HashSet<_>>()
+        };
+        let next = offered(Lexicon::Next);
+        let active = |word: &str| {
+            is_keyword(word)
+                || KEYWORDS.iter().any(|row| {
+                    row.status == Status::Active
+                        && (row.japanese == word || row.english.split(' ').any(|part| part == word))
+                })
+        };
+        let mut reserved_names = 0;
+        for row in KEYWORDS {
+            let spellings = row
+                .english
+                .split(' ')
+                .chain([row.japanese])
+                .collect::<Vec<_>>();
+            for word in spellings {
+                assert_eq!(
+                    is_keyword_in(Lexicon::Next, word),
+                    active(word),
+                    "{:?} `{word}` ({:?})",
+                    row.kw,
+                    row.status
+                );
+                if row.status == Status::Reserved && !active(word) {
+                    reserved_names += 1;
+                }
+            }
+            let spelled_by_an_active_row = |label: &str| {
+                KEYWORDS.iter().any(|other| {
+                    other.status == Status::Active
+                        && (other.english == label || other.japanese == label)
+                })
+            };
+            for label in [row.english, row.japanese] {
+                assert_eq!(
+                    next.contains(label),
+                    spelled_by_an_active_row(label) || KEYWORDS_STARTERS.contains(&label),
+                    "completion of `{label}` ({:?})",
+                    row.status
+                );
+            }
+            assert!(
+                !is_keyword_in(Lexicon::Published, row.japanese),
+                "{}",
+                row.japanese
+            );
+        }
+        // Not vacuous: some reserved spelling is a name today.
+        assert!(reserved_names > 0);
+        for (_, particle) in PARTICLES {
+            assert!(is_keyword_in(Lexicon::Next, particle), "{particle}");
+            assert_eq!(
+                next.contains(*particle),
+                KEYWORDS
+                    .iter()
+                    .any(|row| row.status == Status::Active && row.japanese == *particle),
+                "{particle}"
+            );
+            assert!(!is_keyword_in(Lexicon::Published, particle), "{particle}");
+        }
+        let published = offered(Lexicon::Published);
+        assert_eq!(
+            published,
+            KEYWORDS_STARTERS
+                .iter()
+                .map(|keyword| (*keyword).to_owned())
+                .collect::<HashSet<_>>()
+        );
     }
 
     #[test]

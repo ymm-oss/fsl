@@ -517,7 +517,8 @@ pub fn plan_migration(
                 ),
                 fsl_syntax::UnsafeFormatKind::AgentBody
                 | fsl_syntax::UnsafeFormatKind::EditOutsideUtf8Boundary
-                | fsl_syntax::UnsafeFormatKind::OverlappingEdits => (
+                | fsl_syntax::UnsafeFormatKind::OverlappingEdits
+                | fsl_syntax::UnsafeFormatKind::PhraseInteriorComment => (
                     "unsafe_source_attachment",
                     "move the comment, then rerun migrate".to_owned(),
                 ),
