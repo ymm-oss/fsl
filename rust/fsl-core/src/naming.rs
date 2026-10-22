@@ -9,9 +9,16 @@
 //!   `alias__name` ([`ComposeName`]);
 //! - names an engine synthesises for a violation or an implicit property
 //!   ([`SyntheticName`]);
-//! - every other Kernel identifier, published as written except for the
-//!   legacy string rule (the first `__` reads as `.`, and the database
-//!   dialect's separator sentinel reads as `__`).
+//! - every other Kernel identifier. A name a user declares never contains the
+//!   separator `__` (check rejects one, [`crate::reject_declared_separator`]), so a
+//!   `__` inside a Kernel name is always one a lowering generated (a branch
+//!   split `submit__b1`, a dialect's derived name), and the string rule (the
+//!   first `__` reads as `.`, and the database dialect's separator sentinel
+//!   reads as `__`) publishes it as `submit.b1`.
+//!
+//! Every output publishes a name in this one spelling, in a human-facing field
+//! and in an identifier field alike; the Public Kernel is the exception that
+//! keeps the internal name, since it is the Kernel itself.
 //!
 //! [`NameMap`], owned by each [`crate::KernelModel`], is the only producer of
 //! a [`PublicName`] and the only reader that maps a public spelling back to an
@@ -27,7 +34,17 @@ use std::fmt;
 /// name, restored when the name is published.
 pub(crate) const DB_SEPARATOR: &str = "QqDbSepqQ";
 
-/// The legacy internal-to-public string rule.
+/// The separator a lowering puts between the parts of a generated name.
+const SEPARATOR: &str = "__";
+
+/// Whether a declared name contains the separator, which only generated
+/// names may (decisions 051, #1256).
+#[must_use]
+pub fn contains_separator(name: &str) -> bool {
+    name.contains(SEPARATOR)
+}
+
+/// The internal-to-public string rule.
 fn display_name(name: &str) -> String {
     name.replacen("__", ".", 1).replace(DB_SEPARATOR, "__")
 }
@@ -35,9 +52,9 @@ fn display_name(name: &str) -> String {
 /// Public spelling of a Kernel identifier read where no [`NameMap`] is in
 /// reach.
 ///
-/// This is the legacy string rule, so it misspells an internal name the rule
-/// cannot invert (an alias containing `__`, or a non-compose name containing
-/// `__`). A caller that has a model publishes through [`NameMap`] instead.
+/// This is the string rule, which agrees with [`NameMap`] for every name a
+/// checked document can produce, because no declared name contains `__`. A
+/// caller that has a model publishes through [`NameMap`] instead.
 #[must_use]
 pub fn unmapped_public_spelling(name: &str) -> String {
     display_name(name)
@@ -46,9 +63,9 @@ pub fn unmapped_public_spelling(name: &str) -> String {
 /// Structural identity of one compose component declaration: the `use` alias
 /// and the name declared by the component spec.
 ///
-/// The internal Kernel name `alias__name` is not injective (alias `a__b` with
-/// name `c` and alias `a` with name `b__c` share it), so public spellings are
-/// built from these two parts rather than parsed back out of the internal name.
+/// Public spellings are built from these two parts rather than parsed back
+/// out of the internal name `alias__name`. Neither part may contain `__`
+/// ([`crate::reject_declared_separator`]), so the two agree.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComposeName {
     pub alias: String,
@@ -67,13 +84,6 @@ impl ComposeName {
     #[must_use]
     pub fn display(&self) -> String {
         format!("{}.{}", self.alias, self.name)
-    }
-
-    /// The internal spelling `alias__name`, which v1 replay traces written
-    /// before #1234 use for component actions.
-    #[must_use]
-    pub fn legacy(&self) -> String {
-        compose_internal(&self.alias, &self.name)
     }
 }
 
@@ -299,7 +309,7 @@ impl<'a> SyntheticName<'a> {
 ///     name.as_str()
 /// }
 /// let names = fsl_core::NameMap::default();
-/// assert_eq!(publish(&names.public_action_key("acct__go")), "acct__go");
+/// assert_eq!(publish(&names.public_action("submit__b1")), "submit.b1");
 /// ```
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PublicName(String);
@@ -513,76 +523,59 @@ impl NameMap {
             .then(|| PublicName(format!("{prefix}{}", component.display())))
     }
 
-    /// An action in a human-facing field: `alias.action` for a compose
-    /// component action, the string rule otherwise.
+    /// An action: `alias.action` for a compose component action, the string
+    /// rule otherwise (a branch split `submit__b1` publishes as `submit.b1`).
+    ///
+    /// Human-facing fields and identifier fields (a replay echo, a graph node
+    /// ID, a claim key, a mutation target) use this one spelling.
     #[must_use]
     pub fn public_action(&self, name: &str) -> PublicName {
         self.component_public_name(name, name)
             .unwrap_or_else(|| PublicName(display_name(name)))
     }
 
-    /// An action in an identifier field (a replay echo, a graph node ID, a
-    /// claim key, a mutation target): `alias.action` for a compose component
-    /// action, the exact Kernel name otherwise.
-    #[must_use]
-    pub fn public_action_key(&self, name: &str) -> PublicName {
-        self.component_public_name(name, name)
-            .unwrap_or_else(|| PublicName(name.to_owned()))
-    }
-
-    /// An action spelled by the string rule even when a component owns it,
-    /// for the outputs that have always done so; [`Self::public_action`]
-    /// differs from it only for a compose component action.
-    #[must_use]
-    pub fn legacy_action_spelling(&self, name: &str) -> PublicName {
-        PublicName(display_name(name))
-    }
-
     /// A violation, CTI, or mutation-kill name produced while `action`
-    /// stepped (see [`Self::component_public_name`]), or the string rule
-    /// over the whole name.
+    /// stepped (see [`Self::component_public_name`]), or [`Self::public_name`]
+    /// (a component invariant publishes as `acct.Inv`, #1255).
     #[must_use]
     pub fn public_violation(&self, name: &str, action: Option<&str>) -> PublicName {
         action
             .and_then(|action| self.component_public_name(name, action))
-            .unwrap_or_else(|| PublicName(display_name(name)))
-    }
-
-    /// A violation name produced while `action` stepped, in an identifier
-    /// field: respelled like [`Self::public_violation`] when the action is a
-    /// component action and the name was built from it, the exact Kernel
-    /// name otherwise (so a component invariant keeps its internal
-    /// `alias__name`).
-    #[must_use]
-    pub fn public_violation_key(&self, name: &str, action: &str) -> PublicName {
-        self.component_public_name(name, action)
-            .unwrap_or_else(|| PublicName(name.to_owned()))
+            .unwrap_or_else(|| self.public_name(name))
     }
 
     /// A mutation target path rooted at `action` (`<action>` followed by the
-    /// path inside it), with the action respelled as a component action; the
-    /// exact target otherwise.
+    /// path inside it), with the action respelled by [`Self::public_action`];
+    /// the exact target otherwise.
     #[must_use]
     pub fn public_action_target(&self, target: &str, action: Option<&str>) -> PublicName {
         action
             .and_then(|action| {
                 let rest = target.strip_prefix(action)?;
-                let action = self.component_public_name(action, action)?;
-                Some(PublicName(format!("{action}{rest}")))
+                Some(PublicName(format!("{}{rest}", self.public_action(action))))
             })
             .unwrap_or_else(|| PublicName(target.to_owned()))
     }
 
-    /// A state variable.
+    /// A state variable: `alias.name` for a compose component state, the
+    /// string rule otherwise.
     #[must_use]
     pub fn public_state(&self, name: &str) -> PublicName {
-        PublicName(display_name(name))
+        PublicName(
+            self.compose_state(name)
+                .map_or_else(|| display_name(name), ComposeName::display),
+        )
     }
 
-    /// A declared property (invariant, transition, reachable, leadsTo).
+    /// A declared property (invariant, transition, reachable, leadsTo):
+    /// `alias.name` for a compose component property, the string rule
+    /// otherwise.
     #[must_use]
     pub fn public_property(&self, name: &str) -> PublicName {
-        PublicName(display_name(name))
+        PublicName(
+            self.compose_property(name)
+                .map_or_else(|| display_name(name), ComposeName::display),
+        )
     }
 
     /// A declared type (domain, enum, struct).
@@ -598,18 +591,26 @@ impl NameMap {
         PublicName(display_name(name))
     }
 
-    /// A synthetic name rendered from its parts: an action-step name like
-    /// [`Self::public_violation`] in that action's context, `_bounds_`
-    /// followed by the state's public spelling, and the string rule over the
-    /// whole name for the property kinds.
+    /// A synthetic name rendered from its parts: the kind prefix followed by
+    /// the public spelling of the action, property, or state it names.
     #[must_use]
     pub fn public_synthetic(&self, name: &SyntheticName<'_>) -> PublicName {
-        match name {
-            SyntheticName::Bounds { state } => {
-                PublicName(format!("{BOUNDS}{}", self.public_state(state)))
+        let (prefix, part) = match name {
+            SyntheticName::RequiresFailed { action } => {
+                (REQUIRES_FAILED, self.public_action(action))
             }
-            _ => self.public_violation(&name.internal(), name.action()),
-        }
+            SyntheticName::PartialAction { action } => (PARTIAL, self.public_action(action)),
+            SyntheticName::KeyDomainAction { action } => (KEY_DOMAIN, self.public_action(action)),
+            SyntheticName::PartialProperty { property } => {
+                (PARTIAL_PROPERTY, self.public_property(property))
+            }
+            SyntheticName::KeyDomainProperty { property } => {
+                (KEY_DOMAIN_PROPERTY, self.public_property(property))
+            }
+            SyntheticName::Bounds { state } => (BOUNDS, self.public_state(state)),
+            SyntheticName::PartialTerminal => return PublicName(PARTIAL_TERMINAL.to_owned()),
+        };
+        PublicName(format!("{prefix}{part}"))
     }
 
     /// Public spelling of a name derived from a compose component
@@ -617,25 +618,43 @@ impl NameMap {
     /// `_bounds_<state>` name built from a state variable. `None` for every
     /// other name.
     ///
-    /// Actions use their structural `alias.action`; state and property names
-    /// keep the string rule every other output uses.
+    /// Each is spelled from its structural `alias.name`.
     #[must_use]
     pub fn compose_public_name(&self, name: &str) -> Option<PublicName> {
         let declared =
             |name: &str| self.states.contains_key(name) || self.properties.contains_key(name);
         self.component_public_name(name, name)
-            .or_else(|| declared(name).then(|| PublicName(display_name(name))))
+            .or_else(|| self.compose_state(name).map(|_| self.public_state(name)))
+            .or_else(|| {
+                self.compose_property(name)
+                    .map(|_| self.public_property(name))
+            })
             .or_else(|| {
                 let state = SyntheticName::parse_internal(name)?.bounds_state()?;
                 declared(state).then(|| self.public_synthetic(&SyntheticName::Bounds { state }))
             })
     }
 
+    /// Any Kernel name whose kind the caller does not know (a solver cost
+    /// entry, a property list mixing kinds): a component action, state, or
+    /// property by its structural spelling, a synthetic name from its parts,
+    /// the string rule otherwise.
+    #[must_use]
+    pub fn public_name(&self, name: &str) -> PublicName {
+        self.compose_public_name(name).unwrap_or_else(|| {
+            SyntheticName::parse_internal(name).map_or_else(
+                || PublicName(display_name(name)),
+                |synthetic| self.public_synthetic(&synthetic),
+            )
+        })
+    }
+
     /// Resolve an action spelling against `candidates` (internal names).
     ///
-    /// A compose component action matches its canonical `alias.action` or its
-    /// pre-#1234 `alias__action` spelling, both looked up from the structural
-    /// table; every other action matches only its exact Kernel name.
+    /// An action matches its public spelling ([`Self::public_action`]) or its
+    /// internal Kernel name, which v1 replay traces written before the public
+    /// spelling was settled use (`alias__action` before #1234, a branch split
+    /// `submit__b1` before #1256).
     ///
     /// # Errors
     ///
@@ -649,12 +668,7 @@ impl NameMap {
         unique(
             candidates
                 .into_iter()
-                .filter(|name| match self.compose_action(name) {
-                    Some(component) => {
-                        component.display() == spelling || component.legacy() == spelling
-                    }
-                    None => *name == spelling,
-                }),
+                .filter(|name| *name == spelling || self.public_action(name) == spelling),
         )
     }
 
@@ -728,8 +742,10 @@ fn unique<'n>(
 
 #[cfg(test)]
 mod tests {
-    use super::{AmbiguousName, ComposeName, NameMap, SyntheticName};
-    use crate::{CoreError, FileResolver, KernelModel, build_model, parse_kernel_source};
+    use super::{AmbiguousName, ComposeName, NameMap, PublicName, SyntheticName};
+    use crate::{
+        CoreError, CoreErrorKind, FileResolver, KernelModel, build_model, parse_kernel_source,
+    };
 
     struct Components;
 
@@ -874,49 +890,68 @@ mod tests {
     }
 
     #[test]
-    fn a_non_compose_double_underscore_name_round_trips_only_through_its_key() {
+    fn a_generated_name_publishes_and_resolves_in_one_spelling() {
         let names = NameMap::default();
-        // #1256: the display spelling of an action is not resolvable; the
-        // identifier spelling is.
-        assert_eq!(names.public_action("foo__bar"), "foo.bar");
-        assert_eq!(names.resolve_action("foo.bar", ["foo__bar"]), Ok(None));
-        assert_eq!(names.public_action_key("foo__bar"), "foo__bar");
+        // #1256: a branch split `submit__b1` is the only kind of non-compose
+        // name with `__`. Human-facing and identifier fields share its public
+        // spelling, which resolves back, as does the internal name an older
+        // replay trace wrote.
+        assert_eq!(names.public_action("submit__b1"), "submit.b1");
         assert_eq!(
-            names.resolve_action("foo__bar", ["foo__bar"]),
-            Ok(Some("foo__bar"))
+            names.resolve_action("submit.b1", ["submit__b1", "submit__b2"]),
+            Ok(Some("submit__b1"))
         );
-        assert_eq!(names.public_state("foo__bar"), "foo.bar");
         assert_eq!(
-            names.resolve_state("foo.bar", ["foo__bar"]),
-            Ok(Some("foo__bar"))
+            names.resolve_action("submit__b1", ["submit__b1", "submit__b2"]),
+            Ok(Some("submit__b1"))
+        );
+        assert_eq!(
+            names.public_action_target("submit__b1 requires #1", Some("submit__b1")),
+            "submit.b1 requires #1"
+        );
+        assert_eq!(names.public_state("sys__st"), "sys.st");
+        assert_eq!(
+            names.resolve_state("sys.st", ["sys__st"]),
+            Ok(Some("sys__st"))
         );
     }
 
     #[test]
-    fn an_alias_containing_the_separator_keeps_todays_state_spelling() {
-        let model = compose(&["a__b"]);
+    fn a_declared_name_containing_the_separator_is_rejected_before_lowering() {
+        for (source, line, column) in [
+            ("compose Bank { use Acct as a__b from \"Acct.fsl\" }", 1, 28),
+            (
+                "spec S {\n  state { x: Int }\n  init { x = 0 }\n  action foo__bar() { x = 1 }\n}",
+                4,
+                10,
+            ),
+            (
+                "spec S {\n  const LIM__IT = 1\n  state { x: Int }\n  init { x = 0 }\n}",
+                2,
+                9,
+            ),
+        ] {
+            let error = parse_kernel_source(source, &Components).expect_err(source);
+            assert_eq!(error.kind, CoreErrorKind::NameResolution, "{source}");
+            assert!(error.message.contains("contains '__'"), "{}", error.message);
+            assert_eq!((error.line, error.column), (line, column), "{source}");
+        }
+    }
+
+    #[test]
+    fn compose_state_and_property_publish_from_the_structural_table() {
+        let model = compose(&["acct"]);
         let names = model.names();
+        assert_eq!(names.public_state("acct__bal"), "acct.bal");
+        assert_eq!(names.public_property("acct__Inv"), "acct.Inv");
         assert_eq!(
             names
-                .compose_state("a__b__bal")
-                .map(ComposeName::display)
-                .as_deref(),
-            Some("a__b.bal")
+                .compose_public_name("acct__Inv")
+                .as_ref()
+                .map(PublicName::as_str),
+            Some("acct.Inv")
         );
-        assert_eq!(names.public_action("a__b__go"), "a__b.go");
-        assert_eq!(
-            names.resolve_action("a__b.go", actions(&model)),
-            Ok(Some("a__b__go"))
-        );
-        // Stage 1 keeps the string rule for state and property names, so the
-        // structural `a__b.bal` is not today's spelling.
-        assert_eq!(names.public_state("a__b__bal"), "a.b__bal");
-        assert_eq!(
-            names.resolve_state("a.b__bal", states(&model)),
-            Ok(Some("a__b__bal"))
-        );
-        assert_eq!(names.resolve_state("a__b.bal", states(&model)), Ok(None));
-        assert_eq!(names.public_property("a__b__Inv"), "a.b__Inv");
+        assert_eq!(names.public_name("_bounds_acct__bal"), "_bounds_acct.bal");
     }
 
     #[test]
@@ -965,31 +1000,28 @@ mod tests {
     }
 
     #[test]
-    fn todays_string_rule_edges_are_pinned() {
+    fn violation_names_publish_from_their_parts() {
         let model = compose(&["acct"]);
         let names = model.names();
-        // A property whose name ends in `_<component action>` is respelled
-        // as if the action had built it.
-        assert_eq!(
-            names.public_violation("_partial_property_p_acct__go", Some("acct__go")),
-            "_partial_property_p_acct.go"
-        );
-        // `_bounds_` rendered from its parts and the whole-name rule part
-        // ways for a state that starts with `_`.
-        let state = "_a__b";
+        // `_bounds_` followed by a state that starts with `_`: the whole-name
+        // string rule would read the prefix's `_` and the state's `_` as the
+        // separator.
+        let state = "_a";
+        let internal = SyntheticName::Bounds { state }.internal();
         assert_eq!(
             names.public_synthetic(&SyntheticName::Bounds { state }),
-            "_bounds__a.b"
+            "_bounds__a"
+        );
+        assert_eq!(names.public_violation(&internal, None), "_bounds__a");
+        // #1255: a component invariant broken while another action stepped
+        // publishes as the component property, not as its internal name.
+        assert_eq!(
+            names.public_violation("acct__Inv", Some("acct__go")),
+            "acct.Inv"
         );
         assert_eq!(
-            names.public_violation(&SyntheticName::Bounds { state }.internal(), None),
-            "_bounds.a__b"
-        );
-        // A component invariant keeps its internal spelling in an identifier
-        // field (#1255).
-        assert_eq!(
-            names.public_violation_key("acct__Inv", "acct__go"),
-            "acct__Inv"
+            names.public_violation("_requires_failed_acct__go", Some("acct__go")),
+            "_requires_failed_acct.go"
         );
     }
 }

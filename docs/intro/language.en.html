@@ -1968,18 +1968,31 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   component.</li>
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — excludes that action from interleaving.</li>
 <li>An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).</li>
-<li>JSON display: the physical name <code>alias__x</code> is output as <code>alias.x</code> (state keys,
-  action names, invariant / reachable names, traces, scenarios, and Monitor — all of them).
-  A component action's public name is built from its alias and its action name,
-  so <code>use X as a__b</code> with action <code>c</code> is <code>a__b.c</code>. Every command that names a
-  component action — verify, sweep, scenarios, explain, testgen, conformance,
-  mutate, refine, diff, html, ledger, analyze (including graph IDs such as
-  <code>action:a__b.c</code>), <code>check --strict-tags</code> warnings, and <code>replay</code> output including <code>state_mismatch.action</code> — uses
-  this <code>alias.action</code> form, including in names derived from the action such as
-  <code>_requires_failed_a__b.c</code>. State keys keep the rule above, so the state <code>n</code> of
-  <code>use X as a__b</code> is shown as <code>a.b__n</code> (the frozen Python reference shows
-  <code>a__b.n</code>). A v1 <code>replay</code> trace may write a component action as <code>alias.action</code> or as
-  the older <code>alias__action</code>; both name the same action (see
+<li>Names and <code>__</code>: a name you declare in a <code>spec</code>, <code>requirements</code>, <code>business</code>, or
+  <code>compose</code> document (a spec, action, parameter, <code>let</code>, state variable, property,
+  type, const, enum member, struct field, process, stage, actor, or <code>use</code> alias)
+  must not contain <code>__</code>. <code>fslc check</code> rejects one at the declaration
+  (<code>kind:"name"</code>, exit 2); a compose component's declaration is reported at the
+  parent's <code>use</code>. <code>__</code> is reserved for the names lowering generates: the
+  physical name <code>alias__x</code> of a compose component declaration and the split
+  <code>submit__b1</code> of a requirements <code>branches</code> action. A generated name may still
+  be referenced, as a refinement mapping does with <code>submit__b1</code>.</li>
+<li>JSON display: a generated name is published with <code>.</code> in place of its <code>__</code>,
+  in one spelling for every output: the physical name <code>alias__x</code> is <code>alias.x</code>,
+  and a branch split <code>submit__b1</code> is <code>submit.b1</code> (state keys, action names,
+  invariant / reachable names, diagnostics, traces, scenarios, and the Monitor —
+  all of them). A component declaration's public name is built from its alias
+  and its own name. Every command that names one — verify (including
+  <code>cost.properties[].name</code>), sweep, scenarios, explain, testgen, conformance
+  (including outcome names such as <code>acct.Inv</code>), testplan, mutate (targets and the
+  dead-action note), refine, diff, html, ledger, analyze (including graph IDs
+  such as <code>action:acct.go</code> and <code>action:submit.b1</code>), <code>check --strict-tags</code>
+  warnings, and <code>replay</code> output including <code>state_mismatch.action</code> — uses this
+  form, including in names derived from an action such as
+  <code>_requires_failed_acct.go</code>. Only the Public Kernel (<code>fslc kernel</code>) keeps the
+  internal name. A v1 <code>replay</code> trace may write a generated action in its public
+  spelling or as its internal name (<code>acct.go</code> or <code>acct__go</code>, <code>submit.b1</code> or
+  <code>submit__b1</code>); both name the same action (see
   <code>docs/design/DESIGN-replay-trace.md</code>). The native implementation owns all of
   these spellings, and the names the engines build such as <code>_partial_&lt;action&gt;</code>
   and <code>_bounds_&lt;state&gt;</code>, in one module, <code>rust/fsl-core/src/naming.rs</code>.</li>
@@ -2514,8 +2527,9 @@ verify {
   behavior that needs explicit kernel state. That fallback still supports
   <code>struct</code> / <code>state</code> / <code>init</code>, <code>fair action</code>, <code>branches</code>, and explicit <code>maps</code>.
   <code>branches</code> automatically splits an action by each when condition (displayed as
-  <code>submit[a &lt;= AUTO_LIMIT]</code>), and the <code>maps</code> clause provides the action
-  correspondence to the upper layer.</li>
+  <code>submit[a &lt;= AUTO_LIMIT]</code> in mutation targets; the split actions are
+  <code>submit.b1</code>, <code>submit.b2</code>, … in every other output), and the <code>maps</code> clause
+  provides the action correspondence to the upper layer.</li>
 <li><code>terminal { &lt;expr&gt; }</code> is allowed at the top level of a <code>requirements</code> spec
   and lowers to the kernel (§6) — there is exactly one <code>terminal</code> block per
   spec, same as the kernel. <code>stage(c)</code> is available in all requirements

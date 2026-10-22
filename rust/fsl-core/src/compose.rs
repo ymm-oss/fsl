@@ -71,6 +71,7 @@ pub fn parse_kernel_source_with_options(
     options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
     let parsed = parse_document_with(SourceFile::new(source), options)?;
+    crate::reject_declared_separator(&parsed.surface, source)?;
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(spec) => crate::lower_direct_spec(spec),
         SurfaceDocument::Business(business) => crate::lower_business(business),
@@ -249,6 +250,8 @@ fn parse_component(
     let parsed = parse_document_with(SourceFile::new(source), &options).map_err(|error| {
         component_error(path, use_span, &CoreError::from(error), "failed to parse")
     })?;
+    crate::reject_declared_separator(&parsed.surface, source)
+        .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
     let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(error_at("compose use must reference a spec", use_span));
     };
