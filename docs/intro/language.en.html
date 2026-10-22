@@ -3163,15 +3163,16 @@ DESIGN-*.md).</p>
   when the depth reached the violation, <code>verified</code> (exit 0) when it did not;
   with <code>--engine induction</code>, its own verdict. Every other command that runs this
   check exits 2 too (<code>scenarios</code> and <code>testgen</code> with no scenario and no test
-  file; <code>html</code> and <code>ledger</code> still write their report), except three:
-  <code>explain</code> still exits 0 with no witnesses (known gap #1242: <code>explain</code>
-  discards the gate's error, and so does the witnesses section of <code>html</code>);
-  <code>approval create --kind ledger</code> exits 0 with a record of the ledger, which
-  lists the error — where the depth reached the violation it used to exit 2
-  only because that ledger embeds wall-clock <code>elapsed_s</code> (whether a ledger
-  whose forbidden gate fails may be approved is tracked by #1243); and
-  <code>approval check</code> of a ledger record created before reports <code>drifted</code>
-  (exit 0). <code>fslc diff</code> reports the violation (below).
+  file). <strong>Since #1242 / #1243 (breaking)</strong> that includes <code>explain</code>, <code>html</code>,
+  <code>ledger</code>, the <code>document</code> commands, and <code>approval create</code> / <code>check</code> of every
+  kind: each prints the gate's error and writes no report, ledger, document,
+  or record (before, <code>explain</code> exited 0 with no witnesses, <code>html</code> and <code>ledger</code>
+  wrote their report, the <code>document</code> commands rendered the case as a claim,
+  <code>approval create --kind ledger</code> / <code>requirements_document</code> recorded an
+  approval, and <code>approval check</code> of a ledger record reported <code>drifted</code>,
+  exit 0). The language server shows the error as an <code>FSL-REQUIREMENT-TRACE</code>
+  diagnostic, and <code>fslc analyze</code> still graphs the cases, each node marked
+  <code>"trace_gate": "unchecked"</code>. <code>fslc diff</code> reports the violation (below).
   The measured before/after of each command, exit status and output, is in
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.
   The scenario's <code>rejected_by</code> (asserted by testgen) is
@@ -3203,21 +3204,17 @@ DESIGN-*.md).</p>
   not, while <code>scenarios</code>, <code>testgen</code>, <code>counterexample export</code>, and <code>approval
   create</code> could also exit 2. Now <code>check</code>, <code>verify</code> (every engine), <code>sweep</code>,
   <code>chain</code>, <code>scenarios</code>, <code>testgen</code>, the <code>mutate</code> baseline, <code>counterexample
-  export</code>, <code>html</code>, <code>ledger</code>, and <code>approval create --kind scenarios</code> / <code>html</code>
-  exit 2 and report no verdict, counterexample, scenario, test, or mutant for
-  the rest of the spec. <code>html</code>, <code>ledger</code>, and <code>approval create --kind html</code>
-  print the generated result (<code>result: "generated"</code>) with the error inside
-  the report (<code>html</code> and <code>ledger</code> still write their report); <code>chain</code> reports
-  it as the <code>[requirements]</code> layer's <code>detail</code>; the others print the error
-  (<code>error</code> / <code>kind: "forbidden"</code>). <code>approval check</code> of a <code>scenarios</code> or <code>html</code> record created
-  before exits 2. Three do not exit 2: <code>explain</code> still exits 0, with no
-  witnesses (known gap #1242: <code>explain</code> discards the gate's error, and so
-  does the witnesses section of <code>html</code>); <code>approval create --kind ledger</code>
-  exits 0 with a record of the ledger, which lists the error — on a spec
-  whose rest has a violation it used to exit 2 only because that ledger
-  embeds wall-clock <code>elapsed_s</code> (whether a ledger whose forbidden gate fails
-  may be approved is tracked by #1243); and <code>approval check</code> of a ledger record
-  created before reports <code>drifted</code> (exit 0). <code>fslc diff</code> changes forbidden
+  export</code>, <code>explain</code>, <code>html</code>, <code>ledger</code>, the <code>document</code> commands, and
+  <code>approval create</code> / <code>check</code> of every kind exit 2 and report no verdict,
+  counterexample, scenario, test, mutant, explanation, report, ledger,
+  document, or record for the rest of the spec. <code>chain</code> reports the error as
+  the <code>[requirements]</code> layer's <code>detail</code>; the others print it (<code>error</code> /
+  <code>kind: "forbidden"</code>), and the language server shows it as an
+  <code>FSL-REQUIREMENT-TRACE</code> diagnostic (<code>explain</code>, <code>html</code>, <code>ledger</code>, the
+  <code>document</code> commands, <code>approval create --kind ledger</code> /
+  <code>requirements_document</code>, and <code>approval check</code> of a ledger record only
+  since #1242 / #1243; §2.1 of the design note has their before and after).
+  <code>fslc diff</code> changes forbidden
   verdicts for both steps, which can change a <code>--forbid unknown</code> exit. The
   before/after of every command, measured, is in
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1.

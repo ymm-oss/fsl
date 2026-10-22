@@ -3063,15 +3063,15 @@ DESIGN-*.md があります)。</p>
   (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
   深さが違反に届けば <code>violated</code>(exit 1)、届かなければ <code>verified</code>(exit 0)、
   <code>--engine induction</code> ではその判定です。この検査を走らせる他のコマンドも exit 2 で
-  止まります(<code>scenarios</code> と <code>testgen</code> は scenario もテストファイルも出力せず、<code>html</code> と
-  <code>ledger</code> はレポートを書き出します)。ただし次の 3 つは exit 2 に
-  なりません。<code>explain</code> は exit 0 のままで witness はありません(既知の欠落 #1242:
-  <code>explain</code> は gate のエラーを捨て、<code>html</code> の witness 欄も同じです)。
-  <code>approval create --kind ledger</code> は exit 0 で、エラーを載せた ledger を記録します。
-  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
-  <code>elapsed_s</code> を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
-  #1243 で扱います)。以前に作った ledger の記録の <code>approval check</code> は <code>drifted</code>
-  (exit 0)です。<code>fslc diff</code> はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  止まります(<code>scenarios</code> と <code>testgen</code> は scenario もテストファイルも出力しません)。
+  <strong>#1242 / #1243 から(破壊的変更)</strong> <code>explain</code>、<code>html</code>、<code>ledger</code>、<code>document</code> の各コマンド、
+  どの種類の <code>approval create</code> / <code>check</code> も同じで、gate のエラーを出力し、レポート・ledger・
+  文書・記録を書き出しません(以前は <code>explain</code> が exit 0 で witness なし、<code>html</code> と <code>ledger</code> は
+  レポートを書き出し、<code>document</code> の各コマンドはその case を claim として出し、
+  <code>approval create --kind ledger</code> / <code>requirements_document</code> は承認を記録し、ledger の記録の
+  <code>approval check</code> は <code>drifted</code>(exit 0)でした)。言語サーバーはこのエラーを
+  <code>FSL-REQUIREMENT-TRACE</code> の診断として示し、<code>fslc analyze</code> はその case をグラフに出したうえで
+  各ノードに <code>"trace_gate": "unchecked"</code> を付けます。<code>fslc diff</code> はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
   出力の実測は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1 にあります。
   scenario の <code>rejected_by</code>(testgen が assert します)は、
@@ -3100,20 +3100,14 @@ DESIGN-*.md があります)。</p>
   検証が通れば exit 0、通らなければ exit 1 で、<code>scenarios</code>、<code>testgen</code>、
   <code>counterexample export</code>、<code>approval create</code> は exit 2 になることもありました。
   今は <code>check</code>、<code>verify</code>(どのエンジンでも)、<code>sweep</code>、<code>chain</code>、<code>scenarios</code>、<code>testgen</code>、
-  <code>mutate</code> の baseline、<code>counterexample export</code>、<code>html</code>、<code>ledger</code>、
-  <code>approval create --kind scenarios</code> / <code>html</code> が exit 2 になり、仕様の残りの
-  部分についての判定・反例・scenario・テスト・mutant を報告しません。<code>html</code>、<code>ledger</code>、
-  <code>approval create --kind html</code> の stdout は生成結果(<code>result: "generated"</code>)で、エラーは
-  レポートの中に載ります(<code>html</code> と <code>ledger</code> はレポートを書き出します)。<code>chain</code> はエラーを
-  <code>[requirements]</code> 層の <code>detail</code> に載せ、それ以外はエラー(<code>error</code> / <code>kind: "forbidden"</code>)を
-  出力します。以前に作った <code>scenarios</code> / <code>html</code> の記録の <code>approval check</code> は
-  exit 2 です。exit 2 にならないのは次の 3 つです。<code>explain</code> は exit 0 のままで、witness は
-  ありません(既知の欠落 #1242: <code>explain</code> は gate のエラーを捨て、<code>html</code> の witness 欄も
-  同じです)。<code>approval create --kind ledger</code> は exit 0 で、エラーを載せた ledger を
-  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
-  その ledger が実時間の <code>elapsed_s</code> を埋め込むためでした(forbidden の gate が落ちる
-  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の <code>approval check</code> は
-  <code>drifted</code>(exit 0)です。
+  <code>mutate</code> の baseline、<code>counterexample export</code>、<code>explain</code>、<code>html</code>、<code>ledger</code>、<code>document</code> の
+  各コマンド、どの種類の <code>approval create</code> / <code>check</code> も exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant・説明・レポート・ledger・文書・記録を
+  報告しません。<code>chain</code> はエラーを <code>[requirements]</code> 層の <code>detail</code> に載せ、それ以外はエラー
+  (<code>error</code> / <code>kind: "forbidden"</code>)を出力し、言語サーバーは <code>FSL-REQUIREMENT-TRACE</code> の診断として
+  示します(<code>explain</code>、<code>html</code>、<code>ledger</code>、<code>document</code> の各コマンド、
+  <code>approval create --kind ledger</code> / <code>requirements_document</code>、ledger の記録の
+  <code>approval check</code> は #1242 / #1243 からです。変更前と変更後は設計ノートの §2.1 にあります)。
   <code>fslc diff</code> はどちらのステップでも forbidden の判定を変えるので、
   <code>--forbid unknown</code> の exit が変わることがあります。各コマンドの変更前と変更後の実測は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-forbidden.md"><code>DESIGN-forbidden.md</code></a> §2.1 にあります。
