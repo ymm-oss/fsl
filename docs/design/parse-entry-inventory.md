@@ -150,8 +150,9 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   also written as itself. `--names` and `--strict-names` exist only behind
   the gate.
 - Not yet: the language server (hover, completion, rename of aliases; S11),
-  `fmt --names` (S10), and the document glossary, whose project parse is
-  pinned to the published language until S10 (`DOCUMENT` rows below).
+  and `fmt --names` (S10). The document (S10) reads the glossary from the
+  checked model: its glossary table, and aliases in its views under
+  `--lang ja`.
 
 ## Keyword table and particles (S5)
 
@@ -202,9 +203,10 @@ silently. Explicit stable constructions (`ParseOptions::stable`,
 Owner: the stage that converts the reference. `Definition` = the
 published-language entry itself, a fixed published-language input, or a parity
 tool (stays); `D8` = causal / ai dialects, where decisions/049 D8 makes an
-edition header an error, so the published language is the intended reading;
-`S10` = the document projection, which takes the options with the document
-work of the next edition.
+edition header an error, so the published language is the intended reading.
+The document projection and render (S10) take the options through their
+`_with_options` entries; the published-language names beside them are
+wrappers.
 
 | Reason | Meaning |
 |---|---|
@@ -216,7 +218,6 @@ work of the next edition.
 | STABLE_WRAPPER | the published-language entry itself (fsl-syntax, and fsl-core's wrapper beside each `_with_options` entry) |
 | DIRECT_KERNEL | `parse_direct_kernel_spec`, whose only callers are tests |
 | FIXTURE | a fixed in-repository fixture in the published language, never a user document |
-| DOCUMENT | document claims / render (#1243), fail closed until S10 |
 
 | File | Entry | Count | Owner | Reason |
 |---|---|---|---|---|
@@ -247,10 +248,8 @@ work of the next edition.
 | `fsl-syntax/src/parser.rs` | `lex` | 2 | Definition | FRAGMENT |
 | `fsl-tools/src/causal.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
 | `fsl-tools/src/causal.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
-| `fsl-tools/src/document_project.rs` | `parse_document` | 2 | S10 | DOCUMENT |
-| `fsl-tools/src/document_project.rs` | `parse_kernel_source` | 1 | S10 | DOCUMENT |
-| `fsl-tools/src/document_project.rs` | `requirements_trace_contract` | 1 | S10 | DOCUMENT |
-| `fsl-tools/src/document_render.rs` | `requirements_trace_contract` | 1 | S10 | DOCUMENT |
+| `fsl-tools/src/document_project.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
+| `fsl-tools/src/document_render.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
 | `fslc/src/bin/fsl-bmc.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fslc/src/bin/fsl-replay-actions.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fslc/src/causal.rs` | `parse_causal` | 2 | D8 | CAUSAL_AI |

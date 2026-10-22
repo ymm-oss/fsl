@@ -18,6 +18,8 @@ use fsl_syntax::{
 
 mod next_rules;
 
+pub use next_rules::rule_property_names;
+
 use crate::{
     CoreError, FileResolver, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry,
     OriginSite, ProjectionDef, TERMINAL_TARGET, action_target, lower_direct_spec, state_target,

@@ -133,6 +133,28 @@ fn property_replacements(process: &RequirementsProcess, binder: &str) -> HashMap
     replacements
 }
 
+/// The Kernel property name of each of `properties` (a requirements
+/// document's rule properties, in source order), as the lowering names them:
+/// the written name, or the one [`crate::naming::rule_property_name`]
+/// generates. A reader (`fslc document`) finds each property's lowered
+/// expression by it.
+#[must_use]
+pub fn rule_property_names(properties: &[RuleProperty]) -> Vec<String> {
+    let mut ordinals = BTreeMap::<(&str, &str), usize>::new();
+    properties
+        .iter()
+        .map(|property| {
+            property.name.clone().unwrap_or_else(|| {
+                let ordinal = ordinals
+                    .entry((property.requirement.as_str(), property.kind))
+                    .or_default();
+                *ordinal += 1;
+                crate::naming::rule_property_name(&property.requirement, property.kind, *ordinal)
+            })
+        })
+        .collect()
+}
+
 /// The Kernel name of `property`: the written one, checked, or the one
 /// [`crate::naming::rule_property_name`] generates, numbered among the
 /// requirement's unnamed statements of its kind. The name joins `declared`.
