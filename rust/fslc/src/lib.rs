@@ -41,6 +41,7 @@ pub mod origin_coverage;
 pub mod outcome;
 pub mod replay_trace;
 pub mod reproducer;
+pub mod requirements_solver;
 pub mod source_diagnostic;
 pub mod spec_load;
 // The unstable gate's environment reading, shared by the native CLI and the

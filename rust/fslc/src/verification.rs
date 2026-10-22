@@ -2373,7 +2373,7 @@ fn prepare_cli_verification_from_source(
             // is what put a reference out of scope. Loaded without the
             // recorder: the scoped path never resolves through it either, so
             // the cache key's dependency domain is unchanged.
-            let declared = load_model_from_source(path, source).ok();
+            let declared = crate::spec_loading::load_declared_model_beside_scope(path, source).ok();
             match fslc_rust::verification_output::validate_requirement_trace_source_scoped(
                 &envelope(),
                 source,

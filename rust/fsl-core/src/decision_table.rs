@@ -17,8 +17,8 @@
 //! Worker report the same diagnostics as the CLI. A table whose fields'
 //! domain product exceeds [`crate::DOMAIN_BOUND`], or whose condition reads
 //! something other than the entity's fields, constants and enum members, is
-//! not enumerated: [`crate::solver_obligations`] hands it to the native
-//! `check`, which asks the solver.
+//! not enumerated: [`crate::solver_obligations`] hands it to the surface that
+//! loaded the spec, which asks its solver.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

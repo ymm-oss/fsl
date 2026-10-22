@@ -354,6 +354,7 @@ version = "4.12.0"
 dependencies = [
  "crossbeam-channel",
  "fsl-core",
+ "fsl-solver-z3",
  "fsl-syntax",
  "fsl-tools",
  "fslc-rust",
@@ -437,6 +438,7 @@ dependencies = [
  "fsl-core",
  "fsl-runtime",
  "fsl-solver",
+ "fsl-solver-z3",
  "fsl-solver-z3js",
  "fsl-syntax",
  "fsl-verifier",

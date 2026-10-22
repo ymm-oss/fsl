@@ -246,9 +246,9 @@ fn a_scenario_step_names_the_instance_a_relation_records() {
 }
 
 /// decisions/048 J3: a guard that reads a resource is enumerated over the
-/// resource's type, so the lowering itself (`kernel`, as the editor and the
-/// browser run it) finds the conflict. A guard that reads a relation role
-/// (an `Option`) is left to `check`'s solver, which reads the role's state.
+/// resource's type, so the lowering itself finds the conflict. A guard that
+/// reads a relation role (an `Option`) is left to the solver, which reads
+/// the role's state and is asked by `kernel` as by `check`.
 #[test]
 fn guards_on_resources_are_enumerated_and_on_roles_go_to_the_solver() {
     // Without the traces, which `check` replays before it asks the solver.
@@ -276,7 +276,14 @@ fn guards_on_resources_are_enumerated_and_on_roles_go_to_the_solver() {
     let role = conflict("assignee == none");
     let (output, exit) = fslc("kernel", "role-conflict-kernel", &role);
     assert_eq!(
-        exit, 0,
+        (output["diagnostic_code"].as_str(), exit),
+        (Some("rule_conflict_unsatisfiable_guard"), 2),
+        "{output:#}"
+    );
+    assert!(
+        output["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("(checked by the solver, because")),
         "the enumeration leaves a role to the solver: {output:#}"
     );
     let (output, exit) = fslc("check", "role-conflict", &role);
