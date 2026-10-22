@@ -90,7 +90,7 @@ impl Parser<'_> {
     /// `decide ID "text" for Stage Entity { row … [otherwise => outcome] }
     /// [assuming Q]`.
     pub(super) fn decide_declaration(&mut self) -> Result<DecideDeclaration, ParseError> {
-        let start = self.bump().span;
+        let start = self.bump_kw(Kw::Decide);
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         self.expect_kw(Kw::DecideFor)?;
@@ -151,6 +151,7 @@ impl Parser<'_> {
         };
         self.expect_symbol("=>")?;
         let particles = self.phrase_has_particles(&[Kw::Covers]);
+        let outcome_start = self.peek().span;
         let (actor, verbs) = if particles {
             self.marked_row_outcome()?
         } else {
@@ -162,10 +163,19 @@ impl Parser<'_> {
             (actor, verbs)
         };
         let end = self.last_span();
+        self.spellings.phrases.push(crate::PhraseSpelling {
+            kind: crate::PhraseKind::DecisionRow,
+            span: join_span(outcome_start, end),
+            particles,
+            actor: actor.span,
+            verbs: verbs.iter().map(|verb| verb.span).collect(),
+            object: None,
+            inputs: Vec::new(),
+        });
         let source = row_text(&condition, &actor, &verbs);
         let mut covers = Vec::new();
         while self.peek_kw(Kw::Covers) {
-            let cover_start = self.bump().span;
+            let cover_start = self.bump_kw(Kw::Covers);
             let id = self.req_id()?;
             let (text, text_span) = self.expect_string_with_span()?;
             covers.push(ProcessCover {
@@ -174,6 +184,9 @@ impl Parser<'_> {
                 span: join_span(cover_start, text_span),
             });
         }
+        self.spellings
+            .statements
+            .push(join_span(start, self.last_span()));
         Ok(RowSource {
             condition,
             actor,

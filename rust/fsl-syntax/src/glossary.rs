@@ -535,7 +535,7 @@ pub(crate) fn reject_unaliased_non_ascii(tokens: &[Token]) -> Result<(), ParseEr
 
 /// When `tokens[index]` starts `implements NAME from "path" {`, the index
 /// just past the block's closing brace.
-fn implements_body_end(tokens: &[Token], index: usize) -> Option<usize> {
+pub(crate) fn implements_body_end(tokens: &[Token], index: usize) -> Option<usize> {
     let head = tokens.get(index..index + 5)?;
     let opens = matches!(&head[0].kind, TokenKind::Ident(word) if word == "implements")
         && matches!(head[1].kind, TokenKind::Ident(_))

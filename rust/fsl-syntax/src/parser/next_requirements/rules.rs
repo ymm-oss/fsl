@@ -54,6 +54,8 @@ struct Phrase {
     actor: Word,
     words: [Word; 2],
     particles: bool,
+    /// From the phrase's first word to its last.
+    span: Span,
 }
 
 /// One conjunct of a concept expression: a concept, or `Stage Entity`.
@@ -115,7 +117,7 @@ pub(in crate::parser) struct RuleDeclaration {
 impl Parser<'_> {
     /// `rule REQ "text" { … }`.
     pub(in crate::parser) fn rule_declaration(&mut self) -> Result<RuleDeclaration, ParseError> {
-        let start = self.bump().span;
+        let start = self.bump_kw(Kw::Rule);
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
@@ -152,6 +154,7 @@ impl Parser<'_> {
                 ));
             }
             let span = join_span(begin, self.last_span());
+            self.spellings.statements.push(span);
             let detail = self.source[span.start.offset..span.end.offset]
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -207,9 +210,19 @@ impl Parser<'_> {
                     has_text: self.canonical_text(from),
                 });
             }
+            let left_start = self.peek().span;
             let left = self.conjuncts()?;
-            self.expect_kw(Kw::AlwaysIs)?;
-            return Ok(RuleStatement::Always(left, self.conjuncts()?));
+            let is = self.peek().span;
+            if !self.peek_kw(Kw::AlwaysIs) {
+                return Err(self.error(&format!("expected {}", self.kw_spelling(Kw::AlwaysIs))));
+            }
+            self.bump();
+            let right = self.conjuncts()?;
+            self.spellings.checks.push(crate::CheckSpelling {
+                is,
+                span: join_span(left_start, self.last_span()),
+            });
+            return Ok(RuleStatement::Always(left, right));
         }
         if self.eat_kw(Kw::Deadline) {
             let name = self.expect_ident()?;
@@ -221,7 +234,7 @@ impl Parser<'_> {
         }
         if self.peek_kw_at(1, Kw::Enters) {
             let entity = self.word()?;
-            self.bump();
+            self.bump_kw(Kw::Enters);
             let target = self.word()?;
             self.expect_kw(Kw::OnlyFrom)?;
             return Ok(RuleStatement::Enters {
@@ -245,9 +258,12 @@ impl Parser<'_> {
     /// on one line up to one of `stops`.
     fn phrase(&mut self, stops: &[Kw]) -> Result<Phrase, ParseError> {
         if !self.phrase_has_particles(stops) {
+            let actor = self.word()?;
+            let words = [self.word()?, self.word()?];
             return Ok(Phrase {
-                actor: self.word()?,
-                words: [self.word()?, self.word()?],
+                span: join_span(actor.span, words[1].span),
+                actor,
+                words,
                 particles: false,
             });
         }
@@ -284,6 +300,7 @@ impl Parser<'_> {
                 actor,
                 words: [verb, object],
                 particles: true,
+                span: join_span(start, self.last_span()),
             }),
             (Some(word), None) => Err(ParseError::coded(
                 MIXED_PARTICLES,
@@ -553,7 +570,12 @@ impl Scope<'_> {
 
     /// The entity a phrase is about and the events it names: every event
     /// with its actor, verb and entity (B.6: a phrase can name several).
-    fn phrase(&self, phrase: &Phrase) -> Result<(String, Vec<&EventSignature>), ParseError> {
+    /// The phrase's spelling, by role, goes to `phrases`.
+    fn phrase(
+        &self,
+        phrase: &Phrase,
+        phrases: &mut Vec<crate::PhraseSpelling>,
+    ) -> Result<(String, Vec<&EventSignature>), ParseError> {
         if phrase.particles {
             let [verb, entity] = &phrase.words;
             check_marked_roles(
@@ -584,6 +606,15 @@ impl Scope<'_> {
                 second.span,
             ));
         };
+        phrases.push(crate::PhraseSpelling {
+            kind: crate::PhraseKind::Rule,
+            span: phrase.span,
+            particles: phrase.particles,
+            actor: phrase.actor.span,
+            verbs: vec![verb.span],
+            object: Some(entity.span),
+            inputs: Vec::new(),
+        });
         let matching = self
             .events
             .iter()
@@ -907,7 +938,8 @@ pub(in crate::parser) fn apply(
             match statement {
                 RuleStatement::Allow(phrase, condition)
                 | RuleStatement::Never(phrase, condition) => {
-                    let (entity_name, events) = scope.phrase(&phrase)?;
+                    let (entity_name, events) =
+                        scope.phrase(&phrase, &mut next.spellings.phrases)?;
                     let entity = &scope.entities[&entity_name];
                     for event in events {
                         let condition = match &condition {
@@ -945,8 +977,10 @@ pub(in crate::parser) fn apply(
                     }
                 }
                 RuleStatement::After(later, earlier) => {
-                    let (entity_name, later_events) = scope.phrase(&later)?;
-                    let (earlier_entity, earlier_events) = scope.phrase(&earlier)?;
+                    let (entity_name, later_events) =
+                        scope.phrase(&later, &mut next.spellings.phrases)?;
+                    let (earlier_entity, earlier_events) =
+                        scope.phrase(&earlier, &mut next.spellings.phrases)?;
                     if earlier_entity != entity_name {
                         return Err(ParseError::new(
                             format!(

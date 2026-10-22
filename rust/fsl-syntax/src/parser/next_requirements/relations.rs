@@ -100,6 +100,9 @@ impl Parser<'_> {
         let role = self.word()?;
         self.expect_kw(Kw::RelationVia)?;
         let event = self.word()?;
+        self.spellings
+            .statements
+            .push(join_span(span, self.last_span()));
         Ok(RelationSource {
             entity,
             target,
@@ -111,7 +114,7 @@ impl Parser<'_> {
 
     /// `resource name: Type = initial`.
     pub(in crate::parser) fn resource_declaration(&mut self) -> Result<ResourceSource, ParseError> {
-        let span = self.bump().span;
+        let span = self.bump_kw(Kw::Resource);
         let name = self.word()?;
         self.expect_symbol(":")?;
         let type_name = self.qualified_name()?;
@@ -125,6 +128,9 @@ impl Parser<'_> {
             ));
         }
         let initial = self.expression(0)?;
+        self.spellings
+            .statements
+            .push(join_span(span, self.last_span()));
         Ok(ResourceSource {
             name,
             type_name,
@@ -135,7 +141,7 @@ impl Parser<'_> {
 
     /// `measure name = count Concept` or `count Entity in Stage {, Stage}`.
     pub(in crate::parser) fn measure_declaration(&mut self) -> Result<MeasureSource, ParseError> {
-        let span = self.bump().span;
+        let span = self.bump_kw(Kw::Measure);
         let name = self.word()?;
         self.expect_symbol("=")?;
         self.expect_kw(Kw::Count)?;
@@ -149,6 +155,9 @@ impl Parser<'_> {
                 }
             }
         }
+        self.spellings
+            .statements
+            .push(join_span(span, self.last_span()));
         Ok(MeasureSource {
             name,
             counted,
@@ -159,13 +168,16 @@ impl Parser<'_> {
 
     /// `goal ID "text" some E can reach S`.
     pub(in crate::parser) fn goal_declaration(&mut self) -> Result<GoalSource, ParseError> {
-        let start = self.bump().span;
+        let start = self.bump_kw(Kw::Goal);
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         self.expect_kw(Kw::GoalSome)?;
         let entity = self.word()?;
         self.expect_kw(Kw::CanReach)?;
         let stage = self.word()?;
+        self.spellings
+            .statements
+            .push(join_span(start, self.last_span()));
         Ok(GoalSource {
             id,
             text,
@@ -176,7 +188,7 @@ impl Parser<'_> {
 
     /// `policy ID "text" every E in S must eventually be T {or T}`.
     pub(in crate::parser) fn policy_declaration(&mut self) -> Result<GoalSource, ParseError> {
-        let start = self.bump().span;
+        let start = self.bump_kw(Kw::Policy);
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         self.expect_kw(Kw::PolicyEvery)?;
@@ -188,6 +200,9 @@ impl Parser<'_> {
         while self.eat_kw(Kw::PolicyOr) {
             targets.push(self.word()?);
         }
+        self.spellings
+            .statements
+            .push(join_span(start, self.last_span()));
         Ok(GoalSource {
             id,
             text,

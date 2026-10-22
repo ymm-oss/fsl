@@ -723,6 +723,9 @@ pub struct NextEditionRequirements {
     /// The decision tables, already folded into their events' guards; kept
     /// for the exhaustiveness / overlap checks and the lowering's origins.
     pub decisions: Vec<DecisionTable>,
+    /// Where the document spelled its keywords and phrases, for the
+    /// formatter.
+    pub spellings: crate::SourceSpellings,
     /// The relations, in source order. Each role is also a data field of
     /// its entity's `process`, written by the relation's event.
     pub relations: Vec<RelationDeclaration>,
