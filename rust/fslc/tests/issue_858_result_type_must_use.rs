@@ -21,13 +21,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The 30 public type names this change annotates: #858's enumeration minus
+/// The 31 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
-/// curated table missed, `RefinementVerdict` (#1245), `Verdict` (#901), and
-/// `TraceGate` (#1285). Each must carry `#[must_use]` on the TYPE, because on
+/// curated table missed, `RefinementVerdict` (#1245), `Verdict` (#901),
+/// `TraceGate` (#1285), and `ProcessFormOutcome` (the migration's process-form
+/// rewrite or refusal). Each must carry `#[must_use]` on the TYPE, because on
 /// the function it is redundant against `Result` and closes nothing.
-const ANNOTATED: [&str; 30] = [
+const ANNOTATED: [&str; 31] = [
     // fsl-runtime
     "Violation",
     "StepResult",
@@ -63,12 +64,13 @@ const ANNOTATED: [&str; 30] = [
     "OutcomeClass",
     "Verdict",
     "TraceGate",
+    "ProcessFormOutcome",
 ];
 
-/// `ANNOTATED` holds 30 distinct names but 31 declarations: `ReachableWitness`
+/// `ANNOTATED` holds 31 distinct names but 32 declarations: `ReachableWitness`
 /// is declared once in `fsl-runtime` and once in `fsl-verifier`, and both must
 /// carry the attribute.
-const ANNOTATED_DECLARATIONS: usize = 31;
+const ANNOTATED_DECLARATIONS: usize = 32;
 
 /// Types deliberately left un-annotated, each with the reason. A type moved
 /// off this list must gain the attribute; a type added to it must state why.
@@ -104,9 +106,9 @@ fn read_source(path: &Path) -> String {
 
 /// What the rule below actually matches today. #858 reports 33 types from a
 /// hand-curated table; this rule -- #858's, extended with the `*Violation`
-/// suffix -- selects 18, all of which are in `ANNOTATED`. Both numbers are pinned so
+/// suffix -- selects 19, all of which are in `ANNOTATED`. Both numbers are pinned so
 /// neither the curated decision nor the detector can drift unnoticed.
-const DISCOVERED: [&str; 18] = [
+const DISCOVERED: [&str; 19] = [
     "BfsResult",
     "BmcResult",
     "BmcViolation",
@@ -117,6 +119,7 @@ const DISCOVERED: [&str; 18] = [
     "ImplicationResult",
     "InductionResult",
     "LeadsToViolation",
+    "ProcessFormOutcome",
     "ProgressCheck",
     "RankedLeadstoResult",
     "RefinementVerdict",

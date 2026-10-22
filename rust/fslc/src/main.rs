@@ -537,15 +537,26 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
     let mut planned = Vec::new();
     let mut files = Vec::new();
     let mut refused = false;
+    let mut manual_required = false;
     for path in &options.paths {
         let (source, plan, edition) = match load_migration_plan(path, options) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
         refused |= plan.refused();
+        manual_required |= plan.manual_required();
         let migrated = plan.migrated_source.as_ref();
+        let origins = if plan
+            .diagnostics
+            .iter()
+            .any(|finding| finding.code == fslc_rust::migration::LEGACY_PROCESS_FORM)
+        {
+            fslc_rust::migration::Origins::Ignored
+        } else {
+            fslc_rust::migration::Origins::Kept
+        };
         if let Some(migrated) = migrated
-            && let Err(error) = validate_migration_semantics(&source, migrated, path)
+            && let Err(error) = validate_migration_semantics(&source, migrated, path, origins)
         {
             return (semantic_error_output(&error), 2);
         }
@@ -567,6 +578,20 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
                 "files":files,
             }),
             2,
+        );
+    }
+    // A process form the migrator cannot rewrite leaves every input as it
+    // is, like a refusal, but the inputs are valid: the author rewrites them.
+    if manual_required {
+        return (
+            json!({
+                "fsl":"1.0",
+                "result":fslc_rust::migration::MIGRATE_MANUAL_REQUIRED,
+                "edition":options.requested_edition(),
+                "written":false,
+                "files":files,
+            }),
+            1,
         );
     }
     if options.write {
@@ -633,22 +658,6 @@ fn load_migration_plan(
         crate::parse_options(),
     )
     .map_err(|error| migration_plan_error_output(&source, path, &error))?;
-    if let Some(header) =
-        fslc_rust::migration::missing_edition_header(&source, edition, crate::parse_options())
-    {
-        if !plan.refused() {
-            let migrated = plan.migrated_source.as_deref().unwrap_or(&source);
-            plan.migrated_source = fslc_rust::migration::missing_edition_header(
-                migrated,
-                edition,
-                crate::parse_options(),
-            )
-            .map(|insertion| fsl_syntax::apply_source_edits(migrated, insertion.edits))
-            .transpose()
-            .map_err(|error| migration_plan_error_output(&source, path, &error.to_string()))?;
-        }
-        plan.diagnostics.push(header);
-    }
     // A refused plan (`plan.refused()`) means `plan_migration` itself already
     // found a legacy construct it cannot machine-apply — e.g. `&&`, which is
     // not tokenizable under the current grammar at all and is recognized via
@@ -658,8 +667,48 @@ fn load_migration_plan(
     // `&&`, with a confusing generic parse error) on exactly the construct
     // `migrate`/`lint` already correctly report as `migration_refused`/an
     // `unsupported_in_edition` finding, so skip it in that case.
-    if !plan.refused() {
+    let refused = plan.refused();
+    if !refused {
         validate_migration_input_semantics(&source, path)?;
+    }
+    let header =
+        fslc_rust::migration::missing_edition_header(&source, edition, crate::parse_options());
+    let conversion = if refused {
+        fslc_rust::migration::ProcessFormOutcome::Unchanged
+    } else {
+        fslc_rust::migration::convert_process_forms(
+            &source,
+            plan.migrated_source.as_deref().unwrap_or(&source),
+            path,
+            edition,
+            crate::parse_options(),
+        )
+    };
+    match conversion {
+        fslc_rust::migration::ProcessFormOutcome::Unchanged => {
+            if header.is_some() && !refused {
+                let migrated = plan.migrated_source.as_deref().unwrap_or(&source);
+                plan.migrated_source = fslc_rust::migration::missing_edition_header(
+                    migrated,
+                    edition,
+                    crate::parse_options(),
+                )
+                .map(|insertion| fsl_syntax::apply_source_edits(migrated, insertion.edits))
+                .transpose()
+                .map_err(|error| migration_plan_error_output(&source, path, &error.to_string()))?;
+            }
+        }
+        fslc_rust::migration::ProcessFormOutcome::Converted { source, findings } => {
+            plan.migrated_source = Some(source);
+            plan.diagnostics.extend(findings);
+        }
+        fslc_rust::migration::ProcessFormOutcome::ManualRequired(findings) => {
+            plan.migrated_source = None;
+            plan.diagnostics.extend(findings);
+        }
+    }
+    if let Some(header) = header {
+        plan.diagnostics.push(header);
     }
     Ok((source, plan, edition))
 }
@@ -719,9 +768,20 @@ fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), V
     Ok(())
 }
 
-fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Result<(), String> {
-    let before = migration_kernel_contract(before, path)?;
-    let after = migration_kernel_contract(after, path)?;
+/// The migration contract over the whole rewrite: `origins` is
+/// [`fslc_rust::migration::Origins::Ignored`] when a process form was
+/// converted, whose events carry their own lowering origins.
+fn validate_migration_semantics(
+    before: &str,
+    after: &str,
+    path: &Path,
+    origins: fslc_rust::migration::Origins,
+) -> Result<(), String> {
+    let contract = |source| {
+        fslc_rust::migration::kernel_contract(source, path, crate::parse_options(), origins)
+    };
+    let before = contract(before)?;
+    let after = contract(after)?;
     if before == after {
         Ok(())
     } else {
@@ -730,119 +790,6 @@ fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Resul
             path.display()
         ))
     }
-}
-
-fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String> {
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
-        source,
-        &resolver,
-        path.to_string_lossy(),
-        crate::parse_options(),
-    )
-    .map_err(|error| error.to_string())?;
-    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
-    if matches!(
-        fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
-        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
-    ) {
-        fsl_core::requirements_implements_with_options(
-            source,
-            &resolver,
-            &model,
-            crate::parse_options(),
-        )
-        .map_err(|error| error.to_string())?;
-    }
-    let mut contract = fsl_core::public_kernel_contract(
-        &kernel,
-        &model,
-        &path.to_string_lossy(),
-        source_dialect(source),
-    )
-    .map_err(|error| error.to_string())?;
-    remove_migration_locations(&mut contract);
-    remove_legacy_metadata_projection(&mut contract);
-    Ok(json!({
-        "kernel": contract,
-        "annotations": migration_annotation_contract(&model),
-    }))
-}
-
-fn remove_migration_locations(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            for key in ["span", "source_node_id", "source_node_ids", "reverse_index"] {
-                object.remove(key);
-            }
-            object.values_mut().for_each(remove_migration_locations);
-        }
-        Value::Array(values) => values.iter_mut().for_each(remove_migration_locations),
-        _ => {}
-    }
-}
-
-fn remove_legacy_metadata_projection(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            object.remove("requirement");
-            if let Some(Value::Object(origin)) = object.get_mut("origin") {
-                origin.remove("declaration");
-            }
-            object
-                .values_mut()
-                .for_each(remove_legacy_metadata_projection);
-        }
-        Value::Array(values) => values
-            .iter_mut()
-            .for_each(remove_legacy_metadata_projection),
-        _ => {}
-    }
-}
-
-fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
-    let mut targets = vec!["spec".to_owned(), "init".to_owned()];
-    targets.extend(
-        model
-            .actions
-            .iter()
-            .map(|action| fsl_core::action_target(&action.name)),
-    );
-    for (kind, properties) in [
-        ("invariant", &model.invariants),
-        ("trans", &model.transitions),
-        ("reachable", &model.reachables),
-    ] {
-        targets.extend(
-            properties
-                .iter()
-                .map(|property| fsl_core::property_target(kind, &property.name)),
-        );
-    }
-    targets.extend(
-        model
-            .leadstos
-            .iter()
-            .map(|property| fsl_core::property_target("leadsTo", &property.name)),
-    );
-    targets.sort();
-    targets.dedup();
-    Value::Object(
-        targets
-            .into_iter()
-            .filter_map(|target| {
-                let mut annotations = model
-                    .annotations_for(&target)
-                    .source_order()
-                    .iter()
-                    .map(fsl_syntax::Annotation::render_source)
-                    .collect::<Vec<_>>();
-                annotations.sort();
-                (!annotations.is_empty()).then(|| (target, json!(annotations)))
-            })
-            .collect(),
-    )
 }
 
 fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
@@ -6029,14 +5976,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
 }
 
 fn source_dialect(source: &str) -> &str {
-    match fsl_syntax::dialect_keyword_with(source, crate::parse_options()) {
-        Ok("spec") => "kernel",
-        Ok("dbsystem") => "db",
-        Ok("ai_component") => "ai-component",
-        Ok("agent") => "ai-agent",
-        Ok(keyword) => keyword,
-        Err(_) => "unknown",
-    }
+    fslc_rust::migration::source_dialect(source, crate::parse_options())
 }
 
 fn add_strict_tag_warnings_from_source(

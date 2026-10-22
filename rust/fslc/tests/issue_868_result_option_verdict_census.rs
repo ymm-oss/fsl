@@ -572,6 +572,15 @@ const CLASSIFICATIONS: &[Classification] = &[
         "literate_access",
         ResultOption
     ),
+    // `None` is a document with no process form to rewrite; the reasons a
+    // process cannot be rewritten are the error, not a verdict.
+    entry!(
+        Ordinary,
+        "rust/fslc/src/migration/process_form.rs",
+        274,
+        "plan_process_conversion",
+        ResultOption
+    ),
     entry!(
         Ordinary,
         "rust/fslc/src/main.rs",
