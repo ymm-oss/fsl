@@ -21,8 +21,9 @@ use std::fmt::Write as _;
 use fsl_core::{
     ActionGuard, KernelModel, KernelSpec, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target,
-    requirements_trace_contract,
+    requirements_trace_contract_with_options,
 };
+use fsl_syntax::ParseOptions;
 use serde_json::Value;
 
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
@@ -107,18 +108,66 @@ pub fn render_requirements_document(
     evidence: Option<&AppliedEvidence<'_>>,
     approvals: Option<&AppliedApprovals<'_>>,
 ) -> Result<RenderedDocument, String> {
+    render_requirements_document_with_options(
+        claims,
+        kernel,
+        model,
+        source,
+        locale,
+        glossary,
+        evidence,
+        approvals,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`render_requirements_document`] with `source` read under explicit
+/// [`ParseOptions`], the options it was lowered and projected under.
+///
+/// A requirements document declared with entities and events also gets the
+/// overview section (`document_views`): lifecycle diagrams, the event
+/// table, the decision tables with their results, the rules and the
+/// glossary; its events' phrases label their actions' claim headings unless
+/// a `--glossary` sidecar labels them.
+///
+/// # Errors
+///
+/// As [`render_requirements_document`].
+#[allow(clippy::too_many_arguments)]
+pub fn render_requirements_document_with_options(
+    claims: &RequirementClaimSet,
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    source: &str,
+    locale: Locale,
+    glossary: Option<&AppliedGlossary<'_>>,
+    evidence: Option<&AppliedEvidence<'_>>,
+    approvals: Option<&AppliedApprovals<'_>>,
+    options: &ParseOptions,
+) -> Result<RenderedDocument, String> {
     // Ungated here: the requirement-trace gate replays traces on
     // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
     // before every document command and fails closed on its refusal.
-    let trace = requirements_trace_contract(source).map_err(|error| error.to_string())?;
-    validate_render_inputs(claims, kernel, model, source, trace.as_ref())?;
+    let trace = requirements_trace_contract_with_options(source, options)
+        .map_err(|error| error.to_string())?;
+    validate_render_inputs(claims, kernel, model, source, trace.as_ref(), *options)?;
+    let views = crate::document_views::RequirementsViews::of(source, model, *options, locale);
+    let labelled = views.as_ref().map(|views| {
+        crate::document_glossary::with_source_labels(
+            glossary.map(|applied| applied.glossary),
+            locale,
+            views.action_labels(),
+        )
+    });
     let mut ctx = Ctx {
         model,
         trace: trace.as_ref(),
         locale,
         fallback_count: 0,
         rendered_claims: BTreeSet::new(),
-        glossary: glossary.map(|applied| applied.glossary),
+        glossary: labelled
+            .as_ref()
+            .or_else(|| glossary.map(|applied| applied.glossary)),
         evidence: evidence.map_or(&[], |applied| applied.files),
     };
 
@@ -140,11 +189,14 @@ pub fn render_requirements_document(
     push_section(&mut out, &position_section(locale));
     push_section(&mut out, &semantics_section(locale));
     push_section(&mut out, &verification_status_section(locale));
+    if let Some(views) = &views {
+        push_section(&mut out, &views.overview_section(claims));
+    }
     push_section(&mut out, &requirements_section(claims, &mut ctx));
     push_section(&mut out, &unattributed_section(claims, &mut ctx));
     push_section(&mut out, &undecided_section(claims, locale));
     push_section(&mut out, &analysis_scope_section(claims, locale));
-    if let Some(section) = glossary_section(ctx.glossary, locale) {
+    if let Some(section) = glossary_section(glossary.map(|applied| applied.glossary), locale) {
         push_section(&mut out, &section);
     }
     if let Some(section) = evidence_sources_section(claims, ctx.evidence, locale) {
@@ -175,9 +227,16 @@ fn validate_render_inputs(
     model: &KernelModel,
     source: &str,
     trace: Option<&RequirementsTraceContract>,
+    options: ParseOptions,
 ) -> Result<(), String> {
-    let projected =
-        project_renderer_contract(kernel, model, source, claims.spec.source.as_deref(), trace)?;
+    let projected = project_renderer_contract(
+        kernel,
+        model,
+        source,
+        claims.spec.source.as_deref(),
+        trace,
+        options,
+    )?;
     if projected != *claims {
         return Err("RCIR does not match the paired checked source and model".to_owned());
     }

@@ -1852,7 +1852,12 @@ fn load_document_claims_with_label(
 ) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
     let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    match fsl_tools::project_requirement_claims_from_source(&source, Some(label), base) {
+    match fsl_tools::project_requirement_claims_from_source_with_options(
+        &source,
+        Some(label),
+        base,
+        crate::parse_options(),
+    ) {
         Ok(claims) => {
             document_trace_gate(&source, base)?;
             Ok((source, claims))
@@ -2248,7 +2253,7 @@ fn run_document_generate(
     let applied_evidence = loaded_evidence
         .as_ref()
         .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
-    let rendered = match fsl_tools::render_requirements_document(
+    let rendered = match fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
         &model,
@@ -2257,6 +2262,7 @@ fn run_document_generate(
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
         None,
+        crate::parse_options(),
     ) {
         Ok(rendered) => rendered,
         Err(error) => return (error_output("document", &error), 2),
@@ -2329,7 +2335,7 @@ fn run_document_generate(
             records: &applied_approvals_vec,
             digest: combined_digest,
         };
-        match fsl_tools::render_requirements_document(
+        match fsl_tools::render_requirements_document_with_options(
             &claims,
             &kernel,
             &model,
@@ -2338,6 +2344,7 @@ fn run_document_generate(
             applied_glossary.as_ref(),
             applied_evidence.as_ref(),
             Some(&applied_approvals),
+            crate::parse_options(),
         ) {
             Ok(rendered) => rendered,
             Err(error) => return (error_output("document", &error), 2),
@@ -2608,7 +2615,7 @@ fn run_document_check(
     let applied_approvals = loaded_approvals
         .as_ref()
         .map(|(records, digest)| fsl_tools::AppliedApprovals { records, digest });
-    let rendered = match fsl_tools::render_requirements_document(
+    let rendered = match fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
         &model,
@@ -2617,6 +2624,7 @@ fn run_document_check(
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
         applied_approvals.as_ref(),
+        crate::parse_options(),
     ) {
         Ok(rendered) => rendered,
         Err(error) => return (error_output("document", &error), 2),
@@ -12619,7 +12627,7 @@ fn render_document_for_approval(
     let applied_evidence = loaded_evidence
         .as_ref()
         .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
-    let rendered = fsl_tools::render_requirements_document(
+    let rendered = fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
         &model,
@@ -12628,6 +12636,7 @@ fn render_document_for_approval(
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
         None,
+        crate::parse_options(),
     )
     .map_err(|error| error_output("document", &error))?;
     Ok((claims, rendered.markdown))

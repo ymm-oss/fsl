@@ -93,10 +93,6 @@ enum Owner {
     /// decisions/049 D8: this dialect rejects an edition header, so it stays
     /// on the published language.
     D8,
-    /// fsl 5 plan S10 (document): the document projection and render chain
-    /// takes the options when it gains the next edition's sections; until then
-    /// a gated document is rejected there (fail closed), never read differently.
-    S10,
 }
 
 const CAUSAL_AI: &str = "causal or ai dialect: decisions/049 D8 makes an edition header an error \
@@ -116,9 +112,6 @@ const DIRECT_KERNEL: &str = "parse_direct_kernel_spec keeps the published langua
      callers are tests";
 const FIXTURE: &str = "reads a fixed in-repository fixture written in the published language, \
      never a user document";
-const DOCUMENT: &str = "document claims / render (#1243): the projection reads the published \
-     language until S10 threads the options through it; a gated document is rejected (fail \
-     closed)";
 
 /// `(workspace-relative file, entry, count, owner, reason)`.
 const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
@@ -301,31 +294,17 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ),
     (
         "fsl-tools/src/document_project.rs",
-        "parse_document",
+        "ParseOptions::stable",
         2,
-        Owner::S10,
-        DOCUMENT,
-    ),
-    (
-        "fsl-tools/src/document_project.rs",
-        "parse_kernel_source",
-        1,
-        Owner::S10,
-        DOCUMENT,
-    ),
-    (
-        "fsl-tools/src/document_project.rs",
-        "requirements_trace_contract",
-        1,
-        Owner::S10,
-        DOCUMENT,
+        Owner::Definition,
+        STABLE_WRAPPER,
     ),
     (
         "fsl-tools/src/document_render.rs",
-        "requirements_trace_contract",
+        "ParseOptions::stable",
         1,
-        Owner::S10,
-        DOCUMENT,
+        Owner::Definition,
+        STABLE_WRAPPER,
     ),
     (
         "fslc/src/bin/fsl-bmc.rs",
