@@ -77,16 +77,15 @@ the logical transition order, including stutter steps.
 Public Kernel rejects compose, but `fslc replay` accepts a compose spec. A
 component action has one canonical public name, `alias.action`, built from the
 `use` alias and the component's action name (#1234). testgen, conformance, the
-Monitor, and replay output — including `state_mismatch.action` — all use it, so
-`use X as a__b` with action `c` is `a__b.c`. A v1 trace may name a component
-action as `alias.action` or as the pre-#1234 `alias__action`. Both are looked up
-in the checked model's table of component actions, built from the alias and
-action pairs that compose lowering recorded (`NameMap::resolve_action` in
-`rust/fsl-core/src/naming.rs`); neither spelling is rewritten into the other. A spelling that matched more than one action would be an input
-error (exit 2) rather than a choice. A checked model cannot reach that case,
-because the two structures sharing an `alias__action` spelling would be
-duplicate actions. Sync and glue actions, and every action of a non-compose
-spec, match only their exact Kernel name (`foo__bar` is not also `foo.bar`).
+Monitor, and replay output — including `state_mismatch.action` — all use it. A
+v1 trace may name an action by its public spelling or by its Kernel name: a
+component action as `alias.action` or the pre-#1234 `alias__action`, and a
+requirements branch split as `submit.b1` (the name conformance prints, #1256) or
+`submit__b1`. Each action is matched against both of its own spellings
+(`NameMap::resolve_action` in `rust/fsl-core/src/naming.rs`); neither spelling
+is rewritten into the other. A spelling that matched more than one action would
+be an input error (exit 2) rather than a choice. A checked model cannot reach
+that case, because no declared name contains `__` (check rejects one, #1256).
 An `internal` component action is absent from the model and is rejected under
 either spelling.
 
