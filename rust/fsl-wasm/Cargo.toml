@@ -23,5 +23,11 @@ serde_json.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 
+# The Worker's requirements checks take their solver as a parameter; the
+# native-host tests answer them with native Z3 (the browser bridge exists
+# only in a Worker).
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+fsl-solver-z3 = { path = "../fsl-solver-z3" }
+
 [lints]
 workspace = true

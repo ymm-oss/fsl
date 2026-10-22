@@ -505,18 +505,29 @@ fn a_concept_off_the_event_stage_is_rule_conflict_unsatisfiable_guard() {
 }
 
 /// decisions/048 J3: past the enumeration bound the lowering leaves the
-/// question to `check`'s solver, which reports the same conflict.
+/// question to the solver, which reports the same conflict, in `check` and
+/// in every other command that loads the spec (here `kernel`).
 #[test]
 fn past_the_enumeration_bound_check_asks_the_solver() {
     let rules = "  rule REQ-1 \"t\" {\n    allow Employee submits Claim only when input amount > 5\n    \
                  allow Employee submits Claim only when input amount < 4\n  }\n";
     let huge = "values Amount = 0..2000000";
-    // The lowering alone (`kernel`) does not enumerate this domain, so it
-    // reports nothing: the rejection below is the solver's.
+    // The lowering does not enumerate this domain: the rejection is the
+    // solver's, and `kernel` reports it as `check` does.
     let scratch = Scratch::new("unsat-solver-kernel", None);
     scratch.write("doc.fsl", &claim_document(rules, huge));
     let (output, exit) = fslc("kernel", &scratch.0, "doc.fsl");
-    assert_eq!(exit, 0, "{output:#}");
+    assert_eq!(
+        (output["diagnostic_code"].as_str(), exit),
+        (Some("rule_conflict_unsatisfiable_guard"), 2),
+        "{output:#}"
+    );
+    assert!(
+        output["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("(checked by the solver, because")),
+        "{output:#}"
+    );
     assert_error(
         "unsat-solver",
         &claim_document(rules, huge),

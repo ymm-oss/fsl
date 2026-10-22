@@ -34,7 +34,6 @@ mod name_display;
 mod process;
 mod property_selection;
 mod refinement;
-mod requirements_solver;
 mod spec_loading;
 mod strict_tags;
 mod verification;
@@ -1900,14 +1899,18 @@ fn load_document_claims_with_label(
 /// [`load_document_claims_with_label`]: the document states a claim per
 /// acceptance / forbidden case, so a spec whose traces the gate refuses gets
 /// the gate's error (exit 2) instead of a document (#1243). The model is built
-/// the way the document commands build theirs.
+/// the way the document commands build theirs. A requirements check the
+/// solver refutes rejects the spec after the gate, as `check` orders them.
 fn document_trace_gate(source: &str, base: &Path) -> Result<(), Value> {
     let resolver = fsl_core::FsResolver::new(base);
     let kernel =
         fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
-    require_trace_gate(source, &model).map(|_checked| ())
+    require_trace_gate(source, &model).and_then(|_checked| {
+        spec_loading::reject_refuted_requirements(source, &model)
+            .map_err(|error| spec_load_error_output(&error))
+    })
 }
 
 /// Recover the typed-model diagnostic behind a document-projection failure that
@@ -5888,18 +5891,16 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     // The validity stages are shared with the Worker (issue #1163); only the
     // success envelope is composed here.
-    match fslc_rust::check_stages::run_check_stages(
+    match crate::process::block_on_native(fslc_rust::check_stages::run_check_stages(
         source,
         &path.to_string_lossy(),
         &display_path.to_string_lossy(),
         &resolver,
         &envelope,
         crate::parse_options(),
-    ) {
+        &mut spec_loading::z3_solver,
+    )) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
-            if let Some(rejection) = requirements_solver::check(source, &model, &envelope) {
-                return rejection;
-            }
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
             output.insert("spec".to_owned(), json!(model.name));
@@ -6011,6 +6012,9 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
     };
+    if let Err(error) = spec_loading::reject_refuted_requirements(&source, &model) {
+        return (spec_load_error_output(&error), 2);
+    }
     let source_path = portable_path.unwrap_or_else(|| path.to_string_lossy().into_owned());
     match fsl_core::public_kernel_contract_for_version(
         &kernel,
@@ -12048,6 +12052,9 @@ fn run_typestate(path: &Path) -> (Value, i32) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
     };
+    if let Err(error) = spec_loading::reject_refuted_requirements(&source, &model) {
+        return (spec_load_error_output(&error), 2);
+    }
     let path_text = path.to_string_lossy();
     let contract = match fsl_core::public_kernel_contract(
         &kernel,
