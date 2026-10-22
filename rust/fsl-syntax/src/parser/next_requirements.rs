@@ -52,6 +52,7 @@ use crate::{
     QualifiedName, RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent, Token, TokenKind,
     VerifyItem,
 };
+use crate::{PhraseKind, PhraseSpelling};
 
 /// `process` / `transition` in a next-edition requirements document.
 pub const MIXED_REQUIREMENTS_FORMS: &str = "mixed_requirements_forms";
@@ -117,11 +118,14 @@ struct EventDeclaration {
     words: Vec<Word>,
     /// With particles: the verb and the entity as marked.
     marked: Option<(Option<Word>, Option<Word>)>,
-    inputs: Vec<(Word, Option<QualifiedName>)>,
+    /// Each input as written, `name[: Type]`.
+    inputs: Vec<(Word, Option<QualifiedName>, Span)>,
     movement: Move,
     sets: Vec<(Word, Expr)>,
     covers: Vec<ProcessCover>,
     span: Span,
+    /// The phrase, from the actor to the last input.
+    phrase_span: Span,
 }
 
 enum Step {
@@ -130,9 +134,12 @@ enum Step {
         /// The verb and the instance, in either order; with particles,
         /// `[verb, instance]`.
         words: [Word; 2],
-        inputs: Vec<(Word, Expr)>,
+        /// Each input with its span as written, `name value`.
+        inputs: Vec<(Word, Expr, Span)>,
         particles: bool,
         span: Span,
+        /// The phrase, from its first word to its last.
+        phrase_span: Span,
     },
     Call(AcceptanceStep),
 }
@@ -335,16 +342,52 @@ fn check_marked_roles(
 }
 
 /// Reject a particle written onto the word it marks (`従業員が` for `従業員
-/// が`): an identifier of `tokens[from..]` that ends in a particle's character
-/// and is a name (an alias or canonical name of `glossary`, or a name the
-/// document writes on its own) once that character is taken off. Run before
-/// aliases are resolved, on the words as written; an identifier that is
-/// itself an alias or a keyword is a word of its own.
+/// が`): the first of [`particles_without_space`].
 pub(super) fn reject_particles_without_space(
     tokens: &[Token],
     from: usize,
     glossary: Option<&Glossary>,
 ) -> Result<(), ParseError> {
+    match particles_without_space(tokens, from, glossary).first() {
+        Some(found) => {
+            let token = &tokens[found.token];
+            let TokenKind::Ident(word) = &token.kind else {
+                unreachable!("a particle is found on an identifier")
+            };
+            let stem = &word[..found.stem_len];
+            Err(ParseError::coded(
+                PARTICLE_NEEDS_SPACE,
+                format!(
+                    "'{word}' is read as one word; a particle is a word of its own: write \
+                     '{stem} {}' (`fslc fmt` inserts the space)",
+                    found.particle.spelling()
+                ),
+                token.span,
+            ))
+        }
+        None => Ok(()),
+    }
+}
+
+/// A particle written onto the word it marks: the identifier
+/// `tokens[token]`, whose first `stem_len` bytes are the word.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ParticleWithoutSpace {
+    pub(crate) token: usize,
+    pub(crate) stem_len: usize,
+    pub(crate) particle: Particle,
+}
+
+/// Every identifier of `tokens[from..]` that ends in a particle's character
+/// and is a name (an alias or canonical name of `glossary`, or a name the
+/// document writes on its own) once that character is taken off. Read before
+/// aliases are resolved, on the words as written; an identifier that is
+/// itself an alias or a keyword is a word of its own.
+pub(crate) fn particles_without_space(
+    tokens: &[Token],
+    from: usize,
+    glossary: Option<&Glossary>,
+) -> Vec<ParticleWithoutSpace> {
     let mut names = BTreeSet::new();
     let mut aliases = BTreeSet::new();
     if let Some(glossary) = glossary {
@@ -364,7 +407,8 @@ pub(super) fn reject_particles_without_space(
             names.insert(word.as_str());
         }
     }
-    for token in &tokens[from..] {
+    let mut found = Vec::new();
+    for (index, token) in tokens.iter().enumerate().skip(from) {
         let TokenKind::Ident(word) = &token.kind else {
             continue;
         };
@@ -380,18 +424,14 @@ pub(super) fn reject_particles_without_space(
             && !stem.is_empty()
             && names.contains(stem)
         {
-            return Err(ParseError::coded(
-                PARTICLE_NEEDS_SPACE,
-                format!(
-                    "'{word}' is read as one word; a particle is a word of its own: write \
-                     '{stem} {}'",
-                    particle.spelling()
-                ),
-                token.span,
-            ));
+            found.push(ParticleWithoutSpace {
+                token: index,
+                stem_len: stem.len(),
+                particle,
+            });
         }
     }
-    Ok(())
+    found
 }
 
 impl Parser<'_> {
@@ -416,7 +456,7 @@ impl Parser<'_> {
             ));
         }
         if self.peek_kw(Kw::Actor) {
-            self.bump();
+            self.bump_kw(Kw::Actor);
             loop {
                 let actor = self.word()?;
                 pending.actors.push(actor);
@@ -428,7 +468,7 @@ impl Parser<'_> {
             let entity = self.entity_declaration()?;
             pending.entities.push((position, entity));
         } else if self.peek_kw(Kw::Concept) {
-            let span = self.bump().span;
+            let span = self.bump_kw(Kw::Concept);
             let name = self.word()?;
             self.expect_symbol("=")?;
             let entity = self.word()?;
@@ -446,6 +486,9 @@ impl Parser<'_> {
             } else {
                 None
             };
+            self.spellings
+                .statements
+                .push(join_span(span, self.last_span()));
             pending.concepts.push(ConceptSource {
                 name,
                 entity,
@@ -498,18 +541,21 @@ impl Parser<'_> {
 
     /// `entity Name { field: Type = value … lifecycle A -> B … }`.
     fn entity_declaration(&mut self) -> Result<EntityDeclaration, ParseError> {
-        let span = self.bump().span;
+        let span = self.bump_kw(Kw::Entity);
         let name = self.word()?;
         self.expect_symbol("{")?;
         let mut fields = Vec::new();
         let mut lifecycles = Vec::new();
         while !self.eat_symbol("}") {
             if self.peek_kw(Kw::Lifecycle) && !is_symbol(self.peek_n(1), ":") {
-                self.bump();
+                let start = self.bump_kw(Kw::Lifecycle);
                 let mut stages = vec![self.word()?];
                 while self.eat_symbol("->") {
                     stages.push(self.word()?);
                 }
+                self.spellings
+                    .statements
+                    .push(join_span(start, self.last_span()));
                 lifecycles.push(stages);
                 continue;
             }
@@ -563,6 +609,7 @@ impl Parser<'_> {
         self.expect_kw(Kw::Event)?;
         let name = self.word()?;
         self.expect_symbol("=")?;
+        let phrase_start = self.peek().span;
         let (actor, words, mut inputs, marked) = if self.phrase_has_particles(&[Kw::EventIn]) {
             let (actor, verb, object, inputs) = self.marked_event_phrase()?;
             let words = verb.iter().chain(object.iter()).cloned().collect();
@@ -592,6 +639,7 @@ impl Parser<'_> {
         if self.eat_kw(Kw::EventWith) {
             inputs.extend(self.event_inputs()?);
         }
+        let phrase_span = join_span(phrase_start, self.last_span());
         let movement = if self.eat_kw(Kw::EventIn) {
             Move::Stay(self.word()?)
         } else {
@@ -612,7 +660,7 @@ impl Parser<'_> {
         }
         let mut covers = Vec::new();
         while self.peek_kw(Kw::Covers) {
-            let start = self.bump().span;
+            let start = self.bump_kw(Kw::Covers);
             let id = self.req_id()?;
             let (text, text_span) = self.expect_string_with_span()?;
             covers.push(ProcessCover {
@@ -621,6 +669,9 @@ impl Parser<'_> {
                 span: join_span(start, text_span),
             });
         }
+        self.spellings
+            .statements
+            .push(join_span(span, self.last_span()));
         Ok(EventDeclaration {
             fault,
             name,
@@ -632,11 +683,12 @@ impl Parser<'_> {
             sets,
             covers,
             span,
+            phrase_span,
         })
     }
 
     /// `i [: Type] {, i [: Type]}`, the inputs after `with` (or before で).
-    fn event_inputs(&mut self) -> Result<Vec<(Word, Option<QualifiedName>)>, ParseError> {
+    fn event_inputs(&mut self) -> Result<Vec<(Word, Option<QualifiedName>, Span)>, ParseError> {
         let mut inputs = Vec::new();
         loop {
             let input = self.word()?;
@@ -645,7 +697,8 @@ impl Parser<'_> {
             } else {
                 None
             };
-            inputs.push((input, type_name));
+            let span = join_span(input.span, self.last_span());
+            inputs.push((input, type_name, span));
             if !self.eat_symbol(",") {
                 return Ok(inputs);
             }
@@ -700,7 +753,7 @@ impl Parser<'_> {
             Word,
             Option<Word>,
             Option<Word>,
-            Vec<(Word, Option<QualifiedName>)>,
+            Vec<(Word, Option<QualifiedName>, Span)>,
         ),
         ParseError,
     > {
@@ -726,7 +779,7 @@ impl Parser<'_> {
                             group[0].0.span,
                         ));
                     }
-                    let (word, _) = group.remove(0);
+                    let (word, _, _) = group.remove(0);
                     match particle {
                         Some(particle) => {
                             self.bump();
@@ -745,6 +798,8 @@ impl Parser<'_> {
     /// The pair is read as one identifier spelled with [`INPUT_MARK`], over
     /// the tokens up to the end of the enclosing block.
     fn event_expression(&mut self) -> Result<Expr, ParseError> {
+        let start = self.cursor;
+        let mut inputs = Vec::new();
         let mut tokens = Vec::new();
         let mut origins = Vec::new();
         let mut depth = 0usize;
@@ -767,6 +822,7 @@ impl Parser<'_> {
                 && self.spells_kw(word, Kw::Input)
                 && let TokenKind::Ident(name) = &next.kind
             {
+                inputs.push(token.span);
                 tokens.push(Token {
                     kind: TokenKind::Ident(format!("{INPUT_MARK}{name}")),
                     span: join_span(token.span, next.span),
@@ -793,6 +849,11 @@ impl Parser<'_> {
             parse_tokens_expression(&tokens, &mut cursor, self.expression_mode(), false)?
                 .into_kernel()?;
         self.cursor = origins[cursor];
+        let end = self.tokens[self.cursor].span.start.offset;
+        for span in inputs.into_iter().filter(|span| span.start.offset < end) {
+            self.note_kw(Kw::Input, span);
+        }
+        self.note_expression(start);
         Ok(expression)
     }
 
@@ -800,7 +861,11 @@ impl Parser<'_> {
     /// `forbidden ID "text" { steps then rejected }`.
     fn trace_declaration(&mut self) -> Result<TraceDeclaration, ParseError> {
         let forbidden = self.peek_kw(Kw::Forbidden);
-        let start = self.bump().span;
+        let start = self.bump_kw(if forbidden {
+            Kw::Forbidden
+        } else {
+            Kw::Scenario
+        });
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
@@ -810,7 +875,11 @@ impl Parser<'_> {
         while !(self.peek_kw(Kw::Then) || (forbidden && self.peek_ident("expect"))) {
             steps.push(self.trace_step()?);
         }
-        let check_span = self.bump().span;
+        let check_span = if self.peek_kw(Kw::Then) {
+            self.bump_kw(Kw::Then)
+        } else {
+            self.bump().span
+        };
         let check = if forbidden {
             self.expect_kw(Kw::Rejected)?;
             None
@@ -819,8 +888,12 @@ impl Parser<'_> {
             && matches!(self.peek_n(2).kind, TokenKind::Ident(_))
         {
             let instance = self.word()?;
-            self.bump();
+            let is = self.bump().span;
             let stage = self.word()?;
+            self.spellings.checks.push(crate::CheckSpelling {
+                is,
+                span: join_span(instance.span, stage.span),
+            });
             if self.peek_kw(Kw::ThenAnd) {
                 return Err(self.error(
                     "a scenario checks one instance's stage; write the other checks as an \
@@ -866,15 +939,18 @@ impl Parser<'_> {
             inputs,
             particles: false,
             span,
+            phrase_span: join_span(span, self.last_span()),
         })
     }
 
     /// `input value {, input value}`, a step's inputs after `with`.
-    fn step_inputs(&mut self) -> Result<Vec<(Word, Expr)>, ParseError> {
+    fn step_inputs(&mut self) -> Result<Vec<(Word, Expr, Span)>, ParseError> {
         let mut inputs = Vec::new();
         loop {
             let input = self.word()?;
-            inputs.push((input, self.expression(0)?));
+            let value = self.expression(0)?;
+            let span = join_span(input.span, self.last_span());
+            inputs.push((input, value, span));
             if !self.eat_symbol(",") {
                 return Ok(inputs);
             }
@@ -942,13 +1018,14 @@ impl Parser<'_> {
             inputs,
             particles: true,
             span,
+            phrase_span: join_span(span, self.last_span()),
         })
     }
 
     /// After the word `input`, already read: `value {, input value} で` on
     /// `line`, the step's inputs; `None` (nothing consumed) when what
     /// follows is not that, so the word is the verb.
-    fn marked_step_inputs(&mut self, input: &Word, line: u32) -> Option<Vec<(Word, Expr)>> {
+    fn marked_step_inputs(&mut self, input: &Word, line: u32) -> Option<Vec<(Word, Expr, Span)>> {
         let start = self.cursor;
         let mut inputs = Vec::new();
         let mut name = input.clone();
@@ -963,8 +1040,11 @@ impl Parser<'_> {
             else {
                 break;
             };
+            let value_start = self.cursor;
             self.cursor = cursor;
-            inputs.push((name, value));
+            self.note_expression(value_start);
+            let span = join_span(name.span, self.last_span());
+            inputs.push((name, value, span));
             if self.particle_here() == Some(Particle::De) {
                 self.bump();
                 return Some(inputs);
@@ -978,6 +1058,10 @@ impl Parser<'_> {
             }
         }
         self.cursor = start;
+        let rewound = self.tokens[start].span.start.offset;
+        self.spellings
+            .expressions
+            .retain(|expression| expression.span.start.offset < rewound);
         None
     }
 }
@@ -1256,6 +1340,22 @@ impl Pending {
                     ));
                 }
             };
+            // The verb is the word that is not the entity; none when the
+            // event name is the verb.
+            let verb_word = event
+                .words
+                .iter()
+                .find(|word| word.span != entity_name.span)
+                .map(|word| word.span);
+            next.spellings.phrases.push(PhraseSpelling {
+                kind: PhraseKind::Event,
+                span: event.phrase_span,
+                particles: event.marked.is_some(),
+                actor: event.actor.span,
+                verbs: verb_word.into_iter().collect(),
+                object: Some(entity_name.span),
+                inputs: event.inputs.iter().map(|(_, _, span)| *span).collect(),
+            });
             let entity = &entities[&entity_name.text];
             let (from, to, moves) = match &event.movement {
                 Move::Between(from, to) => {
@@ -1291,7 +1391,7 @@ impl Pending {
             let mut params = Vec::new();
             let mut assignments = Vec::new();
             let mut input_names = Vec::new();
-            for (input, type_name) in &event.inputs {
+            for (input, type_name, _) in &event.inputs {
                 if entity.roles.contains(&input.text) {
                     return Err(ParseError::new(
                         format!(
@@ -1517,7 +1617,14 @@ impl Pending {
         }
 
         for (position, trace) in self.traces {
-            let item = desugar_trace(trace, &actors, &signatures, &entities, &instance_bounds)?;
+            let item = desugar_trace(
+                trace,
+                &actors,
+                &signatures,
+                &entities,
+                &instance_bounds,
+                &mut next.spellings.phrases,
+            )?;
             generated.push((position, item));
         }
         generated.sort_by_key(|(position, _)| *position);
@@ -1671,6 +1778,7 @@ fn desugar_trace(
     events: &[EventSignature],
     entities: &BTreeMap<String, Entity>,
     instance_bounds: &BTreeMap<String, i64>,
+    phrases: &mut Vec<PhraseSpelling>,
 ) -> Result<RequirementsItem, ParseError> {
     let verbs = events
         .iter()
@@ -1680,7 +1788,7 @@ fn desugar_trace(
     let mut counts = BTreeMap::<String, i64>::new();
     let mut steps = Vec::new();
     for step in trace.steps {
-        let (actor, words, inputs, particles, span) = match step {
+        let (actor, words, inputs, particles, span, phrase_span) = match step {
             Step::Call(call) => {
                 steps.push(call);
                 continue;
@@ -1691,7 +1799,8 @@ fn desugar_trace(
                 inputs,
                 particles,
                 span,
-            } => (actor, words, inputs, particles, span),
+                phrase_span,
+            } => (actor, words, inputs, particles, span, phrase_span),
         };
         if particles {
             let [verb, instance] = &words;
@@ -1730,6 +1839,15 @@ fn desugar_trace(
                 first.span,
             ));
         };
+        phrases.push(PhraseSpelling {
+            kind: PhraseKind::Step,
+            span: phrase_span,
+            particles,
+            actor: actor.span,
+            verbs: vec![verb.span],
+            object: Some(instance.span),
+            inputs: inputs.iter().map(|(_, _, span)| *span).collect(),
+        });
         let phrase = format!("'{} {}'", actor.text, verb.text);
         let bound = instances
             .get(&instance.text)
@@ -1849,7 +1967,7 @@ fn desugar_trace(
         }
         let mut given = inputs
             .into_iter()
-            .map(|(name, value)| (name.text.clone(), (name, value)))
+            .map(|(name, value, _)| (name.text.clone(), (name, value)))
             .collect::<BTreeMap<_, _>>();
         let mut args = vec![Expr::Num(state.number)];
         for role in &chosen.roles {

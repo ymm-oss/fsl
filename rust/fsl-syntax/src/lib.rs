@@ -26,6 +26,8 @@ mod literate;
 mod lossless;
 mod parser;
 pub mod recursion;
+mod respell;
+mod source_spellings;
 mod surface;
 mod syntax_expr;
 mod unstable;
@@ -90,11 +92,17 @@ pub use literate::extract_literate_fsl;
 pub use lossless::{
     CanonicalRewrite, CanonicalRewriteKind, FormatError, LosslessDocument, LosslessKind,
     LosslessNode, SourceEdit, UnsafeFormatKind, apply_source_edits, canonical_rewrites,
-    canonical_rewrites_with, format_source, format_source_with, lossless_document,
-    lossless_document_with, source_position, source_span,
+    canonical_rewrites_with, format_source, format_source_respelled, format_source_with,
+    lossless_document, lossless_document_with, source_position, source_span,
 };
 pub use parser::{
     ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,
+};
+pub use respell::{
+    KeywordLanguage, NameForm, RESPELL_NOT_APPLICABLE, Respelling, respell_source, space_particles,
+};
+pub use source_spellings::{
+    CheckSpelling, ExpressionSpelling, KeywordSpelling, PhraseKind, PhraseSpelling, SourceSpellings,
 };
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
