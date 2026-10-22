@@ -4678,10 +4678,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     (!versioned)
                         .then(|| {
                             model.actions.iter().find(|action| {
-                                model
-                                    .names()
-                                    .legacy_action_spelling(&action.name)
-                                    .into_string()
+                                model.names().public_action(&action.name).into_string()
                                     == *action_name
                             })
                         })
@@ -4747,7 +4744,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                         }),
                     );
                 }
-                (json!(model.action_key(&action.name)), "action")
+                (json!(model.action_display_name(&action.name)), "action")
             }
         };
         if let Some(state) = &event.state {
@@ -5684,11 +5681,7 @@ fn requirement_trace_scenarios(
             .iter()
             .find(|action| {
                 action.name == final_step.name
-                    || model
-                        .names()
-                        .legacy_action_spelling(&action.name)
-                        .into_string()
-                        == final_step.name
+                    || model.names().public_action(&action.name).into_string() == final_step.name
                     || action.name.starts_with(&format!("{}__b", final_step.name))
             })
             .ok_or_else(|| format!("unknown forbidden action '{}'", final_step.name))?;
@@ -8316,25 +8309,31 @@ fn run_domain_testgen(
     (result, status)
 }
 
-fn type_ref_text(ty: &TypeRef) -> String {
+fn type_ref_text(model: &KernelModel, ty: &TypeRef) -> String {
     match ty {
         TypeRef::Int => "Int".to_owned(),
         TypeRef::Bool => "Bool".to_owned(),
-        TypeRef::Named(name) => name.clone(),
+        TypeRef::Named(name) => model.names().public_type(name).into_string(),
         TypeRef::Range(lo, hi) => format!("{lo}..{hi}"),
         TypeRef::Map(key, value) => {
-            format!("Map<{}, {}>", type_ref_text(key), type_ref_text(value))
+            format!(
+                "Map<{}, {}>",
+                type_ref_text(model, key),
+                type_ref_text(model, value)
+            )
         }
         TypeRef::Relation(left, right) => {
             format!(
                 "relation {} -> {}",
-                type_ref_text(left),
-                type_ref_text(right)
+                type_ref_text(model, left),
+                type_ref_text(model, right)
             )
         }
-        TypeRef::Set(value) => format!("Set<{}>", type_ref_text(value)),
-        TypeRef::Seq(value, length) => format!("Seq<{}, {length}>", type_ref_text(value)),
-        TypeRef::Option(value) => format!("Option<{}>", type_ref_text(value)),
+        TypeRef::Set(value) => format!("Set<{}>", type_ref_text(model, value)),
+        TypeRef::Seq(value, length) => {
+            format!("Seq<{}, {length}>", type_ref_text(model, value))
+        }
+        TypeRef::Option(value) => format!("Option<{}>", type_ref_text(model, value)),
     }
 }
 
@@ -8422,7 +8421,7 @@ fn param_skeleton(model: &KernelModel, param: &ParamDef) -> Value {
                 },
                 TypeRef::Range(lo, hi) => ("Int".to_owned(), *lo, *hi),
                 TypeRef::Bool => ("Bool".to_owned(), 0, 1),
-                _ => (type_ref_text(ty), 0, 0),
+                _ => (type_ref_text(model, ty), 0, 0),
             };
             json!({"name":name,"type":type_name,"lo":lo,"hi":hi})
         }
@@ -9898,7 +9897,7 @@ fn run_explain_from_source(
                 text,
                 "  - {}: {}",
                 model.names().public_state(name).into_string(),
-                type_ref_text(ty)
+                type_ref_text(&model, ty)
             );
         }
         if let Some(implements) = readable_implements_text_from_source(path, source, &model, depth)
@@ -9920,7 +9919,9 @@ fn run_explain_from_source(
                 .params
                 .iter()
                 .map(|param| match param {
-                    ParamDef::Typed { name, ty } => format!("{name}: {}", type_ref_text(ty)),
+                    ParamDef::Typed { name, ty } => {
+                        format!("{name}: {}", type_ref_text(&model, ty))
+                    }
                     ParamDef::Range { name, lo, hi } => format!("{name}: {lo}..{hi}"),
                 })
                 .collect::<Vec<_>>()
@@ -11671,10 +11672,10 @@ fn run_mutate_with(
             insert_requirement_metadata(public, annotations, mutant.requirement.as_ref());
         }
         if status == "survived"
-            && mutant
-                .action
-                .as_ref()
-                .is_some_and(|action| dead_actions.contains(action))
+            && mutant.action.as_ref().is_some_and(|action| {
+                // `action_coverage` keys are public names (#1255).
+                dead_actions.contains(model.action_display_name(action).as_str())
+            })
             && let Value::Object(public) = &mut public
         {
             public.insert(
@@ -13246,9 +13247,14 @@ fn expression_identifiers(value: &Value) -> std::collections::BTreeSet<String> {
 
 fn tag_lvalue_text(target: &KernelLValue) -> String {
     match target {
-        KernelLValue::Var(name) => name.clone(),
+        // The same spelling `expr_text` gives the root on the right-hand side.
+        KernelLValue::Var(name) => fsl_core::unmapped_public_spelling(name),
         KernelLValue::Index(name, index) => {
-            format!("{name}[{}]", fslc_rust::expr_text(index))
+            format!(
+                "{}[{}]",
+                fsl_core::unmapped_public_spelling(name),
+                fslc_rust::expr_text(index)
+            )
         }
         KernelLValue::Field(base, field) => format!("{}.{}", tag_lvalue_text(base), field),
     }
@@ -13322,7 +13328,7 @@ fn tag_review_output(model: &KernelModel) -> Value {
         tag_statement_effects(&action.statements, &[], &mut effects);
         declarations.push(json!({
             "kind":"action",
-            "name":model.action_key(&action.name),
+            "name":model.action_display_name(&action.name),
             "node_id":fsl_tools::action_node_id(model, &action.name),
             "tag":tag,
             "tags":tags,
@@ -14608,7 +14614,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         }
         for correspondence in checked_refinement.action_correspondences.values() {
             let name = &correspondence.impl_action.0;
-            let key = implementation.model.action_key(name);
+            let key = implementation.model.action_display_name(name);
             let map_id = format!("action_map:{layer}->{target}:{key}");
             let mut map_node = project_analysis_node(&map_id, "action_map", &key);
             if let Value::Object(object) = &mut map_node {
@@ -16972,7 +16978,7 @@ fn parse_versioned_params(
     if values.len() != action.params.len() {
         return Err(format!(
             "event {event_index} parameter mismatch for action '{}'",
-            model.action_key(&action.name)
+            model.action_display_name(&action.name)
         ));
     }
     action
@@ -17815,7 +17821,7 @@ spec InitTraceability {
         assert!(
             model.actions.iter().any(|action| model
                 .names()
-                .legacy_action_spelling(&action.name)
+                .public_action(&action.name)
                 .into_string()
                 == "doc_close_doc"),
             "replay model must retain source A's lowered CloseDoc action"
