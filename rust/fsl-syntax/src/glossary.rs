@@ -31,6 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::keywords::Kw;
 use crate::{ParseError, Span, Token, TokenKind};
 
 /// One alias names two canonical names.
@@ -62,13 +63,14 @@ pub const GLOSSARY_DIAGNOSTICS: &[&str] = &[
     crate::CANONICAL_NAME_NOT_ASCII,
 ];
 
-/// Keywords an alias may not be spelled as: the union over every context of
-/// the words the shared grammar reads as keywords, the English words of the
-/// next edition's requirements, and their Japanese counterparts and particles
-/// (the keyword table proposal, ranges B and reserved). A single list, not one
-/// per context, so that an alias is never usable in one place and a keyword in
-/// another. `keyword_spellings_cover_the_parser` keeps the English
-/// part in step with the parser.
+/// The English keywords an alias may not be spelled as: the union over every
+/// context of the words the shared grammar reads as keywords and the English
+/// words of the next edition's requirements. Their Japanese counterparts and
+/// the particles come from the keyword table ([`crate::keywords`]);
+/// [`is_keyword_spelling`] reads both. A single union, not one per context,
+/// so that an alias is never usable in one place and a keyword in another.
+/// `keyword_spellings_cover_the_parser` keeps this list in step with the
+/// parser and the table.
 pub const KEYWORD_SPELLINGS: &[&str] = &[
     "Bool",
     "Int",
@@ -209,6 +211,7 @@ pub const KEYWORD_SPELLINGS: &[&str] = &[
     "then",
     "through",
     "time",
+    "to",
     "trans",
     "transition",
     "true",
@@ -225,76 +228,13 @@ pub const KEYWORD_SPELLINGS: &[&str] = &[
     "while",
     "with",
     "within",
-    "いずれかの",
-    "いずれ必ず",
-    "が",
-    "かつ",
-    "すべての",
-    "それ以外",
-    "で",
-    "に",
-    "のうち",
-    "は",
-    "または",
-    "を",
-    "アクター",
-    "エンティティ",
-    "シナリオ",
-    "ライフサイクル",
-    "仮定",
-    "件数",
-    "個数",
-    "先行条件",
-    "入力",
-    "出来事",
-    "前提",
-    "列挙",
-    "到達可能",
-    "許可",
-    "型",
-    "外部",
-    "定数",
-    "対応要件",
-    "対象",
-    "常に",
-    "必須",
-    "所属先",
-    "拒否",
-    "拒否シナリオ",
-    "指標",
-    "数値",
-    "方針",
-    "更新",
-    "期限",
-    "条件",
-    "検証",
-    "段階",
-    "段階以外",
-    "決定表",
-    "用語集",
-    "理由",
-    "目標",
-    "禁止",
-    "立場",
-    "範囲外",
-    "結果",
-    "規則",
-    "要件",
-    "資源",
-    "遷移元",
-    "遷移先",
-    "重要指標",
-    "値域",
-    "区分",
-    "契機",
-    "役名",
-    "異常",
 ];
 
-/// Whether `word` is one of [`KEYWORD_SPELLINGS`].
+/// Whether `word` is one of [`KEYWORD_SPELLINGS`], a Japanese keyword of the
+/// keyword table (any context, reserved rows included) or a particle.
 #[must_use]
 pub fn is_keyword_spelling(word: &str) -> bool {
-    KEYWORD_SPELLINGS.contains(&word)
+    KEYWORD_SPELLINGS.contains(&word) || crate::keywords::is_japanese_spelling(word)
 }
 
 /// The canonical side of a glossary entry: a name, or `Entity.field`.
@@ -608,7 +548,8 @@ fn implements_body_end(tokens: &[Token], index: usize) -> Option<usize> {
 /// When `tokens[index]` starts a `scenario` or `forbidden` block, the index
 /// just past its closing brace.
 fn trace_body_end(tokens: &[Token], index: usize) -> Option<usize> {
-    if !matches!(&tokens[index].kind, TokenKind::Ident(word) if word == "scenario" || word == "forbidden")
+    if !matches!(&tokens[index].kind, TokenKind::Ident(word)
+        if crate::keywords::spells(word, Kw::Scenario) || crate::keywords::spells(word, Kw::Forbidden))
     {
         return None;
     }
@@ -674,10 +615,10 @@ pub fn document_glossary(source: &str, options: &crate::ParseOptions) -> Option<
     let mut cursor = 0;
     crate::annotation_parse::leading_annotations(&tokens, &mut cursor).ok()?;
     let opens = tokens.get(cursor..cursor + 4).is_some_and(|head| {
-        matches!(&head[0].kind, TokenKind::Ident(word) if word == "requirements")
+        matches!(&head[0].kind, TokenKind::Ident(word) if crate::keywords::spells(word, Kw::Requirements))
             && matches!(head[1].kind, TokenKind::Ident(_))
             && is_symbol(&head[2], "{")
-            && matches!(&head[3].kind, TokenKind::Ident(word) if word == "glossary")
+            && matches!(&head[3].kind, TokenKind::Ident(word) if crate::keywords::spells(word, Kw::Glossary))
     });
     if !opens {
         return None;
@@ -732,6 +673,8 @@ mod tests {
         let sources = [
             include_str!("parser.rs"),
             include_str!("parser/next_requirements.rs"),
+            include_str!("parser/next_requirements/rules.rs"),
+            include_str!("parser/next_requirements/decide.rs"),
             include_str!("syntax_expr.rs"),
         ];
         let mut missing = BTreeSet::new();
@@ -748,12 +691,38 @@ mod tests {
                 }
             }
         }
+        // Every word the parser reads through the keyword table.
+        for keyword in crate::keywords::KEYWORDS {
+            for word in keyword.english.split(' ') {
+                if !KEYWORD_SPELLINGS.contains(&word) {
+                    missing.insert(word.to_owned());
+                }
+            }
+        }
         assert!(missing.is_empty(), "not in KEYWORD_SPELLINGS: {missing:?}");
+        assert!(
+            KEYWORD_SPELLINGS.iter().all(|word| word.is_ascii()),
+            "the Japanese spellings come from the keyword table"
+        );
         let mut unique = BTreeSet::new();
         assert!(
             KEYWORD_SPELLINGS.iter().all(|word| unique.insert(*word)),
             "a keyword spelling is listed twice"
         );
+    }
+
+    /// `alias_shadows_keyword` reads the keyword table: every Japanese
+    /// spelling of every context, reserved rows included, and every particle
+    /// is a keyword spelling, and no other non-ASCII word is.
+    #[test]
+    fn japanese_keyword_spellings_are_the_keyword_tables() {
+        for keyword in crate::keywords::KEYWORDS {
+            assert!(is_keyword_spelling(keyword.japanese), "{:?}", keyword.kw);
+        }
+        for (_, particle) in crate::keywords::PARTICLES {
+            assert!(is_keyword_spelling(particle), "{particle}");
+        }
+        assert!(!is_keyword_spelling("申請"));
     }
 
     /// The block is the next edition's: elsewhere `glossary` is the published

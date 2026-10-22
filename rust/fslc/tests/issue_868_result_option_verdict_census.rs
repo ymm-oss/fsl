@@ -545,6 +545,20 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultTupleOption
     ),
     entry!(
+        Verdict,
+        "rust/fslc/src/verification_output.rs",
+        1382,
+        "require_trace_gate",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/spec_loading.rs",
+        41,
+        "require_trace_gate",
+        ResultOption
+    ),
+    entry!(
         Ordinary,
         "rust/fslc/src/approval.rs",
         272,
@@ -577,6 +591,15 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fslc/src/literate_access.rs",
         409,
         "literate_access",
+        ResultOption
+    ),
+    // `None` is a document with no process form to rewrite; the reasons a
+    // process cannot be rewritten are the error, not a verdict.
+    entry!(
+        Ordinary,
+        "rust/fslc/src/migration/process_form.rs",
+        274,
+        "plan_process_conversion",
         ResultOption
     ),
     entry!(

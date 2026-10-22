@@ -123,7 +123,9 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
 - Resolution starts on the token stream (`fsl-syntax/src/glossary.rs`): the
   block is checked on its own (`canonical_name_not_ascii` for a left side,
   `duplicate_alias`, `alias_collision`, `alias_shadows_keyword` against
-  `KEYWORD_SPELLINGS`, the union of every keyword spelling, `alias_shadows_name`
+  the union of every keyword spelling (`KEYWORD_SPELLINGS` for the English
+  words, the keyword table of S5 for the Japanese ones and the particles),
+  `alias_shadows_name`
   against the block's canonical names), then every later identifier token
   that is an alias becomes its canonical name (a field alias becomes the
   field name), so every frontend position reads canonical names. The body of
@@ -150,6 +152,26 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
 - Not yet: the language server (hover, completion, rename of aliases; S11),
   `fmt --names` (S10), and the document glossary, whose project parse is
   pinned to the published language until S10 (`DOCUMENT` rows below).
+
+## Keyword table and particles (S5)
+
+- `fsl-syntax/src/keywords.rs` is the one table of next-edition requirements
+  keywords: per context (`KeywordContext`), an English spelling (one or more
+  words) and a Japanese one (one word), one to one within a context. The
+  parser reads a keyword through it (`peek_kw(Kw::…)`) and accepts the
+  Japanese spelling only while `Parser::keywords` is set, which only the body
+  of a `requirements` document headed `fsl 5` does (and the dispatch reads
+  `要件` as `requirements` only in that edition). Elsewhere `peek_kw` is the
+  English `peek_ident`, so published documents parse as before (R0).
+- Particles が・を・に・で・は are separate words. A phrase (event
+  declaration, rule, decision table row, scenario step) with a particle on
+  its line is read by role, in any order, and every word but the verb takes
+  one (`mixed_particles`); a role of the wrong kind is
+  `particle_role_mismatch`; a particle written onto its word (`従業員が`) is
+  `particle_needs_space`, found on the tokens before aliases resolve.
+- Both directions of the table are public (`english_of`, `japanese_of`,
+  `Keyword::lookup_*`, `Kw::english` / `Kw::japanese`, `PARTICLES`) for
+  `fmt --lang` (S10) and the language server's keyword index (S11).
 
 ## Fail closed (decisions/049 D2)
 
