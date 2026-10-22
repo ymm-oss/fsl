@@ -36,6 +36,7 @@ mod dialect;
 mod domain;
 mod domain_lowering;
 mod expr_text;
+mod finite_domain;
 mod model;
 mod naming;
 pub mod obligation;
@@ -45,6 +46,7 @@ mod public_kernel;
 mod refinement;
 mod reserved;
 mod resolve_aliases;
+mod rule_guards;
 mod trace;
 mod trace_json;
 mod typecheck;
@@ -55,8 +57,7 @@ pub use compose::{
     parse_kernel_source_with_options,
 };
 pub use decision_table::{
-    DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DOMAIN_BOUND, DecisionObligation,
-    decision_solver_obligations,
+    DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DecisionObligation,
 };
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
@@ -78,6 +79,7 @@ pub use dialect::{
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
 pub use expr_text::{binder_text, expr_text, source_binder_text, source_expr_text};
+pub use finite_domain::{DOMAIN_BOUND, SolverObligation, solver_obligations};
 pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
@@ -115,6 +117,7 @@ pub use refinement::{
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
 pub use resolve_aliases::lower_requirements;
+pub use rule_guards::{GuardConflict, RULE_CONFLICT_UNSATISFIABLE_GUARD};
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
     fsl_value_json, internal_origin_json, origin_display_name, state_json, state_summary,

@@ -16,6 +16,8 @@ use fsl_syntax::{
     TimeItem, TypeExpr, VerifyItem, parse_surface_document_with,
 };
 
+mod next_rules;
+
 use crate::{
     CoreError, FileResolver, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry,
     OriginSite, ProjectionDef, TERMINAL_TARGET, action_target, lower_direct_spec, state_target,
@@ -2227,6 +2229,7 @@ pub(crate) fn lower_resolved_requirements(
     let processes = requirements_processes(&requirements)?;
     let binders = process_binders(&requirements, &processes);
     let decision_tables = crate::decision_table::Tables::of(&requirements);
+    let rule_guards = crate::rule_guards::RuleGuards::of(&requirements);
     if let Some(next) = &requirements.next {
         check_generated_names(next, &items, &processes, &binders)?;
     }
@@ -2337,6 +2340,7 @@ pub(crate) fn lower_resolved_requirements(
                     });
                     bare.into_iter().chain(dotted)
                 })
+                .chain(event.map(|_| next_rules::stage_replacement(&process.process, binder)))
                 .collect::<std::collections::HashMap<_, _>>();
             let mut body = vec![ActionItem::Requires(
                 stage_is(&process.process, binder, &transition.source),
@@ -2345,6 +2349,16 @@ pub(crate) fn lower_resolved_requirements(
             if let Some(guard) = &transition.guard {
                 body.push(ActionItem::Requires(
                     substitute_expr(guard.clone(), &replacements),
+                    transition.span,
+                ));
+            }
+            for guard in event.map_or(&[][..], |event| event.rule_guards.as_slice()) {
+                extra_origins.push((
+                    crate::action_guard_target(&transition.name, body.len()),
+                    next_rules::guard_origin(transition, guard),
+                ));
+                body.push(ActionItem::Requires(
+                    substitute_expr(guard.condition.clone(), &replacements),
                     transition.span,
                 ));
             }
@@ -2408,6 +2422,18 @@ pub(crate) fn lower_resolved_requirements(
                 sync: false,
                 annotations: transition.annotations.clone(),
             });
+        }
+    }
+    if let Some(next) = &requirements.next {
+        for property in next_rules::lower_rule_properties(
+            &next.properties,
+            &processes,
+            &binders,
+            &requirements.items,
+        )? {
+            extra_annotations.push((property.target.clone(), property.annotation));
+            extra_origins.push((property.target, property.origin));
+            items.push(property.item);
         }
     }
     let mut deadlines = Vec::new();
@@ -2811,7 +2837,13 @@ pub(crate) fn lower_resolved_requirements(
     let next_warnings = requirements
         .next
         .as_ref()
-        .map(|next| next.warnings.clone())
+        .map(|next| {
+            next.warnings
+                .iter()
+                .map(|warning| (warning.clone(), "warning"))
+                .chain(next.notes.iter().map(|note| (note.clone(), "info")))
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
@@ -2827,17 +2859,17 @@ pub(crate) fn lower_resolved_requirements(
     }
     kernel
         .diagnostics
-        .extend(next_warnings.into_iter().map(|warning| {
+        .extend(next_warnings.into_iter().map(|(warning, severity)| {
             json!({
                 "kind": warning.code,
                 "code": warning.code,
-                "severity": "warning",
+                "severity": severity,
                 "message": warning.message,
                 "loc": warning.span.python_loc(),
             })
         }));
-    let decision_warnings = decision_tables.check(&kernel)?;
-    kernel.diagnostics.extend(decision_warnings);
+    let domain_warnings = crate::finite_domain::check(&decision_tables, &rule_guards, &kernel)?;
+    kernel.diagnostics.extend(domain_warnings);
     Ok(kernel)
 }
 
