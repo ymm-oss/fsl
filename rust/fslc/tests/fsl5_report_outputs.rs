@@ -17,7 +17,8 @@
 //!   in an event's actor note, as everywhere else.
 //!
 //! The fixtures are the returns example of the next skills, in English and
-//! in Japanese with a glossary (`fixtures/fsl5/outputs`).
+//! in Japanese with a glossary, in `fixtures/fsl5_outputs` (outside
+//! `fixtures/fsl5`, whose sources are the lowering-contract corpus).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -27,7 +28,7 @@ use serde_json::Value;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/fsl5/outputs")
+        .join("tests/fixtures/fsl5_outputs")
         .join(name)
 }
 
