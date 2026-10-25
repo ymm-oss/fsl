@@ -559,7 +559,11 @@ pub fn lower_compose_with_options(
                 annotations,
             }) => {
                 init_origins.extend(std::iter::repeat_n(None, statements.len()));
-                init.extend(rewrite_compose_statements(statements.clone(), &components)?);
+                init.extend(rewrite_compose_statements(
+                    statements.clone(),
+                    &components,
+                    false,
+                )?);
                 if init_meta.is_none() {
                     init_meta.clone_from(meta);
                 }
@@ -1329,6 +1333,7 @@ fn rewrite_compose_item(
             annotations,
         },
         item @ SpecItem::LeadsTo { .. } => resolve_alias_leads_to(item, components)?,
+        item @ SpecItem::Action { .. } => resolve_alias_action(item, components)?,
         other => other,
     })
 }
@@ -1381,19 +1386,56 @@ fn resolve_alias_leads_to(
     })
 }
 
+fn resolve_alias_action(
+    item: SpecItem,
+    components: &BTreeMap<String, Component>,
+) -> Result<SpecItem, CoreError> {
+    let SpecItem::Action {
+        name,
+        params,
+        items,
+        span,
+        fair,
+        meta,
+        sync,
+        annotations,
+    } = item
+    else {
+        unreachable!("only glue actions are routed here")
+    };
+    Ok(SpecItem::Action {
+        name,
+        params: params
+            .into_iter()
+            .map(|param| resolve_alias_param(param, components, span))
+            .collect::<Result<_, _>>()?,
+        items: items
+            .into_iter()
+            .map(|item| resolve_alias_action_item(item, components, true))
+            .collect::<Result<_, _>>()?,
+        span,
+        fair,
+        meta,
+        sync,
+        annotations,
+    })
+}
+
 fn rewrite_compose_statements(
     statements: Vec<Statement>,
     components: &BTreeMap<String, Component>,
+    allow_component_writes: bool,
 ) -> Result<Vec<Statement>, CoreError> {
     statements
         .into_iter()
-        .map(|statement| resolve_alias_statement(statement, components))
+        .map(|statement| resolve_alias_statement(statement, components, allow_component_writes))
         .collect()
 }
 
 fn resolve_alias_statement(
     statement: Statement,
     components: &BTreeMap<String, Component>,
+    allow_component_writes: bool,
 ) -> Result<Statement, CoreError> {
     Ok(match statement {
         Statement::Assign {
@@ -1401,7 +1443,7 @@ fn resolve_alias_statement(
             value,
             span,
         } => Statement::Assign {
-            target,
+            target: resolve_alias_lvalue(target, components, span, allow_component_writes)?,
             value: resolve_alias_expr(value, components, span)?,
             span,
         },
@@ -1412,14 +1454,16 @@ fn resolve_alias_statement(
             span,
         } => Statement::If {
             condition: resolve_alias_expr(condition, components, span)?,
-            then_statements: then_statements
-                .into_iter()
-                .map(|statement| resolve_alias_statement(statement, components))
-                .collect::<Result<_, _>>()?,
-            else_statements: else_statements
-                .into_iter()
-                .map(|statement| resolve_alias_statement(statement, components))
-                .collect::<Result<_, _>>()?,
+            then_statements: rewrite_compose_statements(
+                then_statements,
+                components,
+                allow_component_writes,
+            )?,
+            else_statements: rewrite_compose_statements(
+                else_statements,
+                components,
+                allow_component_writes,
+            )?,
             span,
         },
         Statement::ForAll {
@@ -1428,13 +1472,61 @@ fn resolve_alias_statement(
             span,
         } => Statement::ForAll {
             binder: resolve_alias_binder(binder, components, span)?,
-            statements: statements
-                .into_iter()
-                .map(|statement| resolve_alias_statement(statement, components))
-                .collect::<Result<_, _>>()?,
+            statements: rewrite_compose_statements(statements, components, allow_component_writes)?,
             span,
         },
     })
+}
+
+/// All compose-side assignment paths share alias/index normalization and write policy.
+fn resolve_alias_lvalue(
+    target: LValue,
+    components: &BTreeMap<String, Component>,
+    span: fsl_syntax::Span,
+    allow_component_writes: bool,
+) -> Result<LValue, CoreError> {
+    let target = match target {
+        LValue::Var(name) => LValue::Var(name),
+        LValue::Index(name, index) => {
+            LValue::Index(name, resolve_alias_expr(index, components, span)?)
+        }
+        LValue::Field(base, name) => match *base {
+            LValue::Var(alias) if components.contains_key(&alias) => {
+                LValue::Var(prefix(&alias, &name))
+            }
+            base => LValue::Field(
+                Box::new(resolve_alias_lvalue(
+                    base,
+                    components,
+                    span,
+                    allow_component_writes,
+                )?),
+                name,
+            ),
+        },
+    };
+    let mut base = &target;
+    while let LValue::Field(parent, _) = base {
+        base = parent;
+    }
+    let (LValue::Var(name) | LValue::Index(name, _)) = base else {
+        unreachable!("field bases were unwrapped")
+    };
+    if !allow_component_writes
+        && components.values().any(|component| {
+            component
+                .names
+                .state
+                .iter()
+                .any(|state| prefix(&component.alias, state) == *name)
+        })
+    {
+        return Err(error_at(
+            "only glue actions may write component state; sync additions and compose init may only write composition-side state",
+            span,
+        ));
+    }
+    Ok(target)
 }
 
 fn sync_action(
@@ -1524,7 +1616,7 @@ fn sync_action(
             .items
             .iter()
             .cloned()
-            .map(|item| resolve_alias_action_item(item, components))
+            .map(|item| resolve_alias_action_item(item, components, false))
             .collect::<Result<Vec<_>, _>>()?,
     );
     if !action.fair && !fair_constituents.is_empty() {
@@ -1812,6 +1904,7 @@ fn resolve_alias_expr(
 fn resolve_alias_action_item(
     item: ActionItem,
     components: &BTreeMap<String, Component>,
+    allow_component_writes: bool,
 ) -> Result<ActionItem, CoreError> {
     Ok(match item {
         ActionItem::Requires(expr, span) => {
@@ -1823,9 +1916,11 @@ fn resolve_alias_action_item(
         ActionItem::Let(name, expr, span) => {
             ActionItem::Let(name, resolve_alias_expr(expr, components, span)?, span)
         }
-        ActionItem::Statement(statement) => {
-            ActionItem::Statement(resolve_alias_statement(statement, components)?)
-        }
+        ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
+            statement,
+            components,
+            allow_component_writes,
+        )?),
     })
 }
 

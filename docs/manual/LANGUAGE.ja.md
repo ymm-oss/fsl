@@ -2085,6 +2085,7 @@ compose OrderSystem {
   コンポーネントで変換をモデル化してください。
 - `internal <alias>.<action>` — その action をインターリービングから除外します。
 - (`=` のない)通常の `action` も書けます(グルー action)。
+  グルー action は compose 側の状態と部品の状態を `alias.var` で直接読み書きできます。
 - 名前と `__`: `spec`・`requirements`・`business`・`compose` の文書で宣言する名前
   (spec、action、パラメータ、`let`、状態変数、property、型、const、enum の
   メンバー、struct のフィールド、process、stage、actor、`use` の alias)には
