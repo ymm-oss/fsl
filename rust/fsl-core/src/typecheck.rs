@@ -19,7 +19,7 @@ pub(crate) struct TypecheckError {
 }
 
 impl TypecheckError {
-    fn with_span(mut self, span: Span) -> Self {
+    pub(crate) fn with_span(mut self, span: Span) -> Self {
         self.span.get_or_insert(span);
         self
     }
@@ -606,13 +606,32 @@ fn reject_colliding_pattern_binding(
     model: &KernelModel,
     span: Span,
 ) -> Result<(), TypecheckError> {
-    let collides_with = if model.state.iter().any(|(name, _)| name == binding) {
+    reject_pattern_binding_name(
+        binding,
+        model.state.iter().map(|(name, _)| name.as_str()),
+        model.consts.keys().map(String::as_str),
+        model.enum_members.keys().map(String::as_str),
+        env.keys().map(String::as_str),
+    )
+    .map_err(|error| error.with_span(span))
+}
+
+/// The same collision rule applies before compose prefixes global names.
+pub(crate) fn reject_pattern_binding_name<'a>(
+    binding: &str,
+    state: impl IntoIterator<Item = &'a str>,
+    constants: impl IntoIterator<Item = &'a str>,
+    enum_members: impl IntoIterator<Item = &'a str>,
+    local: impl IntoIterator<Item = &'a str>,
+) -> Result<(), TypecheckError> {
+    let is_binding = |name: &str| name == binding;
+    let collides_with = if state.into_iter().any(is_binding) {
         "a state variable"
-    } else if model.consts.contains_key(binding) {
+    } else if constants.into_iter().any(is_binding) {
         "a constant"
-    } else if model.enum_members.contains_key(binding) {
+    } else if enum_members.into_iter().any(is_binding) {
         "an enum member"
-    } else if env.contains_key(binding) {
+    } else if local.into_iter().any(is_binding) {
         "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)"
     } else {
         return Ok(());
@@ -620,8 +639,7 @@ fn reject_colliding_pattern_binding(
     Err(error(format!(
         "pattern binding '{binding}' in 'is some({binding})' shadows {collides_with} of the same name; \
          rename the pattern variable"
-    ))
-    .with_span(span))
+    )))
 }
 
 pub(crate) fn lvalue_type(

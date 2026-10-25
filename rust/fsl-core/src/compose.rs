@@ -160,6 +160,7 @@ struct Component {
 #[derive(Clone, Default)]
 struct ComponentNames {
     consts: HashSet<String>,
+    enum_members: HashSet<String>,
     types: HashSet<String>,
     state: HashSet<String>,
     actions: HashSet<String>,
@@ -174,10 +175,12 @@ impl ComponentNames {
                 SpecItem::Const { name, .. } => {
                     names.consts.insert(name.clone());
                 }
-                SpecItem::Type { name, .. }
-                | SpecItem::Enum { name, .. }
-                | SpecItem::Struct { name, .. } => {
+                SpecItem::Type { name, .. } | SpecItem::Struct { name, .. } => {
                     names.types.insert(name.clone());
+                }
+                SpecItem::Enum { name, members, .. } => {
+                    names.types.insert(name.clone());
+                    names.enum_members.extend(members.iter().cloned());
                 }
                 SpecItem::State(fields) => {
                     names
@@ -527,11 +530,10 @@ pub fn lower_compose_with_options(
                         Some(component_origin(component, "init")),
                         statements.len(),
                     ));
-                    init.extend(rewrite_statements(
-                        statements.clone(),
-                        component,
-                        &HashSet::new(),
-                    ));
+                    init.extend(
+                        rewrite_statements(statements.clone(), component, &HashSet::new())
+                            .map_err(component_rewrite_error)?,
+                    );
                     if init_meta.is_none() {
                         init_meta.clone_from(meta);
                     }
@@ -540,10 +542,10 @@ pub fn lower_compose_with_options(
                 SpecItem::Action { name, .. } => {
                     if !internal.contains(&(alias.clone(), name.clone())) {
                         names.insert_action(alias, name);
-                        actions.push(rewrite_component_item(item.clone(), component));
+                        actions.push(rewrite_component_item(item.clone(), component)?);
                     }
                 }
-                _ => static_items.push(rewrite_component_item(item.clone(), component)),
+                _ => static_items.push(rewrite_component_item(item.clone(), component)?),
             }
         }
     }
@@ -693,13 +695,38 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
+type ComponentRewrite<T> = Result<T, crate::typecheck::TypecheckError>;
+
+fn component_rewrite_error(error: crate::typecheck::TypecheckError) -> CoreError {
+    let crate::typecheck::TypecheckError { mut message, span } = error;
+    message.insert_str(0, "invalid model expression: ");
+    if let Some(span) = span {
+        return error_at(message, span);
+    }
+    CoreError {
+        message,
+        line: 0,
+        column: 0,
+        kind: CoreErrorKind::Semantics,
+        origin: None,
+        diagnostic_code: None,
+    }
+}
+
+fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecItem, CoreError> {
+    rewrite_component_item_inner(item, component).map_err(component_rewrite_error)
+}
+
 #[allow(clippy::too_many_lines)]
-fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
+fn rewrite_component_item_inner(
+    item: SpecItem,
+    component: &Component,
+) -> ComponentRewrite<SpecItem> {
     let alias = &component.alias;
-    match item {
+    Ok(match item {
         SpecItem::Const { name, value } => SpecItem::Const {
             name: prefix(alias, &name),
-            value: Box::new(rewrite_expr(*value, component, &HashSet::new())),
+            value: Box::new(rewrite_expr(*value, component, &HashSet::new())?),
         },
         SpecItem::Type {
             name,
@@ -708,8 +735,8 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             symmetric,
         } => SpecItem::Type {
             name: prefix(alias, &name),
-            lo: Box::new(rewrite_expr(*lo, component, &HashSet::new())),
-            hi: Box::new(rewrite_expr(*hi, component, &HashSet::new())),
+            lo: Box::new(rewrite_expr(*lo, component, &HashSet::new())?),
+            hi: Box::new(rewrite_expr(*hi, component, &HashSet::new())?),
             symmetric,
         },
         SpecItem::Enum {
@@ -728,29 +755,45 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             span,
             fields: fields
                 .into_iter()
-                .map(|(name, ty)| (name, rewrite_type(ty, component)))
-                .collect(),
+                .map(|(name, ty)| {
+                    Ok((
+                        name,
+                        rewrite_type(ty, component).map_err(|error| error.with_span(span))?,
+                    ))
+                })
+                .collect::<ComponentRewrite<_>>()?,
         },
         SpecItem::State(fields) => SpecItem::State(
             fields
                 .into_iter()
-                .map(|field| fsl_syntax::StateField {
-                    name: prefix(alias, &field.name),
-                    ty: rewrite_type(field.ty, component),
-                    initializer: field
-                        .initializer
-                        .map(|expr| rewrite_expr(expr, component, &HashSet::new())),
-                    span: field.span,
-                    initializer_span: field.initializer_span,
+                .map(|field| {
+                    Ok(fsl_syntax::StateField {
+                        name: prefix(alias, &field.name),
+                        ty: rewrite_type(field.ty, component)
+                            .map_err(|error| error.with_span(field.span))?,
+                        initializer: field
+                            .initializer
+                            .map(|expr| {
+                                rewrite_expr_at(
+                                    expr,
+                                    component,
+                                    &HashSet::new(),
+                                    field.initializer_span.unwrap_or(field.span),
+                                )
+                            })
+                            .transpose()?,
+                        span: field.span,
+                        initializer_span: field.initializer_span,
+                    })
                 })
-                .collect(),
+                .collect::<ComponentRewrite<_>>()?,
         ),
         SpecItem::Init {
             statements,
             meta,
             annotations,
         } => SpecItem::Init {
-            statements: rewrite_statements(statements, component, &HashSet::new()),
+            statements: rewrite_statements(statements, component, &HashSet::new())?,
             meta,
             annotations,
         },
@@ -767,7 +810,8 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             let params = params
                 .into_iter()
                 .map(|param| rewrite_param(param, component))
-                .collect::<Vec<_>>();
+                .collect::<ComponentRewrite<Vec<_>>>()
+                .map_err(|error| error.with_span(span))?;
             let bound = params
                 .iter()
                 .map(|param| match param {
@@ -777,7 +821,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             SpecItem::Action {
                 name: prefix(alias, &name),
                 params,
-                items: rewrite_action_items(items, component, &bound),
+                items: rewrite_action_items(items, component, &bound, span)?,
                 span,
                 fair,
                 meta,
@@ -793,7 +837,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Invariant {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
             span,
             meta,
             annotations,
@@ -806,7 +850,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Trans {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
             span,
             meta,
             annotations,
@@ -819,13 +863,13 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Reachable {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
             span,
             meta,
             annotations,
         },
         SpecItem::Terminal { expr, span } => SpecItem::Terminal {
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
             span,
         },
         SpecItem::LeadsTo {
@@ -844,20 +888,24 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             let binders = binders
                 .into_iter()
                 .map(|binder| {
-                    let binder = rewrite_binder(binder, component, &bound);
+                    let binder = rewrite_binder(binder, component, &bound)?;
                     bound.insert(binder_name(&binder).to_owned());
-                    binder
+                    Ok(binder)
                 })
-                .collect();
+                .collect::<ComponentRewrite<_>>()?;
             SpecItem::LeadsTo {
                 name: prefix(alias, &name),
                 binders,
-                before: Box::new(rewrite_expr(*before, component, &bound)),
-                after: Box::new(rewrite_expr(*after, component, &bound)),
+                before: Box::new(rewrite_expr_at(*before, component, &bound, span)?),
+                after: Box::new(rewrite_expr_at(*after, component, &bound, span)?),
                 span,
                 meta,
-                decreases: decreases.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
-                within: within.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
+                decreases: decreases
+                    .map(|expr| rewrite_expr_at(*expr, component, &bound, span).map(Box::new))
+                    .transpose()?,
+                within: within
+                    .map(|expr| rewrite_expr_at(*expr, component, &bound, span).map(Box::new))
+                    .transpose()?,
                 helpful: helpful
                     .into_iter()
                     .map(|mut helper| {
@@ -865,11 +913,11 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                         helper.args = helper
                             .args
                             .into_iter()
-                            .map(|arg| rewrite_expr(arg, component, &bound))
-                            .collect();
-                        helper
+                            .map(|arg| rewrite_expr_at(arg, component, &bound, helper.span))
+                            .collect::<ComponentRewrite<_>>()?;
+                        Ok(helper)
                     })
-                    .collect(),
+                    .collect::<ComponentRewrite<_>>()?,
                 annotations,
             }
         }
@@ -887,8 +935,8 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Until {
             name: prefix(alias, &name),
-            before: Box::new(rewrite_expr(*before, component, &HashSet::new())),
-            after: Box::new(rewrite_expr(*after, component, &HashSet::new())),
+            before: Box::new(rewrite_expr_at(*before, component, &HashSet::new(), span)?),
+            after: Box::new(rewrite_expr_at(*after, component, &HashSet::new(), span)?),
             span,
             meta,
             annotations,
@@ -902,8 +950,8 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Unless {
             name: prefix(alias, &name),
-            before: Box::new(rewrite_expr(*before, component, &HashSet::new())),
-            after: Box::new(rewrite_expr(*after, component, &HashSet::new())),
+            before: Box::new(rewrite_expr_at(*before, component, &HashSet::new(), span)?),
+            after: Box::new(rewrite_expr_at(*after, component, &HashSet::new(), span)?),
             span,
             meta,
             annotations,
@@ -912,38 +960,38 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
         | SpecItem::Entity(..)
         | SpecItem::Number(..)
         | SpecItem::Def { .. }) => item,
-    }
+    })
 }
 
-fn rewrite_type(ty: TypeExpr, component: &Component) -> TypeExpr {
-    match ty {
+fn rewrite_type(ty: TypeExpr, component: &Component) -> ComponentRewrite<TypeExpr> {
+    Ok(match ty {
         TypeExpr::Name(name) if component.names.types.contains(&name) => {
             TypeExpr::Name(prefix(&component.alias, &name))
         }
         TypeExpr::Range(lo, hi) => TypeExpr::Range(
-            rewrite_expr(lo, component, &HashSet::new()),
-            rewrite_expr(hi, component, &HashSet::new()),
+            rewrite_expr(lo, component, &HashSet::new())?,
+            rewrite_expr(hi, component, &HashSet::new())?,
         ),
         TypeExpr::Map(key, value) => TypeExpr::Map(
-            Box::new(rewrite_type(*key, component)),
-            Box::new(rewrite_type(*value, component)),
+            Box::new(rewrite_type(*key, component)?),
+            Box::new(rewrite_type(*value, component)?),
         ),
         TypeExpr::Relation(source, target) => TypeExpr::Relation(
-            Box::new(rewrite_type(*source, component)),
-            Box::new(rewrite_type(*target, component)),
+            Box::new(rewrite_type(*source, component)?),
+            Box::new(rewrite_type(*target, component)?),
         ),
-        TypeExpr::Set(inner) => TypeExpr::Set(Box::new(rewrite_type(*inner, component))),
+        TypeExpr::Set(inner) => TypeExpr::Set(Box::new(rewrite_type(*inner, component)?)),
         TypeExpr::Seq(inner, cap) => TypeExpr::Seq(
-            Box::new(rewrite_type(*inner, component)),
-            rewrite_expr(cap, component, &HashSet::new()),
+            Box::new(rewrite_type(*inner, component)?),
+            rewrite_expr(cap, component, &HashSet::new())?,
         ),
-        TypeExpr::Option(inner) => TypeExpr::Option(Box::new(rewrite_type(*inner, component))),
+        TypeExpr::Option(inner) => TypeExpr::Option(Box::new(rewrite_type(*inner, component)?)),
         other => other,
-    }
+    })
 }
 
-fn rewrite_param(param: Param, component: &Component) -> Param {
-    match param {
+fn rewrite_param(param: Param, component: &Component) -> ComponentRewrite<Param> {
+    Ok(match param {
         Param::Typed(name, mut qualified) => {
             if qualified.namespace.is_none() && component.names.types.contains(&qualified.name) {
                 qualified.name = prefix(&component.alias, &qualified.name);
@@ -952,32 +1000,41 @@ fn rewrite_param(param: Param, component: &Component) -> Param {
         }
         Param::Range(name, lo, hi) => Param::Range(
             name,
-            rewrite_expr(lo, component, &HashSet::new()),
-            rewrite_expr(hi, component, &HashSet::new()),
+            rewrite_expr(lo, component, &HashSet::new())?,
+            rewrite_expr(hi, component, &HashSet::new())?,
         ),
-    }
+    })
 }
 
 fn rewrite_action_items(
     items: Vec<ActionItem>,
     component: &Component,
     bound: &HashSet<String>,
-) -> Vec<ActionItem> {
+    action_span: fsl_syntax::Span,
+) -> ComponentRewrite<Vec<ActionItem>> {
+    let mut bound = bound.clone();
     items
         .into_iter()
-        .map(|item| match item {
-            ActionItem::Requires(expr, span) => {
-                ActionItem::Requires(rewrite_expr(expr, component, bound), span)
-            }
-            ActionItem::Ensures(expr, span) => {
-                ActionItem::Ensures(rewrite_expr(expr, component, bound), span)
-            }
-            ActionItem::Let(name, expr, span) => {
-                ActionItem::Let(name, rewrite_expr(expr, component, bound), span)
-            }
-            ActionItem::Statement(statement) => {
-                ActionItem::Statement(rewrite_statement(statement, component, bound))
-            }
+        .map(|item| {
+            Ok(match item {
+                ActionItem::Requires(expr, span) => {
+                    let expr = rewrite_expr_at(expr, component, &bound, action_span)?;
+                    extend_pattern_names(&expr, &mut bound);
+                    ActionItem::Requires(expr, span)
+                }
+                ActionItem::Ensures(expr, span) => ActionItem::Ensures(
+                    rewrite_expr_at(expr, component, &bound, action_span)?,
+                    span,
+                ),
+                ActionItem::Let(name, expr, span) => {
+                    let expr = rewrite_expr_at(expr, component, &bound, action_span)?;
+                    bound.insert(name.clone());
+                    ActionItem::Let(name, expr, span)
+                }
+                ActionItem::Statement(statement) => {
+                    ActionItem::Statement(rewrite_statement(statement, component, &bound)?)
+                }
+            })
         })
         .collect()
 }
@@ -986,7 +1043,7 @@ fn rewrite_statements(
     statements: Vec<Statement>,
     component: &Component,
     bound: &HashSet<String>,
-) -> Vec<Statement> {
+) -> ComponentRewrite<Vec<Statement>> {
     statements
         .into_iter()
         .map(|statement| rewrite_statement(statement, component, bound))
@@ -997,15 +1054,16 @@ fn rewrite_statement(
     statement: Statement,
     component: &Component,
     bound: &HashSet<String>,
-) -> Statement {
-    match statement {
+) -> ComponentRewrite<Statement> {
+    Ok(match statement {
         Statement::Assign {
             target,
             value,
             span,
         } => Statement::Assign {
-            target: rewrite_lvalue(target, component, bound),
-            value: rewrite_expr(value, component, bound),
+            target: rewrite_lvalue(target, component, bound)
+                .map_err(|error| error.with_span(span))?,
+            value: rewrite_expr_at(value, component, bound, span)?,
             span,
         },
         Statement::If {
@@ -1013,40 +1071,49 @@ fn rewrite_statement(
             then_statements,
             else_statements,
             span,
-        } => Statement::If {
-            condition: rewrite_expr(condition, component, bound),
-            then_statements: rewrite_statements(then_statements, component, bound),
-            else_statements: rewrite_statements(else_statements, component, bound),
-            span,
-        },
+        } => {
+            let condition = rewrite_expr_at(condition, component, bound, span)?;
+            let nested = pattern_scope(&condition, bound);
+            Statement::If {
+                condition,
+                then_statements: rewrite_statements(then_statements, component, &nested)?,
+                else_statements: rewrite_statements(else_statements, component, bound)?,
+                span,
+            }
+        }
         Statement::ForAll {
             binder,
             statements,
             span,
         } => {
-            let binder = rewrite_binder(binder, component, bound);
+            let binder =
+                rewrite_binder(binder, component, bound).map_err(|error| error.with_span(span))?;
             let mut nested = bound.clone();
             nested.insert(binder_name(&binder).to_owned());
             Statement::ForAll {
                 binder,
-                statements: rewrite_statements(statements, component, &nested),
+                statements: rewrite_statements(statements, component, &nested)?,
                 span,
             }
         }
-    }
+    })
 }
 
-fn rewrite_lvalue(lvalue: LValue, component: &Component, bound: &HashSet<String>) -> LValue {
-    match lvalue {
+fn rewrite_lvalue(
+    lvalue: LValue,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> ComponentRewrite<LValue> {
+    Ok(match lvalue {
         LValue::Var(name) => LValue::Var(rewrite_state_name(name, component)),
         LValue::Index(name, expr) => LValue::Index(
             rewrite_state_name(name, component),
-            rewrite_expr(expr, component, bound),
+            rewrite_expr(expr, component, bound)?,
         ),
         LValue::Field(base, field) => {
-            LValue::Field(Box::new(rewrite_lvalue(*base, component, bound)), field)
+            LValue::Field(Box::new(rewrite_lvalue(*base, component, bound)?), field)
         }
-    }
+    })
 }
 
 fn rewrite_state_name(name: String, component: &Component) -> String {
@@ -1057,9 +1124,23 @@ fn rewrite_state_name(name: String, component: &Component) -> String {
     }
 }
 
+fn rewrite_expr_at(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+    span: fsl_syntax::Span,
+) -> ComponentRewrite<Expr> {
+    rewrite_expr(expr, component, bound).map_err(|error| error.with_span(span))
+}
+
 #[allow(clippy::too_many_lines)]
-fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> Expr {
-    match expr {
+fn rewrite_expr(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> ComponentRewrite<Expr> {
+    let rewrite = |expr| rewrite_expr(expr, component, bound);
+    Ok(match expr {
         Expr::Var(name)
             if !bound.contains(&name)
                 && (component.names.state.contains(&name)
@@ -1067,18 +1148,18 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
         {
             Expr::Var(prefix(&component.alias, &name))
         }
-        Expr::Some(expr) => Expr::Some(Box::new(rewrite_expr(*expr, component, bound))),
+        Expr::Some(expr) => Expr::Some(Box::new(rewrite(*expr)?)),
         Expr::Set(items) => Expr::Set(
             items
                 .into_iter()
-                .map(|item| rewrite_expr(item, component, bound))
-                .collect(),
+                .map(rewrite)
+                .collect::<ComponentRewrite<_>>()?,
         ),
         Expr::Seq(items) => Expr::Seq(
             items
                 .into_iter()
-                .map(|item| rewrite_expr(item, component, bound))
-                .collect(),
+                .map(rewrite)
+                .collect::<ComponentRewrite<_>>()?,
         ),
         Expr::Struct { name, fields } => Expr::Struct {
             name: if component.names.types.contains(&name) {
@@ -1088,70 +1169,96 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
             },
             fields: fields
                 .into_iter()
-                .map(|(name, expr)| (name, rewrite_expr(expr, component, bound)))
-                .collect(),
+                .map(|(name, expr)| Ok((name, rewrite(expr)?)))
+                .collect::<ComponentRewrite<_>>()?,
         },
         Expr::Call { name, args, span } => Expr::Call {
             name,
             args: args
                 .into_iter()
-                .map(|arg| rewrite_expr(arg, component, bound))
-                .collect(),
+                .map(rewrite)
+                .collect::<ComponentRewrite<_>>()?,
             span,
         },
-        Expr::Index(base, index) => Expr::Index(
-            Box::new(rewrite_expr(*base, component, bound)),
-            Box::new(rewrite_expr(*index, component, bound)),
-        ),
-        Expr::Field(base, name) => {
-            Expr::Field(Box::new(rewrite_expr(*base, component, bound)), name)
+        Expr::Index(base, index) => {
+            Expr::Index(Box::new(rewrite(*base)?), Box::new(rewrite(*index)?))
         }
+        Expr::Field(base, name) => Expr::Field(Box::new(rewrite(*base)?), name),
         Expr::Method {
             receiver,
             name,
             args,
         } => Expr::Method {
-            receiver: Box::new(rewrite_expr(*receiver, component, bound)),
+            receiver: Box::new(rewrite(*receiver)?),
             name,
             args: args
                 .into_iter()
-                .map(|arg| rewrite_expr(arg, component, bound))
-                .collect(),
+                .map(rewrite)
+                .collect::<ComponentRewrite<_>>()?,
         },
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: Box::new(rewrite_expr(*left, component, bound)),
-            right: Box::new(rewrite_expr(*right, component, bound)),
-        },
-        Expr::Neg(expr) => Expr::Neg(Box::new(rewrite_expr(*expr, component, bound))),
-        Expr::Not(expr) => Expr::Not(Box::new(rewrite_expr(*expr, component, bound))),
+        Expr::Binary { op, left, right } => {
+            let left = rewrite(*left)?;
+            let nested = pattern_scope(&left, bound);
+            Expr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(rewrite_expr(*right, component, &nested)?),
+            }
+        }
+        Expr::Neg(expr) => Expr::Neg(Box::new(rewrite(*expr)?)),
+        Expr::Not(expr) => Expr::Not(Box::new(rewrite(*expr)?)),
         Expr::Conditional {
             condition,
             then_expr,
             else_expr,
             spans,
-        } => Expr::Conditional {
-            spans,
-            condition: Box::new(rewrite_expr(*condition, component, bound)),
-            then_expr: Box::new(rewrite_expr(*then_expr, component, bound)),
-            else_expr: Box::new(rewrite_expr(*else_expr, component, bound)),
-        },
-        Expr::Is { expr, pattern } => Expr::Is {
-            expr: Box::new(rewrite_expr(*expr, component, bound)),
-            pattern,
-        },
+        } => {
+            let condition = rewrite_expr_at(*condition, component, bound, spans.condition)?;
+            let nested = pattern_scope(&condition, bound);
+            Expr::Conditional {
+                condition: Box::new(condition),
+                then_expr: Box::new(rewrite_expr_at(
+                    *then_expr,
+                    component,
+                    &nested,
+                    spans.then_expr,
+                )?),
+                else_expr: Box::new(rewrite_expr_at(
+                    *else_expr,
+                    component,
+                    bound,
+                    spans.else_expr,
+                )?),
+                spans,
+            }
+        }
+        Expr::Is { expr, pattern } => {
+            if let fsl_syntax::Pattern::Some(name) = &pattern {
+                crate::typecheck::reject_pattern_binding_name(
+                    name,
+                    component.names.state.iter().map(String::as_str),
+                    component.names.consts.iter().map(String::as_str),
+                    component.names.enum_members.iter().map(String::as_str),
+                    bound.iter().map(String::as_str),
+                )?;
+            }
+            Expr::Is {
+                expr: Box::new(rewrite(*expr)?),
+                pattern,
+            }
+        }
         Expr::Quantified {
             quantifier,
             binder,
             body,
         } => {
-            let binder = rewrite_binder(binder, component, bound);
+            let binder = rewrite_binder(binder, component, bound)?;
             let mut nested = bound.clone();
             nested.insert(binder_name(&binder).to_owned());
             Expr::Quantified {
                 quantifier,
                 binder,
-                body: Box::new(rewrite_expr(*body, component, &nested)),
+                body: Box::new(rewrite_expr(*body, component, &nested)?),
             }
         }
         Expr::Aggregate {
@@ -1159,24 +1266,26 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
             binder,
             value,
         } => {
-            let binder = rewrite_binder(binder, component, bound);
+            let binder = rewrite_binder(binder, component, bound)?;
             let mut nested = bound.clone();
             nested.insert(binder_name(&binder).to_owned());
             Expr::Aggregate {
                 kind,
                 binder,
-                value: value.map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+                value: value
+                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
+                    .transpose()?,
             }
         }
         Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
             name,
-            expr: Box::new(rewrite_expr(*expr, component, bound)),
+            expr: Box::new(rewrite(*expr)?),
             span,
         },
         Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
             name,
-            left: Box::new(rewrite_expr(*left, component, bound)),
-            right: Box::new(rewrite_expr(*right, component, bound)),
+            left: Box::new(rewrite(*left)?),
+            right: Box::new(rewrite(*right)?),
         },
         Expr::TernaryNamed {
             name,
@@ -1185,16 +1294,20 @@ fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> E
             third,
         } => Expr::TernaryNamed {
             name,
-            first: Box::new(rewrite_expr(*first, component, bound)),
-            second: Box::new(rewrite_expr(*second, component, bound)),
-            third: Box::new(rewrite_expr(*third, component, bound)),
+            first: Box::new(rewrite(*first)?),
+            second: Box::new(rewrite(*second)?),
+            third: Box::new(rewrite(*third)?),
         },
         other => other,
-    }
+    })
 }
 
-fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>) -> Binder {
-    match binder {
+fn rewrite_binder(
+    binder: Binder,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> ComponentRewrite<Binder> {
+    Ok(match binder {
         Binder::Typed {
             name,
             mut type_name,
@@ -1209,7 +1322,8 @@ fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>
                 name,
                 type_name,
                 where_expr: where_expr
-                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
+                    .transpose()?,
             }
         }
         Binder::Range {
@@ -1222,10 +1336,11 @@ fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>
             nested.insert(name.clone());
             Binder::Range {
                 name,
-                lo: Box::new(rewrite_expr(*lo, component, bound)),
-                hi: Box::new(rewrite_expr(*hi, component, bound)),
+                lo: Box::new(rewrite_expr(*lo, component, bound)?),
+                hi: Box::new(rewrite_expr(*hi, component, bound)?),
                 where_expr: where_expr
-                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
+                    .transpose()?,
             }
         }
         Binder::Collection {
@@ -1237,12 +1352,13 @@ fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>
             nested.insert(name.clone());
             Binder::Collection {
                 name,
-                collection: Box::new(rewrite_expr(*collection, component, bound)),
+                collection: Box::new(rewrite_expr(*collection, component, bound)?),
                 where_expr: where_expr
-                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
+                    .transpose()?,
             }
         }
-    }
+    })
 }
 
 fn binder_name(binder: &Binder) -> &str {
@@ -1630,7 +1746,7 @@ fn sync_action(
             params: source_params,
             items: source_items,
             ..
-        } = rewrite_component_item(source, component)
+        } = rewrite_component_item(source, component)?
         else {
             unreachable!()
         };
@@ -1884,8 +2000,7 @@ fn resolve_alias_expr_scoped(
         },
         Expr::Binary { op, left, right } => {
             let left = resolve(*left)?;
-            let mut nested = bound.clone();
-            extend_pattern_names(&left, &mut nested);
+            let nested = pattern_scope(&left, bound);
             Expr::Binary {
                 op,
                 left: Box::new(left),
@@ -1976,6 +2091,12 @@ fn resolve_alias_expr_scoped(
 }
 
 /// Match the public Kernel's Is/Binary pattern continuation scope.
+fn pattern_scope(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
+    let mut nested = bound.clone();
+    extend_pattern_names(expr, &mut nested);
+    nested
+}
+
 fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
     match expr {
         Expr::Is {
