@@ -10,7 +10,10 @@
 
 use std::fmt::Write as _;
 
+use fsl_core::KernelModel;
 use serde_json::{Value, json};
+
+use crate::coverage::source_action_coverage;
 
 fn escape(value: &str) -> String {
     value
@@ -1205,6 +1208,7 @@ fn raw_section(explained: &Value, verification: &Value) -> String {
 pub fn render_html_report(
     file: &str,
     source: &str,
+    model: &KernelModel,
     explained: &Value,
     verification: &Value,
     undecided: &[Value],
@@ -1227,7 +1231,8 @@ pub fn render_html_report(
         .cloned()
         .unwrap_or_default();
     let domains = skeleton["domains"].as_array().cloned().unwrap_or_default();
-    let coverage = &verification["action_coverage"];
+    let raw_coverage = &verification["action_coverage"];
+    let coverage = json!(source_action_coverage(model, raw_coverage));
     let covered = coverage.as_object().map_or(0, |values| {
         values
             .values()
@@ -1263,7 +1268,7 @@ pub fn render_html_report(
                 .as_array()
                 .map_or(&[], Vec::as_slice),
         ),
-        actions_section(&actions, coverage),
+        actions_section(&actions, &coverage),
         properties_section(&properties, &checks, verification),
     ];
     if !undecided.is_empty() {

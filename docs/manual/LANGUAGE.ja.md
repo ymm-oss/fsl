@@ -1269,6 +1269,13 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
 ブロックしている requires 節は、それが安価な場合、最小化された unsat core によって
 特定されます。requirements の `branches` については、偽のカバレッジ診断は内部の
 分割 action の `name` を保持し、`display_name` を追加します。
+生の `action_coverage` は生成だけの sentinel の `covered:false` も保持し、verify、induction、
+Worker の JSON は変わりません。公開の coverage 所見には、著者の primary origin、なければ
+kernel action の宣言に正の行・列が必要です。名前や prefix ではない、この共通の位置判定で
+scaffolding を runtime の警告、ledger の coverage 所見、HTML の badge と分母から除外します。
+対象 action がなければ HTML の指標は `0/0` です。HTML Raw Data は元の coverage map を保持します。
+描画が変わる ledger/HTML の既存承認は `drifted`(exit 0)になります。修正された artifact を確認して
+再承認してください。
 
 ### explicit action 実行プロファイル
 
@@ -3134,6 +3141,10 @@ DESIGN-*.md があります)。
   `vacuity_probe_truncated`†を警告します。
   `error` は exit 2 です。→
   [`DESIGN-vacuity.md`](../design/DESIGN-vacuity.md)
+
+  `never_enabled_action` の所見は source-backed action だけが対象です(著者の primary origin、
+  次に kernel 宣言を調べ、正の行・列を要求します)。生成だけの sentinel は生の coverage 証跡に
+  残りますが、これらの警告、ledger coverage 所見、HTML の badge・coverage 分母には含めません。
 
   † `vacuity_probe_truncated`: `vacuous_implication`/`vacuous_leadsto` の
   到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の

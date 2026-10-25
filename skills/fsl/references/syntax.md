@@ -939,7 +939,13 @@ result; the other four kinds (`always_true_requires`, `tautology_over_frozen`,
 still computed and then filtered. `never_enabled_action` is emitted from the
 existing action-coverage exploration, then selected or removed by the same mode;
 the structured `action_coverage` evidence remains a separate ledger projection and
-does not change assurance.
+does not change assurance. Generated-only sentinels remain in raw coverage
+(`covered:false` included), but not in public warnings, ledger coverage findings,
+or HTML badges/coverage denominators. Eligibility uses the authored primary
+origin's positive line/column, then the kernel action's positive source span,
+never a name/prefix test. HTML Raw Data retains the original map; zero eligible
+actions render `0/0`. Corrected ledger/HTML renderings invalidate old artifact
+approval digests (`drifted`, exit 0); review and re-approve them.
 
 `fslc scenarios` has no `--vacuity` mode and never escalates this finding to
 exit 2. It independently retains the same typed `never_enabled_action`

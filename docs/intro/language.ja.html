@@ -1394,7 +1394,14 @@ witness のコントラクトを使わなければなりません。</p>
 </code></pre>
 <p>ブロックしている requires 節は、それが安価な場合、最小化された unsat core によって
 特定されます。requirements の <code>branches</code> については、偽のカバレッジ診断は内部の
-分割 action の <code>name</code> を保持し、<code>display_name</code> を追加します。</p>
+分割 action の <code>name</code> を保持し、<code>display_name</code> を追加します。
+生の <code>action_coverage</code> は生成だけの sentinel の <code>covered:false</code> も保持し、verify、induction、
+Worker の JSON は変わりません。公開の coverage 所見には、著者の primary origin、なければ
+kernel action の宣言に正の行・列が必要です。名前や prefix ではない、この共通の位置判定で
+scaffolding を runtime の警告、ledger の coverage 所見、HTML の badge と分母から除外します。
+対象 action がなければ HTML の指標は <code>0/0</code> です。HTML Raw Data は元の coverage map を保持します。
+描画が変わる ledger/HTML の既存承認は <code>drifted</code>(exit 0)になります。修正された artifact を確認して
+再承認してください。</p>
 <h3 id="explicit-action">explicit action 実行プロファイル</h3>
 <p><code>--engine explicit</code> が結果を判定した場合、エンベロープには <code>cost</code> および
 <code>action_coverage</code> と並んで <code>action_profile</code> が追加されます:</p>
@@ -3169,6 +3176,9 @@ DESIGN-*.md があります)。</p>
   <code>error</code> は exit 2 です。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 </ul>
+<p><code>never_enabled_action</code> の所見は source-backed action だけが対象です(著者の primary origin、
+  次に kernel 宣言を調べ、正の行・列を要求します)。生成だけの sentinel は生の coverage 証跡に
+  残りますが、これらの警告、ledger coverage 所見、HTML の badge・coverage 分母には含めません。</p>
 <p>† <code>vacuity_probe_truncated</code>: <code>vacuous_implication</code>/<code>vacuous_leadsto</code> の
   到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
   budget 付き concrete BFS を共有します。ある候補が、真になることも

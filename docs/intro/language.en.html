@@ -1445,7 +1445,16 @@ and <code>decreases</code>. When a <code>trans</code> is declared, the success o
 </code></pre>
 <p>The blocking requires clause is identified by a minimized unsat core when that is
 cheap. For requirements <code>branches</code>, a false coverage diagnostic keeps the
-internal split-action <code>name</code> and adds <code>display_name</code>.</p>
+internal split-action <code>name</code> and adds <code>display_name</code>.
+Raw <code>action_coverage</code> retains generated-only sentinel entries, including
+<code>covered:false</code>; verify, induction, and Worker JSON are unchanged. Public coverage
+findings require a positive line/column on the authored primary origin, or else
+the kernel action declaration. This shared source-location rule, not a name or
+prefix, excludes scaffolding from runtime warnings, ledger coverage findings,
+and HTML badges and coverage denominators. With no eligible action the HTML
+metric is <code>0/0</code>; HTML Raw Data still contains the original coverage map.
+Affected ledger/HTML approvals become <code>drifted</code> (exit 0) because the rendering
+changes; review the corrected artifact and re-approve it.</p>
 <h3 id="explicit-action-execution-profile">Explicit action execution profile</h3>
 <p>When <code>--engine explicit</code> decides a run, its envelope additionally carries an
 <code>action_profile</code> alongside <code>cost</code> and <code>action_coverage</code>:</p>
@@ -3283,6 +3292,10 @@ DESIGN-*.md).</p>
   <code>vacuity_probe_truncated</code>†. <code>error</code> exits 2. →
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-vacuity.md"><code>DESIGN-vacuity.md</code></a></li>
 </ul>
+<p><code>never_enabled_action</code> findings apply only to source-backed actions (authored
+  primary origin, then kernel declaration, with positive line/column).
+  Generated-only sentinels remain in raw coverage evidence but not in these
+  warnings, ledger coverage findings, or HTML badges/coverage denominators.</p>
 <p>† <code>vacuity_probe_truncated</code>: the <code>vacuous_implication</code>/<code>vacuous_leadsto</code>
   reachability probe shares one budgeted concrete BFS across every
   antecedent/trigger in the spec; a candidate that neither becomes true nor

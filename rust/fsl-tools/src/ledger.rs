@@ -342,16 +342,15 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             raw: verification.clone(),
         });
     }
-    for (name, item) in verification
-        .get("action_coverage")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flatten()
+    for (name, item) in
+        crate::coverage::source_action_coverage(model, &verification["action_coverage"])
+            .into_iter()
+            .flatten()
     {
         if item.get("covered").and_then(Value::as_bool) != Some(false) {
             continue;
         }
-        let metadata = finding_requirement(model, item, "actions", name);
+        let metadata = finding_requirement(model, item, "actions", &name);
         let mut summary = "深さ内で一度も実行可能にならない（死アクション）".to_owned();
         if let Some(blocking) = item
             .get("blocking_requires")
