@@ -2460,20 +2460,23 @@ verify {
   An impl action with both a `maps` clause and a matching inline `action ...`
   item is a duplicate-correspondence, `kind: "type"` check-time error naming
   both origins and locations (same as a mapping file that lists the same action
-  twice). Auto-mapped process
-  transitions are actor-checked; a transition whose actor differs from the
-  business action's actor is a check-time error.
+  twice). A process transition auto-mapped to a same-named business action is
+  actor-checked; a transition whose actor differs from that business action's
+  actor is a check-time error.
 - A requirements transition's `by X` is a free label, not a reference to a
   declared actor: the requirements layer has no `actor` declaration, and
   `check` does not ask whether `X` is declared anywhere. (A `business` process
   is the opposite: a transition whose actor no `actor` line declares is a
-  check-time error.) The label is compared with the business layer only
-  through `implements`, and only for a transition that `implements` maps to
-  the same-named business action automatically, i.e. one that no explicit
-  inline `action ... -> ...` item names (an empty `implements { }` body maps
-  every transition this way; so does `maps auto`). A transition mapped by an
-  explicit inline `action` item, and every transition of a spec without
-  `implements`, has its `by` label checked against nothing.
+  check-time error.) The label is compared with a business actor only when a
+  refinement maps the transition automatically to the business action of the
+  same name. The inline `implements` seam does this, in `check` and `verify`,
+  for every transition that no explicit inline `action ... -> ...` item names
+  (with an empty body or with `maps auto`); a standalone refinement file does
+  it under `maps auto`, in `fslc refine` and in a `fslc chain` refine layer.
+  A mismatch is a `kind: "type"` error. The label is checked against nothing
+  for a transition mapped by an explicit `action` item, for a transition with
+  no same-named business action (the inline seam maps it to `stutter`), and,
+  in `check`, for every transition of a spec without `implements`.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen

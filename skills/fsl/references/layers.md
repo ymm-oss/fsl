@@ -93,12 +93,16 @@ the relevant role skill directs it.
   refinement, restricted to entity/number names the abstraction declares (impl-only
   names stay on the implementation side). An empty body
   auto-generates identity refinement when names match, `maps auto` is allowed for
-  same-name kernel-wrapper state/actions, and auto-mapped process transitions are
-  actor-checked. That check is the only place a requirements `by X` meets the
-  business actors: requirements has no `actor` declaration, so `by X` is a free
-  label `check` never looks up, and a transition mapped by an explicit inline
-  `action` item, or in a spec without `implements`, is not actor-checked. The
-  inline block also takes action-correspondence items
+  same-name kernel-wrapper state/actions, and a process transition auto-mapped
+  to a same-named business action is actor-checked. Auto-mapping is the only
+  place a requirements `by X` meets the business actors: requirements has no
+  `actor` declaration, so `by X` is a free label `check` never looks up. The
+  inline seam auto-maps every transition no explicit inline `action` item names
+  (empty body or `maps auto`); a standalone refinement file auto-maps under
+  `maps auto` (`fslc refine`, a `fslc chain` refine layer). Not actor-checked:
+  a transition mapped by an explicit `action` item, one with no same-named
+  business action (the inline seam maps it to `stutter`), and, in `check`, a
+  spec without `implements`. The inline block also takes action-correspondence items
   (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
   syntax a separate refinement file uses. `acceptance` is replay-checked at
   check time and supports `expect E id in Stage` as well as `expect <expr>`,
@@ -350,8 +354,9 @@ verify {
   action name is a duplicate-correspondence error (`kind: "type"`,
   with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
-  `name__b<N>` alias. Auto-mapped process transitions are statically
-  actor-checked; an actor mismatch is a check-time type error. The seam's
+  `name__b<N>` alias. A process transition auto-mapped to a same-named
+  business action is statically actor-checked; an actor mismatch is a
+  check-time type error. The seam's
   verdict is reported as `implements: {abs, result}` with `result` one of
   `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
   requirements spec breaks its own bounds/invariants, so no refinement verdict

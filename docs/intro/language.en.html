@@ -2511,20 +2511,23 @@ verify {
   An impl action with both a <code>maps</code> clause and a matching inline <code>action ...</code>
   item is a duplicate-correspondence, <code>kind: "type"</code> check-time error naming
   both origins and locations (same as a mapping file that lists the same action
-  twice). Auto-mapped process
-  transitions are actor-checked; a transition whose actor differs from the
-  business action's actor is a check-time error.</li>
+  twice). A process transition auto-mapped to a same-named business action is
+  actor-checked; a transition whose actor differs from that business action's
+  actor is a check-time error.</li>
 <li>A requirements transition's <code>by X</code> is a free label, not a reference to a
   declared actor: the requirements layer has no <code>actor</code> declaration, and
   <code>check</code> does not ask whether <code>X</code> is declared anywhere. (A <code>business</code> process
   is the opposite: a transition whose actor no <code>actor</code> line declares is a
-  check-time error.) The label is compared with the business layer only
-  through <code>implements</code>, and only for a transition that <code>implements</code> maps to
-  the same-named business action automatically, i.e. one that no explicit
-  inline <code>action ... -&gt; ...</code> item names (an empty <code>implements { }</code> body maps
-  every transition this way; so does <code>maps auto</code>). A transition mapped by an
-  explicit inline <code>action</code> item, and every transition of a spec without
-  <code>implements</code>, has its <code>by</code> label checked against nothing.</li>
+  check-time error.) The label is compared with a business actor only when a
+  refinement maps the transition automatically to the business action of the
+  same name. The inline <code>implements</code> seam does this, in <code>check</code> and <code>verify</code>,
+  for every transition that no explicit inline <code>action ... -&gt; ...</code> item names
+  (with an empty body or with <code>maps auto</code>); a standalone refinement file does
+  it under <code>maps auto</code>, in <code>fslc refine</code> and in a <code>fslc chain</code> refine layer.
+  A mismatch is a <code>kind: "type"</code> error. The label is checked against nothing
+  for a transition mapped by an explicit <code>action</code> item, for a transition with
+  no same-named business action (the inline seam maps it to <code>stutter</code>), and,
+  in <code>check</code>, for every transition of a spec without <code>implements</code>.</li>
 <li><code>acceptance</code> is replay-verified at check time by the concrete Monitor (a
   failure is <code>kind: "acceptance"</code>). It supports <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> alongside <code>expect &lt;expr&gt;</code> and flows directly into scenarios / testgen

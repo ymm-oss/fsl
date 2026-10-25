@@ -118,8 +118,10 @@ skill produced.
      refinement when process/action/stage names match
    - `maps auto` is allowed inside `implements` for same-name kernel-wrapper
      state/actions; explicit `map` and action correspondences override it
-   - auto-mapped process transitions are actor-checked; a requirements transition
-     whose actor differs from the business action's actor is a check-time error
+   - a process transition auto-mapped to a same-named business action is
+     actor-checked; a requirements transition whose actor differs from that
+     business action's actor is a check-time error (a transition with no
+     same-named business action maps to `stutter` and is not actor-checked)
    - the inline block also accepts action correspondence items —
      `action impl(...) -> abs(...) | stutter` — including an arity change
      between impl and abs params, the same syntax a separate refinement file uses
