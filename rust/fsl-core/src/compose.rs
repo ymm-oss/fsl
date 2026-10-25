@@ -809,7 +809,18 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
                 meta,
                 decreases: decreases.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
                 within: within.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
-                helpful,
+                helpful: helpful
+                    .into_iter()
+                    .map(|mut helper| {
+                        helper.action = prefix(alias, &helper.action);
+                        helper.args = helper
+                            .args
+                            .into_iter()
+                            .map(|arg| rewrite_expr(arg, component, &bound))
+                            .collect();
+                        helper
+                    })
+                    .collect(),
                 annotations,
             }
         }
