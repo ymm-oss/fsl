@@ -1434,9 +1434,8 @@ enum ComposeWriteContext {
 impl ComposeWriteContext {
     fn permits_component_write(self) -> bool {
         match self {
-            Self::Glue => true,
+            Self::Glue | Self::Init => true,
             Self::Sync => false,
-            Self::Init => false,
         }
     }
 }
@@ -1551,7 +1550,7 @@ fn resolve_alias_lvalue(
         })
     {
         return Err(error_at(
-            "only glue actions may write component state; sync additions and compose init may only write composition-side state",
+            "sync additional statements may only write composition-side state",
             span,
         ));
     }

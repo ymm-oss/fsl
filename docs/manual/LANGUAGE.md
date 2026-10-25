@@ -2197,6 +2197,7 @@ compose OrderSystem {
 - `internal <alias>.<action>` — excludes that action from interleaving.
 - An ordinary `action` (without `=`) can also be written (a glue action).
   A glue action reads and writes composition-side state and component state directly via `alias.var`.
+  Compose `init` can also initialize component state via `alias.var`; overlapping a component's own `init` assignment is rejected as duplicate initialization.
 - Names and `__`: a name you declare in a `spec`, `requirements`, `business`, or
   `compose` document (a spec, action, parameter, `let`, state variable, property,
   type, const, enum member, struct field, process, stage, actor, or `use` alias)

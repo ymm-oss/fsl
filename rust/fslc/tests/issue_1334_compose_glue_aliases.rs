@@ -7,7 +7,8 @@
 //! target 'a'`, and typed params with `qualified type remained`. Physical-name
 //! controls establish each intended verdict before asserting the alias form.
 //! Shared target traversal must also resolve local-map indices in sync/init,
-//! WITHOUT permitting component writes from those two restricted contexts.
+//! Sync additions cannot write component state; compose init may initialize it
+//! only when the component does not already initialize the same location.
 
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
@@ -281,8 +282,44 @@ fn a1334_sync_addition_rejects_component_write_at_assignment() {
 }
 
 #[test]
-fn a1334_compose_init_rejects_component_write_at_assignment() {
-    reject_restricted_component_write("  init {\n    a.on = true\n  }", "a.on");
+fn a1334_compose_init_initializes_component_state_but_rejects_duplicate_init() {
+    let uninitialized = component(false).replace("  init { on = false }\n", "");
+    for on in [false, true] {
+        let source = compose(&format!(
+            "  init {{ a.on = {on} }}\n  invariant Off {{ not a.on }}"
+        ));
+        let dir = scratch(
+            "issue-1334-init-owner",
+            &[("a.fsl", &uninitialized), ("c.fsl", &source)],
+        );
+        let checked = check(&dir, "c.fsl");
+        assert_eq!(checked.1, 0, "{}", checked.0);
+        let result = verify(&dir, "c.fsl");
+        verdict(&result, if on { "violated" } else { "verified" });
+        if on {
+            assert_eq!(result.0["invariant"], "Off");
+        }
+    }
+    let source = compose("  init { a.on = true }");
+    let physical = source.replace("a.on =", "a__on =");
+    let dir = scratch(
+        "issue-1334-init-duplicate",
+        &[
+            ("a.fsl", &component(false)),
+            ("c.fsl", &source),
+            ("physical.fsl", &physical),
+        ],
+    );
+    let control = check(&dir, "physical.fsl");
+    assert_eq!(control.1, 2, "{}", control.0);
+    eprintln!("duplicate init physical={}", control.0);
+    let result = check(&dir, "c.fsl");
+    assert_eq!(result.1, 2, "{}", result.0);
+    assert_eq!(result.0["message"], control.0["message"]);
+    assert_eq!(
+        result.0["message"],
+        "state variable 'a__on' assigned more than once in init"
+    );
 }
 
 #[test]
