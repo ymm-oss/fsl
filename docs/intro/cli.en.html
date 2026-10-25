@@ -42,7 +42,7 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
 result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
-governance `preservation` folds into `check`/`verify`/`scenarios` through the same mapping (§13). The fold
+governance `preservation` folds into `check`/`verify`/`scenarios`/`testgen` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
@@ -56,7 +56,9 @@ For inline `implements`, the ledger body also shows the folded verdict and
 only `refines` is green, including passing seams. Ledgers without `implements`
 are byte-identical. Previously approved inline-implements ledgers now report
 `drifted` in `approval check` (exit 0): review the section and re-approve them.
-The same
+`testgen` refuses a failed seam or preservation with the same verify failure
+envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
+and writes no harness. The same
 `2` mapping is fail-closed for `chain`&#x27;s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`&#x27;s replay input (a

@@ -1137,7 +1137,7 @@ indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
-`preservation` も同じ対応付けで `check` / `verify` / `scenarios` に畳み込まれます(§13)。畳み込みは検証封筒を
+`preservation` も同じ対応付けで `check` / `verify` / `scenarios` / `testgen` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
@@ -1149,7 +1149,8 @@ governance とリスク一覧より前の `## inline implements` 節に畳み込
 `abs` / `result` も示します。通る seam も表示し、`refines` だけが緑です。
 `implements` のない ledger は byte 一致のままです。既承認の inline-implements ledger は
 描画 digest が変わり、`approval check` で `drifted`(exit 0)になります。節を確認して再承認してください。
-同じ `2` の
+`testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
+`verify` と同じ失敗封筒と exit 1(契約エラーは exit 2)を返し、ハーネスを書きません。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1929,6 +1930,10 @@ requirements の `acceptance` は**その層**の scenarios/testgen へ流れる
 fail closed です。compose は、明示の検査済み names/order ブリッジを使います。
 Public Kernel は不完全なマルチファイルの provenance を意図的に拒否するためです。
 エクスポートエラーの後のフォールバックではなく、同じアダプタに入ります。
+ウォーク、出力パスの処理、生成より前に、`testgen` は `scenarios` と同じ畳み込みで
+inline `implements` と governance preservation を検査します。失敗した場合は scenarios 形ではなく
+`verify` の生成元による失敗封筒と exit(seam/preservation の失敗は 1、契約エラーは 2)を返し、
+ハーネスを書きません。通る文書と、non-strict で一部だけ到達したシナリオの通常の生成動作は変わりません。
 
 固定シードのウォークは 100 ステップを上限とする具象 Monitor の実行であり、
 enabled な action が無くなればそこで止まります。`--depth` には束縛され **ません**。
@@ -2627,7 +2632,8 @@ governance 契約のエラー(委譲先の business ファイル、control、`sa
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
 `fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
 すべての preservation とその結果を、失敗したものに印を付けて示します)、`fslc scenarios` は
-`verify` と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
+`verify` と同じように preservation を自身の封筒へ畳み込み、`testgen` は preservation の失敗時に
+kernel 経路でも verify の失敗封筒と exit を返してハーネスを書かず、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
 exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が

@@ -1186,7 +1186,7 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
-governance `preservation` folds into `check`/`verify`/`scenarios` through the same mapping (§13). The fold
+governance `preservation` folds into `check`/`verify`/`scenarios`/`testgen` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
@@ -1200,7 +1200,9 @@ For inline `implements`, the ledger body also shows the folded verdict and
 only `refines` is green, including passing seams. Ledgers without `implements`
 are byte-identical. Previously approved inline-implements ledgers now report
 `drifted` in `approval check` (exit 0): review the section and re-approve them.
-The same
+`testgen` refuses a failed seam or preservation with the same verify failure
+envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
+and writes no harness. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -2009,6 +2011,12 @@ Schema/version/spec mismatches, unknown state/action/parameter names, and
 malformed input fail closed. Compose uses an explicit checked names/order bridge because
 Public Kernel intentionally rejects incomplete multi-file provenance; it enters
 the same adapter rather than falling back after an export error.
+Before the walk, output-path handling, or generation, `testgen` checks inline
+`implements` and governance preservations through the same fold as `scenarios`.
+If either fails, it returns the `verify` owner's failure envelope and exit
+(1 for a failed seam/preservation, 2 for a contract error), not a scenarios-shaped
+envelope, and writes no harness. Passing documents and non-strict partially
+reachable scenarios retain their ordinary generation behavior.
 
 The fixed-seed walk is a concrete Monitor run capped at 100 steps, and it stops
 early when no action is enabled; it is **not** bounded by `--depth`. It can
@@ -2734,7 +2742,9 @@ Consumers of the `check`/`verify` envelope read the folded verdict: a
 exit 1 from the same baseline (the ledger body also states that verdict and
 lists every preservation with its result, failing ones marked), `fslc
 scenarios` folds the preservations into its own envelope as `verify` does,
-and the browser Worker folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
+`testgen` returns the verify failure envelope and exit without a harness when
+a preservation fails (including on the kernel path), and the browser Worker
+folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
 preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
 `verify` reported no `governance` section at all (and answered `verified` even
 for a contract `check` rejected). A CI that gated on the exit

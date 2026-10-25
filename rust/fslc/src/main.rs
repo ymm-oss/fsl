@@ -5295,8 +5295,9 @@ fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32)
 /// is folded here, in `run_verify_from_source`'s order (seam, then
 /// preservations) and through the same owners, so there is no second
 /// mapping; any other envelope is an error or the already-folded fallback.
-/// The `testgen` / `explain` / `ledger` callers of the builder are not
-/// changed.
+/// `testgen` uses this same fold as a gate, returning the verify owner's
+/// envelope on failure before generating a harness. The `explain` / `ledger`
+/// callers of the builder are unchanged.
 fn fold_scenarios_refinements(
     path: &Path,
     source: &str,
@@ -12400,6 +12401,7 @@ fn run_testgen(
 }
 
 /// Generate a test scaffold from one caller-owned root-source snapshot.
+#[allow(clippy::too_many_lines)]
 fn run_testgen_from_source(
     path: &Path,
     source: &str,
@@ -12426,6 +12428,20 @@ fn run_testgen_from_source(
         // destroying the trace. Status 3 (internal) is propagated the same
         // way for the same reason.
         return (scenarios, status);
+    }
+    let (scenarios, status) = fold_scenarios_refinements(path, source, depth, scenarios, status);
+    if status != 0 {
+        // Use the same failure-envelope owner as the kernel-failure path,
+        // not the scenarios-shaped fold result. Gate before walk or writes.
+        return run_verify_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
         Ok(fslc_rust::TestgenWalk::Clean(walk)) => walk,
