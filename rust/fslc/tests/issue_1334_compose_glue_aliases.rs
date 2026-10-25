@@ -406,3 +406,45 @@ fn a1334_shadow_property_quantifier_respects_lexical_binding() {
     assert_eq!(result.0["message"], control.0["message"]);
     assert_eq!(result.0["loc"], control.0["loc"]);
 }
+
+fn shadowed_pattern_branch(action: &str) {
+    let source = |binding| {
+        compose(&format!(
+            "  state {{ opt: Option<Int>, seen: Bool }}\n  init {{ opt = some(1) seen = false }}\n  {}",
+            action.replace("BINDING", binding)
+        ))
+    };
+    let dir = scratch(
+        "issue-1334-pattern-branch",
+        &[
+            ("a.fsl", &component(false)),
+            ("control.fsl", &source("x")),
+            ("alias.fsl", &source("a")),
+        ],
+    );
+    let control = check(&dir, "control.fsl");
+    assert_eq!(control.1, 2, "{}", control.0);
+    let result = check(&dir, "alias.fsl");
+    assert_eq!(result.1, control.1, "{}", result.0);
+    assert_eq!(result.0["kind"], control.0["kind"]);
+    assert_eq!(result.0["loc"], control.0["loc"]);
+    assert_eq!(
+        result.0["message"],
+        control.0["message"]
+            .as_str()
+            .expect("control error")
+            .replace("'x'", "'a'")
+    );
+}
+
+#[test]
+fn a1334_shadow_pattern_in_statement_branch_is_not_a_component_alias() {
+    shadowed_pattern_branch("action glue() { if opt is some(BINDING) { seen = BINDING.on } }");
+}
+
+#[test]
+fn a1334_shadow_pattern_in_expression_branch_is_not_a_component_alias() {
+    shadowed_pattern_branch(
+        "action glue() { seen = if opt is some(BINDING) then BINDING.on else false }",
+    );
+}
