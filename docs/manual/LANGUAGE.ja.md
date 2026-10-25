@@ -2364,23 +2364,27 @@ verify {
   します。`maps` 節と、それに一致するインラインの `action ...` 項目の両方を持つ
   impl の action は、対応の重複であり、両方の起源と位置を名指しする
   `kind: "type"` の check 時エラーです(同じ action を 2 回列挙するマッピング
-  ファイルと同じです)。同名の business の action へ auto マップされた process の
-  transition は actor 検査されます。actor がその business の action の actor と
-  異なる transition は check 時エラーです。
+  ファイルと同じです)。継ぎ目が評価されるときは、同名の business の action へ
+  auto マップされた process の transition は actor 検査されます。actor がその
+  business の action の actor と異なる transition は check 時エラーです。
 - requirements の transition の `by X` は自由なラベルで、宣言された actor を
   指すものではありません。requirements レイヤーには `actor` の宣言が無く、
   `check` は `X` がどこかで宣言されているかを見ません(`business` の process は
   逆で、どの `actor` 行も宣言していない actor を使う transition は check 時
   エラーです)。このラベルが business の actor と照合されるのは、refinement が
-  その transition を同名の business の action へ自動で対応付けたときだけです。
-  インラインの `implements` の継ぎ目は、`check` と `verify` で、明示のインライン
-  `action ... -> ...` 項目が名指ししていないすべての transition にこれを行います
-  (空の本体でも `maps auto` でも同じです)。単独の refinement ファイルは
-  `maps auto` のもとで、`fslc refine` と `fslc chain` の refine 層でこれを行い
-  ます。食い違いは `kind: "type"` のエラーです。明示の `action` 項目で対応付けた
-  transition、同名の business の action が無い transition(インラインの継ぎ目は
-  `stutter` へ対応付けます)、そして `check` における `implements` の無い spec の
-  すべての transition では、`by` のラベルは何とも照合されません。
+  その transition を同名の business の action へ自動で対応付け、その refinement
+  が評価されたときだけです。自動の対応付けとは、`maps auto` によるものと、
+  インラインの `implements` の継ぎ目が、明示のインライン `action ... -> ...`
+  項目が名指ししていないすべての transition を暗黙に対応付けるものです。食い違いは
+  `kind: "type"` のエラーです。たとえば、インラインの継ぎ目は、範囲を選ばない
+  `check` や `verify` と `fslc scenarios` では評価されますが、`--property` などで
+  範囲を選んだ `verify` では評価されません(上述)。refinement ファイルの
+  `maps auto` は `fslc refine` や `fslc chain` の refine 層で評価されます。
+  `fslc diff` は mapping が無いと 2 つの版の間の `maps auto` の refinement を
+  自分で作るので、そこでは `by` のラベルの違いが自動対応の失敗として現れます。
+  明示の `action` 項目で対応付けた transition、business 側に同名の action が
+  無いためにインラインの継ぎ目が `stutter` へ対応付ける transition、そしてその
+  ような refinement が評価されないときには、`by` のラベルは何とも照合されません。
 - `acceptance` は、check 時に具象の Monitor によって replay 検証されます(失敗は
   `kind: "acceptance"`)。`expect <expr>` と並んで `expect <Entity> <id> in
   <Stage>` をサポートし、scenarios / testgen へ直接流れ込みます(= 受け入れ基準が

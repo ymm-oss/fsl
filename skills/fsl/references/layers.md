@@ -97,12 +97,18 @@ the relevant role skill directs it.
   to a same-named business action is actor-checked. Auto-mapping is the only
   place a requirements `by X` meets the business actors: requirements has no
   `actor` declaration, so `by X` is a free label `check` never looks up. The
-  inline seam auto-maps every transition no explicit inline `action` item names
-  (empty body or `maps auto`); a standalone refinement file auto-maps under
-  `maps auto` (`fslc refine`, a `fslc chain` refine layer). Not actor-checked:
-  a transition mapped by an explicit `action` item, one with no same-named
-  business action (the inline seam maps it to `stutter`), and, in `check`, a
-  spec without `implements`. The inline block also takes action-correspondence items
+  comparison happens when a refinement auto-maps the transition to the
+  same-named business action — via `maps auto`, or via the inline seam's
+  implicit auto-mapping of every transition no explicit inline `action` item
+  names — and that refinement is evaluated. Examples: the inline seam runs in
+  an unscoped `check`/`verify` and in `scenarios`, not in a `verify` scoped
+  with `--property` and the like; a refinement file's `maps auto` runs in
+  `fslc refine` or a `fslc chain` refine layer; `fslc diff` without a mapping
+  builds its own `maps auto` refinement between the two versions, so a changed
+  `by` label shows up there as an automatic-mapping failure. Not actor-checked:
+  a transition mapped by an explicit `action` item, one the inline seam maps to
+  `stutter` (no same-named business action), and any run that evaluates no
+  such refinement. The inline block also takes action-correspondence items
   (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
   syntax a separate refinement file uses. `acceptance` is replay-checked at
   check time and supports `expect E id in Stage` as well as `expect <expr>`,
@@ -354,9 +360,9 @@ verify {
   action name is a duplicate-correspondence error (`kind: "type"`,
   with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
-  `name__b<N>` alias. A process transition auto-mapped to a same-named
-  business action is statically actor-checked; an actor mismatch is a
-  check-time type error. The seam's
+  `name__b<N>` alias. Whenever the seam is evaluated, a process transition
+  auto-mapped to a same-named business action is statically actor-checked; an
+  actor mismatch is a check-time type error. The seam's
   verdict is reported as `implements: {abs, result}` with `result` one of
   `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
   requirements spec breaks its own bounds/invariants, so no refinement verdict

@@ -2416,23 +2416,27 @@ verify {
   します。<code>maps</code> 節と、それに一致するインラインの <code>action ...</code> 項目の両方を持つ
   impl の action は、対応の重複であり、両方の起源と位置を名指しする
   <code>kind: "type"</code> の check 時エラーです(同じ action を 2 回列挙するマッピング
-  ファイルと同じです)。同名の business の action へ auto マップされた process の
-  transition は actor 検査されます。actor がその business の action の actor と
-  異なる transition は check 時エラーです。</li>
+  ファイルと同じです)。継ぎ目が評価されるときは、同名の business の action へ
+  auto マップされた process の transition は actor 検査されます。actor がその
+  business の action の actor と異なる transition は check 時エラーです。</li>
 <li>requirements の transition の <code>by X</code> は自由なラベルで、宣言された actor を
   指すものではありません。requirements レイヤーには <code>actor</code> の宣言が無く、
   <code>check</code> は <code>X</code> がどこかで宣言されているかを見ません(<code>business</code> の process は
   逆で、どの <code>actor</code> 行も宣言していない actor を使う transition は check 時
   エラーです)。このラベルが business の actor と照合されるのは、refinement が
-  その transition を同名の business の action へ自動で対応付けたときだけです。
-  インラインの <code>implements</code> の継ぎ目は、<code>check</code> と <code>verify</code> で、明示のインライン
-  <code>action ... -&gt; ...</code> 項目が名指ししていないすべての transition にこれを行います
-  (空の本体でも <code>maps auto</code> でも同じです)。単独の refinement ファイルは
-  <code>maps auto</code> のもとで、<code>fslc refine</code> と <code>fslc chain</code> の refine 層でこれを行い
-  ます。食い違いは <code>kind: "type"</code> のエラーです。明示の <code>action</code> 項目で対応付けた
-  transition、同名の business の action が無い transition(インラインの継ぎ目は
-  <code>stutter</code> へ対応付けます)、そして <code>check</code> における <code>implements</code> の無い spec の
-  すべての transition では、<code>by</code> のラベルは何とも照合されません。</li>
+  その transition を同名の business の action へ自動で対応付け、その refinement
+  が評価されたときだけです。自動の対応付けとは、<code>maps auto</code> によるものと、
+  インラインの <code>implements</code> の継ぎ目が、明示のインライン <code>action ... -&gt; ...</code>
+  項目が名指ししていないすべての transition を暗黙に対応付けるものです。食い違いは
+  <code>kind: "type"</code> のエラーです。たとえば、インラインの継ぎ目は、範囲を選ばない
+  <code>check</code> や <code>verify</code> と <code>fslc scenarios</code> では評価されますが、<code>--property</code> などで
+  範囲を選んだ <code>verify</code> では評価されません(上述)。refinement ファイルの
+  <code>maps auto</code> は <code>fslc refine</code> や <code>fslc chain</code> の refine 層で評価されます。
+  <code>fslc diff</code> は mapping が無いと 2 つの版の間の <code>maps auto</code> の refinement を
+  自分で作るので、そこでは <code>by</code> のラベルの違いが自動対応の失敗として現れます。
+  明示の <code>action</code> 項目で対応付けた transition、business 側に同名の action が
+  無いためにインラインの継ぎ目が <code>stutter</code> へ対応付ける transition、そしてその
+  ような refinement が評価されないときには、<code>by</code> のラベルは何とも照合されません。</li>
 <li><code>acceptance</code> は、check 時に具象の Monitor によって replay 検証されます(失敗は
   <code>kind: "acceptance"</code>)。<code>expect &lt;expr&gt;</code> と並んで <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> をサポートし、scenarios / testgen へ直接流れ込みます(= 受け入れ基準が
