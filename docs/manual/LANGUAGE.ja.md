@@ -2065,6 +2065,7 @@ compose OrderSystem {
   各コンポーネント action の requires / 本体 / ensures をマージします。追加の文は
   合成側の状態にのみ代入できます
   (同じコンポーネントの 2 つの action を同期させることはできません)。
+  破壊的な削除 (#1334): 以前は `check` を通った `alias__x` のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき

@@ -48,7 +48,11 @@ compose OrderSystem {
   - body = the union of each action's body + additional statements (simultaneous
     assignment; since the write targets are disjoint across components and additional
     statements can only write composition-side state, there is no conflict —
-    synchronizing two actions of the same component is not allowed)
+     synchronizing two actions of the same component is not allowed)
+   - Breaking removal (#1334): additional statements also reject component-state
+     assignments written with physical names such as `alias__x`, at the assignment's
+     location; those spellings previously passed `check`. The corpus transition set
+     is recorded by the orchestrator's base/head sweep, not inferred from this note.
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state
     expressions

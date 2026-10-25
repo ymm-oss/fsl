@@ -240,12 +240,15 @@ fn a1334_index_compose_init_local_map() {
     local_map_index("init");
 }
 
-fn reject_restricted_component_write(body: &str) {
+fn reject_restricted_component_write(body: &str, target: &str) {
     let source = compose(body);
     let (line, column) = source
         .lines()
         .enumerate()
-        .find_map(|(line, text)| text.find("a.on =").map(|column| (line + 1, column + 1)))
+        .find_map(|(line, text)| {
+            text.find(&format!("{target} ="))
+                .map(|column| (line + 1, column + 1))
+        })
         .expect("assignment location");
     let dir = scratch(
         "issue-1334-restricted",
@@ -271,12 +274,23 @@ fn reject_restricted_component_write(body: &str) {
 
 #[test]
 fn a1334_sync_addition_rejects_component_write_at_assignment() {
-    reject_restricted_component_write("  action together() = a.stay() {\n    a.on = true\n  }");
+    reject_restricted_component_write(
+        "  action together() = a.stay() {\n    a.on = true\n  }",
+        "a.on",
+    );
 }
 
 #[test]
 fn a1334_compose_init_rejects_component_write_at_assignment() {
-    reject_restricted_component_write("  init {\n    a.on = true\n  }");
+    reject_restricted_component_write("  init {\n    a.on = true\n  }", "a.on");
+}
+
+#[test]
+fn a1334_sync_addition_rejects_physical_component_write_at_assignment() {
+    reject_restricted_component_write(
+        "  action together() = a.stay() {\n    a__on = true\n  }",
+        "a__on",
+    );
 }
 
 fn shadowed_alias_case(body: &str) {

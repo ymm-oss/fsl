@@ -1432,10 +1432,10 @@ enum ComposeWriteContext {
 }
 
 impl ComposeWriteContext {
-    fn permits_component_write(self, via_alias: bool) -> bool {
+    fn permits_component_write(self) -> bool {
         match self {
             Self::Glue => true,
-            Self::Sync => !via_alias,
+            Self::Sync => false,
             Self::Init => false,
         }
     }
@@ -1541,7 +1541,7 @@ fn resolve_alias_lvalue(
     let (LValue::Var(name) | LValue::Index(name, _)) = base else {
         unreachable!("field bases were unwrapped")
     };
-    if !context.permits_component_write(via_alias)
+    if !context.permits_component_write()
         && components.values().any(|component| {
             component
                 .names

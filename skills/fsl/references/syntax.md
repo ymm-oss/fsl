@@ -643,6 +643,10 @@ compose <Name> {
 }
 ```
 
+Sync additional statements may assign only composition-side state: component
+targets are rejected with a located error, including physical `alias__x` names
+that previously passed `check` (breaking removal, #1334).
+
 Compose synchronization does **not** inherit `fair` from component actions. If a
 fair constituent action is synchronized into a non-fair composite action, the
 result JSON `warnings` includes `kind: "fair_not_inherited"` naming the

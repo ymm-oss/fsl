@@ -2175,6 +2175,7 @@ compose OrderSystem {
   merges the requires / body / ensures of each component action, and the
   additional statements may only assign to the composition-side state
   (synchronizing two actions of the same component is not allowed).
+  Breaking removal (#1334): additional statements assigning component state via physical names such as `alias__x`, which previously passed `check`, now produce a located error too.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write
