@@ -455,6 +455,7 @@ pub fn lower_compose_with_options(
     resolver: &dyn FileResolver,
     options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
+    let compose = expand_compose_predicates(compose)?;
     let mut components = BTreeMap::new();
     let mut component_annotations = Annotations::default();
     let mut order = Vec::new();
@@ -612,6 +613,52 @@ pub fn lower_compose_with_options(
             .bind(crate::origin::component_check_target(&target), origin);
     }
     Ok(kernel)
+}
+
+/// Expand source-local defs before aliases or sync substitution can change scope.
+fn expand_compose_predicates(mut compose: SurfaceCompose) -> Result<SurfaceCompose, CoreError> {
+    let definitions = SurfaceSpec {
+        name: compose.name.clone(),
+        meta: None,
+        items: compose
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ComposeItem::Common(item @ SpecItem::Def { .. }) => Some(item.clone()),
+                _ => None,
+            })
+            .collect(),
+    };
+    let expander = PredicateExpander::new(&definitions)?;
+    let mut items = Vec::new();
+    for item in compose.items {
+        items.push(match item {
+            ComposeItem::Common(SpecItem::Def { .. }) => continue,
+            ComposeItem::Common(item) => ComposeItem::Common(expander.expand_item(item)?),
+            ComposeItem::SyncAction(mut action) => {
+                action.params = action
+                    .params
+                    .into_iter()
+                    .map(|param| expander.expand_param(param))
+                    .collect::<Result<_, _>>()?;
+                for reference in &mut action.refs {
+                    reference.args = std::mem::take(&mut reference.args)
+                        .into_iter()
+                        .map(|arg| expander.expand_expr(arg, &mut Vec::new()))
+                        .collect::<Result<_, _>>()?;
+                }
+                action.items = action
+                    .items
+                    .into_iter()
+                    .map(|item| expander.expand_action_item(item))
+                    .collect::<Result<_, _>>()?;
+                ComposeItem::SyncAction(action)
+            }
+            item @ (ComposeItem::Use { .. } | ComposeItem::Internal { .. }) => item,
+        });
+    }
+    compose.items = items;
+    Ok(compose)
 }
 
 fn prefix(alias: &str, name: &str) -> String {
