@@ -12,6 +12,7 @@ use fsl_syntax::{
 use serde_json::{Value, json};
 
 use crate::naming::NameMap;
+use crate::typecheck::TypecheckError;
 use crate::{
     CoreError, CoreErrorKind, IndexedReplacements, KernelSpec, PredicateExpander,
     capture_avoiding_binding_with_names, collect_binder_names, collect_names, expand_spec_domains,
@@ -695,10 +696,8 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
-type ComponentRewrite<T> = Result<T, crate::typecheck::TypecheckError>;
-
-fn component_rewrite_error(error: crate::typecheck::TypecheckError) -> CoreError {
-    let crate::typecheck::TypecheckError { mut message, span } = error;
+fn component_rewrite_error(error: TypecheckError) -> CoreError {
+    let TypecheckError { mut message, span } = error;
     message.insert_str(0, "invalid model expression: ");
     if let Some(span) = span {
         return error_at(message, span);
@@ -721,7 +720,7 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecI
 fn rewrite_component_item_inner(
     item: SpecItem,
     component: &Component,
-) -> ComponentRewrite<SpecItem> {
+) -> Result<SpecItem, TypecheckError> {
     let alias = &component.alias;
     Ok(match item {
         SpecItem::Const { name, value } => SpecItem::Const {
@@ -761,7 +760,7 @@ fn rewrite_component_item_inner(
                         rewrite_type(ty, component).map_err(|error| error.with_span(span))?,
                     ))
                 })
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
         },
         SpecItem::State(fields) => SpecItem::State(
             fields
@@ -786,7 +785,7 @@ fn rewrite_component_item_inner(
                         initializer_span: field.initializer_span,
                     })
                 })
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
         ),
         SpecItem::Init {
             statements,
@@ -810,7 +809,7 @@ fn rewrite_component_item_inner(
             let params = params
                 .into_iter()
                 .map(|param| rewrite_param(param, component))
-                .collect::<ComponentRewrite<Vec<_>>>()
+                .collect::<Result<Vec<_>, TypecheckError>>()
                 .map_err(|error| error.with_span(span))?;
             let bound = params
                 .iter()
@@ -892,7 +891,7 @@ fn rewrite_component_item_inner(
                     bound.insert(binder_name(&binder).to_owned());
                     Ok(binder)
                 })
-                .collect::<ComponentRewrite<_>>()?;
+                .collect::<Result<_, TypecheckError>>()?;
             SpecItem::LeadsTo {
                 name: prefix(alias, &name),
                 binders,
@@ -914,10 +913,10 @@ fn rewrite_component_item_inner(
                             .args
                             .into_iter()
                             .map(|arg| rewrite_expr_at(arg, component, &bound, helper.span))
-                            .collect::<ComponentRewrite<_>>()?;
+                            .collect::<Result<_, TypecheckError>>()?;
                         Ok(helper)
                     })
-                    .collect::<ComponentRewrite<_>>()?,
+                    .collect::<Result<_, TypecheckError>>()?,
                 annotations,
             }
         }
@@ -963,7 +962,7 @@ fn rewrite_component_item_inner(
     })
 }
 
-fn rewrite_type(ty: TypeExpr, component: &Component) -> ComponentRewrite<TypeExpr> {
+fn rewrite_type(ty: TypeExpr, component: &Component) -> Result<TypeExpr, TypecheckError> {
     Ok(match ty {
         TypeExpr::Name(name) if component.names.types.contains(&name) => {
             TypeExpr::Name(prefix(&component.alias, &name))
@@ -990,7 +989,7 @@ fn rewrite_type(ty: TypeExpr, component: &Component) -> ComponentRewrite<TypeExp
     })
 }
 
-fn rewrite_param(param: Param, component: &Component) -> ComponentRewrite<Param> {
+fn rewrite_param(param: Param, component: &Component) -> Result<Param, TypecheckError> {
     Ok(match param {
         Param::Typed(name, mut qualified) => {
             if qualified.namespace.is_none() && component.names.types.contains(&qualified.name) {
@@ -1011,7 +1010,7 @@ fn rewrite_action_items(
     component: &Component,
     bound: &HashSet<String>,
     action_span: fsl_syntax::Span,
-) -> ComponentRewrite<Vec<ActionItem>> {
+) -> Result<Vec<ActionItem>, TypecheckError> {
     let mut bound = bound.clone();
     items
         .into_iter()
@@ -1043,7 +1042,7 @@ fn rewrite_statements(
     statements: Vec<Statement>,
     component: &Component,
     bound: &HashSet<String>,
-) -> ComponentRewrite<Vec<Statement>> {
+) -> Result<Vec<Statement>, TypecheckError> {
     statements
         .into_iter()
         .map(|statement| rewrite_statement(statement, component, bound))
@@ -1054,7 +1053,7 @@ fn rewrite_statement(
     statement: Statement,
     component: &Component,
     bound: &HashSet<String>,
-) -> ComponentRewrite<Statement> {
+) -> Result<Statement, TypecheckError> {
     Ok(match statement {
         Statement::Assign {
             target,
@@ -1103,7 +1102,7 @@ fn rewrite_lvalue(
     lvalue: LValue,
     component: &Component,
     bound: &HashSet<String>,
-) -> ComponentRewrite<LValue> {
+) -> Result<LValue, TypecheckError> {
     Ok(match lvalue {
         LValue::Var(name) => LValue::Var(rewrite_state_name(name, component)),
         LValue::Index(name, expr) => LValue::Index(
@@ -1129,7 +1128,7 @@ fn rewrite_expr_at(
     component: &Component,
     bound: &HashSet<String>,
     span: fsl_syntax::Span,
-) -> ComponentRewrite<Expr> {
+) -> Result<Expr, TypecheckError> {
     rewrite_expr(expr, component, bound).map_err(|error| error.with_span(span))
 }
 
@@ -1138,7 +1137,7 @@ fn rewrite_expr(
     expr: Expr,
     component: &Component,
     bound: &HashSet<String>,
-) -> ComponentRewrite<Expr> {
+) -> Result<Expr, TypecheckError> {
     let rewrite = |expr| rewrite_expr(expr, component, bound);
     Ok(match expr {
         Expr::Var(name)
@@ -1153,13 +1152,13 @@ fn rewrite_expr(
             items
                 .into_iter()
                 .map(rewrite)
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
         ),
         Expr::Seq(items) => Expr::Seq(
             items
                 .into_iter()
                 .map(rewrite)
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
         ),
         Expr::Struct { name, fields } => Expr::Struct {
             name: if component.names.types.contains(&name) {
@@ -1170,14 +1169,14 @@ fn rewrite_expr(
             fields: fields
                 .into_iter()
                 .map(|(name, expr)| Ok((name, rewrite(expr)?)))
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
         },
         Expr::Call { name, args, span } => Expr::Call {
             name,
             args: args
                 .into_iter()
                 .map(rewrite)
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
             span,
         },
         Expr::Index(base, index) => {
@@ -1194,7 +1193,7 @@ fn rewrite_expr(
             args: args
                 .into_iter()
                 .map(rewrite)
-                .collect::<ComponentRewrite<_>>()?,
+                .collect::<Result<_, TypecheckError>>()?,
         },
         Expr::Binary { op, left, right } => {
             let left = rewrite(*left)?;
@@ -1306,7 +1305,7 @@ fn rewrite_binder(
     binder: Binder,
     component: &Component,
     bound: &HashSet<String>,
-) -> ComponentRewrite<Binder> {
+) -> Result<Binder, TypecheckError> {
     Ok(match binder {
         Binder::Typed {
             name,
