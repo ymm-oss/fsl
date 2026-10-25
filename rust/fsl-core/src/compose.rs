@@ -550,9 +550,6 @@ pub fn lower_compose_with_options(
 
     for item in &compose.items {
         match item {
-            ComposeItem::Common(SpecItem::State(fields)) => {
-                static_items.push(SpecItem::State(fields.clone()));
-            }
             ComposeItem::Common(SpecItem::Init {
                 statements,
                 meta,
@@ -1261,6 +1258,25 @@ fn rewrite_compose_item(
     components: &BTreeMap<String, Component>,
 ) -> Result<SpecItem, CoreError> {
     Ok(match item {
+        SpecItem::State(fields) => SpecItem::State(
+            fields
+                .into_iter()
+                .map(|mut field| {
+                    field.ty = resolve_alias_type(field.ty, components, field.span)?;
+                    field.initializer = field
+                        .initializer
+                        .map(|expr| {
+                            resolve_alias_expr(
+                                expr,
+                                components,
+                                field.initializer_span.unwrap_or(field.span),
+                            )
+                        })
+                        .transpose()?;
+                    Ok(field)
+                })
+                .collect::<Result<_, CoreError>>()?,
+        ),
         SpecItem::Invariant {
             name,
             expr,
@@ -1336,6 +1352,26 @@ fn rewrite_compose_item(
         item @ SpecItem::LeadsTo { .. } => resolve_alias_leads_to(item, components)?,
         item @ SpecItem::Action { .. } => resolve_alias_action(item, components)?,
         other => other,
+    })
+}
+
+fn resolve_alias_type(
+    ty: TypeExpr,
+    components: &BTreeMap<String, Component>,
+    span: fsl_syntax::Span,
+) -> Result<TypeExpr, CoreError> {
+    let resolve_type = |ty| resolve_alias_type(ty, components, span).map(Box::new);
+    let resolve_expr = |expr| resolve_alias_expr(expr, components, span);
+    Ok(match ty {
+        TypeExpr::Range(lo, hi) => TypeExpr::Range(resolve_expr(lo)?, resolve_expr(hi)?),
+        TypeExpr::Map(key, value) => TypeExpr::Map(resolve_type(*key)?, resolve_type(*value)?),
+        TypeExpr::Relation(source, target) => {
+            TypeExpr::Relation(resolve_type(*source)?, resolve_type(*target)?)
+        }
+        TypeExpr::Set(inner) => TypeExpr::Set(resolve_type(*inner)?),
+        TypeExpr::Seq(inner, cap) => TypeExpr::Seq(resolve_type(*inner)?, resolve_expr(cap)?),
+        TypeExpr::Option(inner) => TypeExpr::Option(resolve_type(*inner)?),
+        TypeExpr::Int | TypeExpr::Bool | TypeExpr::Name(_) => ty,
     })
 }
 
@@ -1522,9 +1558,7 @@ fn resolve_alias_lvalue(
             resolve_alias_expr_scoped(index, components, span, bound)?,
         ),
         LValue::Field(base, name) => match *base {
-            LValue::Var(alias) if via_alias => {
-                LValue::Var(prefix(&alias, &name))
-            }
+            LValue::Var(alias) if via_alias => LValue::Var(prefix(&alias, &name)),
             base => LValue::Field(
                 Box::new(resolve_alias_lvalue(
                     base, components, span, bound, context,
