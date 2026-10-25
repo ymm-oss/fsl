@@ -62,6 +62,14 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 1. **Header** — the guarantee limit in positive form ("BMC: depth N までの全実行を
    網羅" / "k帰納法で全実行を証明") + the honesty line ("保証するのは内部整合;
    intent fidelity is borne by the per-row 判断").
+   - **inline implements** (issue #1336) — after the header and any approval
+     comparison, before governance and the undecided list, an `implements`
+     envelope adds the folded top-level verdict (`検証判定`) and a table of
+     `abs` and `result`: 🟢 only for `refines`, 🔴 otherwise. Passing seams
+     are shown too. Without `implements`, the ledger is byte-identical.
+     Migration: an already-approved inline-implements ledger has a changed
+     rendering digest; `approval check` reports `drifted` (exit 0). Review
+     the new section and re-approve it; the approval schema is unchanged.
    - **governance preservation** (governance documents only, issue #1316) —
      when the verification envelope carries a `governance` section, the
      top-level verdict (`検証判定`, the verify `result` after the #1303 fold)

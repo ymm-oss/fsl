@@ -1136,7 +1136,12 @@ baseline の verdict をそのまま返し(baseline が `verified` でなくな�
 真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。
 `scenarios` も、自身の有界実行で答えた場合と `verify` の封筒へフォールバックした場合のどちらでも、
 seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた `result`、exit 1、
-`implements` / `governance` セクション付き)。同じ `2` の
+`implements` / `governance` セクション付き)。inline `implements` がある ledger の本文は、
+governance とリスク一覧より前の `## inline implements` 節に畳み込み後の判定と
+`abs` / `result` も示します。通る seam も表示し、`refines` だけが緑です。
+`implements` のない ledger は byte 一致のままです。既承認の inline-implements ledger は
+描画 digest が変わり、`approval check` で `drifted`(exit 0)になります。節を確認して再承認してください。
+同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、

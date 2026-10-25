@@ -88,7 +88,10 @@ the relevant role skill directs it.
   clauses carry inputs (`with`), guards (`when`), field updates (`set`), and
   traceability (`covers`). Put verifier bounds in `verify { instances E = N
   values T = lo..hi }`. With `implements`, verify simultaneously runs the refine
-  to the upper layer (the `implements` field in the result JSON); CLI
+  to the upper layer (the `implements` field in the result JSON). The ledger
+  body shows its folded verdict and `abs` / `result` in `## inline implements`,
+  even when the seam passes (only `refines` is green); old approvals of such
+  ledgers become `drifted` and need review and re-approval. CLI
   `--instances` / `--values` overrides propagate into the abstract spec for that
   refinement, restricted to entity/number names the abstraction declares (impl-only
   names stay on the implementation side). An empty body
