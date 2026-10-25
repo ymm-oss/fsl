@@ -94,6 +94,7 @@ fn a1333_2_component_helpful_progress_rejects_a_real_lasso() {
 }
 
 const PER_BINDING: &str = "spec A {
+  const c = 0
   type Case = 0..1
   type Level = 0..2
   state { level: Map<Case, Level> }
