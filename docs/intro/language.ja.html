@@ -1219,7 +1219,12 @@ baseline の verdict をそのまま返し(baseline が <code>verified</code> �
 真の失敗なら <code>sweep_failed</code>、深さ不足のセルしかないスコープがあれば <code>sweep_inconclusive</code> を返します。
 <code>scenarios</code> も、自身の有界実行で答えた場合と <code>verify</code> の封筒へフォールバックした場合のどちらでも、
 seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた <code>result</code>、exit 1、
-<code>implements</code> / <code>governance</code> セクション付き)。同じ <code>2</code> の
+<code>implements</code> / <code>governance</code> セクション付き)。inline <code>implements</code> がある ledger の本文は、
+governance とリスク一覧より前の <code>## inline implements</code> 節に畳み込み後の判定と
+<code>abs</code> / <code>result</code> も示します。通る seam も表示し、<code>refines</code> だけが緑です。
+<code>implements</code> のない ledger は byte 一致のままです。既承認の inline-implements ledger は
+描画 digest が変わり、<code>approval check</code> で <code>drifted</code>(exit 0)になります。節を確認して再承認してください。
+同じ <code>2</code> の
 対応付けは <code>chain</code> のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な <code>depth</code>/<code>refine_depth</code> — <code>docs/design/DESIGN-layers.md</code> §7)
 と、<code>ledger --impl-log</code> の replay 入力(replay エラーは実装ログの証跡ではなく、

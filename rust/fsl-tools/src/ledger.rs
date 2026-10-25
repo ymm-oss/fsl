@@ -872,6 +872,32 @@ fn guarantee_line(verification: &Value) -> String {
     )
 }
 
+fn refinement_text(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .map_or_else(|| "—".to_owned(), escape)
+}
+
+fn refinement_mark(result: Option<&str>) -> &'static str {
+    if result == Some("refines") {
+        "🟢"
+    } else {
+        "🔴"
+    }
+}
+
+/// State the folded verdict and seam result, including a passing seam (#1336).
+fn render_implements_section(output: &mut String, verification: &Value, implements: &Value) {
+    let _ = writeln!(
+        output,
+        "\n## inline implements\n\n- 検証判定: `{}`\n\n| abs | result |\n|---|---|\n| `{}` | {} `{}` |",
+        refinement_text(verification.get("result")),
+        refinement_text(implements.get("abs")),
+        refinement_mark(implements.get("result").and_then(Value::as_str)),
+        refinement_text(implements.get("result")),
+    );
+}
+
 /// The verdict and preservation results of a governance document (#1316).
 ///
 /// Since #1303 the first non-`refines` preservation folds into the
@@ -881,15 +907,10 @@ fn guarantee_line(verification: &Value) -> String {
 /// marked failing. Rendered only when the verification envelope carries a
 /// `governance` section, so no other ledger changes.
 fn render_governance_section(output: &mut String, verification: &Value, governance: &Value) {
-    let text = |value: Option<&Value>| {
-        value
-            .and_then(Value::as_str)
-            .map_or_else(|| "—".to_owned(), escape)
-    };
     let _ = write!(
         output,
         "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
-        text(verification.get("result"))
+        refinement_text(verification.get("result"))
     );
     for preservation in governance
         .get("preservations")
@@ -906,23 +927,19 @@ fn render_governance_section(output: &mut String, verification: &Value, governan
             .map(|control| format!("`{}`", escape(control)))
             .collect::<Vec<_>>();
         let result = preservation.get("result").and_then(Value::as_str);
-        let mark = if result == Some("refines") {
-            "🟢"
-        } else {
-            "🔴"
-        };
+        let mark = refinement_mark(result);
         let _ = writeln!(
             output,
             "| `{}` | `{}` → `{}` | {} | {mark} `{}` |",
-            text(preservation.get("name")),
-            text(preservation.get("before")),
-            text(preservation.get("after")),
+            refinement_text(preservation.get("name")),
+            refinement_text(preservation.get("before")),
+            refinement_text(preservation.get("after")),
             if preserve.is_empty() {
                 "—".to_owned()
             } else {
                 preserve.join(", ")
             },
-            text(preservation.get("result")),
+            refinement_text(preservation.get("result")),
         );
     }
 }
@@ -1078,6 +1095,9 @@ pub fn render_ledger_with_approvals(
         output.push_str(
             "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n",
         );
+    }
+    if let Some(implements) = verification.get("implements") {
+        render_implements_section(&mut output, verification, implements);
     }
     if let Some(governance) = verification.get("governance") {
         render_governance_section(&mut output, verification, governance);

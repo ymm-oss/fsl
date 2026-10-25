@@ -92,7 +92,10 @@ separately) becomes the top-level `result` verbatim and the process exits 1,
 while `implements.violation` (or `implements.states_explored` for
 `unknown_budget`) keeps the seam-specific evidence. Gate on
 `implements.result == "refines"` (the only passing value), or run
-`fslc chain`, which applies that gate for you.
+`fslc chain`, which applies that gate for you. The ledger's `## inline implements`
+section shows the folded verdict and `abs` / `result` for passing seams too;
+only `refines` is green. Previously approved ledgers with this seam need review
+and re-approval because their rendering digest changes (`drifted`).
 
 **Governance preservations are fail-closed the same way.** `check`,
 `verify`, and `scenarios` of a `governance` document run every `preservation` refinement at

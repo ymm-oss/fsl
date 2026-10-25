@@ -1194,7 +1194,13 @@ same exit from the folded verification envelope, and `sweep` reports `sweep_fail
 failure or `sweep_inconclusive` when some scope has only depth-limited cells. `scenarios`
 folds the seam and every preservation into its own envelope the same way (the folded
 `result`, exit 1, with the `implements` / `governance` section attached), whether it
-answered from its own bounded run or fell back to the `verify` envelope. The same
+answered from its own bounded run or fell back to the `verify` envelope.
+For inline `implements`, the ledger body also shows the folded verdict and
+`abs` / `result` in `## inline implements`, before governance and the risk lists;
+only `refines` is green, including passing seams. Ledgers without `implements`
+are byte-identical. Previously approved inline-implements ledgers now report
+`drifted` in `approval check` (exit 0): review the section and re-approve them.
+The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
