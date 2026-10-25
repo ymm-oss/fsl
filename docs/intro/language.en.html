@@ -2514,6 +2514,17 @@ verify {
   twice). Auto-mapped process
   transitions are actor-checked; a transition whose actor differs from the
   business action's actor is a check-time error.</li>
+<li>A requirements transition's <code>by X</code> is a free label, not a reference to a
+  declared actor: the requirements layer has no <code>actor</code> declaration, and
+  <code>check</code> does not ask whether <code>X</code> is declared anywhere. (A <code>business</code> process
+  is the opposite: a transition whose actor no <code>actor</code> line declares is a
+  check-time error.) The label is compared with the business layer only
+  through <code>implements</code>, and only for a transition that <code>implements</code> maps to
+  the same-named business action automatically, i.e. one that no explicit
+  inline <code>action ... -&gt; ...</code> item names (an empty <code>implements { }</code> body maps
+  every transition this way; so does <code>maps auto</code>). A transition mapped by an
+  explicit inline <code>action</code> item, and every transition of a spec without
+  <code>implements</code>, has its <code>by</code> label checked against nothing.</li>
 <li><code>acceptance</code> is replay-verified at check time by the concrete Monitor (a
   failure is <code>kind: "acceptance"</code>). It supports <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> alongside <code>expect &lt;expr&gt;</code> and flows directly into scenarios / testgen

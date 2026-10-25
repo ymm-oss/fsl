@@ -94,7 +94,11 @@ the relevant role skill directs it.
   names stay on the implementation side). An empty body
   auto-generates identity refinement when names match, `maps auto` is allowed for
   same-name kernel-wrapper state/actions, and auto-mapped process transitions are
-  actor-checked; the inline block also takes action-correspondence items
+  actor-checked. That check is the only place a requirements `by X` meets the
+  business actors: requirements has no `actor` declaration, so `by X` is a free
+  label `check` never looks up, and a transition mapped by an explicit inline
+  `action` item, or in a spec without `implements`, is not actor-checked. The
+  inline block also takes action-correspondence items
   (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
   syntax a separate refinement file uses. `acceptance` is replay-checked at
   check time and supports `expect E id in Stage` as well as `expect <expr>`,

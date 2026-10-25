@@ -2419,6 +2419,18 @@ verify {
   ファイルと同じです)。auto マップされた process の
   transition は actor 検査されます。actor が business の action の actor と異なる
   transition は check 時エラーです。</li>
+<li>requirements の transition の <code>by X</code> は自由なラベルで、宣言された actor を
+  指すものではありません。requirements レイヤーには <code>actor</code> の宣言が無く、
+  <code>check</code> は <code>X</code> がどこかで宣言されているかを見ません(<code>business</code> の process は
+  逆で、どの <code>actor</code> 行も宣言していない actor を使う transition は check 時
+  エラーです)。このラベルが business レイヤーと照合されるのは <code>implements</code> を
+  通したときだけで、しかも <code>implements</code> が同名の business の action へ自動で
+  対応付けた transition、つまり明示のインライン <code>action ... -&gt; ...</code> 項目が
+  名指ししていない transition に限られます(空の <code>implements { }</code> 本体は
+  すべての transition をこの方法で対応付けます。<code>maps auto</code> も同じです)。
+  明示のインライン <code>action</code> 項目で対応付けた transition と、
+  <code>implements</code> の無い spec のすべての transition では、<code>by</code> のラベルは何とも
+  照合されません。</li>
 <li><code>acceptance</code> は、check 時に具象の Monitor によって replay 検証されます(失敗は
   <code>kind: "acceptance"</code>)。<code>expect &lt;expr&gt;</code> と並んで <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> をサポートし、scenarios / testgen へ直接流れ込みます(= 受け入れ基準が
