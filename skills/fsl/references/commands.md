@@ -82,6 +82,11 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
 
 ## 7. CLI and JSON essentials
 
+Current-edition `check` and `verify` append migration warnings for string metadata,
+colon quantifiers, and inline action `maps`, without changing verdicts or exits.
+The Worker shares them for an explicit current-edition header. Codes and complete
+finding data match lint; lint still exits 1 when findings exist, not 0.
+
 ```
 fslc check <f>                                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates

@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use serde_json::Value;
+#[path = "support/migration_warnings.rs"]
+mod migration_warnings;
 use std::process::Command;
 
-fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+fn repo_root() -> &'static std::path::Path {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
-        .expect("workspace root");
+        .expect("workspace root")
+}
+
+fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
-        .current_dir(root)
+        .current_dir(repo_root())
         .output()
         .expect("run native CLI");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -756,11 +762,7 @@ fn typed_requirement_relations_reach_strict_tags_scenarios_and_diagnostics() {
     ]);
     assert_eq!(status, 0);
     assert_eq!(checked["result"], "ok");
-    assert!(
-        checked["warnings"]
-            .as_array()
-            .is_none_or(std::vec::Vec::is_empty)
-    );
+    assert_typed_annotation_migration_warnings(&checked, spec);
 
     let (violation, status) = run_cli(&[
         "verify",
@@ -1129,15 +1131,23 @@ fn strict_tags_verify_reports_empty_requirement_block_without_requirements_flag(
 /// document's documented fan-out), so it must not start warning as a side effect
 /// of auto-collecting block IDs into `Declared`.
 #[test]
-fn strict_tags_non_empty_requirement_block_stays_unwarned() {
+fn strict_tags_non_empty_requirement_block_has_only_migration_warnings() {
     let fixture = "rust/fslc/tests/fixtures/typed_annotation_outputs.fsl";
     let (checked, status) = run_cli(&["check", fixture, "--strict-tags"]);
     assert_eq!(status, 0, "{checked}");
     assert_eq!(checked["result"], "ok", "{checked}");
-    assert!(
-        checked["warnings"]
-            .as_array()
-            .is_none_or(std::vec::Vec::is_empty),
-        "{checked}"
+    assert_typed_annotation_migration_warnings(&checked, fixture);
+}
+
+// Strict-tag warnings must remain absent; the fixture deliberately retains three
+// legacy metadata slots, whose complete migration findings are now exposed.
+fn assert_typed_annotation_migration_warnings(checked: &Value, fixture: &str) {
+    let mut checked = checked.clone();
+    migration_warnings::take_migration_warnings(
+        &mut checked,
+        &repo_root().join(fixture),
+        fixture,
+        &["legacy_string_metadata"; 3],
     );
+    assert_eq!(checked["warnings"], serde_json::json!([]), "{checked}");
 }

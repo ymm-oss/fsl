@@ -303,6 +303,118 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
     }
 }
 
+fn assert_token_location(finding: &Value, source: &str, token: &str) {
+    let offset = source.find(token).expect("legacy token");
+    let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    assert_eq!(
+        finding["loc"]["line"],
+        source[..offset].matches('\n').count() + 1
+    );
+    assert_eq!(
+        finding["loc"]["column"],
+        source[line_start..offset].chars().count() + 1
+    );
+    assert_eq!(
+        finding["loc"]["end_column"],
+        source[line_start..offset].chars().count() + token.chars().count() + 1
+    );
+}
+
+#[test]
+fn current_edition_exposes_legacy_findings_without_changing_success() {
+    let directory = FixtureDir::new();
+    directory.write(
+        "abstract.fsl",
+        "spec Abstract { state { done: Bool = false } action finish() { done = true } }\n",
+    );
+    for (body, code, token) in [
+        (
+            "spec S { state { done: Bool = false } action finish() \"REQ-PROBE-001: 完了\" { done = true } }\n",
+            "legacy_string_metadata",
+            "\"REQ-PROBE-001: 完了\"",
+        ),
+        (
+            "spec S { state { done: Bool = false } action finish() { done = true } invariant Typed { forall i in 0..1: done == true or done == false } }\n",
+            "legacy_quantifier_colon",
+            "forall",
+        ),
+        (
+            "requirements S { implements Abstract from \"abstract.fsl\" { map done = done } state { done: Bool = false } action complete() maps finish() { done = true } }\n",
+            "inline_action_maps",
+            "maps finish()",
+        ),
+    ] {
+        for (prefix, edition) in [
+            ("// 日本語\n", None),
+            ("// 日本語\n", Some("current")),
+            ("fsl 4\n// 日本語\n", None),
+        ] {
+            let source = format!("{prefix}{body}");
+            let path = directory.write("current.fsl", &source);
+            let path = path.to_str().expect("path");
+            let invoke = |verb: &str, extra: &[&str]| {
+                let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+                command.env("FSLC_UNSTABLE", "fsl5").args([verb, path]);
+                if let Some(edition) = edition {
+                    command.args(["--edition", edition]);
+                }
+                command.args(extra).output().expect("run fslc")
+            };
+            // Preservation: lint already reports these findings, including exit 1.
+            let lint = invoke("lint", &[]);
+            assert_eq!(lint.status.code(), Some(1));
+            let lint = json(&lint);
+            let findings = lint["files"][0]["findings"].as_array().expect("findings");
+            assert_eq!(lint["finding_count"], findings.len());
+            let expected = findings
+                .iter()
+                .filter(|f| f["code"] == code)
+                .collect::<Vec<_>>();
+            assert_eq!(expected.len(), 1, "{lint:#}");
+            let expected = expected[0];
+            assert_token_location(expected, &source, token);
+            assert_eq!(expected["severity"], "warning");
+            assert_eq!(expected["edition"], "current");
+            for (verb, extra) in [
+                ("check", vec![]),
+                ("verify", vec!["--depth", "2", "--no-cache"]),
+            ] {
+                let output = invoke(verb, &extra);
+                assert_eq!(
+                    output.status.code(),
+                    Some(0),
+                    "{}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                let output = json(&output);
+                let warnings = output["warnings"].as_array().expect("warnings");
+                let actual = warnings
+                    .iter()
+                    .filter(|f| f["code"] == code)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual,
+                    vec![expected],
+                    "{verb}: expected {code}, produced {output:#}"
+                );
+                assert_eq!(
+                    output.get("fsl_edition").is_some(),
+                    prefix.starts_with("fsl 4")
+                );
+                if code == "legacy_string_metadata" {
+                    assert!(
+                        warnings.iter().any(|f| f["kind"] == "no_user_invariants"),
+                        "existing warning retained: {output:#}"
+                    );
+                }
+            }
+            // Preservation: the existing next-edition rejection stays exit 2.
+            let next = run(&["check", path, "--edition", "next"]);
+            assert_eq!(next.status.code(), Some(2));
+        }
+    }
+}
+
 fn assert_operator_endpoints(source: &str, offset: usize) {
     let options = gated_options();
     let error = fsl_syntax::parse_surface_document_with(source, &options)
@@ -386,6 +498,69 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
         String::from_utf8_lossy(&output.stdout)
     );
     assert_eq!(json(&output)["result"], expected);
+}
+
+#[test]
+fn current_warnings_preserve_refusals_and_ignore_canonical_and_literal_forms() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let directory = FixtureDir::new();
+    let branch = directory.write("branches.fsl", "requirements Branch { state { done: Bool = false } action complete() { branches { when not done { done = true } maps stutter } } }\n");
+    for path in [
+        branch,
+        root.join("tests/fixtures/action_correspondence_duplicate.fsl"),
+    ] {
+        let path = path.to_str().expect("path");
+        let check = run(&["check", path]);
+        let lint = run(&["lint", path]);
+        assert_eq!(lint.status.code(), Some(1));
+        let lint = json(&lint);
+        let expected = lint["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .filter(|f| f["code"] == "inline_action_maps")
+            .collect::<Vec<_>>();
+        assert!(expected.iter().any(|f| f["machine_applicable"] == false));
+        let check = json(&check);
+        let actual = check["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter(|f| f["code"] == "inline_action_maps")
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "{check:#}");
+    }
+    let source = r#"// forall i in 0..1: || -> maps finish()
+spec Canonical {
+  state { done: Bool = false }
+  @requirement("REQ-PROBE-001", "literal maps finish() forall i: -> ||")
+  action finish() { done = true }
+  invariant Typed { forall i in 0..1 { done == true or done == false } }
+}
+"#;
+    let path = directory.write("canonical.fsl", source);
+    for verb in ["check", "lint"] {
+        let output = run(&[verb, path.to_str().expect("path")]);
+        assert_eq!(output.status.code(), Some(0));
+        let output = json(&output);
+        let findings = if verb == "lint" {
+            &output["files"][0]["findings"]
+        } else {
+            &output["warnings"]
+        };
+        assert!(
+            findings
+                .as_array()
+                .expect("findings")
+                .iter()
+                .all(|f| !matches!(
+                    f["code"].as_str(),
+                    Some(
+                        "legacy_string_metadata" | "legacy_quantifier_colon" | "inline_action_maps"
+                    )
+                ))
+        );
+    }
 }
 
 #[test]

@@ -650,7 +650,15 @@ pub fn apply_edition(
     let mut additions = plan
         .diagnostics
         .iter()
-        .filter(|finding| next || finding.code == "deprecated_domain_enum_union")
+        .filter(|finding| {
+            next || matches!(
+                finding.code,
+                "deprecated_domain_enum_union"
+                    | "legacy_string_metadata"
+                    | "legacy_quantifier_colon"
+                    | "inline_action_maps"
+            )
+        })
         .map(|finding| finding.json(path, edition))
         .collect::<Vec<_>>();
     if !next && implicit_warnings {

@@ -136,3 +136,20 @@ check folds it only on the model path, preserving early successful AI-project
 gate envelopes; verify keeps its native outer governance fold before edition.
 Implicit-initial-value warnings are owned by
 that step rather than also appended by success-only metadata finalization.
+
+## Amendment: current-edition warning exposure (#251)
+
+The shared edition step appends `legacy_string_metadata`,
+`legacy_quantifier_colon`, and `inline_action_maps` to current-edition check and
+verify JSON warnings, including headerless documents. A Worker document with
+an explicit current-edition header uses the same step. Existing warnings,
+verdicts, envelopes, and process exits are retained. Lint already exposes these
+findings and keeps its 0/1/2 exit contract.
+
+The migration planner remains the single owner of occurrence identity: code,
+span, replacement, byte edits, taxonomy, and machine applicability are unchanged.
+In particular ambiguous comment/branch/duplicate mappings still refuse automatic
+migration; displaying their warning must not make them machine-applicable.
+Canonical annotations, braced quantifiers, and explicit action correspondences
+do not produce these legacy findings. No accepted syntax or semantic model is
+changed by warning exposure.

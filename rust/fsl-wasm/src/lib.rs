@@ -3104,6 +3104,24 @@ mod tests {
             "{ungated:#}"
         );
 
+        let current = format!("fsl 4\n{body}");
+        let current = block_on(check(&request(&current, &["fsl5"]), TEST_SOLVER_VERSION));
+        assert_eq!(current["result"], "ok", "{current:#}");
+        let findings = current["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter(|finding| finding["code"] == "legacy_quantifier_colon")
+            .collect::<Vec<_>>();
+        assert_eq!(findings.len(), 2, "{current:#}");
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding["severity"] == "warning"
+                    && finding["edition"] == "current"
+                    && finding["machine_applicable"] == true)
+        );
+
         let plain = block_on(check(&request(body, &["fsl5"]), TEST_SOLVER_VERSION));
         let published = block_on(check(&request(body, &[]), TEST_SOLVER_VERSION));
         assert_eq!(plain, published, "a document without a header is unchanged");

@@ -1362,6 +1362,17 @@ Range type endpoints, including parenthesized subexpressions within them,
 retain generic `FSL-PARSE` diagnostics for these invalid spellings. They remain
 rejected; this exception does not change structural relation arrows.
 
+In the current edition (including documents without an edition header), `check`
+and `verify` also append migration warnings for declaration string metadata
+(`legacy_string_metadata`), colon quantifiers (`legacy_quantifier_colon`), and
+inline action `maps` (`inline_action_maps`). The Worker reports the same warnings
+for an explicit current-edition header. These reuse lint's exact locations,
+replacements, edits, and migration-safety information, without changing verdicts
+or exit codes. A refused rewrite remains `machine_applicable: false`; a warning
+does not mean automatic migration is safe. Prefer typed annotations, braced
+quantifiers, and explicit action correspondences in `implements`. Lint retains
+exit 0 for no findings, 1 for findings, and 2 for parse/check failure.
+
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while
 walking them, and the combined file set is deduplicated and sorted
