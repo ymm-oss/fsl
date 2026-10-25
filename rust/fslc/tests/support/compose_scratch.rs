@@ -26,9 +26,8 @@ pub fn scratch(label: &str, files: &[(&str, &str)]) -> PathBuf {
     dir
 }
 
-fn run(dir: &Path, command: &str, file: &str, args: &[&str]) -> (Value, i32) {
+pub fn run(dir: &Path, args: &[&str]) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args([command, file])
         .args(args)
         .current_dir(dir)
         .output()
@@ -44,19 +43,17 @@ fn run(dir: &Path, command: &str, file: &str, args: &[&str]) -> (Value, i32) {
 }
 
 pub fn check(dir: &Path, file: &str) -> (Value, i32) {
-    run(dir, "check", file, &[])
+    run(dir, &["check", file])
 }
 
 pub fn verify(dir: &Path, file: &str) -> (Value, i32) {
-    run(dir, "verify", file, &["--depth", "4", "--no-cache"])
+    run(dir, &["verify", file, "--depth", "4", "--no-cache"])
 }
 
 #[allow(dead_code)]
 pub fn verify_induction(dir: &Path, file: &str) -> (Value, i32) {
     run(
         dir,
-        "verify",
-        file,
-        &["--engine", "induction", "--no-cache"],
+        &["verify", file, "--engine", "induction", "--no-cache"],
     )
 }
