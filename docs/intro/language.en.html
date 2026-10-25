@@ -1253,7 +1253,7 @@ indeterminate (<code>chain</code> when its <code>[impl]</code> layer has no evid
 <code>--vacuity error</code>), <code>3</code> = internal error. <code>observed_*</code> is <code>fslc db observe</code>'s
 result; <code>imported</code>/<code>imported_with_warnings</code> is <code>fslc db import</code>'s. <code>impl_violated</code> is listed
 because inline <code>implements</code> propagates that seam verdict to the top-level <code>result</code>; a failed
-governance <code>preservation</code> folds into <code>check</code>/<code>verify</code>/<code>scenarios</code> through the same mapping (§13). The fold
+governance <code>preservation</code> folds into <code>check</code>/<code>verify</code>/<code>scenarios</code>/<code>testgen</code> through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to <code>check</code> and
 <code>verify</code>: on a spec whose seam fails, <code>mutate</code> re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer <code>verified</code>), <code>ledger</code> and <code>fslc html</code> inherit the
@@ -1267,7 +1267,9 @@ For inline <code>implements</code>, the ledger body also shows the folded verdic
 only <code>refines</code> is green, including passing seams. Ledgers without <code>implements</code>
 are byte-identical. Previously approved inline-implements ledgers now report
 <code>drifted</code> in <code>approval check</code> (exit 0): review the section and re-approve them.
-The same
+<code>testgen</code> refuses a failed seam or preservation with the same verify failure
+envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
+and writes no harness. The same
 <code>2</code> mapping is fail-closed for <code>chain</code>'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable <code>depth</code>/<code>refine_depth</code> —
 <code>docs/design/DESIGN-layers.md</code> §7) and for <code>ledger --impl-log</code>'s replay input (a
@@ -2061,7 +2063,13 @@ from Public Kernel v1, scenario JSON, and the versioned fixed-seed
 Schema/version/spec mismatches, unknown state/action/parameter names, and
 malformed input fail closed. Compose uses an explicit checked names/order bridge because
 Public Kernel intentionally rejects incomplete multi-file provenance; it enters
-the same adapter rather than falling back after an export error.</p>
+the same adapter rather than falling back after an export error.
+Before the walk, output-path handling, or generation, <code>testgen</code> checks inline
+<code>implements</code> and governance preservations through the same fold as <code>scenarios</code>.
+If either fails, it returns the <code>verify</code> owner's failure envelope and exit
+(1 for a failed seam/preservation, 2 for a contract error), not a scenarios-shaped
+envelope, and writes no harness. Passing documents and non-strict partially
+reachable scenarios retain their ordinary generation behavior.</p>
 <p>The fixed-seed walk is a concrete Monitor run capped at 100 steps, and it stops
 early when no action is enabled; it is <strong>not</strong> bounded by <code>--depth</code>. It can
 therefore reach a violation that the bounded verification <code>testgen</code> runs first
@@ -2749,7 +2757,9 @@ Consumers of the <code>check</code>/<code>verify</code> envelope read the folded
 exit 1 from the same baseline (the ledger body also states that verdict and
 lists every preservation with its result, failing ones marked), <code>fslc
 scenarios</code> folds the preservations into its own envelope as <code>verify</code> does,
-and the browser Worker folds <code>check</code> and <code>verify</code> the same way. This changed exit codes: before 4.11 a failed
+<code>testgen</code> returns the verify failure envelope and exit without a harness when
+a preservation fails (including on the kernel path), and the browser Worker
+folds <code>check</code> and <code>verify</code> the same way. This changed exit codes: before 4.11 a failed
 preservation left <code>check</code> at <code>ok</code> and <code>verify</code> at <code>verified</code>, both exit 0, and
 <code>verify</code> reported no <code>governance</code> section at all (and answered <code>verified</code> even
 for a contract <code>check</code> rejected). A CI that gated on the exit

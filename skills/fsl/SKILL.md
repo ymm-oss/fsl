@@ -83,7 +83,7 @@ statuses).
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
-layer checked during `check`/`verify`/`scenarios`. A `refines` verdict preserves the
+layer checked during `check`/`verify`/`scenarios`/`testgen`. A `refines` verdict preserves the
 command's ordinary top-level `result` and exit code. Any of the three failing
 nested values (`refinement_failed`, `impl_violated`, or `unknown_budget` — the
 correspondence search hit its fixed internal state-count budget before
@@ -98,10 +98,12 @@ only `refines` is green. Previously approved ledgers with this seam need review
 and re-approval because their rendering digest changes (`drifted`).
 
 **Governance preservations are fail-closed the same way.** `check`,
-`verify`, and `scenarios` of a `governance` document run every `preservation` refinement at
+`verify`, `scenarios`, and `testgen` of a `governance` document run every `preservation` refinement at
 depth 8; the first one that is not `refines` becomes the top-level `result`
 (`refinement_failed`, `impl_violated`, or `unknown_budget`) with exit 1, while `governance.preservations[].result`
-keeps each one's own value.
+keeps each one's own value. On a seam or preservation failure, `testgen` returns
+the verify owner's envelope and exit (1, or 2 for a contract error) and writes
+no harness; passing documents retain generation.
 
 ## Before writing a spec: source fidelity and the formalization memo
 
