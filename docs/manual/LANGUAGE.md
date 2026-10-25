@@ -1329,6 +1329,15 @@ and `decreases`. When a `trans` is declared, the success output carries
 The blocking requires clause is identified by a minimized unsat core when that is
 cheap. For requirements `branches`, a false coverage diagnostic keeps the
 internal split-action `name` and adds `display_name`.
+Raw `action_coverage` retains generated-only sentinel entries, including
+`covered:false`; verify, induction, and Worker JSON are unchanged. Public coverage
+findings require a positive line/column on the authored primary origin, or else
+the kernel action declaration. This shared source-location rule, not a name or
+prefix, excludes scaffolding from runtime warnings, ledger coverage findings,
+and HTML badges and coverage denominators. With no eligible action the HTML
+metric is `0/0`; HTML Raw Data still contains the original coverage map.
+Affected ledger/HTML approvals become `drifted` (exit 0) because the rendering
+changes; review the corrected artifact and re-approve it.
 
 ### Explicit action execution profile
 
@@ -3289,6 +3298,11 @@ DESIGN-*.md).
   whose age is proven to remain zero across every transition), and
   `vacuity_probe_truncated`†. `error` exits 2. →
   [`DESIGN-vacuity.md`](../design/DESIGN-vacuity.md)
+
+  `never_enabled_action` findings apply only to source-backed actions (authored
+  primary origin, then kernel declaration, with positive line/column).
+  Generated-only sentinels remain in raw coverage evidence but not in these
+  warnings, ledger coverage findings, or HTML badges/coverage denominators.
 
   † `vacuity_probe_truncated`: the `vacuous_implication`/`vacuous_leadsto`
   reachability probe shares one budgeted concrete BFS across every

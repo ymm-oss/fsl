@@ -17,7 +17,7 @@ reads as "guarantees nothing".
 ## Inputs
 
 - `run_verify(file, depth, deadlock)` — violations (with `requirement` +
-  `trace_type` from #23), dead `reachable`s (`unreached[]`), uncovered actions,
+  `trace_type` from #23), dead `reachable`s (`unreached[]`), uncovered source-backed actions,
   vacuity warnings, failed acceptance/forbidden (as errors), and the guarantee
   bound (`checked_to_depth` + `completeness`).
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
@@ -83,7 +83,16 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    identified as metadata, not a verification condition.
 3. **リスク一覧** — one row per requirement id: 業務目的 / 状態 (🔴 要確認 / 🟢
    確認済) / 検出種別 (`trace_type`) / リスク (`control.severity`) / 判断者
-   (`control.owner`) / 次アクション.
+   (`control.owner`) / 次アクション. Coverage findings require an authored
+   primary-origin span, or otherwise a kernel action span, with positive line
+   and column. The shared `KernelModel::action_source_span` owner also governs
+   runtime warnings and HTML coverage badges/denominators. Generated-only
+   sentinels have no such finding; their raw `action_coverage` evidence remains
+   unchanged in verify/induction/Worker JSON and HTML Raw Data. Names and
+   prefixes are not the classification rule. An empty eligible HTML coverage
+   map renders `0/0`. Migration (#1338): removing false sentinel findings changes
+   affected ledger/HTML rendering digests; existing approvals report `drifted`
+   (exit 0), so review and re-approve them. Approval schemas are unchanged.
 4. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).

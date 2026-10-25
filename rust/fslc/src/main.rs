@@ -12658,6 +12658,7 @@ fn run_html_report_from_source_with_timing(
     let html = fsl_tools::render_html_report(
         &path.display().to_string(),
         source,
+        &model,
         explained_view,
         verification_view,
         &fsl_tools::undecided_declarations(&model),
