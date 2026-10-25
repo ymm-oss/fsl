@@ -1311,7 +1311,7 @@ fn command() -> Result<(Value, i32), String> {
             } else if options.rest.len() % 2 != 0 {
                 Ok((
                     error_output(
-                        "io",
+                        "usage",
                         "refine chain must list (abs map) pairs after the first mapping",
                     ),
                     2,
@@ -2705,6 +2705,9 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                         deadlock = args
                             .next()
                             .ok_or_else(|| "--deadlock requires a value".to_owned())?;
+                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
+                            return Err("--deadlock must be warn, error, or ignore".to_owned());
+                        }
                     }
                     "--engine" => {
                         engine = args

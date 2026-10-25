@@ -605,10 +605,23 @@ impl MutationFamilyOptions {
                         &required_option_value(&mut args, "--names")?,
                     )?);
                 }
-                // Issue #1237: the opt-in mutation gate belongs to `mutate`
+                // Issues #1237/#1341: mutation options belong to `mutate`
                 // alone; the other two commands sharing this loop reject it
                 // instead of silently accepting a flag that cannot apply.
-                "--fail-on-survivors" | "--min-kill-rate" if command != "mutate" => {
+                "--fail-on-survivors"
+                | "--min-kill-rate"
+                | "--max-mutants"
+                | "--by-requirement"
+                | "--oracle-attribution"
+                | "--from"
+                    if command != "mutate" =>
+                {
+                    return Err(format!("unknown {command} option '{option}'"));
+                }
+                "--depth" | "--readable" if command == "typestate" => {
+                    return Err(format!("unknown {command} option '{option}'"));
+                }
+                "--ts" if command == "explain" => {
                     return Err(format!("unknown {command} option '{option}'"));
                 }
                 "--fail-on-survivors" => fail_on_survivors = true,
@@ -722,6 +735,9 @@ impl ReportOptions {
                     target = args
                         .next()
                         .ok_or_else(|| "--target requires a value".to_owned())?;
+                }
+                "--engine" if command == "testgen" => {
+                    return Err(format!("unknown {command} option '{option}'"));
                 }
                 "--engine" => {
                     engine = args

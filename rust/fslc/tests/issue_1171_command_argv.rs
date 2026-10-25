@@ -340,20 +340,41 @@ fn explain_mutate_typestate_argv() {
             &[command, SPEC, "extra"],
             &format!("unknown {command} option 'extra'"),
         );
-        usage(&[command, SPEC, "--depth"], "--depth requires a value");
-        usage(
-            &[command, "--depth", "x", SPEC],
-            "--depth must be a non-negative integer",
-        );
-        usage(
-            &[command, SPEC, "--max-mutants"],
-            "--max-mutants requires a value",
-        );
-        usage(
-            &[command, "--max-mutants", "-1", SPEC],
-            "--max-mutants must be an integer",
-        );
-        usage(&[command, SPEC, "--from"], "--from requires a JSONL path");
+        if command == "typestate" {
+            usage(
+                &[command, SPEC, "--depth"],
+                "unknown typestate option '--depth'",
+            );
+            usage(
+                &[command, "--depth", "x", SPEC],
+                "unknown typestate option '--depth'",
+            );
+        } else {
+            usage(&[command, SPEC, "--depth"], "--depth requires a value");
+            usage(
+                &[command, "--depth", "x", SPEC],
+                "--depth must be a non-negative integer",
+            );
+        }
+        if command == "mutate" {
+            usage(
+                &[command, SPEC, "--max-mutants"],
+                "--max-mutants requires a value",
+            );
+            usage(
+                &[command, "--max-mutants", "-1", SPEC],
+                "--max-mutants must be an integer",
+            );
+            usage(&[command, SPEC, "--from"], "--from requires a JSONL path");
+        } else {
+            let message = format!("unknown {command} option '--max-mutants'");
+            usage(&[command, SPEC, "--max-mutants"], &message);
+            usage(&[command, "--max-mutants", "-1", SPEC], &message);
+            usage(
+                &[command, SPEC, "--from"],
+                &format!("unknown {command} option '--from'"),
+            );
+        }
     }
     // The mutation gate belongs to `mutate` alone (#1237).
     for command in ["explain", "typestate"] {
@@ -385,15 +406,7 @@ fn explain_mutate_typestate_argv() {
         serde_json::from_str::<Value>(&readable.stdout).is_err(),
         "--readable prints text"
     );
-    let skeleton = run(&[
-        "typestate",
-        "--ts",
-        "--depth",
-        "1",
-        "--max-mutants",
-        "1",
-        SPEC,
-    ]);
+    let skeleton = run(&["typestate", "--ts", SPEC]);
     assert_eq!(skeleton.status, 0);
     assert!(
         skeleton
@@ -426,11 +439,18 @@ fn testgen_html_ledger_argv() {
         usage(&[command, SPEC, "-o"], "--output requires a path");
         usage(&[command, SPEC, "--output"], "--output requires a path");
         usage(&[command, SPEC, "--target"], "--target requires a value");
-        usage(&[command, SPEC, "--engine"], "--engine requires a value");
-        usage(
-            &[command, "--engine", "explicit", SPEC],
-            "--engine must be bmc or induction",
-        );
+        let engine_missing = if command == "testgen" {
+            "unknown testgen option '--engine'"
+        } else {
+            "--engine requires a value"
+        };
+        let engine_invalid = if command == "testgen" {
+            "unknown testgen option '--engine'"
+        } else {
+            "--engine must be bmc or induction"
+        };
+        usage(&[command, SPEC, "--engine"], engine_missing);
+        usage(&[command, "--engine", "explicit", SPEC], engine_invalid);
         usage(
             &[command, SPEC, "--deadlock"],
             "--deadlock requires a value",
@@ -441,7 +461,7 @@ fn testgen_html_ledger_argv() {
         );
         usage(
             &[command, "--engine", "bmc", "--engine", "bogus", SPEC],
-            "--engine must be bmc or induction",
+            engine_invalid,
         );
     }
     for command in ["testgen", "html"] {
@@ -600,7 +620,7 @@ fn refine_and_replay_argv() {
             SPEC,
         ],
         2,
-        "io",
+        "usage",
         "refine chain must list (abs map) pairs after the first mapping",
     );
 
