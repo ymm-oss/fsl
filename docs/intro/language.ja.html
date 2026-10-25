@@ -2427,8 +2427,9 @@ verify {
   その transition を同名の business の action へ自動で対応付け、その refinement
   が評価されたときだけです。自動の対応付けとは、<code>maps auto</code> によるものと、
   インラインの <code>implements</code> の継ぎ目が、明示のインライン <code>action ... -&gt; ...</code>
-  項目が名指ししていないすべての transition を暗黙に対応付けるものです。食い違いは
-  <code>kind: "type"</code> のエラーです。たとえば、インラインの継ぎ目は、範囲を選ばない
+  項目が名指ししていないすべての transition を暗黙に対応付けるものです。
+  refinement を検査する所(<code>check</code> や <code>fslc refine</code> など)では、食い違いは
+  <code>kind: "type"</code> のエラーです。<code>fslc diff</code> は、後で述べるとおり別の形で報告します。たとえば、インラインの継ぎ目は、範囲を選ばない
   <code>check</code> や <code>verify</code> と <code>fslc scenarios</code> では評価されますが、<code>--property</code> などで
   範囲を選んだ <code>verify</code> では評価されません(上述)。refinement ファイルの
   <code>maps auto</code> は <code>fslc refine</code> や <code>fslc chain</code> の refine 層で評価されます。

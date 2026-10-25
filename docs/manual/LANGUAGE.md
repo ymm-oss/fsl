@@ -2471,8 +2471,10 @@ verify {
   refinement maps the transition automatically to the business action of the
   same name — through `maps auto`, or through the inline `implements` seam's
   implicit auto-mapping of every transition that no explicit inline
-  `action ... -> ...` item names — and that refinement is evaluated. A
-  mismatch is a `kind: "type"` error. For example, the inline seam is
+  `action ... -> ...` item names — and that refinement is evaluated. Where
+  the refinement is checked (`check`, `fslc refine`, and the like), a mismatch
+  is a `kind: "type"` error; `fslc diff` reports it differently, as described
+  below. For example, the inline seam is
   evaluated by an unscoped `check` or `verify` and by `fslc scenarios`, but not
   by a `verify` scoped with `--property` and the like (above); a refinement
   file's `maps auto` is evaluated by `fslc refine` or a `fslc chain` refine
