@@ -1572,7 +1572,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
     let mut origins = resolve_stage_items(&mut items, &processes, "business")?;
     for transition in processes.iter().flat_map(|process| &process.transitions) {
         origins.bind_action_actor(
-            transition.name.clone(),
+            &transition.name,
             crate::origin::ActionActor::BusinessTransition(transition.actor.clone()),
         );
     }
@@ -3016,7 +3016,7 @@ pub(crate) fn lower_resolved_requirements(
         .filter(|transition| transition.event.is_some())
     {
         origins.bind_action_actor(
-            transition.name.clone(),
+            &transition.name,
             crate::origin::ActionActor::Event(transition.actor.clone()),
         );
     }

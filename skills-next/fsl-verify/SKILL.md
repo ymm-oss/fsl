@@ -231,6 +231,7 @@ canonical name in parentheses (`'申請（Claim）'`).
 | Code | Means | Next move |
 |---|---|---|
 | `actor_not_declared` | an event or step names an actor no `actor` declares (the message lists the declared ones) | declare it if the source has it; otherwise fix the name |
+| message `maps auto actor mismatch …` (`kind: "type"`, no `diagnostic_code`) | an automatically matched event's actor differs from the business transition's actor | fix the declared actor to match the source contract; requirement text does not supply the actor |
 | `event_not_on_lifecycle` | an event's move is not an edge of the lifecycle (or its `in S` is not a stage) | fix the move or the lifecycle to what the source says |
 | `ambiguous_input_field` | a bare name in an event's expression is both its input and a field | write `input amount` or `Return.amount` |
 | field `… needs an initial value` (parse error) | an entity field without `= init` | give the initial value the source states, or ask |

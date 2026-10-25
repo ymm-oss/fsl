@@ -35,6 +35,8 @@ init statements, actions, action guards/statements, properties, and terminal.
 The same identity bound to multiple targets represents one-to-many lowering.
 Secondary sites represent many-to-one lowering. `primary: None` represents a
 generated-only/source-less node; the implementation does not invent a location.
+The registry also carries typed source actors for business-transition and event
+action targets, read by refinement's automatic actor correspondence check.
 
 Requirement traceability is stored independently in `TraceabilityRegistry`.
 It may refer to the same semantic target without becoming part of the origin

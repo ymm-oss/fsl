@@ -79,12 +79,12 @@ pub(crate) enum ActionActor {
 }
 
 impl OriginRegistry {
-    pub(crate) fn bind_action_actor(&mut self, name: String, actor: ActionActor) {
-        self.action_actors.insert(name, actor);
+    pub(crate) fn bind_action_actor(&mut self, name: &str, actor: ActionActor) {
+        self.action_actors.insert(action_target(name), actor);
     }
 
     pub(crate) fn action_actor(&self, name: &str) -> Option<&ActionActor> {
-        self.action_actors.get(name)
+        self.action_actors.get(&action_target(name))
     }
 
     pub fn bind(&mut self, target: impl Into<String>, origin: OriginChain) {

@@ -236,3 +236,128 @@ fn business_covers_does_not_hide_fsl5_event_actor_mismatch() {
         "approve",
     );
 }
+
+// Keep the original controls/helpers above unchanged. The additional command
+// routes share an exact diagnostic assertion, not just a message substring.
+fn assert_exact_actor_mismatch(directory: &Path, args: &[&str], action: &str) {
+    let (output, exit) = fslc(directory, args);
+    let expected = format!(
+        "maps auto actor mismatch for action '{action}': impl actor 'Manager' != abstract actor 'System'"
+    );
+    assert_eq!(
+        (
+            exit,
+            output["result"].as_str(),
+            output["kind"].as_str(),
+            output["message"].as_str(),
+        ),
+        (2, Some("error"), Some("type"), Some(expected.as_str())),
+        "{args:?}: {output:#}"
+    );
+}
+
+#[test]
+fn fault_event_with_wrong_actor_is_a_check_time_error() {
+    let source = case_source("").replace("event approve =", "fault event approve =");
+    let directory = fixture("fault_event", &source, &business_source(""));
+    assert_exact_actor_mismatch(&directory, &["check", "requirements.fsl"], "approve");
+}
+
+#[test]
+fn in_stage_event_with_wrong_actor_is_a_check_time_error() {
+    let source = case_source("").replace("Case Open -> Done", "Case in Open");
+    let directory = fixture("in_stage_event", &source, &business_source(""));
+    assert_exact_actor_mismatch(&directory, &["check", "requirements.fsl"], "approve");
+}
+
+#[test]
+fn explicit_maps_auto_checks_event_actor() {
+    let source = case_source("").replace(
+        r#"implements Abs from "business.fsl" { }"#,
+        r#"implements Abs from "business.fsl" { maps auto }"#,
+    );
+    let directory = fixture("explicit_maps_auto", &source, &business_source(""));
+    assert_exact_actor_mismatch(&directory, &["check", "requirements.fsl"], "approve");
+}
+
+#[test]
+fn standalone_refinement_maps_auto_checks_event_actor() {
+    let source = case_source("").replace("  implements Abs from \"business.fsl\" { }\n", "");
+    let directory = fixture("standalone_refinement", &source, &business_source(""));
+    std::fs::write(
+        directory.join("mapping.fsl"),
+        "refinement Mapping { impl Impl abs Abs maps auto }\n",
+    )
+    .expect("write standalone refinement");
+    assert_exact_actor_mismatch(
+        &directory,
+        &[
+            "refine",
+            "requirements.fsl",
+            "business.fsl",
+            "mapping.fsl",
+            "--depth",
+            "6",
+        ],
+        "approve",
+    );
+}
+
+#[test]
+fn glossary_actor_mismatch_names_the_canonical_actor() {
+    let source = case_source("")
+        .replace(
+            "requirements Impl {",
+            "requirements Impl {\n  glossary { Manager = 上長 }",
+        )
+        .replace("= Manager approves", "= 上長 approves");
+    let directory = fixture("glossary_actor", &source, &business_source(""));
+    assert_exact_actor_mismatch(&directory, &["check", "requirements.fsl"], "approve");
+}
+
+#[test]
+fn verify_rejects_the_issue_actor_mismatch_before_proof() {
+    let directory = fixture(
+        "verify_wrong_actor",
+        &expense_source("Manager", ""),
+        EXPENSE_BUSINESS,
+    );
+    assert_exact_actor_mismatch(
+        &directory,
+        &["verify", "requirements.fsl", "--depth", "6"],
+        "auto_approve",
+    );
+}
+
+#[test]
+fn event_covers_actor_text_cannot_override_the_declared_actor() {
+    let directory = fixture(
+        "event_covers_actor_text",
+        &expense_source("Manager", r#"covers REQ-1 "by System""#),
+        EXPENSE_BUSINESS,
+    );
+    assert_exact_actor_mismatch(&directory, &["check", "requirements.fsl"], "auto_approve");
+}
+
+#[test]
+fn business_covers_actor_text_cannot_override_the_declared_actor() {
+    let directory = fixture(
+        "business_covers_actor_text",
+        &case_source(""),
+        &business_source(r#"covers BIZ-1 "by Manager""#),
+    );
+    assert_exact_actor_mismatch(&directory, &["check", "requirements.fsl"], "approve");
+}
+
+#[test]
+fn explicit_action_correspondence_does_not_check_event_actor() {
+    let source = case_source("").replace(
+        r#"implements Abs from "business.fsl" { }"#,
+        r#"implements Abs from "business.fsl" { action approve(c) -> approve(c) }"#,
+    );
+    let directory = fixture("explicit_action", &source, &business_source(""));
+    let (output, exit) = fslc(&directory, &["check", "requirements.fsl"]);
+    assert_eq!(exit, 0, "{output:#}");
+    assert_eq!(output["result"], "ok", "{output:#}");
+    assert_eq!(output["implements"]["result"], "refines", "{output:#}");
+}
