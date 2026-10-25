@@ -545,6 +545,43 @@ fn a_forbidden_the_gate_rejects_is_published_as_an_error() {
     );
 }
 
+/// #1346: publish acceptance's wrong-kind message as an error at its step,
+/// rather than the acceptance declaration or a generic not-enabled failure.
+#[test]
+fn an_acceptance_wrong_kind_step_is_published_as_a_located_error() {
+    let source = r#"requirements Shop {
+  enum Color { Red, Blue }
+  state { color: Color }
+  init { color = Red }
+  requirement REQ-1 "paint" {
+    action paint(c: Color) { requires c != color  color = c }
+  }
+  acceptance AC-1 "paint blue" {
+    paint(1)
+    expect color == Blue
+  }
+}
+"#;
+    let published = published_diagnostics(source, None);
+    let trace = published
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "FSL-REQUIREMENT-TRACE")
+        .collect::<Vec<_>>();
+    assert_eq!(trace.len(), 1, "{published:#?}");
+    assert_eq!(trace[0]["severity"], 1, "{published:#?}");
+    assert_eq!(trace[0]["data"]["kind"], "acceptance", "{published:#?}");
+    assert_eq!(
+        trace[0]["range"]["start"],
+        json!({"line": 8, "character": 4}),
+        "{published:#?}"
+    );
+    assert_eq!(
+        trace[0]["message"],
+        "acceptance 'AC-1' does not pass the requirement-trace gate: argument 1 for 'c' of 'paint' is not a value of type 'Color' in acceptance, so no guard was evaluated",
+        "{published:#?}"
+    );
+}
+
 /// One `fslc-lsp` process driven request by request; notifications the
 /// server publishes in between (diagnostics) are skipped.
 struct Session {

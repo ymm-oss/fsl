@@ -2426,10 +2426,14 @@ verify {
   `kind: "acceptance"`)。`expect <expr>` と並んで `expect <Entity> <id> in
   <Stage>` をサポートし、scenarios / testgen へ直接流れ込みます(= 受け入れ基準が
   実装のコンフォーマンステストになります)。
-  `acceptance`/`forbidden` のステップの action 引数は、数値リテラルに加えて enum
-  メンバー名と const 名を受け付けます(例: `answer(0, Triggered)` は
-  `Triggered` が `Trigger` の第 2 メンバーであるとき `answer(0, 1)` と等価です)
-  — 未定義の名前は check 時エラーです。
+  `acceptance`/`forbidden` のステップの action 引数は、パラメータの種類と一致する
+  必要があります。enum パラメータにはメンバー名を渡し、数値の ordinal は渡せません
+  (`paint(1)` は `paint(Blue)` ではありません)。const 名も、その値がパラメータの
+  種類と一致する場合に使えます。未定義の名前は check 時エラーです。acceptance の
+  ステップで種類が異なる引数を渡すと、`kind: "acceptance"`、`wrong_kind_argument`
+  オブジェクト (`parameter`, `value`, `type`)、どの引数がパラメータの型に属さず、
+  ガードが評価されなかったことを説明するトップレベルの `message`、ヒント、および
+  そのステップの `loc` を持つエラーになります。
 - カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの
   要件、保存則、SLA/時間、carried フィールドとして表現できない履歴、明示の
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き

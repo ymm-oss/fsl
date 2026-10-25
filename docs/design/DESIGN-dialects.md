@@ -166,6 +166,7 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
    concrete Monitor** and verify at check time that each step is ok and that
    expect is true at the end (failure is reported as a `kind: "acceptance"`
    error with the AC ID + the failing step).
+   Step arguments are not enum ordinals (DESIGN-forbidden.md:120); wrong-kind acceptance arguments carry `wrong_kind_argument`, `message` (`argument <value> for '<param>' of '<action>' is not a value of type '<type>' in acceptance, so no guard was evaluated`), a hint, and the step's `loc`, with kind and exit status unchanged (#1346).
    (b) Embed it in the scenarios output as a `kind: "acceptance"` scenario
    (steps / expected_states are built from the replay result) → it flows
    naturally into testgen.
