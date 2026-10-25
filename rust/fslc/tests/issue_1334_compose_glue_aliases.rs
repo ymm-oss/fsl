@@ -278,3 +278,80 @@ fn a1334_sync_addition_rejects_component_write_at_assignment() {
 fn a1334_compose_init_rejects_component_write_at_assignment() {
     reject_restricted_component_write("  init {\n    a.on = true\n  }");
 }
+
+fn shadowed_alias_case(body: &str) {
+    let part_b = "spec B {
+  struct R { on: Bool }
+  state { r: R }
+  init { r = R { on: true } }
+  action stay() { }
+}";
+    let source = |binding| {
+        format!(
+            "compose C {{\n  use A as a from \"a.fsl\"\n  use B as b from \"b.fsl\"\n{}\n}}",
+            body.replace("BINDING", binding)
+        )
+    };
+    let dir = scratch(
+        "issue-1334-shadow",
+        &[
+            ("a.fsl", &component(false)),
+            ("b.fsl", part_b),
+            ("alias.fsl", &source("a")),
+            ("control.fsl", &source("x")),
+        ],
+    );
+    let control = verify(&dir, "control.fsl");
+    verdict(&control, "violated");
+    let result = verify(&dir, "alias.fsl");
+    eprintln!(
+        "shadow renamed={} alias={} exit={}",
+        control.0["result"], result.0["result"], result.1
+    );
+    verdict(&result, "violated");
+    assert_eq!(result.0["result"], control.0["result"]);
+    assert_eq!(result.0["violation_kind"], control.0["violation_kind"]);
+    assert_eq!(result.0["invariant"], control.0["invariant"]);
+}
+
+#[test]
+fn a1334_shadow_glue_let_respects_lexical_binding() {
+    shadowed_alias_case(
+        "  state { seen: Bool }\n  init { seen = false }\n  action glue() { let BINDING = b.r seen = BINDING.on }\n  invariant NotSeen { not seen }",
+    );
+}
+
+#[test]
+fn a1334_shadow_sync_let_respects_lexical_binding() {
+    shadowed_alias_case(
+        "  state { seen: Bool }\n  init { seen = false }\n  action s() = b.stay() { let BINDING = b.r seen = BINDING.on }\n  invariant NotSeen { not seen }",
+    );
+}
+
+#[test]
+fn a1334_shadow_property_quantifier_respects_lexical_binding() {
+    // A scalar has no `on` field. Binding `a` must not turn this invalid
+    // property into an accepted read of the component's Boolean state.
+    let source = |binding| {
+        compose(&format!(
+            "  invariant Off {{ forall {binding} in 0..1 {{ not {binding}.on }} }}"
+        ))
+    };
+    let dir = scratch(
+        "issue-1334-shadow-property",
+        &[
+            ("a.fsl", &component(false)),
+            ("alias.fsl", &source("a")),
+            ("control.fsl", &source("x")),
+        ],
+    );
+    let control = check(&dir, "control.fsl");
+    assert_eq!(control.1, 2, "{}", control.0);
+    eprintln!("quantifier renamed={} exit={}", control.0, control.1);
+    let result = check(&dir, "alias.fsl");
+    assert_eq!(result.1, control.1, "{}", result.0);
+    assert_eq!(result.0["result"], control.0["result"]);
+    assert_eq!(result.0["kind"], control.0["kind"]);
+    assert_eq!(result.0["message"], control.0["message"]);
+    assert_eq!(result.0["loc"], control.0["loc"]);
+}

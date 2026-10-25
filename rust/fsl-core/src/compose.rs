@@ -562,7 +562,8 @@ pub fn lower_compose_with_options(
                 init.extend(rewrite_compose_statements(
                     statements.clone(),
                     &components,
-                    false,
+                    &HashSet::new(),
+                    ComposeWriteContext::Init,
                 )?);
                 if init_meta.is_none() {
                     init_meta.clone_from(meta);
@@ -1358,13 +1359,20 @@ fn resolve_alias_leads_to(
     else {
         return Ok(item);
     };
-    let resolve = |expr: Box<Expr>| resolve_alias_expr(*expr, components, span).map(Box::new);
+    let mut bound = HashSet::new();
+    let binders = binders
+        .into_iter()
+        .map(|binder| {
+            let (binder, nested) = resolve_alias_binder(binder, components, span, &bound)?;
+            bound = nested;
+            Ok(binder)
+        })
+        .collect::<Result<_, CoreError>>()?;
+    let resolve =
+        |expr: Box<Expr>| resolve_alias_expr_scoped(*expr, components, span, &bound).map(Box::new);
     Ok(SpecItem::LeadsTo {
         name,
-        binders: binders
-            .into_iter()
-            .map(|binder| resolve_alias_binder(binder, components, span))
-            .collect::<Result<_, _>>()?,
+        binders,
         before: resolve(before)?,
         after: resolve(after)?,
         span,
@@ -1377,7 +1385,7 @@ fn resolve_alias_leads_to(
                 helper.args = helper
                     .args
                     .into_iter()
-                    .map(|arg| resolve_alias_expr(arg, components, span))
+                    .map(|arg| resolve_alias_expr_scoped(arg, components, span, &bound))
                     .collect::<Result<_, _>>()?;
                 Ok(helper)
             })
@@ -1403,16 +1411,11 @@ fn resolve_alias_action(
     else {
         unreachable!("only glue actions are routed here")
     };
+    let (params, bound) = resolve_alias_params(params, components, span)?;
     Ok(SpecItem::Action {
         name,
-        params: params
-            .into_iter()
-            .map(|param| resolve_alias_param(param, components, span))
-            .collect::<Result<_, _>>()?,
-        items: items
-            .into_iter()
-            .map(|item| resolve_alias_action_item(item, components, true))
-            .collect::<Result<_, _>>()?,
+        params,
+        items: resolve_alias_action_items(items, components, &bound, ComposeWriteContext::Glue)?,
         span,
         fair,
         meta,
@@ -1421,21 +1424,40 @@ fn resolve_alias_action(
     })
 }
 
+#[derive(Clone, Copy)]
+enum ComposeWriteContext {
+    Glue,
+    Sync,
+    Init,
+}
+
+impl ComposeWriteContext {
+    fn permits_component_write(self, via_alias: bool) -> bool {
+        match self {
+            Self::Glue => true,
+            Self::Sync => !via_alias,
+            Self::Init => false,
+        }
+    }
+}
+
 fn rewrite_compose_statements(
     statements: Vec<Statement>,
     components: &BTreeMap<String, Component>,
-    allow_component_writes: bool,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
 ) -> Result<Vec<Statement>, CoreError> {
     statements
         .into_iter()
-        .map(|statement| resolve_alias_statement(statement, components, allow_component_writes))
+        .map(|statement| resolve_alias_statement(statement, components, bound, context))
         .collect()
 }
 
 fn resolve_alias_statement(
     statement: Statement,
     components: &BTreeMap<String, Component>,
-    allow_component_writes: bool,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
 ) -> Result<Statement, CoreError> {
     Ok(match statement {
         Statement::Assign {
@@ -1443,8 +1465,8 @@ fn resolve_alias_statement(
             value,
             span,
         } => Statement::Assign {
-            target: resolve_alias_lvalue(target, components, span, allow_component_writes)?,
-            value: resolve_alias_expr(value, components, span)?,
+            target: resolve_alias_lvalue(target, components, span, bound, context)?,
+            value: resolve_alias_expr_scoped(value, components, span, bound)?,
             span,
         },
         Statement::If {
@@ -1453,16 +1475,18 @@ fn resolve_alias_statement(
             else_statements,
             span,
         } => Statement::If {
-            condition: resolve_alias_expr(condition, components, span)?,
+            condition: resolve_alias_expr_scoped(condition, components, span, bound)?,
             then_statements: rewrite_compose_statements(
                 then_statements,
                 components,
-                allow_component_writes,
+                bound,
+                context,
             )?,
             else_statements: rewrite_compose_statements(
                 else_statements,
                 components,
-                allow_component_writes,
+                bound,
+                context,
             )?,
             span,
         },
@@ -1470,11 +1494,14 @@ fn resolve_alias_statement(
             binder,
             statements,
             span,
-        } => Statement::ForAll {
-            binder: resolve_alias_binder(binder, components, span)?,
-            statements: rewrite_compose_statements(statements, components, allow_component_writes)?,
-            span,
-        },
+        } => {
+            let (binder, nested) = resolve_alias_binder(binder, components, span, bound)?;
+            Statement::ForAll {
+                binder,
+                statements: rewrite_compose_statements(statements, components, &nested, context)?,
+                span,
+            }
+        }
     })
 }
 
@@ -1483,23 +1510,25 @@ fn resolve_alias_lvalue(
     target: LValue,
     components: &BTreeMap<String, Component>,
     span: fsl_syntax::Span,
-    allow_component_writes: bool,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
 ) -> Result<LValue, CoreError> {
+    let via_alias = matches!(&target, LValue::Field(base, _)
+        if matches!(base.as_ref(), LValue::Var(alias)
+            if !bound.contains(alias) && components.contains_key(alias)));
     let target = match target {
         LValue::Var(name) => LValue::Var(name),
-        LValue::Index(name, index) => {
-            LValue::Index(name, resolve_alias_expr(index, components, span)?)
-        }
+        LValue::Index(name, index) => LValue::Index(
+            name,
+            resolve_alias_expr_scoped(index, components, span, bound)?,
+        ),
         LValue::Field(base, name) => match *base {
-            LValue::Var(alias) if components.contains_key(&alias) => {
+            LValue::Var(alias) if via_alias => {
                 LValue::Var(prefix(&alias, &name))
             }
             base => LValue::Field(
                 Box::new(resolve_alias_lvalue(
-                    base,
-                    components,
-                    span,
-                    allow_component_writes,
+                    base, components, span, bound, context,
                 )?),
                 name,
             ),
@@ -1512,7 +1541,7 @@ fn resolve_alias_lvalue(
     let (LValue::Var(name) | LValue::Index(name, _)) = base else {
         unreachable!("field bases were unwrapped")
     };
-    if !allow_component_writes
+    if !context.permits_component_write(via_alias)
         && components.values().any(|component| {
             component
                 .names
@@ -1535,16 +1564,11 @@ fn sync_action(
     warnings: &mut Vec<Value>,
     origins: &mut BTreeMap<String, crate::OriginChain>,
 ) -> Result<SpecItem, CoreError> {
-    let params = action
-        .params
-        .iter()
-        .cloned()
-        .map(|param| resolve_alias_param(param, components, action.span))
-        .collect::<Result<Vec<_>, _>>()?;
+    let (params, bound) = resolve_alias_params(action.params.clone(), components, action.span)?;
     let mut items = Vec::new();
     let mut item_origins = Vec::new();
     let mut fair_constituents = Vec::new();
-    let mut avoid = sync_avoid_names(action, &params, components)?;
+    let mut avoid = sync_avoid_names(action, &bound, components)?;
     for reference in &action.refs {
         let component = components
             .get(&reference.alias)
@@ -1598,7 +1622,7 @@ fn sync_action(
                 };
                 Ok((
                     name,
-                    resolve_alias_expr(arg.clone(), components, action.span)?,
+                    resolve_alias_expr_scoped(arg.clone(), components, action.span, &bound)?,
                 ))
             })
             .collect::<Result<HashMap<_, _>, CoreError>>()?;
@@ -1611,14 +1635,12 @@ fn sync_action(
         items.extend(source_items);
     }
     record_sync_item_origins(origins, &action.name, &items, item_origins);
-    items.extend(
-        action
-            .items
-            .iter()
-            .cloned()
-            .map(|item| resolve_alias_action_item(item, components, false))
-            .collect::<Result<Vec<_>, _>>()?,
-    );
+    items.extend(resolve_alias_action_items(
+        action.items.clone(),
+        components,
+        &bound,
+        ComposeWriteContext::Sync,
+    )?);
     if !action.fair && !fair_constituents.is_empty() {
         let refs = fair_constituents.join(", ");
         warnings.push(json!({
@@ -1647,43 +1669,49 @@ fn sync_action(
 /// argument's free names, across all references (#1254).
 fn sync_avoid_names(
     action: &SyncAction,
-    params: &[Param],
+    bound: &HashSet<String>,
     components: &BTreeMap<String, Component>,
 ) -> Result<HashSet<String>, CoreError> {
-    let mut avoid = params
-        .iter()
-        .map(|param| match param {
-            Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
-        })
-        .collect::<HashSet<_>>();
+    let mut avoid = bound.clone();
     for reference in &action.refs {
         for arg in &reference.args {
-            avoid.extend(free_vars(&resolve_alias_expr(
+            avoid.extend(free_vars(&resolve_alias_expr_scoped(
                 arg.clone(),
                 components,
                 action.span,
+                bound,
             )?));
         }
     }
     Ok(avoid)
 }
 
-fn resolve_alias_param(
-    param: Param,
+fn resolve_alias_params(
+    params: Vec<Param>,
     components: &BTreeMap<String, Component>,
     span: fsl_syntax::Span,
-) -> Result<Param, CoreError> {
-    Ok(match param {
-        Param::Typed(name, qualified) => Param::Typed(
-            name,
-            resolve_alias_qualified_name(qualified, components, span)?,
-        ),
-        Param::Range(name, lo, hi) => Param::Range(
-            name,
-            resolve_alias_expr(lo, components, span)?,
-            resolve_alias_expr(hi, components, span)?,
-        ),
-    })
+) -> Result<(Vec<Param>, HashSet<String>), CoreError> {
+    let mut bound = HashSet::new();
+    let params = params
+        .into_iter()
+        .map(|param| {
+            let param = match param {
+                Param::Typed(name, qualified) => Param::Typed(
+                    name,
+                    resolve_alias_qualified_name(qualified, components, span)?,
+                ),
+                Param::Range(name, lo, hi) => Param::Range(
+                    name,
+                    resolve_alias_expr_scoped(lo, components, span, &bound)?,
+                    resolve_alias_expr_scoped(hi, components, span, &bound)?,
+                ),
+            };
+            let (Param::Typed(name, _) | Param::Range(name, _, _)) = &param;
+            bound.insert(name.clone());
+            Ok(param)
+        })
+        .collect::<Result<_, CoreError>>()?;
+    Ok((params, bound))
 }
 
 fn resolve_alias_qualified_name(
@@ -1712,8 +1740,11 @@ fn resolve_alias_binder(
     binder: Binder,
     components: &BTreeMap<String, Component>,
     span: fsl_syntax::Span,
-) -> Result<Binder, CoreError> {
-    Ok(match binder {
+    bound: &HashSet<String>,
+) -> Result<(Binder, HashSet<String>), CoreError> {
+    let mut nested = bound.clone();
+    nested.insert(binder_name(&binder).to_owned());
+    let binder = match binder {
         Binder::Typed {
             name,
             type_name,
@@ -1722,7 +1753,9 @@ fn resolve_alias_binder(
             name,
             type_name: resolve_alias_qualified_name(type_name, components, span)?,
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .map(|expr| {
+                    resolve_alias_expr_scoped(*expr, components, span, &nested).map(Box::new)
+                })
                 .transpose()?,
         },
         Binder::Range {
@@ -1732,10 +1765,12 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Range {
             name,
-            lo: Box::new(resolve_alias_expr(*lo, components, span)?),
-            hi: Box::new(resolve_alias_expr(*hi, components, span)?),
+            lo: Box::new(resolve_alias_expr_scoped(*lo, components, span, bound)?),
+            hi: Box::new(resolve_alias_expr_scoped(*hi, components, span, bound)?),
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .map(|expr| {
+                    resolve_alias_expr_scoped(*expr, components, span, &nested).map(Box::new)
+                })
                 .transpose()?,
         },
         Binder::Collection {
@@ -1744,103 +1779,93 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Collection {
             name,
-            collection: Box::new(resolve_alias_expr(*collection, components, span)?),
+            collection: Box::new(resolve_alias_expr_scoped(
+                *collection,
+                components,
+                span,
+                bound,
+            )?),
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .map(|expr| {
+                    resolve_alias_expr_scoped(*expr, components, span, &nested).map(Box::new)
+                })
                 .transpose()?,
         },
-    })
+    };
+    Ok((binder, nested))
 }
 
-#[allow(clippy::too_many_lines)]
 fn resolve_alias_expr(
     expr: Expr,
     components: &BTreeMap<String, Component>,
     diagnostic_span: fsl_syntax::Span,
 ) -> Result<Expr, CoreError> {
+    resolve_alias_expr_scoped(expr, components, diagnostic_span, &HashSet::new())
+}
+
+#[allow(clippy::too_many_lines)]
+fn resolve_alias_expr_scoped(
+    expr: Expr,
+    components: &BTreeMap<String, Component>,
+    diagnostic_span: fsl_syntax::Span,
+    bound: &HashSet<String>,
+) -> Result<Expr, CoreError> {
+    let resolve = |expr| resolve_alias_expr_scoped(expr, components, diagnostic_span, bound);
     Ok(match expr {
         Expr::Field(base, name) => {
-            if let Expr::Var(alias) = base.as_ref() {
-                if components.contains_key(alias) {
-                    Expr::Var(prefix(alias, &name))
-                } else {
-                    Expr::Field(
-                        Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
-                        name,
-                    )
-                }
+            if let Expr::Var(alias) = base.as_ref()
+                && !bound.contains(alias)
+                && components.contains_key(alias)
+            {
+                Expr::Var(prefix(alias, &name))
             } else {
-                Expr::Field(
-                    Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
-                    name,
-                )
+                Expr::Field(Box::new(resolve(*base)?), name)
             }
         }
-        Expr::Some(expr) => Expr::Some(Box::new(resolve_alias_expr(
-            *expr,
-            components,
-            diagnostic_span,
-        )?)),
-        Expr::Set(items) => Expr::Set(
-            items
-                .into_iter()
-                .map(|item| resolve_alias_expr(item, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
-        ),
-        Expr::Seq(items) => Expr::Seq(
-            items
-                .into_iter()
-                .map(|item| resolve_alias_expr(item, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
-        ),
+        Expr::Some(expr) => Expr::Some(Box::new(resolve(*expr)?)),
+        Expr::Set(items) => Expr::Set(items.into_iter().map(resolve).collect::<Result<_, _>>()?),
+        Expr::Seq(items) => Expr::Seq(items.into_iter().map(resolve).collect::<Result<_, _>>()?),
         Expr::Struct { name, fields } => Expr::Struct {
             name,
             fields: fields
                 .into_iter()
-                .map(|(name, expr)| {
-                    Ok((name, resolve_alias_expr(expr, components, diagnostic_span)?))
-                })
+                .map(|(name, expr)| Ok((name, resolve(expr)?)))
                 .collect::<Result<_, CoreError>>()?,
         },
         Expr::Call { name, args, span } => Expr::Call {
             name,
-            args: args
-                .into_iter()
-                .map(|arg| resolve_alias_expr(arg, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
+            args: args.into_iter().map(resolve).collect::<Result<_, _>>()?,
             span,
         },
-        Expr::Index(base, index) => Expr::Index(
-            Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
-            Box::new(resolve_alias_expr(*index, components, diagnostic_span)?),
-        ),
+        Expr::Index(base, index) => {
+            Expr::Index(Box::new(resolve(*base)?), Box::new(resolve(*index)?))
+        }
         Expr::Method {
             receiver,
             name,
             args,
         } => Expr::Method {
-            receiver: Box::new(resolve_alias_expr(*receiver, components, diagnostic_span)?),
+            receiver: Box::new(resolve(*receiver)?),
             name,
-            args: args
-                .into_iter()
-                .map(|arg| resolve_alias_expr(arg, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
+            args: args.into_iter().map(resolve).collect::<Result<_, _>>()?,
         },
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: Box::new(resolve_alias_expr(*left, components, diagnostic_span)?),
-            right: Box::new(resolve_alias_expr(*right, components, diagnostic_span)?),
-        },
-        Expr::Neg(expr) => Expr::Neg(Box::new(resolve_alias_expr(
-            *expr,
-            components,
-            diagnostic_span,
-        )?)),
-        Expr::Not(expr) => Expr::Not(Box::new(resolve_alias_expr(
-            *expr,
-            components,
-            diagnostic_span,
-        )?)),
+        Expr::Binary { op, left, right } => {
+            let left = resolve(*left)?;
+            let mut nested = bound.clone();
+            extend_pattern_names(&left, &mut nested);
+            Expr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(resolve_alias_expr_scoped(
+                    *right,
+                    components,
+                    diagnostic_span,
+                    &nested,
+                )?),
+            }
+        }
+        Expr::Neg(expr) => Expr::Neg(Box::new(resolve(*expr)?)),
+        Expr::Not(expr) => Expr::Not(Box::new(resolve(*expr)?)),
         Expr::Conditional {
             condition,
             then_expr,
@@ -1848,43 +1873,59 @@ fn resolve_alias_expr(
             spans,
         } => Expr::Conditional {
             spans,
-            condition: Box::new(resolve_alias_expr(*condition, components, diagnostic_span)?),
-            then_expr: Box::new(resolve_alias_expr(*then_expr, components, diagnostic_span)?),
-            else_expr: Box::new(resolve_alias_expr(*else_expr, components, diagnostic_span)?),
+            condition: Box::new(resolve(*condition)?),
+            then_expr: Box::new(resolve(*then_expr)?),
+            else_expr: Box::new(resolve(*else_expr)?),
         },
         Expr::Is { expr, pattern } => Expr::Is {
-            expr: Box::new(resolve_alias_expr(*expr, components, diagnostic_span)?),
+            expr: Box::new(resolve(*expr)?),
             pattern,
         },
         Expr::Quantified {
             quantifier,
             binder,
             body,
-        } => Expr::Quantified {
-            quantifier,
-            binder: resolve_alias_binder(binder, components, diagnostic_span)?,
-            body: Box::new(resolve_alias_expr(*body, components, diagnostic_span)?),
-        },
+        } => {
+            let (binder, nested) =
+                resolve_alias_binder(binder, components, diagnostic_span, bound)?;
+            Expr::Quantified {
+                quantifier,
+                binder,
+                body: Box::new(resolve_alias_expr_scoped(
+                    *body,
+                    components,
+                    diagnostic_span,
+                    &nested,
+                )?),
+            }
+        }
         Expr::Aggregate {
             kind,
             binder,
             value,
-        } => Expr::Aggregate {
-            kind,
-            binder: resolve_alias_binder(binder, components, diagnostic_span)?,
-            value: value
-                .map(|expr| resolve_alias_expr(*expr, components, diagnostic_span).map(Box::new))
-                .transpose()?,
-        },
+        } => {
+            let (binder, nested) =
+                resolve_alias_binder(binder, components, diagnostic_span, bound)?;
+            Expr::Aggregate {
+                kind,
+                binder,
+                value: value
+                    .map(|expr| {
+                        resolve_alias_expr_scoped(*expr, components, diagnostic_span, &nested)
+                            .map(Box::new)
+                    })
+                    .transpose()?,
+            }
+        }
         Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
             name,
-            expr: Box::new(resolve_alias_expr(*expr, components, diagnostic_span)?),
+            expr: Box::new(resolve(*expr)?),
             span,
         },
         Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
             name,
-            left: Box::new(resolve_alias_expr(*left, components, diagnostic_span)?),
-            right: Box::new(resolve_alias_expr(*right, components, diagnostic_span)?),
+            left: Box::new(resolve(*left)?),
+            right: Box::new(resolve(*right)?),
         },
         Expr::TernaryNamed {
             name,
@@ -1893,35 +1934,62 @@ fn resolve_alias_expr(
             third,
         } => Expr::TernaryNamed {
             name,
-            first: Box::new(resolve_alias_expr(*first, components, diagnostic_span)?),
-            second: Box::new(resolve_alias_expr(*second, components, diagnostic_span)?),
-            third: Box::new(resolve_alias_expr(*third, components, diagnostic_span)?),
+            first: Box::new(resolve(*first)?),
+            second: Box::new(resolve(*second)?),
+            third: Box::new(resolve(*third)?),
         },
         other => other,
     })
 }
 
-fn resolve_alias_action_item(
-    item: ActionItem,
+/// Match the public Kernel's Is/Binary pattern continuation scope.
+fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
+    match expr {
+        Expr::Is {
+            pattern: fsl_syntax::Pattern::Some(name),
+            ..
+        } => {
+            bound.insert(name.clone());
+        }
+        Expr::Binary { left, right, .. } => {
+            extend_pattern_names(left, bound);
+            extend_pattern_names(right, bound);
+        }
+        _ => {}
+    }
+}
+
+fn resolve_alias_action_items(
+    items: Vec<ActionItem>,
     components: &BTreeMap<String, Component>,
-    allow_component_writes: bool,
-) -> Result<ActionItem, CoreError> {
-    Ok(match item {
-        ActionItem::Requires(expr, span) => {
-            ActionItem::Requires(resolve_alias_expr(expr, components, span)?, span)
-        }
-        ActionItem::Ensures(expr, span) => {
-            ActionItem::Ensures(resolve_alias_expr(expr, components, span)?, span)
-        }
-        ActionItem::Let(name, expr, span) => {
-            ActionItem::Let(name, resolve_alias_expr(expr, components, span)?, span)
-        }
-        ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
-            statement,
-            components,
-            allow_component_writes,
-        )?),
-    })
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
+) -> Result<Vec<ActionItem>, CoreError> {
+    let mut bound = bound.clone();
+    items
+        .into_iter()
+        .map(|item| {
+            Ok(match item {
+                ActionItem::Requires(expr, span) => {
+                    let expr = resolve_alias_expr_scoped(expr, components, span, &bound)?;
+                    extend_pattern_names(&expr, &mut bound);
+                    ActionItem::Requires(expr, span)
+                }
+                ActionItem::Ensures(expr, span) => ActionItem::Ensures(
+                    resolve_alias_expr_scoped(expr, components, span, &bound)?,
+                    span,
+                ),
+                ActionItem::Let(name, expr, span) => {
+                    let expr = resolve_alias_expr_scoped(expr, components, span, &bound)?;
+                    bound.insert(name.clone());
+                    ActionItem::Let(name, expr, span)
+                }
+                ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
+                    statement, components, &bound, context,
+                )?),
+            })
+        })
+        .collect()
 }
 
 /// Substitute a component action's parameters by a sync reference's arguments
