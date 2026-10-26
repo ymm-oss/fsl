@@ -12581,6 +12581,9 @@ fn run_testgen_from_source(
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    // Both verifier-failure paths use CLI verify's edition finalizer. Testgen
+    // has no requested-edition flag; the captured source header governs it.
+    let finalize_failure = |result| apply_domain_edition_from_source(result, source, path, None);
     let (scenarios, status) =
         run_scenarios_mode_from_source(path, source, depth, deadlock_mode, !strict);
     if status != 0 {
@@ -12593,13 +12596,13 @@ fn run_testgen_from_source(
         // reclassifying "your spec has a bug" as "fix your input" and
         // destroying the trace. Status 3 (internal) is propagated the same
         // way for the same reason.
-        return (scenarios, status);
+        return finalize_failure((scenarios, status));
     }
     let (scenarios, status) = fold_scenarios_refinements(path, source, depth, scenarios, status);
     if status != 0 {
         // Use the same failure-envelope owner as the kernel-failure path,
         // not the scenarios-shaped fold result. Gate before walk or writes.
-        return run_verify_from_source(
+        return finalize_failure(run_verify_from_source(
             path,
             source,
             depth,
@@ -12607,7 +12610,7 @@ fn run_testgen_from_source(
             "bmc",
             DEFAULT_EXPLICIT_BUDGET,
             1,
-        );
+        ));
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
         Ok(fslc_rust::TestgenWalk::Clean(walk)) => walk,
