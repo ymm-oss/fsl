@@ -2176,6 +2176,7 @@ compose OrderSystem {
   additional statements may only assign to the composition-side state
   (synchronizing two actions of the same component is not allowed).
   Breaking removal (#1334): additional statements assigning component state via physical names such as `alias__x`, which previously passed `check`, now produce a located error too.
+  Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write

@@ -647,6 +647,8 @@ Sync additional statements may assign only composition-side state: component
 targets are rejected with a located error, including physical `alias__x` names
 that previously passed `check` (breaking removal, #1334).
 
+Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
+
 A glue action reads and writes local and component state directly via `alias.var`.
 Compose `init` may also initialize component state (including physical names), but
 overlap with a component's own init is rejected as duplicate initialization.

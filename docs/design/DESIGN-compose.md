@@ -60,6 +60,56 @@ compose OrderSystem {
     **zero ok-to-error transitions** (this write form does not occur in that
     corpus). No pre-existing required tests were
     rewritten, renamed, deleted, or stopped; only new regression tests were added.
+  - Breaking removal (#1442): reference arguments read only header parameters,
+    consts, and state, never bindings from the additional items' `let`s.
+
+    **Migration contract (#702, limited to sync reference argument scope):**
+
+    1. **Versions/editions:** reproduced with native 4.12.0 and the default/current
+       edition at base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` (accepted) and
+       the scoped compose implementation (rejected, also reporting 4.12.0).
+       This is the v5.0.0 contract; no edition bypass is provided. The earliest
+       affected release has not been established.
+    2. **New rejection:** `action s() = b.go(t) { let t = true }` no longer
+       checks when the additional `let` is the only declaration of `t`.
+       For the measured five-line component with
+       `action go(v: Bool) { flag = v }`, the exact diagnostic is exit 2,
+       `result: "error"`, `kind: "semantics"`, message
+       `invalid model expression: public Kernel cannot type identifier 't' at 4:24`,
+       and `loc: {"line": 4, "column": 24}`. The location depends on the input;
+       it is not a fixed location for every rejected reference.
+    3. **Rewrite:** declare a header parameter, for example
+       `action s(t: Bool) = b.go(t) { }`, and supply the intended value at its
+       call sites, or represent the intended value in composition-side state
+       and pass that state expression. Header parameters, consts, and state
+       remain valid argument sources. Review the action interface and state
+       semantics: these rewrites are not automatically equivalent to an
+       additional local binding. There is no automatic migration.
+    4. **Commands:** run unscoped `fslc check composed.fsl`, correct each
+       out-of-scope reference, repeat `check`, then run
+       `fslc verify composed.fsl --depth 8 --no-cache` on the corrected source.
+       There is no dedicated lint/migrate auto-fix for this scope change;
+       a selected-property verification run is not a migration detector.
+    5. **Verdicts/evidence:** a previous `ok` now becomes the type error above;
+       do not reuse verification evidence for the removed source form after
+       rewriting it. Existing JSON envelopes and assurance classes are unchanged.
+       The recorded `fslc check` sweep of all 579 `.fsl` files under `specs/`,
+       `examples/`, and `rust/fslc/tests/fixtures/`, from the base above to
+       `acd81719248dd7740b942e4ee3fff0c56892e6be`, has zero ok-to-error
+       transitions; this inline form is not in that corpus. Its base acceptance
+       and new rejection were each reproduced twice, and the regression also
+       checks accepting header-parameter and composition-state rewrites.
+    6. **Consumers/artifacts:** native CLI, Worker/shared compose loading,
+       hooks, CI, and downstream callers must handle the rejection rather than
+       treating an old `ok` as current acceptance. Do not use editor silence
+       instead of `check`. Reverify corrected sources, regenerate affected
+       scenario/testgen/replay/ledger/document/HTML artifacts, and recheck
+       approval records and implementation conformance against the new inputs.
+    7. **Rollback:** v5.0.0 has no compatibility bypass or grace period for this
+       form. Returning to an older accepting binary is a version rollback,
+       not evidence that the input satisfies the v5 contract; revalidate its
+       artifacts with that binary. No support duration is promised. This note
+       does not implement #702's general release gate.
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state
     expressions
