@@ -85,6 +85,16 @@ acceptance trace use the declared action names. Legacy branch/name regressions
 remain in dedicated fixtures; this manual rewrite does not make branch `maps`
 machine-applicable or alter the migrator's refusal boundary.
 
+### Manual cancellation example normalization
+
+The cancellation requirements example applies the four safe finding edits to
+place its action correspondences in the single local `implements` block. Its
+checked Kernel, typed requirement metadata, history flag and conservation
+counters are preserved. This spelling-only edit does not reformat the file:
+`fslc fmt examples/pm/cancel_system.fsl --check --edition next` still exits 1,
+as it does for the original example. This example update does not claim to have
+passed the bulk procedure's formatting gate.
+
 The retained Python implementation is not a second migrator. The native
 `fslc-lsp` preserves migration data on diagnostics and exposes
 machine-applicable edits as quick-fix Code Actions through the authoritative
@@ -94,9 +104,6 @@ Rust planner.
 
 1. Run `fslc lint PATH... --edition next` and resolve every refusal.
 2. Review `fslc migrate PATH... --edition next` machine edits.
-   The cancellation requirements example applies the four safe local action
-   correspondences in its single `implements` block, preserving its checked
-   Kernel, typed requirement metadata, history flag and conservation counters.
 3. Run the same command with `--write`.
 4. Require `fslc migrate PATH... --edition next` to report zero changes,
    `fslc fmt PATH... --check --edition next` to exit 0, and the project check /
