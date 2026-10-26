@@ -486,7 +486,12 @@ a `requirement.id` nested inside a `findings`/`checks` array item — or a
 spec-level（仕様全体）finding when it fails with no attribution at all; it
 never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
-verdict).
+verdict). Non-`refines` preservations each add a `GOV` finding; non-`refines`
+inline `implements` adds a spec-level finding without inventing requirement
+links. `unknown_cti` is an unestablished induction finding using the ordinary
+violation attribution rules, not a reachable counterexample. Full CTI/hint/
+rank-failure evidence stays in the appendix. These new findings change affected
+ledger approval digests and require review and re-approval.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a

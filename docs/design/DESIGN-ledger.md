@@ -100,6 +100,27 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 
 ## Column → source map
 
+### Amendment to #1316: verdict findings (#1338, decision 2026-10-26)
+
+The dedicated governance/implements sections alone are not sufficient for
+requirement-level review. Every non-`refines` preservation now adds a finding
+attributed to the governance catalog's `GOV` requirement, with declaration name,
+result, `before` → `after`, controls, and its complete raw evidence. Passing
+preservations (including an empty list) add no findings. A non-`refines` inline
+`implements` adds a spec-level finding, not a fabricated requirement link; an
+otherwise confirmed requirement row can remain green. Both rules include
+`impl_violated` and `unknown_budget`, independently of the primary verdict.
+Budget exhaustion is unfinished search, not an established counterexample.
+
+`unknown_cti` adds an **unestablished** induction finding, attributed by the
+same metadata/property lookup as `violated`, or to the spec as a whole. Its
+summary and translation do not claim a reachable counterexample or violation;
+the appendix preserves the full `cti`, `hint`, and `rank_failure` evidence.
+Ordinary violations, requirement confirmations, assurance classes, and human
+approval status remain separate axes. These new findings change affected
+ledger rendering digests: existing approvals become `drifted` and require
+review and re-approval.
+
 Most columns are derived from fields the JSON already carries (issue #23):
 `requirement.{id,text}`, `trace_type`, `recommended_action`/`hint`,
 `checked_to_depth`+`completeness`. Governance columns (risk / decider) come from

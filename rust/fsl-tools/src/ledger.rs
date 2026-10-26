@@ -214,7 +214,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         .get("trace_type")
         .and_then(Value::as_str)
         .unwrap_or("");
-    if result == "violated" {
+    if matches!(result, "violated" | "unknown_cti") {
         let (group, name) =
             if let Some(name) = verification.get("invariant").and_then(Value::as_str) {
                 ("invariants", name)
@@ -235,16 +235,26 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
-            trace_type: if trace_type.is_empty() {
+            trace_type: if result == "unknown_cti" {
+                "induction_cti"
+            } else if trace_type.is_empty() {
                 "invariant"
             } else {
                 trace_type
             }
             .to_owned(),
             name: name.to_owned(),
-            summary: summarize_violation(verification),
+            summary: if result == "unknown_cti" {
+                "帰納証明は未確立（unknown_cti）".to_owned()
+            } else {
+                summarize_violation(verification)
+            },
             next_action: verification
-                .get("recommended_action")
+                .get(if result == "unknown_cti" {
+                    "hint"
+                } else {
+                    "recommended_action"
+                })
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             raw: verification.clone(),
@@ -342,6 +352,36 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             raw: verification.clone(),
         });
     }
+    if let Some(implements) = verification.get("implements") {
+        findings.extend(refinement_finding(
+            implements,
+            "implements",
+            implements.get("abs").and_then(Value::as_str).unwrap_or("—"),
+            None,
+            "",
+        ));
+    }
+    for preservation in verification["governance"]["preservations"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        findings.extend(refinement_finding(
+            preservation,
+            "preservation",
+            preservation
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("—"),
+            Some("GOV".to_owned()),
+            &format!(
+                "{} → {} / control: {}",
+                preservation["before"].as_str().unwrap_or("—"),
+                preservation["after"].as_str().unwrap_or("—"),
+                preservation["preserve"],
+            ),
+        ));
+    }
     for (name, item) in
         crate::coverage::source_action_coverage(model, &verification["action_coverage"])
             .into_iter()
@@ -408,6 +448,28 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         });
     }
     findings
+}
+
+fn refinement_finding(
+    raw: &Value,
+    kind: &str,
+    name: &str,
+    requirement_id: Option<String>,
+    context: &str,
+) -> Option<Finding> {
+    let result = raw.get("result").and_then(Value::as_str);
+    if refinement_passes(result) {
+        return None;
+    }
+    Some(Finding {
+        requirement_id,
+        requirement_text: None,
+        trace_type: kind.to_owned(),
+        name: name.to_owned(),
+        summary: format!("{}: {} {context}", name, result.unwrap_or("—")),
+        next_action: None,
+        raw: raw.clone(),
+    })
 }
 
 /// What a `trace_type: "forbidden"` error reports. Only `Accepted` carries an
@@ -508,6 +570,15 @@ fn translate(finding: &Finding) -> String {
             "応答性『{}』の停止性（ランキング）が示せない。進行が単調に進むことを確認する。",
             finding.name
         ),
+        "induction_cti" => format!(
+            "性質『{}』の帰納証明は未確立。補助不変条件やランキングを確認する。",
+            finding.name
+        ),
+        "implements" | "preservation" => if finding.raw["result"] == "unknown_budget" {
+            "対応関係の探索が未完了。範囲と対応付けを見直す。".to_owned()
+        } else {
+            "上位契約との対応関係が成立していない。対応付けと仕様を確認する。".to_owned()
+        },
         "refinement" => "詳細仕様が上位契約から逸脱している。対応付け（mapping）かガードを修正する。".to_owned(),
         "conformance" => "実装ログが仕様に非適合。実装か仕様のどちらが正かを確定する。".to_owned(),
         "external_evidence" => format!(
@@ -877,8 +948,12 @@ fn refinement_text(value: Option<&Value>) -> String {
         .map_or_else(|| "—".to_owned(), escape)
 }
 
+fn refinement_passes(result: Option<&str>) -> bool {
+    result == Some("refines")
+}
+
 fn refinement_mark(result: Option<&str>) -> &'static str {
-    if result == Some("refines") {
+    if refinement_passes(result) {
         "🟢"
     } else {
         "🔴"
@@ -1288,9 +1363,14 @@ pub fn render_ledger_with_approvals(
             );
         }
         for finding in requirement_findings {
+            let summary_label = match finding.trace_type.as_str() {
+                "induction_cti" => "未確立の要約",
+                "implements" | "preservation" => "判定要約",
+                _ => "反例要約",
+            };
             let _ = writeln!(
                 output,
-                "- **検出**: `{}` — {}\n  - 反例要約: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
+                "- **検出**: `{}` — {}\n  - {summary_label}: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
                 finding.trace_type,
                 escape(&finding.name),
                 escape(&finding.summary),
