@@ -27,3 +27,7 @@ source member spelling; conversion, abstraction, and explicitly qualified enum
 literals retain owner qualification through node-local spelling provenance.
 A single inserted argument pattern without foreign interference
 is no longer renamed merely because its name is reserved for freshness.
+When sync composition must rename colliding private bindings, synthesized names
+such as `__u_substitution_0` may intentionally appear in later error messages,
+`explain`, `analyze`, and approval HTML output. Inputs needing no such renaming
+keep their existing output spelling.
