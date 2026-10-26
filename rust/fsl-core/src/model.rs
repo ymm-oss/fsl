@@ -2134,7 +2134,7 @@ fn collect_state_references(
     }
 }
 
-/// State names referenced anywhere in an expression, in concrete value order.
+/// State names referenced anywhere in an expression, in lexicographic name order.
 #[must_use]
 pub fn state_references(expr: &Expr, model: &KernelModel) -> BTreeSet<String> {
     let state_names = model.state.iter().map(|(name, _)| name.clone()).collect();
@@ -2148,7 +2148,7 @@ pub fn state_references(expr: &Expr, model: &KernelModel) -> BTreeSet<String> {
 /// This is a verification-time restriction, not a type-checking restriction.
 ///
 /// # Errors
-/// Returns the shared diagnostic for the first state name in value order.
+/// Returns the shared diagnostic for the first state name in lexicographic order.
 pub fn check_init_collection_binder(
     model: &KernelModel,
     binder: &Binder,
