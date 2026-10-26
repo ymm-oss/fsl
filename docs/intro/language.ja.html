@@ -209,6 +209,19 @@ API/オフラインおよび有界の preservation/rollback 検査は、ダイ�
 プロンプト/リトリーバー、ツールスキーマ、出力スキーマ、モバイル/サーバー、その他の
 アーティファクトプロファイルを同じスナップショットモデルでカバーします。
 <code>docs/design/DESIGN-db.md</code> を参照。</p>
+<p><code>check compatibility</code> の12個のルール名は、lowering と DB ツールが共有する閉じた語彙です。
+未知の名前は Kernel/model や成果物を作る前に拒否され、<code>kernel</code>、<code>scenarios</code>、<code>explain</code>、
+<code>testgen</code>、ファイル入力の <code>fmt</code>/<code>lint</code>/<code>migrate</code> も exit 2 になります。lowering は記述した
+ルールの位置を持つ <code>semantics</code> error を返します。各 command は既存の lowering error と
+同じ形式で描画し、対応する envelope には <code>loc</code>、<code>fmt</code>/<code>lint</code>/<code>migrate</code> では message 内に
+位置を示します。<code>check</code> と Worker の既存の特化 validator の error は位置なしのままです。
+DB 固有の findings と schema 範囲の到達可能性検査は DB ツールに残り、Kernel export の
+追加の門にはしません。有効なルールとデフォルトの選択、修理の道具の carve-out
+(formatter の stdin を含む)は変わりません。
+直接の HTML/ledger report は、描画用の lowering より先に検証の位置なし validator 拒否を
+返します。#1473 の base/head 比較では、595個の <code>.fsl</code> ファイルで <code>check</code> の <code>ok</code>→<code>error</code>
+遷移および出力/exit の差はありませんでした。正確な commit、binary hash、command は
+<code>docs/design/DESIGN-db.md</code> に記録しています。</p>
 <p>関数型 DDD / 非同期エフェクトダイアレクト(v0。同じカーネルへ展開され、安定した
 fsl-domain findings を報告します):</p>
 <pre><code class="language-fsl">domain &lt;Name&gt; {
@@ -1265,9 +1278,10 @@ panic(exit 101)でなく semantics error(exit 2)になります。
 通る report、warning、metadata と承認 artifact の digest は変わりません。
 この error の訂正は直接の <code>ledger</code> と <code>html</code> の報告だけが対象です。
 <code>approval create --kind ledger|html</code>、<code>approval check</code>、<code>approval diff</code> と
-<code>counterexample export</code> は今も検証や再描画より先に spec を lower するため、不正入力の error の
-優先順と AI authority の未知の tool による panic(exit 101)は変わりません。
-panic は #1464、approval create の diagnostic の優先順は別の issue で扱います。
+<code>counterexample export</code> は今も検証や再描画より先に spec を lower し、既存の不正入力の error の
+優先順を保ちます。#1464 の後は、AI authority の未知の tool は panic でなく
+semantics error(exit 2)を返します。approval create の diagnostic の優先順は
+引き続き別の issue で扱います。
 <code>testgen</code> は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
 <code>verify</code> と同じ失敗封筒と exit(検証の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
 ハーネスを書きません。同じ <code>2</code> の

@@ -3297,9 +3297,10 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] if the lowered kernel catalog is invalid.
+/// Returns [`CoreError`] if a compatibility rule name is unknown or the lowered
+/// kernel catalog is invalid.
 pub fn lower_db(system: &fsl_syntax::DbSystem) -> Result<KernelSpec, CoreError> {
-    let (surface, origins) = crate::db::lower_db_surface(system);
+    let (surface, origins) = crate::db::lower_db_surface(system)?;
     crate::lower_direct_spec_with_origins(surface, origins)
 }
 

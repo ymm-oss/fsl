@@ -2988,6 +2988,403 @@ fn unknown_authority_tool_returns_an_error_for_every_document_command() {
     );
 }
 
+// Independent specification vocabulary: do not derive this oracle from the
+// production rule registry (#1473).
+const DB_UNKNOWN_RULE_MESSAGE: &str = "unknown db compatibility rule 'unregistered_compatibility_rule'; supported rules: all_active_reads_exist, all_active_writes_exist, api_calls_accepted, api_responses_expected, artifact_capabilities_provided, data_preserved, destructive_operations_annotated, not_null_after_backfill, offline_payloads_accepted, preservation_transforms_annotated, removed_only_after_unused, rollback_equivalent";
+
+struct SpecializedOutputDirectory(PathBuf);
+
+impl SpecializedOutputDirectory {
+    fn new() -> Self {
+        let sequence = APPROVAL_RECORD_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "fslc-specialized-rejection-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).expect("test-owned output directory");
+        Self(path)
+    }
+}
+
+impl Drop for SpecializedOutputDirectory {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn specialized_error(kind: &str, message: &str) -> Value {
+    serde_json::json!({"fsl": "1.0", "result": "error", "kind": kind, "message": message})
+}
+
+fn specialized_expected_error(command: &str, fixture: &str, input: &str) -> Option<Value> {
+    let db = fixture == DB_GUARD_FIXTURE;
+    let (kind, message) = if db {
+        match command {
+            "ai check" => (
+                "semantics",
+                "expected an ai_component or agent document".to_owned(),
+            ),
+            "ai compat" => (
+                "semantics",
+                "expected an ai_component or fsl-ai project document".to_owned(),
+            ),
+            "ai replay" => ("semantics", "expected an ai_component document".to_owned()),
+            "ai drift" | "ai eval" | "ai regress" => (
+                "parse",
+                "expected fsl-ai project declarations at 1:1".to_owned(),
+            ),
+            "check" | "verify" | "sweep" | "mutate" | "db check" | "compat check"
+            | "db observe" | "html" | "ledger" => ("semantics", DB_UNKNOWN_RULE_MESSAGE.to_owned()),
+            "kernel" => ("semantics", format!("{DB_UNKNOWN_RULE_MESSAGE} at 12:5")),
+            _ => {
+                let (kind, message) = unknown_authority_tool_expected_error(command, input)?;
+                (
+                    kind,
+                    message
+                        .replace(AI_UNKNOWN_TOOL_MESSAGE, DB_UNKNOWN_RULE_MESSAGE)
+                        .replace("14:5", "12:5")
+                        .replace("'ai_component'", "'dbsystem'"),
+                )
+            }
+        }
+    } else {
+        assert_eq!(fixture, AI_NAME_FIXTURE);
+        unknown_authority_tool_expected_error(command, input)?
+    };
+    let mut expected = specialized_error(kind, &message);
+    match kind {
+        "document" => {
+            expected["code"] = "FSL-DOC-DIALECT-UNSUPPORTED".into();
+            expected["dialect"] = if db { "dbsystem" } else { "ai_component" }.into();
+            expected["supported_dialects"] = serde_json::json!(["requirements", "spec"]);
+        }
+        "parse" => {
+            expected["diagnostic_code"] = "FSL-PARSE".into();
+            expected["loc"] = serde_json::json!({
+                "line": if db && command.starts_with("ai ") { 1 } else { 3 },
+                "column": 1
+            });
+        }
+        _ if (message.contains(" at ")
+            && !matches!(command, "fmt" | "lint" | "migrate" | "approval check")) =>
+        {
+            expected["loc"] = serde_json::json!({"line": if db { 12 } else { 14 }, "column": 5});
+        }
+        _ => {}
+    }
+    Some(expected)
+}
+
+fn specialized_envelope_matches(
+    actual: &Actual,
+    expected: &Value,
+    command: &str,
+    approval: Option<&ApprovalFixture>,
+) -> bool {
+    let Some(output) = actual.json.as_ref() else {
+        return false;
+    };
+    // Match the established #1464 walk: the diagnostic is exact, while
+    // command metadata is checked separately, never mistaken for an artifact.
+    if actual.exit != 2
+        || !actual.stderr.is_empty()
+        || !expected
+            .as_object()
+            .expect("error object")
+            .iter()
+            .all(|(key, value)| output.get(key) == Some(value))
+        || output.get("loc") != expected.get("loc")
+    {
+        return false;
+    }
+    for key in [
+        "$schema",
+        "schema_version",
+        "kernel_schema_version",
+        "kernel",
+        "spec",
+        "semantics",
+        "types",
+        "constants",
+        "state",
+        "actions",
+        "states",
+        "vectors",
+        "content",
+        "output",
+        "scenarios",
+        "analysis",
+        "projection",
+        "nodes",
+        "edges",
+        "files",
+        "findings",
+        "changed",
+        "written",
+        "target",
+        "summary",
+        "coverage",
+        "artifact",
+        "html",
+        "markdown",
+        "test_plan",
+        "action_map",
+        "directions",
+    ] {
+        if output.get(key).is_some() {
+            return false;
+        }
+    }
+    // Observed with FSLC_CACHE unset: check/verify attach versions, other
+    // commands do not. Version values belong to the installed backend, not
+    // this malformed-input contract. Presence remains a live assertion.
+    let versions = matches!(command, "check" | "verify")
+        && std::env::var("FSLC_CACHE").as_deref() != Ok("off");
+    if output.get("versions").is_some() != versions {
+        return false;
+    }
+    if command == "approval diff" {
+        let approval = approval.expect("approval fixture");
+        let record: Value =
+            serde_json::from_slice(&std::fs::read(&approval.record).expect("record"))
+                .expect("record JSON");
+        let metadata = &output["approval"];
+        if metadata["record"] != approval.record.display().to_string()
+            || metadata["baseline_digest"] != record["spec"]["digest"]
+            || metadata["baseline_commit"] != record["spec"]["git_commit"]
+            || metadata["signature_status"] != "unsigned"
+            || metadata.get("key_id") != Some(&Value::Null)
+        {
+            return false;
+        }
+    } else if output.get("approval").is_some() {
+        return false;
+    }
+    true
+}
+
+fn contract_command<'a>(contract: &'a Value, command: &str) -> &'a Value {
+    let mut node = &contract["root"];
+    for segment in command.split_whitespace() {
+        node = node["commands"]
+            .as_array()
+            .expect("commands")
+            .iter()
+            .find(|child| {
+                child["path"]
+                    .as_array()
+                    .expect("path")
+                    .last()
+                    .and_then(Value::as_str)
+                    == Some(segment)
+            })
+            .unwrap_or_else(|| panic!("missing contract node for {command}"));
+    }
+    node
+}
+
+fn specialized_observation(actual: &Actual) -> Value {
+    let value = actual.json.clone().unwrap_or(Value::Null);
+    serde_json::json!({
+        "exit": actual.exit, "result": value["result"], "kind": value["kind"],
+        "message": value["message"], "loc": value["loc"],
+        "stdout_bytes": actual.stdout.len(), "stderr": actual.stderr,
+    })
+}
+
+fn specialized_rejection_walk(fixture: &str) {
+    require_test_git();
+    parity_registry_is_total_and_has_no_orphaned_commands();
+    let contract: Value =
+        serde_json::from_str(include_str!("../cli-contract.json")).expect("CLI contract");
+    let mut leaves = BTreeSet::new();
+    cli_contract_leaves(&contract["root"], &mut leaves);
+    let outputs = SpecializedOutputDirectory::new();
+    let mut failures = Vec::new();
+    let mut tested = 0;
+    for command in leaves {
+        if let ParityScope::Excluded { reason } = registration(&command).scope {
+            assert!(
+                !reason.trim().is_empty(),
+                "{command}: exclusion needs a reason"
+            );
+            continue;
+        }
+        tested += 1;
+        let approval = approval_command(&command).then(|| ApprovalFixture::new(fixture));
+        let input = approval
+            .as_ref()
+            .map_or(fixture, |_| approval_positional_name(fixture));
+        let expected = specialized_expected_error(&command, fixture, input).unwrap_or_else(|| {
+            panic!("{command}: missing specialized fixture expectation for {fixture}")
+        });
+        let cwd = approval
+            .as_ref()
+            .map_or_else(workspace_root, |fixture| fixture.root.clone());
+        let mut arguments = invoke(
+            &command,
+            fixture,
+            input,
+            approval.as_ref().map(|fixture| fixture.record.as_path()),
+        );
+        // A real reviewed artifact and valid record, not an early missing-file
+        // error, must lead approval through its digest/lowering gate.
+        if command == "approval create" {
+            let artifact = arguments
+                .iter()
+                .position(|arg| arg == "--artifact")
+                .expect("artifact");
+            "ledger.md".clone_into(&mut arguments[artifact + 1]);
+            let approval = approval.as_ref().expect("approval fixture");
+            approval.git(&["add", "spec.fsl"]);
+            approval.git(&["commit", "-qm", "malformed current spec"]);
+        }
+        let output = outputs.0.join(format!("{}.out", command.replace(' ', "-")));
+        assert!(!output.exists());
+        let supports_output = contract_command(&contract, &command)["actions"]
+            .as_array()
+            .expect("actions")
+            .iter()
+            .any(|action| action["dest"] == "output");
+        if supports_output {
+            if let Some(index) = arguments
+                .iter()
+                .position(|arg| matches!(arg.as_str(), "-o" | "--output"))
+            {
+                arguments[index + 1] = output.display().to_string();
+            } else {
+                arguments.extend(["-o".to_owned(), output.display().to_string()]);
+            }
+        }
+        let actual = run_arguments(&command, &arguments, &cwd);
+        let matches = specialized_envelope_matches(&actual, &expected, &command, approval.as_ref())
+            && !output.exists();
+        eprintln!(
+            "1473 {} {fixture}/{command}: expected exit=2 json={expected} file=false; produced {} file={} file_bytes={}",
+            if matches { "PASS" } else { "FAIL" },
+            specialized_observation(&actual),
+            output.exists(),
+            std::fs::metadata(&output).map_or(0, |metadata| metadata.len())
+        );
+        if !matches {
+            failures.push(format!(
+                "{command}: expected exit=2 json={expected} file=false; produced {} file={}",
+                specialized_observation(&actual),
+                output.exists()
+            ));
+        }
+    }
+    assert_eq!(tested, 48, "review additions/removals of document commands");
+    assert!(
+        failures.is_empty(),
+        "{fixture}: {}/{tested} cells failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn specialized_preflight_rejects_invalid_db_rule_for_every_document_command() {
+    // The authored span starts at the `rule` keyword, not at the unknown name.
+    let fsl_syntax::SurfaceDocument::Db(system) = fsl_syntax::parse_surface_document(include_str!(
+        "fixtures/error_envelope_db_invalid_rule.fsl"
+    ))
+    .expect("DB fixture") else {
+        panic!("DB fixture");
+    };
+    assert_eq!(system.check.rules[0].span.start.line, 12);
+    assert_eq!(system.check.rules[0].span.start.column, 5);
+    specialized_rejection_walk(DB_GUARD_FIXTURE);
+}
+
+#[test]
+fn specialized_preflight_preserves_unknown_ai_tool_for_every_document_command() {
+    specialized_rejection_walk(AI_NAME_FIXTURE);
+}
+
+#[test]
+fn specialized_preflight_reaches_db_gate_with_valid_replay_and_refinement_inputs() {
+    let directory = SpecializedOutputDirectory::new();
+    let invalid = include_str!("fixtures/error_envelope_db_invalid_rule.fsl");
+    let valid = invalid.replace("unregistered_compatibility_rule", "all_active_reads_exist");
+    std::fs::write(directory.0.join("valid.fsl"), valid).expect("valid DB");
+    std::fs::write(directory.0.join("invalid.fsl"), invalid).expect("invalid DB");
+    let state = serde_json::json!({"schema_version": 0, "column_exists": {"col_users_id": true}, "column_backfilled": {"col_users_id": true}, "column_not_null": {"col_users_id": true}});
+    let trace = serde_json::json!({
+        "$schema": "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
+        "schema_version": "1.0.0", "kernel_schema_version": "1.0.0",
+        "spec": "EnvelopeParityInvalidDbRule", "initial": state,
+        "events": [{"tick": 1, "action": "observe_schema_0", "params": {}, "state": state}]
+    });
+    std::fs::write(
+        directory.0.join("trace.json"),
+        serde_json::to_vec(&trace).expect("trace JSON"),
+    )
+    .expect("trace");
+    std::fs::write(directory.0.join("mapping.fsl"), "refinement Identity {\n  impl EnvelopeParityInvalidDbRule\n  abs EnvelopeParityInvalidDbRule\n  map schema_version = schema_version\n  map column_exists[c: Column] = column_exists[c]\n  map column_backfilled[c: Column] = column_backfilled[c]\n  map column_not_null[c: Column] = column_not_null[c]\n  action observe_schema_0() -> observe_schema_0()\n}\n").expect("mapping");
+    let mut failures = Vec::new();
+    for (command, arguments, result) in [
+        (
+            "replay",
+            vec!["replay", "valid.fsl", "--trace", "trace.json"],
+            "conformant",
+        ),
+        (
+            "refine",
+            vec![
+                "refine",
+                "valid.fsl",
+                "valid.fsl",
+                "mapping.fsl",
+                "--depth",
+                "1",
+            ],
+            "refines",
+        ),
+    ] {
+        let arguments = arguments.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        let control = run_arguments(command, &arguments, &directory.0);
+        assert_eq!(
+            control.exit, 0,
+            "valid {command} control: {}",
+            control.stdout
+        );
+        assert!(control.stderr.is_empty(), "{}", control.stderr);
+        assert_eq!(
+            control.json.as_ref().expect("JSON")["result"],
+            result,
+            "{}",
+            control.stdout
+        );
+        let arguments = arguments
+            .into_iter()
+            .map(|arg| {
+                if arg == "valid.fsl" {
+                    "invalid.fsl".to_owned()
+                } else {
+                    arg
+                }
+            })
+            .collect::<Vec<_>>();
+        let actual = run_arguments(command, &arguments, &directory.0);
+        let expected = specialized_expected_error(command, DB_GUARD_FIXTURE, "invalid.fsl")
+            .expect("gate expectation");
+        let matches = specialized_envelope_matches(&actual, &expected, command, None);
+        eprintln!(
+            "1473 {} valid-side-input/{command}: expected exit=2 json={expected}; produced {}",
+            if matches { "PASS" } else { "FAIL" },
+            specialized_observation(&actual)
+        );
+        if !matches {
+            failures.push(format!(
+                "{command}: expected {expected}; produced {}",
+                specialized_observation(&actual)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn empty_membership_invariant_is_false(source: &str) -> bool {
     fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
         .and_then(|kernel| {

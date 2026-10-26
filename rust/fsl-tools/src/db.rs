@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use fsl_core::DB_COMPATIBILITY_RULES;
 use fsl_syntax::{
     DbArtifact, DbColumnRef, DbEnvironment, DbEnvironmentArtifact, DbMigration, DbMigrationOp,
     DbSystem, Span,
@@ -29,10 +30,6 @@ const DEFAULT_RULES: &[&str] = &[
     "offline_payloads_accepted",
     "artifact_capabilities_provided",
 ];
-
-/// Rules that exist in the closed vocabulary but are never enabled by
-/// default; a `dbsystem` must select them explicitly.
-const OPT_IN_RULES: &[&str] = &["data_preserved", "rollback_equivalent"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DbToolError {
@@ -131,19 +128,14 @@ pub fn validate_db(system: &DbSystem) -> Result<(), DbToolError> {
 
     // DB-01 (#490): `check compatibility` accepted any rule name, so a typo
     // silently selected nothing instead of raising an error. The closed
-    // vocabulary is `DEFAULT_RULES` plus `OPT_IN_RULES`.
+    // vocabulary is shared with lowering; defaults remain a separate selection.
     for rule in &system.check.rules {
-        if !DEFAULT_RULES.contains(&rule.name.as_str())
-            && !OPT_IN_RULES.contains(&rule.name.as_str())
-        {
-            let mut allowed = DEFAULT_RULES.to_vec();
-            allowed.extend_from_slice(OPT_IN_RULES);
-            allowed.sort_unstable();
+        if !DB_COMPATIBILITY_RULES.contains(&rule.name.as_str()) {
             return Err(tool_error(
                 format!(
                     "unknown db compatibility rule '{}'; supported rules: {}",
                     rule.name,
-                    allowed.join(", ")
+                    DB_COMPATIBILITY_RULES.join(", ")
                 ),
                 Some(rule.span),
             ));
