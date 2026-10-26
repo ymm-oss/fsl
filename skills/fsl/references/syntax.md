@@ -877,8 +877,12 @@ never a state variable named `true`), so the declaration is rejected. No other w
   endpoint type. Enum-relation idioms such as
   `not (exists x in domain(r): reachable(r, x, x))` check again; their runtime
   meaning is unchanged and false invariants still violate. Numeric projections
-  remain integer-compatible. The earlier endpoint-only measurement used BASE
-  `75ce67832faf063f3ffb850ddb6ef6465b5b62ef`; commands and identities are in
+  remain integer-compatible. The restacked boundary sweep used BASE
+  `e8cf78f0162530e264128f588981d49790f2767f`: **zero corpus `ok` → `error`
+  transitions** across all 591 forms. All 122 inline occurrences were checked;
+  #1458 removes 23 occurrences (21 distinct sources) in both modes, 46 mode-form
+  transitions. Each mode/tree ran twice, full outputs without exclusions.
+  Commands and identities are in
   `docs/design/DESIGN-nested-option-support.md`, section #1458.
   The endpoint removals for numeric `N -> N` are
   `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,

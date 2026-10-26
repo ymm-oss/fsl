@@ -8,8 +8,11 @@ target types`. `domain(r)` is now `Set<A>` and `range(r)` is `Set<B>` for
 annotations. This restores valid enum-relation idioms and rejects enum/Int
 confusion. Enum nominality, numeric/range compatibility, public Kernel schemas
 and runtime semantics are unchanged; LSP/Worker inherit the shared checker.
-The earlier endpoint-only boundary measurement used BASE
-`75ce67832faf063f3ffb850ddb6ef6465b5b62ef`; see
+The restacked boundary sweep used BASE
+`e8cf78f0162530e264128f588981d49790f2767f`: zero `ok` to `error` transitions
+among all 591 corpus forms. All 122 inline fixture occurrences were checked;
+#1458 removes 23 occurrences (21 distinct sources) in both modes, 46 mode-form
+transitions. Each mode/tree ran twice, full outputs without exclusions. See
 `docs/design/DESIGN-nested-option-support.md`, section #1458, for commands,
 identities and measurements. Removed numeric `N -> N` invariants are
 `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,

@@ -737,8 +737,11 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   これにより `not (exists x in domain(r): reachable(r, x, x))` のような
   正当な enum 関係の記法が復旧しますが、実行時の意味を変更したり、不変条件の
   成立を保証したりはしません。数値射影は整数互換性を保ちます。
-  以前の端点のみの境界測定の BASE は `75ce67832faf063f3ffb850ddb6ef6465b5b62ef`
-  です。コマンド、識別情報、測定結果は
+  restack 後の境界測定の BASE は `e8cf78f0162530e264128f588981d49790f2767f`
+  です。コーパス591形式の `ok` → `error` 遷移集合は**測定の結果、空**でした。
+  inline fixture 全122件も検査し、#1458 は23件(異なるソース21種)を両モードで
+  拒否します(モード・形式の組で46遷移)。各ツリーで両モードを2回ずつ実行し、
+  除外なしで出力全体を比較しました。コマンド、識別情報、測定結果は
   [設計ノート](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
   を参照してください。端点の破壊的な受理範囲の縮小に該当する式は、
   数値の `N -> N` について `not reachable(r, Red, Blue)`、

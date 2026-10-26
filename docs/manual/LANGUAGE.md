@@ -769,8 +769,12 @@ variable capture instead of inventing internal binder names. See
   types. This restores legitimate enum-relation idioms such as
   `not (exists x in domain(r): reachable(r, x, x))`; it does not change their
   runtime meaning or guarantee that their invariants hold. Numeric projections
-  retain integer compatibility. The earlier endpoint-only boundary measurement
-  used BASE `75ce67832faf063f3ffb850ddb6ef6465b5b62ef`; see
+  retain integer compatibility. The restacked boundary sweep used BASE
+  `e8cf78f0162530e264128f588981d49790f2767f`: all 591 corpus forms have a
+  **measured empty** `ok` → `error` transition set. All 122 inline fixture
+  occurrences were also checked; #1458 removes 23 occurrences (21 distinct
+  sources) in both modes, 46 mode-form transitions. Both modes ran twice in
+  each tree with full outputs and no exclusions. See
   [the design note](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
   for commands, identities and measurements. The endpoint breaking removals are:
   for numeric `N -> N`, `not reachable(r, Red, Blue)`,
