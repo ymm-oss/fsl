@@ -501,6 +501,43 @@ fn ai_compare_rejects_literal_terminator_in_label_and_dataset_value_positions() 
 }
 
 #[test]
+fn ai_compare_bare_terminator_preserves_output_and_rejects_a_tail() {
+    let records = "examples/ai/support_eval_v7.jsonl";
+    assert!(root().join(records).is_file());
+    let args = ["ai", "compare", "--from", records, "--to", records].map(str::to_owned);
+    let baseline = run(&args);
+    assert_eq!(baseline.status.code(), Some(0), "{:?}", decoded(&baseline));
+    assert!(baseline.stderr.is_empty());
+
+    let mut tail_args = args.to_vec();
+    tail_args.extend(["--", "extra"].map(str::to_owned));
+    let tail = run(&tail_args);
+    assert!(usage(&tail));
+    assert_eq!(
+        decoded(&tail),
+        json!({
+            "fsl":"1.0", "result":"error", "kind":"usage",
+            "message":"unknown ai compare option 'extra'",
+        })
+    );
+
+    let mut terminated_args = args.to_vec();
+    terminated_args.push("--".to_owned());
+    let terminated = run(&terminated_args);
+    assert_eq!(
+        terminated.status.code(),
+        baseline.status.code(),
+        "{:?}",
+        decoded(&terminated)
+    );
+    assert_eq!(
+        terminated.stdout, baseline.stdout,
+        "complete stdout comparison"
+    );
+    assert!(terminated.stderr.is_empty());
+}
+
+#[test]
 fn finite_positional_capacity_is_enforced() {
     let contract = contract();
     let mut sweep = Sweep::default();
@@ -621,7 +658,15 @@ fn allow_unwired_is_effective_and_published_for_both_testgen_paths() {
 #[test]
 fn malformed_git_ranges_and_odd_refine_operands_are_usage() {
     let mut sweep = Sweep::default();
-    for range in ["bad", "..HEAD", "HEAD..", "HEAD....HEAD"] {
+    for range in [
+        "bad",
+        "..HEAD",
+        "HEAD..",
+        "HEAD....HEAD",
+        "HEAD...HEAD",
+        "HEAD...",
+        "...HEAD",
+    ] {
         let args = ["diff", "--git", range, MISSING].map(str::to_owned);
         let output = run(&args);
         sweep.check(
@@ -650,4 +695,30 @@ fn malformed_git_ranges_and_odd_refine_operands_are_usage() {
         "FSL-INPUT-LITERATE-UNSUPPORTED"
     );
     sweep.finish("shape");
+}
+
+#[test]
+fn correctly_shaped_git_ranges_with_missing_refs_remain_io() {
+    let missing_ref = "refs/fsl-contract-no-such-ref";
+    let lookup = Command::new("git")
+        .args(["show", "--no-patch", "--format=%H", missing_ref, "--"])
+        .current_dir(root())
+        .output()
+        .expect("look up the missing ref without changing the repository");
+    assert!(!lookup.status.success(), "control ref must not exist");
+    for range in [
+        format!("{missing_ref}..HEAD"),
+        format!("HEAD..{missing_ref}"),
+    ] {
+        let args = ["diff", "--git", &range, MISSING].map(str::to_owned);
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{range}");
+        assert!(output.stderr.is_empty(), "{range}");
+        let value = decoded(&output);
+        assert_eq!(value["fsl"], "1.0", "{range}");
+        assert_eq!(value["result"], "error", "{range}");
+        assert_eq!(value["kind"], "io", "{range}");
+        assert!(value["message"].is_string(), "{range}");
+        assert_eq!(value.as_object().expect("I/O envelope").len(), 4, "{range}");
+    }
 }
