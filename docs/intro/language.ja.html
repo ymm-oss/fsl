@@ -2477,10 +2477,14 @@ verify {
   <code>kind: "acceptance"</code>)。<code>expect &lt;expr&gt;</code> と並んで <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> をサポートし、scenarios / testgen へ直接流れ込みます(= 受け入れ基準が
   実装のコンフォーマンステストになります)。
-  <code>acceptance</code>/<code>forbidden</code> のステップの action 引数は、数値リテラルに加えて enum
-  メンバー名と const 名を受け付けます(例: <code>answer(0, Triggered)</code> は
-  <code>Triggered</code> が <code>Trigger</code> の第 2 メンバーであるとき <code>answer(0, 1)</code> と等価です)
-  — 未定義の名前は check 時エラーです。</li>
+  <code>acceptance</code>/<code>forbidden</code> のステップの action 引数は、パラメータの種類と一致する
+  必要があります。enum パラメータにはメンバー名を渡し、数値の ordinal は渡せません
+  (<code>paint(1)</code> は <code>paint(Blue)</code> ではありません)。const 名も、その値がパラメータの
+  種類と一致する場合に使えます。未定義の名前は check 時エラーです。acceptance の
+  ステップで種類が異なる引数を渡すと、<code>kind: "acceptance"</code>、<code>wrong_kind_argument</code>
+  オブジェクト (<code>parameter</code>, <code>value</code>, <code>type</code>)、どの引数がパラメータの型に属さず、
+  ガードが評価されなかったことを説明するトップレベルの <code>message</code>、ヒント、および
+  そのステップの <code>loc</code> を持つエラーになります。</li>
 <li>カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの
   要件、保存則、SLA/時間、carried フィールドとして表現できない履歴、明示の
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
