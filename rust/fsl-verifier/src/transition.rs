@@ -541,16 +541,12 @@ fn collect_init_statement<S: SmtSolver>(
                         &mut body_constraints,
                     )?;
                 }
-                if let Some(condition) = condition {
-                    constraints.extend(
-                        body_constraints
-                            .into_iter()
-                            .map(|term| solver.implies(&condition, &term))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    );
-                } else {
-                    constraints.extend(body_constraints);
-                }
+                constraints.extend(
+                    body_constraints
+                        .into_iter()
+                        .map(|term| solver.implies(&condition, &term))
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
             }
         }
     }
@@ -675,11 +671,7 @@ fn compute_statement<S: SmtSolver>(
                     pending.clone(),
                     &mut local,
                 )?;
-                pending = if let Some(condition) = condition {
-                    merge_states(solver, model, &condition, &candidate, &pending)?
-                } else {
-                    candidate
-                };
+                pending = merge_states(solver, model, &condition, &candidate, &pending)?;
             }
             Ok(pending)
         }

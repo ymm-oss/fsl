@@ -1727,14 +1727,10 @@ fn eval_quantified<S: SmtSolver>(
         let body = bool_term(&body)?.clone();
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
         let condition = binder_condition(solver, membership, where_term)?;
-        terms.push(if let Some(condition) = condition {
-            if quantifier == "forall" {
-                solver.implies(&condition, &body)?
-            } else {
-                solver.and(&[condition, body])?
-            }
+        terms.push(if quantifier == "forall" {
+            solver.implies(&condition, &body)?
         } else {
-            body
+            solver.and(&[condition, body])?
         });
     }
     let term = if quantifier == "forall" {
@@ -1759,10 +1755,7 @@ fn binder_conditions<S: SmtSolver>(
         let mut local = bindings.clone();
         local.insert(name, value);
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
-        terms.push(
-            binder_condition(solver, membership, where_term)?
-                .unwrap_or_else(|| solver.bool_value(true)),
-        );
+        terms.push(binder_condition(solver, membership, where_term)?);
     }
     Ok(terms)
 }
@@ -1809,26 +1802,23 @@ fn eval_aggregate<S: SmtSolver>(
         let value = eval(solver, model, value, state, &mut local, old_state)?;
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
         let condition = binder_condition(solver, membership, where_term)?;
-        terms.push(if let Some(condition) = condition {
-            solver.ite(&condition, int_term(&value)?, &solver.int_value(0))?
-        } else {
-            int_term(&value)?.clone()
-        });
+        terms.push(solver.ite(&condition, int_term(&value)?, &solver.int_value(0))?);
     }
     Ok(int_value(solver, sum_terms(solver, &terms)?))
 }
 
 type ConditionalBinderCandidates<T> = Vec<(String, SymbolicValue<T>, Option<T>)>;
 
+/// An unfiltered binder has condition true, the identity for conjunction.
 pub(crate) fn binder_condition<S: SmtSolver>(
     solver: &S,
     membership: Option<S::Term>,
     where_term: Option<S::Term>,
-) -> Result<Option<S::Term>, VerifyError> {
+) -> Result<S::Term, VerifyError> {
     Ok(match (membership, where_term) {
-        (Some(membership), Some(where_term)) => Some(solver.and(&[membership, where_term])?),
-        (Some(condition), None) | (None, Some(condition)) => Some(condition),
-        (None, None) => None,
+        (Some(membership), Some(where_term)) => solver.and(&[membership, where_term])?,
+        (Some(condition), None) | (None, Some(condition)) => condition,
+        (None, None) => solver.bool_value(true),
     })
 }
 
