@@ -915,8 +915,7 @@ never a state variable named `true`), so the declaration is rejected. No other w
   `xs = domain(s)` for `s: relation Color -> Color`, `xs: Set<N>`, at assignment
   origin 8:19. Do not coerce enum elements to numeric ordinals.
   General breaking rule: projection elements/sets take their endpoint type, so
-  enum or Bool elements reject anywhere `Int` is expected, except for the
-  pre-existing `abs` operand-check gap tracked in #1459; their whole sets reject
+  enum or Bool elements reject anywhere `Int` is expected; their whole sets reject
   where a numeric Set is expected. This includes comparison, ordering,
   arithmetic, `min`/`max`, membership, set-literal equality, Option and pattern
   payloads, numeric Set state assignments and refinement maps. The measured
@@ -943,6 +942,37 @@ never a state variable named `true`), so the declaration is rejected. No other w
   while only the selected branch is evaluated
 - ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q`,
   `P ~> within K Q`, plus optional `decreases <int expr>` for induction ranking
+
+Static operand/signature boundary (#1459, breaking): check both conditional
+branches and all action/trace expression positions. `is none`/`is some(x)` need
+Option; `abs` needs an integer-compatible operand, including projection elements
+(no enum ordinal or Bool coercion). All six relation functions require a relation;
+non-relation domain/range no longer infer `Set<Int>`. `reachable`/`acyclic` require
+identical declared endpoint types (`T -> T`): mixed enum/numeric relations and
+`N -> M` reject, even when numeric N and M have identical bounds. Numeric
+compatibility is not self-relation identity. Heterogeneous functional/injective/domain/range and
+relation endpoint methods remain valid. Supported method signatures are exactly
+Set contains/add/remove with one item and size with none; Seq contains/push/at
+with one argument and pop/head/size with none; relation contains/add/remove with
+two endpoints. Map has no methods. Thus `n.contains(0)`, `s.push(0)`, `q.add(0)`,
+`r.size()`, `s.contains()`, `q.pop(1)` and action assignment `n = q.at()` reject.
+Validate original count/sum binders, Bool filters and integer values even if the
+domain is empty: `count(i in 1..0 where 1)` and `sum(i in 1..0 of true)` reject;
+well-typed empty values remain zero. Failures are located semantics errors,
+exit 2, before execution/replay. Preserve Option binding scope, endpoint hints
+and non-reflexive reachability. See the #1459 design amendment for sweep evidence.
+
+#1459 audit: BASE `e8cf78f0`, HEAD `33d7faa7`; 591 corpus + 384 inline occurrences
+= 975 forms, stable/fsl5 twice in three independently built trees (baseline,
+immediate parent, head), 11,700 checks. Corpus ok→error set is empty and no other
+corpus output drifts; no field/form exclusions. Parent→head attributes 248
+mode-form removals (124 occurrences/123 distinct sources) and 60 diagnostic
+reclassifications to the six categories above, including numeric N→M. All 60
+remain error/semantics/2, now authored static errors rather than unlocated
+runtime errors. The expanded inventory separately retains inherited #1439
+(86 removals/11 reclassifications) and #1458 (56 removals/6 additions); do not
+attribute these to #1459. Full accounting and calibrated controls are in the
+design amendment.
 
 ## 4. Statements (init / action body)
 

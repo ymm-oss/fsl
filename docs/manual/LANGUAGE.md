@@ -813,9 +813,8 @@ variable capture instead of inventing internal binder names. See
   Enum projection elements cannot be used as numeric endpoints or compared with
   integer values; use the declared endpoint type, not an enum ordinal.
   More generally, projection elements and whole projection sets take the declared
-  endpoint type: enum or Bool elements cannot be used wherever `Int` is expected,
-  except for the pre-existing `abs` operand-check gap tracked in #1459; their sets
-  cannot be used wherever a numeric Set is expected. This breaking rule applies
+  endpoint type: enum or Bool elements cannot be used wherever `Int` is expected;
+  their sets cannot be used wherever a numeric Set is expected. This breaking rule applies
   to comparison, ordering, arithmetic, `min`/`max`, membership, set-literal
   equality, Option comparisons and pattern payloads, assignment to numeric Set
   state, and refinement maps; the listed measured removals are not exhaustive.
@@ -844,6 +843,48 @@ variable capture instead of inventing internal binder names. See
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
   optional `within K` before Q for a bounded deadline, and optional
   `decreases <int expr>` after the response body for induction ranking
+
+Static operand/signature checking (#1459, **breaking**) also visits unselected
+branches, action assignments, `requires`/`ensures`, and trace expressions:
+
+- `is none` / `is some(x)` require an Option operand; fresh payload binding and
+  continuation scope are unchanged.
+- `abs` requires an integer-compatible operand, including when its argument is
+  a domain/range element. Enum ordinals and Bool values are not integers.
+- `acyclic`, `functional`, `injective`, `domain`, `range`, and `reachable` require
+  a relation. Non-relations no longer acquire an invented `Set<Int>` projection.
+  `reachable` and `acyclic` require identical declared endpoint types (`T -> T`):
+  mixed enum/numeric relations and `N -> M` are rejected, even if numeric `N`
+  and `M` have identical bounds. Numeric compatibility does not establish a self-relation;
+  heterogeneous `functional`/`injective`/`domain`/`range` remain supported.
+- Method receivers, names and argument counts must match the runtime signatures:
+  Set `contains(x)`, `add(x)`, `remove(x)`, `size()`;
+  Seq `contains(x)`, `push(x)`, `pop()`, `head()`, `at(i)`, `size()`;
+  relation `contains(a,b)`, `add(a,b)`, `remove(a,b)`. Map has no methods.
+  This rejects, for example, `n.contains(0)`, `s.push(0)`, `q.add(0)`,
+  `r.size()`, `s.contains()`, `q.pop(1)`, and `n = q.at()` in an action body.
+- `count`/`sum` validate the original binder, Bool filter and integer sum value
+  before expansion, including empty ranges and zero-capacity sequences.
+  `count(i in 1..0 where 1)` and `sum(i in 1..0 of true)` are now errors;
+  well-typed empty aggregates still return `0`.
+
+These are located loader errors (`kind: "semantics"`, exit 2), not deferred
+runtime or acceptance-replay errors. Existing endpoint-type hints, valid method
+behavior and non-reflexive reachability are preserved. See the
+[design amendment](../design/DESIGN-nested-option-support.md#static-operand-and-signature-boundary-1459).
+
+The #1459 boundary audit compares BASE `e8cf78f0` with HEAD `33d7faa7` using
+591 corpus files and 384 inline occurrences (975 forms), in stable and fsl5 modes
+twice in each of three independently built trees: baseline, immediate parent
+and head, for 11,700 checks. **No corpus form stops checking, and no other corpus
+output changes; no fields or forms are excluded.** The immediate-parent
+comparison attributes **248 mode-form removals (124 occurrences, 123 distinct
+sources)** and **60 diagnostic reclassifications** to the six #1459 categories
+above, including numeric `N -> M`. The latter remain `error/semantics/2` but now
+have authored static locations rather than unlocated runtime errors. Inherited
+#1439 contributes 86 removals and 11 reclassifications; inherited #1458 contributes
+56 removals and six additions in this expanded inventory. These are not new
+#1459 changes; the design amendment records the full attribution and controls.
 
 Top-level temporal sugar:
 

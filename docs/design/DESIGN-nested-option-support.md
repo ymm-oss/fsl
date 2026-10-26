@@ -531,8 +531,7 @@ observations, not independent triangulation or unbounded verification.
 The measured fixture lists above are **not an exhaustive description of the
 language boundary**. Both each element and the whole set produced by `domain`
 or `range` take the declared endpoint type. Consequently an enum or Bool
-projection element is rejected anywhere `Int` is expected, except for the
-pre-existing `abs` operand-check gap tracked in #1459; its whole set is rejected
+projection element is rejected anywhere `Int` is expected; its whole set is rejected
 wherever a numeric Set is expected. The breaking removal includes
 comparison, ordering, arithmetic, `min`/`max`, membership, set-literal equality,
 Option comparisons and pattern payloads, numeric Set state assignment, and
@@ -632,8 +631,153 @@ Out-of-scope leftovers are explicitly retained: cross-range numeric Set coercion
 explicit returns a violation; relation indexing `h[x]` (q17) checks on both but
 both engines report errors. Both are routed to the representative as new issue
 candidates, not fixed or covered by an unchanged-runtime agreement claim here.
-`abs` on an enum projection element (p15) checks but both engines error on both
-binaries; it and the non-relation `domain` fallback to `Set<Int>` remain #1459.
+At that checkpoint `abs` on an enum projection element (p15) checked but both
+engines errored on both binaries; it and the non-relation `domain` fallback to
+`Set<Int>` were deferred to #1459, resolved by the amendment below.
+
+### Static operand and signature boundary (#1459)
+
+This amendment closes six remaining shared-checker gaps. It changes neither
+grammar/lowering nor runtime/verifier semantics. Invalid authored expressions
+now fail during model loading, with `kind: semantics`, exit 2, and the existing
+authored expression origin; generated aggregate terms must not replace that
+origin with 1:1. All expression positions are checked, including unselected
+conditional branches, action assignments, guards and ensures, and trace
+expectations/arguments.
+
+| Breaking removal category | Previously accepted examples now rejected |
+|---|---|
+| Non-Option patterns | `n is none`, `n is some(x)` for numeric `n` |
+| Non-integer abs operands | `abs(Red)`, `abs(true)`, `abs(x)` for an enum domain/range binder |
+| Non-relation functions/projections | `acyclic(n)`, `functional(n)`, `injective(n)`, `domain(n)`, `range(n)`, `reachable(n,0,1)`; no invented `Set<Int>` fallback |
+| Invalid path/cycle relation shape | `acyclic(h)` and `reachable(h,a,b)` on mixed enum/numeric endpoints or `N -> M`, even with identical numeric bounds |
+| Invalid collection receiver/name/arity | numeric receivers; Set.push, Seq.add, relation.size; missing/extra Set/Seq arguments; relation endpoint methods without exactly two arguments; action assignment `n = q.at()` |
+| Erased empty-aggregate operands | `count(i in 1..0 where 1)` / `where not 1`, `sum(i in 1..0 of true)` / `of -Red`, and corresponding zero-capacity Seq forms |
+
+The method gate matches existing runtime dispatch: Set contains/add/remove take
+one item, size takes none; Seq contains/push take one item, at takes one integer
+index, pop/head/size take none; relation contains/add/remove take exactly two
+typed endpoints. Map has no methods. No new runtime operation is introduced.
+Original count/sum binders, Bool filters and integer sum values are validated
+before normalization; well-typed empty domains keep their zero identities.
+
+Diagnostics reuse domain-lowering Option and method wording, ordinary Int/Bool
+assignability, public relation-function names and repair hints. Existing #1458
+endpoint mismatches/hints remain unchanged. Heterogeneous non-path relation
+functions, valid methods, Option continuation bindings and non-reflexive
+reachability retain their meaning. Additive native/shared-LSP and Worker rows
+assert located Option errors rather than merely a runtime exit code.
+
+The existing verifier test `acyclic_on_a_non_self_relation_is_rejected` keeps
+its name and intent. It now asserts the earlier model-build rejection of its
+unchanged `relation User -> Role` source. It also retains the verifier-level
+`verify_bounded` rejection by mutating a public checked-model expression from
+functional to acyclic, following the existing #1259 unchecked-input test pattern.
+No unchecked builder API, product bypass or accepted-source exception is added.
+
+Self-relation means exact declared endpoint `TypeRef` identity for both
+`reachable` and `acyclic`, matching symbolic evaluation: `T -> T`, not merely
+numeric assignability. Thus `type N = 0..2` and `type M = 0..2` still make
+`relation N -> M` invalid for these two functions. Heterogeneous non-path
+functions and endpoint methods remain valid. This is an explicit breaking
+removal, not a new enum/numeric encoding or runtime conversion.
+
+#### Three-tree boundary audit (#1459)
+
+The released BASE is `e8cf78f0162530e264128f588981d49790f2767f`, the immediate
+parent is `764a00c37750ef271a8407ca9785a5d27251406e`, and the implementation
+HEAD is `33d7faa7dc034a7c8b484d59c40c0e78a45607ca`. Both baselines were freshly
+materialized with `git archive` inside the task worktree, each starting without
+a target directory. Each tree built its own CLI with
+`cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked --offline -v`.
+Verbose logs show `fsl-syntax`, `fsl-core` and `fslc-rust` compiling from that
+tree's own paths, not a cloned target or another worktree's binary.
+
+| State | CLI binary SHA-256 | Checker source SHA-256 |
+|---|---|---|
+| BASE `e8cf78f0` | `218301707985a399d4cdfa722b5033950298ce5cb8565f12c01ad541e022c89c` | `a7d9fa098655a325fe184cc6d849fb37d6dbfc32288dc66e9436c026447ebe9b` |
+| Parent `764a00c3` | `086b0db01caaee83a0bd102b2519dc9fbda88dd874a7f75f86d8110101b5c098` | `61dcd7feb19f120b53f3df6fc3cde8240a9a86f345462075f0a7c32b8e6888b8` |
+| HEAD `33d7faa7` | `649ee0617acebb01716cfc9f940289f3643e07b73d16e6c9942d907553956661` | `08ac6ec27e100b7b6832aabac302137be071b88ca847a523bcbc4e984c66078e` |
+
+Recount command:
+`rg --files -0 specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
+An independent recursive inventory agrees, and all corpus paths and source
+bytes agree across the three trees. The **591 corpus files** and **384 inline
+occurrences** give **975 forms per tree**. Inline coverage includes the original
+122 occurrences, 12 forms from the seven final #1458 tests, two new consumer
+rows, two forms for the adapted verifier test, all 228 current operand fixtures,
+17 statement fixtures, and the original combined numeric-policy fixture from
+the formerly ignored test. The historical 122 source hashes are unchanged.
+
+Each binary ran `check FORM` in its own tree, serially, in both modes twice:
+
+```text
+env -u FSLC_UNSTABLE FSLC_CACHE=off BINARY check FORM
+env FSLC_UNSTABLE=fsl5 FSLC_CACHE=off BINARY check FORM
+```
+
+One outer lane-D-then-heavy advisory lock covered calibration, all checks,
+comparison and audit; per-binary locks were removed before measurement. Uptime
+was checked **inside** those locks before every binary, pausing at one-minute
+load ≥9. Observed sweep loads were 1.63–2.43. Whole-wrapper exit was **0**,
+wall time **754.44 s including lock wait / 272.20 s inside the locks**.
+There are **11,700 sweep checks**, plus 12 calibration calls: the Option detector
+checks on both bases and rejects on HEAD, while the #1458 endpoint detector
+checks on BASE but rejects on parent and HEAD, each twice.
+
+All **5,850 repeat pairs** agree in full stdout, JSON, stderr and exit. There
+are no excluded fields or omitted forms. The **corpus ok→error set is empty**
+for BASE→HEAD and parent→HEAD; there is also **no other corpus output drift**.
+These are measured results for the named commits and commands, not an
+assumption from the narrower native corpus gate.
+
+| New #1459 category | Removed source occurrences | Removed mode-forms | Diagnostic reclassifications (mode-forms) |
+|---|---:|---:|---:|
+| Option operand shape | 9 | 18 | 8 |
+| Integer abs operands | 12 | 24 | 16 |
+| Relation operands/projections | 15 | 30 | 24 |
+| Exact self-relation identity | 20 | 40 | 0 |
+| Method receiver/name/arity | 44 | 88 | 12 |
+| Original empty count/sum operands | 24 | 48 | 0 |
+| **Total** | **124** | **248** | **60** |
+
+The removals comprise **123 distinct source texts** (the new native/Worker
+Option rows duplicate one text). Numeric `N -> M` accounts for **nine source
+occurrences / 18 mode-form removals**: eight final reachable/acyclic position
+fixtures plus the original combined fixture. The adapted verifier's unchanged
+`User -> Role` acyclic source contributes two mode-form removals. All 60 new
+diagnostic reclassifications remain `error/semantics/2`: formerly unlocated
+runtime errors now have the authored static origin and approved class text.
+
+Attribution uses BASE→parent for inherited work and parent→HEAD for #1459:
+
+| Issue in the expanded inventory | Removals | Diagnostic reclassifications | Additions |
+|---|---:|---:|---:|
+| Inherited #1439 | 86 | 11 | 0 |
+| Inherited #1458 | 56 | 0 | 6 |
+| New #1459 | 248 | 60 | 0 |
+
+All entries count mode-forms. The original 122 occurrences reproduce exactly
+the prior 70 #1439 removals, three #1439 reclassifications and 46 #1458 removals.
+The expanded controls add 16 inherited unary-filter removals and eight
+head/at trace-location reclassifications; eight endpoint-calibration removals
+and two numeric-Set assignment removals remain #1458, not new #1459 behavior.
+The six additions are the two-mode count, enum set-literal equality and enum
+Set assignment forms already restored by #1458. Direct BASE→HEAD comparison
+has **390 removals, 71 diagnostic reclassifications, six additions and 1,483
+fully unchanged pairs**, out of 1,950 mode-form pairs.
+
+Final regression calibration: the fixed operand target passes **28 tests twice**,
+with no ignore. Reversing only the production checker change produces the
+expected **18 original-reason detector failures and ten control passes**
+(14 false-green check tuples, four missing-static-diagnostic failures); exact
+checker/diff and fixed-test hashes are restored. The statement target passes
+**17 tests twice**; its production-only revert produces exactly **16 intended
+check false-green failures and one valid-body control pass**. All six scoped
+package suites pass, native LSP/Worker rows run twice, formatting passes, and
+final scoped Clippy has only the separately authorized #1444 dead-code warning.
+This is source-boundary and routing evidence, not independent semantic
+triangulation or an unbounded-verification claim.
 
 ## 5. Lossless public observation and replay
 

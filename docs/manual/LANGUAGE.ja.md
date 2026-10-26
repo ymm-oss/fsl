@@ -779,8 +779,7 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   enum 射影要素を数値端点や整数との比較に使うことはできません。
   enum の序数ではなく、宣言された端点の型を使ってください。
   一般に、射影要素と射影集合全体は宣言された端点の型を持ちます。enum や Bool の
-  要素を `Int` が必要な場所で使うことはできません。ただし、`abs` のオペランド型検査の
-  不足は既存の例外で、#1459 で追跡しています。その集合を数値 Set が必要な場所で
+  要素を `Int` が必要な場所で使うことはできません。その集合を数値 Set が必要な場所で
   使うこともできません。この破壊的変更は比較、順序、算術、`min`/`max`、所属、
   集合リテラルとの等価比較、Option 比較とパターンのペイロード、数値 Set 状態への
   代入、refinement map に適用されます。列挙した測定例だけに限りません。
@@ -809,6 +808,47 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 - leadsTo ブロックの内側のみ: `P ~> Q`(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り `within K` を、応答本体の後に induction のランキング用の
   `decreases <int expr>` を置けます
+
+静的なオペランド・シグネチャ検査(#1459、**破壊的変更**)は、選択されない分岐、
+action の代入、`requires`/`ensures`、trace 内の式も検査します:
+
+- `is none` / `is some(x)` のオペランドには Option が必要です。新しいペイロード名の
+  束縛と後続式のスコープは変わりません。
+- `abs` のオペランドには整数互換の型が必要で、domain/range の要素も例外では
+  ありません。enum の序数や Bool を整数として扱うことはできません。
+- `acyclic`、`functional`、`injective`、`domain`、`range`、`reachable` には関係が
+  必要です。関係でない値の射影を仮の `Set<Int>` として扱うことはありません。
+  `reachable` と `acyclic` は宣言された端点型が同一の関係(`T -> T`)を要求します。
+  enum と数値が混在する関係だけでなく、数値型 `N` と `M` の範囲が同じでも
+  `N -> M` は拒否します。数値互換性だけでは自己関係になりません。
+  異種端点の `functional`/`injective`/`domain`/`range` は引き続き使えます。
+- メソッドの receiver、名前、引数個数は実行時のシグネチャに一致する必要があります:
+  Set は `contains(x)`、`add(x)`、`remove(x)`、`size()`、
+  Seq は `contains(x)`、`push(x)`、`pop()`、`head()`、`at(i)`、`size()`、
+  関係は `contains(a,b)`、`add(a,b)`、`remove(a,b)` です。Map にメソッドはありません。
+  たとえば `n.contains(0)`、`s.push(0)`、`q.add(0)`、`r.size()`、`s.contains()`、
+  `q.pop(1)`、action 内の `n = q.at()` を拒否します。
+- `count`/`sum` は展開前の束縛子、Bool フィルター、整数の加算値を検査します。
+  空の範囲や容量ゼロの Seq でも同じです。`count(i in 1..0 where 1)` や
+  `sum(i in 1..0 of true)` はエラーになります。正しく型付けされた空の集約は
+  引き続き `0` を返します。
+
+これらは実行時や acceptance replay まで遅延させない、位置付きの loader エラー
+(`kind: "semantics"`、終了コード2)です。既存の端点型ヒント、正しいメソッドの動作、
+非反射的な到達可能性は不変です。
+[設計の追補](../design/DESIGN-nested-option-support.md#static-operand-and-signature-boundary-1459)も参照してください。
+
+#1459 の型境界監査では BASE `e8cf78f0` と HEAD `33d7faa7` を比較しました。
+corpus 591件と inline 384件(計975形式)を、個別にビルドした基準・直前の親・head の
+3つの木で stable/fsl5 の各モード2回ずつ、計11,700回検査しています。
+**検査に通らなくなる corpus は空集合で、その他の corpus 出力変化もありません。
+除外した形式やフィールドはありません。** 直前の親との比較により、上記6カテゴリの
+#1459 固有の削除は **248 mode-form(124出現、異なるソース123種)**、診断の再分類は
+**60 mode-form** です。数値型 `N -> M` の削除も含みます。後者の
+`error/semantics/2` は不変ですが、位置のない実行時エラーから作成元の静的位置を持つ
+エラーになります。拡張した対象集合では、継承した #1439 は削除86・再分類11、
+#1458 は削除56・追加6 mode-form です。これらを #1459 の新規変更とは数えません。
+全件の帰属と対照検査は設計の追補に記録しています。
 
 トップレベルの時相シュガー:
 
