@@ -13,7 +13,7 @@ pub fn directory(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let path = super::cli::repository_root()
-        .join("rust/target/ledger-r3")
+        .join("rust/target/ledger-tests")
         .join(format!(
             "{label}-{}-{nonce}-{}",
             std::process::id(),
@@ -29,7 +29,7 @@ pub fn annotated_fixture(fixture: &str, declaration: &str) -> String {
     assert_eq!(source.matches(declaration).count(), 1);
     source.replacen(
         declaration,
-        &format!("@requirement(\"REQ-R3\", \"review obligation\")\n  {declaration}"),
+        &format!("@requirement(\"REQ-OBLIGATION\", \"review obligation\")\n  {declaration}"),
         1,
     )
 }

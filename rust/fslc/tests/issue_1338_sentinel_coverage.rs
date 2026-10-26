@@ -3,7 +3,7 @@
 //! #1338: filter public findings, not the raw verification evidence. The
 //! original explain/model listing is deliberately outside this exclusion.
 
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 mod cli;
 
 use serde_json::Value;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 mod cli;
-#[path = "support/ledger_r3.rs"]
+#[path = "support/ledger_fixtures.rs"]
 mod support;
 
 const MISSING: &str = "rust/fslc/tests/fixtures/governance_missing_dependency.fsl";

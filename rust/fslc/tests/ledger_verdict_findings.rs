@@ -2,7 +2,7 @@
 
 //! G1-G4: ledger findings must retain failed or unestablished verification evidence.
 
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 mod cli;
 #[path = "support/ledger_findings.rs"]
 mod findings;

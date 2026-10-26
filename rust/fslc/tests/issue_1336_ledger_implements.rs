@@ -2,7 +2,7 @@
 
 //! #1336: the real ledger CLI must display the same seam verdict as its exit.
 
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 mod cli;
 
 fn assert_seam_body(fixture: &str, expected_status: i32) {

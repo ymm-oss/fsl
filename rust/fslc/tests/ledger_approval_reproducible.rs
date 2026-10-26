@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 #[allow(dead_code)]
 mod cli;
-#[path = "support/ledger_r3.rs"]
+#[path = "support/ledger_fixtures.rs"]
 mod support;
 
 use std::path::Path;
@@ -155,7 +155,7 @@ fn create(root: &Path, induction: bool, ledger_status: i32) {
     let created: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         created["record"]["approval"]["requirements"],
-        json!(["REQ-R3"])
+        json!(["REQ-OBLIGATION"])
     );
 }
 
