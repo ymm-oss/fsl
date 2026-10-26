@@ -218,6 +218,67 @@ fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
         .expect("one publish")
 }
 
+#[test]
+fn legacy_expression_operator_diagnostics_use_the_operator_utf16_range() {
+    for (operator, replacement) in [("||", "or"), ("->", "=>")] {
+        let line = format!(
+            "  @requirement(\"REQ-PROBE-001\", \"日本語😀\") invariant I {{ true {operator} false }}"
+        );
+        let source = format!("fsl 5\nspec S {{\n  state {{ flag: Bool = false }}\n{line}\n}}\n");
+        let diagnostics = published_diagnostics(&source, Some("fsl5"));
+        let diagnostic = diagnostics
+            .iter()
+            .find(|d| d["code"] == "unsupported_in_edition")
+            .unwrap_or_else(|| panic!("expected edition diagnostic, produced {diagnostics:#?}"));
+        let column = line[..line.find(operator).expect("operator")]
+            .encode_utf16()
+            .count();
+        assert_eq!(
+            diagnostic["range"],
+            json!({"start":{"line":3,"character":column},"end":{"line":3,"character":column+2}})
+        );
+        assert_eq!(diagnostic["severity"], 1);
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .is_some_and(|m| m.contains(&format!("use '{replacement}'"))
+                    && m.contains("fslc migrate <file> --edition next"))
+        );
+        let canonical = source.replace(operator, replacement);
+        assert!(
+            published_diagnostics(&canonical, Some("fsl5"))
+                .iter()
+                .all(|d| d["code"] != "unsupported_in_edition")
+        );
+    }
+}
+
+#[test]
+fn shared_expression_entries_publish_both_operator_endpoints() {
+    for body in [
+        "requirements R { state { flag: Bool = false } invariant I { true OP false } }",
+        "compose C { state { flag: Bool = false } invariant I { true OP false } }",
+        "business B { actor User entity Case process Case { stages New, Done initial New transition finish New -> Done by User } policy POL-PROBE-001 \"policy\" invariant { true OP false } } verify { instances Case = 1 }",
+        "refinement R { impl I abs A map flag = true OP false }",
+    ] {
+        let column = body[..body.find("OP").expect("operator marker")]
+            .encode_utf16()
+            .count();
+        for operator in ["||", "->"] {
+            let source = format!("fsl 5\n{}\n", body.replace("OP", operator));
+            let diagnostics = published_diagnostics(&source, Some("fsl5"));
+            let diagnostic = diagnostics
+                .iter()
+                .find(|d| d["code"] == "unsupported_in_edition")
+                .unwrap_or_else(|| panic!("expected operator diagnostic: {diagnostics:#?}"));
+            assert_eq!(
+                diagnostic["range"],
+                json!({"start":{"line":1,"character":column},"end":{"line":1,"character":column+2}})
+            );
+        }
+    }
+}
+
 /// Open the first of `texts` in a fresh server with the unstable gate set or
 /// unset, replace the document's text with each of the others in turn, and
 /// return the diagnostics the server publishes for each.

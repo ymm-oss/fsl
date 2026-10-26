@@ -245,6 +245,11 @@ enum unions. Use `fslc lint <path>... --edition next` for stable non-mutating
 edition diagnostics and `fslc migrate <path>... --edition next` to review
 machine edits; add `--write` only after reviewing the complete validated set.
 
+Already-invalid expression `||` / `->` in spec, requirements, compose, business
+policy, and refinement maps get `diagnostic_code: unsupported_in_edition` when
+checking for the next edition, retaining `kind: parse` and exit 2. Use `or` / `=>`.
+This does not ban structural composition/arrows or change domain expressions.
+
 ```fsl
 domain <Name> {
   implementation_profile functional_ddd

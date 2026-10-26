@@ -55,6 +55,24 @@ impl ParseError {
     pub fn code(&self) -> &'static str {
         self.code
     }
+
+    /// Classify a rejected expression for the requested edition without changing
+    /// the source's grammar or replacing any other parse diagnostic.
+    #[must_use]
+    pub fn for_edition(
+        self,
+        source: &str,
+        edition: Edition,
+        options: &crate::ParseOptions,
+    ) -> Self {
+        if self.code() == "FSL-PARSE"
+            && edition == Edition::Fsl5
+            && let Some(error) = crate::legacy_expression_operator_error(source, options)
+        {
+            return error;
+        }
+        self
+    }
 }
 
 impl From<crate::LexError> for ParseError {
@@ -147,9 +165,11 @@ pub(crate) fn parse_shared_tokens(
     tokens: Vec<Token>,
     cursor: usize,
     edition: Edition,
+    diagnose_legacy_operators: bool,
 ) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
     let mut parser = Parser::new(source, tokens, cursor);
     parser.edition = edition;
+    parser.diagnose_legacy_operators = diagnose_legacy_operators;
     let document = if parser.peek_ident("spec") {
         SurfaceDocument::Spec(parser.surface_spec()?)
     } else if parser.peek_ident("refinement") {
@@ -180,6 +200,7 @@ struct Parser<'a> {
     pending_annotations: Annotations,
     /// The edition the document is read in ([`crate::SourceFile::edition`]).
     edition: Edition,
+    diagnose_legacy_operators: bool,
     /// Every identifier [`Self::req_id`] has read, in source order.
     ids: Vec<IdSpelling>,
     /// Whether keywords are read through the keyword table, in English or in
@@ -203,6 +224,7 @@ impl<'a> Parser<'a> {
             cursor,
             pending_annotations: Annotations::default(),
             edition: Edition::Fsl4,
+            diagnose_legacy_operators: false,
             ids: Vec::new(),
             keywords: false,
             spellings: crate::SourceSpellings::default(),
@@ -1792,9 +1814,9 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok(TypeExpr::Name(name));
         }
-        let lo = self.expression(0)?;
+        let lo = self.expression_with_operator_diagnostics(false)?;
         self.expect_symbol("..")?;
-        let hi = self.expression(0)?;
+        let hi = self.expression_with_operator_diagnostics(false)?;
         Ok(TypeExpr::Range(lo, hi))
     }
 
@@ -2183,10 +2205,21 @@ impl<'a> Parser<'a> {
             min_binding_power, 0,
             "shared parser owns recursive precedence"
         );
+        self.expression_with_operator_diagnostics(self.diagnose_legacy_operators)
+    }
+
+    // Range type endpoints precede grammar-owned relation arrows, not infix
+    // operators. Their caller disables only this diagnostic, not expression parsing.
+    fn expression_with_operator_diagnostics(&mut self, diagnose: bool) -> Result<Expr, ParseError> {
         let start = self.cursor;
         let mut cursor = self.cursor;
-        let expression =
-            parse_tokens_expression(&self.tokens, &mut cursor, self.expression_mode(), false)?;
+        let expression = parse_tokens_expression(
+            &self.tokens,
+            &mut cursor,
+            self.expression_mode(),
+            false,
+            diagnose,
+        )?;
         self.cursor = cursor;
         self.note_expression(start);
         expression.into_kernel()

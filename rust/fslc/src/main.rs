@@ -703,7 +703,7 @@ fn load_migration_plan(
         edition,
         crate::parse_options(),
     )
-    .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+    .map_err(|error| migration_plan_error_output(&source, path, &error, edition))?;
     // A refused plan (`plan.refused()`) means `plan_migration` itself already
     // found a legacy construct it cannot machine-apply — e.g. `&&`, which is
     // not tokenizable under the current grammar at all and is recognized via
@@ -741,7 +741,9 @@ fn load_migration_plan(
                 )
                 .map(|insertion| fsl_syntax::apply_source_edits(migrated, insertion.edits))
                 .transpose()
-                .map_err(|error| migration_plan_error_output(&source, path, &error.to_string()))?;
+                .map_err(|error| {
+                    migration_plan_error_output(&source, path, &error.to_string(), edition)
+                })?;
             }
         }
         fslc_rust::migration::ProcessFormOutcome::Converted { source, findings } => {
@@ -842,9 +844,16 @@ fn validate_migration_semantics(
     }
 }
 
-fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
+fn migration_plan_error_output(
+    source: &str,
+    path: &Path,
+    message: &str,
+    edition: fsl_syntax::Edition,
+) -> Value {
     let mut output = match fsl_syntax::parse_surface_document_with(source, crate::parse_options()) {
-        Err(error) => surface_parse_error_output(&error),
+        Err(error) => {
+            surface_parse_error_output(&error.for_edition(source, edition, crate::parse_options()))
+        }
         Ok(_) => semantic_error_output(message),
     };
     let object = output.as_object_mut().expect("error envelope");

@@ -86,3 +86,31 @@ Rust planner.
 4. Require `fslc migrate PATH... --edition next` to report zero changes,
    `fslc fmt PATH... --check --edition next` to exit 0, and the project check /
    verification gates to retain their verdicts.
+
+## Amendment: legacy expression operator diagnostics (#251)
+
+In the observed shared expression entries (spec, requirements kernel wrapper and
+readable concept, compose invariant, business policy, refinement map), fsl 5
+returns the parser code `unsupported_in_edition` at the two-byte `||` / `->`
+operator, with manual `or` / `=>` repair and migration-command guidance for
+remaining supported edits. Lint/migrate share the same diagnostic but do not
+automatically rewrite these invalid expressions. Kind stays `parse` and
+exit stays 2. This changes no accepted-source set, typed model or semantics.
+
+Only the expression parser classifies these spellings. Structural composition,
+correspondence/transition arrows, quoted strings/comments, Domain's accepted
+legacy expressions, and standalone editionless `parse_expr` are unchanged.
+Headers select diagnostics in the shared parser; for a headerless CLI request,
+a diagnostic-only reparse keeps the original grammar edition and yields no
+replacement model. `ParseError::for_edition` is the single classifier used by
+check/verify, formatter, lint and migrate. Type-bound range endpoints leave
+structural relation arrows to their enclosing grammar. The diagnostic exception
+covers the whole bound, including grouped subexpressions:
+these remain generic `FSL-PARSE` failures, not accepted legacy operators.
+LSP retains the exact span and publishes its UTF-16 range. All Worker check/verify exits pass
+through the same edition finalization, including parser/semantic/implements
+errors and headerless documents. Governance is not part of that shared exit:
+check folds it only on the model path, preserving early successful AI-project
+gate envelopes; verify keeps its native outer governance fold before edition.
+Implicit-initial-value warnings are owned by
+that step rather than also appended by success-only metadata finalization.
