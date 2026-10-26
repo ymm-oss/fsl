@@ -478,9 +478,9 @@ pub fn classify_kernel_key(key: &str) -> Option<KernelKeyFate> {
         "fsl"
         // The top-level `fslc verify` CLI command's own on-disk
         // verification-cache lookup metadata (`{"hit":true,...}`), inserted
-        // by `run_verify_cli`'s cache wrapper -- never by `run_verify`
-        // itself. `run_db_check`/`run_domain_check` call `run_verify`
-        // directly and so never produce it in a nested kernel, but a census
+        // by the shared verification pipeline when caching is enabled.
+        // `run_db_check`/`run_domain_check` use its no-cache baseline adapter
+        // and so never produce it in a nested kernel, but a census
         // of the `fslc verify` command can still surface it and needs a
         // registered fate.
         | "cache"

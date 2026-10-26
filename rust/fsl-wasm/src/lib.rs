@@ -510,10 +510,11 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
     let started = performance_now();
-    // The stages ahead of the solver follow native `run_verify_from_source`
-    // in its order (issue #1163): surface parse and the Agent rejection,
-    // specialized validation, then a deferred Kernel load whose traces and
-    // `implements` are checked before the request options.
+    // This async pipeline retains the pre-solver order established in #1163:
+    // surface parse and Agent rejection, specialized validation, then a
+    // deferred Kernel load whose traces and `implements` precede request
+    // options. Native baselines now delegate to `run_verify_cli_from_source`
+    // (#1417); the Worker does not share that native orchestration.
     match fsl_syntax::parse_document_with(
         fsl_syntax::SourceFile::new(&request.source),
         &request.parse_options(),
@@ -707,7 +708,7 @@ fn prepend_compose_warnings(output: &mut Value, compose_warnings: Vec<Value>) {
         && object.get("result").and_then(Value::as_str) != Some("error")
         && let Some(Value::Array(warnings)) = object.get_mut("warnings")
     {
-        // See the matching comment in native `run_verify` (rust/fslc/src/main.rs):
+        // See native `decorate_default_cli_verification` (fslc/src/verification.rs):
         // compose-lowering warnings must be captured before `build_model` drops
         // per-component fairness information, so they cannot come from `model`.
         warnings.splice(0..0, compose_warnings);

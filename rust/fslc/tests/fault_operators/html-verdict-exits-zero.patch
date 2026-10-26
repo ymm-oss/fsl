@@ -6,26 +6,26 @@ fold so the discarded status has no remaining use on the shared timing path.
 
 --- a/rust/fslc/src/main.rs
 +++ b/rust/fslc/src/main.rs
-@@ -12629,7 +12629,7 @@ fn run_html_report_from_source_with_timing(
-         Ok(model) => model,
-         Err(error) => return (spec_load_error_output(&error), 2),
-     };
+@@ -12621,7 +12621,7 @@ fn run_html_report_from_source_with_timing(
+     output_path: Option<&Path>,
+     no_timing: bool,
+ ) -> (Value, i32) {
 -    let (verification, verification_status) = run_verify_from_source(
 +    let (verification, _) = run_verify_from_source(
          path,
          source,
          depth,
-@@ -12638,9 +12638,6 @@ fn run_html_report_from_source_with_timing(
+@@ -12630,9 +12630,6 @@ fn run_html_report_from_source_with_timing(
          DEFAULT_EXPLICIT_BUDGET,
          1,
      );
 -    if let Some(error) = report_verification_error(&verification, verification_status) {
 -        return error;
 -    }
-     let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
-     if explain_status != 0 {
-         return (explained, explain_status);
-@@ -12670,7 +12667,7 @@ fn run_html_report_from_source_with_timing(
+     let model = match load_model_from_source(path, source) {
+         Ok(model) => model,
+         Err(error) => return (spec_load_error_output(&error), 2),
+@@ -12666,7 +12663,7 @@ fn run_html_report_from_source_with_timing(
          verification_view,
          &fsl_tools::undecided_declarations(&model),
      );
@@ -34,7 +34,7 @@ fold so the discarded status has no remaining use on the shared timing path.
          "html_report",
          &model.name,
          format!(
-@@ -12681,13 +12678,6 @@ fn run_html_report_from_source_with_timing(
+@@ -12677,13 +12674,6 @@ fn run_html_report_from_source_with_timing(
          ),
          &html,
          output_path,

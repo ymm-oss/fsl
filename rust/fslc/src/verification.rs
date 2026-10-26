@@ -2168,8 +2168,9 @@ pub(super) fn run_verify_cli_from_source(
     // outside the verify cache (issue #1303): the cache key covers only the
     // document's own kernel, so a cached `verified` must still be re-gated by
     // the preservations' current files. Every `verify`-shaped caller --
-    // `verify` (including `--lemma`), `sweep` cells, and a `chain` spec layer
-    // with a `depth` -- goes through this one point.
+    // `verify` (including `--lemma`), `sweep` cells, a `chain` spec layer
+    // with a `depth`, and the no-cache report/tool baseline adapter -- goes
+    // through this one point.
     match fold_governance_from_source(path, source, &mut output) {
         Ok(folded) => (output, folded.unwrap_or(status)),
         Err(error) => error,
@@ -2722,10 +2723,9 @@ fn execute_cli_verification(
     // option parsing, which both `verify` and `sweep` funnel through
     // `run_verify_cli` -- `sweep` builds its own `CliVerifyOptions` per
     // grid cell and calls `run_verify_cli` exactly like `verify` does.
-    // Every other constructor of `BmcRequest`/`InductionRequest`/
-    // `ExplicitRequest` in this codebase (the `ledger`/`html`/`mutate`
-    // baseline in `rust/fslc/src/main.rs`'s `run_verify`, and tests) must
-    // pass `false`.
+    // No-cache baseline adapters also reach this derivation, with the
+    // default `warn` policy, so they keep the probe. Other request
+    // constructors (including tests) must pass `false`.
     let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut output, status) = match VerificationEngine::parse(&options.engine) {
         Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {

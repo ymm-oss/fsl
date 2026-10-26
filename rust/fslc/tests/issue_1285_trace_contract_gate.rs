@@ -213,8 +213,8 @@ const FAIL_CLOSED: &[(&str, usize, &str)] = &[
     ("fslc/src/check_stages.rs", 1, "check"),
     (
         "fslc/src/main.rs",
-        6,
-        "document (generate / claims / check, requirements_document approval), scenarios / testgen, explain / html, mutate, ledger (and ledger approval), verify",
+        5,
+        "document (generate / claims / check, requirements_document approval), scenarios / testgen, explain / html, mutate, ledger (and ledger approval); verification baselines delegate to verification.rs (#1417)",
     ),
     ("fslc/src/source_diagnostic.rs", 1, "LSP diagnostics"),
     (
@@ -222,7 +222,11 @@ const FAIL_CLOSED: &[(&str, usize, &str)] = &[
         1,
         "the process-parse-options wrapper",
     ),
-    ("fslc/src/verification.rs", 1, "verify engines"),
+    (
+        "fslc/src/verification.rs",
+        1,
+        "shared verify engines and no-cache baselines (#1417)",
+    ),
 ];
 
 #[test]

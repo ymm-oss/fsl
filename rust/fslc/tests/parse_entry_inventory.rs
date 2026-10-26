@@ -351,7 +351,7 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     (
         "fslc/src/main.rs",
         "is_causal_source",
-        2,
+        1,
         Owner::D8,
         CAUSAL_AI,
     ),
@@ -362,7 +362,6 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         Owner::D8,
         CAUSAL_AI,
     ),
-    ("fslc/src/main.rs", "parse_causal", 1, Owner::D8, CAUSAL_AI),
     (
         "fslc/src/origin_coverage.rs",
         "parse_kernel_source_with_file",
