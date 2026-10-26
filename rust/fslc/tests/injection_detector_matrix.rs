@@ -79,7 +79,9 @@ fn baseline_for(base: &str) -> PathBuf {
     match base {
         "specs/bank.fsl" => root().join("specs/bank.fsl"),
         "specs/order_workflow.fsl" => root().join("specs/order_workflow.fsl"),
-        "examples/layers/return_system.fsl" => root().join("examples/layers/return_system.fsl"),
+        "examples/layers/return_system.fsl" => {
+            root().join("rust/fslc/tests/fixtures/legacy_return_branches.fsl")
+        }
         other => panic!("unknown base spec: {other}"),
     }
 }
@@ -112,6 +114,7 @@ fn warning_names(value: &Value, kind: &str) -> Vec<String> {
         .collect()
 }
 
+#[derive(Debug)]
 struct Cell {
     caught: bool,
     signal: String,
@@ -316,6 +319,7 @@ fn native_injected_corpus_primary_blind_matrix() {
         let case_headers = headers(path);
         let inject = case_headers["inject"].as_str();
         let cells = measure(path, &case_headers, &scratch);
+        eprintln!("{file_name}: {cells:?}");
 
         let primary = primary_detector(inject);
         if !cells[primary].caught {

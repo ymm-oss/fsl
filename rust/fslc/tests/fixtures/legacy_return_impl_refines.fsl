@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: Apache-2.0
+// Keep references to generated branch names independent of the public example.
+refinement ImplRefinesRequirements {
+  impl ReturnImpl
+  abs  ReturnSystemReq
+
+  // Design's two payment steps collapse to the requirement layer's single Paid,
+  // so this is many-to-one and needs `enum abstraction`, not `enum conversion`.
+  // Written out rather than left as a bare-member if-chain because `New`,
+  // `AutoApproved`, `MgrQueue`, `MgrApproved`, and `MgrRejected` each name a
+  // member of both DSt and SSt: the chain read as if it were the identity while
+  // the compiler had to guess which enum each bare name meant.
+  enum abstraction case_state DSt -> SSt {
+    New          -> New
+    AutoApproved -> AutoApproved
+    MgrQueue     -> MgrQueue
+    MgrApproved  -> MgrApproved
+    MgrRejected  -> MgrRejected
+    PaySubmitted -> Paid
+    PayConfirmed -> Paid
+  }
+
+  map sys[c: CaseId] = RCase {
+    st: abstract(case_state, d[c].st),
+    amount: d[c].amount
+  }
+  map paid_count = paid
+
+  // Requirement-layer actions split by branches are matched via their internal names (submit__b1/b2)
+  action submit_small(c, a) -> submit__b1(c, a)
+  action submit_large(c, a) -> submit__b2(c, a)
+  action mgr_approve(c)     -> mgr_approve(c)
+  action mgr_reject(c)      -> mgr_reject(c)
+  action pay_submit(c)      -> pay(c)
+  action pay_confirm(c)     -> stutter
+  action outbox_send()      -> stutter
+}
