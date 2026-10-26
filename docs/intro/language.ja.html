@@ -910,8 +910,6 @@ fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
-fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
-                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -928,6 +926,8 @@ fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|a
                                                  #   induction の trans 選択は全 invariant を保持
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
 fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
@@ -1208,7 +1208,7 @@ imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
 indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが実行された証拠が無いとき)、
-<code>2</code> = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
+<code>2</code> = 入力エラー(usage は argv の誤り / parse / type / semantics / io / vacuous / acceptance / forbidden /
 <code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
 <code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
 inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。失敗した governance の
@@ -1329,8 +1329,8 @@ digest 比較用の承認専用 ledger 再描画は、この門とは別のま�
 </tr>
 <tr>
 <td><code>error</code></td>
-<td>parse / type / semantics / io</td>
-<td><code>loc</code> / <code>expected</code> / <code>hint</code> に従って直す</td>
+<td>usage(argv の誤り) / parse / type / semantics / io</td>
+<td><code>usage</code> は argv を直す。それ以外は <code>loc</code> / <code>expected</code> / <code>hint</code> に従って直す</td>
 </tr>
 </tbody>
 </table>

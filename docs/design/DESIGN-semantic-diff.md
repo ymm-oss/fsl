@@ -166,7 +166,7 @@ Only a finding named by `--forbid` makes `gate.passed:false` and exits 1, with
 two exceptions that fail the gate unconditionally, whatever `--forbid` says:
 `impl_violated` (one input is broken on its own) and `unknown_budget` (the
 comparison was not completed). Both are added to `gate.violations` themselves.
-Parse/type/IO errors remain exit 2 and internal failures exit 3. This separates
+Usage (invalid argv)/parse/type/IO errors remain exit 2 and internal failures exit 3. This separates
 an informative change report from a repository-specific compatibility gate.
 
 `fslc diff --git` and `fslc approval diff` run this same comparison, so they

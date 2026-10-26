@@ -217,7 +217,7 @@ fn refine_chain_rejects_an_unpaired_final_operand() {
 
     assert_eq!(status, 2, "{result}");
     assert_eq!(result["result"], "error", "{result}");
-    assert_eq!(result["kind"], "io", "{result}");
+    assert_eq!(result["kind"], "usage", "{result}");
     assert_eq!(
         result["message"], "refine chain must list (abs map) pairs after the first mapping",
         "{result}"

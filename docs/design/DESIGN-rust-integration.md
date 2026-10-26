@@ -19,7 +19,7 @@ part of the Rust product gate.
 
 | Contract | Required native evidence |
 |---|---|
-| CLI grammar, help, exit 2, envelopes, versions, cost | `fslc/tests/native_integration.rs` |
+| CLI grammar, help, exit 2, envelopes, versions, cost | `fslc/tests/native_integration.rs`, `cli_contract_conformance.rs` |
 | Published JSON schema inventory and IDs | `native_integration.rs`, `kernel_contract.rs`, `conformance_coverage.rs` |
 | Public Kernel, testgen, and code generation | `kernel_contract.rs`, `public_kernel_v2.rs`, `testgen_contract.rs`, `domain_codegen_contract.rs` |
 | Registered FSL corpus formatting and semantics | `formatter_cli.rs` |
@@ -60,10 +60,41 @@ merely to accept native evolution. A nonzero result is an unresolved compatibili
 native product failure and not permission to broaden exclusions.
 
 The checked-in `rust/fslc/cli-contract.json` is therefore native-authored authority, not a snapshot
-to regenerate from the frozen Python parser. It enumerates all 50 live native leaves, including the
+to regenerate from the frozen Python parser. It enumerates all 52 live native leaves, including the
 six Rust-only causal commands, and the native test fixes that leaf count plus the deliberately absent
 `causal verify` path. `tools/export_cli_contract.py` exports only the frozen Python compatibility
 subset and refuses to overwrite the authoritative native file.
+
+### CLI argument validation amendment (#1341, #1342, #1343, #1446, #1447)
+
+The embedded contract is also the authority for stable argv acceptance. A single preflight in
+`fslc/src/cli_contract.rs`, after metadata/help interception and before formatting or normal dispatch,
+resolves command paths and derives option ownership, exact aliases, arity, choices, and positional
+upper bounds from its actions. Unknown options, out-of-domain choices, and excess positionals report
+`kind: "usage"`, exit 2, before source I/O. Previously ignored non-owned options and version operands
+are no longer accepted. Both testgen paths publish their existing `--allow-unwired` flag in actions
+and help; this does not introduce a new generator capability.
+
+Value-taking options consume their next token once, including dash-prefixed values; bare `--` ends
+options, and `--` in place of a required value is a missing-value error. This preserves the existing
+`CommandArgs` behavior. `ai compare` previously consumed literal `--` as a value with its raw iterator;
+it now rejects that value as missing too, an intentional breaking change with no command exception.
+The second-stage `ai compare` parser also honors bare `--` as an option terminator;
+any following tokens remain excess positional arguments rejected by preflight.
+Every repeated choice is checked, so a later valid occurrence cannot mask an earlier invalid one.
+Existing typed parsers
+retain numeric/type interpretation, required-argument diagnostics, duplicate/combination rules,
+and execution plumbing. Unstable fsl5 options and numeric edition aliases remain gated, command-local
+overlays, not a bypass of stable validation or additions to the stable metadata.
+
+Diagnostics retain already-rejecting wording when it identifies the option and the actual command;
+wrong helper labels and omitted option spellings are corrected. Unsupported Kernel majors keep
+their message but use `usage`, not `semantics`. Odd refine chain operands and malformed diff git
+ranges already caught by shape validation use `usage`, not `io`, retaining their messages and exit 2.
+Three-dot ranges are rejected before Git ref resolution with `--git range must be BASE..HEAD`.
+The checks remain in their original branches and order, preserving refine's literate-input priority
+and the handling of nonexistent Git refs. `cli_contract_conformance.rs` executes every stable node's
+advertised options, unknown vocabulary, choices, finite positional limits, help, and shape controls.
 
 ## Root-source snapshot integrity
 

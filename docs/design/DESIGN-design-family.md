@@ -135,7 +135,7 @@ Aggregation preserves this precedence:
 | Class | Family exit |
 |---|---:|
 | Internal producer failure | 3 |
-| Manifest, I/O, parse, type, reference, or producer-contract failure | 2 |
+| Usage (invalid argv), manifest, I/O, parse, type, reference, or producer-contract failure | 2 |
 | Verification, refinement, or explicitly gated comparison failure | 1 |
 | Eligible family or informative diff finding | 0 |
 

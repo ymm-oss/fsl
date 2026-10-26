@@ -38,7 +38,7 @@ imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
 indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
-`2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
+`2` = input error (usage for invalid argv / parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
 result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
@@ -439,7 +439,7 @@ options:
   -h, --help   show this help message and exit
   --logs LOGS
 </pre></div></details>
-<details><summary>fslc domain testgen</summary><div class="tree-body"><pre>usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [-o OUTPUT] file
+<details><summary>fslc domain testgen</summary><div class="tree-body"><pre>usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [--allow-unwired] [-o OUTPUT] file
 
 positional arguments:
   file
@@ -450,6 +450,7 @@ options:
   --target {vitest,pytest,swift,kotlin,dart,phpunit}
   --deadlock {warn,error,ignore}
   --strict
+  --allow-unwired       emit runtime skips instead of failures for unwired adapters
   -o, --output OUTPUT
 </pre></div></details></div></div></details>
 <details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
@@ -729,7 +730,7 @@ options:
   --strict-tags
   --requirements REQUIREMENTS
 </pre></div></details>
-<details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file
+<details><summary>fslc testgen</summary><div class="tree-body"><pre>usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [--allow-unwired] file
 
 positional arguments:
   file
@@ -742,6 +743,7 @@ options:
                         test harness to emit (default: pytest)
   --deadlock {warn,error,ignore}
   --strict
+  --allow-unwired       emit runtime skips instead of failures for unwired adapters
 </pre></div></details>
 <details><summary>fslc typestate</summary><div class="tree-body"><pre>usage: fslc typestate [-h] [--ts] file
 

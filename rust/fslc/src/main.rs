@@ -25,6 +25,7 @@ use serde_json::{Map, Value, json};
 
 mod approval;
 mod causal;
+mod cli_contract;
 mod cli_options;
 mod cli_output;
 mod code_audit;
@@ -152,6 +153,15 @@ fn main() {
 fn run() {
     if print_cli_metadata() {
         return;
+    }
+    let argv = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Err(message) = cli_contract::validate_argv(CLI_CONTRACT, &argv, *parse_options()) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&error_output("usage", &message))
+                .expect("serialize CLI argument error")
+        );
+        std::process::exit(2);
     }
     if let Some((output, status)) = fmt_command() {
         match output {
@@ -1311,7 +1321,7 @@ fn command() -> Result<(Value, i32), String> {
             } else if options.rest.len() % 2 != 0 {
                 Ok((
                     error_output(
-                        "io",
+                        "usage",
                         "refine chain must list (abs map) pairs after the first mapping",
                     ),
                     2,
@@ -2821,6 +2831,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
         let mut from_label = None;
         let mut to_label = None;
         while let Some(option) = args.next() {
+            if option == "--" {
+                break;
+            }
             let value = args
                 .next()
                 .ok_or_else(|| format!("{option} requires a value"))?;
@@ -16664,10 +16677,14 @@ fn run_diff_git(
     forbid: &[String],
 ) -> (Value, i32) {
     let Some((base_input, head_input)) = range.split_once("..") else {
-        return (error_output("io", "--git range must be BASE..HEAD"), 2);
+        return (error_output("usage", "--git range must be BASE..HEAD"), 2);
     };
-    if base_input.is_empty() || head_input.is_empty() || head_input.contains("..") {
-        return (error_output("io", "--git range must be BASE..HEAD"), 2);
+    if range.contains("...")
+        || base_input.is_empty()
+        || head_input.is_empty()
+        || head_input.contains("..")
+    {
+        return (error_output("usage", "--git range must be BASE..HEAD"), 2);
     }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,

@@ -867,8 +867,6 @@ fslc fmt       <path>... --check                 # JSON format_check; exit 0 cle
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
-fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
-                                               # slice 1: export a safety-invariant counterexample to reproducer.v1
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -885,6 +883,8 @@ fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [
                                                  #   induction keeps all invariants for a selected trans
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: export a safety-invariant counterexample to reproducer.v1
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test scaffold JSON
@@ -1182,7 +1182,7 @@ imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
 indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
-`2` = spec error (parse / type / semantics / io / vacuous / acceptance / forbidden /
+`2` = input error (usage for invalid argv / parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
@@ -1251,7 +1251,7 @@ records why, and why `fslc document check`'s `document_drifted` differs. Gate on
 | `unknown_cti` / `key_domain` | A state satisfying every proved invariant indexes a finite-key `Map` outside its key domain (read or indexed assignment) in a guard, body, property, or reached `ensures`; BMC and explicit report it as an error once it is within depth | Guard the index with a short-circuit `and`/`=>`/`or`/`if` or a `requires`, or add an auxiliary invariant that excludes the state if it is unreachable |
 | `unknown_cti` / `ensures` | An action's reached `ensures` is false on a step between states that satisfy every proved invariant | Fix the body or the `ensures`; if the start state is unreachable, add an auxiliary invariant that excludes it |
 | `unknown_budget` | Either: `--engine explicit` exceeded `--explicit-budget` before closing; or a refinement correspondence search exceeded its fixed internal state budget (no CLI flag) — an inline `implements Abs from "file" { }` seam (`check`/`verify`), `fslc refine` (single or chain), a `fslc chain` refine layer, or a governance `preservation` (§10, §13) | For the explicit engine: raise the budget, or use `--engine bmc`/`induction` for this spec. For a refinement: lower the depth or narrow the `verify {}` domains of both layers; an inline `implements` seam can also be split into `fslc verify` of each layer, but `fslc refine` shares the same budget. `fslc diff` reports a cut-off direction as `unknown_budget` and fails its gate unconditionally (an `unknown_budget` finding, exit 1); `fslc mutate` reports the mutant as `inconclusive`, outside `kill_rate`, and fails a requested gate |
-| `error` | parse / type / semantics / io | Fix per `loc` / `expected` / `hint` |
+| `error` | usage (invalid argv) / parse / type / semantics / io | Fix argv for `usage`; otherwise follow `loc` / `expected` / `hint` |
 
 `--engine auto` composes explicit and bmc: it tries explicit first (faster,
 and can reach `proved`+`closure:true`) and falls back transparently to bmc
