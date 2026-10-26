@@ -3501,15 +3501,20 @@ DESIGN-*.md).</p>
   nondeterministic timings. HTML-only <code>--no-timing</code> (default false, no alias)
   omits only <code>verification.cost.elapsed_s</code>,
   <code>verification.cost.solver.check_elapsed_s</code>,
-  <code>verification.cost.properties[].elapsed_s</code>, and
-  <code>explained.counterfactuals[].violation.cost.elapsed_s</code> from presentation
+  <code>verification.cost.properties[].elapsed_s</code>,
+  <code>explained.counterfactuals[].violation.cost.elapsed_s</code>,
+  <code>verification.cost.solver.memory_mb</code>, <code>verification.cost.solver.conflicts</code>,
+  <code>verification.cost.solver.decisions</code>, and
+  <code>verification.cost.solver.propagations</code> from presentation
   copies before rendering, on stdout and in <code>-o</code>/<code>--output</code> files alike.
-  Source and domain-state fields, counts, property identities, and other
-  statistics remain intact; ordinary verify JSON and exit codes are unchanged.
+  Source and domain-state fields, <code>solver.checks</code>, and property
+  <code>kind</code>/<code>name</code>/<code>checks</code> remain intact; ordinary verify JSON and exit codes are
+  unchanged. Wall-clock timings and environment-dependent Z3 internal
+  statistics are omitted; default HTML retains all timings and solver statistics.
   This supports byte-stable comparison for the same input path, source,
   options, and toolchain, not normalization across paths, backends, or
   environments.
-  <code>approval create --kind html</code> regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a <code>--no-timing</code> artifact as not matching a fresh rendering. →
+  <code>approval create --kind html</code> regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a <code>--no-timing</code> artifact as not matching a fresh rendering. →
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>The discipline before writing (the formalization memo, the NL→syntax reverse
 lookup, recommended practices) is in the AI-agent skills under <code>skills/</code>, with
