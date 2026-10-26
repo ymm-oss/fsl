@@ -52,6 +52,7 @@ fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
   Timing-free reports support byte-stable comparison for the same input path,
   source, options, and toolchain; they do not normalize different paths,
   backends, or environments.
+  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 - Parse/type/semantic/io errors use the existing CLI error envelope and exit-code
   convention.
 

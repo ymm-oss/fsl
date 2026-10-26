@@ -3370,7 +3370,8 @@ DESIGN-*.md).
   statistics remain intact; ordinary verify JSON and exit codes are unchanged.
   This supports byte-stable comparison for the same input path, source,
   options, and toolchain, not normalization across paths, backends, or
-  environments. →
+  environments.
+  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering. →
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 The discipline before writing (the formalization memo, the NL→syntax reverse

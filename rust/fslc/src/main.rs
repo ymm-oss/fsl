@@ -18046,6 +18046,63 @@ spec InitTraceability {
         }
     }
 
+    #[test]
+    fn html_timing_projection_preserves_every_other_value() {
+        let explained = json!({
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s",
+            "counterfactuals": [{"property": "Safe", "violation": {
+                "result": "violated", "loc": {"line": 7, "column": 3},
+                "assurance": "bounded", "cost": {"elapsed_s": 0.5, "checks": 17},
+                "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
+                    "cost": {"elapsed_s": 33}}}]
+            }}, {"property": "Other", "result": "unreachable"}],
+            "state": {"elapsed_s": 34}, "elapsed_s": 35
+        });
+        let verification = json!({
+            "result": "violated", "spec": "Synthetic", "depth": 4,
+            "loc": {"line": 9, "column": 5}, "assurance": "bounded",
+            "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}}}],
+            "cost": {"elapsed_s": 0.25, "checks": 19,
+                "solver": {"check_elapsed_s": 0.125, "checks": 23,
+                    "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
+                "properties": [
+                    {"kind": "invariant", "name": "Safe", "checks": 7, "elapsed_s": 0.0625},
+                    {"kind": "reachable", "name": "Goal", "checks": 11, "elapsed_s": 0.03125}]},
+            "cache": {"hit": true, "source": "exact"}, "elapsed_s": 44
+        });
+        // Independent full expected payloads: do not derive them with the projection.
+        let expected_explained = json!({
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s",
+            "counterfactuals": [{"property": "Safe", "violation": {
+                "result": "violated", "loc": {"line": 7, "column": 3},
+                "assurance": "bounded", "cost": {"checks": 17},
+                "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
+                    "cost": {"elapsed_s": 33}}}]
+            }}, {"property": "Other", "result": "unreachable"}],
+            "state": {"elapsed_s": 34}, "elapsed_s": 35
+        });
+        let expected_verification = json!({
+            "result": "violated", "spec": "Synthetic", "depth": 4,
+            "loc": {"line": 9, "column": 5}, "assurance": "bounded",
+            "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}}}],
+            "cost": {"checks": 19,
+                "solver": {"checks": 23,
+                    "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
+                "properties": [
+                    {"kind": "invariant", "name": "Safe", "checks": 7},
+                    {"kind": "reachable", "name": "Goal", "checks": 11}]},
+            "cache": {"hit": true, "source": "exact"}, "elapsed_s": 44
+        });
+        let originals = (explained.clone(), verification.clone());
+        assert_eq!(
+            html_report_without_timing(&explained, &verification),
+            (expected_explained, expected_verification)
+        );
+        assert_eq!((explained, verification), originals, "originals unchanged");
+    }
+
     /// Platform-neutral #808 control for `domain generate`. The scaffold's
     /// checked Kernel and domain metadata must both derive from source A after
     /// the root path has been normally overwritten with malformed source B.

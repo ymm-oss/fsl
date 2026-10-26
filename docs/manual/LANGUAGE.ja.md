@@ -3260,7 +3260,8 @@ DESIGN-*.md があります)。
   効きます。ソースや domain state のフィールド、回数、プロパティの識別情報、
   その他の統計は保持し、通常の verify JSON や exit code は変えません。
   同じ入力パス、ソース、オプション、toolchain での byte が安定した比較を支援する
-  もので、異なるパス、backend、環境の間の正規化ではありません。→
+  もので、異なるパス、backend、環境の間の正規化ではありません。
+  `approval create --kind html` は既定の timing 入りレポートを再生成し、timing の値を正規化しても key は除かないため、`--no-timing` の artifact を fresh rendering と不一致として拒否します。→
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は

@@ -195,6 +195,7 @@ other statistics, ordinary verify JSON, and exit codes are unchanged. Use it for
 byte-stable comparison with the same input path, source, options, and toolchain;
 it does not normalize across paths, backends, or environments. It is not a
 `testgen` or `ledger` option.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 Each `lint` path may be a file or directory. Directories recursively expand to
 regular `*.fsl` files; symlink entries and other extensions are skipped while

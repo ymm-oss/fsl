@@ -329,3 +329,83 @@ fn html_contract_advertises_no_timing_in_help_and_actions() {
         "missing HTML actions option"
     );
 }
+
+#[test]
+fn no_timing_artifact_is_rejected_by_html_approval_create() {
+    let run = ReportRun::new("approval");
+    let spec = run.0.join("spec.fsl");
+    std::fs::copy(root().join(CLEAN), &spec).expect("copy spec into isolated approval repository");
+    for arguments in [
+        vec!["init", "--quiet"],
+        vec![
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "add",
+            "spec.fsl",
+        ],
+        vec![
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "test baseline",
+        ],
+    ] {
+        let output = Command::new("git")
+            .args(arguments)
+            .current_dir(&run.0)
+            .output()
+            .expect("create isolated approval Git baseline");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let spec_text = spec.to_str().expect("UTF-8 spec path");
+    let artifact = run.0.join("review.html");
+    let artifact_text = artifact.to_str().expect("UTF-8 artifact path");
+    let rendered = run.run(&[
+        "html",
+        spec_text,
+        "--no-timing",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "-o",
+        artifact_text,
+    ]);
+    assert_eq!(rendered.status.code(), Some(0));
+    let report: Value = serde_json::from_slice(&rendered.stdout).expect("generated HTML envelope");
+    assert_eq!(report["result"], "generated");
+    assert!(artifact.is_file(), "reviewed artifact must exist");
+    let output = run.run(&[
+        "approval",
+        "create",
+        spec_text,
+        "--kind",
+        "html",
+        "--artifact",
+        artifact_text,
+        "--approver",
+        "reviewer",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let error: Value = serde_json::from_slice(&output.stdout).expect("approval error envelope");
+    assert_eq!(error["result"], "error");
+    assert_eq!(error["kind"], "semantics", "{error:#}");
+    assert_eq!(
+        error["message"],
+        "reviewed artifact does not match a fresh rendering with the recorded inputs"
+    );
+}

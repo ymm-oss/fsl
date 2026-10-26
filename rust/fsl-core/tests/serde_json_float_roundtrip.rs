@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! fslc/fsl-tools tests enable `float_roundtrip` through their `jsonschema` dev-dependency.
-//! fsl-core observes normal workspace features; adding `jsonschema` here would silence this detector.
+//! A standalone `cargo test -p fsl-core` invocation observes the distributed feature set.
+//! `cargo test --workspace` or an invocation also selecting fslc/fsl-tools tests
+//! unifies `float_roundtrip` through their `jsonschema` dev-dependency and passes even on base.
+//! CI's `.github/workflows/merge-readiness.yml` core step calls `check_core_contracts`
+//! in `tools/check-merge-readiness.sh`, testing only fsl-syntax, fsl-core, fsl-runtime,
+//! and fsl-solver; adding `jsonschema` to any of these four crates' dev-dependencies
+//! would silence that reduced-graph detector.
 //! Guards DESIGN-incremental-verify.md §4's byte-identical cache hits and the
 //! `serde_json::from_slice` cache reader in rust/fslc/src/verification.rs.
 

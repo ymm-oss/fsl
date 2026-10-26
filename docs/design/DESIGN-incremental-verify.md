@@ -107,10 +107,11 @@ than hashing an under-specified representation).
   layout under `<root>/verify/v3/`. Content-addressed keys make a machine-global cache
   safe across projects/worktrees; entries embed no absolute paths (results carry spec names,
   not file paths).
-- Entry: `{"schema": 1, "created": iso8601, "fslc": version, "key_inputs": {component
+- Python entry: `{"schema": 1, "created": iso8601, "fslc": version, "key_inputs": {component
   digests, for debugging}, "result": <decorated pre-envelope out>}`. Only verdict-class
   results are stored (`verified`, `proved`, `violated`, `reachable_failed`, `unknown_cti`);
   `error`/internal results are never cached.
+  Native schema v2 entries instead contain `schema: "fslc-rust-cache.v2"`, `key`, `xdepth`, `backend`, `solver_version`, and `output`, with no `created` field.
 - Writes are atomic (`tempfile` + `os.replace`); concurrent agents at worst duplicate work.
   Unreadable/corrupt entries are treated as a miss and deleted. Entries over 5 MB (huge
   traces) are not stored. Because of this, running many `fslc verify` processes in parallel
@@ -137,11 +138,19 @@ than hashing an under-specified representation).
   `sweep.results[].verification` and
   `sweep.minimal_counterexample.verification` when present. Preserve same-named
   fields in domain state; do not recursively delete keys or remove verdict,
-  location, or assurance evidence. The native JSON reader uses serde_json's
+  location, or assurance evidence. The workspace-wide JSON reader uses serde_json's
   `float_roundtrip` feature to preserve stored f64 values and their serialized
   tokens on replay, including the original solve timings. This does not change
   the cache JSON shape, schema, or key derivation. Sweep has no `--no-cache`
   option; use `FSLC_CACHE=off` to disable its cache reads and writes.
+- `float_roundtrip` applies workspace-wide, including Worker request parsing,
+  not just cache replay: it reads JSON f64 values accurately in scenario approval
+  normalization, AI eval/JSONL inputs, causal evidence/plan/lifecycle inputs, and
+  log replay/implementation-log/event inputs. Digests of older scenario approvals
+  or causal artifacts containing boundary decimal values can therefore change.
+  The fslc/fsl-tools test graphs already enabled this feature through the
+  `jsonschema` dev-dependency; previously those tests and distributed builds
+  parsed such numbers differently.
 - Exit codes are untouched: a hit returns the same `result` value through the same
   `exit_code()` mapping.
 - Caching is **on by default** for `fslc verify` (both engines). Rationale: the key
