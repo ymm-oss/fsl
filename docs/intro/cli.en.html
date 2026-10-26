@@ -437,7 +437,7 @@ options:
   --depth DEPTH
   --readable
 </pre></div></details>
-<details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file
+<details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--no-timing] file
 
 positional arguments:
   file
@@ -450,6 +450,8 @@ options:
   --engine {bmc,induction}
                         use k-induction so a proved report can show assurance
                         class &#x27;proved&#x27;
+  --no-timing           omit execution timing fields from HTML (stdout or file);
+                        keep timings by default
 </pre></div></details>
 <details><summary>fslc approval <span class="tree-blurb">— 3 subcommands</span></summary><div class="tree-body"><pre>usage: fslc approval [-h] {create,check,diff}
 

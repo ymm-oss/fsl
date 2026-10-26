@@ -949,7 +949,7 @@ fslc mutate    &lt;file.fsl&gt; [--by-requirement] [--oracle-attribution] [--max
                                                  # built-in + external spec mutation (§15)
 fslc explain   &lt;file.fsl&gt; [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   &lt;file-or-dir&gt;... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
-fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] # self-contained review report (§15)
+fslc html      &lt;file.fsl&gt; [--depth K] [-o report.html] [--no-timing] # self-contained review report (§15)
 fslc ledger    &lt;file.fsl&gt; [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate &lt;file.fsl&gt; [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
                [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
@@ -1097,6 +1097,13 @@ Public Kernel v2 はオプトインで、
 コマンドがファイルを書き換えることは決してありません。未検証の仮定モードは
 ありません。BMC エンジンでの <code>--lemma</code> は使用法エラーです。候補のテキストと順序は
 検証キャッシュのキーの一部です。</p>
+<p>sweep の envelope は、実行メタデータの <code>cache</code> と timing を除けば入力の関数です。
+安定した比較では approval の <code>stable_json</code> と同じく、各 verification envelope
+(<code>sweep.results[].verification</code> と、存在する場合の
+<code>sweep.minimal_counterexample.verification</code>)の root だけから <code>cost</code> と <code>cache</code> を
+除外し、domain state 内の同名フィールドは保持します。cache の由来は verdict の
+エビデンスではありません。sweep に <code>--no-cache</code> オプションはありません。
+cache の読み書きを止めるには <code>FSLC_CACHE=off</code> を使います。</p>
 <p><code>sweep</code> は <code>verify</code> のオプトインのラッパーで、通常の検証を変えません。
 <code>--instances NAME=lo..hi</code>、<code>--values NAME=lo..hi</code>、<code>--depth lo..hi</code> の上書きの
 決定的なグリッドを評価し、各基盤の検証結果を <code>sweep.results</code> に記録し、最初の真の
@@ -3276,7 +3283,18 @@ DESIGN-*.md があります)。</p>
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
-  非専門家によるプロジェクトレビューに使うためのものです。→
+  非専門家によるプロジェクトレビューに使うためのものです。既定では非決定的な
+  timing を保持します。HTML 専用の <code>--no-timing</code>(既定 false、別名なし)は、
+  <code>verification.cost.elapsed_s</code>、
+  <code>verification.cost.solver.check_elapsed_s</code>、
+  <code>verification.cost.properties[].elapsed_s</code>、
+  <code>explained.counterfactuals[].violation.cost.elapsed_s</code> だけを、描画前の
+  presentation 用の写しから省きます。stdout と <code>-o</code>/<code>--output</code> のファイルの両方に
+  効きます。ソースや domain state のフィールド、回数、プロパティの識別情報、
+  その他の統計は保持し、通常の verify JSON や exit code は変えません。
+  同じ入力パス、ソース、オプション、toolchain での byte が安定した比較を支援する
+  もので、異なるパス、backend、環境の間の正規化ではありません。
+  <code>approval create --kind html</code> は既定の timing 入りレポートを再生成し、timing の値を正規化しても key は除かないため、<code>--no-timing</code> の artifact を fresh rendering と不一致として拒否します。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-html-report.md"><code>DESIGN-html-report.md</code></a></p>
 <p>書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
 <code>skills/</code> の下の AI エージェントスキルにあり、共有の言語リファレンスは
