@@ -723,7 +723,43 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `reachable(r, a, b)`、`acyclic(r)`、`functional(r)`、`injective(r)`、
   `domain(r)`、`range(r)`。`reachable` と `acyclic` は自己関係
   (`relation T -> T`)を要求します。端点の型/アリティのエラーは修復ヒントを
-  含みます。`reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
+  含みます。
+  `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
+  `a` を `A`、`b` を `B` に対して独立に型検査します。不適合な端点は
+  check 時の `kind: "semantics"` エラー(終了コード 2)となり、代入可能性の
+  メッセージに `hint: use endpoints matching the relation's declared source and target types`
+  が続きます。名前付き enum は公称型のままで、数値範囲は従来の整数互換性を
+  保ちます。例えば `N` が数値範囲なら、enum の `Red` は `relation N -> N` の
+  端点にできません。この破壊的な受理範囲の縮小(#1458)は、以前受理されていた
+  型不正な式を実行時に意味付けせず拒否します。`domain(r)` の型は `Set<A>`、
+  `range(r)` の型は `Set<B>` となり、一律の `Set<Int>` ではなくなります。
+  コレクション束縛子と public Kernel の型注釈にも端点の型が伝わります。
+  これにより `not (exists x in domain(r): reachable(r, x, x))` のような
+  正当な enum 関係の記法が復旧しますが、実行時の意味を変更したり、不変条件の
+  成立を保証したりはしません。数値射影は整数互換性を保ちます。
+  以前の端点のみの境界測定の BASE は `75ce67832faf063f3ffb850ddb6ef6465b5b62ef`
+  です。コマンド、識別情報、測定結果は
+  [設計ノート](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
+  を参照してください。端点の破壊的な受理範囲の縮小に該当する式は、
+  数値の `N -> N` について `not reachable(r, Red, Blue)`、
+  `not reachable(r, Red, 1)`、`not reachable(r, 1, Blue)`、
+  `not r.contains(Red, Blue)`、`not r.contains(Red, 1)`、
+  `not r.contains(1, Blue)`、`r.add(Red, Blue).contains(Red, Blue)`、
+  `r.add(Red, 1) != r`、`r.add(1, Blue) != r`、
+  `r.remove(Red, Blue) == r`、`r.remove(Red, 1) == r`、
+  `r.remove(1, Blue) == r`、`N -> Color` について `not r.contains(1, 2)`、
+  `r.add(1, 2) != r`、`r.remove(1, 2) == r` です。
+  `Red` と `Blue` は `Color` の enum メンバーです。追加の LSP と Worker の
+  fixture は数値関係の target のみが不正な `contains` と `reachable` の再掲です。
+  射影の型付けにより、`s: relation Color -> Color` と `r: relation N -> N` に
+  対する、以前受理されていた次の enum/Int 形式も拒否されます:
+  `forall x in domain(s): not r.contains(x, x)`、
+  `forall x in range(s): not r.contains(x, x)`、
+  `not domain(s).contains(0)`、`not range(s).contains(0)`、
+  `forall x in domain(s): x != 0`、`forall x in range(s): x != 0`。
+  enum 射影要素を数値端点や整数との比較に使うことはできません。
+  enum の序数ではなく、宣言された端点の型を使ってください。
+  `reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
   `a` に戻る、1本以上の辺からなる本物のパスがある場合にのみ真です(空の関係
   や非巡回の関係では、すべての `a` について `reachable(r, a, a) == false`)。
   反射的な読みだと、任意の非空ドメインで `not reachable(r, a, a)` が構造上

@@ -365,7 +365,16 @@ fn infer_type_inner(
             "old" => infer_type(expr, env, model, expected),
             "abs" => Ok(TypeRef::Int),
             "rel_acyclic" | "rel_functional" | "rel_injective" => Ok(TypeRef::Bool),
-            "rel_domain" | "rel_range" => Ok(TypeRef::Set(Box::new(TypeRef::Int))),
+            "rel_domain" | "rel_range" => {
+                let element = match resolve(model, &infer_type(expr, env, model, None)?)? {
+                    TypeRef::Relation(source, target) => {
+                        if name == "rel_domain" { source } else { target }
+                    }
+                    // Non-relation signature validation is separate (#1459).
+                    _ => Box::new(TypeRef::Int),
+                };
+                Ok(TypeRef::Set(element))
+            }
             _ => Err(error(format!("unsupported unary expression '{name}'"))),
         },
         Expr::TernaryNamed { name, .. } if name == "rel_reachable" => Ok(TypeRef::Bool),
@@ -1024,6 +1033,23 @@ fn validate_expression_in_phase(
     recursion::guard(|| validate_expression_inner(expr, env, model, span, expected, phase))
 }
 
+fn validate_relation_endpoint(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    span: Span,
+    expected: &TypeRef,
+    phase: &ValidationPhase,
+) -> Result<(), TypecheckError> {
+    expression_type(expr, env, model, span, Some(expected)).map_err(|mut error| {
+        error.message.push_str(
+            "; hint: use endpoints matching the relation's declared source and target types",
+        );
+        error
+    })?;
+    validate_expression_in_phase(expr, env, model, span, Some(expected), phase)
+}
+
 #[allow(clippy::too_many_lines)]
 fn validate_expression_inner(
     expr: &Expr,
@@ -1083,8 +1109,21 @@ fn validate_expression_inner(
             let receiver_ty = resolve(model, &infer_type(receiver, env, model, None)?)?;
             let argument_type = method_argument_type(name, &receiver_ty);
             validate(receiver, env, span, None)?;
-            for argument in args {
-                validate(argument, env, span, argument_type.as_ref())?;
+            for (index, argument) in args.iter().enumerate() {
+                let endpoint_type = match (name.as_str(), &receiver_ty, index) {
+                    ("contains" | "add" | "remove", TypeRef::Relation(source, _), 0) => {
+                        Some(source.as_ref())
+                    }
+                    ("contains" | "add" | "remove", TypeRef::Relation(_, target), 1) => {
+                        Some(target.as_ref())
+                    }
+                    _ => None,
+                };
+                if let Some(endpoint_type) = endpoint_type {
+                    validate_relation_endpoint(argument, env, model, span, endpoint_type, phase)?;
+                } else {
+                    validate(argument, env, span, argument_type.as_ref())?;
+                }
             }
         }
         Expr::Binary { op, left, right } => {
@@ -1166,14 +1205,22 @@ fn validate_expression_inner(
             validate(right, env, span, Some(&TypeRef::Int))?;
         }
         Expr::TernaryNamed {
+            name,
             first,
             second,
             third,
-            ..
         } => {
             validate(first, env, span, None)?;
-            validate(second, env, span, None)?;
-            validate(third, env, span, None)?;
+            if name == "rel_reachable"
+                && let TypeRef::Relation(source, target) =
+                    resolve(model, &infer_type(first, env, model, None)?)?
+            {
+                validate_relation_endpoint(second, env, model, span, &source, phase)?;
+                validate_relation_endpoint(third, env, model, span, &target, phase)?;
+            } else {
+                validate(second, env, span, None)?;
+                validate(third, env, span, None)?;
+            }
         }
     }
     Ok(())

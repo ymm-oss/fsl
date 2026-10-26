@@ -755,6 +755,42 @@ variable capture instead of inventing internal binder names. See
   `reachable(r, a, b)`, `acyclic(r)`, `functional(r)`, `injective(r)`,
   `domain(r)`, `range(r)`. `reachable` and `acyclic` require a self-relation
   (`relation T -> T`); endpoint type/arity errors include repair hints.
+  For `r: relation A -> B`, `contains`, `add`, `remove`, and `reachable`
+  check `a` against `A` and `b` against `B` independently. Incompatible
+  endpoints are check-time `kind: "semantics"` errors (exit 2), with the
+  assignability message followed by `hint: use endpoints matching the relation's
+  declared source and target types`. Named enums remain nominal; numeric ranges
+  retain their existing integer compatibility. For example, enum `Red` cannot
+  be an endpoint of `relation N -> N` when `N` is a numeric range. This breaking
+  removal (#1458) rejects previously accepted ill-typed expressions rather than
+  assigning them a runtime meaning. `domain(r)` now has type `Set<A>` and
+  `range(r)` has type `Set<B>`, rather than `Set<Int>` for every relation.
+  Collection binders and public Kernel type annotations inherit those endpoint
+  types. This restores legitimate enum-relation idioms such as
+  `not (exists x in domain(r): reachable(r, x, x))`; it does not change their
+  runtime meaning or guarantee that their invariants hold. Numeric projections
+  retain integer compatibility. The earlier endpoint-only boundary measurement
+  used BASE `75ce67832faf063f3ffb850ddb6ef6465b5b62ef`; see
+  [the design note](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
+  for commands, identities and measurements. The endpoint breaking removals are:
+  for numeric `N -> N`, `not reachable(r, Red, Blue)`,
+  `not reachable(r, Red, 1)`, `not reachable(r, 1, Blue)`,
+  `not r.contains(Red, Blue)`, `not r.contains(Red, 1)`,
+  `not r.contains(1, Blue)`, `r.add(Red, Blue).contains(Red, Blue)`,
+  `r.add(Red, 1) != r`, `r.add(1, Blue) != r`,
+  `r.remove(Red, Blue) == r`, `r.remove(Red, 1) == r`,
+  `r.remove(1, Blue) == r`; for `N -> Color`, `not r.contains(1, 2)`,
+  `r.add(1, 2) != r`, `r.remove(1, 2) == r`.
+  `Red`/`Blue` are `Color` enum members. The additional LSP and Worker
+  occurrences repeat the numeric target-only `contains` and `reachable` forms.
+  Projection typing also removes these previously accepted enum/Int forms for
+  `s: relation Color -> Color` and `r: relation N -> N`:
+  `forall x in domain(s): not r.contains(x, x)`,
+  `forall x in range(s): not r.contains(x, x)`,
+  `not domain(s).contains(0)`, `not range(s).contains(0)`,
+  `forall x in domain(s): x != 0`, `forall x in range(s): x != 0`.
+  Enum projection elements cannot be used as numeric endpoints or compared with
+  integer values; use the declared endpoint type, not an enum ordinal.
   `reachable(r, a, a)` is **not** reflexive by construction: it is true only
   if a real path of one or more edges leads from `a` back to `a` (so an empty
   or acyclic relation gives `reachable(r, a, a) == false` for every `a`). A

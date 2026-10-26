@@ -864,6 +864,37 @@ never a state variable named `true`), so the declaration is rejected. No other w
 - Relation: `.contains(a,b) .add(a,b) .remove(a,b)`,
   `reachable(r,a,b) acyclic(r) functional(r) injective(r) domain(r) range(r)`.
   `reachable`/`acyclic` require a self-relation (`relation T -> T`).
+  For `r: relation A -> B`, `contains`/`add`/`remove`/`reachable` require
+  source `a` assignable to `A` and target `b` assignable to `B` independently.
+  A mismatch is `kind: "semantics"`, exit 2, with the existing assignability
+  message and `hint: use endpoints matching the relation's declared source and
+  target types`. Enums are nominal; numeric ranges retain integer compatibility.
+  Breaking removal (#1458): previously accepted mismatched endpoints (such as
+  enum `Red` in a numeric relation) are rejected before evaluation. Do not repair
+  this by coercing enum ordinals or weakening a property; use the declared types.
+  `domain(r)` infers `Set<A>` and `range(r)` infers `Set<B>` (not always
+  `Set<Int>`); collection binders and public Kernel annotations inherit the
+  endpoint type. Enum-relation idioms such as
+  `not (exists x in domain(r): reachable(r, x, x))` check again; their runtime
+  meaning is unchanged and false invariants still violate. Numeric projections
+  remain integer-compatible. The earlier endpoint-only measurement used BASE
+  `75ce67832faf063f3ffb850ddb6ef6465b5b62ef`; commands and identities are in
+  `docs/design/DESIGN-nested-option-support.md`, section #1458.
+  The endpoint removals for numeric `N -> N` are
+  `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,
+  `not reachable(r, 1, Blue)`, `not r.contains(Red, Blue)`,
+  `not r.contains(Red, 1)`, `not r.contains(1, Blue)`,
+  `r.add(Red, Blue).contains(Red, Blue)`, `r.add(Red, 1) != r`,
+  `r.add(1, Blue) != r`, `r.remove(Red, Blue) == r`,
+  `r.remove(Red, 1) == r`, `r.remove(1, Blue) == r`;
+  for `N -> Color`: `not r.contains(1, 2)`, `r.add(1, 2) != r`,
+  `r.remove(1, 2) == r`. `Red`/`Blue` belong to enum `Color`.
+  LSP repeats the numeric target-only contains form; Worker repeats target-only
+  reachable. Projection typing additionally removes, for `s: relation Color -> Color`
+  and `r: relation N -> N`, `forall x in domain(s): not r.contains(x, x)`,
+  `forall x in range(s): not r.contains(x, x)`, `not domain(s).contains(0)`,
+  `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
+  `forall x in range(s): x != 0`. Do not coerce enum elements to numeric ordinals.
   `reachable(r,a,a)` is **not reflexive**: true only via a real path of ≥1
   edges back to `a` (empty/acyclic `r` gives `false`, never a free 0-hop
   `a==a`). Use `acyclic(r)` for "no self-loops or cycles anywhere".

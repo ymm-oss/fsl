@@ -263,6 +263,111 @@ claims triangulation, it must separately preserve a raw observation, declare
 two independent decision lineages, execute model-world/oracle-world/model-oracle
 edges, and calibrate them as required by that accepted design.
 
+### Relation endpoint expression boundary (#1458)
+
+The bounded-scalar relation declaration gate also requires typed uses of its
+endpoints. For `r: relation A -> B`, `r.contains(a,b)`, `r.add(a,b)`,
+`r.remove(a,b)` and `reachable(r,a,b)` validate `a` against `A` and `b` against
+`B` independently through the shared recursive expression checker. Enum types
+remain nominal and existing integer/range assignability is unchanged.
+
+This is a breaking removal of previously accepted ill-typed expressions, not
+a runtime coercion or new relation operation. A mismatch retains the existing
+assignability diagnostic and authored expression origin, appending
+`hint: use endpoints matching the relation's declared source and target types`.
+Native check and verify reject it with `kind: "semantics"`, exit 2, before
+evaluation. LSP retains `FSL-SEMANTIC`; Worker preserves the native semantic
+error envelope with Worker-owned delivery metadata. Public Kernel expression
+validation uses the same gate without changing the schema. Native/Worker parity
+is shared-checker evidence, not independent semantic triangulation.
+
+The 15 endpoint detectors and 14 preservation/rejecting controls in
+`issue_1458_relation_endpoint_types.rs` cover each method's two positions,
+both reachable positions, heterogeneous source/target order, nested expressions,
+and valid relation operations. A well-typed negated membership control must
+still produce a real invariant violation, not a check error or false green.
+Receiver/arity validation, relation functions on non-relations and the
+self-relation requirement are separate #1459 signature work. No runtime or
+verifier endpoint checks are introduced here.
+
+For `r: relation A -> B`, `domain(r)` infers `Set<A>` and `range(r)` infers
+`Set<B>`, not a universal `Set<Int>`. Collection binders inherit the endpoint
+type, as do public Kernel expression and binder annotations (the schema is
+unchanged). This restores valid enum projection idioms, including
+`not (exists x in domain(r): reachable(r, x, x))`, while closing the numeric
+endpoint bypass through enum projection binders. Symbolic and concrete
+projection semantics are unchanged; enum/Int confusion is rejected before
+evaluation rather than interpreted through ordinals. Named numeric endpoints
+remain integer-compatible. The fixed domain/range target has nine detectors
+(three restored enum uses and six newly rejected forms) and seven numeric
+preservation/rejecting controls. Existing non-relation signature handling is
+outside this change (#1459).
+
+The additional breaking removals for `s: relation Color -> Color` and
+`r: relation N -> N` are:
+
+| Inline fixture | Removed invariant expression |
+|---|---|
+| enum-domain-bypass | `forall x in domain(s): not r.contains(x, x)` |
+| enum-range-bypass | `forall x in range(s): not r.contains(x, x)` |
+| enum-domain-integer-member | `not domain(s).contains(0)` |
+| enum-range-integer-member | `not range(s).contains(0)` |
+| enum-domain-integer-comparison | `forall x in domain(s): x != 0` |
+| enum-range-integer-comparison | `forall x in range(s): x != 0` |
+
+#### Historical endpoint-only measurement (before projection typing/restack)
+
+BASE and the HEAD commit reference are both
+`75ce67832faf063f3ffb850ddb6ef6465b5b62ef`: HEAD here is that commit plus
+the uncommitted production patch SHA-256
+`0caed026d28c3653628f821ed912b420e740941fe3843c9665b17c298cc7e945`,
+not a claimed new commit. BASE was materialized by `git archive` under
+`.claude/work/base-tree`; HEAD is the working tree. Each binary checked forms
+in its own tree. The supplied BASE binary `.claude/work/fslc-1439` has SHA-256
+`ed375b54aea571629ab3cd3f1e7d0e07c4a5b8b6aac034c3d871eff4908eb3fd`;
+the final built HEAD `rust/target/debug/fslc` has SHA-256
+`b72f3ccf797fecc628e898e3127df13dcb0cfcc6b0353ba7a9f3e53f65a7139a`.
+
+Exact driver commands: `python3 .claude/work/sweep-1458.py prepare`,
+`python3 .claude/work/sweep-1458.py base`,
+`python3 .claude/work/sweep-1458.py head`,
+`python3 .claude/work/sweep-1458.py compare`. Each check invocation acquires
+the lane lock followed by the heavy lock. The driver checks every `.fsl` under
+`specs/`, `examples/`, `rust/fslc/tests/fixtures/` (**579 forms**), plus every
+inline fixture occurrence in the fixed regression file (35), the augmented
+native/LSP diagnostic test (8), and the augmented Worker parity test (7):
+**629 forms per tree**, twice with `FSLC_UNSTABLE` removed and twice with
+`FSLC_UNSTABLE=fsl5`, **5,032 checks**. This includes deliberately rejecting
+corpus outcomes such as governance `refinement_failed` / exit 1; those are
+compared, not dropped. Repeat stdout bytes, JSON, stderr and exit codes agree
+exactly, without any excluded field.
+
+The measured corpus `ok` → `error` transition set is **empty**. The following
+17 inline occurrences (15 distinct source texts) each change from `ok` / 0 to
+`error` / `semantics` / 2 in **both modes**: **34 mode-form transitions**.
+All other full outputs are unchanged. Here `N = 0..2` and `Color = {Red, Blue}`;
+all new errors retain invariant origin 7:3 and the endpoint repair hint.
+
+| Inline fixture label | Relation | Removed invariant expression |
+|---|---|---|
+| fixed-reachable-evaluated-enums | N -> N | `not reachable(r, Red, Blue)` |
+| fixed-contains-evaluated-enums | N -> N | `not r.contains(Red, Blue)` |
+| fixed-add-contains-evaluated-enums | N -> N | `r.add(Red, Blue).contains(Red, Blue)` |
+| fixed-remove-evaluated-enums | N -> N | `r.remove(Red, Blue) == r` |
+| fixed-reachable-source | N -> N | `not reachable(r, Red, 1)` |
+| fixed-reachable-target | N -> N | `not reachable(r, 1, Blue)` |
+| fixed-contains-source | N -> N | `not r.contains(Red, 1)` |
+| fixed-contains-target | N -> N | `not r.contains(1, Blue)` |
+| fixed-add-source | N -> N | `r.add(Red, 1) != r` |
+| fixed-add-target | N -> N | `r.add(1, Blue) != r` |
+| fixed-remove-source | N -> N | `r.remove(Red, 1) == r` |
+| fixed-remove-target | N -> N | `r.remove(1, Blue) == r` |
+| fixed-heterogeneous-contains-target | N -> Color | `not r.contains(1, 2)` |
+| fixed-heterogeneous-add-target | N -> Color | `r.add(1, 2) != r` |
+| fixed-heterogeneous-remove-target | N -> Color | `r.remove(1, 2) == r` |
+| lsp-08 | N -> N | `not r.contains(1, Blue)` (duplicate occurrence) |
+| worker-07 | N -> N | `not reachable(r, 1, Blue)` (duplicate occurrence) |
+
 ## 5. Lossless public observation and replay
 
 Full language support is incomplete if engines distinguish `none` from

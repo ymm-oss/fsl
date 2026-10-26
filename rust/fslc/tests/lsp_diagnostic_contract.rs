@@ -126,6 +126,12 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             Some((10, 5)),
             None,
         ),
+        (
+            "relation-endpoint-type",
+            "spec RelEndpoint {\n  enum Color { Red, Blue }\n  type N = 0..2\n  state { r: relation N -> N }\n  init { r = Set {} }\n  action stay() { }\n  invariant P { not r.contains(1, Blue) }\n}\n",
+            Some((7, 3)),
+            None,
+        ),
     ];
 
     for (name, source, expected_location, expected_hint) in cases {
@@ -151,6 +157,9 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
         assert_eq!(cli["kind"], shared.kind, "{name}");
         assert_eq!(cli["message"], shared.message, "{name}");
         assert_eq!(cli["hint"].as_str(), expected_hint, "{name}");
+        if name == "relation-endpoint-type" {
+            assert_eq!(shared.code, "FSL-SEMANTIC");
+        }
         if name == "acceptance-expect-type" {
             assert_eq!(cli["result"], "error");
             assert_eq!(cli["kind"], "semantics");
