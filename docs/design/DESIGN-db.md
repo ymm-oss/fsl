@@ -61,17 +61,19 @@ window rejection does not newly prevent Kernel export.
 
 The #1473 check-boundary comparison covered all 595 `.fsl` files recursively
 under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, without corpus
-exclusions. Base production was `13859b4193d9b76e651ec9a1f69252de4b695d70`
-(identical to the measured `e57011fc` production); head was
-`f2c41c28f9ea19ec808cdda6e200402f80a1ecf2` (tree-identical to measured
-`96cf2c5c65f08e81e18016ab2d49bc08ff3749e2`). For each relative path, the commands
-were `FSLC_CACHE=off .codex/tmp/sweep-1473/base2-fslc check <relative-path>` and
-`FSLC_CACHE=off .codex/tmp/sweep-1473/head2-fslc check <relative-path>` in this
+exclusions. Base production was `2debc32a67d5e459110a4fd61fce9cbcf93c3fe7`;
+the head implementation commit was `63f98beb88be08f4455592436219bdd4a92bcf06`
+(tree `dcd6497eb7dc8b6049a734e1bf457bfb8894f72c`).
+The measured head binary was built from a tree whose production sources and
+Cargo.lock are identical to that implementation commit.
+For each relative path, the commands
+were `FSLC_CACHE=off .codex/tmp/sweep-1473/base3-fslc check <relative-path>` and
+`FSLC_CACHE=off .codex/tmp/sweep-1473/head3-fslc check <relative-path>` in this
 materialized tree, with the base binary built after restoring the five affected
 production files to base and the head binary built from the restored head.
 Their SHA256 values were respectively
-`d03258db90f2d34eb3b78894815daaac4292f10f802d52ee90a083c4a656b10b` and
-`9bca33eaee46bfe19aaa56b49a1e268c84dfb835d8bb72e96994ead96d56d61a`.
+`7b431cb05464e3eef24f35a68edab9c716d44055ed4b281b088db3d91f7d7079` and
+`c7e659610dbd7efddf539f7d730d106344955e4fc1dec9cb3d09e260765eb0c3`.
 The path-set difference and `check` `ok`→`error` transition set were both empty;
 stdout, stderr, and exit statuses also matched in full (400 exit-0 forms on
 each side). This is a check-acceptance comparison, not preservation of the old
