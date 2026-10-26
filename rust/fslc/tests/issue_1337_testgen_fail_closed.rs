@@ -3,7 +3,7 @@
 //! #1337: compare each failed testgen CLI envelope with verify of the same
 //! document, not with the structurally different scenarios envelope.
 
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 mod cli;
 
 use std::path::PathBuf;
@@ -27,7 +27,7 @@ fn output_path() -> PathBuf {
         .expect("time after epoch")
         .as_nanos();
     let dir = cli::repository_root().join(format!(
-        "rust/target/lane-b-acceptance/{}-{timestamp}-{serial}",
+        "rust/target/report-acceptance/{}-{timestamp}-{serial}",
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).expect("create worktree-local output directory");

@@ -2,12 +2,12 @@
 
 #[path = "support/ledger_attribution.rs"]
 mod cases;
-#[path = "support/lane_b_cli.rs"]
+#[path = "support/report_cli.rs"]
 mod cli;
 #[path = "support/ledger_findings.rs"]
 #[allow(dead_code)]
 mod findings;
-#[path = "support/ledger_r3.rs"]
+#[path = "support/ledger_fixtures.rs"]
 mod support;
 
 #[test]
@@ -76,7 +76,7 @@ fn assert_attributed(fixture: &str, declaration: &str, name: &str, annotated: bo
     let (body, status) = cli::run("ledger", path, 3, &extra);
     assert_eq!(status, 1, "{body}");
     let id = if annotated {
-        "REQ-R3"
+        "REQ-OBLIGATION"
     } else {
         "（仕様全体）"
     };
