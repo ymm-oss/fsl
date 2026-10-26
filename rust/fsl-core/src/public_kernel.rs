@@ -732,10 +732,13 @@ fn walk_partial(
             Some(operation @ (PartialOperation::Head | PartialOperation::Pop)),
             Expr::Method { receiver, .. },
         ) => Some((operation, empty_failure(receiver))),
-        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => Some((
-            PartialOperation::At,
-            out_of_prefix_failure(receiver, &args[0]),
-        )),
+        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => {
+            let index = args.first().ok_or_else(|| PublicKernelError {
+                message: "method 'at' requires an index argument".to_owned(),
+                span: Some(span),
+            })?;
+            Some((PartialOperation::At, out_of_prefix_failure(receiver, index)))
+        }
         (Some(PartialOperation::Index), Expr::Index(collection, index))
             if matches!(
                 resolve(model, &infer_type(collection, env, model, None)?)?,
