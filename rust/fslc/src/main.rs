@@ -13306,15 +13306,10 @@ fn run_ledger_report_from_source(
     approval_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source) {
+    let prepared = match prepare_ledger_report_from_source(request, source, true) {
         Ok(prepared) => prepared,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
-    if let Some(error) =
-        report_verification_error(&prepared.verification, prepared.verification_status)
-    {
-        return error;
-    }
     let approvals = if approval_paths.is_empty() {
         None
     } else {
@@ -13355,9 +13350,9 @@ fn generate_unapproved_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source) {
+    let prepared = match prepare_ledger_report_from_source(request, source, false) {
         Ok(prepared) => prepared,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     render_ledger_report(request, &prepared, None)
 }
@@ -13365,14 +13360,15 @@ fn generate_unapproved_ledger_report_from_source(
 fn prepare_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
-) -> Result<PreparedLedgerReport, Value> {
+    direct_report: bool,
+) -> Result<PreparedLedgerReport, (Value, i32)> {
     let model = match load_model_from_source(request.path, source) {
         Ok(model) => model,
-        Err(error) => return Err(spec_load_error_output(&error)),
+        Err(error) => return Err((spec_load_error_output(&error), 2)),
     };
     // A ledger row per acceptance / forbidden case is a claim about that case,
     // so a spec whose traces the gate refuses gets no ledger (#1243).
-    let trace_contract = require_trace_gate(source, &model)?;
+    let trace_contract = require_trace_gate(source, &model).map_err(|error| (error, 2))?;
     let (verification, verification_status) = run_verify_from_source(
         request.path,
         source,
@@ -13382,6 +13378,13 @@ fn prepare_ledger_report_from_source(
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
+    // Approval-only rerendering deliberately keeps processing ancillary inputs.
+    // Direct reports must preserve this error before replay, evidence or witnesses.
+    if direct_report
+        && let Some(error) = report_verification_error(&verification, verification_status)
+    {
+        return Err(error);
+    }
     let replay = match request.impl_log {
         Some(trace) => {
             let (detail, status) = run_replay_from_source(request.path, source, trace);
@@ -13389,7 +13392,7 @@ fn prepare_ledger_report_from_source(
             // evidence; io/parse/internal errors (>=2) must fail the ledger
             // command instead of silently omitting the implementation-log row.
             if status >= 2 {
-                return Err(detail);
+                return Err((detail, 2));
             }
             Some(detail)
         }
@@ -13411,7 +13414,8 @@ fn prepare_ledger_report_from_source(
             }
             Ok((evidence_path.clone(), value))
         })
-        .collect::<Result<Vec<_>, Value>>()?;
+        .collect::<Result<Vec<_>, Value>>()
+        .map_err(|error| (error, 2))?;
     let scenarios = witness_scenarios(
         request.path,
         source,

@@ -58,8 +58,8 @@ Python AST or source re-parsing. Validate independent implementations with
 `fslc conformance <spec> --depth N`.
 
 Most commands print a single JSON document on stdout; `fslc ledger` and
-`fslc document generate` print Markdown instead, so gate on the exit code, not
-on stdout being parseable.
+`fslc document generate` print Markdown instead. Ledger verification errors return
+the original JSON error, not Markdown. Gate on the exit code, not on stdout being parseable.
 
 exit: 0=success, 1=property not satisfied, 2=spec error
 (parse/type/semantics/io), 3=internal error. **Do not treat any list of
@@ -102,7 +102,8 @@ and re-approval because their rendering digest changes (`drifted`).
 depth 8; the first one that is not `refines` becomes the top-level `result`
 (`refinement_failed`, `impl_violated`, or `unknown_budget`) with exit 1, while `governance.preservations[].result`
 keeps each one's own value. On a seam or preservation failure, `testgen` returns
-the verify owner's envelope and exit (1, or 2 for a contract error) and writes
+the verify owner's envelope and exit (1 for failed verification, 2 for a contract
+error, 3 for an internal error) and writes
 no harness; passing documents retain generation.
 The ledger additionally lists each failed preservation under the model-owned
 governance requirement and a failed inline seam at spec level. CTIs are

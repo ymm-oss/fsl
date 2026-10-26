@@ -1161,7 +1161,8 @@ inline seam を仕様全体の所見としても載せます。無関係な要�
 artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
 digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
 `testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
-`verify` と同じ失敗封筒と exit 1(契約エラーは exit 2)を返し、ハーネスを書きません。同じ `2` の
+`verify` と同じ失敗封筒と exit(検証の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
+ハーネスを書きません。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1291,7 +1292,9 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
 生の `action_coverage` は生成だけの sentinel の `covered:false` も保持し、verify、induction、
 Worker の JSON は変わりません。公開の coverage 所見には、著者の primary origin、なければ
 kernel action の宣言に正の行・列が必要です。名前や prefix ではない、この共通の位置判定で
-scaffolding を runtime の警告、ledger の coverage 所見、HTML の badge と分母から除外します。
+scaffolding を runtime の警告、ledger の coverage 所見、mutate の死アクションの注記、
+HTML の badge と分母から除外します。現在の CLI の mutant 列挙経路には、生成だけの
+死アクションが到達する経路はありません。
 対象 action がなければ HTML の指標は `0/0` です。HTML Raw Data は元の coverage map を保持します。
 描画が変わる ledger/HTML の既存承認は `drifted`(exit 0)になります。修正された artifact を確認して
 再承認してください。
@@ -1950,7 +1953,7 @@ Public Kernel は不完全なマルチファイルの provenance を意図的に
 エクスポートエラーの後のフォールバックではなく、同じアダプタに入ります。
 ウォーク、出力パスの処理、生成より前に、`testgen` は `scenarios` と同じ畳み込みで
 inline `implements` と governance preservation を検査します。失敗した場合は scenarios 形ではなく
-`verify` の生成元による失敗封筒と exit(seam/preservation の失敗は 1、契約エラーは 2)を返し、
+`verify` の生成元による失敗封筒と exit(seam/preservation の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
 ハーネスを書きません。通る文書と、non-strict で一部だけ到達したシナリオの通常の生成動作は変わりません。
 
 固定シードのウォークは 100 ステップを上限とする具象 Monitor の実行であり、

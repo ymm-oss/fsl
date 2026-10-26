@@ -56,6 +56,10 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
   standard CLI error envelope and exit codes. Defaults to `--deadlock ignore`
   (an audit focuses on intent drift, not terminal-state deadlock; run
   `verify --deadlock warn` separately for that).
+- A verification `result:"error"` returns its full JSON envelope and exit 2/3
+  before ancillary inputs, rendering, or output-file creation; see the
+  [verdict-findings amendment](#amendment-to-1316-verdict-findings-1338-decision-2026-10-26)
+  for the direct-report gate and approval-only exception.
 
 ## Structure
 
@@ -89,8 +93,10 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    (`control.owner`) / 次アクション. Coverage findings require an authored
    primary-origin span, or otherwise a kernel action span, with positive line
    and column. The shared `KernelModel::action_source_span` owner also governs
-   runtime warnings and HTML coverage badges/denominators. Generated-only
-   sentinels have no such finding; their raw `action_coverage` evidence remains
+   runtime warnings, mutate dead-action notes, and HTML coverage badges/denominators.
+   The current CLI mutant-enumeration path cannot encounter generated-only dead
+   actions; the shared view keeps its note eligibility aligned with reports.
+   Generated-only sentinels have no such finding; their raw `action_coverage` evidence remains
    unchanged in verify/induction/Worker JSON and HTML Raw Data. Names and
    prefixes are not the classification rule. An empty eligible HTML coverage
    map renders `0/0`. Migration (#1338): removing false sentinel findings changes
@@ -100,8 +106,6 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).
 5. **付録** — the raw JSON findings, collapsed (`<details>`), demoted off page 1.
-
-## Column → source map
 
 ### Amendment to #1316: verdict findings (#1338, decision 2026-10-26)
 
@@ -127,13 +131,18 @@ ledger rendering digests: existing approvals become `drifted` and require
 review and re-approval.
 
 Direct `ledger` additionally returns a verification `result:"error"` envelope
-and its exit (2 for document errors, 3 for internal errors) before rendering,
-approval overlays, or output-file creation. This shares its gate with direct
+and its exit (2 for document errors, 3 for internal errors) before replay,
+evidence loading, witness preparation, rendering, approval overlays, or output-file
+creation. This shares its gate with direct
 HTML reporting, which checks before explain/render/write. Stdout is error JSON,
 not Markdown/HTML or a generated-artifact envelope. Non-error failed or
 unestablished verdicts still produce reports with their existing nonzero exit.
 Approval-only `generate_unapproved_ledger_report_from_source` rerendering keeps
 its existing digest-comparison behavior and does not use this direct-report gate.
+Its ancillary-input errors retain their existing handling. For non-error
+verification results, direct ledger also retains those ancillary-input errors.
+
+## Column → source map
 
 Most columns are derived from fields the JSON already carries (issue #23):
 `requirement.{id,text}`, `trace_type`, `recommended_action`/`hint`,

@@ -1214,7 +1214,8 @@ JSON error envelope and exit 2/3, before rendering or writing an artifact
 failed/unestablished verdicts still generate reports with their nonzero exit.
 Approval-only ledger rerendering for digest comparison is separate from this gate.
 `testgen` refuses a failed seam or preservation with the same verify failure
-envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
+envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
+internal error), on both kernel and fallback paths,
 and writes no harness. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
@@ -1347,7 +1348,9 @@ Raw `action_coverage` retains generated-only sentinel entries, including
 findings require a positive line/column on the authored primary origin, or else
 the kernel action declaration. This shared source-location rule, not a name or
 prefix, excludes scaffolding from runtime warnings, ledger coverage findings,
-and HTML badges and coverage denominators. With no eligible action the HTML
+mutate dead-action notes, and HTML badges and coverage denominators. The current
+CLI mutant-enumeration path cannot encounter generated-only dead actions.
+With no eligible action the HTML
 metric is `0/0`; HTML Raw Data still contains the original coverage map.
 Affected ledger/HTML approvals become `drifted` (exit 0) because the rendering
 changes; review the corrected artifact and re-approve it.
@@ -2036,7 +2039,7 @@ the same adapter rather than falling back after an export error.
 Before the walk, output-path handling, or generation, `testgen` checks inline
 `implements` and governance preservations through the same fold as `scenarios`.
 If either fails, it returns the `verify` owner's failure envelope and exit
-(1 for a failed seam/preservation, 2 for a contract error), not a scenarios-shaped
+(1 for a failed seam/preservation, 2 for a contract error, 3 for an internal error), not a scenarios-shaped
 envelope, and writes no harness. Passing documents and non-strict partially
 reachable scenarios retain their ordinary generation behavior.
 
