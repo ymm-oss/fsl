@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use fsl_core::KernelModel;
+use fsl_core::{KernelModel, SyntheticName};
 use fsl_syntax::{Annotations, RequirementLink};
 use serde_json::Value;
 
@@ -215,23 +215,45 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         .and_then(Value::as_str)
         .unwrap_or("");
     if matches!(result, "violated" | "unknown_cti") {
-        let (group, name) =
-            if let Some(name) = verification.get("invariant").and_then(Value::as_str) {
-                ("invariants", name)
-            } else if let Some(name) = verification.get("leadsTo").and_then(Value::as_str) {
-                ("leadstos", name)
-            } else if let Some(name) = verification.get("trans").and_then(Value::as_str) {
-                ("transitions", name)
-            } else {
-                (
-                    "",
-                    verification
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                )
-            };
-        let metadata = finding_requirement(model, verification, group, name);
+        let name = verification
+            .get("trans")
+            .or_else(|| verification.get("leadsTo"))
+            .or_else(|| verification.get("invariant"))
+            .or_else(|| verification.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        // Historical `invariant` fields also carry transition, liveness and
+        // action obligations. Resolve the declaration, not the field spelling.
+        let last_action = verification["last_action"]["name"].as_str().unwrap_or("");
+        let (group, owner) = match verification.get("violation_kind").and_then(Value::as_str) {
+            Some("deadlock") => ("", ""),
+            Some("leadsTo" | "leadsTo_rank") => ("leadstos", name),
+            Some("trans") => ("transitions", name),
+            _ if verification.get("trans").is_some() => ("transitions", name),
+            _ if verification.get("leadsTo").is_some() => ("leadstos", name),
+            Some("partial_op" | "key_domain") => match SyntheticName::parse_internal(name) {
+                Some(
+                    SyntheticName::PartialProperty { property }
+                    | SyntheticName::KeyDomainProperty { property },
+                ) => {
+                    let group = if model.transitions.iter().any(|item| item.name == property) {
+                        "transitions"
+                    } else if model.leadstos.iter().any(|item| item.name == property) {
+                        "leadstos"
+                    } else {
+                        "invariants"
+                    };
+                    (group, property)
+                }
+                Some(
+                    SyntheticName::PartialAction { .. } | SyntheticName::KeyDomainAction { .. },
+                ) => ("actions", last_action),
+                _ => ("", ""),
+            },
+            Some("ensures" | "type_bound") => ("actions", last_action),
+            _ => ("invariants", name),
+        };
+        let metadata = finding_requirement(model, verification, group, owner);
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
