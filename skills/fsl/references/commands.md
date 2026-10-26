@@ -136,7 +136,7 @@ fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
                                                 # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
-fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
+fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction] [--no-timing]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
 fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
@@ -184,6 +184,18 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+HTML-only `--no-timing` (default false, no alias) omits only
+`verification.cost.elapsed_s`, `verification.cost.solver.check_elapsed_s`,
+`verification.cost.properties[].elapsed_s`, and
+`explained.counterfactuals[].violation.cost.elapsed_s` from presentation copies
+before rendering, for stdout and `-o`/`--output` files. Default HTML retains
+nondeterministic timings. Source/domain-state fields, counts, property identities,
+other statistics, ordinary verify JSON, and exit codes are unchanged. Use it for
+byte-stable comparison with the same input path, source, options, and toolchain;
+it does not normalize across paths, backends, or environments. It is not a
+`testgen` or `ledger` option.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 Each `lint` path may be a file or directory. Directories recursively expand to
 regular `*.fsl` files; symlink entries and other extensions are skipped while
@@ -672,7 +684,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `summary` row gets `"<section>": "not_evaluated"` and
   `sweep.not_evaluated: {sections, reasons}` is the union over cells (absent
   when nothing was skipped). `sweep_passed` says nothing about those sections —
-  check them on an unscoped run.
+  check them on an unscoped run. The envelope is a function of its inputs apart
+  from `cache` and timing execution metadata. For stable comparisons, follow
+  approval's `stable_json`: exclude `cost` and `cache` only at each verification
+  envelope's root (`sweep.results[].verification` and
+  `sweep.minimal_counterexample.verification` when present), preserving
+  same-named domain-state fields. Cache provenance is not verdict evidence.
+  Sweep has no `--no-cache`; use `FSLC_CACHE=off` to disable cache reads/writes.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest

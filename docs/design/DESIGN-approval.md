@@ -317,6 +317,7 @@ and memory only in the top-level verify envelope. Property identities, check
 counts, and same-named fields in reviewed domain state remain bound. Ledger
 Markdown is hashed as rendered. This preserves review-visible content while
 preventing solver timing from producing false drift.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 The approval overlay itself is not part of a ledger target digest. The base
 ledger is rendered and hashed first, then approval status is added. This avoids

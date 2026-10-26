@@ -1176,12 +1176,13 @@ fn command() -> Result<(Value, i32), String> {
                     options.strict,
                     options.output.as_deref(),
                 ),
-                "html" => run_html_report(
+                "html" => run_html_report_with_timing(
                     path,
                     options.depth,
                     &options.deadlock,
                     &options.engine,
                     options.output.as_deref(),
+                    options.no_timing,
                 ),
                 "ledger" => run_ledger_report(
                     &LedgerReportRequest {
@@ -12541,11 +12542,34 @@ fn run_html_report(
     engine: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
+    run_html_report_with_timing(path, depth, deadlock_mode, engine, output_path, false)
+}
+
+fn run_html_report_with_timing(
+    path: &Path,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
+) -> (Value, i32) {
     let source = match read_spec_source(path) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
+    if no_timing {
+        run_html_report_from_source_with_timing(
+            path,
+            &source,
+            depth,
+            deadlock_mode,
+            engine,
+            output_path,
+            true,
+        )
+    } else {
+        run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
+    }
 }
 
 /// Render one HTML report from one caller-owned root-source snapshot.
@@ -12560,6 +12584,26 @@ fn run_html_report_from_source(
     deadlock_mode: &str,
     engine: &str,
     output_path: Option<&Path>,
+) -> (Value, i32) {
+    run_html_report_from_source_with_timing(
+        path,
+        source,
+        depth,
+        deadlock_mode,
+        engine,
+        output_path,
+        false,
+    )
+}
+
+fn run_html_report_from_source_with_timing(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
 ) -> (Value, i32) {
     let model = match load_model_from_source(path, source) {
         Ok(model) => model,
@@ -12589,11 +12633,17 @@ fn run_html_report_from_source(
             }
         }
     }
+    let timing_free = no_timing.then(|| html_report_without_timing(&explained, &verification));
+    let (explained_view, verification_view) = timing_free
+        .as_ref()
+        .map_or((&explained, &verification), |(explained, verification)| {
+            (explained, verification)
+        });
     let html = fsl_tools::render_html_report(
         &path.display().to_string(),
         source,
-        &explained,
-        &verification,
+        explained_view,
+        verification_view,
         &fsl_tools::undecided_declarations(&model),
     );
     let (result, status) = generated_content_result(
@@ -12615,6 +12665,42 @@ fn run_html_report_from_source(
         result,
         mutate_exit_status(&verification, verification_status),
     )
+}
+
+/// Strip only known execution timings from presentation copies, never source
+/// text or same-named fields in domain state. Keep the authoritative envelopes
+/// intact for verification outcome and exit-code handling.
+fn html_report_without_timing(explained: &Value, verification: &Value) -> (Value, Value) {
+    let mut explained = explained.clone();
+    let mut verification = verification.clone();
+    if let Some(cost) = verification.get_mut("cost").and_then(Value::as_object_mut) {
+        cost.remove("elapsed_s");
+        if let Some(solver) = cost.get_mut("solver").and_then(Value::as_object_mut) {
+            solver.remove("check_elapsed_s");
+        }
+        if let Some(properties) = cost.get_mut("properties").and_then(Value::as_array_mut) {
+            for property in properties {
+                if let Some(property) = property.as_object_mut() {
+                    property.remove("elapsed_s");
+                }
+            }
+        }
+    }
+    if let Some(counterfactuals) = explained
+        .get_mut("counterfactuals")
+        .and_then(Value::as_array_mut)
+    {
+        for counterfactual in counterfactuals {
+            if let Some(cost) = counterfactual
+                .get_mut("violation")
+                .and_then(|violation| violation.get_mut("cost"))
+                .and_then(Value::as_object_mut)
+            {
+                cost.remove("elapsed_s");
+            }
+        }
+    }
+    (explained, verification)
 }
 
 fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {
@@ -17958,6 +18044,63 @@ spec InitTraceability {
                 "missing solver.check_elapsed_s: {html}"
             );
         }
+    }
+
+    #[test]
+    fn html_timing_projection_preserves_every_other_value() {
+        let explained = json!({
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s",
+            "counterfactuals": [{"property": "Safe", "violation": {
+                "result": "violated", "loc": {"line": 7, "column": 3},
+                "assurance": "bounded", "cost": {"elapsed_s": 0.5, "checks": 17},
+                "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
+                    "cost": {"elapsed_s": 33}}}]
+            }}, {"property": "Other", "result": "unreachable"}],
+            "state": {"elapsed_s": 34}, "elapsed_s": 35
+        });
+        let verification = json!({
+            "result": "violated", "spec": "Synthetic", "depth": 4,
+            "loc": {"line": 9, "column": 5}, "assurance": "bounded",
+            "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}}}],
+            "cost": {"elapsed_s": 0.25, "checks": 19,
+                "solver": {"check_elapsed_s": 0.125, "checks": 23,
+                    "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
+                "properties": [
+                    {"kind": "invariant", "name": "Safe", "checks": 7, "elapsed_s": 0.0625},
+                    {"kind": "reachable", "name": "Goal", "checks": 11, "elapsed_s": 0.03125}]},
+            "cache": {"hit": true, "source": "exact"}, "elapsed_s": 44
+        });
+        // Independent full expected payloads: do not derive them with the projection.
+        let expected_explained = json!({
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s",
+            "counterfactuals": [{"property": "Safe", "violation": {
+                "result": "violated", "loc": {"line": 7, "column": 3},
+                "assurance": "bounded", "cost": {"checks": 17},
+                "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
+                    "cost": {"elapsed_s": 33}}}]
+            }}, {"property": "Other", "result": "unreachable"}],
+            "state": {"elapsed_s": 34}, "elapsed_s": 35
+        });
+        let expected_verification = json!({
+            "result": "violated", "spec": "Synthetic", "depth": 4,
+            "loc": {"line": 9, "column": 5}, "assurance": "bounded",
+            "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}}}],
+            "cost": {"checks": 19,
+                "solver": {"checks": 23,
+                    "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
+                "properties": [
+                    {"kind": "invariant", "name": "Safe", "checks": 7},
+                    {"kind": "reachable", "name": "Goal", "checks": 11}]},
+            "cache": {"hit": true, "source": "exact"}, "elapsed_s": 44
+        });
+        let originals = (explained.clone(), verification.clone());
+        assert_eq!(
+            html_report_without_timing(&explained, &verification),
+            (expected_explained, expected_verification)
+        );
+        assert_eq!((explained, verification), originals, "originals unchanged");
     }
 
     /// Platform-neutral #808 control for `domain generate`. The scaffold's

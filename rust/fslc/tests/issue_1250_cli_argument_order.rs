@@ -148,13 +148,81 @@ fn issue_1250_repro_depth_value_is_not_the_spec() {
 
 #[test]
 fn check_and_sweep_accept_options_before_the_spec() {
+    // #1345: compare a genuinely cold options-first sweep with its warm
+    // spec-first peer, not two runs made equal by a hidden warm-up. Leave the
+    // other commands' historical `run` / `strip_cost` behavior untouched.
+    fn strip_metadata(verification: &mut Value, expect_hit: bool) {
+        let envelope = verification.as_object_mut().expect("verification object");
+        assert!(
+            envelope.remove("cost").is_some(),
+            "dead sweep cost exclusion"
+        );
+        let cache = envelope.remove("cache");
+        if expect_hit {
+            let cache = cache.expect("dead warm sweep cache exclusion");
+            assert_eq!(cache["hit"], true);
+            assert_eq!(cache["source"], "exact");
+        } else {
+            assert!(cache.is_none(), "first sweep must start cold: {cache:?}");
+        }
+    }
     assert_order_insensitive(
         &["check", "--strict-tags", "--edition", "current", SPEC],
         &["check", SPEC, "--strict-tags", "--edition", "current"],
     );
-    assert_order_insensitive(
+    let cache = scratch(&format!(
+        "sweep-cache-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos(),
+    ));
+    std::fs::create_dir(&cache).expect("fresh worktree-local sweep cache");
+    let run_sweep = |args: &[&str], expect_hit: bool| {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(args)
+            .current_dir(root())
+            .env("FSLC_CACHE_DIR", &cache)
+            .env_remove("FSLC_CACHE")
+            .env_remove("FSLC_CACHE_VERIFY")
+            .output()
+            .expect("run sweep without warm-up");
+        let mut value: Value = serde_json::from_slice(&output.stdout).expect("sweep JSON");
+        let grid = value["sweep"]
+            .as_object_mut()
+            .expect("sweep grid, not usage");
+        let cells = grid
+            .get_mut("results")
+            .and_then(Value::as_array_mut)
+            .expect("sweep cells");
+        assert!(!cells.is_empty(), "sweep exclusions must be exercised");
+        for cell in cells {
+            strip_metadata(
+                cell.get_mut("verification").expect("verification"),
+                expect_hit,
+            );
+        }
+        let minimal = grid.get_mut("minimal_counterexample").expect("minimal key");
+        if !minimal.is_null() {
+            strip_metadata(
+                minimal.get_mut("verification").expect("verification"),
+                expect_hit,
+            );
+        }
+        (output.status.code().expect("sweep exit"), value)
+    };
+    let first = run_sweep(
         &["sweep", "--depth", "0..1", "--deadlock", "ignore", SPEC],
+        false,
+    );
+    let last = run_sweep(
         &["sweep", SPEC, "--depth", "0..1", "--deadlock", "ignore"],
+        true,
+    );
+    assert_eq!(
+        first, last,
+        "full stable sweep envelope and exit must agree"
     );
 }
 
