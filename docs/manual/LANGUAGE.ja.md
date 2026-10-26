@@ -168,6 +168,20 @@ API/オフラインおよび有界の preservation/rollback 検査は、ダイ�
 アーティファクトプロファイルを同じスナップショットモデルでカバーします。
 `docs/design/DESIGN-db.md` を参照。
 
+`check compatibility` の12個のルール名は、lowering と DB ツールが共有する閉じた語彙です。
+未知の名前は Kernel/model や成果物を作る前に拒否され、`kernel`、`scenarios`、`explain`、
+`testgen`、ファイル入力の `fmt`/`lint`/`migrate` も exit 2 になります。lowering は記述した
+ルールの位置を持つ `semantics` error を返します。各 command は既存の lowering error と
+同じ形式で描画し、対応する envelope には `loc`、`fmt`/`lint`/`migrate` では message 内に
+位置を示します。`check` と Worker の既存の特化 validator の error は位置なしのままです。
+DB 固有の findings と schema 範囲の到達可能性検査は DB ツールに残り、Kernel export の
+追加の門にはしません。有効なルールとデフォルトの選択、修理の道具の carve-out
+(formatter の stdin を含む)は変わりません。
+直接の HTML/ledger report は、描画用の lowering より先に検証の位置なし validator 拒否を
+返します。#1473 の base/head 比較では、595個の `.fsl` ファイルで `check` の `ok`→`error`
+遷移および出力/exit の差はありませんでした。正確な commit、binary hash、command は
+`docs/design/DESIGN-db.md` に記録しています。
+
 関数型 DDD / 非同期エフェクトダイアレクト(v0。同じカーネルへ展開され、安定した
 fsl-domain findings を報告します):
 

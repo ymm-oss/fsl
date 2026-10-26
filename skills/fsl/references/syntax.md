@@ -233,6 +233,20 @@ event envelope against the `observation.v0` schema
 (exit 2 on a malformed record) and honors each event's `flags` snapshot the same
 way `fslc db check` does.
 
+The twelve compatibility-rule names above are a closed vocabulary shared by the
+core lowering and DB tools. Unknown names are rejected before model/artifact
+generation (exit 2), including `kernel`, `scenarios`, `explain`, `testgen`, and
+file-based `fmt`/`lint`/`migrate`. The authored lowering error is `semantics` with
+the rule position: ordinary lowering envelopes carry `loc`, while formatter and
+migration wrappers keep the position in `message`. `check`/Worker keep their
+existing unlocated specialized-validator errors. This gate does not move DB-only
+findings or reachable-schema validation into the core; valid rules/defaults and
+intentional repair-tool carve-outs are unchanged.
+Direct HTML/ledger reports keep verification's unlocated validator refusal before
+presentation lowering. The #1473 comparison of 595 file-backed forms had no
+`check` `ok`→`error` transitions or output/exit drift; exact commits, binary hashes,
+and commands are recorded in `docs/design/DESIGN-db.md`.
+
 Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
 

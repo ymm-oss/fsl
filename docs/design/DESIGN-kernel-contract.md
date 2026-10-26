@@ -424,6 +424,16 @@ reach the shared lowering gate and retain truthful source provenance; `compose`
 is the explicit v1 exception described above. The output records the original
 dialect and requirement origin.
 
+DB lowering validates the closed compatibility-rule vocabulary before building
+the catalog. An unknown rule now returns an authored `semantics` error (exit 2),
+with its rule location, rather than exporting a catalog that silently omits that
+obligation. The same boundary covers every consumer of DB lowering. This is not
+full DB compatibility validation: DB-only findings and unreachable schema-window
+errors remain with the DB tools and do not newly block `kernel`. The existing
+unlocated specialized-validator envelopes of `check` and the Worker are unchanged;
+other commands retain their established lowering-error rendering (including
+message-only locations for `fmt`/`lint`/`migrate`).
+
 Rust callers can use:
 
 - `fsl_core::public_kernel_contract(&KernelSpec, &KernelModel, path, dialect)`;

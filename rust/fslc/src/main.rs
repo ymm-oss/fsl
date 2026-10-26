@@ -770,8 +770,11 @@ fn load_migration_plan(
 /// was previously only validated on the changed-file path
 /// (`validate_migration_semantics`), never on an unchanged one.
 ///
-/// Mirrors `run_check`'s own gate exactly, so the same input gets the same
-/// verdict on both commands: `parse`/`build_model` failures are
+/// Validates standalone Kernel/model well-formedness, not every stage of
+/// `run_check`: dialect-specific compatibility findings remain with their
+/// specialized validators. Lowering itself rejects unknown DB rule names, so
+/// those cannot silently pass an unchanged migration plan either.
+/// `parse`/`build_model` failures are
 /// `kind:"semantics"` (`load_model`'s convention); an unresolvable
 /// requirements `implements ... from` target is `kind:"type"`
 /// (`implements_error_output`'s convention), located when a span is
@@ -5986,9 +5989,10 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
     // (#1464), but retain the guard to preserve the existing validator envelope.
     // Like `run_check_from_source`, validate authority names before lowering,
     // but do not use the full `validate_specialized_document_from_source` gate:
-    // it additionally runs `validate_db`, which `kernel` has never called and
-    // could reject a `dbsystem` document that `kernel` previously accepted. A
-    // parse failure or any other document kind falls through unchanged to
+    // it additionally runs full `validate_db`, including DB-only schema-window
+    // validation that is deliberately not a Kernel-export gate. Unknown DB rule
+    // names are already rejected by lowering itself (#1473). A parse failure or
+    // any other document kind falls through unchanged to
     // `parse_kernel_source` below, keeping its own `kind:"parse"` envelope.
     if let Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) =
         parse_surface_document_from_source(path, &source)

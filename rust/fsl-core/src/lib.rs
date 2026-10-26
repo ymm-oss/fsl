@@ -57,6 +57,7 @@ pub use compose::{
     parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
     parse_kernel_source_with_options,
 };
+pub use db::DB_COMPATIBILITY_RULES;
 pub use decision_table::{
     DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DecisionObligation,
     DecisionTableResult, decision_table_results,

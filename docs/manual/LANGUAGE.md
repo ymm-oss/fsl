@@ -169,6 +169,21 @@ not prove rollout percentages. Generic `requires` / `provides` capabilities
 cover AI model/prompt/retriever, tool schema, output schema, mobile/server, and
 other artifact profiles in the same snapshot model. See `docs/design/DESIGN-db.md`.
 
+The twelve `check compatibility` rule names form a closed vocabulary shared by
+lowering and the DB tools. Unknown names fail before any Kernel/model or artifact
+is produced, including by `kernel`, `scenarios`, `explain`, `testgen`, and file-based
+`fmt`/`lint`/`migrate` (exit 2). Lowering reports an authored `semantics` error;
+commands render it like other lowering errors, with `loc` where their envelope
+supports it and the source position in the message for `fmt`/`lint`/`migrate`.
+Existing specialized-validator errors from `check` and the Worker remain
+unlocated. DB-only findings and reachable-schema-window validation remain in the
+DB tools; they are not additional Kernel-export gates. Valid rule/default
+selection and repair-tool carve-outs (including formatter stdin) are unchanged.
+Direct HTML/ledger reports keep verification's unlocated validator refusal before
+presentation lowering. The #1473 base/head comparison found no `check` `ok`→`error`
+transitions or output/exit drift across 595 file-backed forms; the exact commits,
+binary hashes, and commands are recorded in `docs/design/DESIGN-db.md`.
+
 Functional DDD / async effect dialect (v0; expands to the same kernel and
 reports stable fsl-domain findings):
 
