@@ -127,6 +127,7 @@ pub use trace_json::{
     fsl_value_json, internal_origin_json, origin_display_name, state_json, state_summary,
     trace_json,
 };
+pub use typecheck::validate_boolean_expression;
 
 /// What a core frontend or lowering failure is, independent of its wording.
 ///

@@ -1204,6 +1204,18 @@ pub(crate) fn validate_expression_type(
         .map_err(|error| error.with_span(span))
 }
 
+/// Recursively type-check a standalone predicate against a built model, using
+/// the same expected Boolean type as an invariant. Returns the checker message
+/// without a source location: callers may be validating an argv expression.
+///
+/// # Errors
+/// Returns the recursive checker's diagnostic if the expression is ill-typed
+/// or cannot be assigned to `Bool` in the model's environment.
+pub fn validate_boolean_expression(expr: &Expr, model: &KernelModel) -> Result<(), String> {
+    validate_public_expression(expr, model, unknown_span(), Some(&TypeRef::Bool))
+        .map_err(|error| error.message)
+}
+
 pub(crate) fn validate_public_expression(
     expr: &Expr,
     model: &KernelModel,

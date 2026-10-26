@@ -1033,18 +1033,26 @@ Public Kernel v2 はオプトインで、
 (`fair_not_inherited`)と同じ `no_user_invariants` の抑止を報告します。
 
 `verify --engine induction --lemma "EXPR"` は、`unknown_cti` の修復ループのための
-補助 invariant 候補を繰り返し指定で受け付けます。各式はまず、元の init/actions と
+補助 invariant 候補を繰り返し指定で受け付けます。候補の証明や評価を始める前に、
+すべての候補をパースし、invariant と同じ検査器で `Bool` として再帰的に型検査します。
+型検査を通った各式は、元の init/actions と
 暗黙の型境界に対して、元のユーザー invariant を仮定せずに独立に証明されます。偽の
 候補は、その到達可能な反例とともに `rejected` になります。帰納的でない候補は、
-それ自身の CTI とともに拒否されます。不正な候補はパース/型エラーを運びます。独立の
+それ自身の CTI とともに拒否されます。不正な候補は `rejected`、`used:false` となり、
+パース/型エラーを運びます。型エラーは `proof.result:"error"`、`proof.kind:"semantics"` と
+検査器のメッセージを持ち、argv の `loc` は付けません。パースエラーはパーサーの位置を
+保ちます。拒否されても後続の候補は処理され、終了コードはターゲットの結果が決めます。独立の
 結果が `proved` である候補だけが、元の証明に入ることができます。検証器はそれらの
 候補を各ターゲット CTI 上で評価し、その CTI 上で実際に偽である最初のものを追加して
 リトライします。JSON のフィールド `lemmas` と `lemma_cti_exclusions` は、裁定と
 正確な CTI/違反ステップを記録します。ターゲットが `proved` に達すると、
 `auxiliary_invariant_recommendation` がソースに永続化すべき宣言を出力します。この
 コマンドがファイルを書き換えることは決してありません。未検証の仮定モードは
-ありません。BMC エンジンでの `--lemma` は使用法エラーです。候補のテキストと順序は
-検証キャッシュのキーの一部です。
+ありません。BMC エンジンでの `--lemma` は使用法エラーです。lemma を使う run は
+永続検証キャッシュの参照も保存も行いません。
+#1448 では、579 個の `.fsl` を両モードで base/head 比較した `check` sweep において、
+受理されていた形式の削除はありませんでした。コマンドとリビジョンの識別情報は
+`docs/design/DESIGN-induction-lemmas.md` の "Type-validation compatibility evidence" に記録しています。
 
 sweep の envelope は、実行メタデータの `cache` と timing を除けば入力の関数です。
 安定した比較では approval の `stable_json` と同じく、各 verification envelope

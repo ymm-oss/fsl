@@ -1078,19 +1078,28 @@ not a selected check: a selected run reports the same compose-lowering warnings
 run.
 
 `verify --engine induction --lemma "EXPR"` accepts repeatable auxiliary
-invariant candidates for an `unknown_cti` repair loop. Each expression is first
+invariant candidates for an `unknown_cti` repair loop. All candidates are parsed
+and recursively type-checked as `Bool` by the invariant checker before any
+candidate proof or evaluation. Each valid expression is then
 proved independently against the original init/actions and implicit type
 bounds, without assuming the original user invariants. A false candidate is
 `rejected` with its reachable counterexample; a non-inductive candidate is
-rejected with its own CTI; invalid candidates carry a parse/type error. Only
-candidates whose independent result is `proved` may enter the original proof.
+rejected with its own CTI; invalid candidates are `rejected`, `used:false`, with
+a parse/type error. Type errors carry `proof.result:"error"`, `proof.kind:"semantics"`
+and the checker message, without an argv `loc`; parse errors keep their parser
+location. Rejection does not abort later candidates; the target result owns the
+exit code. Only candidates whose independent result is `proved` may enter the
+original proof.
 The verifier evaluates those candidates on each target CTI, adds the first one
 that is actually false on that CTI, and retries. JSON fields `lemmas` and
 `lemma_cti_exclusions` record adjudication and the exact CTI/violated steps.
 When the target reaches `proved`, `auxiliary_invariant_recommendation` emits the
 declarations to persist in the source; the command never rewrites the file.
 There is no unverified-assumption mode. `--lemma` with the BMC engine is a usage
-error. Candidate text/order is part of the verification cache key.
+error. Lemma-guided runs bypass persistent verification cache lookup and storage.
+For #1448, the 579-form, two-mode base/head `check` sweep removed no accepted
+`.fsl` forms; commands and revision identities are recorded in
+`docs/design/DESIGN-induction-lemmas.md`, "Type-validation compatibility evidence".
 
 The sweep envelope is a function of its inputs apart from `cache` and timing
 execution metadata. For stable comparisons, exclude `cost` and `cache` only at

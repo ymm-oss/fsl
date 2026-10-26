@@ -1517,6 +1517,37 @@ fn prepare_lemma_induction<'a>(
     Ok((selection, selected, occupied_names))
 }
 
+fn prepare_lemma_candidates<'a>(
+    sources: &'a [String],
+    model: &KernelModel,
+    mut occupied_names: std::collections::BTreeSet<String>,
+) -> Vec<Result<(String, KernelExpr, &'a str), Value>> {
+    let mut candidates = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        let name = collision_free_lemma_name(index, &mut occupied_names);
+        let expression = match fsl_syntax::parse_expr(source) {
+            Ok(expression) => expression,
+            Err(error) => {
+                candidates.push(Err(json!({
+                    "expression":source,"name":name,"status":"rejected","used":false,
+                    "proof":{"result":"error","kind":"parse","message":error.message,
+                        "loc":error.span.python_loc()},
+                })));
+                continue;
+            }
+        };
+        if let Err(message) = fsl_core::validate_boolean_expression(&expression, model) {
+            candidates.push(Err(json!({
+                "expression":source,"name":name,"status":"rejected","used":false,
+                "proof":{"result":"error","kind":"semantics","message":message},
+            })));
+            continue;
+        }
+        candidates.push(Ok((name, expression, source.as_str())));
+    }
+    candidates
+}
+
 fn run_induction_with_lemmas(
     path: &Path,
     options: &CliVerifyOptions,
@@ -1526,25 +1557,23 @@ fn run_induction_with_lemmas(
         Ok(mode) => mode,
         Err(error) => return (error_output("usage", &error), 2),
     };
-    let (selection, model, mut occupied_names) =
-        match prepare_lemma_induction(path, options, prepared) {
-            Ok(prepared) => prepared,
-            Err(output) => return output,
-        };
+    let (selection, model, occupied_names) = match prepare_lemma_induction(path, options, prepared)
+    {
+        Ok(prepared) => prepared,
+        Err(output) => return output,
+    };
     let mut entries = Vec::new();
     let mut proved_candidates = Vec::new();
     let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
     let mut exclusions = Vec::new();
-    for (index, source) in options.lemmas.iter().enumerate() {
-        let name = collision_free_lemma_name(index, &mut occupied_names);
-        let expression = match fsl_syntax::parse_expr(source) {
-            Ok(expression) => expression,
-            Err(error) => {
-                entries.push(json!({
-                    "expression":source,"name":name,"status":"rejected","used":false,
-                    "proof":{"result":"error","kind":"parse","message":error.message,
-                        "loc":error.span.python_loc()},
-                }));
+    // Finish parsing and invariant-equivalent type validation for every
+    // candidate before any candidate proof or concrete CTI evaluation.
+    let candidates = prepare_lemma_candidates(&options.lemmas, &model, occupied_names);
+    for candidate in candidates {
+        let (name, expression, source) = match candidate {
+            Ok(candidate) => candidate,
+            Err(entry) => {
+                entries.push(entry);
                 continue;
             }
         };
@@ -1557,7 +1586,7 @@ fn run_induction_with_lemmas(
             options.k_ind,
         );
         if entry.get("status").and_then(Value::as_str) == Some("proved") {
-            proved_candidates.push((entries.len(), name.clone(), expression, source.clone()));
+            proved_candidates.push((entries.len(), name.clone(), expression, source.to_owned()));
         }
         entries.push(entry);
     }
