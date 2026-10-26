@@ -66,7 +66,9 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
      comparison, before governance and the undecided list, an `implements`
      envelope adds the folded top-level verdict (`検証判定`) and a table of
      `abs` and `result`: 🟢 only for `refines`, 🔴 otherwise. Passing seams
-     are shown too. Without `implements`, the ledger is byte-identical.
+     are shown too. Adding this section alone does not change ledgers without
+     `implements`; sentinel coverage removal and the verdict findings below
+     independently change affected ledgers, even without `implements`.
      Migration: an already-approved inline-implements ledger has a changed
      rendering digest; `approval check` reports `drifted` (exit 0). Review
      the new section and re-approve it; the approval schema is unchanged.
@@ -77,7 +79,8 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
      `after`, preserved controls, and its own `result`, 🟢 for `refines` and
      🔴 for anything else (the fold's own predicate). Every preservation is
      listed, passing ones included, so the body agrees with the exit code. A
-     ledger without a `governance` section is unchanged.
+     ledger without a `governance` section gains no such section. This does not
+     promise byte stability against other finding/rendering changes.
 2. **未決定一覧** — when `undecided:` metadata exists, declaration / reason /
    state-dependency-derived affected requirement IDs. The marker is explicitly
    identified as metadata, not a verification condition.
@@ -111,6 +114,8 @@ preservations (including an empty list) add no findings. A non-`refines` inline
 otherwise confirmed requirement row can remain green. Both rules include
 `impl_violated` and `unknown_budget`, independently of the primary verdict.
 Budget exhaustion is unfinished search, not an established counterexample.
+The requirement ID and text come from the model metadata attached by governance
+lowering to its catalog invariant, not a copied ID or synthesized catalog text.
 
 `unknown_cti` adds an **unestablished** induction finding, attributed by the
 same metadata/property lookup as `violated`, or to the spec as a whole. Its

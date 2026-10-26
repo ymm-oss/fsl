@@ -496,7 +496,8 @@ Direct `ledger` and `html` return verification `result:"error"` with the full
 JSON error envelope and exit 2/3, before rendering or output-file creation
 (HTML before explain too). No `-o` artifact is created. Non-error failed or
 unestablished verdicts still render reports with nonzero exit. Approval-only
-ledger rerendering for digest comparison is unchanged by this direct-report gate.
+ledger rerendering for digest comparison does not use this direct-report gate;
+its artifact bytes can still change with the new findings and coverage rendering.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a

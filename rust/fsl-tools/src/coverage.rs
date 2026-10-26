@@ -6,7 +6,8 @@ use fsl_core::KernelModel;
 use serde_json::Value;
 
 /// A presentation-only view; the verifier's raw coverage evidence is unchanged.
-pub(crate) fn source_action_coverage<'a>(
+#[must_use]
+pub fn source_action_coverage<'a>(
     model: &KernelModel,
     coverage: &'a Value,
 ) -> Option<BTreeMap<String, &'a Value>> {

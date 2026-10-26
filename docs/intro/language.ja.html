@@ -1222,7 +1222,9 @@ seam とすべての preservation を同じように自身の封筒へ畳み込�
 <code>implements</code> / <code>governance</code> セクション付き)。inline <code>implements</code> がある ledger の本文は、
 governance とリスク一覧より前の <code>## inline implements</code> 節に畳み込み後の判定と
 <code>abs</code> / <code>result</code> も示します。通る seam も表示し、<code>refines</code> だけが緑です。
-<code>implements</code> のない ledger は byte 一致のままです。既承認の inline-implements ledger は
+この節の追加だけでは <code>implements</code> のない ledger は変わりません。ただし sentinel coverage の除去と
+判定所見の追加は別に対象の本文を変え、<code>implements</code> のない governance 文書も対象です。
+既承認の inline-implements ledger は
 描画 digest が変わり、<code>approval check</code> で <code>drifted</code>(exit 0)になります。節を確認して再承認してください。
 ledger のリスク一覧には、非 <code>refines</code> の preservation をそれぞれ <code>GOV</code> の所見、非 <code>refines</code> の
 inline seam を仕様全体の所見としても載せます。無関係な要件行は自身の状態を保ちます。

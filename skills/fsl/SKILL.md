@@ -104,6 +104,12 @@ depth 8; the first one that is not `refines` becomes the top-level `result`
 keeps each one's own value. On a seam or preservation failure, `testgen` returns
 the verify owner's envelope and exit (1, or 2 for a contract error) and writes
 no harness; passing documents retain generation.
+The ledger additionally lists each failed preservation under the model-owned
+governance requirement and a failed inline seam at spec level. CTIs are
+unestablished proof findings, not reachable counterexamples. Direct ledger/HTML
+verification errors return the full JSON error and exit 2/3 without an artifact;
+other failed verdicts still render. Review and re-approve artifacts with changed
+rendering digests.
 
 ## Before writing a spec: source fidelity and the formalization memo
 

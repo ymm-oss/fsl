@@ -235,9 +235,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
-            trace_type: if result == "unknown_cti" {
-                "induction_cti"
-            } else if trace_type.is_empty() {
+            trace_type: if trace_type.is_empty() {
                 "invariant"
             } else {
                 trace_type
@@ -245,7 +243,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .to_owned(),
             name: name.to_owned(),
             summary: if result == "unknown_cti" {
-                "帰納証明は未確立（unknown_cti）".to_owned()
+                format!("帰納証明は未確立（{result}）")
             } else {
                 summarize_violation(verification)
             },
@@ -361,6 +359,12 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             "",
         ));
     }
+    // Governance lowering attaches its catalog requirement to the invariant.
+    // Read that metadata owner, not a copy of its ID or catalog text.
+    let governance_requirement = model
+        .invariants
+        .iter()
+        .find_map(|property| metadata_for(model, "invariants", &property.name));
     for preservation in verification["governance"]["preservations"]
         .as_array()
         .into_iter()
@@ -373,7 +377,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                 .get("name")
                 .and_then(Value::as_str)
                 .unwrap_or("—"),
-            Some("GOV".to_owned()),
+            governance_requirement.clone(),
             &format!(
                 "{} → {} / control: {}",
                 preservation["before"].as_str().unwrap_or("—"),
@@ -454,7 +458,7 @@ fn refinement_finding(
     raw: &Value,
     kind: &str,
     name: &str,
-    requirement_id: Option<String>,
+    requirement: Option<RequirementLink>,
     context: &str,
 ) -> Option<Finding> {
     let result = raw.get("result").and_then(Value::as_str);
@@ -462,8 +466,8 @@ fn refinement_finding(
         return None;
     }
     Some(Finding {
-        requirement_id,
-        requirement_text: None,
+        requirement_id: requirement.as_ref().map(|link| link.id.clone()),
+        requirement_text: requirement.and_then(|link| link.text),
         trace_type: kind.to_owned(),
         name: name.to_owned(),
         summary: format!("{}: {} {context}", name, result.unwrap_or("—")),
@@ -1455,4 +1459,41 @@ pub fn render_ledger_with_approvals(
     output.push_str(&serde_json::to_string_pretty(&raw).unwrap_or_else(|_| "[]".to_owned()));
     output.push_str("\n```\n\n</details>\n");
     output
+}
+
+#[cfg(test)]
+mod requirement_owner_tests {
+    use super::*;
+    use fsl_core::{FsResolver, build_model, parse_kernel_source};
+    use serde_json::json;
+
+    #[test]
+    fn preservation_finding_reads_both_catalog_requirement_fields_from_model() {
+        let model = build_model(
+            parse_kernel_source(
+                r#"spec Catalog { state { ok: Bool } init { ok = true }
+                @requirement("CATALOG-ALT", "catalog intent from metadata")
+                invariant CatalogValid { ok } }"#,
+                &FsResolver::new("."),
+            )
+            .expect("parse catalog model"),
+        )
+        .expect("build model");
+        let findings = collect_findings(
+            &model,
+            &json!({
+                "result":"refinement_failed",
+                "governance":{"preservations":[{
+                    "name":"P", "before":"A", "after":"I", "preserve":["CTRL"],
+                    "result":"refinement_failed"
+                }]}
+            }),
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].requirement_id.as_deref(), Some("CATALOG-ALT"));
+        assert_eq!(
+            findings[0].requirement_text.as_deref(),
+            Some("catalog intent from metadata")
+        );
+    }
 }
