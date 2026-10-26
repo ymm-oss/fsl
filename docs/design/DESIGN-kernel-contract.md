@@ -419,7 +419,7 @@ fslc conformance spec.fsl --depth 4 > vectors.json
 ```
 
 Both commands return one JSON document and use the normal native exit contract:
-0 success, 2 parse/type/semantic/I/O error. `kernel` accepts source dialects that
+0 success, 2 usage (invalid argv)/parse/type/semantic/I/O error. `kernel` accepts source dialects that
 reach the shared lowering gate and retain truthful source provenance; `compose`
 is the explicit v1 exception described above. The output records the original
 dialect and requirement origin.

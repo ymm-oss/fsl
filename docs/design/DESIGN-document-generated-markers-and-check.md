@@ -228,7 +228,7 @@ the artifact path, matching the issue's own JSON shapes with `fsl: "1.0"` added
 `document_conformant` -> 0; `document_drifted` -> 1 (a `reasons`-bearing result,
 *not* routed through `normalized_exit_status`'s `kind == "internal"` -> 3 special
 case, since its `result` is neither `"error"` nor internal); a frontmatter/schema
-failure, an I/O error, or a spec parse/type/semantics error -> 2, using the same
+failure, a usage (invalid argv) error, an I/O error, or a spec parse/type/semantics error -> 2, using the same
 `error_output`/`semantic_error_output` helpers `generate`/`claims` already call; an
 unexpected internal failure -> 3 via the existing `normalized_exit_status` path. No
 new exit-code plumbing was needed.

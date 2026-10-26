@@ -832,8 +832,6 @@ fslc fmt       <path>... --check                 # JSON format_check; exit 0 cle
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
-fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
-                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -850,6 +848,8 @@ fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [
                                                  #   induction の trans 選択は全 invariant を保持
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
@@ -1133,7 +1133,7 @@ imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
 indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
-`2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
+`2` = 入力エラー(usage は argv の誤り / parse / type / semantics / io / vacuous / acceptance / forbidden /
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
@@ -1176,7 +1176,7 @@ seam とすべての preservation を同じように自身の封筒へ畳み込�
 | `unknown_cti` / `key_domain` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が有限キーの `Map` をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する | 短絡する `and`/`=>`/`or`/`if` か `requires` で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` は打ち切られた方向を `unknown_budget` と報告し、gate を無条件に落とす(finding `unknown_budget`、exit 1)。`fslc mutate` はその mutant を `inconclusive` と報告し、`kill_rate` から外し、要求された gate を落とす |
-| `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
+| `error` | usage(argv の誤り) / parse / type / semantics / io | `usage` は argv を直す。それ以外は `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
 `proved`+`closure:true` に到達できます)、explicit が単独ではその spec を判定でき

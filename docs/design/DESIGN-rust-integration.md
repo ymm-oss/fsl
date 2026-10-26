@@ -76,8 +76,11 @@ are no longer accepted. Both testgen paths publish their existing `--allow-unwir
 and help; this does not introduce a new generator capability.
 
 Value-taking options consume their next token once, including dash-prefixed values; bare `--` ends
-options, and `--` in place of a required value remains a missing-value error. Every repeated choice
-is checked, so a later valid occurrence cannot mask an earlier invalid one. Existing typed parsers
+options, and `--` in place of a required value is a missing-value error. This preserves the existing
+`CommandArgs` behavior. `ai compare` previously consumed literal `--` as a value with its raw iterator;
+it now rejects that value as missing too, an intentional breaking change with no command exception.
+Every repeated choice is checked, so a later valid occurrence cannot mask an earlier invalid one.
+Existing typed parsers
 retain numeric/type interpretation, required-argument diagnostics, duplicate/combination rules,
 and execution plumbing. Unstable fsl5 options and numeric edition aliases remain gated, command-local
 overlays, not a bypass of stable validation or additions to the stable metadata.

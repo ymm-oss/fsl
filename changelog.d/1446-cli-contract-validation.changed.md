@@ -21,3 +21,5 @@ the real command and option on `scenarios`, `ai check`, `domain check`,
 options on the `compat` group. Existing root/other-group wording,
 `compat` no-argument/bare-unknown usage and `--include-ai` wording, and
 terminal `ai compare` missing-value wording are preserved.
+`ai compare` no longer accepts literal `--` as an option value, including labels
+and dataset: it reports a missing-value usage error (exit 2) instead.
