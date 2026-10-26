@@ -710,8 +710,8 @@ absent own actors falsely rejected by prose are intentionally accepted instead.
 Explicit action entries, inline branch maps and stutter remain exempt. Metadata
 priority, Kernel v1/v2, RCIR/digest and attribution are unchanged. Both binaries'
 `fslc check` swept every `.fsl` in the same three roots in each archived tree,
-base `ed877bd9622d6042a889a70755fa2d75852c8d48` / head
-`bfead01a3692754eb9669dd00befa026545126f4`, twice, 591 base / 592 head forms
+base `e8cf78f0162530e264128f588981d49790f2767f` / head
+`b8daaa8245f374f74448fd983755689f832484cc`, twice, 591 base / 592 head forms
 per binary: **0 corpus ok→error and 0 error→ok transitions**. Acceptance controls
 are a separate set. See `docs/design/DESIGN-refinement.md`, section
 “#1456: requirement-action own actors and breaking-source migration”. Confirm

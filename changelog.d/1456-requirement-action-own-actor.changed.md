@@ -8,8 +8,8 @@ previously rejected by prose are intentionally accepted. Typed requirement text
 does not declare an actor. Explicit action entries, inline branch maps and stutter
 stay exempt; public metadata priority, Kernel v1/v2, RCIR, digests and report
 attribution are unchanged. The repeated four-cell corpus check at base
-`ed877bd9622d6042a889a70755fa2d75852c8d48` / head
-`bfead01a3692754eb9669dd00befa026545126f4` (591 base / 592 head forms per binary,
+`e8cf78f0162530e264128f588981d49790f2767f` / head
+`b8daaa8245f374f74448fd983755689f832484cc` (591 base / 592 head forms per binary,
 each own tree) found no corpus ok→error or error→ok transitions. Acceptance
 removals/expansions are separate controls. Confirm policy before correcting an
 action's actor; there is no general automatic migration, compatibility bypass or

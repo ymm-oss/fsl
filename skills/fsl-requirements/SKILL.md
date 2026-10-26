@@ -125,6 +125,9 @@ skill produced.
      error even with covers (its text is not an actor declaration; #1441); a
      transition with no same-named business action maps to `stutter` and is not
      actor-checked
+   - requirement actions inside a block or standalone (including `X__bN` branches)
+     use only their own metadata's `by X` actor, never block or `@requirement`
+     text, and are not actor-compared when that actor is absent (#1456).
    - the inline block also accepts action correspondence items —
      `action impl(...) -> abs(...) | stutter` — including an arity change
      between impl and abs params, the same syntax a separate refinement file uses

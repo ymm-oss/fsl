@@ -1563,7 +1563,8 @@ refinement CartImplRefinesCart {
   として報告されます。
   `covers`・edition混在・composeを含むautoのactor互換性は§13.2に従います。
   [DESIGN-refinement](../design/DESIGN-refinement.md)の
-  「#1441: source-actor auto mapping and breaking-source migration」も参照してください。
+  「#1441: source-actor auto mapping and breaking-source migration」および
+  「#1456: requirement-action own actors and breaking-source migration」も参照してください。
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   `name: Type` の注釈でもかまいません。
@@ -2411,8 +2412,8 @@ verify {
   逆に、自身actorが一致または不在なのにブロック本文が偽の不一致を作っていた形の受理は
   意図した拡大です。typed requirement本文はactor宣言ではありません。公開metadataの優先順、
   Kernel v1/v2、RCIR、spec digest、reportの帰属は保ちます。base
-  `ed877bd9622d6042a889a70755fa2d75852c8d48`とhead
-  `bfead01a3692754eb9669dd00befa026545126f4`の各archive treeで、3 rootの全formを
+  `e8cf78f0162530e264128f588981d49790f2767f`とhead
+  `b8daaa8245f374f74448fd983755689f832484cc`の各archive treeで、3 rootの全formを
   両binaryの`fslc check`で2回sweepしました(base 591 / head 592 forms、各binary)。
   **corpusの`ok`→`error`は0件、`error`→`ok`も0件**で、受入テストの拒否・拡大とは別集合です。
   手動での方針確認・訂正とコマンドは[DESIGN-refinement](../design/DESIGN-refinement.md)の

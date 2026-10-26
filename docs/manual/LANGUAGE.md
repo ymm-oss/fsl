@@ -1621,7 +1621,8 @@ refinement CartImplRefinesCart {
   `kind: "type"` errors.
   Auto actor compatibility, including `covers`, mixed editions and compose,
   follows §13.2; see [DESIGN-refinement](../design/DESIGN-refinement.md),
-  “#1441: source-actor auto mapping and breaking-source migration”.
+  “#1441: source-actor auto mapping and breaking-source migration” and
+  “#1456: requirement-action own actors and breaking-source migration”.
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
@@ -2513,8 +2514,8 @@ verify {
   block prose are intentionally accepted; typed requirement text is not an actor
   declaration. Public metadata priority, Kernel v1/v2, RCIR, spec digests and report
   attribution are preserved. Both binaries' `fslc check` swept all three roots in
-  their own archived trees at base `ed877bd9622d6042a889a70755fa2d75852c8d48`
-  and head `bfead01a3692754eb9669dd00befa026545126f4`, twice (591 base / 592 head
+  their own archived trees at base `e8cf78f0162530e264128f588981d49790f2767f`
+  and head `b8daaa8245f374f74448fd983755689f832484cc`, twice (591 base / 592 head
   forms per binary): **0 corpus `ok`→`error` and 0 `error`→`ok` transitions**.
   Acceptance removals/expansions are separate from this empty corpus set.
   See [DESIGN-refinement](../design/DESIGN-refinement.md), section

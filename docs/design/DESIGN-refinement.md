@@ -969,8 +969,8 @@ is unchanged, as are `ActionDef`, Kernel v1/v2, RCIR, spec digests, traceability
 and report attribution. Explicit action entries, inline branch maps and stutter
 are still not actor-checked; standalone `maps auto` does check generated branches.
 
-**Measured inventory.** Base `ed877bd9622d6042a889a70755fa2d75852c8d48`
-and implementation `bfead01a3692754eb9669dd00befa026545126f4` were each
+**Measured inventory.** Base `e8cf78f0162530e264128f588981d49790f2767f`
+and implementation `b8daaa8245f374f74448fd983755689f832484cc` were each
 materialized with `git archive <sha>` and `tar -xf <archive> -C <tree>`, then built
 in their own tree with `cargo build --manifest-path rust/Cargo.toml -p fslc-rust
 --bin fslc --locked` (Rust 1.98.0, `88d9e12ae`, offline, debug). Both binaries
@@ -991,8 +991,8 @@ no existing sources were repaired or removed. No pre-existing base inline forms
 were rewritten, renamed, removed or stopped from running (materialization count
 0). The new acceptance helper's explicit-auto location expectation was corrected
 to the existing `maps` token span; no production span rule changed.
-Binary SHA256: base `db9615e12df0dbdccd14b7a2d7dbc57edf02a78e12ee488a195ead4e832513ce`,
-head `3837abe8813805c84198f65dc9fa882b6a0ad5ea5bde05fb9e809f7a0749424f`.
+Binary SHA256: base `ec78a59a98f1732783ab41740367b261ae1d3b09e072886051afc69c878972e2`,
+head `0cdf4b1868d38a00a4db9283c3d1aaa399b0f73199e622948095609c2ccda804`.
 
 Separate from that corpus, CLI acceptance controls and Worker stable-only controls
 were calibrated on old production, then passed twice on the fix:
