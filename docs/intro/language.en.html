@@ -1273,6 +1273,11 @@ requirement rows keep their own status. <code>unknown_cti</code> is an unestabli
 induction finding, attributed by the ordinary violation metadata/property
 lookup, not a reachable counterexample; raw CTI, hint, and rank-failure evidence
 is preserved. These added findings also change affected ledger approval digests.
+Direct <code>ledger</code> and <code>html</code> return verification <code>result:"error"</code> as the original
+JSON error envelope and exit 2/3, before rendering or writing an artifact
+(<code>html</code> also stops before explain). With <code>-o</code>, no artifact is created. Other
+failed/unestablished verdicts still generate reports with their nonzero exit.
+Approval-only ledger rerendering for digest comparison is separate from this gate.
 <code>testgen</code> refuses a failed seam or preservation with the same verify failure
 envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
 and writes no harness. The same

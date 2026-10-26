@@ -41,6 +41,11 @@ fslc html spec.fsl --depth 8 -o report.html
   "artifact to stdout" behavior.
 - Parse/type/semantic/io errors use the existing CLI error envelope and exit-code
   convention.
+- A verification `result:"error"` returns that full error envelope and exit
+  (2 for document errors, 3 for internal errors) before explain, rendering, or
+  output-file creation. Stdout is JSON rather than HTML, and `-o` creates no
+  artifact. The gate is shared with direct ledger reporting. Non-error failure
+  verdicts still render a report and retain their nonzero verification exit.
 
 ## Report structure
 
