@@ -1160,19 +1160,28 @@ not a selected check: a selected run reports the same compose-lowering warnings
 (<code>fair_not_inherited</code>) and the same <code>no_user_invariants</code> suppression as a full
 run.</p>
 <p><code>verify --engine induction --lemma "EXPR"</code> accepts repeatable auxiliary
-invariant candidates for an <code>unknown_cti</code> repair loop. Each expression is first
+invariant candidates for an <code>unknown_cti</code> repair loop. All candidates are parsed
+and recursively type-checked as <code>Bool</code> by the invariant checker before any
+candidate proof or evaluation. Each valid expression is then
 proved independently against the original init/actions and implicit type
 bounds, without assuming the original user invariants. A false candidate is
 <code>rejected</code> with its reachable counterexample; a non-inductive candidate is
-rejected with its own CTI; invalid candidates carry a parse/type error. Only
-candidates whose independent result is <code>proved</code> may enter the original proof.
+rejected with its own CTI; invalid candidates are <code>rejected</code>, <code>used:false</code>, with
+a parse/type error. Type errors carry <code>proof.result:"error"</code>, <code>proof.kind:"semantics"</code>
+and the checker message, without an argv <code>loc</code>; parse errors keep their parser
+location. Rejection does not abort later candidates; the target result owns the
+exit code. Only candidates whose independent result is <code>proved</code> may enter the
+original proof.
 The verifier evaluates those candidates on each target CTI, adds the first one
 that is actually false on that CTI, and retries. JSON fields <code>lemmas</code> and
 <code>lemma_cti_exclusions</code> record adjudication and the exact CTI/violated steps.
 When the target reaches <code>proved</code>, <code>auxiliary_invariant_recommendation</code> emits the
 declarations to persist in the source; the command never rewrites the file.
 There is no unverified-assumption mode. <code>--lemma</code> with the BMC engine is a usage
-error. Candidate text/order is part of the verification cache key.</p>
+error. Lemma-guided runs bypass persistent verification cache lookup and storage.
+For #1448, the 579-form, two-mode base/head <code>check</code> sweep removed no accepted
+<code>.fsl</code> forms; commands and revision identities are recorded in
+<code>docs/design/DESIGN-induction-lemmas.md</code>, "Type-validation compatibility evidence".</p>
 <p>The sweep envelope is a function of its inputs apart from <code>cache</code> and timing
 execution metadata. For stable comparisons, exclude <code>cost</code> and <code>cache</code> only at
 the root of each verification envelope (<code>sweep.results[].verification</code> and
