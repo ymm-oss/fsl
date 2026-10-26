@@ -3472,8 +3472,9 @@ fn ai_index_assign(map_name: &str, index: Expr, value: Expr, span: fsl_syntax::S
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] when `check hard { rule ... }` names an unknown rule
-/// or the generated kernel catalog is invalid.
+/// Returns [`CoreError`] when authority references an undeclared tool,
+/// `check hard { rule ... }` names an unknown rule, or the generated kernel
+/// catalog is invalid.
 #[allow(clippy::too_many_lines)]
 pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSpec, CoreError> {
     let rules = ai_rule_set(&component)?;
@@ -3489,7 +3490,43 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
         .iter()
         .map(|tool| (tool.name.as_str(), tool))
         .collect::<BTreeMap<_, _>>();
-    let member_expr = |tool_name: &str| Expr::Var(members[tool_name].clone());
+    let member_expr = |tool_name: &str| {
+        members
+            .get(tool_name)
+            .cloned()
+            .map(Expr::Var)
+            .ok_or_else(|| {
+                let loc = component
+                    .authority
+                    .may_suggest
+                    .iter()
+                    .chain(&component.authority.may_execute)
+                    .chain(&component.authority.requires_human_approval)
+                    .chain(&component.authority.forbidden)
+                    .find(|rule| rule.name == tool_name)
+                    .and_then(|rule| rule.loc)
+                    .unwrap_or(component.loc);
+                let span = ai_span(loc);
+                let mut error = core_error(
+                    format!("unknown tool '{tool_name}' in authority block"),
+                    span,
+                );
+                error.origin = Some(Box::new(OriginChain {
+                    id: OriginId(format!("ai-authority:{}:{}", loc.line, loc.column)),
+                    dialect: "ai_component".to_owned(),
+                    primary: Some(OriginSite {
+                        source_file: None,
+                        span: Some(span),
+                        dialect: "ai_component".to_owned(),
+                        declaration_path: vec![component.name.clone(), "authority".to_owned()],
+                    }),
+                    secondary: Vec::new(),
+                    lowering_steps: Vec::new(),
+                    generated: false,
+                }));
+                error
+            })
+    };
     let tool_span = |tool_name: &str| {
         tool_by_name
             .get(tool_name)
@@ -3587,7 +3624,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
             name,
             ai_index_assign(
                 "tool_suggested",
-                member_expr(tool_name),
+                member_expr(tool_name)?,
                 Expr::Bool(true),
                 tool_span(tool_name),
             ),
@@ -3603,7 +3640,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
             name,
             ai_index_assign(
                 "human_approved",
-                member_expr(tool_name),
+                member_expr(tool_name)?,
                 Expr::Bool(true),
                 tool_span(tool_name),
             ),
@@ -3620,14 +3657,14 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
             action_items.push(ActionItem::Requires(
                 Expr::Index(
                     Box::new(Expr::Var("human_approved".to_owned())),
-                    Box::new(member_expr(tool_name)),
+                    Box::new(member_expr(tool_name)?),
                 ),
                 tool_span(tool_name),
             ));
         }
         action_items.push(ActionItem::Statement(ai_index_assign(
             "tool_executed",
-            member_expr(tool_name),
+            member_expr(tool_name)?,
             Expr::Bool(true),
             tool_span(tool_name),
         )));
@@ -3676,7 +3713,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                 name,
                 expr: Box::new(Expr::Not(Box::new(Expr::Index(
                     Box::new(Expr::Var("tool_executed".to_owned())),
-                    Box::new(member_expr(tool_name)),
+                    Box::new(member_expr(tool_name)?),
                 )))),
                 span: tool_span(tool_name),
                 meta: meta(
@@ -3697,11 +3734,11 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                     op: "=>".to_owned(),
                     left: Box::new(Expr::Index(
                         Box::new(Expr::Var("tool_executed".to_owned())),
-                        Box::new(member_expr(tool_name)),
+                        Box::new(member_expr(tool_name)?),
                     )),
                     right: Box::new(Expr::Index(
                         Box::new(Expr::Var("human_approved".to_owned())),
-                        Box::new(member_expr(tool_name)),
+                        Box::new(member_expr(tool_name)?),
                     )),
                 }),
                 span: tool_span(tool_name),
