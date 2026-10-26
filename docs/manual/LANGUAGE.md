@@ -1611,6 +1611,8 @@ refinement CartImplRefinesCart {
   explicit `action ... -> ...` correspondence for that pair instead.
   Incompatible same-name state candidates are likewise reported as
   `kind: "type"` errors.
+  Auto actor compatibility, including `covers`, mixed editions and compose,
+  follows §13.2; see the [v5.0.0 migration](../design/DESIGN-refinement.md#migration-1441).
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
@@ -2460,30 +2462,53 @@ verify {
   An impl action with both a `maps` clause and a matching inline `action ...`
   item is a duplicate-correspondence, `kind: "type"` check-time error naming
   both origins and locations (same as a mapping file that lists the same action
-  twice). Whenever the seam is evaluated, a process transition auto-mapped to
-  a same-named business action is actor-checked; a transition whose actor
-  differs from that business action's actor is a check-time error.
-- A requirements transition's `by X` is a free label, not a reference to a
-  declared actor: the requirements layer has no `actor` declaration, and
-  `check` does not ask whether `X` is declared anywhere. (A `business` process
-  is the opposite: a transition whose actor no `actor` line declares is a
-  check-time error.) The label is compared with a business actor only when a
-  refinement maps the transition automatically to the business action of the
-  same name — through `maps auto`, or through the inline `implements` seam's
-  implicit auto-mapping of every transition that no explicit inline
-  `action ... -> ...` item names — and that refinement is evaluated. Where
-  the refinement is checked (`check`, `fslc refine`, and the like), a mismatch
-  is a `kind: "type"` error; `fslc diff` reports it differently, as described
-  below. For example, the inline seam is
-  evaluated by an unscoped `check` or `verify` and by `fslc scenarios`, but not
-  by a `verify` scoped with `--property` and the like (above); a refinement
-  file's `maps auto` is evaluated by `fslc refine` or a `fslc chain` refine
-  layer; and `fslc diff` without a mapping builds a `maps auto` refinement
-  between the two versions itself, so a changed `by` label there surfaces as
-  an automatic-mapping failure. The label is checked against nothing for a
-  transition mapped by an explicit `action` item, for one the inline seam maps
-  to `stutter` because the business layer has no action of that name, and
-  whenever no such refinement is evaluated.
+  twice). Whenever the seam is evaluated, auto-mapped process transitions and events compare the declared
+  source actors on both sides, regardless of edition (4/5) or `covers` on
+  either side, including prose beginning `by `. A registered actor takes
+  precedence over metadata; only raw spec/compose actions without a registry
+  entry use the existing metadata rule (`by` followed by a space and a
+  nonempty actor). When both actors are available,
+  a mismatch is `error` / `kind: "type"`, exit 2, with
+  `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
+  at the `implements` or standalone `maps auto` correspondence. The same rule
+  applies in unscoped `verify`, standalone `refine` and Worker; explicit action
+  correspondences and `stutter` are not actor-checked. Selected `verify` still
+  does not evaluate the seam. Without a supplied mapping, `diff` reports an
+  affected direction as `unknown` / `automatic_mapping_failed` inside its
+  `semantic_diff`/exit-0 envelope, not as a top-level type error.
+  **v5.0.0 breaking source change (#1441):** mismatches previously hidden by
+  `covers`, cross-edition or mixed compose lookup are rejected; Kernel/JSON
+  schemas do not change. The full four-cell corpus sweep at base
+  `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and head
+  `9ca8630c7f45f1def54c056bf53a852853c7a60c` ran both binaries' `fslc check`
+  on every `.fsl` in `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, in each
+  SHA's own tree (579 base / 591 head forms): **0 `ok`→`error` and 0
+  `error`→`ok` corpus transitions**. Separately, matching `System` actors with
+  `covers ... "by Manager"` on the impl (B3) or business (B4) now check `ok/0`
+  instead of `error/type/2`; bounded verify now returns `verified/0` with
+  `implements refines`. See the [migration and measured evidence](../design/DESIGN-refinement.md#migration-1441)
+  for commands, gate policy and manual correction; no general automatic
+  semantics-preserving migration exists. LSP delivery is not promised.
+- In a requirements process-form transition (edition 4), `by X` is a free label,
+  not a reference to a declared actor: this form has no `actor` declaration,
+  and `check` does not ask whether `X` is declared anywhere. Here, “source actor”
+  means the label written on the transition, not a declared actor symbol.
+  (A `business` process is the opposite: a transition whose actor no `actor`
+  line declares is a check-time error.) The label is compared with a business
+  actor only when a refinement maps the transition automatically to the
+  business action of the same name — through `maps auto`, or through the inline
+  `implements` seam's implicit auto-mapping of every transition that no explicit
+  inline `action ... -> ...` item names — and that refinement is evaluated.
+  The mismatch and `diff` reporting rules are described above. For example,
+  the inline seam is evaluated by an unscoped `check` or `verify` and by
+  `fslc scenarios`, but not by a `verify` scoped with `--property` and the like
+  (above); a refinement file's `maps auto` is evaluated by `fslc refine` or a
+  `fslc chain` refine layer; and `fslc diff` without a mapping builds a
+  `maps auto` refinement between the two versions itself, so a changed `by`
+  label there surfaces as an automatic-mapping failure. The label is checked
+  against nothing for a transition mapped by an explicit `action` item, for one
+  the inline seam maps to `stutter` because the business layer has no action of
+  that name, and whenever no such refinement is evaluated.
 - `acceptance` is replay-verified at check time by the concrete Monitor (a
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen

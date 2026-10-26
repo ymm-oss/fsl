@@ -678,6 +678,24 @@ compatibility are checked identically. Duplicate diagnostics identify both
 origin kinds and line/column sites; auto synthesis never replaces an explicit
 entry.
 
+For auto pairs only, both sides use registered source actors independently of
+`covers` (even text beginning `by `), process/event/business form or fsl 4/5
+edition. Actions without a registry entry (raw spec/compose) retain the legacy
+metadata `by ` rule; two available actors must match. A mismatch is a located
+`maps auto actor mismatch` type error (exit 2) in check/unscoped verify/refine
+and Worker. Explicit action entries and stutter are not actor-checked;
+selected verify still skips the seam. Mapping-free diff instead reports
+`unknown`/`automatic_mapping_failed` within `semantic_diff`/exit 0.
+This is a v5.0.0 breaking removal of hidden actor mismatches (#1441), without a
+Kernel/JSON schema change. The four-cell sweep of all `.fsl` in specs/examples/
+rust/fslc/tests/fixtures at base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`
+and head `9ca8630c7f45f1def54c056bf53a852853c7a60c`, running both binaries'
+`fslc check` in each own tree (579 base / 591 head forms), measured **0
+ok→error and 0 error→ok corpus transitions**. Separately, B3/B4 (matching
+System actors, impl/business covers text `by Manager`) expand error/type/2→ok/0
+and bounded verify→verified/0 with implements refines. Commands and the manual
+migration contract: [DESIGN-refinement, #1441](../../../docs/design/DESIGN-refinement.md#migration-1441).
+
 Give impl and abs distinct enum/struct type names. Refinement merges type
 metadata by name; a same-named enum/struct with a different member list/field
 set on each side is rejected as `kind: "type"` (exit 2) rather than silently

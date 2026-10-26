@@ -1553,6 +1553,8 @@ refinement CartImplRefinesCart {
   `kind: "type"` エラーになります。そのペアには明示の `action ... -> ...`
   対応を書いてください。互換でない同名の状態候補も同様に `kind: "type"` エラー
   として報告されます。
+  `covers`・edition混在・composeを含むautoのactor互換性は§13.2に従います。
+  [v5.0.0移行手順](../design/DESIGN-refinement.md#migration-1441)も参照してください。
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   `name: Type` の注釈でもかまいません。
@@ -2364,20 +2366,41 @@ verify {
   します。`maps` 節と、それに一致するインラインの `action ...` 項目の両方を持つ
   impl の action は、対応の重複であり、両方の起源と位置を名指しする
   `kind: "type"` の check 時エラーです(同じ action を 2 回列挙するマッピング
-  ファイルと同じです)。継ぎ目が評価されるときは、同名の business の action へ
-  auto マップされた process の transition は actor 検査されます。actor がその
-  business の action の actor と異なる transition は check 時エラーです。
-- requirements の transition の `by X` は自由なラベルで、宣言された actor を
-  指すものではありません。requirements レイヤーには `actor` の宣言が無く、
-  `check` は `X` がどこかで宣言されているかを見ません(`business` の process は
-  逆で、どの `actor` 行も宣言していない actor を使う transition は check 時
-  エラーです)。このラベルが business の actor と照合されるのは、refinement が
-  その transition を同名の business の action へ自動で対応付け、その refinement
-  が評価されたときだけです。自動の対応付けとは、`maps auto` によるものと、
-  インラインの `implements` の継ぎ目が、明示のインライン `action ... -> ...`
-  項目が名指ししていないすべての transition を暗黙に対応付けるものです。
-  refinement を検査する所(`check` や `fslc refine` など)では、食い違いは
-  `kind: "type"` のエラーです。`fslc diff` は、後で述べるとおり別の形で報告します。たとえば、インラインの継ぎ目は、範囲を選ばない
+  ファイルと同じです)。継ぎ目が評価されるとき、autoマップされたprocessのtransitionとeventは、両側で宣言された
+  source actorを比較します。edition(4/5)、どちら側の`covers`、`by `で始まる説明本文にも
+  依存しません。登録済みactorはmetadataに優先し、registry entryの無いraw spec/compose
+  actionだけが従来のmetadata規則(`by`、空白、空でないactor)を使います。
+  両actorを取得できるとき、不一致は
+  `error` / `kind: "type"`、exit 2で、既存のmessage
+  `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
+  を、`implements`または単独の`maps auto`の対応位置に報告します。スコープ無しの
+  `verify`、単独の`refine`、Workerも同じ規則です。明示のaction対応と`stutter`は
+  actorを比較せず、選択した`verify`は引き続きseamを評価しません。mappingを指定しない
+  `diff`は、該当する方向を`unknown` / `automatic_mapping_failed`として
+  `semantic_diff`/exit 0の封筒内に報告し、トップレベルの型エラーにはしません。
+  **v5.0.0の破壊的なソース変更(#1441):** `covers`、edition混在、composeとの混在lookupで
+  隠れていた不一致を拒否します。Kernel/JSON schemaは変わりません。base
+  `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`とhead
+  `9ca8630c7f45f1def54c056bf53a852853c7a60c`の完全な4-cell corpus sweepでは、各SHA自身の
+  treeの`specs/`・`examples/`・`rust/fslc/tests/fixtures/`の全`.fsl`を両binaryの
+  `fslc check`で検査しました(base 579 / head 591 forms)。corpusの
+  **`ok`→`error`は0件、`error`→`ok`も0件**です。別集合の受入対照では、両宣言actorが
+  `System`でimpl(B3)またはbusiness(B4)の`covers ... "by Manager"`だけが異なる正しい
+  ソースが、従来の`error/type/2`から`ok/0`へ変わり、有界verifyは`verified/0`と
+  `implements refines`を返します。[移行手順と測定証拠](../design/DESIGN-refinement.md#migration-1441)
+  にコマンド・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
+  LSPでの診断配信も約束しません。
+- requirements の process 形式(edition 4)の transition の `by X` は自由なラベルで、
+  宣言された actor を指すものではありません。この形式には `actor` の宣言が無く、
+  `check` は `X` がどこかで宣言されているかを見ません。ここでいう「source actor」は
+  transitionに書いたラベルで、actorシンボルの宣言への参照ではありません。
+  (`business` の process は逆で、どの `actor` 行も宣言していない actor を使う
+  transition は check 時エラーです)。このラベルが business の actor と照合されるのは、
+  refinement がその transition を同名の business の action へ自動で対応付け、その
+  refinement が評価されたときだけです。自動の対応付けとは、`maps auto` によるものと、
+  インラインの `implements` の継ぎ目が、明示のインライン `action ... -> ...` 項目が
+  名指ししていないすべての transition を暗黙に対応付けるものです。不一致と`diff`の
+  報告形式は上述のとおりです。たとえば、インラインの継ぎ目は、範囲を選ばない
   `check` や `verify` と `fslc scenarios` では評価されますが、`--property` などで
   範囲を選んだ `verify` では評価されません(上述)。refinement ファイルの
   `maps auto` は `fslc refine` や `fslc chain` の refine 層で評価されます。
