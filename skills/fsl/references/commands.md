@@ -187,15 +187,20 @@ fslc compat check <f> [--include-ai]                    # dbsystem compatibility
 
 HTML-only `--no-timing` (default false, no alias) omits only
 `verification.cost.elapsed_s`, `verification.cost.solver.check_elapsed_s`,
-`verification.cost.properties[].elapsed_s`, and
-`explained.counterfactuals[].violation.cost.elapsed_s` from presentation copies
+`verification.cost.properties[].elapsed_s`,
+`explained.counterfactuals[].violation.cost.elapsed_s`,
+`verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
+`verification.cost.solver.decisions`, and
+`verification.cost.solver.propagations` from presentation copies
 before rendering, for stdout and `-o`/`--output` files. Default HTML retains
-nondeterministic timings. Source/domain-state fields, counts, property identities,
-other statistics, ordinary verify JSON, and exit codes are unchanged. Use it for
+nondeterministic timings and solver statistics. Source/domain-state fields,
+`solver.checks`, property `kind`/`name`/`checks`, ordinary verify JSON, and exit
+codes are unchanged. Wall-clock timings and environment-dependent Z3 internal
+statistics are omitted for byte stability. Use it for
 byte-stable comparison with the same input path, source, options, and toolchain;
 it does not normalize across paths, backends, or environments. It is not a
 `testgen` or `ledger` option.
-`approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 Each `lint` path may be a file or directory. Directories recursively expand to
 regular `*.fsl` files; symlink entries and other extensions are skipped while

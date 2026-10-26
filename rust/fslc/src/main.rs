@@ -12691,9 +12691,9 @@ fn run_html_report_from_source_with_timing(
     )
 }
 
-/// Strip only known execution timings from presentation copies, never source
-/// text or same-named fields in domain state. Keep the authoritative envelopes
-/// intact for verification outcome and exit-code handling.
+/// Strip known execution timings and ambient solver statistics from presentation
+/// copies, never source text or same-named fields in domain state. Keep the
+/// authoritative envelopes intact for verification outcome and exit-code handling.
 fn html_report_without_timing(explained: &Value, verification: &Value) -> (Value, Value) {
     let mut explained = explained.clone();
     let mut verification = verification.clone();
@@ -12701,6 +12701,10 @@ fn html_report_without_timing(explained: &Value, verification: &Value) -> (Value
         cost.remove("elapsed_s");
         if let Some(solver) = cost.get_mut("solver").and_then(Value::as_object_mut) {
             solver.remove("check_elapsed_s");
+            solver.remove("memory_mb");
+            solver.remove("conflicts");
+            solver.remove("decisions");
+            solver.remove("propagations");
         }
         if let Some(properties) = cost.get_mut("properties").and_then(Value::as_array_mut) {
             for property in properties {

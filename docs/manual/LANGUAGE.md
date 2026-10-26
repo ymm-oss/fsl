@@ -3470,15 +3470,20 @@ DESIGN-*.md).
   nondeterministic timings. HTML-only `--no-timing` (default false, no alias)
   omits only `verification.cost.elapsed_s`,
   `verification.cost.solver.check_elapsed_s`,
-  `verification.cost.properties[].elapsed_s`, and
-  `explained.counterfactuals[].violation.cost.elapsed_s` from presentation
+  `verification.cost.properties[].elapsed_s`,
+  `explained.counterfactuals[].violation.cost.elapsed_s`,
+  `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
+  `verification.cost.solver.decisions`, and
+  `verification.cost.solver.propagations` from presentation
   copies before rendering, on stdout and in `-o`/`--output` files alike.
-  Source and domain-state fields, counts, property identities, and other
-  statistics remain intact; ordinary verify JSON and exit codes are unchanged.
+  Source and domain-state fields, `solver.checks`, and property
+  `kind`/`name`/`checks` remain intact; ordinary verify JSON and exit codes are
+  unchanged. Wall-clock timings and environment-dependent Z3 internal
+  statistics are omitted; default HTML retains all timings and solver statistics.
   This supports byte-stable comparison for the same input path, source,
   options, and toolchain, not normalization across paths, backends, or
   environments.
-  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering. →
+  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering. →
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 The discipline before writing (the formalization memo, the NL→syntax reverse
