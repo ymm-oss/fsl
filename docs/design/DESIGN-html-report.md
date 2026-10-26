@@ -42,17 +42,28 @@ fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
 - `--no-timing` is HTML-only, defaults to false, and has no alias. It omits
   only `verification.cost.elapsed_s`,
   `verification.cost.solver.check_elapsed_s`,
-  `verification.cost.properties[].elapsed_s`, and
-  `explained.counterfactuals[].violation.cost.elapsed_s` from presentation
+  `verification.cost.properties[].elapsed_s`,
+  `explained.counterfactuals[].violation.cost.elapsed_s`,
+  `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
+  `verification.cost.solver.decisions`, and
+  `verification.cost.solver.propagations` from presentation
   copies before rendering, for both stdout and `-o`/`--output` files. Source,
-  domain-state fields, counts, property identities, and other statistics remain
-  intact. The default report retains nondeterministic timings, as specified in
+  domain-state fields, `solver.checks`, and property `kind`/`name`/`checks` remain
+  intact. Wall-clock timings and environment-dependent Z3 internal statistics
+  are omitted for byte-stable comparison. The default report retains all timings
+  and solver statistics, as specified in
   [`DESIGN-verification-cost.md`](DESIGN-verification-cost.md); ordinary verify
   JSON, verification outcomes, and approval normalization are unchanged.
   Timing-free reports support byte-stable comparison for the same input path,
   source, options, and toolchain; they do not normalize different paths,
   backends, or environments.
-  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
+  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
+  For #1469, 396 local macOS runs showed no variation in these solver statistics,
+  including `memory_mb`; one CI failure did show `memory_mb` differing between
+  reports (17.91 versus 17.92). The classification of `conflicts`, `decisions`,
+  and `propagations` as ambient rests on their Z3-internal source and the existing
+  approval normalization of the same four solver statistics, not observed drift
+  in that local sample.
 - Parse/type/semantic/io errors use the existing CLI error envelope and exit-code
   convention.
 - A verification `result:"error"` returns that full error envelope and exit

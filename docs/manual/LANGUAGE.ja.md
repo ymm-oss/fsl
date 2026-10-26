@@ -3345,13 +3345,18 @@ DESIGN-*.md があります)。
   `verification.cost.elapsed_s`、
   `verification.cost.solver.check_elapsed_s`、
   `verification.cost.properties[].elapsed_s`、
-  `explained.counterfactuals[].violation.cost.elapsed_s` だけを、描画前の
+  `explained.counterfactuals[].violation.cost.elapsed_s`、
+  `verification.cost.solver.memory_mb`、`verification.cost.solver.conflicts`、
+  `verification.cost.solver.decisions`、
+  `verification.cost.solver.propagations` だけを、描画前の
   presentation 用の写しから省きます。stdout と `-o`/`--output` のファイルの両方に
-  効きます。ソースや domain state のフィールド、回数、プロパティの識別情報、
-  その他の統計は保持し、通常の verify JSON や exit code は変えません。
+  効きます。ソースや domain state のフィールド、`solver.checks`、プロパティの
+  `kind`/`name`/`checks` は保持し、通常の verify JSON や exit code は変えません。
+  実時間の timing と実行環境に依存する Z3 内部の統計を省きますが、既定の HTML は
+  timing と solver の統計をすべて保持します。
   同じ入力パス、ソース、オプション、toolchain での byte が安定した比較を支援する
   もので、異なるパス、backend、環境の間の正規化ではありません。
-  `approval create --kind html` は既定の timing 入りレポートを再生成し、timing の値を正規化しても key は除かないため、`--no-timing` の artifact を fresh rendering と不一致として拒否します。→
+  `approval create --kind html` は既定の timing 入りレポートを再生成し、timing と実行環境に依存する solver 統計の値を正規化しても key は除かないため、`--no-timing` の artifact を fresh rendering と不一致として拒否します。→
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は

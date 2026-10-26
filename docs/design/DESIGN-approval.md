@@ -319,7 +319,7 @@ Markdown is hashed as rendered; its renderer omits only each appendix finding's
 top-level `cost` and `cache`, retaining proof evidence and same-named domain fields.
 This preserves review-visible content while
 preventing solver timing from producing false drift.
-`approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 The approval overlay itself is not part of a ledger target digest. The base
 ledger is rendered and hashed first, then approval status is added. This avoids

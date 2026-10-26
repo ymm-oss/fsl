@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! #1344: timing-free HTML is opt-in, HTML-only, and independent of delivery.
+//! #1344/#1469: timing/ambient-free HTML is opt-in, HTML-only, and delivery-independent.
 //! No existing `.fsl` under specs/examples/native fixtures names `elapsed_s`.
 //! Domain/source same-name preservation therefore remains an implementation-unit
 //! control, not a claim made by these existing-fixture CLI tests.
@@ -12,6 +12,7 @@ use serde_json::Value;
 
 const CLEAN: &str = "rust/fslc/tests/fixtures/sweep_clean.fsl";
 const VIOLATED: &str = "rust/fslc/tests/fixtures/sweep_violating.fsl";
+const AMBIENT_SOLVER_KEYS: [&str; 4] = ["memory_mb", "conflicts", "decisions", "propagations"];
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -83,7 +84,7 @@ fn embedded_json(output: &Output, label: &str) -> Value {
     serde_json::from_str(&json).expect("embedded JSON")
 }
 
-fn assert_four_timing_locations(verification: &Value, explained: &Value, present: bool) {
+fn assert_performance_locations(verification: &Value, explained: &Value, present: bool) {
     let cost = verification["cost"]
         .as_object()
         .expect("cost block is retained");
@@ -99,7 +100,13 @@ fn assert_four_timing_locations(verification: &Value, explained: &Value, present
         solver.contains_key("checks"),
         "do not discard stable check counts"
     );
-    assert!(solver.contains_key("memory_mb"), "not a timing field");
+    for key in AMBIENT_SOLVER_KEYS {
+        assert_eq!(
+            solver.contains_key(key),
+            present,
+            "verification.cost.solver.{key} is ambient, not a stable check count"
+        );
+    }
     assert_eq!(
         solver.contains_key("check_elapsed_s"),
         present,
@@ -247,7 +254,7 @@ fn default_html_preserves_all_four_observed_timing_locations() {
     let run = ReportRun::new("default");
     let output = run.run(&["html", CLEAN, "--depth", "2", "--deadlock", "ignore"]);
     assert_html(&output, 0);
-    assert_four_timing_locations(
+    assert_performance_locations(
         &embedded_json(&output, "verify JSON"),
         &embedded_json(&output, "explain JSON"),
         true,
@@ -255,11 +262,11 @@ fn default_html_preserves_all_four_observed_timing_locations() {
 }
 
 #[test]
-fn no_timing_removes_only_the_four_execution_timing_locations() {
+fn no_timing_removes_execution_timings_and_ambient_solver_statistics() {
     let run = ReportRun::new("locations");
     let default = run.run(&["html", CLEAN, "--depth", "2", "--deadlock", "ignore"]);
     assert_html(&default, 0);
-    assert_four_timing_locations(
+    assert_performance_locations(
         &embedded_json(&default, "verify JSON"),
         &embedded_json(&default, "explain JSON"),
         true,
@@ -274,10 +281,87 @@ fn no_timing_removes_only_the_four_execution_timing_locations() {
         "ignore",
     ]);
     assert_html(&stable, 0);
-    assert_four_timing_locations(
+    assert_performance_locations(
         &embedded_json(&stable, "verify JSON"),
         &embedded_json(&stable, "explain JSON"),
         false,
+    );
+}
+
+/// Membership, not run-to-run equality, detects surviving ambient observations
+/// even when Z3 happens to report identical numbers in every execution.
+#[test]
+fn no_timing_omits_ambient_keys_from_stdout_and_both_output_aliases() {
+    let run = ReportRun::new("ambient-keys");
+    let mut surviving = Vec::new();
+    for engine in ["bmc", "induction"] {
+        let default = run.run(&[
+            "html",
+            CLEAN,
+            "--depth",
+            "2",
+            "--deadlock",
+            "ignore",
+            "--engine",
+            engine,
+        ]);
+        assert_html(&default, 0);
+        let verification = embedded_json(&default, "verify JSON");
+        for key in AMBIENT_SOLVER_KEYS {
+            assert!(
+                verification["cost"]["solver"][key].is_number(),
+                "live default {engine} solver statistic {key}: {verification}"
+            );
+        }
+        let default_html = std::str::from_utf8(&default.stdout).expect("UTF-8 default HTML");
+        for key in ["elapsed_s", "check_elapsed_s"]
+            .into_iter()
+            .chain(AMBIENT_SOLVER_KEYS)
+        {
+            assert!(
+                default_html.contains(&format!("&quot;{key}&quot;:")),
+                "dead ambient-key exclusion: default {engine} HTML lacks {key}"
+            );
+        }
+        for delivery in ["stdout", "-o", "--output"] {
+            let path = run.0.join(format!("ambient-{engine}-{delivery}.html"));
+            let mut args = vec![
+                "html",
+                CLEAN,
+                "--no-timing",
+                "--depth",
+                "2",
+                "--deadlock",
+                "ignore",
+                "--engine",
+                engine,
+            ];
+            if delivery != "stdout" {
+                args.extend([delivery, path.to_str().expect("UTF-8 output path")]);
+            }
+            let output = run.run(&args);
+            let bytes = if delivery == "stdout" {
+                assert_html(&output, 0);
+                output.stdout
+            } else {
+                assert_eq!(output.status.code(), Some(0), "{output:?}");
+                std::fs::read(&path).expect("generated HTML file")
+            };
+            let html = std::str::from_utf8(&bytes).expect("UTF-8 timing-free HTML");
+            assert!(html.starts_with("<!doctype html>"));
+            for key in ["elapsed_s", "check_elapsed_s"]
+                .into_iter()
+                .chain(AMBIENT_SOLVER_KEYS)
+            {
+                if html.contains(&format!("&quot;{key}&quot;:")) {
+                    surviving.push(format!("{engine}/{delivery}: ambient key {key} remains"));
+                }
+            }
+        }
+    }
+    assert!(
+        surviving.is_empty(),
+        "--no-timing must omit every ambient key everywhere in HTML: {surviving:#?}"
     );
 }
 
