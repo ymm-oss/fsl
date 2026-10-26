@@ -1005,6 +1005,23 @@ fn rewrite_param(param: Param, component: &Component) -> Result<Param, Typecheck
     })
 }
 
+/// Match model normalization without changing surface item order: guards see
+/// preceding guards; every statement and ensures sees the final guard scope.
+fn map_normalized_action_items<S, E>(
+    mut items: Vec<ActionItem>,
+    scope: &mut S,
+    mut rewrite: impl FnMut(ActionItem, &mut S) -> Result<ActionItem, E>,
+) -> Result<Vec<ActionItem>, E> {
+    for guards in [true, false] {
+        for item in &mut items {
+            if matches!(item, ActionItem::Requires(..) | ActionItem::Let(..)) == guards {
+                *item = rewrite(item.clone(), scope)?;
+            }
+        }
+    }
+    Ok(items)
+}
+
 fn rewrite_action_items(
     items: Vec<ActionItem>,
     component: &Component,
@@ -1012,30 +1029,26 @@ fn rewrite_action_items(
     action_span: fsl_syntax::Span,
 ) -> Result<Vec<ActionItem>, TypecheckError> {
     let mut bound = bound.clone();
-    items
-        .into_iter()
-        .map(|item| {
-            Ok(match item {
-                ActionItem::Requires(expr, span) => {
-                    let expr = rewrite_expr_at(expr, component, &bound, action_span)?;
-                    extend_pattern_names(&expr, &mut bound);
-                    ActionItem::Requires(expr, span)
-                }
-                ActionItem::Ensures(expr, span) => ActionItem::Ensures(
-                    rewrite_expr_at(expr, component, &bound, action_span)?,
-                    span,
-                ),
-                ActionItem::Let(name, expr, span) => {
-                    let expr = rewrite_expr_at(expr, component, &bound, action_span)?;
-                    bound.insert(name.clone());
-                    ActionItem::Let(name, expr, span)
-                }
-                ActionItem::Statement(statement) => {
-                    ActionItem::Statement(rewrite_statement(statement, component, &bound)?)
-                }
-            })
+    map_normalized_action_items(items, &mut bound, |item, bound| {
+        Ok(match item {
+            ActionItem::Requires(expr, span) => {
+                let expr = rewrite_expr_at(expr, component, bound, action_span)?;
+                extend_pattern_names(&expr, bound);
+                ActionItem::Requires(expr, span)
+            }
+            ActionItem::Ensures(expr, span) => {
+                ActionItem::Ensures(rewrite_expr_at(expr, component, bound, action_span)?, span)
+            }
+            ActionItem::Let(name, expr, span) => {
+                let expr = rewrite_expr_at(expr, component, bound, action_span)?;
+                bound.insert(name.clone());
+                ActionItem::Let(name, expr, span)
+            }
+            ActionItem::Statement(statement) => {
+                ActionItem::Statement(rewrite_statement(statement, component, bound)?)
+            }
         })
-        .collect()
+    })
 }
 
 fn rewrite_statements(
@@ -2132,38 +2145,35 @@ fn resolve_alias_action_items(
     context: ComposeWriteContext,
 ) -> Result<Vec<ActionItem>, CoreError> {
     let mut bound = bound.clone();
-    items
-        .into_iter()
-        .map(|item| {
-            Ok(match item {
-                ActionItem::Requires(expr, span) => {
-                    let expr = resolve_alias_expr_scoped(expr, components, span, &bound)?;
-                    extend_pattern_names(&expr, &mut bound);
-                    ActionItem::Requires(expr, span)
-                }
-                ActionItem::Ensures(expr, span) => ActionItem::Ensures(
-                    resolve_alias_expr_scoped(expr, components, span, &bound)?,
-                    span,
-                ),
-                ActionItem::Let(name, expr, span) => {
-                    let expr = resolve_alias_expr_scoped(expr, components, span, &bound)?;
-                    bound.insert(name.clone());
-                    ActionItem::Let(name, expr, span)
-                }
-                ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
-                    statement, components, &bound, context,
-                )?),
-            })
+    map_normalized_action_items(items, &mut bound, |item, bound| {
+        Ok(match item {
+            ActionItem::Requires(expr, span) => {
+                let expr = resolve_alias_expr_scoped(expr, components, span, bound)?;
+                extend_pattern_names(&expr, bound);
+                ActionItem::Requires(expr, span)
+            }
+            ActionItem::Ensures(expr, span) => ActionItem::Ensures(
+                resolve_alias_expr_scoped(expr, components, span, bound)?,
+                span,
+            ),
+            ActionItem::Let(name, expr, span) => {
+                let expr = resolve_alias_expr_scoped(expr, components, span, bound)?;
+                bound.insert(name.clone());
+                ActionItem::Let(name, expr, span)
+            }
+            ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
+                statement, components, bound, context,
+            )?),
         })
-        .collect()
+    })
 }
 
 /// Substitute a component action's parameters by a sync reference's arguments
 /// throughout the action's items, respecting every binder in scope (#1254).
 ///
-/// `let` bindings scope over the items after them, so they are processed in
-/// order: a `let` shadows a parameter of the same name for the rest of the
-/// action, and a `let` whose name occurs free in an argument (`go(y) =
+/// Guards are processed in order; every body/ensures uses their final scope,
+/// regardless of source position. A `let` shadows a parameter in later guards
+/// and every body/ensures, and a `let` whose name occurs free in an argument (`go(y) =
 /// c.poke(y)` against `let y = 0`) or in `avoid` is renamed to a fresh name,
 /// so neither the argument nor a later sync part reading that name is
 /// captured by it. `avoid` collects the names the composed action's other
@@ -2184,38 +2194,42 @@ fn substitute_action_items(
         collect_action_item_names(item, &mut names);
     }
     let mut current = replacements.clone();
-    items
-        .into_iter()
-        .map(|item| match item {
-            ActionItem::Requires(expr, span) => {
-                ActionItem::Requires(substitute(expr, &current, &indexed), span)
-            }
-            ActionItem::Ensures(expr, span) => {
-                ActionItem::Ensures(substitute(expr, &current, &indexed), span)
-            }
-            ActionItem::Let(name, expr, span) => {
-                let value = substitute(expr, &current, &indexed);
-                current.remove(&name);
-                let captures = avoid.contains(&name)
-                    || current
-                        .values()
-                        .any(|replacement| free_vars(replacement).contains(&name));
-                let name = if captures {
-                    let fresh = fresh_binding_name(&name, &names);
-                    names.insert(fresh.clone());
-                    current.insert(name, Expr::Var(fresh.clone()));
-                    fresh
-                } else {
-                    name
-                };
-                avoid.insert(name.clone());
-                ActionItem::Let(name, value, span)
-            }
-            ActionItem::Statement(statement) => {
-                ActionItem::Statement(substitute_statement(statement, &current))
-            }
-        })
-        .collect()
+    let rewritten: Result<_, std::convert::Infallible> =
+        map_normalized_action_items(items, &mut current, |item, current| {
+            Ok(match item {
+                ActionItem::Requires(expr, span) => {
+                    ActionItem::Requires(substitute(expr, current, &indexed), span)
+                }
+                ActionItem::Ensures(expr, span) => {
+                    ActionItem::Ensures(substitute(expr, current, &indexed), span)
+                }
+                ActionItem::Let(name, expr, span) => {
+                    let value = substitute(expr, current, &indexed);
+                    current.remove(&name);
+                    let captures = avoid.contains(&name)
+                        || current
+                            .values()
+                            .any(|replacement| free_vars(replacement).contains(&name));
+                    let name = if captures {
+                        let fresh = fresh_binding_name(&name, &names);
+                        names.insert(fresh.clone());
+                        current.insert(name, Expr::Var(fresh.clone()));
+                        fresh
+                    } else {
+                        name
+                    };
+                    avoid.insert(name.clone());
+                    ActionItem::Let(name, value, span)
+                }
+                ActionItem::Statement(statement) => {
+                    ActionItem::Statement(substitute_statement(statement, current))
+                }
+            })
+        });
+    match rewritten {
+        Ok(items) => items,
+        Err(never) => match never {},
+    }
 }
 
 fn collect_action_item_names(item: &ActionItem, names: &mut HashSet<String>) {

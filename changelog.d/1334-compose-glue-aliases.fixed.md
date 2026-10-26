@@ -8,5 +8,7 @@ update target. Compose init can initialize component state through `alias.var`;
 overlap with the component's own init is rejected by the existing duplicate
 initialization check, never resolved by picking one assignment. Component
 invariants continue to check glue writes. Alias resolution
-respects parameters, sequential lets, quantifiers, aggregates, patterns, and
-temporal binders, so a local binding named like an alias keeps its referent.
+respects parameters, model-normalized guard bindings, quantifiers, aggregates,
+patterns, and temporal binders. Guards see preceding bindings; body statements
+and ensures see the final guard scope regardless of their source position, so a
+local binding named like an alias keeps its referent.

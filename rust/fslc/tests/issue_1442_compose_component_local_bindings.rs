@@ -446,3 +446,103 @@ fn preservation_type_error_keeps_component_location() {
     );
     assert_same(direct, check(&dir, "system.fsl"), false);
 }
+
+fn checked_late_guard_source(body: &str) -> String {
+    let source = SHADOW.replace("let on = true seen = on", body);
+    let dir = pair("Shadow", &source);
+    let direct = check(&dir, "component.fsl");
+    assert_eq!(direct.1, 0, "late guard direct check: {}", direct.0);
+    source
+}
+
+verify_test!(
+    detector_late_let_body_bmc,
+    "Shadow",
+    checked_late_guard_source("seen = on let on = true"),
+    "bmc"
+);
+verify_test!(
+    detector_late_let_body_bfs,
+    "Shadow",
+    checked_late_guard_source("seen = on let on = true"),
+    "explicit"
+);
+
+#[test]
+fn detector_late_let_body_monitor() {
+    replay_let(
+        "Shadow",
+        &checked_late_guard_source("seen = on let on = true"),
+        "observe",
+    );
+}
+
+verify_test!(
+    detector_guard_values_use_only_preceding_guards,
+    "Shadow",
+    checked_late_guard_source("let captured = on seen = on let on = true requires not captured"),
+    "bmc"
+);
+
+#[test]
+fn preservation_late_requires_pattern_supplies_the_body_binding() {
+    let source = SHADOW
+        .replace(
+            "on: Bool, seen: Bool",
+            "on: Bool, seen: Bool, opt: Option<Bool>",
+        )
+        .replace(
+            "on = false seen = false",
+            "on = false seen = false opt = some(true)",
+        )
+        .replace(
+            "let on = true seen = on",
+            "seen = v requires opt is some(v)",
+        );
+    let dir = pair("Shadow", &source);
+    assert_eq!(check(&dir, "component.fsl").1, 0);
+    verify_pair("Shadow", &source, "bmc");
+}
+
+#[test]
+fn detector_sync_copy_late_let_shadows_the_substituted_parameter() {
+    let source = SHADOW.replace(
+        "observe() { let on = true seen = on",
+        "observe(on: Bool) { seen = on let on = true",
+    );
+    let composed = "compose System { use Shadow as a from \"component.fsl\" internal a.observe action together() = a.observe(false) { } }";
+    let dir = scratch(
+        "issue-1442-late-sync",
+        &[("component.fsl", &source), ("system.fsl", composed)],
+    );
+    for file in ["component.fsl", "system.fsl"] {
+        let checked = check(&dir, file);
+        assert_eq!(checked.1, 0, "{}", checked.0);
+    }
+    let direct = compose_scratch::verify(&dir, "component.fsl");
+    assert_eq!(direct.1, 0, "{}", direct.0);
+    let composed = compose_scratch::verify(&dir, "system.fsl");
+    assert_eq!(composed.1, direct.1, "{}", composed.0);
+    assert_eq!(composed.0["result"], direct.0["result"]);
+    assert_eq!(
+        composed.0["reachables"]["a.Seen"]["witness"][1]["state"]["a.seen"],
+        true
+    );
+}
+
+#[test]
+fn detector_earlier_ensures_reads_the_later_let_binding() {
+    let source = SHADOW
+        .replace(
+            "let on = true seen = on",
+            "seen = true ensures on let on = true",
+        )
+        .replace("  reachable Seen { seen }\n", "");
+    let dir = pair("Shadow", &source);
+    let direct_check = check(&dir, "component.fsl");
+    assert_eq!(direct_check.1, 0, "{}", direct_check.0);
+    let direct = compose_scratch::verify(&dir, "component.fsl");
+    assert_eq!(direct.1, 0, "{}", direct.0);
+    assert_eq!(direct.0["result"], "verified");
+    assert_same(direct, compose_scratch::verify(&dir, "system.fsl"), true);
+}

@@ -448,3 +448,31 @@ fn a1334_shadow_pattern_in_expression_branch_is_not_a_component_alias() {
         "action glue() { seen = if opt is some(BINDING) then BINDING.on else false }",
     );
 }
+
+#[test]
+fn a1334_late_let_binds_an_earlier_glue_statement() {
+    shadowed_alias_case(
+        "  state { seen: Bool }\n  init { seen = false }\n  action glue() { seen = BINDING.on let BINDING = b.r }\n  invariant NotSeen { not seen }",
+    );
+}
+
+#[test]
+fn a1334_late_let_binds_an_earlier_sync_additional_statement() {
+    shadowed_alias_case(
+        "  state { seen: Bool }\n  init { seen = false }\n  action s() = b.stay() { seen = BINDING.on let BINDING = b.r }\n  invariant NotSeen { not seen }",
+    );
+}
+
+#[test]
+fn a1334_ensures_uses_the_binding_of_a_later_let() {
+    shadowed_alias_case(
+        "  state { seen: Bool }\n  init { seen = false }\n  action glue() { ensures not BINDING.on seen = true let BINDING = b.r }",
+    );
+}
+
+#[test]
+fn a1334_late_requires_pattern_supplies_the_body_binding() {
+    shadowed_alias_case(
+        "  state { opt: Option<Bool>, seen: Bool }\n  init { opt = some(true) seen = false }\n  action glue() { seen = BINDING requires opt is some(BINDING) }\n  invariant NotSeen { not seen }",
+    );
+}
