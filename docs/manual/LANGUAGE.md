@@ -886,6 +886,29 @@ have authored static locations rather than unlocated runtime errors. Inherited
 56 removals and six additions in this expanded inventory. These are not new
 #1459 changes; the design amendment records the full attribution and controls.
 
+Review round 1 closes a further self-relation selection gap: both branches of a
+conditional relation operand are checked, even when unselected, including nested
+conditionals, `old`, relation add/remove receivers and action-local let aliases.
+Inference cannot hide an `N -> M` branch behind a self-relation then branch.
+Projection-inference errors retain the authored enclosing or more precise inner
+origin; empty literals do not replace the substantive relation diagnostic.
+Range-bound errors and terminal errors also use their authored origins, not a
+generated 1:1 location. Numeric/Set compatibility and valid dynamic verdicts
+are unchanged. These claims concern the expression trees visited by the shared
+validator; helpful action arguments still have only existence/arity checking,
+not parameter-type checking. Unsupported relation-valued temporary collections
+are separate upstream work, not newly supported by this fix.
+
+The round-1 delta compares BASE `33d7faa7` with HEAD `8caf5c2e`: **42 additional
+mode-form removals (21 source occurrences)** for non-self selections, and **24
+diagnostic reclassifications (12 occurrences)**—projection inference 16,
+range-bound origins six, terminal origins two. The latter stay
+`error/semantics/2`. The expanded audit retains 591 corpus files and 447 inline
+occurrences (1,038 forms); both modes twice across four own-built trees give
+16,608 checks, including the separate previous-fix baseline. All 8,304 repeat
+pairs agree in full; no fields/forms are excluded and no corpus output changes.
+Inherited/R0 changes are separated from R1 in the design amendment.
+
 Top-level temporal sugar:
 
 ```fsl

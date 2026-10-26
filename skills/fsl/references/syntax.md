@@ -974,6 +974,24 @@ runtime errors. The expanded inventory separately retains inherited #1439
 attribute these to #1459. Full accounting and calibrated controls are in the
 design amendment.
 
+Review round 1: self-relation identity follows both conditional branches
+(nested/unselected included), `old`, relation add/remove receivers and action
+let aliases. A self-typed then branch cannot hide a selectable N→M branch.
+Projection equality retains the real relation error over context-needed empty
+literals and keeps the authored/precise inner origin; range bounds and terminal
+also avoid generated1:1 origins. Numeric/Set compatibility and valid verdicts
+are unchanged. This describes visited expression trees, not blanket helpful
+argument typing (currently action existence/arity only) or support for
+relation-valued temporary collections; both gaps remain upstream work.
+
+R1 delta BASE `33d7faa7` → HEAD `8caf5c2e`: 42 additional mode-form removals
+(21 source occurrences) and 24 diagnostic reclassifications (12 occurrences:
+projection inference 16, range origins 6, terminal origins 2), all latter still
+error/semantics/2. Expanded inventory: 591 corpus + 447 inline = 1,038 forms;
+both modes twice in four own-built trees, 16,608 checks including the separate
+R0 baseline. All 8,304 full repeat pairs agree, no field/form exclusions or
+corpus drift. Keep inherited/R0 changes distinct from this R1 delta.
+
 ## 4. Statements (init / action body)
 
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`

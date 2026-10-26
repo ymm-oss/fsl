@@ -37,3 +37,22 @@ remain error/semantics/2 but change from unlocated runtime failures to authored
 static diagnostics. Inherited #1439 (86 removals/11 reclassifications) and #1458
 (56 removals/6 additions) are accounted separately in the expanded inventory,
 not counted as new #1459 behavior. The design amendment records full evidence.
+
+Review round 1 also rejects non-self selections hidden behind conditional
+then-branch inference, through nesting, old, relation add/remove receivers and
+action let aliases. Projection equality preserves substantive relation errors
+over context-needed empty literals and retains authored locations; range bounds
+and terminal no longer report generated1:1 origins for authored input. Existing
+numeric/Set compatibility and valid dynamic verdicts are unchanged. The checked
+positions do not include parameter-type validation of helpful arguments, and
+this does not add relation-valued temporary collection support; those gaps are
+separate upstream work.
+
+Round-1 delta BASE 33d7faa7 to HEAD 8caf5c2e: 42 additional mode-form removals
+(21 source occurrences) and 24 diagnostic reclassifications (12 occurrences:
+projection inference 16, range-bound origins six, terminal origins two). The
+diagnostic changes retain error/semantics/2. The expanded 591-corpus/447-inline
+inventory (1,038 forms) runs both modes twice in four own-built trees, 16,608
+checks including the separate previous-fix baseline. All 8,304 repeat pairs
+agree in full, with no exclusions or corpus output drift. Inherited/R0 changes
+are accounted separately, not attributed to round 1.

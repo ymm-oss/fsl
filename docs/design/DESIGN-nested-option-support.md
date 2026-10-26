@@ -641,9 +641,12 @@ This amendment closes six remaining shared-checker gaps. It changes neither
 grammar/lowering nor runtime/verifier semantics. Invalid authored expressions
 now fail during model loading, with `kind: semantics`, exit 2, and the existing
 authored expression origin; generated aggregate terms must not replace that
-origin with 1:1. All expression positions are checked, including unselected
-conditional branches, action assignments, guards and ensures, and trace
-expectations/arguments.
+origin with 1:1. These checks cover expression trees visited by the shared
+validator: unselected conditional branches, initializers, action assignments,
+guard/let values and ensures, properties, leadsTo predicates/ranking, terminal
+predicates, and trace expression internals. This does not claim parameter-type
+checking of helpful action arguments: their current check is action existence
+and arity only. Outer trace argument kinds retain their existing replay contract.
 
 | Breaking removal category | Previously accepted examples now rejected |
 |---|---|
@@ -763,7 +766,7 @@ The expanded controls add 16 inherited unary-filter removals and eight
 head/at trace-location reclassifications; eight endpoint-calibration removals
 and two numeric-Set assignment removals remain #1458, not new #1459 behavior.
 The six additions are the two-mode count, enum set-literal equality and enum
-Set assignment forms already restored by #1458. Direct BASE→HEAD comparison
+Set assignment forms added by #1458. Direct BASE→HEAD comparison
 has **390 removals, 71 diagnostic reclassifications, six additions and 1,483
 fully unchanged pairs**, out of 1,950 mode-form pairs.
 
@@ -778,6 +781,129 @@ package suites pass, native LSP/Worker rows run twice, formatting passes, and
 final scoped Clippy has only the separately authorized #1444 dead-code warning.
 This is source-boundary and routing evidence, not independent semantic
 triangulation or an unbounded-verification claim.
+
+#### Final review round 1 (#1459)
+
+Review of `33d7faa7` found that exact endpoint identity was still checked only
+on an operand's inferred type. Conditional inference uses the then branch,
+and ordinary numeric compatibility permitted a non-self else branch to pass.
+The self-relation check now visits both branches, including nesting and
+unselected branches, through `old` and relation add/remove receivers. Action
+lets retain a separate private identity guarantee computed before each binding,
+so two-step aliases cannot discard a non-self selection. This does not alter
+ordinary numeric or Set compatibility, public type environments or model IR.
+
+All errors leaving recursive expression validation acquire the current authored
+span through the existing insert-if-absent rule; precise inner spans are kept.
+Equality inference distinguishes context-needed literal failures structurally,
+so an empty literal cannot mask a substantive domain/range operand error.
+Range-bound assignability does not manufacture a 1:1 span: the enclosing binder
+supplies the authored origin. Terminal validation uses its stored declaration
+span. Synthetic aggregate/partial-path spans and legacy APIs without a supplied
+source span are not reclassified as authored positions.
+
+The inference call-site audit covers the original 20 typecheck calls, three
+post-validation Public Kernel projection calls and two partial-operation calls
+that consume inference errors. Recursive type inference, index/method helpers,
+binary operand inference, pattern extension and aggregate normalization now
+leave validation through the common authored boundary. `expression_type` and
+assignability already attach caller spans. The former repeated raw let inference
+is span-bound; the three new branch/receiver inferences are covered by the same
+boundary or the action-span mapping during let capture. Public projection runs
+only after full expression/model validation; its raw calls cannot be the first
+diagnostic for invalid authored input. Partial-operation classification consumes
+its two errors rather than returning them as diagnostics.
+
+The `unknown_span` inventory identifies one authored-model use in the model
+expression validator: terminal, now replaced by `terminal_span`. The two range
+bound calls are also fixed. Remaining uses are generated aggregate conditionals,
+generated quantified partial paths, source-span-less legacy expression APIs,
+and declaration-annotation fallbacks (the no-target case is unused). KPI loading
+explicitly restores the projection declaration origin. A source-less programmatic
+model without a terminal span retains the legacy fallback; an authored terminal
+does not use it.
+
+Two scope clarifications remain explicit. `helpful` actions currently check only
+existence and arity, not argument expression/parameter types; that pre-existing
+gap is routed upstream, not fixed here. Relation-valued temporary collection
+literals are not generalized by the self-relation provenance fix: a mixed
+relation sequence can check while both engines reject it because such sequences
+are unsupported. That separate constructor-acceptance gap is likewise routed
+upstream. Neither is evidence for claiming all language expression positions
+or temporary constructors are supported.
+
+Round-1 implementation HEAD is `8caf5c2ed9e1aa15238dcde1b3a66bb4ccf9c857`.
+The primary BASE/parent/HEAD comparison remains `e8cf78f0` / `764a00c3` / this
+HEAD. A **fourth own-tree baseline** was freshly materialized with
+`git archive 33d7faa7` and built from its own source paths, starting without a
+target directory. It was not a copy of the old working-tree executable.
+
+| R1 state | CLI binary SHA-256 | Checker source SHA-256 |
+|---|---|---|
+| R0 `33d7faa7` own-tree baseline | `365a2474809cbf2bb773ace0c2fb23b25e5b301d08f977feec8d86dbb0ed1cd7` | `08ac6ec27e100b7b6832aabac302137be071b88ca847a523bcbc4e984c66078e` |
+| R1 HEAD `8caf5c2e` | `d04df10f36e1140ba18e22d8d7e6b32a5b33987ddb97daf0c2d01456d9533b38` | `5f80538cfaac2b261068ca8cb22037a0d3278ad9fd4c27bae83d7a6c140c4411` |
+
+The earlier two own-tree baselines retain their recorded binary/source hashes.
+The census command and cache/feature-mode `check FORM` commands are the same as
+above. All **591 corpus files** and the original **384 inline occurrences**
+retain their source hashes; 46 review fixtures and 17 supplementary path/origin
+fixtures add **63 forms**, yielding **447 inline / 1,038 total forms per tree**.
+The primary three-tree measurement has **12,456 checks**, with **4,152 additional
+33d checks** for attribution: **16,608 total**, stable/fsl5 twice in all four
+trees. Twenty-four calibration calls prove the original Option/endpoint gates
+and, separately, the conditional-self detector (accepted by `33d7faa7`, rejected
+by R1), each twice per state.
+
+Fresh-baseline/head builds, calibration, all four measurement passes, comparison
+and audit ran under **one lane-D-then-heavy acquisition**. Before every Cargo
+start/binary, uptime was checked inside the locks and load ≥9 paused the run.
+Observed measurement load was 1.46–3.95. Wrapper exit is **0**; wall time is
+**613.81 s including lock wait / 613.71 s inside locks including the fresh build**.
+All **8,304 repeat pairs** agree in full stdout/JSON/stderr/exit. There are **no
+excluded forms or fields**, no corpus ok→error transitions, and no other corpus
+output drift in any comparison.
+
+| R1-only change, `33d7faa7` → `8caf5c2e` | Source occurrences | Mode-forms |
+|---|---:|---:|
+| Non-self conditional selections through supported wrappers/aliases, now rejected | 21 | 42 removals |
+| Projection inference origin/primary-diagnostic correction | 8 | 16 reclassifications |
+| Range-bound generated 1:1 → authored origin | 3 | 6 reclassifications |
+| Terminal generated 1:1 → authored origin | 1 | 2 reclassifications |
+
+Thus R1 adds **42 removals and 24 diagnostic reclassifications**, no additions,
+with **2,010 unchanged pairs** out of 2,076. Every reclassification remains
+`error/semantics/2`: eight source forms formerly had no location and four had
+generated 1:1; all now have the expected authored location. Two of the eight
+also replace a context-needed empty-literal error with the substantive
+domain/range error. The precise-inner-origin control remains unchanged.
+
+| Full expanded comparison | Removed mode-forms | Diagnostic reclassifications | Additions | Unchanged |
+|---|---:|---:|---:|---:|
+| BASE → parent | 142 | 11 | 8 | 1,915 |
+| Parent → R0 `33d7faa7` | 274 | 64 | 0 | 1,738 |
+| R0 → R1 | 42 | 24 | 0 | 2,010 |
+| Parent → R1 | 316 | 66 | 0 | 1,694 |
+| BASE → R1 | 458 | 77 | 8 | 1,533 |
+
+The larger fixture set does not retroactively change the earlier 975-form audit.
+Inherited #1439 still contributes 86 removals/11 reclassifications; inherited
+#1458 contributes 56 removals and now eight additions (including the additional
+enum-projection equality control). The parent→R0 edge adds 26 removals and four
+diagnostic changes on new fixtures to the earlier 248/60 counts. The latter are
+the two-mode Boolean/projection aggregate-range-bound forms: the parent's static
+range-bound error becomes the R0 specific operand error at 1:1, then R1 attaches
+the authored origin. Do not add edge reclassification counts blindly: a form
+already removed by R0 can have a further diagnostic correction in R1.
+
+Final-code V1 runs all four immutable targets twice: **28 + 17 + 30 + 13 = 88
+tests**, none ignored. Reverting only R1 production to exact `33d7faa7` behavior
+produces **33 intended detector failures and 55 passes**, including all 45 earlier
+tests and ten new controls. Produced reasons are 21 false-green check tuples,
+six missing locations, four generated-1:1 locations and two masked substantive
+errors; exact checker/diff and all four hashes are restored. Requested R1 scoped
+packages pass **2,414 tests**, formatting passes, and scoped Clippy retains only
+the separately authorized #1444. No new allowance or existing-test rewrite is
+used. These are bounded source/type and routing checks, not an assurance upgrade.
 
 ## 5. Lossless public observation and replay
 
