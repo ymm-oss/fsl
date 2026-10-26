@@ -906,7 +906,7 @@ fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutan
                                                  # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
-fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
+fslc html      <file.fsl> [--depth K] [-o report.html] [--no-timing] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
                [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
@@ -1054,6 +1054,14 @@ When the target reaches `proved`, `auxiliary_invariant_recommendation` emits the
 declarations to persist in the source; the command never rewrites the file.
 There is no unverified-assumption mode. `--lemma` with the BMC engine is a usage
 error. Candidate text/order is part of the verification cache key.
+
+The sweep envelope is a function of its inputs apart from `cache` and timing
+execution metadata. For stable comparisons, exclude `cost` and `cache` only at
+the root of each verification envelope (`sweep.results[].verification` and
+`sweep.minimal_counterexample.verification` when present), as approval's
+`stable_json` does; preserve same-named fields in domain state. Cache provenance
+is not verdict evidence. Sweep has no `--no-cache` option; use `FSLC_CACHE=off`
+to disable cache reads and writes.
 
 `sweep` is an opt-in wrapper around `verify`; it does not change normal
 verification. It evaluates a deterministic grid of `--instances NAME=lo..hi`,
@@ -3351,7 +3359,18 @@ DESIGN-*.md).
   evidence: status summary, state/action/property tables, an action-to-state
   write graph, trace timelines, witness examples, counterfactuals, source, and
   raw JSON. It is meant for PRs, design reviews, and non-specialist project
-  review without requiring the reader to run the CLI. →
+  review without requiring the reader to run the CLI. By default it retains
+  nondeterministic timings. HTML-only `--no-timing` (default false, no alias)
+  omits only `verification.cost.elapsed_s`,
+  `verification.cost.solver.check_elapsed_s`,
+  `verification.cost.properties[].elapsed_s`, and
+  `explained.counterfactuals[].violation.cost.elapsed_s` from presentation
+  copies before rendering, on stdout and in `-o`/`--output` files alike.
+  Source and domain-state fields, counts, property identities, and other
+  statistics remain intact; ordinary verify JSON and exit codes are unchanged.
+  This supports byte-stable comparison for the same input path, source,
+  options, and toolchain, not normalization across paths, backends, or
+  environments. →
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 The discipline before writing (the formalization memo, the NL→syntax reverse

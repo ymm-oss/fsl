@@ -871,7 +871,7 @@ fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutan
                                                  # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
-fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
+fslc html      <file.fsl> [--depth K] [-o report.html] [--no-timing] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
                [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
@@ -1012,6 +1012,14 @@ Public Kernel v2 はオプトインで、
 コマンドがファイルを書き換えることは決してありません。未検証の仮定モードは
 ありません。BMC エンジンでの `--lemma` は使用法エラーです。候補のテキストと順序は
 検証キャッシュのキーの一部です。
+
+sweep の envelope は、実行メタデータの `cache` と timing を除けば入力の関数です。
+安定した比較では approval の `stable_json` と同じく、各 verification envelope
+(`sweep.results[].verification` と、存在する場合の
+`sweep.minimal_counterexample.verification`)の root だけから `cost` と `cache` を
+除外し、domain state 内の同名フィールドは保持します。cache の由来は verdict の
+エビデンスではありません。sweep に `--no-cache` オプションはありません。
+cache の読み書きを止めるには `FSLC_CACHE=off` を使います。
 
 `sweep` は `verify` のオプトインのラッパーで、通常の検証を変えません。
 `--instances NAME=lo..hi`、`--values NAME=lo..hi`、`--depth lo..hi` の上書きの
@@ -3242,7 +3250,17 @@ DESIGN-*.md があります)。
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
-  非専門家によるプロジェクトレビューに使うためのものです。→
+  非専門家によるプロジェクトレビューに使うためのものです。既定では非決定的な
+  timing を保持します。HTML 専用の `--no-timing`(既定 false、別名なし)は、
+  `verification.cost.elapsed_s`、
+  `verification.cost.solver.check_elapsed_s`、
+  `verification.cost.properties[].elapsed_s`、
+  `explained.counterfactuals[].violation.cost.elapsed_s` だけを、描画前の
+  presentation 用の写しから省きます。stdout と `-o`/`--output` のファイルの両方に
+  効きます。ソースや domain state のフィールド、回数、プロパティの識別情報、
+  その他の統計は保持し、通常の verify JSON や exit code は変えません。
+  同じ入力パス、ソース、オプション、toolchain での byte が安定した比較を支援する
+  もので、異なるパス、backend、環境の間の正規化ではありません。→
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
