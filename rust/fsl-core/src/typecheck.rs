@@ -366,18 +366,12 @@ fn infer_type_inner(
             "abs" => Ok(TypeRef::Int),
             "rel_acyclic" | "rel_functional" | "rel_injective" => Ok(TypeRef::Bool),
             "rel_domain" | "rel_range" => {
-                let element = match resolve(model, &infer_type(expr, env, model, None)?)? {
-                    TypeRef::Relation(source, target) => {
-                        if name == "rel_domain" {
-                            source
-                        } else {
-                            target
-                        }
-                    }
-                    // Non-relation signature validation is separate (#1459).
-                    _ => Box::new(TypeRef::Int),
-                };
-                Ok(TypeRef::Set(element))
+                let (source, target) = relation_operand_types(name, expr, env, model)?;
+                Ok(TypeRef::Set(Box::new(if name == "rel_domain" {
+                    source
+                } else {
+                    target
+                })))
             }
             _ => Err(error(format!("unsupported unary expression '{name}'"))),
         },
@@ -1054,6 +1048,63 @@ fn validate_relation_endpoint(
     validate_expression_in_phase(expr, env, model, span, Some(expected), phase)
 }
 
+fn relation_operand_types(
+    name: &str,
+    operand: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<(TypeRef, TypeRef), TypecheckError> {
+    let public_name = name.strip_prefix("rel_").unwrap_or(name);
+    match resolve(model, &infer_type(operand, env, model, None)?)? {
+        TypeRef::Relation(source, target) => Ok((*source, *target)),
+        _ => Err(error(format!(
+            "{public_name}() requires a relation; hint: use a relation A -> B operand"
+        ))),
+    }
+}
+
+fn validate_self_relation(
+    name: &str,
+    source: &TypeRef,
+    target: &TypeRef,
+) -> Result<(), TypecheckError> {
+    if source != target {
+        let public_name = name.strip_prefix("rel_").unwrap_or(name);
+        return Err(error(format!(
+            "{public_name}() requires a self-relation (relation T -> T); hint: use a relation with the same declared source and target type"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_method_signature(
+    receiver: &TypeRef,
+    name: &str,
+    arity: usize,
+) -> Result<(), TypecheckError> {
+    match (receiver, name, arity) {
+        (TypeRef::Set(_) | TypeRef::Seq(_, _), "contains", 1)
+        | (TypeRef::Set(_), "add" | "remove", 1)
+        | (TypeRef::Set(_) | TypeRef::Seq(_, _), "size", 0)
+        | (TypeRef::Seq(_, _), "push" | "at", 1)
+        | (TypeRef::Seq(_, _), "pop" | "head", 0)
+        | (TypeRef::Relation(_, _), "contains" | "add" | "remove", 2) => Ok(()),
+        (TypeRef::Set(_), _, _) => Err(error(format!("invalid Set method '{name}'/{arity}"))),
+        (TypeRef::Seq(_, _), _, _) => Err(error(format!("invalid Seq method '{name}'/{arity}"))),
+        (TypeRef::Relation(_, _), _, _) => {
+            let hint = if matches!(name, "contains" | "add" | "remove") {
+                format!("; hint: use r.{name}(source, target)")
+            } else {
+                String::new()
+            };
+            Err(error(format!(
+                "invalid relation method '{name}'/{arity}{hint}"
+            )))
+        }
+        _ => Err(error("method receiver has no supported collection methods")),
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn validate_expression_inner(
     expr: &Expr,
@@ -1113,6 +1164,8 @@ fn validate_expression_inner(
             let receiver_ty = resolve(model, &infer_type(receiver, env, model, None)?)?;
             let argument_type = method_argument_type(name, &receiver_ty);
             validate(receiver, env, span, None)?;
+            validate_method_signature(&receiver_ty, name, args.len())
+                .map_err(|error| error.with_span(span))?;
             for (index, argument) in args.iter().enumerate() {
                 let endpoint_type = match (name.as_str(), &receiver_ty, index) {
                     ("contains" | "add" | "remove", TypeRef::Relation(source, _), 0) => {
@@ -1158,9 +1211,27 @@ fn validate_expression_inner(
                 reject_colliding_pattern_binding(binding, env, model, span, phase)?;
             }
             validate(expr, env, span, None)?;
+            if !matches!(
+                resolve(model, &infer_type(expr, env, model, None)?)?,
+                TypeRef::Option(_)
+            ) {
+                return Err(error("'is none/some' requires an Option expression").with_span(span));
+            }
         }
-        Expr::UnaryNamed { expr, .. } => {
-            validate(expr, env, span, None)?;
+        Expr::UnaryNamed { name, expr, .. } => {
+            let expected = (name == "abs").then_some(TypeRef::Int);
+            validate(expr, env, span, expected.as_ref())?;
+            if matches!(
+                name.as_str(),
+                "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range"
+            ) {
+                let (source, target) = relation_operand_types(name, expr, env, model)
+                    .map_err(|error| error.with_span(span))?;
+                if name == "rel_acyclic" {
+                    validate_self_relation(name, &source, &target)
+                        .map_err(|error| error.with_span(span))?;
+                }
+            }
         }
         Expr::Quantified { binder, body, .. } => {
             let child_phase = phase.under_binder(binder, None);
@@ -1215,10 +1286,11 @@ fn validate_expression_inner(
             third,
         } => {
             validate(first, env, span, None)?;
-            if name == "rel_reachable"
-                && let TypeRef::Relation(source, target) =
-                    resolve(model, &infer_type(first, env, model, None)?)?
-            {
+            if name == "rel_reachable" {
+                let (source, target) = relation_operand_types(name, first, env, model)
+                    .map_err(|error| error.with_span(span))?;
+                validate_self_relation(name, &source, &target)
+                    .map_err(|error| error.with_span(span))?;
                 validate_relation_endpoint(second, env, model, span, &source, phase)?;
                 validate_relation_endpoint(third, env, model, span, &target, phase)?;
             } else {

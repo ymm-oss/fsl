@@ -5,6 +5,8 @@ use std::process::Command;
 
 use serde_json::Value;
 
+const OPTION_SOURCE: &str = "spec OptionOperand {\n  type N = 0..2\n  state { n: N }\n  init { n = 0 }\n  action stay() { }\n  invariant P { n is none }\n}\n";
+
 #[test]
 fn trace_step_type_errors_share_native_and_lsp_identity() {
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
@@ -132,6 +134,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             Some((7, 3)),
             None,
         ),
+        ("option-type", OPTION_SOURCE, Some((6, 3)), None),
     ];
 
     for (name, source, expected_location, expected_hint) in cases {
@@ -157,7 +160,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
         assert_eq!(cli["kind"], shared.kind, "{name}");
         assert_eq!(cli["message"], shared.message, "{name}");
         assert_eq!(cli["hint"].as_str(), expected_hint, "{name}");
-        if name == "relation-endpoint-type" {
+        if ["relation-endpoint-type", "option-type"].contains(&name) {
             assert_eq!(shared.code, "FSL-SEMANTIC");
         }
         if name == "acceptance-expect-type" {
