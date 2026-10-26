@@ -1727,10 +1727,16 @@ fn sync_action(
     origins: &mut BTreeMap<String, crate::OriginChain>,
 ) -> Result<SpecItem, CoreError> {
     let (params, bound) = resolve_alias_params(action.params.clone(), components, action.span)?;
+    let additional_items = resolve_alias_action_items(
+        action.items.clone(),
+        components,
+        &bound,
+        ComposeWriteContext::Sync,
+    )?;
     let mut items = Vec::new();
     let mut item_origins = Vec::new();
     let mut fair_constituents = Vec::new();
-    let mut avoid = sync_avoid_names(action, &bound, components)?;
+    let mut avoid = sync_avoid_names(action, &bound, &additional_items, components)?;
     for reference in &action.refs {
         let component = components
             .get(&reference.alias)
@@ -1797,12 +1803,7 @@ fn sync_action(
         items.extend(source_items);
     }
     record_sync_item_origins(origins, &action.name, &items, item_origins);
-    items.extend(resolve_alias_action_items(
-        action.items.clone(),
-        components,
-        &bound,
-        ComposeWriteContext::Sync,
-    )?);
+    items.extend(additional_items);
     if !action.fair && !fair_constituents.is_empty() {
         let refs = fair_constituents.join(", ");
         warnings.push(json!({
@@ -1828,23 +1829,37 @@ fn sync_action(
 
 /// Names a component `let` must not take over in a sync action (see
 /// `substitute_action_items`): the sync action's parameters and every
-/// argument's free names, across all references (#1254).
+/// argument's free names across all references, and the resolved additional
+/// items' free names and final guard bindings (#1254, #1442).
 fn sync_avoid_names(
     action: &SyncAction,
     bound: &HashSet<String>,
+    additional_items: &[ActionItem],
     components: &BTreeMap<String, Component>,
 ) -> Result<HashSet<String>, CoreError> {
     let mut avoid = bound.clone();
     for reference in &action.refs {
         for arg in &reference.args {
-            avoid.extend(free_vars(&resolve_alias_expr_scoped(
-                arg.clone(),
-                components,
-                action.span,
-                bound,
-            )?));
+            collect_expression_names(
+                &resolve_alias_expr_scoped(arg.clone(), components, action.span, bound)?,
+                &mut avoid,
+                Some(bound),
+            );
         }
     }
+    let mut local = bound.clone();
+    map_normalized_action_items(additional_items.to_vec(), &mut local, |item, local| {
+        collect_action_item_names(&item, &mut avoid, Some(local));
+        match &item {
+            ActionItem::Let(name, ..) => {
+                local.insert(name.clone());
+            }
+            ActionItem::Requires(expr, _) => extend_pattern_names(expr, local),
+            ActionItem::Ensures(..) | ActionItem::Statement(_) => {}
+        }
+        Ok::<_, CoreError>(item)
+    })?;
+    avoid.extend(local);
     Ok(avoid)
 }
 
@@ -2174,7 +2189,7 @@ fn resolve_alias_action_items(
 /// so neither the argument nor a later sync part reading that name is
 /// captured by it. `avoid` collects the names the composed action's other
 /// parts read: the sync action's own parameters, every argument's free
-/// names, and the `let`s already emitted by earlier references.
+/// names, additional-item free names, and earlier references' emitted `let`s.
 fn substitute_action_items(
     items: Vec<ActionItem>,
     replacements: &HashMap<String, Expr>,
@@ -2187,7 +2202,7 @@ fn substitute_action_items(
         collect_names(replacement, &mut names);
     }
     for item in &items {
-        collect_action_item_names(item, &mut names);
+        collect_action_item_names(item, &mut names, None);
     }
     let mut current = replacements.clone();
     let rewritten: Result<_, std::convert::Infallible> =
@@ -2228,22 +2243,50 @@ fn substitute_action_items(
     }
 }
 
-fn collect_action_item_names(item: &ActionItem, names: &mut HashSet<String>) {
-    match item {
-        ActionItem::Requires(expr, _) | ActionItem::Ensures(expr, _) => collect_names(expr, names),
-        ActionItem::Let(name, expr, _) => {
-            names.insert(name.clone());
-            collect_names(expr, names);
-        }
-        ActionItem::Statement(statement) => collect_statement_names(statement, names),
+fn collect_expression_names(
+    expr: &Expr,
+    names: &mut HashSet<String>,
+    scope: Option<&HashSet<String>>,
+) {
+    if let Some(bound) = scope {
+        names.extend(
+            free_vars(expr)
+                .into_iter()
+                .filter(|name| !bound.contains(name)),
+        );
+    } else {
+        collect_names(expr, names);
     }
 }
 
-fn collect_statement_names(statement: &Statement, names: &mut HashSet<String>) {
+fn collect_action_item_names(
+    item: &ActionItem,
+    names: &mut HashSet<String>,
+    scope: Option<&HashSet<String>>,
+) {
+    match item {
+        ActionItem::Requires(expr, _) | ActionItem::Ensures(expr, _) => {
+            collect_expression_names(expr, names, scope);
+        }
+        ActionItem::Let(name, expr, _) => {
+            if scope.is_none() {
+                names.insert(name.clone());
+            }
+            collect_expression_names(expr, names, scope);
+        }
+        ActionItem::Statement(statement) => collect_statement_names(statement, names, scope),
+    }
+}
+
+fn collect_statement_names(
+    statement: &Statement,
+    names: &mut HashSet<String>,
+    scope: Option<&HashSet<String>>,
+) {
     match statement {
         Statement::Assign { target, value, .. } => {
-            collect_lvalue_names(target, names);
-            collect_names(value, names);
+            collect_lvalue_names(target, names, scope);
+            collect_expression_names(value, names, scope);
         }
         Statement::If {
             condition,
@@ -2251,32 +2294,47 @@ fn collect_statement_names(statement: &Statement, names: &mut HashSet<String>) {
             else_statements,
             ..
         } => {
-            collect_names(condition, names);
+            collect_expression_names(condition, names, scope);
             for statement in then_statements.iter().chain(else_statements) {
-                collect_statement_names(statement, names);
+                collect_statement_names(statement, names, scope);
             }
         }
         Statement::ForAll {
             binder, statements, ..
         } => {
-            collect_binder_names(binder, names);
+            let nested = scope.map(|bound| {
+                let (free, nested) = crate::free_vars_binder(binder, bound);
+                names.extend(free);
+                nested
+            });
+            if scope.is_none() {
+                collect_binder_names(binder, names);
+            }
             for statement in statements {
-                collect_statement_names(statement, names);
+                collect_statement_names(statement, names, nested.as_ref());
             }
         }
     }
 }
 
-fn collect_lvalue_names(lvalue: &LValue, names: &mut HashSet<String>) {
+fn collect_lvalue_names(
+    lvalue: &LValue,
+    names: &mut HashSet<String>,
+    scope: Option<&HashSet<String>>,
+) {
     match lvalue {
         LValue::Var(name) => {
-            names.insert(name.clone());
+            if scope.is_none() {
+                names.insert(name.clone());
+            }
         }
         LValue::Index(name, expr) => {
-            names.insert(name.clone());
-            collect_names(expr, names);
+            if scope.is_none() {
+                names.insert(name.clone());
+            }
+            collect_expression_names(expr, names, scope);
         }
-        LValue::Field(base, _) => collect_lvalue_names(base, names),
+        LValue::Field(base, _) => collect_lvalue_names(base, names, scope),
     }
 }
 
@@ -2322,7 +2380,7 @@ fn substitute_statement(statement: Statement, replacements: &HashMap<String, Exp
             let original = binder_name(&binder).to_owned();
             let mut body_names = HashSet::new();
             for statement in &statements {
-                collect_statement_names(statement, &mut body_names);
+                collect_statement_names(statement, &mut body_names, None);
             }
             let (binder, _, mut scoped, _) = capture_avoiding_binding_with_names(
                 binder,

@@ -590,3 +590,85 @@ fn detector_then_statement_does_not_export_the_outer_pattern_binding() {
 fn detector_then_expression_does_not_export_the_outer_pattern_binding() {
     nested_then_patterns("seen = if opt is some(u) then (if opt is some(u) then 1 else 0) else 0");
 }
+
+fn sync_addition_free_name(addition: &str, engine: &str) {
+    let part = "spec B { state { flag: Bool } init { flag = true } action go() { let x = false flag = x } }";
+    // Each renamed fixture independently must violate NotY (or accept the
+    // correct Monitor trace), not claim whole-JSON identity of different keys.
+    for free in ["z", "x"] {
+        let property = if engine == "replay" {
+            ""
+        } else {
+            "invariant NotY { not y }"
+        };
+        let source = format!(
+            "compose S {{\n  use B as b from \"b.fsl\"\n  state {{ {free}: Bool, y: Bool }}\n  init {{ {free} = true y = false }}\n  action s() = b.go() {{ {} }}\n  {property}\n}}",
+            addition.replace("FREE", free)
+        );
+        let dir = scratch(
+            "issue-1442-sync-free",
+            &[("b.fsl", part), ("s.fsl", &source)],
+        );
+        let checked = check(&dir, "s.fsl");
+        assert_eq!(checked.1, 0, "{}", checked.0);
+        if engine == "replay" {
+            let mut initial = json!({"b.flag":true,"y":false});
+            initial[free] = json!(true);
+            let mut after = json!({"b.flag":false,"y":true});
+            after[free] = json!(true);
+            let trace = json!({"$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json","schema_version":"1.2.0","kernel_schema_version":"1.0.0","spec":"S","initial":initial,"events":[{"tick":1,"action":"s","params":{},"state":after}]});
+            std::fs::write(dir.join("trace.json"), trace.to_string()).expect("trace fixture");
+            let result = run(&dir, &["replay", "s.fsl", "--trace", "trace.json"]);
+            assert_eq!(result.1, 0, "free={free}: {}", result.0);
+            assert_eq!(result.0["result"], "conformant");
+            assert_eq!(result.0["final_state"]["y"], true);
+        } else {
+            let result = run(
+                &dir,
+                &[
+                    "verify",
+                    "s.fsl",
+                    "--engine",
+                    engine,
+                    "--depth",
+                    "2",
+                    "--no-cache",
+                ],
+            );
+            assert_eq!(result.1, 1, "free={free} engine={engine}: {}", result.0);
+            assert_eq!(result.0["result"], "violated");
+            assert_eq!(result.0["invariant"], "NotY");
+            assert_eq!(result.0["last_action"]["name"], "s");
+        }
+    }
+}
+
+#[test]
+fn detector_sync_additional_requires_bmc() {
+    sync_addition_free_name("requires FREE y = true", "bmc");
+}
+#[test]
+fn detector_sync_additional_requires_bfs() {
+    sync_addition_free_name("requires FREE y = true", "explicit");
+}
+#[test]
+fn detector_sync_additional_requires_monitor() {
+    sync_addition_free_name("requires FREE y = true", "replay");
+}
+#[test]
+fn detector_sync_additional_rhs_bmc() {
+    sync_addition_free_name("y = FREE", "bmc");
+}
+#[test]
+fn detector_sync_additional_rhs_bfs() {
+    sync_addition_free_name("y = FREE", "explicit");
+}
+#[test]
+fn detector_sync_additional_rhs_monitor() {
+    sync_addition_free_name("y = FREE", "replay");
+}
+
+#[test]
+fn detector_sync_additional_let_does_not_capture_the_component_body() {
+    sync_addition_free_name("let FREE = true y = FREE", "replay");
+}

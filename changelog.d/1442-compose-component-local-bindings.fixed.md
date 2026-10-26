@@ -8,3 +8,5 @@ binding that collides with an original component declaration is now rejected
 in compose with the same message, kind, and location as the standalone spec;
 these invalid compositions previously passed `check` after prefixing hid the
 collision. The pattern-collision rule is shared with the ordinary type checker.
+Synchronized component lets are renamed when needed to avoid sync additions'
+free names or final guard bindings, as well as sync parameters and arguments.
