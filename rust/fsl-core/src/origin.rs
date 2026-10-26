@@ -68,18 +68,16 @@ impl OriginChain {
 pub struct OriginRegistry {
     bindings: BTreeMap<String, Vec<OriginChain>>,
     // Source actors are independent of requirement annotations and dialect.
-    action_actors: BTreeMap<String, String>,
+    action_actors: BTreeMap<String, Option<String>>,
 }
 
 impl OriginRegistry {
-    pub(crate) fn bind_action_actor(&mut self, name: &str, actor: String) {
+    pub(crate) fn bind_action_actor(&mut self, name: &str, actor: Option<String>) {
         self.action_actors.insert(action_target(name), actor);
     }
 
-    pub(crate) fn action_actor(&self, name: &str) -> Option<&str> {
-        self.action_actors
-            .get(&action_target(name))
-            .map(String::as_str)
+    pub(crate) fn action_actor(&self, name: &str) -> Option<&Option<String>> {
+        self.action_actors.get(&action_target(name))
     }
 
     pub fn bind(&mut self, target: impl Into<String>, origin: OriginChain) {
@@ -124,6 +122,13 @@ impl OriginRegistry {
             .iter()
             .map(|(target, origins)| (target.as_str(), origins.as_slice()))
     }
+}
+
+pub(crate) fn actor_from_metadata(meta: Option<&MetaTag>) -> Option<&str> {
+    meta.and_then(|tag| tag.text.as_deref())
+        .and_then(|text| text.strip_prefix("by "))
+        .map(str::trim)
+        .filter(|actor| !actor.is_empty())
 }
 
 /// Requirement relations are intentionally separate from declaration/source

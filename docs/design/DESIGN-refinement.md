@@ -66,12 +66,13 @@ refinement CartImplRefinesCart {
   Actor compatibility applies only to automatically synthesized action pairs:
   each side uses its source actor from the registry (the `by X` label for an
   edition 4 process transition), regardless of dialect, edition or requirement
-  text. Actions without a registry entry
-  (raw spec/compose actions and requirements action items, standalone or inside
-  a requirement block) use the existing metadata `by ` prefix rule. Both actors
-  must be available to compare them. Explicit action entries and `stutter` are
+  text. Requirement actions, standalone or inside a block, register their own
+  metadata's `by ` actor, including absence; every generated branch keeps that
+  value. Block text and typed requirement text cannot supply an actor. Only
+  unregistered raw spec/compose actions use the existing metadata `by ` prefix
+  rule. Both actors must be available to compare them. Explicit action entries and `stutter` are
   not actor-checked.
-  See the [#1441 amendment and migration](#migration-1441).
+  See the [#1441 amendment](#migration-1441) and [#1456 migration](#migration-1456).
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
   order). They may be written bare (`u`) or with a type annotation matching the
@@ -840,17 +841,17 @@ transition. One per-action lookup serves both sides, including cross-edition
 4→5/5→4 and typed↔legacy compose pairs. This replaces #1438's private
 `ActionActor` enum with `BTreeMap<String, String>`; it adds no public Kernel,
 `ActionDef`, schema or JSON fields. The legacy metadata rule is retained for
-actions without a registry entry (raw spec/compose actions and requirements
-action items, standalone or inside a requirement block), not for the requirement
-text of registered transitions.
+actions without a registry entry (raw spec/compose actions), not for the requirement
+text of registered transitions. The #1456 amendment below also registers
+requirements action items, standalone or inside a block, including actor absence.
 
 The invariant is that auto-mapped actions with two available source actors
 must compare those actors independently of provenance and traceability text.
 Same-name/parameter matching, explicit correspondence precedence and the
 Auto-only condition are unchanged. `check`, unscoped `verify`, standalone
 `refine` and Worker reject mismatches while constructing the correspondence:
-`result: "error"`, `kind: "type"`, exit 2, at the inline `implements` or
-standalone `maps auto` span, using the existing message, for example:
+`result: "error"`, `kind: "type"`, exit 2, at the implicit inline `implements` or
+explicit `maps auto` span, using the existing message, for example:
 
 ```text
 maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'
@@ -908,8 +909,8 @@ begins with `by ` (covers text and next-edition rule/decide text), not only cove
 Here “next edition” is fsl 5.
 F1 was also measured twice with `refine requirements.fsl business.fsl mapping.fsl
 --depth 6`. These correct sources need no edit; their prose is no longer treated
-as an actor declaration. `verified` here is bounded, not `proved`. Unregistered
-requirements action items retain their metadata-based behavior.
+as an actor declaration. `verified` here is bounded, not `proved`. Requirements
+action items follow the own-actor rule in the #1456 amendment below.
 
 **Migration contract (#702, limited to this change):**
 
@@ -948,6 +949,99 @@ requirements action items retain their metadata-based behavior.
 7. **Rollback:** v5.0.0 is fail-closed, with no compatibility bypass or grace
    period. If problems occur, return to a 4.x binary. No support duration is
    promised. This note does not implement #702's general release gate.
+
+<a id="migration-1456"></a>
+
+## #1456: requirement-action own actors and breaking-source migration
+
+**v5.0.0 amendment (native Rust).** A requirement action's actor comes only from
+its own legacy metadata: text starting with `by `, trimmed to a nonempty actor.
+This applies to actions inside a requirement block, standalone requirements
+actions, and every generated `name__bN` branch, on either side of an automatic
+mapping. The enclosing requirement's ID/text remains traceability, not an actor
+declaration. Typed `@requirement` text does not introduce an actor declaration.
+
+The existing private registry now stores `BTreeMap<String, Option<String>>`:
+a registered actor wins; registered absence ends lookup without consulting block
+text; only an unregistered raw spec/compose action uses the existing metadata
+rule. One shared prefix extractor serves both paths. The public metadata priority
+is unchanged, as are `ActionDef`, Kernel v1/v2, RCIR, spec digests, traceability
+and report attribution. Explicit action entries, inline branch maps and stutter
+are still not actor-checked; standalone `maps auto` does check generated branches.
+
+**Measured inventory.** Base `e8cf78f0162530e264128f588981d49790f2767f`
+and implementation `b8daaa8245f374f74448fd983755689f832484cc` were each
+materialized with `git archive <sha>` and `tar -xf <archive> -C <tree>`, then built
+in their own tree with `cargo build --manifest-path rust/Cargo.toml -p fslc-rust
+--bin fslc --locked` (Rust 1.98.0, `88d9e12ae`, offline, debug). Both binaries
+ran `fslc check <relative-path>` in each tree on every `.fsl` in `specs/`,
+`examples/`, `rust/fslc/tests/fixtures/`, with cache off and the edition opt-in
+only for a file with an `fsl 5` header. No negative fixtures were excluded.
+
+| Source tree | Base binary forms | Head binary forms |
+|---|---:|---:|
+| base | 591 | 591 |
+| head | 592 | 592 |
+
+Both full four-cell observations and summaries were identical on two runs.
+**Corpus `ok`→`error`: empty; `error`→`ok`: empty; other JSON/exit changes: empty**
+in same-source and common-path own-SHA comparisons. The only added path is the
+acceptance fixture `rust/fslc/tests/fixtures/actor_refinement/requirement-action.fsl`;
+no existing sources were repaired or removed. No pre-existing base inline forms
+were rewritten, renamed, removed or stopped from running (materialization count
+0). The new acceptance helper's explicit-auto location expectation was corrected
+to the existing `maps` token span; no production span rule changed.
+Binary SHA256: base `ec78a59a98f1732783ab41740367b261ae1d3b09e072886051afc69c878972e2`,
+head `0cdf4b1868d38a00a4db9283c3d1aaa399b0f73199e622948095609c2ccda804`.
+
+Separate from that corpus, CLI acceptance controls and Worker stable-only controls
+were calibrated on old production, then passed twice on the fix:
+
+| Acceptance class | Old → new result |
+|---|---|
+| Own `Manager` against abstract `System`, hidden by block `by System` or ordinary prose; either side; standalone branch auto | check/verify/refine success → error/type/2 |
+| Own actors both `System`, but block text invents another actor | error/type/2 → ok/0, bounded verified/0, implements refines |
+| Own actor absent (no annotation, non-`by` or empty actor; typed requirement text is not an actor) and block text invents a mismatch | error/type/2 → ok/0, bounded verified/0, implements refines |
+
+The latter two are **intentional acceptance expansions**: prose must neither
+invent nor replace an actor. Artifact probes ran each binary twice on the same
+seam-free input. Kernel v1/v2, analyze, document claims/generate (including RCIR
+and digest), ledger, explain, scenarios and testgen were byte-identical. Full HTML
+was identical after normalizing only ten observed elapsed-time values in embedded
+verify JSON (total, solver check and eight property timings); every excluded key
+was checked present, numeric and nonnegative. No verdict/location/assurance field
+was excluded. This shared-lowering agreement is not independent triangulation.
+
+**Migration contract (#702, limited to this change):**
+
+1. **Versions/editions:** reproduced on native 4.12.0 at the base above; fixed for
+   v5.0.0. The earliest affected release is unknown. Published requirement actions
+   keep the existing own-metadata prefix syntax; typed requirement text is not a
+   new actor syntax.
+2. **New rejection:** the first acceptance class above now reports
+   `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`,
+   `error`/`kind: "type"`/exit 2. The existing implicit `implements` or explicit
+   `maps auto` span is retained. Mapping-free diff keeps semantic_diff/exit 0 and
+   reports affected directions as unknown/automatic_mapping_failed.
+3. **Rewrite:** confirm policy and correct a mistaken actor on the action itself.
+   Do not rewrite the enclosing prose to hide a mismatch. There is no general
+   semantics-equivalent rewrite or automatic migration; an actor change changes
+   policy. Intentional delegation needs a reviewed explicit correspondence.
+4. **Commands:** run unscoped `fslc check req.fsl`, inspect both own actors and the
+   mapping, correct confirmed mistakes, repeat check, then run
+   `fslc verify req.fsl --depth 6 --no-cache`. For standalone mappings use
+   `fslc refine impl.fsl abs.fsl map.fsl --depth 6`. Selected verify skips the seam
+   and is not a migration detector.
+5. **Verdicts/evidence:** old false successes can become type errors, and old
+   prose-induced false rejections can become success. Public Kernel/JSON schemas
+   and metadata/digest projections are unchanged. Bounded verified is not proved.
+6. **Consumers/artifacts:** Worker check/verify use the shared resolver; hooks,
+   CI and downstream callers must handle the new rejection. LSP delivery is not
+   wired. After correcting source, reverify and regenerate affected proof,
+   scenario/testgen/replay/ledger/document evidence. Worker acceptance is stable-only;
+   the accepted typed-text cases are covered by native CLI tests.
+7. **Rollback:** v5.0.0 is fail-closed, without a compatibility bypass or grace
+   period. If problems occur, return to a 4.x binary. No support duration is promised.
 
 ## 6. Documentation Reflection
 

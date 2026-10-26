@@ -1221,16 +1221,11 @@ fn action_actors<'a>(
     abstraction_action: &'a ActionDef,
 ) -> Option<(&'a str, &'a str)> {
     fn actor<'a>(model: &'a KernelModel, action: &'a ActionDef) -> Option<&'a str> {
-        model.origins().action_actor(&action.name).or_else(|| {
-            // Raw spec and compose actions retain the legacy metadata rule.
-            action
-                .meta
-                .as_ref()
-                .and_then(|tag| tag.text.as_deref())
-                .and_then(|text| text.strip_prefix("by "))
-                .map(str::trim)
-                .filter(|actor| !actor.is_empty())
-        })
+        match model.origins().action_actor(&action.name) {
+            Some(actor) => actor.as_deref(),
+            // Only unregistered raw spec and compose actions use legacy metadata.
+            None => crate::origin::actor_from_metadata(action.meta.as_ref()),
+        }
     }
 
     Some((

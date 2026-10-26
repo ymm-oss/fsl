@@ -1571,7 +1571,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         .collect::<Result<Vec<_>, _>>()?;
     let mut origins = resolve_stage_items(&mut items, &processes, "business")?;
     for transition in processes.iter().flat_map(|process| &process.transitions) {
-        origins.bind_action_actor(&transition.name, transition.actor.clone());
+        origins.bind_action_actor(&transition.name, Some(transition.actor.clone()));
     }
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
@@ -1888,6 +1888,7 @@ fn maps_clause_text(maps: &MapsClause) -> String {
 fn lower_requirement_action(
     action: &RequirementAction,
     metadata: Option<MetaTag>,
+    action_actors: &mut BTreeMap<String, Option<String>>,
 ) -> Vec<(SpecItem, Option<OriginChain>)> {
     let ordinary = action
         .items
@@ -1901,7 +1902,7 @@ fn lower_requirement_action(
         RequirementActionItem::Branches { branches, .. } => Some(branches),
         RequirementActionItem::Action(_) => None,
     });
-    match branches {
+    let lowered = match branches {
         None => vec![(
             SpecItem::Action {
                 name: action.name.clone(),
@@ -1961,7 +1962,15 @@ fn lower_requirement_action(
                 )
             })
             .collect(),
+    };
+    let actor = crate::origin::actor_from_metadata(action.meta.as_ref());
+    for (item, _) in &lowered {
+        if let SpecItem::Action { name, .. } = item {
+            // Absence is registered too: requirement text is not an actor source.
+            action_actors.insert(name.clone(), actor.map(str::to_owned));
+        }
     }
+    lowered
 }
 
 fn static_int(expr: &Expr, constants: &BTreeMap<String, i64>) -> Option<i64> {
@@ -2606,6 +2615,7 @@ pub(crate) fn lower_resolved_requirements(
         }
     }
     let mut deadlines = Vec::new();
+    let mut action_actors = BTreeMap::new();
     for requirement in requirement_items {
         let RequirementsItem::Requirement {
             id,
@@ -2621,7 +2631,8 @@ pub(crate) fn lower_resolved_requirements(
         for declaration in declarations {
             match declaration {
                 RequirementBlockItem::Action(action) => {
-                    let lowered = lower_requirement_action(action, metadata.clone());
+                    let lowered =
+                        lower_requirement_action(action, metadata.clone(), &mut action_actors);
                     for (item, origin) in &lowered {
                         if let SpecItem::Action { name, span, .. } = item {
                             extra_annotations.push((
@@ -2699,7 +2710,7 @@ pub(crate) fn lower_resolved_requirements(
         }
     }
     for action in standalone_actions {
-        for (item, origin) in lower_requirement_action(action, None) {
+        for (item, origin) in lower_requirement_action(action, None, &mut action_actors) {
             if let (SpecItem::Action { name, .. }, Some(origin)) = (&item, origin) {
                 extra_origins.push((crate::action_target(name), origin));
             }
@@ -3011,7 +3022,10 @@ pub(crate) fn lower_resolved_requirements(
         .iter()
         .flat_map(|process| &process.process.transitions)
     {
-        origins.bind_action_actor(&transition.name, transition.actor.clone());
+        origins.bind_action_actor(&transition.name, Some(transition.actor.clone()));
+    }
+    for (name, actor) in action_actors {
+        origins.bind_action_actor(&name, actor);
     }
     for (target, origin) in extra_origins {
         origins.bind(target, origin);

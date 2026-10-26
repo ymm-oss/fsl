@@ -1738,7 +1738,8 @@ not depart from the behavior of abs (see <code>DESIGN-refinement.md</code>).</p>
   <code>kind: "type"</code> errors.
   Auto actor compatibility, including <code>covers</code>, mixed editions and compose,
   follows §13.2; see <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>,
-  “#1441: source-actor auto mapping and breaking-source migration”.</li>
+  “#1441: source-actor auto mapping and breaking-source migration” and
+  “#1456: requirement-action own actors and breaking-source migration”.</li>
 <li><code>action &lt;impl&gt;(&lt;formal params&gt;) -&gt; &lt;abs&gt;(&lt;expr&gt;) | stutter</code> — required for every impl action.
   Formal params may be bare names or <code>name: Type</code> annotations matching the impl action declaration.
   <code>stutter</code> is an internal step in which the abstract state does not change.</li>
@@ -2566,13 +2567,15 @@ verify {
   twice). Whenever the seam is evaluated, auto-mapped process transitions and
   events compare the declared source actors on both sides, regardless of edition (4/5) or <code>covers</code> on
   either side, including prose beginning <code>by</code>. A registered actor takes
-  precedence over metadata. Actions without a registry entry (raw spec/compose
-  actions and requirements action items, standalone or inside a requirement
-  block) use the existing metadata rule (<code>by</code> followed by a space and a
-  nonempty actor). When both actors are available,
+  precedence over metadata. Requirement actions, standalone or inside a block,
+  register only their own metadata's actor (<code>by</code> followed by a space and a
+  nonempty trimmed actor), including every generated branch. No annotation,
+  non-<code>by</code> text or an empty actor registers absence: neither enclosing prose nor
+  typed <code>@requirement</code> text can supply an actor. Only unregistered raw spec/compose
+  actions retain the existing metadata rule. When both actors are available,
   a mismatch is <code>error</code> / <code>kind: "type"</code>, exit 2, with
   <code>maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'</code>
-  at the <code>implements</code> or standalone <code>maps auto</code> correspondence. The same rule
+  at the implicit <code>implements</code> or explicit <code>maps auto</code> correspondence. The same rule
   applies in unscoped <code>verify</code>, standalone <code>refine</code> and Worker; explicit action
   correspondences and <code>stutter</code> are not actor-checked. Selected <code>verify</code> still
   does not evaluate the seam. Without a supplied mapping, <code>diff</code> reports an
@@ -2595,7 +2598,22 @@ verify {
   See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>,
   “#1441: source-actor auto mapping and breaking-source migration”,
   for commands, measured evidence, gate policy and manual correction; no general
-  automatic semantics-preserving migration exists. LSP delivery is not promised.</li>
+  automatic semantics-preserving migration exists. LSP delivery is not promised.
+  <strong>v5.0.0 breaking source change (#1456):</strong> requirement actions whose own actor
+  mismatch was hidden by block text are rejected, including standalone auto maps
+  of generated branches. Explicit action entries, inline branch maps and stutter
+  remain exempt. Conversely, matching or absent own actors falsely rejected by
+  block prose are intentionally accepted; typed requirement text is not an actor
+  declaration. Public metadata priority, Kernel v1/v2, RCIR, spec digests and report
+  attribution are preserved. Both binaries' <code>fslc check</code> swept all three roots in
+  their own archived trees at base <code>e8cf78f0162530e264128f588981d49790f2767f</code>
+  and head <code>b8daaa8245f374f74448fd983755689f832484cc</code>, twice (591 base / 592 head
+  forms per binary): <strong>0 corpus <code>ok</code>→<code>error</code> and 0 <code>error</code>→<code>ok</code> transitions</strong>.
+  Acceptance removals/expansions are separate from this empty corpus set.
+  See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>, section
+  “#1456: requirement-action own actors and breaking-source migration”,
+  for manual policy correction and checks. No automatic migration, compatibility
+  bypass or grace period is provided; if problems occur, return to a 4.x binary.</li>
 <li>In a requirements process-form transition (edition 4), <code>by X</code> is a free label,
   not a reference to a declared actor: this form has no <code>actor</code> declaration,
   and <code>check</code> does not ask whether <code>X</code> is declared anywhere. Here, “source actor”

@@ -1674,7 +1674,8 @@ abs の振る舞いから逸脱していないことを <strong><code>fslc refin
   として報告されます。
   <code>covers</code>・edition混在・composeを含むautoのactor互換性は§13.2に従います。
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>の
-  「#1441: source-actor auto mapping and breaking-source migration」も参照してください。</li>
+  「#1441: source-actor auto mapping and breaking-source migration」および
+  「#1456: requirement-action own actors and breaking-source migration」も参照してください。</li>
 <li><code>action &lt;impl&gt;(&lt;formal params&gt;) -&gt; &lt;abs&gt;(&lt;expr&gt;) | stutter</code> — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   <code>name: Type</code> の注釈でもかまいません。
@@ -2461,13 +2462,15 @@ verify {
   <code>kind: "type"</code> の check 時エラーです(同じ action を 2 回列挙するマッピング
   ファイルと同じです)。継ぎ目が評価されるとき、autoマップされたprocessのtransitionとeventは、両側で宣言された
   source actorを比較します。edition(4/5)、どちら側の<code>covers</code>、<code>by</code>で始まる説明本文にも
-  依存しません。登録済みactorはmetadataに優先します。registry entryの無いaction
-  (raw spec/composeのactionと、単独またはrequirementブロック内のrequirements action項目)は
-  従来のmetadata規則(<code>by</code>、空白、空でないactor)を使います。
+  依存しません。登録済みactorはmetadataに優先します。requirementのactionは、単独でも
+  ブロック内でも、自身のmetadataのactor(<code>by</code>、空白、trim後に空でないactor)だけを、
+  生成された全branchにも登録します。注釈無し、<code>by</code>で始まらない本文、空のactorは
+  actor不在として登録し、囲む要求本文やtyped <code>@requirement</code>本文からactorを補いません。
+  registry entryの無いraw spec/composeのactionだけが従来のmetadata規則を使います。
   両actorを取得できるとき、不一致は
   <code>error</code> / <code>kind: "type"</code>、exit 2で、既存のmessage
   <code>maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'</code>
-  を、<code>implements</code>または単独の<code>maps auto</code>の対応位置に報告します。スコープ無しの
+  を、暗黙の<code>implements</code>または明示の<code>maps auto</code>の対応位置に報告します。スコープ無しの
   <code>verify</code>、単独の<code>refine</code>、Workerも同じ規則です。明示のaction対応と<code>stutter</code>は
   actorを比較せず、選択した<code>verify</code>は引き続きseamを評価しません。mappingを指定しない
   <code>diff</code>は、該当する方向を<code>unknown</code> / <code>automatic_mapping_failed</code>として
@@ -2486,7 +2489,20 @@ verify {
   <code>error/type/2</code>から<code>refines/0</code>へ変わります。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>の
   「#1441: source-actor auto mapping and breaking-source migration」に
   コマンド・測定証拠・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
-  LSPでの診断配信も約束しません。</li>
+  LSPでの診断配信も約束しません。
+  <strong>v5.0.0の破壊的なソース変更(#1456):</strong> requirement action自身のactorの不一致が
+  ブロック本文で隠れていた形を拒否します。生成branchを単独のauto mapsで対応させる形も
+  対象です。明示action対応、インラインのbranch maps、stutterの免除は変わりません。
+  逆に、自身actorが一致または不在なのにブロック本文が偽の不一致を作っていた形の受理は
+  意図した拡大です。typed requirement本文はactor宣言ではありません。公開metadataの優先順、
+  Kernel v1/v2、RCIR、spec digest、reportの帰属は保ちます。base
+  <code>e8cf78f0162530e264128f588981d49790f2767f</code>とhead
+  <code>b8daaa8245f374f74448fd983755689f832484cc</code>の各archive treeで、3 rootの全formを
+  両binaryの<code>fslc check</code>で2回sweepしました(base 591 / head 592 forms、各binary)。
+  <strong>corpusの<code>ok</code>→<code>error</code>は0件、<code>error</code>→<code>ok</code>も0件</strong>で、受入テストの拒否・拡大とは別集合です。
+  手動での方針確認・訂正とコマンドは<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>の
+  「#1456: requirement-action own actors and breaking-source migration」を参照してください。
+  自動移行、互換bypass、猶予期間は無く、問題が出たら4.xのbinaryに戻します。</li>
 <li>requirements の process 形式(edition 4)の transition の <code>by X</code> は自由なラベルで、
   宣言された actor を指すものではありません。この形式には <code>actor</code> の宣言が無く、
   <code>check</code> は <code>X</code> がどこかで宣言されているかを見ません。ここでいう「source actor」は

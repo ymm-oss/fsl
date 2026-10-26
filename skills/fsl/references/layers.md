@@ -111,7 +111,8 @@ the relevant role skill directs it.
   builds its own `maps auto` refinement between the two versions, so a changed
   `by` label shows up there as an automatic-mapping failure. Not actor-checked:
   a transition mapped by an explicit `action` item, one the inline seam maps to
-  `stutter` (no same-named business action), and any run that evaluates no
+  `stutter` (no same-named business action), a requirement action without its own
+  `by X` actor (#1456), and any run that evaluates no
   such refinement. The inline block also takes action-correspondence items
   (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
   syntax a separate refinement file uses. `acceptance` is replay-checked at
