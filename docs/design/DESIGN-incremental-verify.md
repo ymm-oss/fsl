@@ -125,10 +125,23 @@ than hashing an under-specified representation).
 ## 4. Output and CLI contract
 
 - On a **hit**, the result dict is byte-identical to the stored run except one **additive**
-  field: `"cache": {"hit": true, "key": …, "created": …, "source": "exact"|"cross_depth"}`.
+  field: `"cache": {"hit": true, "key": …, "source": "exact"|"cross_depth"}`.
   `cost` keeps the original solve cost (honest: it is the cost of the evidence, not of the
   lookup). Misses emit exactly today's output — no new field — so the corpus snapshot and all
   existing contract tests are unaffected by cache-enabled runs that miss.
+- `cache` is execution provenance metadata, not verdict evidence: its presence
+  depends on ambient cache state and run order. A sweep envelope is a function
+  of its inputs apart from cache and timing metadata. Comparators use the same
+  execution-metadata exclusion as approval's `stable_json(.., true)`: remove
+  `cost` and `cache` only at the root of each verification envelope, including
+  `sweep.results[].verification` and
+  `sweep.minimal_counterexample.verification` when present. Preserve same-named
+  fields in domain state; do not recursively delete keys or remove verdict,
+  location, or assurance evidence. The native JSON reader uses serde_json's
+  `float_roundtrip` feature to preserve stored f64 values and their serialized
+  tokens on replay, including the original solve timings. This does not change
+  the cache JSON shape, schema, or key derivation. Sweep has no `--no-cache`
+  option; use `FSLC_CACHE=off` to disable its cache reads and writes.
 - Exit codes are untouched: a hit returns the same `result` value through the same
   `exit_code()` mapping.
 - Caching is **on by default** for `fslc verify` (both engines). Rationale: the key
