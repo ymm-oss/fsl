@@ -66,12 +66,15 @@ kept in one place (`verify_cache.compute_key`); adding a semantics-affecting par
 4. **Raw entry-file source** (`sha256` of the bytes). Required because diagnostics quote
    source text by line (`_source_line_text` / `_requires_blocking_entry` slice
    `source_lines[line-1]`), and a text edit can change a quoted line without changing the AST.
-5. **All verify options**: `engine`, `depth`, `k_ind`, `deadlock_mode`, `vacuity_mode`,
+5. **All cacheable verify options**: `engine`, `depth`, `k_ind`, `deadlock_mode`, `vacuity_mode`,
    `property_name`, sorted `exclude_property_names`, `strict_tags`, the parsed
    `--instances`/`--values` overrides (defense in depth — they are already reflected in the
-   AST), ordered repeatable `--lemma` candidate expressions, and the **content hash** of the
-   `--requirements` file (not its path). Lemma order is semantic because the CTI retry loop
-   deterministically selects the first independently-proved candidate that excludes a CTI.
+   AST), and the **content hash** of the `--requirements` file (not its path).
+   Native CLI runs with any `--lemma` bypass persistent verification cache lookup and
+   storage, so candidate expressions and their order are not a live verdict-cache key
+   component. Order still matters to the uncached CTI retry loop, which deterministically
+   selects the first independently-proved candidate that excludes a CTI; see
+   `DESIGN-induction-lemmas.md`, "CLI, exit, and cache behavior".
 
 What is normalized away, and what deliberately is not: dialect surface syntax normalizes to
 the kernel (two dialect spellings with the same kernel AST + same source text share nothing in
@@ -230,7 +233,9 @@ The sound future path (stage 3, explicitly deferred): `prove(assume_invariants=[
 re-asserts previously-proved unchanged invariants as lemmas *without* re-checking them —
 semantically justified because a prior overall-`proved` entry for the same model core
 established them as true invariants of this transition system; assuming true lemmas only
-strengthens the hypothesis. Until that lands, induction gets whole-verdict caching only.
+strengthens the hypothesis. Until that lands, induction without `--lemma` gets
+whole-verdict caching only. Native lemma-guided runs bypass the persistent cache;
+the deferred internal reuse proposal does not describe live argv-candidate caching.
 
 ## 7. Soundness argument — how the cache could lie, and why it can't
 
@@ -238,7 +243,8 @@ strengthens the hypothesis. Until that lands, induction gets whole-verdict cachi
 |---|---|
 | Spec edit not detected | Key covers raw source bytes + full post-expansion kernel AST; parse always runs; no mtime/size shortcuts anywhere. |
 | Edit to a composed/`use`d/refined component while entry file unchanged | Expansion inlines components into the AST at parse time → AST hash moves. |
-| `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags`/`--lemma` change | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. Lemmas preserve CLI order in the key. |
+| `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags` change on a cacheable run | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. |
+| Any native `--lemma` candidate supplied or changed | Lemma-guided runs bypass persistent cache lookup and storage entirely, so neither a no-lemma verdict nor an earlier candidate verdict can be replayed. Candidate order affects the uncached retry loop, not a live cache key. |
 | `--requirements` file edited at same path | Content hash, not path, in the key. |
 | fslc upgraded, or dev edits `bmc.py` in an editable install | Version string **and** package source fingerprint in the key. |
 | z3 / lark / Python upgraded | Versions in the key. |

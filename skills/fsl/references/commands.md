@@ -251,8 +251,14 @@ For an induction `unknown_cti`, first try `--engine explicit` — if exploration
 closes it returns `proved` with **no lemmas at all** (the invariant being
 non-inductive is irrelevant to exhaustive search). Only when explicit is
 rejected or returns `unknown_budget`, fall back to lemma hunting: pass
-candidate auxiliary invariants with repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
-init/actions + implicit bounds, without original user invariants), rejects
+candidate auxiliary invariants with repeatable `--lemma "EXPR"`. fslc first parses
+and recursively type-checks all candidates as `Bool` with the invariant checker,
+before any candidate proof or evaluation. Invalid candidates are rejected/unused
+with a nested error (type errors: `proof.kind:"semantics"`, checker message, no
+argv `loc`); later candidates continue and the target result owns the exit code.
+Lemma runs bypass persistent verification caching. fslc proves each valid
+candidate independently (original init/actions + implicit bounds, without
+original user invariants), rejects
 false/non-inductive/invalid candidates with their own evidence, and makes only
 `proved` candidates available to the target proof. A candidate is used only
 when it is false on the current CTI; `lemma_cti_exclusions` records the target,
