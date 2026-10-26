@@ -237,7 +237,7 @@ async fn check_with<S: fsl_solver::SmtSolver>(
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
     let output = check_kernel(request, solver_version, new_solver).await;
-    finalize_frontend_output(request, solver_version, output).await
+    apply_edition(request, solver_version, output)
 }
 
 async fn check_kernel<S: fsl_solver::SmtSolver>(
@@ -282,16 +282,13 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
         &warning_ctx,
     );
     output.insert("warnings".to_owned(), Value::Array(warnings));
-    match implements_output(request, &model, 8) {
+    let output = match implements_output(request, &model, 8) {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
-        Err(failure) => implements_error(solver_version, &failure),
-    }
-}
-
-/// One exit for check/verify success and error envelopes, with native ordering.
-async fn finalize_frontend_output(request: &Request, solver_version: &str, output: Value) -> Value {
-    let output = fold_governance(request, solver_version, output).await;
-    apply_edition(request, solver_version, output)
+        Err(failure) => return implements_error(solver_version, &failure),
+    };
+    // Native check folds governance only after the model/implements path,
+    // never for early project/agent gate envelopes (which can be successful).
+    fold_governance(request, solver_version, output).await
 }
 
 /// The native edition step also reads headerless documents as current. It owns
@@ -490,7 +487,8 @@ async fn verify_with<S: fsl_solver::SmtSolver>(
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
     let output = verify_kernel(request, solver_version, new_solver).await;
-    finalize_frontend_output(request, solver_version, output).await
+    let output = fold_governance(request, solver_version, output).await;
+    apply_edition(request, solver_version, output)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1162,13 +1160,16 @@ mod tests {
     /// comparison has no excluded output fields; it is not a native identity
     /// assertion (`versions.verifier` necessarily names `fsl-wasm`).
     fn native_check_error(request: &Request, solver_version: &str) -> Value {
-        native_edition_output(
+        expected_edition_output(
             request,
             native_check_error_unfinalized(request, solver_version),
         )
     }
 
-    fn native_edition_output(request: &Request, output: Value) -> Value {
+    // Expected finalization in the native CLI's ordering, not an invocation of
+    // its private completed command. The project-gate test independently pins
+    // which route must bypass model-only governance.
+    fn expected_edition_output(request: &Request, output: Value) -> Value {
         fslc_rust::migration::apply_edition(
             (output, 2),
             &request.source,
@@ -1480,7 +1481,7 @@ mod tests {
                 ))
             })
             .expect_err("native check rejects the fixture");
-            let native = native_edition_output(&check_request, native);
+            let native = expected_edition_output(&check_request, native);
             assert_eq!(status, 2, "{fixture}: {native:#}");
             assert_eq!(
                 native["diagnostic_code"], "decide_not_exhaustive",
@@ -3004,7 +3005,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_operator_parse_errors_keep_the_complete_native_edition_envelope() {
+    fn legacy_operator_errors_match_native_ordered_edition_expectations() {
         for prefix in ["", "fsl 5\n"] {
             for operator in ["||", "->"] {
                 let source = format!(
@@ -3023,7 +3024,7 @@ mod tests {
                     envelope(TEST_SOLVER_VERSION),
                     &error,
                 );
-                let native = native_edition_output(&request, native);
+                let native = expected_edition_output(&request, native);
                 assert_eq!(
                     native["diagnostic_code"],
                     if prefix.is_empty() {
@@ -3044,6 +3045,35 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn ai_project_gate_success_bypasses_governance_in_check() {
+        let request: Request = serde_json::from_value(json!({
+            "cmd":"check", "source_file":"examples/ai/support_answer_quality.fsl",
+            "source":include_str!("../../../examples/ai/support_answer_quality.fsl")
+        }))
+        .expect("request");
+        // Native check returns this project gate before the model/governance
+        // route, then applies edition policy at its outer command boundary.
+        let (expected, status) = fslc_rust::frontend_output::ai_project_check_output(
+            &request.source,
+            &request.source_file,
+            envelope(TEST_SOLVER_VERSION),
+        )
+        .expect("AI project gate");
+        assert_eq!(status, 0);
+        assert_eq!(expected["result"], "ok");
+        assert_eq!(
+            expected_edition_output(&request, expected.clone()),
+            expected
+        );
+        let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+        assert_eq!(
+            worker, expected,
+            "project gate must not enter model-only governance"
+        );
+        assert_eq!(worker["result"], "ok");
     }
 
     /// fsl 5 plan S2 and S3, as native `check` reports them

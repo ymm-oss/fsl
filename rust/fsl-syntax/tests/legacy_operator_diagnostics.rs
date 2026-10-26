@@ -53,11 +53,15 @@ fn structural_operators_domain_and_literals_are_preserved() {
         assert!(fsl_syntax::legacy_expression_operator_error(&source, &options()).is_none());
     }
     for body in [
-        "spec S { action a -> finish() }",
-        "spec S { state { x: Bool } invariant I { true } -> }",
+        "spec S { state { r: relation 0..1 -> Bool = Set {} } }",
+        "refinement R { impl I abs A action a(r: relation 0..1 -> Bool) -> a(r) }",
+        "refinement R { impl I abs A action a(i: 0..1) -> a(i) }",
     ] {
+        let source = format!("fsl 5\n{body}");
+        parse_document_with(SourceFile::new(&source), &options())
+            .expect("structural relation/parameter arrow");
         assert!(
-            fsl_syntax::legacy_expression_operator_error(body, &options()).is_none(),
+            fsl_syntax::legacy_expression_operator_error(&source, &options()).is_none(),
             "not an expression operator: {body}"
         );
     }

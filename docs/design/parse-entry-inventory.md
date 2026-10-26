@@ -15,19 +15,24 @@ published tree except this directory.
   `parse_surface_document_with`, `dialect_keyword_with`, `lex_with`,
   `lexical_warnings`, `IdentifierRule::for_source`, `edition_header`,
   `document_edition`, `lossless_document_with`, `format_source_with`,
-   `canonical_rewrites_with`, `legacy_expression_operator_error`, and in fsl-core one `_with_options` entry beside
+  `canonical_rewrites_with`, `legacy_expression_operator_error`,
+  `ParseError::for_edition`, and in fsl-core one `_with_options` entry beside
   each function that reads source text (`parse_kernel_source_with_options`,
   `governance_contract_with_options`, ...). The old
   names (`parse_document`, ...) stay as the published-language entries and are
   the `_with` entry under `ParseOptions::stable()`. Every registered dialect
   frontend is reached only through `parse_document_with`, on the token stream
-   it lexed with the same options.
+  it lexed with the same options.
 - `legacy_expression_operator_error` is a diagnostic-only reparse of an already
   rejected expression under the original header/grammar and caller's options.
   It uses the same shared parser, never returns a model or broadens acceptance,
   and excludes domain, governance, dbsystem and editionless frontends. It serves
   a headerless CLI `--edition next` and formatter errors without silently
   parsing the document as a different grammar edition.
+  `ParseError::for_edition` owns the parse-error/edition classification shared by
+  check/verify, formatter, lint, and migrate. Range type bounds disable only the
+  operator diagnostic because a following relation arrow belongs to the type
+  grammar. A line-terminated expression never classifies the next line's token.
 - The library never reads the environment. Three process entry points decide
   the options, once:
   - native CLI: `main` reads `FSLC_UNSTABLE` (comma-separated feature names)
@@ -117,7 +122,10 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   document without one prints the same bytes with the gate on (R0). The
   verify cache key adds the unstable set and the exact `--edition` request
   when the gate is on; the header itself is part of the hashed source.
-- The Worker applies the same edition step to a document with a header.
+- Every Worker check/verify output, including errors and headerless documents,
+  passes through the same edition step. Check folds governance only after its
+  model/implements path, not after an early project/agent gate; verify retains
+  its native outer governance fold before edition finalization.
 
 ## Glossary and alias resolution (S3)
 

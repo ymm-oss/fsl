@@ -632,13 +632,18 @@ pub fn apply_edition(
     let edition = declared.or(requested).unwrap_or_default();
     let next = edition == Edition::Fsl5;
     let Ok(plan) = plan_migration(source, path, edition, options) else {
-        if next
-            && output["kind"] == "parse"
-            && let Some(error) = fsl_syntax::legacy_expression_operator_error(source, options)
-            && let Some(object) = output.as_object_mut()
+        if output["kind"] == "parse"
+            && let Err(original) = fsl_syntax::parse_surface_document_with(source, options)
         {
-            output =
-                crate::frontend_output::render_surface_parse_error(std::mem::take(object), &error);
+            let error = original.clone().for_edition(source, edition, options);
+            if error != original
+                && let Some(object) = output.as_object_mut()
+            {
+                output = crate::frontend_output::render_surface_parse_error(
+                    std::mem::take(object),
+                    &error,
+                );
+            }
         }
         return (with_declared_edition(output, declared), status);
     };

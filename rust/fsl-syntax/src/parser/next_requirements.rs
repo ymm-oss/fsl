@@ -1039,12 +1039,14 @@ impl Parser<'_> {
                 break;
             }
             let mut cursor = self.cursor;
+            // This is speculative phrase matching: errors are discarded, so
+            // do not commit an expression diagnostic at a possible boundary.
             let Ok(value) = parse_tokens_expression(
                 &self.tokens,
                 &mut cursor,
                 self.expression_mode(),
                 true,
-                self.diagnose_legacy_operators,
+                false,
             )
             .and_then(crate::SyntaxExpr::into_kernel) else {
                 break;

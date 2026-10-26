@@ -827,6 +827,7 @@ impl SyntaxParser<'_> {
             }
 
             if self.diagnose_legacy_operators
+                && !self.at_boundary()
                 && let TokenKind::Symbol(operator) = &self.peek().kind
                 && let Some(replacement) = match operator.as_str() {
                     "||" => Some("or"),
@@ -837,7 +838,7 @@ impl SyntaxParser<'_> {
                 return Err(ParseError::coded(
                     "unsupported_in_edition",
                     format!(
-                        "expression operator '{operator}' is unsupported in this edition; use '{replacement}'; review fslc migrate <file> --edition next"
+                        "expression operator '{operator}' is unsupported in this edition; use '{replacement}' manually, then review fslc migrate <file> --edition next for remaining edits"
                     ),
                     self.peek().span,
                 ));
@@ -1452,5 +1453,21 @@ fn join(first: Span, last: Span) -> Span {
     Span {
         start: first.start,
         end: last.end,
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn a_line_terminated_expression_does_not_classify_the_next_line_operator() {
+        for operator in ["->", "||"] {
+            let tokens = crate::lex(&format!("true\n{operator} false")).expect("tokens");
+            let mut cursor = 0;
+            parse_tokens_expression(&tokens, &mut cursor, ExpressionMode::Kernel, true, true)
+                .expect("line boundary belongs to the caller");
+            assert_eq!(cursor, 1);
+        }
     }
 }

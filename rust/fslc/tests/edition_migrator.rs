@@ -66,6 +66,165 @@ fn text(path: &Path) -> String {
     std::fs::read_to_string(path).expect("read fixture")
 }
 
+fn edition_command(verb: &str, headed: bool) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    command.env_remove("FSLC_UNSTABLE").arg(verb);
+    if headed {
+        command.env("FSLC_UNSTABLE", "fsl5");
+    }
+    command
+}
+
+fn gated_options() -> fsl_syntax::ParseOptions {
+    fsl_syntax::ParseOptions::with_unstable(
+        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+    )
+}
+
+fn run_edition(
+    path: &str,
+    verb: &str,
+    edition: Option<&str>,
+    headed: bool,
+    extra: &[&str],
+) -> Output {
+    let mut command = edition_command(verb, headed);
+    command.arg(path);
+    if let Some(edition) = edition {
+        command.args(["--edition", edition]);
+    }
+    command.args(extra).output().expect("run fslc")
+}
+
+#[test]
+fn lint_and_migrate_share_next_operator_diagnostics_without_rewriting() {
+    let directory = FixtureDir::new();
+    for operator in ["||", "->"] {
+        let source = format!(
+            "spec S {{ state {{ flag: Bool = false }} action finish() {{ flag = true }} invariant I {{ true {operator} false }} }}\n"
+        );
+        let path = directory.write("legacy.fsl", &source);
+        for verb in ["lint", "migrate"] {
+            let output = run_edition(path.to_str().expect("path"), verb, Some("next"), false, &[]);
+            assert_eq!(output.status.code(), Some(2));
+            let output = json(&output);
+            assert_eq!(output["result"], "error");
+            assert_eq!(output["kind"], "parse");
+            assert_eq!(
+                output["diagnostic_code"], "unsupported_in_edition",
+                "{verb}: {output:#}"
+            );
+            assert_eq!(
+                text(&path),
+                source,
+                "invalid expressions require manual repair"
+            );
+        }
+    }
+}
+
+#[test]
+fn relation_range_arrows_remain_structural_in_every_edition_entry() {
+    let directory = FixtureDir::new();
+    for endpoints in [
+        "0..1 -> 0..1",
+        "0..1 -> Bool",
+        "0..N -> Bool",
+        "Node -> Node",
+    ] {
+        let body = format!(
+            "spec Relation {{ const N = 1 type Node = 0..1 state {{ edges: relation {endpoints} = Set {{}} }} action hold() {{ edges = edges }} invariant Typed {{ true }} }}\n"
+        );
+        for (prefix, edition) in [("fsl 5\n", None), ("", None), ("", Some("next"))] {
+            let source = format!("{prefix}{body}");
+            let path = directory.write("relation.fsl", &source);
+            let output = run_edition(
+                path.to_str().expect("path"),
+                "check",
+                edition,
+                !prefix.is_empty(),
+                &[],
+            );
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "expected accepted {endpoints}, produced {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(json(&output)["result"], "ok");
+            let options = gated_options();
+            assert!(
+                fsl_syntax::legacy_expression_operator_error(&source, &options).is_none(),
+                "relation arrow is not an expression operator"
+            );
+            let malformed =
+                source.replace("invariant Typed { true }", "invariant Typed { true == }");
+            assert!(
+                fsl_syntax::legacy_expression_operator_error(&malformed, &options).is_none(),
+                "must not replace a later real parse error with a relation diagnostic"
+            );
+            let path = directory.write("malformed.fsl", &malformed);
+            let error = run_edition(
+                path.to_str().expect("path"),
+                "check",
+                edition,
+                !prefix.is_empty(),
+                &[],
+            );
+            assert_eq!(error.status.code(), Some(2));
+            assert_eq!(json(&error)["diagnostic_code"], "FSL-PARSE");
+        }
+        // Explicit gated conversion control: the migrator inserts a header;
+        // this is separate from the ungated current-edition checks above.
+        let path = directory.write("migrating.fsl", &body);
+        let migrated = run_edition(
+            path.to_str().expect("path"),
+            "migrate",
+            Some("next"),
+            true,
+            &["--write"],
+        );
+        assert_eq!(
+            migrated.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&migrated.stdout)
+        );
+        assert_eq!(json(&migrated)["result"], "migrated");
+        assert!(text(&path).starts_with("fsl 5\n"));
+        let checked = run_edition(path.to_str().expect("path"), "check", None, true, &[]);
+        assert_eq!(checked.status.code(), Some(0));
+        assert_eq!(json(&checked)["result"], "ok");
+    }
+}
+
+#[test]
+fn action_correspondence_range_parameter_precedes_a_structural_arrow() {
+    let directory = FixtureDir::new();
+    directory.write("abstract.fsl", "spec A { state { done: Bool = false } action finish(i in 0..1) { done = true } invariant Typed { true } }\n");
+    let body = "requirements C { implements A from \"abstract.fsl\" { map done = done action finish(i: 0..1) -> finish(i) } state { done: Bool = false } action finish(i in 0..1) { done = true } invariant Typed { true } }\n";
+    for (prefix, edition) in [("fsl 5\n", None), ("", None), ("", Some("next"))] {
+        let source = format!("{prefix}{body}");
+        let path = directory.write("parameter.fsl", &source);
+        let output = run_edition(
+            path.to_str().expect("path"),
+            "check",
+            edition,
+            !prefix.is_empty(),
+            &[],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert_eq!(json(&output)["result"], "ok");
+        let options = gated_options();
+        assert!(fsl_syntax::legacy_expression_operator_error(&source, &options).is_none());
+    }
+}
+
 #[test]
 fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() {
     let directory = FixtureDir::new();
@@ -74,7 +233,7 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
         "requirements Probe { state { flag: Bool = false } action finish() { flag = true } invariant I { (flag or false) and (flag => true) } }",
         "compose Probe { state { flag: Bool = false } invariant I { (flag or false) and (flag => true) } }",
         "business Probe { actor User entity Case process Case { stages New, Done initial New transition finish New -> Done by User } policy POL-PROBE-001 \"operator probe\" invariant { (true or false) and (true => true) } } verify { instances Case = 1 }",
-        "refinement Probe { impl I abs A map flag = (true or false) and (true => true) }",
+        "refinement Probe { impl I abs A map flag = (flag or false) and (flag => true) action finish() -> finish() }",
         "requirements Probe { entity Case { flag: Bool = false lifecycle New -> Done } concept Ready = Case where (flag or false) and (flag => true) } verify { instances Case = 1 }",
     ] {
         let readable = body.contains("concept Ready");
@@ -95,32 +254,20 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
                 };
                 let invoke = |source: &str, edition: Option<&str>| {
                     let path = directory.write("operator.fsl", source);
-                    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-                    command
-                        .env_remove("FSLC_UNSTABLE")
-                        .args([verb, path.to_str().expect("path")]);
-                    if headed {
-                        command.env("FSLC_UNSTABLE", "fsl5");
-                    }
-                    if verb == "fmt" {
-                        command.arg("--check");
-                    }
-                    if let Some(edition) = edition {
-                        command.args(["--edition", edition]);
-                    }
-                    command.output().expect("run fslc")
+                    run_edition(
+                        path.to_str().expect("path"),
+                        verb,
+                        edition,
+                        headed,
+                        if verb == "fmt" { &["--check"] } else { &[] },
+                    )
                 };
-                let twin = invoke(&format!("{prefix}{body}\n"), (!headed).then_some("next"));
-                assert_ne!(
-                    twin.status.code(),
-                    Some(2),
-                    "canonical: {}",
-                    String::from_utf8_lossy(&twin.stdout)
-                );
+                assert_canonical_operator_twin(&directory, &format!("{prefix}{body}\n"), headed);
                 let source = format!("{prefix}{}\n", body.replace(canonical, legacy));
                 let output = invoke(&source, (!headed).then_some("next"));
                 assert_eq!(output.status.code(), Some(2));
                 let output = json(&output);
+                assert_eq!(output["result"], "error");
                 assert_eq!(output["kind"], "parse");
                 assert_eq!(
                     output["diagnostic_code"], "unsupported_in_edition",
@@ -136,6 +283,7 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
                     output["loc"]["column"],
                     source[line_start..start].chars().count() + 1
                 );
+                assert_operator_endpoints(&source, start);
                 let message = output["message"].as_str().expect("message");
                 assert!(
                     message.contains(&format!("use '{replacement}'"))
@@ -150,6 +298,70 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
             }
         }
     }
+}
+
+fn assert_operator_endpoints(source: &str, offset: usize) {
+    let options = gated_options();
+    let error = fsl_syntax::parse_surface_document_with(source, &options)
+        .expect_err("legacy operator")
+        .for_edition(source, fsl_syntax::Edition::Fsl5, &options);
+    let line = source[..offset].matches('\n').count() + 1;
+    let start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let column = source[start..offset].chars().count() + 1;
+    assert_eq!(error.span.start.offset, offset);
+    assert_eq!(error.span.end.offset, offset + 2);
+    assert_eq!(
+        (error.span.start.line as usize, error.span.end.line as usize),
+        (line, line)
+    );
+    assert_eq!(
+        (
+            error.span.start.column as usize,
+            error.span.end.column as usize
+        ),
+        (column, column + 2)
+    );
+}
+
+fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: bool) {
+    let path = directory.write("canonical.fsl", source);
+    let verb = if source.contains("refinement Probe") {
+        "refine"
+    } else {
+        "check"
+    };
+    let mut command = edition_command(verb, headed);
+    let expected = if source.contains("refinement Probe") {
+        let model = |name| {
+            format!(
+                "spec {name} {{ state {{ flag: Bool = false }} action finish() {{ flag = true }} invariant Typed {{ true }} }}\n"
+            )
+        };
+        let implementation = directory.write("implementation.fsl", &model("I"));
+        let abstraction = directory.write("abstraction.fsl", &model("A"));
+        command.args([
+            implementation.to_str().expect("path"),
+            abstraction.to_str().expect("path"),
+            path.to_str().expect("path"),
+            "--depth",
+            "2",
+        ]);
+        "refines"
+    } else {
+        command.arg(path.to_str().expect("path"));
+        if !headed {
+            command.args(["--edition", "next"]);
+        }
+        "ok"
+    };
+    let output = command.output().expect("canonical command");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "canonical twin: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(json(&output)["result"], expected);
 }
 
 #[test]

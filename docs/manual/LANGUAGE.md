@@ -953,10 +953,14 @@ steps.
 For already-invalid expression `||` and `->` in spec, requirements, compose,
 business policy, or refinement mappings, checking for the next edition reports
 `kind: parse` with `diagnostic_code: unsupported_in_edition`. The diagnostic
-points to the operator and suggests `or` / `=>` and `fslc migrate <file> --edition
-next`. This is a diagnostic improvement, not a new removal: current-edition
+points to the operator and suggests repairing it manually to `or` / `=>`, then
+using `fslc migrate <file> --edition next` for remaining supported edits. These
+invalid expression spellings are not automatically rewritten; lint/migrate
+retain a parse failure (exit 2) until they are repaired. This is a diagnostic
+improvement, not a new removal: current-edition
 rejection and exit 2 are unchanged. Structural composition `||`, correspondence
-and transition arrows, and domain expressions retain their existing behavior.
+and transition arrows (including anonymous range endpoints in relation types),
+and domain expressions retain their existing behavior.
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while

@@ -327,14 +327,11 @@ pub fn format_source_with(
     // the space is the whole fix (`particle_needs_space`).
     let spaced = crate::space_particles(source, options);
     let source = spaced.as_str();
-    let rewrites = canonical_rewrites_with(source, options).map_err(|error| {
-        if edition == Edition::Fsl5
-            && matches!(error, FormatError::Parse(_))
-            && let Some(diagnostic) = crate::legacy_expression_operator_error(source, options)
-        {
-            return FormatError::Parse(diagnostic);
+    let rewrites = canonical_rewrites_with(source, options).map_err(|error| match error {
+        FormatError::Parse(error) => {
+            FormatError::Parse(error.for_edition(source, edition, options))
         }
-        error
+        other => other,
     })?;
     let rewritten = apply_source_edits(
         source,

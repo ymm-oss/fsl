@@ -917,9 +917,11 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 spec、requirements、compose、business policy、refinement の map の式で既に不正な
 `||` / `->` は、次のエディション向けの検査で `kind: parse` のまま
 `diagnostic_code: unsupported_in_edition` を返します。位置は演算子を指し、
-`or` / `=>` と `fslc migrate <file> --edition next` を提案します。これは新たな
+`or` / `=>` への手修正後に、残る対応済みの編集を `fslc migrate <file> --edition next`
+で確認するよう提案します。この不正な式の綴りは自動変換せず、手修正までは
+lint/migrate も parse 失敗(exit 2)を維持します。これは新たな
 構文削除ではなく診断の改善です。現行の拒否と exit 2 は不変です。構造的な合成の
-`||`、対応や遷移の矢印、domain の式の既存の挙動は維持します。
+`||`、対応や遷移の矢印(relation 型の匿名 range 端点を含む)、domain の式の既存の挙動は維持します。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの

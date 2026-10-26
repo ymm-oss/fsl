@@ -253,6 +253,32 @@ fn legacy_expression_operator_diagnostics_use_the_operator_utf16_range() {
     }
 }
 
+#[test]
+fn shared_expression_entries_publish_both_operator_endpoints() {
+    for body in [
+        "requirements R { state { flag: Bool = false } invariant I { true OP false } }",
+        "compose C { state { flag: Bool = false } invariant I { true OP false } }",
+        "business B { actor User entity Case process Case { stages New, Done initial New transition finish New -> Done by User } policy POL-PROBE-001 \"policy\" invariant { true OP false } } verify { instances Case = 1 }",
+        "refinement R { impl I abs A map flag = true OP false }",
+    ] {
+        let column = body[..body.find("OP").expect("operator marker")]
+            .encode_utf16()
+            .count();
+        for operator in ["||", "->"] {
+            let source = format!("fsl 5\n{}\n", body.replace("OP", operator));
+            let diagnostics = published_diagnostics(&source, Some("fsl5"));
+            let diagnostic = diagnostics
+                .iter()
+                .find(|d| d["code"] == "unsupported_in_edition")
+                .unwrap_or_else(|| panic!("expected operator diagnostic: {diagnostics:#?}"));
+            assert_eq!(
+                diagnostic["range"],
+                json!({"start":{"line":1,"character":column},"end":{"line":1,"character":column+2}})
+            );
+        }
+    }
+}
+
 /// Open the first of `texts` in a fresh server with the unstable gate set or
 /// unset, replace the document's text with each of the others in turn, and
 /// return the diagnostics the server publishes for each.
