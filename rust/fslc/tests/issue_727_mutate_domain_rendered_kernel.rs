@@ -31,8 +31,9 @@
 //! A debug-profile run of the first test alone measured ~135s; expect this
 //! binary to be one of the slower ones in the suite.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
@@ -57,6 +58,62 @@ fn run(args: &[&str]) -> (Value, i32) {
         )
     });
     (value, output.status.code().expect("exit status"))
+}
+
+#[test]
+fn mutate_empty_membership_after_a_verified_baseline_returns_mutation_evidence() {
+    let source = include_str!("fixtures/domain_empty_membership.fsl")
+        .replace("status in []", "not (status in [])");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["mutate", "/dev/stdin", "--depth", "2"])
+        .current_dir(root())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mutate");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(source.as_bytes())
+        .expect("write source");
+    let output = child.wait_with_output().expect("wait for mutate");
+    // main.rs builds `mutated` with baseline=verified after rendering. With
+    // no requested gate, outcome::classify makes that exit 0 even if mutants
+    // survive a tautological invariant. Do not invent a kill count or rate.
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let output: Value = serde_json::from_slice(&output.stdout).expect("mutate JSON");
+    assert_eq!(output["result"], "mutated");
+    assert_eq!(output["baseline"], "verified");
+    assert!(
+        output.get("gate").is_none(),
+        "no gate was requested: {output}"
+    );
+    let mutants = output["mutants"].as_array().expect("mutants");
+    assert!(
+        !mutants.is_empty(),
+        "enumeration must actually run: {output}"
+    );
+    assert_eq!(
+        output["summary"]["total"].as_u64(),
+        Some(mutants.len() as u64)
+    );
+    let rendered = output["kernel_source"]
+        .as_str()
+        .expect("rendered mutation source");
+    let kernel = fsl_core::parse_kernel_source(rendered, &fsl_core::FsResolver::new("."))
+        .expect("rendered source parses");
+    let model = fsl_core::build_model(kernel).expect("rendered source checks");
+    assert!(
+        matches!(
+            &model.invariants[0].expr,
+            fsl_core::KernelExpr::Not(inner) if matches!(inner.as_ref(), fsl_core::KernelExpr::Bool(false))
+        ),
+        "{:?}",
+        model.invariants
+    );
 }
 
 /// T1 (positive oracle) + T5 (envelope replayability): a domain document

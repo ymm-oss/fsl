@@ -2,8 +2,9 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fsl_core::{FsResolver, KernelExpr, ProjectionDef, build_model, parse_kernel_source};
@@ -50,6 +51,71 @@ fn run_cli(args: &[&str]) -> (Value, i32) {
         )
     });
     (value, output.status.code().expect("exit status"))
+}
+
+fn at_method_output(command: &str, index: &str) -> std::process::Output {
+    let source = format!(
+        "spec EmptyAt {{ state {{ q: Seq<Int, 2>, n: Int }} init {{ q = Seq {{}} n = 0 }} \
+         action Touch() {{ n = q.at({index}) }} invariant Safe {{ true }} }}"
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([command, "/dev/stdin"])
+        .current_dir(repo_root())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn at-method CLI");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(source.as_bytes())
+        .expect("write source");
+    child.wait_with_output().expect("wait for CLI")
+}
+
+#[test]
+fn empty_at_index_is_a_kernel_error_but_check_remains_ok() {
+    let checked = at_method_output("check", "");
+    assert!(checked.status.success(), "{checked:?}");
+    let checked: Value = serde_json::from_slice(&checked.stdout).expect("check JSON");
+    assert_eq!(checked["result"], "ok");
+
+    let output = at_method_output("kernel", "");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let output: Value = serde_json::from_slice(&output.stdout).expect("kernel error JSON");
+    assert_eq!(output["fsl"], "1.0");
+    assert_eq!(output["result"], "error");
+    assert_eq!(output["kind"], "semantics");
+    assert!(
+        output["message"].as_str().is_some_and(|message| {
+            message.contains("at") && (message.contains("index") || message.contains("argument"))
+        }),
+        "{output}"
+    );
+    assert_eq!(
+        output,
+        json!({"fsl":"1.0", "result":"error", "kind":"semantics", "message":output["message"]}),
+        "keep the existing kernel projection error envelope"
+    );
+}
+
+#[test]
+fn at_with_an_index_still_exports_a_partial_operation() {
+    let output = at_method_output("kernel", "0");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let output: Value = serde_json::from_slice(&output.stdout).expect("kernel JSON");
+    assert_eq!(output["result"], "kernel");
+    assert_eq!(
+        output["actions"][0]["partial_operations"][0]["operation"],
+        "at"
+    );
+    compiled_kernel_v1_schema()
+        .validate(&output)
+        .expect("valid Kernel schema");
 }
 
 fn compiled_kernel_v1_schema() -> jsonschema::Validator {

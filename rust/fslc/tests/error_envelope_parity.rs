@@ -37,6 +37,7 @@ const PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_broken_approval_requirements_document.fsl";
 const AI_GUARD_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_invalid_rule.fsl";
 const AI_NAME_FIXTURE: &str = "rust/fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl";
+const EMPTY_MEMBERSHIP_FIXTURE: &str = "rust/fslc/tests/fixtures/domain_empty_membership.fsl";
 const AI_PROJECT_GUARD_FIXTURE: &str =
     "rust/fslc/tests/fixtures/error_envelope_ai_project_invalid_rule.fsl";
 const AI_PROJECT_NAME_FIXTURE: &str =
@@ -2966,6 +2967,302 @@ fn unknown_authority_tool_returns_an_error_for_every_document_command() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+fn empty_membership_invariant_is_false(source: &str) -> bool {
+    fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+        .and_then(|kernel| {
+            fsl_core::build_model(kernel)
+                .map_err(|error| fsl_core::CoreError::unlocated(error.message))
+        })
+        .is_ok_and(|model| {
+            model.invariants.iter().any(|property| {
+                property.name == "Order_empty"
+                    && matches!(property.expr, fsl_core::KernelExpr::Bool(false))
+            })
+        })
+}
+
+#[test]
+fn empty_membership_source_checker_rejects_a_true_invariant() {
+    let source = include_str!("fixtures/domain_empty_membership.fsl");
+    assert!(empty_membership_invariant_is_false(source));
+    assert!(!empty_membership_invariant_is_false(
+        &source.replace("status in []", "true")
+    ));
+}
+
+#[allow(clippy::too_many_lines)]
+fn empty_membership_result_matches(command: &str, actual: &Actual) -> bool {
+    if !actual.stderr.is_empty() {
+        return false;
+    }
+    match command {
+        "domain expand" | "fmt" => {
+            return actual.exit == 0 && empty_membership_invariant_is_false(&actual.stdout);
+        }
+        "html" => {
+            return actual.exit == 1
+                && actual.stdout.contains("<html")
+                && actual.stdout.contains("EmptyMembership")
+                && actual.stdout.contains("violated");
+        }
+        "ledger" => {
+            return actual.exit == 1
+                && actual
+                    .stdout
+                    .starts_with("# 意図ずれ監査台帳: EmptyMembership")
+                && actual.stdout.contains("violated");
+        }
+        _ => {}
+    }
+    let Some(output) = &actual.json else {
+        return false;
+    };
+    if output["fsl"] != "1.0" {
+        return false;
+    }
+    let error = |kind: &str, message: &str| {
+        actual.exit == 2
+            && output["result"] == "error"
+            && output["kind"] == kind
+            && output["message"] == message
+    };
+    match command {
+        "ai check" => error("semantics", "expected an ai_component or agent document"),
+        "ai compat" => error(
+            "semantics",
+            "expected an ai_component or fsl-ai project document",
+        ),
+        "ai replay" => error("semantics", "expected an ai_component document"),
+        "ai drift" | "ai eval" | "ai regress" => {
+            error("parse", "expected fsl-ai project declarations at 1:1")
+                && output["diagnostic_code"] == "FSL-PARSE"
+        }
+        "causal analyze" | "causal check" | "causal diff" | "causal ledger" => {
+            error("parse", "expected 'causal'") && output["diagnostic_code"] == "FSL-PARSE"
+        }
+        "causal observe-expectations" | "causal verify-expectations" => {
+            error("parse", "expected 'causal' at 1:1") && output["diagnostic_code"] == "FSL-PARSE"
+        }
+        "compat check" | "db check" | "db observe" => {
+            error("semantics", "expected a dbsystem document")
+        }
+        "document check" | "document claims" | "document generate" => {
+            error(
+                "document",
+                "document projection does not support dialect 'domain' in RCIR v1",
+            ) && output["code"] == "FSL-DOC-DIALECT-UNSUPPORTED"
+                && output["dialect"] == "domain"
+                && output["supported_dialects"] == serde_json::json!(["requirements", "spec"])
+        }
+        "approval create" => error(
+            "io",
+            "approval creation requires a clean tracked worktree so the baseline can be reconstructed",
+        ),
+        "approval check" => {
+            actual.exit == 0
+                && output["result"] == "approval_check"
+                && output["status"] == "drifted"
+                && output["reasons"] == serde_json::json!(["spec_changed", "rendering_changed"])
+        }
+        "approval diff" => {
+            // The valid approved baseline has different state/action names.
+            // run_diff reports unknown directions, not a failed opt-in gate.
+            actual.exit == 0
+                && output["result"] == "semantic_diff"
+                && output["directions"]["new_to_old"]["result"] == "unknown"
+                && output["directions"]["new_to_old"]["reason"] == "state_or_action_names_differ"
+                && output["directions"]["old_to_new"]["result"] == "unknown"
+                && output["gate"]["passed"] == true
+        }
+        "diff" => actual.exit == 1 && output["result"] == "semantic_diff",
+        "refine" => error("type", "expected refinement document"),
+        "replay" => error(
+            "io",
+            "replay trace spec 'ReplayTrace' does not match checked spec 'EmptyMembership'",
+        ),
+        "domain check" => {
+            actual.exit == 1
+                && output["result"] == "violated"
+                && output["formal_result"] == "violated"
+                && output["kernel"]["result"] == "violated"
+                && output["kernel"]["invariant"] == "empty"
+                && output["kernel"]["violated_at_step"] == 0
+        }
+        "domain analyze" => {
+            actual.exit == 0
+                && output["result"] == "analyzed"
+                && output["domain"] == "EmptyMembership"
+                && output["aggregates"][0]["name"] == "Order"
+                && output["aggregates"][0]["invariants"] == serde_json::json!(["empty"])
+        }
+        "domain generate" => {
+            actual.exit == 0
+                && output["result"] == "generated"
+                && output["domain"] == "EmptyMembership"
+                && output["files"]
+                    .as_array()
+                    .is_some_and(|files| !files.is_empty())
+        }
+        "domain replay" => actual.exit == 1 && output["result"] == "nonconformant",
+        "kernel" => {
+            actual.exit == 0
+                && output["result"] == "kernel"
+                && output["properties"]["invariants"][0]["expression"]["kind"] == "bool"
+                && output["properties"]["invariants"][0]["expression"]["value"] == false
+        }
+        "counterexample export"
+        | "domain testgen"
+        | "mutate"
+        | "scenarios"
+        | "testgen"
+        | "verify" => {
+            actual.exit == 1
+                && output["result"] == "violated"
+                && output["invariant"] == "empty"
+                && output["violated_at_step"] == 0
+        }
+        "check" => actual.exit == 0 && output["result"] == "ok",
+        "analyze" => actual.exit == 0 && output["result"] == "analyzed",
+        "conformance" => actual.exit == 0 && output["result"] == "conformance",
+        "explain" => actual.exit == 0 && output["result"] == "explained",
+        "lint" => actual.exit == 1 && output["result"] == "lint",
+        "migrate" => actual.exit == 0 && output["result"] == "migrated",
+        "sweep" => actual.exit == 1 && output["result"] == "sweep_failed",
+        "testplan" => {
+            actual.exit == 0
+                && output["result"] == "testplan"
+                && output["formal_result"] == "not_run"
+        }
+        "typestate" => actual.exit == 0 && output["result"] == "typestate",
+        _ => panic!("missing empty-membership expectation for {command}"),
+    }
+}
+
+#[test]
+fn empty_membership_has_a_defined_result_for_every_document_command() {
+    require_test_git();
+    let contract: Value =
+        serde_json::from_str(include_str!("../cli-contract.json")).expect("CLI contract");
+    let mut leaves = BTreeSet::new();
+    cli_contract_leaves(&contract["root"], &mut leaves);
+    // Reuse the established valid baseline/record and its TMPDIR-owned cleanup.
+    // The current domain spec differs from that approved baseline deliberately.
+    let approval = ApprovalFixture::new(EMPTY_MEMBERSHIP_FIXTURE);
+    let artifact = approval.root.join("empty-membership-reproducer.json");
+    let mut tested = 0;
+    let mut failures = Vec::new();
+    for command in leaves {
+        if !matches!(registration(&command).scope, ParityScope::SpecPath { .. }) {
+            continue;
+        }
+        tested += 1;
+        let actual = if approval_command(&command) {
+            run_from(
+                &command,
+                EMPTY_MEMBERSHIP_FIXTURE,
+                "spec.fsl",
+                Some(&approval.record),
+                &approval.root,
+            )
+        } else if command == "counterexample export" {
+            let mut arguments = invoke(
+                &command,
+                EMPTY_MEMBERSHIP_FIXTURE,
+                EMPTY_MEMBERSHIP_FIXTURE,
+                None,
+            );
+            let output_index = arguments
+                .iter()
+                .position(|arg| arg == COUNTEREXAMPLE_OUTPUT)
+                .expect("output argument");
+            arguments[output_index] = artifact.display().to_string();
+            let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+                .args(arguments)
+                .current_dir(workspace_root())
+                .output()
+                .expect("run counterexample export");
+            Actual {
+                json: serde_json::from_slice(&output.stdout).ok(),
+                stdout: String::from_utf8(output.stdout).expect("UTF-8 stdout"),
+                stderr: String::from_utf8(output.stderr).expect("UTF-8 stderr"),
+                exit: output.status.code().expect("exit status"),
+            }
+        } else {
+            run(&command, EMPTY_MEMBERSHIP_FIXTURE)
+        };
+        if !empty_membership_result_matches(&command, &actual) {
+            failures.push(format!(
+                "{command}: exit={} stdout={:?} stderr={:?}",
+                actual.exit, actual.stdout, actual.stderr
+            ));
+        }
+        if command == "counterexample export" {
+            let exported: Value =
+                serde_json::from_slice(&std::fs::read(&artifact).expect("reproducer was written"))
+                    .expect("reproducer JSON");
+            assert_eq!(exported["schema_version"], "1.0.0", "{exported}");
+            assert_eq!(
+                actual.json.as_ref().expect("export result")["reproducer"]["exported_to"],
+                artifact.display().to_string()
+            );
+        }
+    }
+    assert_eq!(tested, 48, "review document leaf additions/removals");
+    assert!(
+        failures.is_empty(),
+        "empty membership: {}/{tested} commands failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn domain_expand_empty_membership_emits_a_checked_false_invariant() {
+    let actual = run("domain expand", EMPTY_MEMBERSHIP_FIXTURE);
+    assert_eq!(
+        actual.exit, 0,
+        "stdout={} stderr={}",
+        actual.stdout, actual.stderr
+    );
+    assert!(actual.stderr.is_empty(), "{}", actual.stderr);
+    assert!(
+        empty_membership_invariant_is_false(&actual.stdout),
+        "{}",
+        actual.stdout
+    );
+}
+
+#[test]
+fn domain_analyze_empty_membership_preserves_the_structural_projection() {
+    let actual = run("domain analyze", EMPTY_MEMBERSHIP_FIXTURE);
+    assert!(
+        empty_membership_result_matches("domain analyze", &actual),
+        "exit={} stdout={} stderr={}",
+        actual.exit,
+        actual.stdout,
+        actual.stderr
+    );
+    let output = actual.json.expect("analysis JSON");
+    assert_eq!(output["effects"], serde_json::json!([]));
+    assert_eq!(output["sagas"], serde_json::json!([]));
+    assert_eq!(output["findings"], serde_json::json!([]));
+}
+
+#[test]
+fn domain_check_empty_membership_keeps_the_initial_violation() {
+    let actual = run("domain check", EMPTY_MEMBERSHIP_FIXTURE);
+    assert!(
+        empty_membership_result_matches("domain check", &actual),
+        "exit={} stdout={} stderr={}",
+        actual.exit,
+        actual.stdout,
+        actual.stderr
+    );
+    let output = actual.json.expect("domain check JSON");
+    assert_eq!(output["kernel"]["blame"]["conjuncts"][0]["holds"], false);
+    assert_eq!(output["kernel"]["blame"]["conjuncts"][0]["text"], "false");
 }
 
 #[test]
