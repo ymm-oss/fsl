@@ -274,6 +274,30 @@ parityCases.push({
   options: {},
   expected_status: 2,
 });
+// #1457: require real verdicts, not parity between two unsupported errors.
+// Positive cases force the symbolic route; negative controls also preserve
+// the exact deterministic witness instead of only the normalizer's trace shape.
+for (const binder of ["seq_literal", "set_statement"]) {
+  const fixture = `rust/fslc/tests/fixtures/issue_1457_worker_${binder}.fsl`;
+  const positive = await readFile(join(repository, fixture), "utf8");
+  for (const violated of [false, true]) {
+    const source = violated ? positive.replace("not done or flag", "not done or not flag") : positive;
+    const path = relative(repository, join(dist, `issue-1457-${binder}-${violated}.fsl`)).split("\\").join("/");
+    await writeFile(join(repository, path), source, "utf8");
+    parityCases.push({
+      id: `parity-${parityCases.length}`,
+      cmd: "verify",
+      path,
+      source,
+      source_file: path,
+      files: {},
+      options: { depth: 4, deadlock: "warn" },
+      expected_status: violated ? 1 : 0,
+      expected_result: violated ? "violated" : "verified",
+      exact_collection_witness: true,
+    });
+  }
+}
 await writeFile(
   join(dist, "parity-cases.json"),
   `${JSON.stringify([...parityCases, ...exclusionProbes])}\n`,
@@ -485,6 +509,21 @@ const mismatches = [];
 for (let index = 0; index < parityCases.length; index += 1) {
   const nativeEnvelope = native[index];
   const wasmEnvelope = browser.parityEnvelopes[index];
+  const testCase = parityCases[index];
+  if (testCase.exact_collection_witness) {
+    for (const envelope of [nativeEnvelope, wasmEnvelope]) {
+      if (envelope.result !== testCase.expected_result) {
+        throw new ParityViolationError(`${testCase.path}: expected ${testCase.expected_result}, got ${envelope.result}`);
+      }
+    }
+    if (testCase.expected_result === "violated") {
+      const exact = differences(nativeEnvelope.trace, wasmEnvelope.trace);
+      exact.push(...differences(nativeEnvelope.loc, wasmEnvelope.loc));
+      if (exact.length > 0 || nativeEnvelope.invariant !== "Capture" || wasmEnvelope.invariant !== "Capture") {
+        throw new ParityViolationError(`${testCase.path}: collection witness drift: ${JSON.stringify(exact)}`);
+      }
+    }
+  }
   const normalizedNative = normalizeEnvelope(nativeEnvelope);
   let normalizedWasm;
   try {
