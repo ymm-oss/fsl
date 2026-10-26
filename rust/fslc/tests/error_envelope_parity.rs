@@ -2992,13 +2992,37 @@ fn empty_membership_source_checker_rejects_a_true_invariant() {
     ));
 }
 
+fn expanded_empty_membership_invariant_is_false(source: &str) -> bool {
+    fsl_core::parse_direct_kernel_spec(source)
+        .and_then(|kernel| {
+            fsl_core::build_model(kernel)
+                .map_err(|error| fsl_core::CoreError::unlocated(error.message))
+        })
+        .is_ok_and(|model| {
+            model.invariants.iter().any(|property| {
+                property.name == "Order_empty"
+                    && matches!(property.expr, fsl_core::KernelExpr::Bool(false))
+            })
+        })
+}
+
+#[test]
+fn empty_membership_expansion_checker_rejects_an_unexpanded_domain() {
+    let source = include_str!("fixtures/domain_empty_membership.fsl");
+    assert!(!expanded_empty_membership_invariant_is_false(source));
+}
+
 #[allow(clippy::too_many_lines)]
 fn empty_membership_result_matches(command: &str, actual: &Actual) -> bool {
     if !actual.stderr.is_empty() {
         return false;
     }
     match command {
-        "domain expand" | "fmt" => {
+        "domain expand" => {
+            return actual.exit == 0
+                && expanded_empty_membership_invariant_is_false(&actual.stdout);
+        }
+        "fmt" => {
             return actual.exit == 0 && empty_membership_invariant_is_false(&actual.stdout);
         }
         "html" => {
@@ -3228,7 +3252,7 @@ fn domain_expand_empty_membership_emits_a_checked_false_invariant() {
     );
     assert!(actual.stderr.is_empty(), "{}", actual.stderr);
     assert!(
-        empty_membership_invariant_is_false(&actual.stdout),
+        expanded_empty_membership_invariant_is_false(&actual.stdout),
         "{}",
         actual.stdout
     );

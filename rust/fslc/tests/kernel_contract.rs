@@ -2,9 +2,8 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fsl_core::{FsResolver, KernelExpr, ProjectionDef, build_model, parse_kernel_source};
@@ -58,21 +57,14 @@ fn at_method_output(command: &str, index: &str) -> std::process::Output {
         "spec EmptyAt {{ state {{ q: Seq<Int, 2>, n: Int }} init {{ q = Seq {{}} n = 0 }} \
          action Touch() {{ n = q.at({index}) }} invariant Safe {{ true }} }}"
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args([command, "/dev/stdin"])
+    let path = scratch_dir("at-method").join("spec.fsl");
+    fs::write(&path, source).expect("write source");
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg(command)
+        .arg(&path)
         .current_dir(repo_root())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn at-method CLI");
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(source.as_bytes())
-        .expect("write source");
-    child.wait_with_output().expect("wait for CLI")
+        .output()
+        .expect("run at-method CLI")
 }
 
 #[test]

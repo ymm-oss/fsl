@@ -31,11 +31,14 @@
 //! A debug-profile run of the first test alone measured ~135s; expect this
 //! binary to be one of the slower ones in the suite.
 
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
+
+static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -43,6 +46,19 @@ fn root() -> PathBuf {
         .and_then(Path::parent)
         .expect("workspace root")
         .to_owned()
+}
+
+fn scratch_dir(name: &str) -> PathBuf {
+    let id = NEXT_SCRATCH.fetch_add(1, Ordering::Relaxed);
+    let dir = root().join(format!(
+        "rust/target/issue-727-{name}-{}-{id}",
+        std::process::id()
+    ));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).expect("clean stale scratch dir");
+    }
+    fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
@@ -64,21 +80,15 @@ fn run(args: &[&str]) -> (Value, i32) {
 fn mutate_empty_membership_after_a_verified_baseline_returns_mutation_evidence() {
     let source = include_str!("fixtures/domain_empty_membership.fsl")
         .replace("status in []", "not (status in [])");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(["mutate", "/dev/stdin", "--depth", "2"])
+    let path = scratch_dir("empty-membership").join("spec.fsl");
+    fs::write(&path, source).expect("write source");
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg("mutate")
+        .arg(&path)
+        .args(["--depth", "2"])
         .current_dir(root())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn mutate");
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(source.as_bytes())
-        .expect("write source");
-    let output = child.wait_with_output().expect("wait for mutate");
+        .output()
+        .expect("run mutate");
     // main.rs builds `mutated` with baseline=verified after rendering. With
     // no requested gate, outcome::classify makes that exit 0 even if mutants
     // survive a tautological invariant. Do not invent a kill count or rate.
@@ -103,8 +113,7 @@ fn mutate_empty_membership_after_a_verified_baseline_returns_mutation_evidence()
     let rendered = output["kernel_source"]
         .as_str()
         .expect("rendered mutation source");
-    let kernel = fsl_core::parse_kernel_source(rendered, &fsl_core::FsResolver::new("."))
-        .expect("rendered source parses");
+    let kernel = fsl_core::parse_direct_kernel_spec(rendered).expect("rendered source parses");
     let model = fsl_core::build_model(kernel).expect("rendered source checks");
     assert!(
         matches!(
