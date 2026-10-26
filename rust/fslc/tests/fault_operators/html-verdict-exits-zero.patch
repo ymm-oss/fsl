@@ -4,7 +4,7 @@ reading only the process exit code sees a pass over a `violated` baseline.
 
 --- a/rust/fslc/src/main.rs
 +++ b/rust/fslc/src/main.rs
-@@ -11756,7 +11756,7 @@ fn run_html_report_from_source(
+@@ -12609,7 +12609,7 @@ fn run_html_report_from_source_with_timing(
          Ok(model) => model,
          Err(error) => return (spec_load_error_output(&error), 2),
      };
@@ -13,8 +13,8 @@ reading only the process exit code sees a pass over a `violated` baseline.
          path,
          source,
          depth,
-@@ -11787,7 +11787,7 @@ fn run_html_report_from_source(
-         &verification,
+@@ -12646,7 +12646,7 @@ fn run_html_report_from_source_with_timing(
+         verification_view,
          &fsl_tools::undecided_declarations(&model),
      );
 -    let (result, status) = generated_content_result(
@@ -22,7 +22,7 @@ reading only the process exit code sees a pass over a `violated` baseline.
          "html_report",
          &model.name,
          format!(
-@@ -11798,13 +11798,6 @@ fn run_html_report_from_source(
+@@ -12657,13 +12657,6 @@ fn run_html_report_from_source_with_timing(
          ),
          &html,
          output_path,
