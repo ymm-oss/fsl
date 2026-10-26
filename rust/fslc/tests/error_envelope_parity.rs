@@ -2853,8 +2853,8 @@ fn unknown_authority_tool_expected_error(
     input: &str,
 ) -> Option<(&'static str, String)> {
     let (kind, message) = match command {
-        "ai check" | "ai compat" | "ai replay" | "check" | "kernel" | "mutate" | "sweep"
-        | "verify" => ("semantics", AI_UNKNOWN_TOOL_MESSAGE.to_owned()),
+        "ai check" | "ai compat" | "ai replay" | "check" | "html" | "kernel" | "ledger"
+        | "mutate" | "sweep" | "verify" => ("semantics", AI_UNKNOWN_TOOL_MESSAGE.to_owned()),
         "ai drift" => (
             "semantics",
             "no observed_property declaration found".to_owned(),
@@ -2891,8 +2891,6 @@ fn unknown_authority_tool_expected_error(
         | "diff"
         | "explain"
         | "fmt"
-        | "html"
-        | "ledger"
         | "lint"
         | "migrate"
         | "refine"

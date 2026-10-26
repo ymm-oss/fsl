@@ -91,9 +91,9 @@ warnings, metadata and timing-normalized approval target digests are unchanged.
 The invalid-input corrections apply only to direct ledger/HTML reports.
 `approval create --kind ledger|html`, `approval check`, `approval diff`, and
 `counterexample export` still lower the spec before verification or rerendering,
-retaining their old error precedence and unknown-AI-tool panic/exit 101.
-The panics are tracked in #1464; approval create's diagnostic precedence is a
-separate issue.
+retaining their existing invalid-input precedence. After #1464, unknown AI authority
+tools return a semantics error with exit 2 rather than panicking. Approval create's
+diagnostic precedence remains a separate issue.
 
 ## Report structure
 
