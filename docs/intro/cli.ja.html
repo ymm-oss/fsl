@@ -62,6 +62,11 @@ requirement rows keep their own status. `unknown_cti` is an unestablished
 induction finding, attributed by the ordinary violation metadata/property
 lookup, not a reachable counterexample; raw CTI, hint, and rank-failure evidence
 is preserved. These added findings also change affected ledger approval digests.
+Direct `ledger` and `html` return verification `result:&quot;error&quot;` as the original
+JSON error envelope and exit 2/3, before rendering or writing an artifact
+(`html` also stops before explain). With `-o`, no artifact is created. Other
+failed/unestablished verdicts still generate reports with their nonzero exit.
+Approval-only ledger rerendering for digest comparison is separate from this gate.
 `testgen` refuses a failed seam or preservation with the same verify failure
 envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
 and writes no harness. The same

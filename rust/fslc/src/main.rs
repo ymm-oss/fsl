@@ -12551,6 +12551,12 @@ fn testgen_path_context(
     }
 }
 
+/// Direct reports expose verification errors, not successful artifact envelopes.
+/// Approval-only ledger rerendering deliberately does not use this gate.
+fn report_verification_error(verification: &Value, status: i32) -> Option<(Value, i32)> {
+    (verification["result"] == "error").then(|| (verification.clone(), status))
+}
+
 fn run_html_report(
     path: &Path,
     depth: usize,
@@ -12634,6 +12640,9 @@ fn run_html_report_from_source_with_timing(
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
+    if let Some(error) = report_verification_error(&verification, verification_status) {
+        return error;
+    }
     let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
     if explain_status != 0 {
         return (explained, explain_status);
@@ -13303,6 +13312,11 @@ fn run_ledger_report_from_source(
         Ok(prepared) => prepared,
         Err(error) => return (error, 2),
     };
+    if let Some(error) =
+        report_verification_error(&prepared.verification, prepared.verification_status)
+    {
+        return error;
+    }
     let approvals = if approval_paths.is_empty() {
         None
     } else {
@@ -17519,6 +17533,23 @@ mod exit_status_tests {
     use super::*;
     use crate::property_selection::apply_vacuity_mode;
     use crate::refinement::preservation_refine_result;
+
+    #[test]
+    fn direct_report_gate_preserves_complete_errors_and_both_exit_classes() {
+        for (status, kind) in [(2, "type"), (3, "internal")] {
+            let error = json!({"result":"error", "kind":kind, "message":"boom", "loc":{"line":4,"column":3}});
+            assert_eq!(
+                report_verification_error(&error, status),
+                Some((error, status))
+            );
+        }
+        for verdict in ["verified", "violated", "unknown_cti", "refinement_failed"] {
+            assert_eq!(
+                report_verification_error(&json!({"result":verdict}), 1),
+                None
+            );
+        }
+    }
 
     /// Issue #1303: a preservation refinement that exits 3 is an internal
     /// failure of the run (`kind:"internal"`, exit 3), never re-labelled a

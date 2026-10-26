@@ -121,6 +121,15 @@ approval status remain separate axes. These new findings change affected
 ledger rendering digests: existing approvals become `drifted` and require
 review and re-approval.
 
+Direct `ledger` additionally returns a verification `result:"error"` envelope
+and its exit (2 for document errors, 3 for internal errors) before rendering,
+approval overlays, or output-file creation. This shares its gate with direct
+HTML reporting, which checks before explain/render/write. Stdout is error JSON,
+not Markdown/HTML or a generated-artifact envelope. Non-error failed or
+unestablished verdicts still produce reports with their existing nonzero exit.
+Approval-only `generate_unapproved_ledger_report_from_source` rerendering keeps
+its existing digest-comparison behavior and does not use this direct-report gate.
+
 Most columns are derived from fields the JSON already carries (issue #23):
 `requirement.{id,text}`, `trace_type`, `recommended_action`/`hint`,
 `checked_to_depth`+`completeness`. Governance columns (risk / decider) come from

@@ -492,6 +492,11 @@ links. `unknown_cti` is an unestablished induction finding using the ordinary
 violation attribution rules, not a reachable counterexample. Full CTI/hint/
 rank-failure evidence stays in the appendix. These new findings change affected
 ledger approval digests and require review and re-approval.
+Direct `ledger` and `html` return verification `result:"error"` with the full
+JSON error envelope and exit 2/3, before rendering or output-file creation
+(HTML before explain too). No `-o` artifact is created. Non-error failed or
+unestablished verdicts still render reports with nonzero exit. Approval-only
+ledger rerendering for digest comparison is unchanged by this direct-report gate.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
