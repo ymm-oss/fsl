@@ -461,8 +461,9 @@ annotations, not independent semantic triangulation or unbounded verification.
 The measured fixture lists above are **not an exhaustive description of the
 language boundary**. Both each element and the whole set produced by `domain`
 or `range` take the declared endpoint type. Consequently an enum or Bool
-projection element is rejected anywhere `Int` is expected, and its whole set
-is rejected wherever a numeric Set is expected. The breaking removal includes
+projection element is rejected anywhere `Int` is expected, except for the
+pre-existing `abs` operand-check gap tracked in #1459; its whole set is rejected
+wherever a numeric Set is expected. The breaking removal includes
 comparison, ordering, arithmetic, `min`/`max`, membership, set-literal equality,
 Option comparisons and pattern payloads, numeric Set state assignment, and
 refinement maps. This is shared type inference, not an allowlist of the six
@@ -508,7 +509,7 @@ HEAD rejection origins below are invariant 8:3 unless stated otherwise.
 | q01 | `xs = domain(s)`, `s: relation Color -> Color`, `xs: Set<N>` | O | E, assignment 8:19 |
 | p14 | `forall x in domain(s) { x + 1 != 0 }` | O | E |
 | p16 | `forall x in domain(s) { min(x, 1) != 0 }` | O | E |
-| max supplement | same form with `max(x, 1)` | O | E, no structured loc (existing aggregate diagnostic limitation) |
+| max supplement | same form with `max(x, 1)` | O | E, origin 8:3 |
 | q14 | `not domain(b).contains(1)`, `b: relation Bool -> Color` | O | E, 6:3 |
 | p06 | `domain(s) != Set { 0 }` | O | E |
 | p07 | `Set { 0 } != domain(s)` | O | E |

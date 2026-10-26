@@ -798,7 +798,8 @@ variable capture instead of inventing internal binder names. See
   integer values; use the declared endpoint type, not an enum ordinal.
   More generally, projection elements and whole projection sets take the declared
   endpoint type: enum or Bool elements cannot be used wherever `Int` is expected,
-  nor their sets wherever a numeric Set is expected. This breaking rule applies
+  except for the pre-existing `abs` operand-check gap tracked in #1459; their sets
+  cannot be used wherever a numeric Set is expected. This breaking rule applies
   to comparison, ordering, arithmetic, `min`/`max`, membership, set-literal
   equality, Option comparisons and pattern payloads, assignment to numeric Set
   state, and refinement maps; the listed measured removals are not exhaustive.
@@ -808,8 +809,11 @@ variable capture instead of inventing internal binder names. See
   projections consumed as matching typed sets, assignment to a matching enum Set,
   and refinement maps into a matching enum Set. `unique` over enum domain/range
   was already accepted on released main and remains accepted. Acceptance
-  does not imply that an invariant holds. The three enum-binder/cycle idioms
-  above already checked on released main; they are preserved, not new additions.
+  does not imply that an invariant holds. The preserved enum-binder/cycle idioms
+  are `not (exists x in domain(r): reachable(r, x, x))`,
+  `forall x in domain(r): not r.contains(x, Blue)`, and
+  `forall y in range(r): not r.contains(1, y)`. They already checked on released
+  main; they are not new additions.
   `reachable(r, a, a)` is **not** reflexive by construction: it is true only
   if a real path of one or more edges leads from `a` back to `a` (so an empty
   or acyclic relation gives `reachable(r, a, a) == false` for every `a`). A

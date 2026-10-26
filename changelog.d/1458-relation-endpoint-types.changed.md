@@ -6,7 +6,9 @@ message and `hint: use endpoints matching the relation's declared source and
 target types`. `domain(r)` is now `Set<A>` and `range(r)` is `Set<B>` for
 `r: relation A -> B`, including binders over those projections and their public
 Kernel projection/binder annotations. Enum-typed projection uses are accepted;
-the three existing enum-binder/cycle idioms remain compatible with released main.
+the enum-binder/cycle idioms `not (exists x in domain(r): reachable(r, x, x))`,
+`forall x in domain(r): not r.contains(x, Blue)`, and
+`forall y in range(r): not r.contains(1, y)` remain compatible with released main.
 The change rejects enum/Int confusion. Enum nominality, numeric/range
 compatibility, public Kernel schemas
 and runtime semantics are unchanged; LSP/Worker inherit the shared checker.
@@ -32,7 +34,8 @@ Projection typing additionally removes, for `s: relation Color -> Color` and
 `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
 `forall x in range(s): x != 0`.
 General breaking rule: projection elements and sets take the endpoint type.
-Enum or Bool elements are rejected anywhere Int is expected, and their sets
+Enum or Bool elements are rejected anywhere Int is expected, except for the
+pre-existing abs operand-check gap tracked in #1459; their sets are rejected
 where numeric Sets are expected: comparison, ordering, arithmetic, min/max,
 membership, set-literal equality, Option and pattern payloads, numeric Set state
 assignment and refinement maps. The measured fixture list is not exhaustive.

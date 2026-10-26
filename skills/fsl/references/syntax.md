@@ -900,8 +900,9 @@ never a state variable named `true`), so the declaration is rejected. No other w
   `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
   `forall x in range(s): x != 0`. Do not coerce enum elements to numeric ordinals.
   General breaking rule: projection elements/sets take their endpoint type, so
-  enum or Bool elements reject anywhere `Int` is expected, and their whole sets
-  reject where a numeric Set is expected. This includes comparison, ordering,
+  enum or Bool elements reject anywhere `Int` is expected, except for the
+  pre-existing `abs` operand-check gap tracked in #1459; their whole sets reject
+  where a numeric Set is expected. This includes comparison, ordering,
   arithmetic, `min`/`max`, membership, set-literal equality, Option and pattern
   payloads, numeric Set state assignments and refinement maps. The measured
   fixture list is not exhaustive. Newly accepted families: `count` over finite
@@ -910,8 +911,11 @@ never a state variable named `true`), so the declaration is rejected. No other w
   membership; `let`-bound projections consumed as matching typed sets; matching
   enum Set assignments and refinement maps. `unique` over enum domain/range was
   already accepted on released main and remains accepted. Do not confuse acceptance
-  with a verified invariant. The three enum-binder/cycle idioms already accepted
-  on released main remain accepted; they are not new user-facing additions.
+  with a verified invariant. The preserved enum-binder/cycle idioms are
+  `not (exists x in domain(r): reachable(r, x, x))`,
+  `forall x in domain(r): not r.contains(x, Blue)`, and
+  `forall y in range(r): not r.contains(1, y)`. They already checked on released
+  main and are not new user-facing additions.
   `reachable(r,a,a)` is **not reflexive**: true only via a real path of ≥1
   edges back to `a` (empty/acyclic `r` gives `false`, never a free 0-hop
   `a==a`). Use `acyclic(r)` for "no self-loops or cycles anywhere".

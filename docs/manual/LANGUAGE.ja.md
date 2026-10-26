@@ -764,8 +764,9 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   enum 射影要素を数値端点や整数との比較に使うことはできません。
   enum の序数ではなく、宣言された端点の型を使ってください。
   一般に、射影要素と射影集合全体は宣言された端点の型を持ちます。enum や Bool の
-  要素を `Int` が必要な場所で使ったり、その集合を数値 Set が必要な場所で使ったり
-  することはできません。この破壊的変更は比較、順序、算術、`min`/`max`、所属、
+  要素を `Int` が必要な場所で使うことはできません。ただし、`abs` のオペランド型検査の
+  不足は既存の例外で、#1459 で追跡しています。その集合を数値 Set が必要な場所で
+  使うこともできません。この破壊的変更は比較、順序、算術、`min`/`max`、所属、
   集合リテラルとの等価比較、Option 比較とパターンのペイロード、数値 Set 状態への
   代入、refinement map に適用されます。列挙した測定例だけに限りません。
   新たに受理される形式には、有限の端点型を持つ domain/range 射影上の `count`、
@@ -774,8 +775,11 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   対応する enum Set への代入、および同じ型の enum Set への refinement map が
   含まれます。enum domain/range 上の `unique` は公開済み main でも受理されており、
   引き続き受理されます。受理は不変条件の成立を意味しません。
-  上記の3つの enum 束縛子・巡回の記法は公開済み main でも受理されていたため、
-  新規追加ではなく互換性の維持です。
+  互換性を維持する enum 束縛子・巡回の記法は、
+  `not (exists x in domain(r): reachable(r, x, x))`、
+  `forall x in domain(r): not r.contains(x, Blue)`、
+  `forall y in range(r): not r.contains(1, y)` です。これらは公開済み main でも
+  受理されていたため、新規追加ではありません。
   `reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
   `a` に戻る、1本以上の辺からなる本物のパスがある場合にのみ真です(空の関係
   や非巡回の関係では、すべての `a` について `reachable(r, a, a) == false`)。
