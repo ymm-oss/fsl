@@ -420,21 +420,32 @@ fn shadowed_pattern_branch(action: &str) {
             ("a.fsl", &component(false)),
             ("control.fsl", &source("x")),
             ("alias.fsl", &source("a")),
+            (
+                "direct.fsl",
+                &source("x").replace("compose C", "spec Direct").replace(
+                    "use A as a from \"a.fsl\"",
+                    "state { on: Bool } init { on = false }",
+                ),
+            ),
+            (
+                "free-alias.fsl",
+                &source("local").replace("local.on", "a.on"),
+            ),
         ],
     );
     let control = check(&dir, "control.fsl");
     assert_eq!(control.1, 2, "{}", control.0);
+    let direct = check(&dir, "direct.fsl");
+    assert_eq!(direct.1, 2, "{}", direct.0);
+    for field in ["kind", "message", "loc"] {
+        assert_eq!(control.0[field], direct.0[field]);
+    }
+    let free_alias = check(&dir, "free-alias.fsl");
+    assert_eq!(free_alias.1, 0, "{}", free_alias.0);
     let result = check(&dir, "alias.fsl");
-    assert_eq!(result.1, control.1, "{}", result.0);
-    assert_eq!(result.0["kind"], control.0["kind"]);
-    assert_eq!(result.0["loc"], control.0["loc"]);
-    assert_eq!(
-        result.0["message"],
-        control.0["message"]
-            .as_str()
-            .expect("control error")
-            .replace("'x'", "'a'")
-    );
+    assert_eq!(result.1, free_alias.1, "{}", result.0);
+    verdict(&verify(&dir, "free-alias.fsl"), "verified");
+    verdict(&verify(&dir, "alias.fsl"), "verified");
 }
 
 #[test]

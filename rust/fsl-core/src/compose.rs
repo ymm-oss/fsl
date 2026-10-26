@@ -1085,10 +1085,9 @@ fn rewrite_statement(
             span,
         } => {
             let condition = rewrite_expr_at(condition, component, bound, span)?;
-            let nested = pattern_scope(&condition, bound);
             Statement::If {
                 condition,
-                then_statements: rewrite_statements(then_statements, component, &nested)?,
+                then_statements: rewrite_statements(then_statements, component, bound)?,
                 else_statements: rewrite_statements(else_statements, component, bound)?,
                 span,
             }
@@ -1226,13 +1225,12 @@ fn rewrite_expr(
             spans,
         } => {
             let condition = rewrite_expr_at(*condition, component, bound, spans.condition)?;
-            let nested = pattern_scope(&condition, bound);
             Expr::Conditional {
                 condition: Box::new(condition),
                 then_expr: Box::new(rewrite_expr_at(
                     *then_expr,
                     component,
-                    &nested,
+                    bound,
                     spans.then_expr,
                 )?),
                 else_expr: Box::new(rewrite_expr_at(
@@ -1639,13 +1637,12 @@ fn resolve_alias_statement(
             span,
         } => {
             let condition = resolve_alias_expr_scoped(condition, components, span, bound)?;
-            let nested = pattern_scope(&condition, bound);
             Statement::If {
                 condition,
                 then_statements: rewrite_compose_statements(
                     then_statements,
                     components,
-                    &nested,
+                    bound,
                     context,
                 )?,
                 else_statements: rewrite_compose_statements(
@@ -2037,14 +2034,13 @@ fn resolve_alias_expr_scoped(
             spans,
         } => {
             let condition = resolve(*condition)?;
-            let nested = pattern_scope(&condition, bound);
             Expr::Conditional {
                 condition: Box::new(condition),
                 then_expr: Box::new(resolve_alias_expr_scoped(
                     *then_expr,
                     components,
                     diagnostic_span,
-                    &nested,
+                    bound,
                 )?),
                 else_expr: Box::new(resolve(*else_expr)?),
                 spans,

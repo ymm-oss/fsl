@@ -546,3 +546,47 @@ fn detector_earlier_ensures_reads_the_later_let_binding() {
     assert_eq!(direct.0["result"], "verified");
     assert_same(direct, compose_scratch::verify(&dir, "system.fsl"), true);
 }
+
+fn nested_then_patterns(body: &str) {
+    let source = format!(
+        "spec Pattern {{\n  type K = 0..1\n  state {{ opt: Option<K>, seen: Int }}\n  init {{ opt = some(1) seen = 0 }}\n  action read() {{ {body} }}\n  invariant Seen {{ seen == 0 }}\n}}"
+    );
+    let dir = pair("Pattern", &source);
+    let direct = check(&dir, "component.fsl");
+    assert_eq!(direct.1, 0, "{}", direct.0);
+    assert_same(direct, check(&dir, "system.fsl"), false);
+    for engine in ["bmc", "explicit"] {
+        let args = |file| {
+            [
+                "verify",
+                file,
+                "--engine",
+                engine,
+                "--depth",
+                "2",
+                "--no-cache",
+            ]
+        };
+        let direct = run(&dir, &args("component.fsl"));
+        assert_eq!(direct.1, 1, "{}", direct.0);
+        assert_eq!(direct.0["result"], "violated");
+        let mut composed = run(&dir, &args("system.fsl"));
+        // Observed formula display carries the public component state name.
+        // Map exactly this live fixture formula, not arbitrary output strings.
+        let formula = "/blame/conjuncts/0/text";
+        assert_eq!(direct.0.pointer(formula), Some(&json!("seen == 0")));
+        assert_eq!(composed.0.pointer(formula), Some(&json!("a.seen == 0")));
+        *composed.0.pointer_mut(formula).expect("live formula") = json!("seen == 0");
+        assert_same(direct, composed, true);
+    }
+}
+
+#[test]
+fn detector_then_statement_does_not_export_the_outer_pattern_binding() {
+    nested_then_patterns("if opt is some(u) { if opt is some(u) { seen = 1 } }");
+}
+
+#[test]
+fn detector_then_expression_does_not_export_the_outer_pattern_binding() {
+    nested_then_patterns("seen = if opt is some(u) then (if opt is some(u) then 1 else 0) else 0");
+}
