@@ -501,10 +501,12 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         let metadata = requirement(warning);
         let kind = warning.get("kind").and_then(Value::as_str).unwrap_or("");
         let message = warning.get("message").and_then(Value::as_str).unwrap_or("");
+        let migration = fsl_syntax::CURRENT_EDITION_MIGRATION_CODES.contains(&kind)
+            || kind == "implicit_initial_value";
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
-            trace_type: "vacuity".to_owned(),
+            trace_type: if migration { "migration" } else { "vacuity" }.to_owned(),
             name: name.to_owned(),
             // `vacuity_probe_truncated` (issue #729) is not itself a
             // vacuity finding: it means the reachability probe (state
@@ -514,15 +516,21 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             // distinct claim from "疑い" (suspected hollow), so it gets its
             // own prefix -- "未確立" (not established), not "疑い"
             // (suspected).
-            summary: if kind == "vacuity_probe_truncated" {
+            summary: if migration {
+                format!("移行候補（{kind}）: {message}")
+            } else if kind == "vacuity_probe_truncated" {
                 format!("空虚性未確立（到達性 probe が判定に至らず）: {message}")
             } else {
                 format!("空虚性の疑い（{kind}）: {message}")
             },
-            next_action: warning
-                .get("hint")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            next_action: if migration {
+                None
+            } else {
+                warning
+                    .get("hint")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            },
             raw: warning.clone(),
         });
     }

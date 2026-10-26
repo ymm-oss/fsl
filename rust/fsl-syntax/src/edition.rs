@@ -22,6 +22,15 @@ pub const EDITION_HEADER_NOT_ACCEPTED: &str = "edition_header_not_accepted";
 /// Lint information: a document checked for the next edition has no header.
 pub const MISSING_EDITION_HEADER: &str = "missing_edition_header";
 
+/// Migration codes exposed by consumers in the current edition.
+/// Implicit-initial-value diagnostics have a separate initialization contract.
+pub const CURRENT_EDITION_MIGRATION_CODES: [&str; 4] = [
+    "deprecated_domain_enum_union",
+    "legacy_string_metadata",
+    "legacy_quantifier_colon",
+    "inline_action_maps",
+];
+
 /// Declarations that take no edition header: the causal and AI dialects
 /// (decisions/049 D8). Their frontends read the published language only.
 pub const EDITIONLESS_DECLARATIONS: &[&str] = &[

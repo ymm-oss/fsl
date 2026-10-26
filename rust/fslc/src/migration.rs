@@ -702,13 +702,7 @@ pub fn admit_source(
         .diagnostics
         .iter()
         .filter(|finding| {
-            next || matches!(
-                finding.code,
-                "deprecated_domain_enum_union"
-                    | "legacy_string_metadata"
-                    | "legacy_quantifier_colon"
-                    | "inline_action_maps"
-            )
+            next || fsl_syntax::CURRENT_EDITION_MIGRATION_CODES.contains(&finding.code)
         })
         .map(|finding| finding.json(path, edition))
         .collect::<Vec<_>>();

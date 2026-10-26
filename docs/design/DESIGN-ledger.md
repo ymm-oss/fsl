@@ -20,6 +20,7 @@ reads as "guarantees nothing".
   `trace_type` from #23), dead `reachable`s (`unreached[]`), uncovered source-backed actions,
   vacuity warnings, failed acceptance/forbidden (as errors), and the guarantee
   bound (`checked_to_depth` + `completeness`).
+- Edition-migration findings render as `trace_type: migration` with a 移行候補 summary containing the code and message, without mutate advice (#1449).
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log
