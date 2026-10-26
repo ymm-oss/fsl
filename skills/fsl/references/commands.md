@@ -732,8 +732,19 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `--readable` emits a text view that surfaces verification bounds, fairness,
   KPI projections, branch lowering (one `branch:` line per split action),
   and a synthesized `Implements:` refinement mapping when the source
-  declares one. Invariants for which none is found are explicitly marked
-  `no counterfactual within depth K`. Counterfactual weakening checks
+  declares one. Invariants for which none is found normally carry the JSON
+  `note` `no counterfactual within depth K`. If a non-user check preempts the
+  target search and bounded concrete fallback finds no witness, the note instead
+  says `preempted by KIND NAME at step k`. If concrete startup fails, it also
+  appends `concrete search not run: nondeterministic initialization of state
+  NAME[, NAME] is unsupported`, with public names for reported free roots, or
+  `concrete search not run: initialization/initial-state checks failed: REASON`
+  for another reported startup cause. Skipped bounded init-assignment
+  removals append `init-assignment removal of bounded state NAME was not
+  analyzed` with the skip reason to either note; free initial valuations are
+  not enumerated by concrete search. A found candidate takes precedence over
+  these notes. HTML renders the same note evidence; readable mode keeps its
+  scope/skeleton view. Counterfactual weakening checks
   invariants and reachability only; `counterfactual_scope.liveness:"skipped"`
   and the readable header make explicit that `leadsTo` remains the normal
   `verify` command's responsibility.

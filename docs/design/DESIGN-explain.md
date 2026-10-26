@@ -60,10 +60,60 @@ verification logic is written. Key points:
 - `killed_by` includes non-invariants too (ensures = action name, reachable name, bounds) →
   counterfactuals are **limited to user invariants**. Reachable kills are a different kind
   ("without this, X cannot be reached").
-- **"No counterfactual" is legitimate and common**: order_workflow's `NonNegativeRevenue`
-  cannot be broken by any single weakening within depth (it is either redundant — implied by
-  other invariants — or requires greater depth). State this gracefully rather than erroring.
-  Continuous with #6's `empty_formalization`.
+- **"No counterfactual" is legitimate** when no eligible single weakening produces
+  a violation of the target invariant within the requested depth. Report the
+  depth-limit note rather than an error; a deeper search may find a candidate.
+  Do not use order_workflow's `NonNegativeRevenue` as a native no-candidate
+  example: removing `revenue = 0` from init leaves its `Int` value unconstrained,
+  so native explain can select an initial-state violation (#1350).
+- **Native per-invariant isolation (#1350):** for each weakening, search each
+  user invariant separately, retaining that target invariant but excluding the
+  other user-invariant checks. Type bounds and the remaining action/transition
+  checks stay in the model, with the selected engine's first-violation order:
+  BMC can report the target invariant before a `trans` or `ensures` failure on
+  the same terminal edge. Concrete canonicalization may reject that edge; if
+  it finds no acceptable replacement trace, the solver-target path retains
+  the BMC trace, just as normal `verify` reports that first target failure.
+  By contrast, the non-target-preemption
+  fallback below accepts only concrete paths with a clean initial state and
+  checks the remaining obligations even on the terminal edge. Consequently,
+  a target's counterfactual trace may pass through a state that violates another
+  invariant; it is not a promise that the complete model admits that trace.
+  Ordinary `verify` and
+  `replay` retain all invariants and stop at the first violation, so they may
+  stop before this target's narrated failure. Attribution is per invariant,
+  not just the bounded verifier's first reported failure for the mutant.
+- **Non-user-check preemption (#1350):** if the target-isolated verifier first
+  reports `type_bound`, `trans`, `partial_op` or `ensures`, try the existing
+  solver-independent concrete search at each step count through the requested
+  depth. It skips guard-partial action instances and errored/violating children
+  while exploring other instances and queued paths; a failed initialization or
+  an initially violated/unevaluable state cannot supply a concrete trace.
+  A target witness competes under the same ranking tuple. If none is found,
+  the entry's existing `note` says `preempted by KIND NAME at step k` rather
+  than claiming no counterfactual exists within depth. Retain the first observed
+  preemption for that target; any found candidate takes precedence over notes.
+- If concrete startup fails for a preempted weakening, append the reason to
+  that existing note. Missing/partially initialized roots reported by the
+  Monitor use `concrete search not run: nondeterministic initialization of state
+  NAME[, NAME] is unsupported`, with public state names. Other initialization
+  or initial-state check errors use `concrete search not run:
+  initialization/initial-state checks failed: REASON`, preserving the reported
+  cause without inventing free roots. Distinct reasons are retained per target;
+  they do not replace the existing preemption or bounded-init skip clauses.
+  Constructor failure stops retries at larger exact depths because no concrete
+  root exists. This does not enumerate nondeterministic initial states. Entries
+  whose concrete search did run keep their existing note unchanged, and selected
+  candidates still take precedence. A declined optional canonicalization of a
+  solver-target witness keeps its BMC evidence as described above.
+- Bounded init-assignment removals remain skipped: the concrete search cannot
+  enumerate nondeterministic initial valuations. If an invariant has no selected
+  candidate and such a skip occurred, append `init-assignment removal of bounded
+  state NAME was not analyzed` and the skip reason to its existing depth or
+  preemption note, naming each skipped state root. This qualifies the existing
+  depth note rather than introducing a JSON field or silently analyzing a
+  different initial-state model. HTML already renders the same `note` evidence;
+  readable mode remains the existing scope/skeleton view.
 - Counterfactual weakening is scoped to user invariants and reachability. The
   per-candidate verifier model removes `leadsTo` properties because their lasso
   results are not consumed by either counterfactual artifact; normal `verify`
@@ -79,8 +129,11 @@ names only (no internal-name leakage), including nested counterfactual violation
 where `invariant` carries the public dotted name and no raw `internal_invariant` duplicate is
 emitted. JSON-serializable. tests/test_explain.py: cart_v1
 skeleton / the `ShippedWasPaid` counterfactual appears via **assignment removal** /
-NonNegativeRevenue yields "no counterfactual" / the dialect cancel_flow carries the original
-requirement text / compose does not crash / exit 0. Roadmap #1.
+the dialect cancel_flow carries the original requirement text / compose does not crash /
+exit 0. Roadmap #1. The frozen Python test also expects no counterfactual for
+`NonNegativeRevenue`; that historical first-kill behavior is not the native
+contract after #1350. Native regression tests cover shared-mutant per-invariant
+and per-reachable attribution plus the actual violating successor and its changes.
 
 ## 6. Native skeleton restoration (issues #528, #530)
 

@@ -426,6 +426,22 @@ fn mutate_notes_a_dead_component_action() {
     }
 }
 
+const GUARDED_BANK: &str = r#"compose GuardedBank {
+  use BankAccountImpl as bank from "bank_impl.fsl"
+  use AuditLog as audit from "audit_log.fsl"
+
+  action deposit_audited(a: bank.Amount) =
+      bank.submit_deposit(a) || audit.deposit(a) {
+    requires audit.log.size() < 2
+  }
+
+  internal bank.submit_deposit
+  internal audit.deposit
+
+  invariant ShortAudit { audit.log.size() <= 2 }
+}
+"#;
+
 /// Detector: readable `explain` printed component types as `bank__Amount`,
 /// and the blame effect text kept the internal assignment root
 /// `audit__log = audit.log.push(a)`.
@@ -438,6 +454,41 @@ fn explain_spells_component_types_and_assignment_roots_publicly() {
         "{text}"
     );
     let explain = fslc(&["explain", BANK, "--depth", "3"]);
+    let text = String::from_utf8_lossy(&explain.stdout);
+    assert!(!text.contains("audit__"), "{text}");
+
+    // A bounded log invariant forces a selected action trace even when BANK's
+    // other invariants now select shorter init-weakening counterfactuals.
+    let dir = scratch_dir("explain-effect");
+    write(
+        &dir,
+        "bank_impl.fsl",
+        include_str!("../../../specs/bank_impl.fsl"),
+    );
+    write(
+        &dir,
+        "audit_log.fsl",
+        include_str!("../../../specs/audit_log.fsl"),
+    );
+    let path = write(&dir, "guarded_bank.fsl", GUARDED_BANK);
+    let explain = fslc(&["explain", &path, "--depth", "3"]);
+    assert!(explain.status.success(), "{explain:?}");
+    let value = json_of(&explain);
+    let candidate = value["counterfactuals"]
+        .as_array()
+        .expect("counterfactuals")
+        .iter()
+        .find(|item| item["invariant"] == "ShortAudit")
+        .expect("ShortAudit counterfactual");
+    assert_eq!(candidate["weakening"]["op"], "requires-removal");
+    assert_eq!(candidate["violation"]["violated_at_step"], 3);
+    let trace = candidate["trace"].as_array().expect("selected trace");
+    assert_eq!(trace.len(), 4);
+    assert!(
+        trace[1..]
+            .iter()
+            .all(|step| step["action"]["name"] == "deposit_audited")
+    );
     let text = String::from_utf8_lossy(&explain.stdout);
     assert!(
         text.contains("\"audit.log = audit.log.push(a)\"") && !text.contains("audit__"),

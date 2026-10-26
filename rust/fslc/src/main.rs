@@ -9170,8 +9170,8 @@ fn reachable_counterfactuals_from_source(
         return json!([]);
     };
     let document = match parsed {
-        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
-        fsl_syntax::SurfaceDocument::Business(_)
+        fsl_syntax::SurfaceDocument::Spec(_)
+        | fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
@@ -9214,37 +9214,36 @@ fn reachable_counterfactuals_from_source(
         if result.violation.is_some() || result.leadsto_violation.is_some() {
             continue;
         }
-        let Some(property) = model.reachables.iter().find(|property| {
+        for property in model.reachables.iter().filter(|property| {
             result
                 .reachables
                 .get(&property.name)
                 .is_some_and(Option::is_none)
-        }) else {
-            continue;
-        };
-        let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
-        let mut weakening = json!({
-            "op":candidate.op,
-            "loc":candidate.span.python_loc(),
-            "target":candidate.target,
-            "source_text":lines.get(line.saturating_sub(1)).map(|line|line.trim()),
-        });
-        if let Some(origin) = candidate.origin
-            && let Value::Object(value) = &mut weakening
-        {
-            value.insert("origin".to_owned(), json!(origin));
-            value.insert("label".to_owned(), json!("init weakening"));
+        }) {
+            let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
+            let mut weakening = json!({
+                "op":candidate.op,
+                "loc":candidate.span.python_loc(),
+                "target":candidate.target,
+                "source_text":lines.get(line.saturating_sub(1)).map(|line|line.trim()),
+            });
+            if let Some(origin) = candidate.origin
+                && let Value::Object(value) = &mut weakening
+            {
+                value.insert("origin".to_owned(), json!(origin));
+                value.insert("label".to_owned(), json!("init weakening"));
+            }
+            let mut item = json!({
+                "property":model.names().public_property(&property.name).into_string(),
+                "weakening":weakening,
+                "result":"reachable_failed",
+                "requirement":Value::Null,
+            });
+            if let Value::Object(item) = &mut item {
+                insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
+            }
+            output.push(item);
         }
-        let mut item = json!({
-            "property":model.names().public_property(&property.name).into_string(),
-            "weakening":weakening,
-            "result":"reachable_failed",
-            "requirement":Value::Null,
-        });
-        if let Value::Object(item) = &mut item {
-            insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
-        }
-        output.push(item);
     }
     Value::Array(output)
 }
@@ -9471,12 +9470,44 @@ fn trace_blame_json(
     )
 }
 
+fn concrete_search_unavailable_note(
+    model: &KernelModel,
+    error: &fsl_runtime::RuntimeError,
+) -> String {
+    if let Some(roots) = error
+        .message
+        .strip_prefix("init does not assign state variable(s): ")
+    {
+        let roots = roots
+            .strip_suffix(" (partial component initialization is rejected by the explicit engine)")
+            .unwrap_or(roots)
+            .split(", ")
+            .map(|root| model.names().public_state(root).into_string())
+            .collect::<Vec<_>>();
+        return format!(
+            "concrete search not run: nondeterministic initialization of state {} is unsupported",
+            roots.join(", "),
+        );
+    }
+    let mut message = error.message.clone();
+    for (root, _) in &model.state {
+        message = message.replace(
+            &format!("'{root}'"),
+            &format!("'{}'", model.names().public_state(root).as_str()),
+        );
+    }
+    format!("concrete search not run: initialization/initial-state checks failed: {message}")
+}
+
 fn canonical_concrete_violation_trace(
     model: &KernelModel,
     invariant: &str,
     steps: usize,
-) -> Option<Vec<fsl_core::TraceStep>> {
-    let initial = fsl_runtime::Monitor::new(model.clone()).ok()?;
+) -> Result<Option<Vec<fsl_core::TraceStep>>, fsl_runtime::RuntimeError> {
+    let initial = fsl_runtime::Monitor::new(model.clone())?;
+    if initial.current_violation()?.is_some() {
+        return Ok(None);
+    }
     let initial_trace = vec![fsl_core::TraceStep {
         step: 0,
         state: initial.state.clone(),
@@ -9489,22 +9520,36 @@ fn canonical_concrete_violation_trace(
         if step >= steps {
             continue;
         }
-        for enabled in monitor.enabled().ok()? {
+        let Ok(candidates) = monitor.candidates() else {
+            continue;
+        };
+        for candidate in candidates {
+            let fsl_runtime::ActionCandidate::Enabled(enabled) = candidate else {
+                continue;
+            };
             let mut child = monitor.clone();
-            let result = child.step(&enabled).ok()?;
+            let Ok(result) = child.step(&enabled) else {
+                continue;
+            };
             let mut child_trace = trace.clone();
-            child_trace.push(fsl_core::TraceStep {
-                step: step + 1,
-                state: result.state,
-                action: Some(fsl_core::TraceAction {
-                    name: enabled.action,
-                    params: enabled.params,
-                }),
-                changes: std::collections::BTreeMap::new(),
-            });
+            child_trace.push(fsl_runtime::trace_step_from_result(
+                step + 1,
+                &monitor.state,
+                &enabled,
+                &result,
+            ));
             if let Some(violation) = result.violation {
                 if violation.name == invariant && violation.step == steps {
-                    return Some(child_trace);
+                    // Concrete evidence must also satisfy terminal trans/ensures.
+                    // If this rejects a solver-target canonicalization, its
+                    // caller keeps the BMC trace and its first-violation order.
+                    let mut checks = monitor.clone();
+                    checks.model.invariants.clear();
+                    if let Ok(checked) = checks.step(&enabled)
+                        && checked.violation.is_none()
+                    {
+                        return Ok(Some(child_trace));
+                    }
                 }
                 continue;
             }
@@ -9513,7 +9558,7 @@ fn canonical_concrete_violation_trace(
             }
         }
     }
-    None
+    Ok(None)
 }
 
 fn canonicalize_initial_int_violation(
@@ -9670,8 +9715,8 @@ fn invariant_counterfactuals_from_source(
         return json!([]);
     };
     let document = match parsed {
-        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
-        fsl_syntax::SurfaceDocument::Business(_)
+        fsl_syntax::SurfaceDocument::Spec(_)
+        | fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
             let resolver =
@@ -9692,6 +9737,10 @@ fn invariant_counterfactuals_from_source(
     };
     let lines = source.lines().collect::<Vec<_>>();
     let mut found = std::collections::BTreeMap::<String, ((usize, usize, u32), Value)>::new();
+    let mut preemptions = std::collections::BTreeMap::<String, String>::new();
+    let mut unavailable =
+        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    let mut skipped_init_roots = std::collections::BTreeSet::new();
     for candidate in fsl_tools::enumerate_builtin_mutants(&document)
         .into_iter()
         .filter(|candidate| {
@@ -9708,11 +9757,13 @@ fn invariant_counterfactuals_from_source(
             && candidate.action.as_deref() == Some("init"))
         .then(|| removed_init_assignment_root(&document, &candidate.spec))
         .flatten();
-        if removed_init_root
-            .as_ref()
-            .and_then(|root| original.state.iter().find(|(name, _)| name == root))
-            .is_some_and(|(_, ty)| type_has_symbolic_bounds(&original, ty))
-        {
+        if let Some(root) = removed_init_root.as_ref().filter(|root| {
+            original
+                .state
+                .iter()
+                .any(|(name, ty)| name == *root && type_has_symbolic_bounds(&original, ty))
+        }) {
+            skipped_init_roots.insert(root.clone());
             continue;
         }
         let started = Instant::now();
@@ -9721,85 +9772,144 @@ fn invariant_counterfactuals_from_source(
         };
         model.inherit_compose_names(names);
         model.leadstos.clear();
-        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
-            continue;
-        };
-        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
-        else {
-            continue;
-        };
-        let Some(violation) = result.violation.as_ref() else {
-            continue;
-        };
-        if !original
-            .invariants
-            .iter()
-            .any(|property| property.name == violation.name)
-        {
-            continue;
-        }
-        let mut canonical_violation = violation.clone();
-        if let Some(trace) = canonical_concrete_violation_trace(
-            &model,
-            &violation.name,
-            violation.trace.len().saturating_sub(1),
-        ) {
-            canonical_violation.trace = trace;
-        } else if let Some(root) = removed_init_root.as_deref() {
-            canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
-        }
-        let (trace, explanation) =
-            invariant_violation_explanation(&model, &canonical_violation, started);
-        let line = usize::try_from(span.start.line).unwrap_or_default();
-        let op = match candidate.op.as_str() {
-            "assignment_remove" => "assignment-removal",
-            "requires_remove" => "requires-removal",
-            "fair_remove" => "fair-removal",
-            _ => unreachable!("filtered weakening operator"),
-        };
-        let mut weakening = json!({
-            "op": op,
-            "loc": span.python_loc(),
-            "target": names
-                .names()
-                .public_action_target(&candidate.target, candidate.action.as_deref())
-                .as_str(),
-            "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
-        });
-        if candidate.action.as_deref() == Some("init")
-            && let Value::Object(value) = &mut weakening
-        {
-            value.insert("origin".to_owned(), json!("init"));
-            value.insert("label".to_owned(), json!("init weakening"));
-        }
-        let priority = match op {
-            "assignment-removal" => 0,
-            "requires-removal" => 1,
-            "fair-removal" => 2,
-            _ => 99,
-        };
-        let key = (canonical_violation.trace.len(), priority, span.start.line);
-        let property = original
-            .invariants
-            .iter()
-            .find(|property| property.name == violation.name);
-        let mut item = json!({
-            "invariant": model.names().public_violation(&violation.name, None).into_string(),
-            "weakening": weakening,
-            "trace": trace,
-            "requirement": Value::Null,
-            "violation": explanation,
-        });
-        if let Some(property) = property
-            && let Value::Object(item) = &mut item
-        {
-            insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
-        }
-        if found
-            .get(&violation.name)
-            .is_none_or(|(current, _)| key < *current)
-        {
-            found.insert(violation.name.clone(), (key, item));
+        // The bounded verifier reports only its first violation. Analyze each
+        // user invariant separately so another invariant cannot hide its
+        // counterfactual, while preserving the per-invariant ranking below.
+        for property in &original.invariants {
+            let mut model = model.clone();
+            model
+                .invariants
+                .retain(|candidate| candidate.name == property.name);
+            let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+                continue;
+            };
+            let Ok(result) =
+                block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
+            else {
+                continue;
+            };
+            let Some(violation) = result.violation.as_ref() else {
+                continue;
+            };
+            let canonical_violation =
+                if violation.kind == "invariant" && violation.name == property.name {
+                    let mut canonical_violation = violation.clone();
+                    if let Ok(Some(trace)) = canonical_concrete_violation_trace(
+                        &model,
+                        &violation.name,
+                        violation.trace.len().saturating_sub(1),
+                    ) {
+                        canonical_violation.trace = trace;
+                    } else if let Some(root) = removed_init_root.as_deref() {
+                        canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
+                    }
+                    canonical_violation
+                } else if matches!(
+                    violation.kind.as_str(),
+                    "type_bound" | "trans" | "partial_op" | "ensures"
+                ) {
+                    preemptions.entry(property.name.clone()).or_insert_with(|| {
+                        format!(
+                            "preempted by {} {} at step {}",
+                            violation.kind,
+                            model
+                                .names()
+                                .public_violation(&violation.name, violation.last_action.as_deref())
+                                .as_str(),
+                            violation.step,
+                        )
+                    });
+                    // The first failing non-user check need not be on the path
+                    // that breaks this target. Concrete search discards unsafe
+                    // children but keeps exploring the other enabled actions.
+                    let mut concrete_trace = None;
+                    for steps in 0..=depth {
+                        match canonical_concrete_violation_trace(&model, &property.name, steps) {
+                            Ok(Some(trace)) => {
+                                concrete_trace = Some(trace);
+                                break;
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                unavailable
+                                    .entry(property.name.clone())
+                                    .or_default()
+                                    .insert(concrete_search_unavailable_note(&model, &error));
+                                break;
+                            }
+                        }
+                    }
+                    let Some(trace) = concrete_trace else {
+                        continue;
+                    };
+                    fsl_verifier::BmcViolation {
+                        kind: "invariant".to_owned(),
+                        name: property.name.clone(),
+                        step: trace.len().saturating_sub(1),
+                        last_action: trace
+                            .last()
+                            .and_then(|entry| entry.action.as_ref())
+                            .map(|action| action.name.clone()),
+                        trace,
+                        leads_to: None,
+                    }
+                } else {
+                    continue;
+                };
+            let violation = &canonical_violation;
+            let (trace, explanation) =
+                invariant_violation_explanation(&model, &canonical_violation, started);
+            let line = usize::try_from(span.start.line).unwrap_or_default();
+            let op = match candidate.op.as_str() {
+                "assignment_remove" => "assignment-removal",
+                "requires_remove" => "requires-removal",
+                "fair_remove" => "fair-removal",
+                _ => unreachable!("filtered weakening operator"),
+            };
+            let mut weakening = json!({
+                "op": op,
+                "loc": span.python_loc(),
+                "target": names
+                    .names()
+                    .public_action_target(&candidate.target, candidate.action.as_deref())
+                    .as_str(),
+                "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
+            });
+            if candidate.action.as_deref() == Some("init")
+                && let Value::Object(value) = &mut weakening
+            {
+                value.insert("origin".to_owned(), json!("init"));
+                value.insert("label".to_owned(), json!("init weakening"));
+            }
+            let priority = match op {
+                "assignment-removal" => 0,
+                "requires-removal" => 1,
+                "fair-removal" => 2,
+                _ => 99,
+            };
+            let key = (canonical_violation.trace.len(), priority, span.start.line);
+            let property = original
+                .invariants
+                .iter()
+                .find(|property| property.name == violation.name);
+            let mut item = json!({
+                "invariant": model.names().public_violation(&violation.name, None).into_string(),
+                "weakening": weakening,
+                "trace": trace,
+                "requirement": Value::Null,
+                "violation": explanation,
+            });
+            if let Some(property) = property
+                && let Value::Object(item) = &mut item
+            {
+                insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
+            }
+            if found
+                .get(&violation.name)
+                .is_none_or(|(current, _)| key < *current)
+            {
+                found.insert(violation.name.clone(), (key, item));
+            }
         }
     }
     Value::Array(
@@ -9809,12 +9919,27 @@ fn invariant_counterfactuals_from_source(
             .map(|property| {
                 found.get(&property.name).map_or_else(
                     || {
+                        let mut note = preemptions.get(&property.name).cloned().unwrap_or_else(|| {
+                            format!("no counterfactual within depth {depth}")
+                        });
+                        if let Some(reasons) = unavailable.get(&property.name) {
+                            for reason in reasons {
+                                let _ = write!(note, "; {reason}");
+                            }
+                        }
+                        for root in &skipped_init_roots {
+                            let _ = write!(
+                                note,
+                                "; init-assignment removal of bounded state {} was not analyzed (skipped: nondeterministic initialization is unsupported by concrete search)",
+                                names.names().public_state(root).as_str(),
+                            );
+                        }
                         let mut item = json!({
                             "invariant": original.names().public_property(&property.name).into_string(),
                             "weakening": null,
                             "trace": null,
                             "requirement": Value::Null,
-                            "note": format!("no counterfactual within depth {depth}"),
+                            "note": note,
                         });
                         if let Value::Object(item) = &mut item {
                             insert_requirement_metadata(

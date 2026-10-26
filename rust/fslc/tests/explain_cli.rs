@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Negative controls for `fslc explain` reporting-surface defects (issues
-//! #528, #530): the verdict/verification machinery is untouched, but the
+//! Controls for `fslc explain` reporting-surface defects (issues
+//! #528, #530, #1350): the verdict/verification machinery is untouched, but the
 //! explain skeleton and `--readable` projection previously dropped or
-//! mis-rendered structural information. Every test here fails if the
-//! corresponding fix is reverted.
+//! mis-rendered structural information. Detector tests reject a reverted fix;
+//! explicitly labelled preservation controls protect previously working inputs.
 
 use std::process::Command;
 
@@ -47,6 +47,10 @@ fn run_cli_text(args: &[&str]) -> String {
 }
 
 fn run_explain_source(source: &str) -> (serde_json::Value, i32) {
+    run_explain_source_at_depth(source, "3")
+}
+
+fn run_explain_source_at_depth(source: &str, depth: &str) -> (serde_json::Value, i32) {
     let path = std::env::temp_dir().join(format!(
         "fslc-explain-counterfactual-scope-{}-{:?}.fsl",
         std::process::id(),
@@ -57,10 +61,321 @@ fn run_explain_source(source: &str) -> (serde_json::Value, i32) {
         "explain",
         path.to_str().expect("UTF-8 fixture path"),
         "--depth",
-        "3",
+        depth,
     ]);
     std::fs::remove_file(path).expect("remove explain fixture");
     result
+}
+
+// ---------------------------------------------------------------------
+// #1350 — scoped kernel domains must reach both counterfactual rebuilds.
+// ---------------------------------------------------------------------
+
+const ENTITY_MAP_COUNTERFACTUAL: &str = r"spec C {
+  entity R
+  type N = 0..3
+  state { x: Map<R, N> }
+  init { forall r: R { x[r] = 0 } }
+  action inc(r: R) {
+    requires x[r] < 2
+    x[r] = x[r] + 1
+  }
+  invariant AtMostTwo { forall r: R { x[r] <= 2 } }
+}
+verify { instances R = 2 }
+";
+
+const ENTITY_PARAMETER_COUNTERFACTUAL: &str = r"spec C {
+  entity R
+  type N = 0..3
+  state { x: N }
+  init { x = 0 }
+  action inc(r: R) {
+    requires x < 2
+    x = x + 1
+  }
+  invariant AtMostTwo { x <= 2 }
+}
+verify { instances R = 2 }
+";
+
+const NUMBER_COUNTERFACTUAL: &str = r"spec C {
+  number N
+  state { x: N }
+  init { x = 0 }
+  action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  invariant AtMostTwo { x <= 2 }
+}
+verify { values N = 0..3 }
+";
+
+const ENTITY_REACHABLE_COUNTERFACTUAL: &str = r"spec C {
+  entity R
+  state { done: Bool }
+  init { done = false }
+  action finish(r: R) { done = true }
+  reachable Done { done }
+}
+verify { instances R = 2 }
+";
+
+fn counterfactual_type_control(source: &str) -> String {
+    // Keep action/property/guard lines aligned for full-JSON comparisons.
+    source
+        .replace("entity R", "type R = 0..1")
+        .replace("number N", "type N = 0..3")
+        .replace("verify { instances R = 2 }\n", "")
+        .replace("verify { values N = 0..3 }\n", "")
+}
+
+fn assert_kernel_counterfactual_envelope(value: &serde_json::Value, status: i32, depth: usize) {
+    assert_eq!(status, 0, "{value}");
+    assert_eq!(value["fsl"], "1.0", "{value}");
+    assert_eq!(value["result"], "explained", "{value}");
+    assert_eq!(value["spec"], "C", "{value}");
+    assert_eq!(value["depth"], depth, "{value}");
+    assert_eq!(
+        value["counterfactual_scope"],
+        serde_json::json!({
+            "properties": ["invariant", "reachable"],
+            "liveness": "skipped",
+            "reason": "counterfactual weakening is safety/reachability analysis; leadsTo remains verified by the normal verify command",
+        }),
+        "{value}"
+    );
+}
+
+fn assert_protecting_guard_counterfactual(value: &serde_json::Value, guard: &str, line: usize) {
+    let items = value["counterfactuals"]
+        .as_array()
+        .expect("counterfactuals");
+    assert_eq!(
+        items.len(),
+        1,
+        "expected AtMostTwo protecting-guard counterfactual, got {items:?}"
+    );
+    let item = &items[0];
+    assert_eq!(item["invariant"], "AtMostTwo", "{item}");
+    assert_eq!(
+        item["weakening"],
+        serde_json::json!({
+            "op": "requires-removal",
+            "loc": {"line": line, "column": 5},
+            "target": "inc requires #1",
+            "source_text": guard,
+        }),
+        "{item}"
+    );
+    assert_eq!(item.get("requirement"), Some(&serde_json::Value::Null));
+    assert_eq!(item["violation"]["violation_kind"], "invariant", "{item}");
+    assert_eq!(item["violation"]["invariant"], "AtMostTwo", "{item}");
+    assert_eq!(item["violation"]["violated_at_step"], 3, "{item}");
+    let trace = item["trace"].as_array().expect("counterfactual trace");
+    assert!(!trace.is_empty(), "{item}");
+    assert_eq!(trace.len(), 4, "{item}");
+    // The dedicated counterfactual_violating_step_records_successor_and_changes
+    // test is the correctness oracle for #1350's violating trace evidence.
+}
+
+fn counterfactuals_without_elapsed(mut value: serde_json::Value) -> serde_json::Value {
+    let items = value["counterfactuals"]
+        .as_array_mut()
+        .expect("counterfactuals");
+    assert!(
+        !items.is_empty(),
+        "elapsed-time exclusion must not be vacuous"
+    );
+    for item in items {
+        let cost = item["violation"]["cost"]
+            .as_object_mut()
+            .expect("counterfactual violation cost");
+        // Recovery observed this value changing between otherwise identical
+        // runs. Check presence on each side before excluding only this key.
+        let elapsed = cost.remove("elapsed_s").expect("live elapsed_s exclusion");
+        assert!(elapsed.as_f64().is_some_and(|seconds| seconds >= 0.0));
+    }
+    value
+}
+
+/// Detector: a verify-scoped Map key/action parameter must yield its protecting guard.
+#[test]
+fn explain_kernel_entity_map_counterfactual_names_protecting_guard() {
+    let (scoped, status) = run_explain_source(ENTITY_MAP_COUNTERFACTUAL);
+    assert_kernel_counterfactual_envelope(&scoped, status, 3);
+    assert_protecting_guard_counterfactual(&scoped, "requires x[r] < 2", 7);
+
+    let (typed, status) =
+        run_explain_source(&counterfactual_type_control(ENTITY_MAP_COUNTERFACTUAL));
+    assert_kernel_counterfactual_envelope(&typed, status, 3);
+    assert_protecting_guard_counterfactual(&typed, "requires x[r] < 2", 7);
+    assert_eq!(
+        counterfactuals_without_elapsed(scoped),
+        counterfactuals_without_elapsed(typed)
+    );
+}
+
+/// Detector: an entity used only as an action parameter must not erase counterfactuals.
+#[test]
+fn explain_kernel_entity_parameter_counterfactual_names_protecting_guard() {
+    let (value, status) = run_explain_source(ENTITY_PARAMETER_COUNTERFACTUAL);
+    assert_kernel_counterfactual_envelope(&value, status, 3);
+    assert_protecting_guard_counterfactual(&value, "requires x < 2", 7);
+}
+
+/// Detector: a verify-scoped number state must yield its protecting guard.
+#[test]
+fn explain_kernel_number_counterfactual_names_protecting_guard() {
+    let (scoped, status) = run_explain_source(NUMBER_COUNTERFACTUAL);
+    assert_kernel_counterfactual_envelope(&scoped, status, 3);
+    assert_protecting_guard_counterfactual(&scoped, "requires x < 2", 6);
+
+    let (typed, status) = run_explain_source(&counterfactual_type_control(NUMBER_COUNTERFACTUAL));
+    assert_kernel_counterfactual_envelope(&typed, status, 3);
+    assert_protecting_guard_counterfactual(&typed, "requires x < 2", 6);
+    assert_eq!(
+        counterfactuals_without_elapsed(scoped),
+        counterfactuals_without_elapsed(typed)
+    );
+}
+
+/// Preservation control: directly bounded Map/scalar specs already select these guards.
+#[test]
+fn explain_kernel_type_counterfactual_control_matches_current_behavior() {
+    for (source, guard, line) in [
+        (ENTITY_MAP_COUNTERFACTUAL, "requires x[r] < 2", 7),
+        (NUMBER_COUNTERFACTUAL, "requires x < 2", 6),
+    ] {
+        let source = counterfactual_type_control(source);
+        let (first, status) = run_explain_source(&source);
+        assert_kernel_counterfactual_envelope(&first, status, 3);
+        assert_eq!(first["skeleton"]["spec_kind"], "kernel");
+        assert_protecting_guard_counterfactual(&first, guard, line);
+        let (second, status) = run_explain_source(&source);
+        assert_kernel_counterfactual_envelope(&second, status, 3);
+        assert_protecting_guard_counterfactual(&second, guard, line);
+        assert_eq!(
+            counterfactuals_without_elapsed(first),
+            counterfactuals_without_elapsed(second)
+        );
+    }
+}
+
+/// Preservation control: unused entities and lowered requirements already yield candidates.
+#[test]
+fn explain_kernel_unused_entity_and_requirements_controls_keep_counterfactuals() {
+    let unused = ENTITY_PARAMETER_COUNTERFACTUAL.replace("inc(r: R)", "inc()");
+    let (value, status) = run_explain_source(&unused);
+    assert_kernel_counterfactual_envelope(&value, status, 3);
+    assert_eq!(value["skeleton"]["spec_kind"], "kernel");
+    assert_protecting_guard_counterfactual(&value, "requires x < 2", 7);
+
+    let requirements = ENTITY_MAP_COUNTERFACTUAL.replacen("spec C", "requirements C", 1);
+    let (value, status) = run_explain_source(&requirements);
+    assert_kernel_counterfactual_envelope(&value, status, 3);
+    assert_eq!(value["skeleton"]["spec_kind"], "requirements");
+    assert_protecting_guard_counterfactual(&value, "requires x[r] < 2", 7);
+}
+
+/// Detector: shallow scoped searches need an invariant note, not an empty array.
+/// The typed cases are preservation controls for the existing depth-limit note.
+#[test]
+fn explain_kernel_scoped_counterfactuals_report_depth_limit() {
+    let expected = serde_json::json!([{
+        "invariant": "AtMostTwo",
+        "weakening": null,
+        "trace": null,
+        "requirement": null,
+        "note": "no counterfactual within depth 2; init-assignment removal of bounded state x was not analyzed (skipped: nondeterministic initialization is unsupported by concrete search)",
+    }]);
+    let mut scoped_outputs = Vec::new();
+    for source in [ENTITY_MAP_COUNTERFACTUAL, NUMBER_COUNTERFACTUAL] {
+        let (typed, status) =
+            run_explain_source_at_depth(&counterfactual_type_control(source), "2");
+        assert_kernel_counterfactual_envelope(&typed, status, 2);
+        assert_eq!(typed["counterfactuals"], expected, "typed control: {typed}");
+        let (scoped, status) = run_explain_source_at_depth(source, "2");
+        assert_kernel_counterfactual_envelope(&scoped, status, 2);
+        scoped_outputs.push((scoped, typed));
+    }
+    for (scoped, typed) in scoped_outputs {
+        assert_eq!(
+            scoped["counterfactuals"], expected,
+            "expected scoped AtMostTwo depth-limit note, got {}",
+            scoped["counterfactuals"]
+        );
+        assert_eq!(scoped, typed);
+    }
+}
+
+/// Detector: reachable candidate rebuilds must retain an entity parameter's verify scope.
+#[test]
+fn explain_kernel_entity_reachable_counterfactual_matches_type_control() {
+    let (typed, status) = run_explain_source(&counterfactual_type_control(
+        ENTITY_REACHABLE_COUNTERFACTUAL,
+    ));
+    assert_kernel_counterfactual_envelope(&typed, status, 3);
+    let expected = serde_json::json!([{
+        "property": "Done",
+        "weakening": {
+            "op": "assignment-removal",
+            "loc": {"line": 5, "column": 25},
+            "target": "finish assignment",
+            "source_text": "action finish(r: R) { done = true }",
+        },
+        "result": "reachable_failed",
+        "requirement": null,
+        "faithfulness_class": "intent_unexercised",
+        "recommended_action": "add a single-shot reachable for the action / raise --depth",
+    }]);
+    assert_eq!(typed["reachable_counterfactuals"], expected);
+    let (scoped, status) = run_explain_source(ENTITY_REACHABLE_COUNTERFACTUAL);
+    assert_kernel_counterfactual_envelope(&scoped, status, 3);
+    assert_eq!(
+        scoped.get("reachable_counterfactuals"),
+        Some(&expected),
+        "expected scoped Done reachable_counterfactuals, got {}",
+        scoped
+            .get("reachable_counterfactuals")
+            .unwrap_or(&serde_json::Value::Null)
+    );
+    assert_eq!(scoped, typed);
+}
+
+/// Detector: reachable candidate rebuilds must retain a number state's verify scope.
+#[test]
+fn explain_kernel_number_reachable_counterfactual_matches_type_control() {
+    let source =
+        NUMBER_COUNTERFACTUAL.replace("invariant AtMostTwo { x <= 2 }", "reachable Two { x == 2 }");
+    let (typed, status) = run_explain_source(&counterfactual_type_control(&source));
+    assert_kernel_counterfactual_envelope(&typed, status, 3);
+    let expected = serde_json::json!([{
+        "property": "Two",
+        "weakening": {
+            "op": "assignment-removal",
+            "loc": {"line": 7, "column": 5},
+            "target": "inc assignment",
+            "source_text": "x = x + 1",
+        },
+        "result": "reachable_failed",
+        "requirement": null,
+        "faithfulness_class": "intent_unexercised",
+        "recommended_action": "add a single-shot reachable for the action / raise --depth",
+    }]);
+    assert_eq!(typed["reachable_counterfactuals"], expected);
+    let (scoped, status) = run_explain_source(&source);
+    assert_kernel_counterfactual_envelope(&scoped, status, 3);
+    assert_eq!(
+        scoped.get("reachable_counterfactuals"),
+        Some(&expected),
+        "expected scoped Two reachable_counterfactuals, got {}",
+        scoped
+            .get("reachable_counterfactuals")
+            .unwrap_or(&serde_json::Value::Null)
+    );
+    assert_eq!(scoped, typed);
 }
 
 const BRANCHED_SPEC: &str = "examples/layers/return_system.fsl";
