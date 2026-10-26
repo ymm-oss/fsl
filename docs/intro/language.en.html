@@ -1692,7 +1692,10 @@ not depart from the behavior of abs (see <code>DESIGN-refinement.md</code>).</p>
   same-named impl counterpart is a located <code>kind: "type"</code> error; write an
   explicit <code>action ... -&gt; ...</code> correspondence for that pair instead.
   Incompatible same-name state candidates are likewise reported as
-  <code>kind: "type"</code> errors.</li>
+  <code>kind: "type"</code> errors.
+  Auto actor compatibility, including <code>covers</code>, mixed editions and compose,
+  follows §13.2; see <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>,
+  “#1441: source-actor auto mapping and breaking-source migration”.</li>
 <li><code>action &lt;impl&gt;(&lt;formal params&gt;) -&gt; &lt;abs&gt;(&lt;expr&gt;) | stutter</code> — required for every impl action.
   Formal params may be bare names or <code>name: Type</code> annotations matching the impl action declaration.
   <code>stutter</code> is an internal step in which the abstract state does not change.</li>
@@ -2511,30 +2514,59 @@ verify {
   An impl action with both a <code>maps</code> clause and a matching inline <code>action ...</code>
   item is a duplicate-correspondence, <code>kind: "type"</code> check-time error naming
   both origins and locations (same as a mapping file that lists the same action
-  twice). Whenever the seam is evaluated, a process transition auto-mapped to
-  a same-named business action is actor-checked; a transition whose actor
-  differs from that business action's actor is a check-time error.</li>
-<li>A requirements transition's <code>by X</code> is a free label, not a reference to a
-  declared actor: the requirements layer has no <code>actor</code> declaration, and
-  <code>check</code> does not ask whether <code>X</code> is declared anywhere. (A <code>business</code> process
-  is the opposite: a transition whose actor no <code>actor</code> line declares is a
-  check-time error.) The label is compared with a business actor only when a
-  refinement maps the transition automatically to the business action of the
-  same name — through <code>maps auto</code>, or through the inline <code>implements</code> seam's
-  implicit auto-mapping of every transition that no explicit inline
-  <code>action ... -&gt; ...</code> item names — and that refinement is evaluated. Where
-  the refinement is checked (<code>check</code>, <code>fslc refine</code>, and the like), a mismatch
-  is a <code>kind: "type"</code> error; <code>fslc diff</code> reports it differently, as described
-  below. For example, the inline seam is
-  evaluated by an unscoped <code>check</code> or <code>verify</code> and by <code>fslc scenarios</code>, but not
-  by a <code>verify</code> scoped with <code>--property</code> and the like (above); a refinement
-  file's <code>maps auto</code> is evaluated by <code>fslc refine</code> or a <code>fslc chain</code> refine
-  layer; and <code>fslc diff</code> without a mapping builds a <code>maps auto</code> refinement
-  between the two versions itself, so a changed <code>by</code> label there surfaces as
-  an automatic-mapping failure. The label is checked against nothing for a
-  transition mapped by an explicit <code>action</code> item, for one the inline seam maps
-  to <code>stutter</code> because the business layer has no action of that name, and
-  whenever no such refinement is evaluated.</li>
+  twice). Whenever the seam is evaluated, auto-mapped process transitions and
+  events compare the declared source actors on both sides, regardless of edition (4/5) or <code>covers</code> on
+  either side, including prose beginning <code>by</code>. A registered actor takes
+  precedence over metadata. Actions without a registry entry (raw spec/compose
+  actions and requirements action items, standalone or inside a requirement
+  block) use the existing metadata rule (<code>by</code> followed by a space and a
+  nonempty actor). When both actors are available,
+  a mismatch is <code>error</code> / <code>kind: "type"</code>, exit 2, with
+  <code>maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'</code>
+  at the <code>implements</code> or standalone <code>maps auto</code> correspondence. The same rule
+  applies in unscoped <code>verify</code>, standalone <code>refine</code> and Worker; explicit action
+  correspondences and <code>stutter</code> are not actor-checked. Selected <code>verify</code> still
+  does not evaluate the seam. Without a supplied mapping, <code>diff</code> reports an
+  affected direction as <code>unknown</code> / <code>automatic_mapping_failed</code> inside its
+  <code>semantic_diff</code>/exit-0 envelope, not as a top-level type error.
+  <strong>v5.0.0 breaking source change (#1441):</strong> mismatches previously hidden by
+  <code>covers</code>, cross-edition or mixed compose lookup are rejected; Kernel/JSON
+  schemas do not change. The full four-cell corpus sweep at base
+  <code>5a539bbe27dc933d7fe8df95e6189cb75cec6cc9</code> and head
+  <code>9ca8630c7f45f1def54c056bf53a852853c7a60c</code> ran both binaries' <code>fslc check</code>
+  on every <code>.fsl</code> in <code>specs/</code>, <code>examples/</code>, <code>rust/fslc/tests/fixtures/</code>, in each
+  SHA's own tree (579 base / 591 head forms): <strong>0 <code>ok</code>→<code>error</code> and 0
+  <code>error</code>→<code>ok</code> corpus transitions</strong>. Separately, the acceptance-expansion class
+  is registered transition metadata whose requirement text begins with <code>by</code>
+  (covers text and next-edition rule/decide text). With matching <code>System</code> actors,
+  impl covers (B3), business covers (B4) and an abstract event's rule text
+  <code>by Manager only</code> without covers (F1/p5) change <code>error/type/2</code>→<code>ok/0</code>;
+  bounded verify returns <code>verified/0</code> with <code>implements refines</code>, and F1's
+  standalone refine changes <code>error/type/2</code>→<code>refines/0</code>.
+  See <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>,
+  “#1441: source-actor auto mapping and breaking-source migration”,
+  for commands, measured evidence, gate policy and manual correction; no general
+  automatic semantics-preserving migration exists. LSP delivery is not promised.</li>
+<li>In a requirements process-form transition (edition 4), <code>by X</code> is a free label,
+  not a reference to a declared actor: this form has no <code>actor</code> declaration,
+  and <code>check</code> does not ask whether <code>X</code> is declared anywhere. Here, “source actor”
+  means the label written on the transition, not a declared actor symbol.
+  (A <code>business</code> process is the opposite: a transition whose actor no <code>actor</code>
+  line declares is a check-time error.) The label is compared with a business
+  actor only when a refinement maps the transition automatically to the
+  business action of the same name — through <code>maps auto</code>, or through the inline
+  <code>implements</code> seam's implicit auto-mapping of every transition that no explicit
+  inline <code>action ... -&gt; ...</code> item names — and that refinement is evaluated.
+  The mismatch and <code>diff</code> reporting rules are described above. For example,
+  the inline seam is evaluated by an unscoped <code>check</code> or <code>verify</code> and by
+  <code>fslc scenarios</code>, but not by a <code>verify</code> scoped with <code>--property</code> and the like
+  (above); a refinement file's <code>maps auto</code> is evaluated by <code>fslc refine</code> or a
+  <code>fslc chain</code> refine layer; and <code>fslc diff</code> without a mapping builds a
+  <code>maps auto</code> refinement between the two versions itself, so a changed <code>by</code>
+  label there surfaces as an automatic-mapping failure. The label is checked
+  against nothing for a transition mapped by an explicit <code>action</code> item, for one
+  the inline seam maps to <code>stutter</code> because the business layer has no action of
+  that name, and whenever no such refinement is evaluated.</li>
 <li><code>acceptance</code> is replay-verified at check time by the concrete Monitor (a
   failure is <code>kind: "acceptance"</code>). It supports <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> alongside <code>expect &lt;expr&gt;</code> and flows directly into scenarios / testgen
