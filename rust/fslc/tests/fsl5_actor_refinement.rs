@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! #1438: auto-mapped fsl 5 events preserve the business transition's actor,
-//! including events used by scenario steps, rules and decisions. Requirement
+//! #1438/#1441: auto-mapped fsl 4 processes and fsl 5 events preserve source
+//! actors across editions, standalone mappings and compose, including events
+//! used by scenario steps, rules and decisions. Requirement
 //! annotations on either side must not replace the actor's semantic identity.
 
 use std::path::{Path, PathBuf};
@@ -392,4 +393,502 @@ fn event_abstraction_with_correct_actor_refines() {
     let (output, exit) = fslc(&directory, STANDALONE_REFINE);
     assert_eq!(exit, 0, "{output:#}");
     assert_eq!(output["result"], "refines", "{output:#}");
+}
+
+// #1441 acceptance IDs: covers, cross-edition and mixed-carrier actor checks.
+const PROCESS_1441: &str = include_str!("fixtures/actor_refinement/process.fsl");
+const BUSINESS_1441: &str = include_str!("fixtures/actor_refinement/business.fsl");
+const EVENT_1441: &str = include_str!("fixtures/actor_refinement/event.fsl");
+const EXPENSE_1441: &str = include_str!("fixtures/actor_refinement/expense.fsl");
+const AUTO_1441: &str = include_str!("fixtures/actor_refinement/auto.fsl");
+const INLINE_1441: &str = "  implements Abs from \"business.fsl\" { }\n";
+const VERIFY_1441: &[&str] = &["verify", "requirements.fsl", "--depth", "6", "--no-cache"];
+
+fn process_1441(actor: &str, covers: &str) -> String {
+    PROCESS_1441.replace("by Manager", &format!("by {actor} {covers}"))
+}
+
+fn abstract_process_1441(edition: u8) -> String {
+    if edition == 5 {
+        return standalone_source("Abs", "System");
+    }
+    PROCESS_1441
+        .replace(INLINE_1441, "")
+        .replace("Impl", "Abs")
+        .replace("by Manager", "by System")
+}
+
+fn inline_event_1441() -> String {
+    EVENT_1441.replace(
+        "requirements Impl {\n",
+        &format!("requirements Impl {{\n{INLINE_1441}"),
+    )
+}
+
+fn mapping_fixture_1441(label: &str, source: &str, abstraction: &str, mapping: &str) -> PathBuf {
+    // Extend #1438's standalone setup for process/compose inputs and located maps.
+    let directory = standalone_fixture(label, "Manager", abstraction);
+    std::fs::write(directory.join("requirements.fsl"), source).expect("write standalone source");
+    std::fs::write(directory.join("mapping.fsl"), mapping).expect("write mapping");
+    std::fs::write(
+        directory.join("compose-sync-types.fsl"),
+        include_str!("fixtures/actor_refinement/compose-sync-types.fsl"),
+    )
+    .expect("write compose dependency");
+    directory
+}
+
+fn assert_location_1441(output: &Value, source: &str, marker: &str) {
+    let offset = source.find(marker).expect("diagnostic marker");
+    let prefix = &source[..offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix.rsplit('\n').next().expect("line prefix").len() + 1;
+    assert_eq!(
+        output["loc"],
+        serde_json::json!({"line": line, "column": column}),
+        "{output:#}"
+    );
+    assert_eq!(output["span"]["start"]["offset"], offset, "{output:#}");
+    assert_eq!(output["span"]["start"]["line"], line, "{output:#}");
+    assert_eq!(output["span"]["start"]["column"], column, "{output:#}");
+}
+
+fn mismatch_1441(directory: &Path, args: &[&str], action: &str, source: &str, marker: &str) {
+    // Reuse #1438's exact assertion unchanged, then check the located envelope.
+    assert_exact_actor_mismatch(directory, args, action);
+    let (output, _) = fslc(directory, args);
+    assert_location_1441(&output, source, marker);
+}
+
+fn success_1441(directory: &Path, args: &[&str], result: &str, inline: bool) {
+    let (output, exit) = fslc(directory, args);
+    assert_eq!(
+        (exit, output["result"].as_str()),
+        (0, Some(result)),
+        "{args:?}: {output:#}"
+    );
+    if inline {
+        assert_eq!(output["implements"]["result"], "refines", "{output:#}");
+    }
+}
+
+fn check_and_verify_1441(label: &str, source: &str, business: &str, action: &str, wrong: bool) {
+    let directory = fixture(label, source, business);
+    for (args, result) in [
+        (&["check", "requirements.fsl"][..], "ok"),
+        (VERIFY_1441, "verified"),
+    ] {
+        if wrong {
+            mismatch_1441(&directory, args, action, source, "implements");
+        } else {
+            success_1441(&directory, args, result, true);
+        }
+    }
+}
+
+#[test] // A1 detector: expense process, implementation covers; check and unscoped verify.
+fn issue_1441_a1_expense_covers_wrong_actor() {
+    check_and_verify_1441(
+        "1441_a1",
+        EXPENSE_1441,
+        EXPENSE_BUSINESS,
+        "auto_approve",
+        true,
+    );
+}
+
+#[test] // A2 preservation: only the auto_approve actor differs from A1.
+fn issue_1441_a2_expense_covers_correct_actor() {
+    let source = EXPENSE_1441.replace(
+        "Approved by Manager\n      covers",
+        "Approved by System\n      covers",
+    );
+    check_and_verify_1441("1441_a2", &source, EXPENSE_BUSINESS, "auto_approve", false);
+}
+
+fn business_covers_1441(text: &str) -> String {
+    BUSINESS_1441.replace("by System", &format!("by System covers BIZ-1 \"{text}\""))
+}
+
+#[test] // A3 detector: covers on the abstraction, not the implementation.
+fn issue_1441_a3_business_covers_wrong_actor() {
+    check_and_verify_1441(
+        "1441_a3",
+        PROCESS_1441,
+        &business_covers_1441("Approval authority"),
+        "approve",
+        true,
+    );
+}
+
+#[test] // A4 preservation.
+fn issue_1441_a4_business_covers_correct_actor() {
+    check_and_verify_1441(
+        "1441_a4",
+        &process_1441("System", ""),
+        &business_covers_1441("Approval authority"),
+        "approve",
+        false,
+    );
+}
+
+#[test] // A5 detector plus matching-actor preservation, both sides annotated.
+fn issue_1441_a5_both_covers() {
+    for actor in ["System", "Manager"] {
+        check_and_verify_1441(
+            &format!("1441_a5_{actor}"),
+            &process_1441(actor, "covers REQ-1 \"Approval authority\""),
+            &business_covers_1441("Approval authority"),
+            "approve",
+            actor == "Manager",
+        );
+    }
+}
+
+#[test] // B1 detector: authored text must not spoof the implementation actor.
+fn issue_1441_b1_impl_spoof() {
+    check_and_verify_1441(
+        "1441_b1",
+        &process_1441("Manager", "covers REQ-1 \"by System\""),
+        BUSINESS_1441,
+        "approve",
+        true,
+    );
+}
+
+#[test] // B2 detector: authored text must not spoof the business actor.
+fn issue_1441_b2_business_spoof() {
+    check_and_verify_1441(
+        "1441_b2",
+        PROCESS_1441,
+        &business_covers_1441("by Manager"),
+        "approve",
+        true,
+    );
+}
+
+#[test] // B3 detector: the old metadata lookup falsely rejects matching actors.
+fn issue_1441_b3_impl_text_preserves_matching_actors() {
+    check_and_verify_1441(
+        "1441_b3",
+        &process_1441("System", "covers REQ-1 \"by Manager\""),
+        BUSINESS_1441,
+        "approve",
+        false,
+    );
+}
+
+#[test] // B4 detector: likewise on the business side.
+fn issue_1441_b4_business_text_preserves_matching_actors() {
+    check_and_verify_1441(
+        "1441_b4",
+        &process_1441("System", ""),
+        &business_covers_1441("by Manager"),
+        "approve",
+        false,
+    );
+}
+
+#[test] // B5 preservation: explicit action correspondence is not Auto.
+fn issue_1441_b5_explicit_correspondence() {
+    let source = process_1441("Manager", "covers REQ-1 \"Approval authority\"")
+        .replace("{ }", "{ action approve(c) -> approve(c) }");
+    check_and_verify_1441("1441_b5_inline", &source, BUSINESS_1441, "approve", false);
+    let mapping = AUTO_1441.replace("maps auto", "maps auto\n  action approve(c) -> approve(c)");
+    let standalone =
+        process_1441("Manager", "covers REQ-1 \"Approval authority\"").replace(INLINE_1441, "");
+    let directory =
+        mapping_fixture_1441("1441_b5_standalone", &standalone, BUSINESS_1441, &mapping);
+    success_1441(&directory, STANDALONE_REFINE, "refines", false);
+}
+
+fn standalone_covers_1441(business_covers: bool) {
+    for actor in ["System", "Manager"] {
+        let source = process_1441(
+            actor,
+            if business_covers {
+                ""
+            } else {
+                "covers REQ-1 \"Approval authority\""
+            },
+        )
+        .replace(INLINE_1441, "");
+        let business = if business_covers {
+            business_covers_1441("Approval authority")
+        } else {
+            BUSINESS_1441.to_owned()
+        };
+        let directory = mapping_fixture_1441(
+            &format!("1441_b6_{business_covers}_{actor}"),
+            &source,
+            &business,
+            AUTO_1441,
+        );
+        if actor == "Manager" {
+            mismatch_1441(
+                &directory,
+                STANDALONE_REFINE,
+                "approve",
+                AUTO_1441,
+                "maps auto",
+            );
+        } else {
+            success_1441(&directory, STANDALONE_REFINE, "refines", false);
+        }
+    }
+}
+
+#[test] // B6 detector with standalone positive control, implementation covers.
+fn issue_1441_b6_standalone_impl_covers() {
+    standalone_covers_1441(false);
+}
+
+#[test] // B6 detector with standalone positive control, business covers.
+fn issue_1441_b6_standalone_business_covers() {
+    standalone_covers_1441(true);
+}
+
+#[test] // B7 detector: every A/B negative also goes through unscoped verify.
+fn issue_1441_b7_verify_rejects_before_proof() {
+    let source = process_1441("Manager", "covers REQ-1 \"Approval authority\"");
+    let directory = fixture("1441_b7", &source, BUSINESS_1441);
+    mismatch_1441(&directory, VERIFY_1441, "approve", &source, "implements");
+}
+
+#[test] // C1 detector: inline 5 -> 4, both check and unscoped verify.
+fn issue_1441_c1_inline_cross_edition() {
+    check_and_verify_1441(
+        "1441_c1",
+        &inline_event_1441(),
+        &abstract_process_1441(4),
+        "approve",
+        true,
+    );
+}
+
+fn cross_edition_1441(label: &str, source: &str, edition: u8, wrong: bool) {
+    let directory = mapping_fixture_1441(label, source, &abstract_process_1441(edition), AUTO_1441);
+    if wrong {
+        mismatch_1441(
+            &directory,
+            STANDALONE_REFINE,
+            "approve",
+            AUTO_1441,
+            "maps auto",
+        );
+    } else {
+        success_1441(&directory, STANDALONE_REFINE, "refines", false);
+    }
+}
+
+#[test] // C2 detector: standalone 5 -> 4.
+fn issue_1441_c2_event_to_process() {
+    cross_edition_1441("1441_c2", EVENT_1441, 4, true);
+}
+
+#[test] // C3 detector: standalone 4 -> 5.
+fn issue_1441_c3_process_to_event() {
+    cross_edition_1441("1441_c3", &PROCESS_1441.replace(INLINE_1441, ""), 5, true);
+}
+
+#[test] // C4 preservation: matching actors in both directions.
+fn issue_1441_c4_cross_edition_matching_actors() {
+    cross_edition_1441(
+        "1441_c4_event",
+        &EVENT_1441.replace("Manager approves", "System approves"),
+        4,
+        false,
+    );
+    cross_edition_1441(
+        "1441_c4_process",
+        &process_1441("System", "").replace(INLINE_1441, ""),
+        5,
+        false,
+    );
+}
+
+fn compose_1441(label: &str, reverse: bool, actor: &str, event: bool, wrong: bool) {
+    let (source, abstraction, mapping) = if reverse {
+        (
+            include_str!("fixtures/actor_refinement/compose-impl.fsl")
+                .replace("by Manager", &format!("by {actor}")),
+            abstract_process_1441(5),
+            include_str!("fixtures/actor_refinement/compose-reverse-map.fsl"),
+        )
+    } else {
+        let source = if event {
+            EVENT_1441.replace("Manager approves", &format!("{actor} approves"))
+        } else {
+            process_1441(actor, "").replace(INLINE_1441, "")
+        };
+        (
+            source,
+            include_str!("fixtures/actor_refinement/compose-abs.fsl").to_owned(),
+            include_str!("fixtures/actor_refinement/compose-map.fsl"),
+        )
+    };
+    let directory = mapping_fixture_1441(label, &source, &abstraction, mapping);
+    if wrong {
+        mismatch_1441(
+            &directory,
+            STANDALONE_REFINE,
+            "approve",
+            mapping,
+            "maps auto",
+        );
+    } else {
+        success_1441(&directory, STANDALONE_REFINE, "refines", false);
+    }
+}
+
+#[test] // D1 detector: typed event -> compose legacy metadata.
+fn issue_1441_d1_event_to_compose_wrong() {
+    compose_1441("1441_d1", false, "Manager", true, true);
+}
+
+#[test] // D2 preservation.
+fn issue_1441_d2_event_to_compose_correct() {
+    compose_1441("1441_d2", false, "System", true, false);
+}
+
+#[test] // D3 preservation: fsl 4 metadata already rejects this input.
+fn issue_1441_d3_process_to_compose_wrong() {
+    compose_1441("1441_d3", false, "Manager", false, true);
+}
+
+#[test] // D4 detector: compose legacy metadata -> typed event.
+fn issue_1441_d4_compose_to_event_wrong() {
+    compose_1441("1441_d4", true, "Manager", true, true);
+}
+
+#[test] // D5 preservation.
+fn issue_1441_d5_compose_to_event_correct() {
+    compose_1441("1441_d5", true, "System", true, false);
+}
+
+#[test] // E1 preservation: fsl 4 no-covers process/business actor comparison.
+fn issue_1441_e1_no_covers() {
+    check_and_verify_1441(
+        "1441_e1_correct",
+        &process_1441("System", ""),
+        BUSINESS_1441,
+        "approve",
+        false,
+    );
+    check_and_verify_1441(
+        "1441_e1_wrong",
+        PROCESS_1441,
+        BUSINESS_1441,
+        "approve",
+        true,
+    );
+    cross_edition_1441(
+        "1441_e1_process_pair",
+        &PROCESS_1441.replace(INLINE_1441, ""),
+        4,
+        true,
+    );
+    cross_edition_1441(
+        "1441_e1_process_pair_correct",
+        &process_1441("System", "").replace(INLINE_1441, ""),
+        4,
+        false,
+    );
+}
+
+#[test] // E2 preservation: raw legacy mismatch, matching actor, actorless on either side.
+fn issue_1441_e2_raw_metadata() {
+    let source = include_str!("fixtures/actor_refinement/raw-impl.fsl");
+    let business = include_str!("fixtures/actor_refinement/raw-abs.fsl");
+    check_and_verify_1441("1441_e2_wrong", source, business, "approve", true);
+    for (label, source, business) in [
+        (
+            "same",
+            source.replace("by Manager", "by System"),
+            business.to_owned(),
+        ),
+        (
+            "impl_actorless",
+            source.replace(" \"REQ-1: by Manager\"", ""),
+            business.to_owned(),
+        ),
+        (
+            "abs_actorless",
+            source.to_owned(),
+            business.replace(" \"ABS-1: by System\"", ""),
+        ),
+    ] {
+        check_and_verify_1441(
+            &format!("1441_e2_{label}"),
+            &source,
+            &business,
+            "approve",
+            false,
+        );
+    }
+}
+
+#[test] // C2 checkpoint addition: diff synthesizes auto maps; report unknown, NOT type error.
+fn issue_1441_diff_covers_actor_mismatch_is_automatic_mapping_failed() {
+    let source = EXPENSE_1441.replace("  implements ExpenseToBe from \"business.fsl\" { }\n", "");
+    let correct = source.replace(
+        "Approved by Manager\n      covers",
+        "Approved by System\n      covers",
+    );
+    let directory = fixture("1441_diff", &source, &correct);
+    let (output, exit) = fslc(
+        &directory,
+        &["diff", "requirements.fsl", "business.fsl", "--depth", "6"],
+    );
+    assert_eq!(exit, 0, "{output:#}");
+    assert_eq!(output["result"], "semantic_diff", "{output:#}");
+    assert_eq!(
+        output["directions"],
+        serde_json::json!({
+            "old_to_new": {
+                "result": "unknown", "reason": "automatic_mapping_failed",
+                "message": "maps auto actor mismatch for action 'auto_approve': impl actor 'Manager' != abstract actor 'System'"
+            },
+            "new_to_old": {
+                "result": "unknown", "reason": "automatic_mapping_failed",
+                "message": "maps auto actor mismatch for action 'auto_approve': impl actor 'System' != abstract actor 'Manager'"
+            }
+        }),
+        "{output:#}"
+    );
+    assert!(
+        output.get("kind").is_none(),
+        "diff is not a type-error envelope: {output:#}"
+    );
+}
+
+const RULE_ACTOR_TEXT_1441: &str = r#"fsl 5
+requirements Abs {
+  actor System, Manager
+  entity Case { lifecycle Open -> Done }
+  event approve = System approves Case Open -> Done
+  rule REQ-9 "by Manager only" {
+    allow System approves Case only when true
+  }
+}
+verify { instances Case = 1 }
+"#;
+
+#[test] // F1 detector: rule requirement text is not the abstract event's actor.
+fn issue_1441_f1_rule_text_preserves_matching_actors() {
+    let source = process_1441("System", "");
+    check_and_verify_1441(
+        "1441_f1_inline",
+        &source,
+        RULE_ACTOR_TEXT_1441,
+        "approve",
+        false,
+    );
+    let directory = mapping_fixture_1441(
+        "1441_f1_standalone",
+        &source.replace(INLINE_1441, ""),
+        RULE_ACTOR_TEXT_1441,
+        AUTO_1441,
+    );
+    success_1441(&directory, STANDALONE_REFINE, "refines", false);
 }

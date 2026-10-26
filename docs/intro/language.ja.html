@@ -1635,7 +1635,10 @@ abs の振る舞いから逸脱していないことを <strong><code>fslc refin
   パラメータを持たない抽象パラメータがある場合(issue #494)は、位置付きの
   <code>kind: "type"</code> エラーになります。そのペアには明示の <code>action ... -&gt; ...</code>
   対応を書いてください。互換でない同名の状態候補も同様に <code>kind: "type"</code> エラー
-  として報告されます。</li>
+  として報告されます。
+  <code>covers</code>・edition混在・composeを含むautoのactor互換性は§13.2に従います。
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>の
+  「#1441: source-actor auto mapping and breaking-source migration」も参照してください。</li>
 <li><code>action &lt;impl&gt;(&lt;formal params&gt;) -&gt; &lt;abs&gt;(&lt;expr&gt;) | stutter</code> — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   <code>name: Type</code> の注釈でもかまいません。
@@ -2416,20 +2419,45 @@ verify {
   します。<code>maps</code> 節と、それに一致するインラインの <code>action ...</code> 項目の両方を持つ
   impl の action は、対応の重複であり、両方の起源と位置を名指しする
   <code>kind: "type"</code> の check 時エラーです(同じ action を 2 回列挙するマッピング
-  ファイルと同じです)。継ぎ目が評価されるときは、同名の business の action へ
-  auto マップされた process の transition は actor 検査されます。actor がその
-  business の action の actor と異なる transition は check 時エラーです。</li>
-<li>requirements の transition の <code>by X</code> は自由なラベルで、宣言された actor を
-  指すものではありません。requirements レイヤーには <code>actor</code> の宣言が無く、
-  <code>check</code> は <code>X</code> がどこかで宣言されているかを見ません(<code>business</code> の process は
-  逆で、どの <code>actor</code> 行も宣言していない actor を使う transition は check 時
-  エラーです)。このラベルが business の actor と照合されるのは、refinement が
-  その transition を同名の business の action へ自動で対応付け、その refinement
-  が評価されたときだけです。自動の対応付けとは、<code>maps auto</code> によるものと、
-  インラインの <code>implements</code> の継ぎ目が、明示のインライン <code>action ... -&gt; ...</code>
-  項目が名指ししていないすべての transition を暗黙に対応付けるものです。
-  refinement を検査する所(<code>check</code> や <code>fslc refine</code> など)では、食い違いは
-  <code>kind: "type"</code> のエラーです。<code>fslc diff</code> は、後で述べるとおり別の形で報告します。たとえば、インラインの継ぎ目は、範囲を選ばない
+  ファイルと同じです)。継ぎ目が評価されるとき、autoマップされたprocessのtransitionとeventは、両側で宣言された
+  source actorを比較します。edition(4/5)、どちら側の<code>covers</code>、<code>by</code>で始まる説明本文にも
+  依存しません。登録済みactorはmetadataに優先します。registry entryの無いaction
+  (raw spec/composeのactionと、単独またはrequirementブロック内のrequirements action項目)は
+  従来のmetadata規則(<code>by</code>、空白、空でないactor)を使います。
+  両actorを取得できるとき、不一致は
+  <code>error</code> / <code>kind: "type"</code>、exit 2で、既存のmessage
+  <code>maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'</code>
+  を、<code>implements</code>または単独の<code>maps auto</code>の対応位置に報告します。スコープ無しの
+  <code>verify</code>、単独の<code>refine</code>、Workerも同じ規則です。明示のaction対応と<code>stutter</code>は
+  actorを比較せず、選択した<code>verify</code>は引き続きseamを評価しません。mappingを指定しない
+  <code>diff</code>は、該当する方向を<code>unknown</code> / <code>automatic_mapping_failed</code>として
+  <code>semantic_diff</code>/exit 0の封筒内に報告し、トップレベルの型エラーにはしません。
+  <strong>v5.0.0の破壊的なソース変更(#1441):</strong> <code>covers</code>、edition混在、composeとの混在lookupで
+  隠れていた不一致を拒否します。Kernel/JSON schemaは変わりません。base
+  <code>5a539bbe27dc933d7fe8df95e6189cb75cec6cc9</code>とhead
+  <code>9ca8630c7f45f1def54c056bf53a852853c7a60c</code>の完全な4-cell corpus sweepでは、各SHA自身の
+  treeの<code>specs/</code>・<code>examples/</code>・<code>rust/fslc/tests/fixtures/</code>の全<code>.fsl</code>を両binaryの
+  <code>fslc check</code>で検査しました(base 579 / head 591 forms)。corpusの
+  <strong><code>ok</code>→<code>error</code>は0件、<code>error</code>→<code>ok</code>も0件</strong>です。別集合の受理拡大のクラスは、登録済み
+  transitionのmetadataのうち、<code>by</code>で始まる要求本文(covers本文と次editionのrule/decide本文)です。
+  両宣言actorが<code>System</code>で、implのcovers(B3)、businessのcovers(B4)、coversの無い抽象eventの
+  rule本文<code>by Manager only</code>(F1/p5)は、<code>error/type/2</code>から<code>ok/0</code>へ変わります。
+  有界verifyは<code>verified/0</code>と<code>implements refines</code>を返し、F1の単独refineは
+  <code>error/type/2</code>から<code>refines/0</code>へ変わります。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-refinement.md">DESIGN-refinement</a>の
+  「#1441: source-actor auto mapping and breaking-source migration」に
+  コマンド・測定証拠・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
+  LSPでの診断配信も約束しません。</li>
+<li>requirements の process 形式(edition 4)の transition の <code>by X</code> は自由なラベルで、
+  宣言された actor を指すものではありません。この形式には <code>actor</code> の宣言が無く、
+  <code>check</code> は <code>X</code> がどこかで宣言されているかを見ません。ここでいう「source actor」は
+  transitionに書いたラベルで、actorシンボルの宣言への参照ではありません。
+  (<code>business</code> の process は逆で、どの <code>actor</code> 行も宣言していない actor を使う
+  transition は check 時エラーです)。このラベルが business の actor と照合されるのは、
+  refinement がその transition を同名の business の action へ自動で対応付け、その
+  refinement が評価されたときだけです。自動の対応付けとは、<code>maps auto</code> によるものと、
+  インラインの <code>implements</code> の継ぎ目が、明示のインライン <code>action ... -&gt; ...</code> 項目が
+  名指ししていないすべての transition を暗黙に対応付けるものです。不一致と<code>diff</code>の
+  報告形式は上述のとおりです。たとえば、インラインの継ぎ目は、範囲を選ばない
   <code>check</code> や <code>verify</code> と <code>fslc scenarios</code> では評価されますが、<code>--property</code> などで
   範囲を選んだ <code>verify</code> では評価されません(上述)。refinement ファイルの
   <code>maps auto</code> は <code>fslc refine</code> や <code>fslc chain</code> の refine 層で評価されます。

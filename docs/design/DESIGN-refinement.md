@@ -63,6 +63,15 @@ refinement CartImplRefinesCart {
   instead of guessing. A parameter *type* mismatch between two identically
   named parameters is caught by the same `validate_expression_type` check
   every other authoring route already goes through, not duplicated here.
+  Actor compatibility applies only to automatically synthesized action pairs:
+  each side uses its source actor from the registry (the `by X` label for an
+  edition 4 process transition), regardless of dialect, edition or requirement
+  text. Actions without a registry entry
+  (raw spec/compose actions and requirements action items, standalone or inside
+  a requirement block) use the existing metadata `by ` prefix rule. Both actors
+  must be available to compare them. Explicit action entries and `stutter` are
+  not actor-checked.
+  See the [#1441 amendment and migration](#migration-1441).
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
   order). They may be written bare (`u`) or with a type annotation matching the
@@ -817,6 +826,128 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
      `an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds`
      (stepping with the out-of-domain argument would be an abstract
      `type_bound` violation).
+
+<a id="migration-1441"></a>
+
+## #1441: source-actor auto mapping and breaking-source migration
+
+**v5.0.0 amendment (native Rust).** Requirement annotations and actor identity
+are distinct for registered transitions: metadata whose requirement text begins
+with `by ` (covers text and next-edition rule/decide text) cannot erase or replace a
+transition's source actor. The private origin
+registry records every requirements transition (process or event) and business
+transition. One per-action lookup serves both sides, including cross-edition
+4→5/5→4 and typed↔legacy compose pairs. This replaces #1438's private
+`ActionActor` enum with `BTreeMap<String, String>`; it adds no public Kernel,
+`ActionDef`, schema or JSON fields. The legacy metadata rule is retained for
+actions without a registry entry (raw spec/compose actions and requirements
+action items, standalone or inside a requirement block), not for the requirement
+text of registered transitions.
+
+The invariant is that auto-mapped actions with two available source actors
+must compare those actors independently of provenance and traceability text.
+Same-name/parameter matching, explicit correspondence precedence and the
+Auto-only condition are unchanged. `check`, unscoped `verify`, standalone
+`refine` and Worker reject mismatches while constructing the correspondence:
+`result: "error"`, `kind: "type"`, exit 2, at the inline `implements` or
+standalone `maps auto` span, using the existing message, for example:
+
+```text
+maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'
+```
+
+`diff` without a mapping still returns `semantic_diff`/exit 0; an affected
+direction reports `unknown` / `automatic_mapping_failed` with that message,
+not a top-level type-error envelope. Selected `verify` runs still do not
+evaluate the inline seam; explicit action correspondences remain outside the
+actor check. Matching actors do not establish refinement by themselves.
+
+**Measured type-boundary inventory.** Base
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and implementation head
+`9ca8630c7f45f1def54c056bf53a852853c7a60c` were each fully materialized with
+`git archive <sha> | tar -x -C <tree>`. Both binaries were built from their own
+trees with `cargo build --manifest-path <tree>/rust/Cargo.toml -p fslc-rust
+--bin fslc --locked` (Rust 1.98.0, `88d9e12ae`, offline, debug). In each source
+tree, **both** binaries ran `fslc check <relative-path>` on every `.fsl` under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, without exclusions;
+only files with an `fsl 5` header received `FSLC_UNSTABLE=fsl5`.
+
+| Binary / source tree | Forms | `fsl 5` forms | `ok` / `error` | Other results |
+|---|---:|---:|---|---|
+| base / base | 579 | 19 | 406 / 164 | 3 causal_model_checked, 1 impl_violated, 5 refinement_failed |
+| head / base | 579 | 19 | 406 / 164 | same |
+| base / head | 591 | 20 | 411 / 171 | same |
+| head / head | 591 | 20 | 411 / 171 | same |
+
+The four cells were run twice with identical summaries. **Corpus breaking
+removals (`ok`→`error`): empty; corpus expansions (`error`→`ok`): empty.**
+The same-source comparisons and common-path own-SHA comparison had no other
+JSON/exit changes. Head adds the 12 `actor_refinement/` fixture files; no paths
+were removed or existing corpus sources repaired. Classification: true actor
+mixups 0, false rejections 0, unrelated transitions 0. Existing tests/helpers
+were preserved, not renamed, removed or stopped from running, so required old inline
+forms to materialize: 0. Binary SHA256: base
+`1b4c6d491cf35b007eb1734ba1a5f3c38ba6b5111d747ee72735ecb432501e24`, head
+`5d3be4babff513f5e87a59056a67cf47c9ceca6d0fa2088835401dc7e08acf89`.
+
+The source-compatibility break is nevertheless exercised by rejecting
+regression controls in `rust/fslc/tests/fsl5_actor_refinement.rs` (A/B covers,
+C cross-edition, D compose) and Worker A1/A3. The separate **acceptance
+expansions** below are not repository-corpus transitions. All three were measured
+twice with the same base/head binaries, `check requirements.fsl` and
+`verify requirements.fsl --depth 6 --no-cache`:
+
+| Control (both source actors `System`) | Old / new check | Old / new verify or refine |
+|---|---|---|
+| B3: impl `covers REQ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
+| B4: business `covers BIZ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
+| F1 (p5): abstract fsl 5 event, no covers, `rule REQ-9 "by Manager only"` | inline: error/type/2 → ok/0 | inline verify: error/type/2 → verified/0, implements refines; standalone refine: error/type/2 → refines/0 |
+
+The expansion class is registered transition metadata whose requirement text
+begins with `by ` (covers text and next-edition rule/decide text), not only covers.
+Here “next edition” is fsl 5.
+F1 was also measured twice with `refine requirements.fsl business.fsl mapping.fsl
+--depth 6`. These correct sources need no edit; their prose is no longer treated
+as an actor declaration. `verified` here is bounded, not `proved`. Unregistered
+requirements action items retain their metadata-based behavior.
+
+**Migration contract (#702, limited to this change):**
+
+1. **Versions/editions:** reproduced on native 4.12.0 at the base SHA above and
+   on the pre-fix #1438 parent `c00b58ce87798ded9322932abda5b1b75c7804f1`.
+   Fixed for v5.0.0: fsl 4 process/business `covers`, mixed fsl 4/5 automatic
+   mappings and typed/legacy compose pairs. The earliest affected release has
+   not been established. fsl 4→4 without `covers` keeps its existing results.
+2. **New rejection:** previously accepted mismatched source actors hidden by
+   `covers`, cross-edition or mixed-carrier lookup now receive the stable
+   diagnostic above. This removes accepted source patterns even though the
+   checked repository corpus has no removals.
+3. **Rewrite:** there is no general semantics-equivalent rewrite or automatic
+   migration. Removing/changing `covers` does not correct actor identity.
+   Confirm the intended business policy before correcting a mistaken `by
+   Manager` to `by System` (or an event subject). Changing the actor changes
+   business meaning. An intentional delegation needs a human-designed and
+   reviewed explicit correspondence, not an automatic bypass.
+4. **Commands:** run unscoped `fslc check req.fsl`, inspect both declarations
+   and the mapping, correct confirmed mistakes, then repeat `check` and run
+   `fslc verify req.fsl --depth 6 --no-cache`. For a standalone mapping run
+   `fslc refine impl.fsl abs.fsl map.fsl --depth 6`; add `FSLC_UNSTABLE=fsl5`
+   for fsl 5 input. There is no dedicated lint/migrate auto-fix for policy
+   actors; selected `verify` is not a migration detector.
+5. **Verdicts/evidence:** old `ok`/`verified`/`refines` can become type errors;
+   public Kernel/JSON schemas do not change. After a source correction,
+   reverify and regenerate proof/ledger evidence: an old source hash's result
+   is not evidence for the edited source.
+6. **Consumers/artifacts:** Worker uses the shared resolver; native-check
+   hooks/CI/downstream callers must handle the rejection. LSP actor-mismatch
+   delivery remains deferred (S1); use the CLI, not editor silence, to gate.
+   Regenerate affected scenario/testgen/replay/ledger/document artifacts and
+   recheck against the implementation. Worker cross-edition S2 is not covered
+   by these acceptance tests (its native comparison helper is stable-only);
+   CLI C1–C4 cover it.
+7. **Rollback:** v5.0.0 is fail-closed, with no compatibility bypass or grace
+   period. If problems occur, return to a 4.x binary. No support duration is
+   promised. This note does not implement #702's general release gate.
 
 ## 6. Documentation Reflection
 

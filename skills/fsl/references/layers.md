@@ -94,8 +94,9 @@ the relevant role skill directs it.
   names stay on the implementation side). An empty body
   auto-generates identity refinement when names match, `maps auto` is allowed for
   same-name kernel-wrapper state/actions, and a process transition auto-mapped
-  to a same-named business action is actor-checked. Auto-mapping is the only
-  place a requirements `by X` meets the business actors: requirements has no
+  to a same-named business action is actor-checked even with covers (its text
+  is not an actor declaration; #1441). Auto-mapping is the only place a process-form
+  requirements `by X` meets the business actors: this form (edition 4) has no
   `actor` declaration, so `by X` is a free label `check` never looks up. The
   comparison happens when a refinement auto-maps the transition to the
   same-named business action — via `maps auto`, or via the inline seam's
@@ -361,8 +362,9 @@ verify {
   with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
   `name__b<N>` alias. Whenever the seam is evaluated, a process transition
-  auto-mapped to a same-named business action is statically actor-checked; an
-  actor mismatch is a check-time type error. The seam's
+  auto-mapped to a same-named business action is statically actor-checked even
+  with covers (its text is not an actor declaration; #1441);
+  an actor mismatch is a check-time type error. The seam's
   verdict is reported as `implements: {abs, result}` with `result` one of
   `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
   requirements spec breaks its own bounds/invariants, so no refinement verdict

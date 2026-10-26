@@ -2998,4 +2998,83 @@ mod tests {
             "{output:#}"
         );
     }
+
+    fn actor_request_1441(source: &str, business: &str) -> Request {
+        Request {
+            cmd: "check".to_owned(),
+            source: source.to_owned(),
+            source_file: "requirements.fsl".to_owned(),
+            files: BTreeMap::from([("business.fsl".to_owned(), business.to_owned())]),
+            options: Options::default(),
+            unstable: Vec::new(),
+        }
+    }
+
+    fn assert_worker_actor_mismatch_1441(request: &Request, action: &str) {
+        let expected = format!(
+            "maps auto actor mismatch for action '{action}': impl actor 'Manager' != abstract actor 'System'"
+        );
+        for verifying in [false, true] {
+            let output = if verifying {
+                block_on(verify(request, TEST_SOLVER_VERSION))
+            } else {
+                block_on(check(request, TEST_SOLVER_VERSION))
+            };
+            assert_eq!(
+                (
+                    output["result"].as_str(),
+                    output["kind"].as_str(),
+                    output["message"].as_str()
+                ),
+                (Some("error"), Some("type"), Some(expected.as_str())),
+                "{output:#}"
+            );
+            assert_eq!(output["loc"], json!({"line": 3, "column": 3}), "{output:#}");
+        }
+        // E4: full equality, including envelope/locations, no excluded fields.
+        // This is shared-renderer agreement, not independent soundness evidence.
+        assert_worker_implements_error_matches_native(request, "1441 actor check");
+        assert_worker_verify_implements_error_matches_native(request, "1441 actor verify");
+    }
+
+    #[test] // A1 negative; E4 full native/Worker envelope comparison.
+    fn issue_1441_a1_worker_impl_covers() {
+        let request = actor_request_1441(
+            include_str!("../../fslc/tests/fixtures/actor_refinement/expense.fsl"),
+            include_str!("../../fslc/tests/fixtures/fsl5/e2e/1_business.fsl"),
+        );
+        assert_worker_actor_mismatch_1441(&request, "auto_approve");
+    }
+
+    #[test] // A3 negative; E4 full native/Worker envelope comparison.
+    fn issue_1441_a3_worker_business_covers() {
+        let business = include_str!("../../fslc/tests/fixtures/actor_refinement/business.fsl")
+            .replace("by System", "by System covers BIZ-1 \"Approval authority\"");
+        let request = actor_request_1441(
+            include_str!("../../fslc/tests/fixtures/actor_refinement/process.fsl"),
+            &business,
+        );
+        assert_worker_actor_mismatch_1441(&request, "approve");
+    }
+
+    #[test] // A2/E4 preservation: positive covers plus existing no-covers error agreement.
+    fn issue_1441_a2_e4_worker_preservation() {
+        let source = include_str!("../../fslc/tests/fixtures/actor_refinement/expense.fsl")
+            .replace(
+                "Approved by Manager\n      covers",
+                "Approved by System\n      covers",
+            );
+        let request = actor_request_1441(
+            &source,
+            include_str!("../../fslc/tests/fixtures/fsl5/e2e/1_business.fsl"),
+        );
+        let output = block_on(check(&request, TEST_SOLVER_VERSION));
+        assert_eq!(output["result"], "ok", "{output:#}");
+        assert_eq!(output["implements"]["result"], "refines", "{output:#}");
+        let legacy = actor_request_1441(
+            include_str!("../../fslc/tests/fixtures/actor_refinement/process.fsl"),
+            include_str!("../../fslc/tests/fixtures/actor_refinement/business.fsl"),
+        );
+        assert_worker_actor_mismatch_1441(&legacy, "approve");
+    }
 }

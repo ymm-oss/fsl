@@ -67,24 +67,19 @@ impl OriginChain {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OriginRegistry {
     bindings: BTreeMap<String, Vec<OriginChain>>,
-    action_actors: BTreeMap<String, ActionActor>,
-}
-
-/// Source actors are independent of requirement annotations. The event variant
-/// selects typed actor checking without changing legacy process correspondences.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ActionActor {
-    BusinessTransition(String),
-    Event(String),
+    // Source actors are independent of requirement annotations and dialect.
+    action_actors: BTreeMap<String, String>,
 }
 
 impl OriginRegistry {
-    pub(crate) fn bind_action_actor(&mut self, name: &str, actor: ActionActor) {
+    pub(crate) fn bind_action_actor(&mut self, name: &str, actor: String) {
         self.action_actors.insert(action_target(name), actor);
     }
 
-    pub(crate) fn action_actor(&self, name: &str) -> Option<&ActionActor> {
-        self.action_actors.get(&action_target(name))
+    pub(crate) fn action_actor(&self, name: &str) -> Option<&str> {
+        self.action_actors
+            .get(&action_target(name))
+            .map(String::as_str)
     }
 
     pub fn bind(&mut self, target: impl Into<String>, origin: OriginChain) {

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionTarget, Binder, ConditionalSpans, CorrespondenceOrigin, Expr, MetaTag, QualifiedName,
+    ActionTarget, Binder, ConditionalSpans, CorrespondenceOrigin, Expr, QualifiedName,
     RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementsItem, Span, SurfaceDocument, SurfaceRefinement,
 };
@@ -1220,31 +1220,22 @@ fn action_actors<'a>(
     abstraction: &'a KernelModel,
     abstraction_action: &'a ActionDef,
 ) -> Option<(&'a str, &'a str)> {
-    use crate::origin::ActionActor;
-
-    // Preserve the metadata-based actor check for legacy process actions,
-    // including its treatment of covers annotations (tracked separately).
-    fn metadata_actor(meta: Option<&MetaTag>) -> Option<&str> {
-        meta.and_then(|tag| tag.text.as_deref())
-            .and_then(|text| text.strip_prefix("by "))
-            .map(str::trim)
-            .filter(|actor| !actor.is_empty())
-    }
-
-    if let Some(ActionActor::Event(impl_actor)) = implementation
-        .origins()
-        .action_actor(&implementation_action.name)
-    {
-        let (ActionActor::BusinessTransition(abs_actor) | ActionActor::Event(abs_actor)) =
-            abstraction
-                .origins()
-                .action_actor(&abstraction_action.name)?;
-        return Some((impl_actor, abs_actor));
+    fn actor<'a>(model: &'a KernelModel, action: &'a ActionDef) -> Option<&'a str> {
+        model.origins().action_actor(&action.name).or_else(|| {
+            // Raw spec and compose actions retain the legacy metadata rule.
+            action
+                .meta
+                .as_ref()
+                .and_then(|tag| tag.text.as_deref())
+                .and_then(|text| text.strip_prefix("by "))
+                .map(str::trim)
+                .filter(|actor| !actor.is_empty())
+        })
     }
 
     Some((
-        metadata_actor(implementation_action.meta.as_ref())?,
-        metadata_actor(abstraction_action.meta.as_ref())?,
+        actor(implementation, implementation_action)?,
+        actor(abstraction, abstraction_action)?,
     ))
 }
 

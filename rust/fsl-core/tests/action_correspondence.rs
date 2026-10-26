@@ -342,3 +342,94 @@ verify {
             .contains("verify instances references undeclared entity 'Extra'")
     );
 }
+
+const PROCESS_1441: &str = include_str!("../../fslc/tests/fixtures/actor_refinement/process.fsl");
+const BUSINESS_1441: &str = include_str!("../../fslc/tests/fixtures/actor_refinement/business.fsl");
+
+// E1/E2 preservation: no-covers process and legacy raw action actor checks.
+#[test]
+fn issue_1441_e1_e2_legacy_actor_correspondence_is_preserved() {
+    for (source, abstraction) in [
+        (PROCESS_1441, BUSINESS_1441),
+        (
+            include_str!("../../fslc/tests/fixtures/actor_refinement/raw-impl.fsl"),
+            include_str!("../../fslc/tests/fixtures/actor_refinement/raw-abs.fsl"),
+        ),
+    ] {
+        let resolver = Resolver(abstraction.to_owned());
+        let error = requirements_implements(source, &resolver, &build(source))
+            .expect_err("legacy mismatch is rejected");
+        assert_eq!(
+            error.message,
+            "maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'"
+        );
+        assert!(error.span.is_some());
+        let correct = source.replace("by Manager", "by System");
+        let contract = requirements_implements(&correct, &resolver, &build(&correct))
+            .expect("matching legacy actors")
+            .expect("implements contract");
+        assert_eq!(
+            contract.refinement.action_correspondences["approve"].origin,
+            CorrespondenceOrigin::Auto
+        );
+    }
+}
+
+// E3 preservation: authored requirement relation, legacy action meta and public
+// Kernel export stay authored values, even when text starts with `by `.
+#[test]
+fn issue_1441_e3_covers_requirement_and_kernel_export_are_preserved() {
+    for (base, dialect, id) in [
+        (PROCESS_1441, "requirements", "REQ-1"),
+        (BUSINESS_1441, "business", "BIZ-1"),
+    ] {
+        for text in ["Approval authority", "by Manager"] {
+            let covers = format!("covers {id} \"{text}\"");
+            let source = base
+                .replace("by Manager", "by System")
+                .replace("by System\n", &format!("by System {covers}\n"));
+            let kernel = parse_kernel_source(&source, &FsResolver::new(".")).expect("lower covers");
+            let model = build_model(kernel.clone()).expect("build covers");
+            let requirements = model.requirements_for(&fsl_core::action_target("approve"));
+            assert_eq!(requirements.len(), 1);
+            let requirement = &requirements[0];
+            assert_eq!(requirement.id, id);
+            assert_eq!(requirement.text.as_deref(), Some(text));
+            let offset = source.find(&covers).expect("authored covers");
+            assert_eq!(requirement.span.start.offset, offset);
+            assert_eq!(requirement.span.end.offset, offset + covers.len());
+            let action = model
+                .actions
+                .iter()
+                .find(|action| action.name == "approve")
+                .expect("approve");
+            let meta = action.meta.as_ref().expect("authored action metadata");
+            assert_eq!(meta.id, requirement.id);
+            assert_eq!(meta.text, requirement.text);
+            assert_eq!(meta.span, Some(requirement.span));
+            let exported = fsl_core::public_kernel_contract_for_version(
+                &kernel,
+                &model,
+                "actor.fsl",
+                dialect,
+                fsl_core::PublicKernelVersion::V2,
+            )
+            .expect("export covers");
+            assert_eq!(exported["schema_version"], "2.0.0");
+            let action = exported["actions"]
+                .as_array()
+                .expect("actions")
+                .iter()
+                .find(|action| action["name"] == "approve")
+                .expect("exported approve");
+            assert_eq!(
+                action["requirement"],
+                serde_json::json!({"id": id, "text": text})
+            );
+            assert!(
+                action.get("actor").is_none(),
+                "no public actor field is added"
+            );
+        }
+    }
+}

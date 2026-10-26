@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+spec Types {
+  type CaseId = 0..0
+  action go(c: CaseId) { }
+}
