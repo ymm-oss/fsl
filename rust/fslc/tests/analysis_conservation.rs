@@ -118,7 +118,7 @@ fn ai_review_invalid_input_and_unsupported_modes_still_exit_two() {
     assert_eq!(unknown_profile.status.code(), Some(2));
     let unknown_profile = output_json(&unknown_profile);
     assert_eq!(unknown_profile["result"], "error");
-    assert_eq!(unknown_profile["kind"], "semantics");
+    assert_eq!(unknown_profile["kind"], "usage");
 
     let unsupported = run(&[
         "analyze",
