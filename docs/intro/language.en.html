@@ -1290,6 +1290,21 @@ direct <code>ledger</code> stops before ancillary replay, evidence loading, and 
 (<code>html</code> also stops before explain). With <code>-o</code>, no artifact is created. Other
 failed/unestablished verdicts still generate reports with their nonzero exit.
 Approval-only ledger rerendering for digest comparison is separate from this gate.
+All native full-verification callers share one stage owner; baseline adapters
+disable caching and retain default vacuity warnings.
+Direct reports verify and check for errors before loading the presentation model or
+extracting its trace contract. Thus malformed causal syntax retains <code>FSL-PARSE</code>
+and its parser location instead of <code>FSL-DIALECT-UNKNOWN</code>; Agent input retains the
+parse refusal instead of a missing-state semantics error; an unknown DB column
+retains the specialized error without a generated-name location; and an unknown
+AI authority tool returns a semantics error (exit 2), not a panic (exit 101).
+Passing reports, warnings, metadata and approval artifact digests are unchanged.
+These error corrections apply only to direct <code>ledger</code> and <code>html</code> reports.
+<code>approval create --kind ledger|html</code>, <code>approval check</code>, <code>approval diff</code>, and
+<code>counterexample export</code> still lower the spec before verification or rerendering,
+so their invalid-input precedence and unknown-AI-tool panic/exit 101 are unchanged.
+The panics are tracked in #1464; approval create's diagnostic precedence is a
+separate issue.
 <code>testgen</code> refuses a failed seam or preservation with the same verify failure
 envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
 internal error), on both kernel and fallback paths,
