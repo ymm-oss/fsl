@@ -1562,6 +1562,82 @@ mod tests {
     }
 
     #[test]
+    fn did_open_unknown_authority_tool_publishes_an_error_and_keeps_serving() {
+        let source = include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
+        let uri = Url::parse("file:///memory/unknown-authority.fsl").expect("in-memory URI");
+        let mut state = ServerState::default();
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        // No fixture file or stdio process is needed: this is the same
+        // notification handler run_stdio calls synchronously on its main loop.
+        handle_notification(
+            &sender,
+            &mut state,
+            Notification::new(
+                "textDocument/didOpen".to_owned(),
+                serde_json::json!({"textDocument": {
+                    "uri": uri,
+                    "languageId": "fsl",
+                    "version": 1,
+                    "text": source,
+                }}),
+            ),
+        )
+        .expect("invalid source must publish a diagnostic, not unwind the server");
+        let Message::Notification(notification) =
+            receiver.try_recv().expect("diagnostics published")
+        else {
+            panic!("didOpen must publish a notification");
+        };
+        assert_eq!(notification.method, "textDocument/publishDiagnostics");
+        let published: PublishDiagnosticsParams =
+            serde_json::from_value(notification.params).expect("diagnostic payload");
+        assert_eq!(published.uri, uri);
+        assert_eq!(published.version, Some(1));
+        assert_eq!(published.diagnostics.len(), 1, "{published:?}");
+        let diagnostic = &published.diagnostics[0];
+        assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(diagnostic.source.as_deref(), Some("fslc"));
+        assert_eq!(
+            diagnostic.data,
+            Some(serde_json::json!({"kind": "semantics"}))
+        );
+        assert!(
+            diagnostic
+                .message
+                .contains("unknown tool 'MissingTool' in authority block"),
+            "{diagnostic:?}"
+        );
+        assert_eq!(diagnostic.range.start, Position::new(13, 4));
+
+        // A subsequent, well-formed request on the same server state succeeds.
+        // Keep both documents in memory; never fall back to a file on disk.
+        let healthy_uri = Url::parse("file:///memory/healthy.fsl").expect("in-memory URI");
+        state.documents.insert(
+            healthy_uri.clone(),
+            OpenDocument {
+                text: "spec Healthy { state { ready: Bool } init { ready = false } }".to_owned(),
+                version: 1,
+            },
+        );
+        let response = request(
+            &state,
+            "textDocument/completion",
+            serde_json::json!({
+                "textDocument": {"uri": healthy_uri},
+                "position": {"line": 0, "character": 20},
+            }),
+        );
+        assert!(
+            response
+                .as_array()
+                .expect("completion response")
+                .iter()
+                .any(|item| item["label"] == "ready"),
+            "the server must answer after the rejected document: {response}"
+        );
+    }
+
+    #[test]
     fn rename_identifier_validation_is_closed() {
         for rule in [
             fsl_syntax::IdentifierRule::Ascii,

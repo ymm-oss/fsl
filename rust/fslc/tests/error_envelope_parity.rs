@@ -214,7 +214,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["analyze", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -371,7 +371,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["conformance", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -388,7 +388,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -426,7 +426,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["diff", SPEC_PLACEHOLDER, SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -527,7 +527,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["explain", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -536,7 +536,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["fmt", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -545,7 +545,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["html", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -563,7 +563,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["ledger", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -572,7 +572,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["lint", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -581,7 +581,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["migrate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -604,7 +604,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             ],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -613,7 +613,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["replay", SPEC_PLACEHOLDER, "--trace", REPLAY_TRACE],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -624,7 +624,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
         literate: LiterateCoverage::Supported {
             reason: "scenarios accepts literate Markdown and its successful materialization is covered by the literate contract",
         },
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -642,7 +642,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["testgen", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -651,7 +651,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["testplan", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -660,7 +660,7 @@ const PARITY_REGISTRY: &[CommandRegistration] = &[
             invoke: &["typestate", SPEC_PLACEHOLDER],
         },
         literate: LiterateCoverage::UniformUnsupported,
-        coverage: PARSE_KERNEL_COVERAGE,
+        coverage: AI_LOWERING_KERNEL_COVERAGE,
         not_applicable: &[],
     },
     CommandRegistration {
@@ -848,6 +848,12 @@ const SOURCE_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
     name: SOURCE_INPUT_SHAPES,
     literate: SOURCE_INPUT_SHAPES,
 };
+// #1464: these generic commands accept an AI component at the lowering gate,
+// even though they have no specialized component/project dispatch of their own.
+const AI_LOWERING_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
+    name: CHECK_NAME_INPUT_SHAPES,
+    ..SOURCE_INPUT_SHAPE_PROFILE
+};
 const AI_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
     parse: AI_FSL_INPUT_SHAPES,
     guard: AI_FSL_INPUT_SHAPES,
@@ -869,6 +875,7 @@ const MUTATE_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
 };
 const APPROVAL_CREATE_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
     parse: APPROVAL_CREATE_PARSE_INPUT_SHAPES,
+    name: CHECK_NAME_INPUT_SHAPES,
     ..SOURCE_INPUT_SHAPE_PROFILE
 };
 /// `kernel` reaches the same AI-component frontend `check` does (issue
@@ -913,7 +920,7 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("ai eval", AI_INPUT_SHAPE_PROFILE),
     input_shape_population!("ai regress", AI_INPUT_SHAPE_PROFILE),
     input_shape_population!("ai replay", AI_INPUT_SHAPE_PROFILE),
-    input_shape_population!("analyze", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("analyze", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("approval check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("approval create", APPROVAL_CREATE_INPUT_SHAPE_PROFILE),
     input_shape_population!("approval diff", SOURCE_INPUT_SHAPE_PROFILE),
@@ -926,36 +933,36 @@ const INPUT_SHAPE_POPULATIONS: &[CommandInputShapePopulation] = &[
     input_shape_population!("chain", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("check", CHECK_INPUT_SHAPE_PROFILE),
     input_shape_population!("compat check", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("conformance", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("counterexample export", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("conformance", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("counterexample export", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("db check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db import", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("db observe", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("diff", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("document check", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("document claims", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("document generate", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("diff", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("document check", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("document claims", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("document generate", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("domain analyze", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("domain check", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("domain expand", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("domain generate", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("domain replay", SOURCE_INPUT_SHAPE_PROFILE),
     input_shape_population!("domain testgen", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("explain", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("fmt", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("html", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("explain", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("fmt", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("html", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("kernel", KERNEL_INPUT_SHAPE_PROFILE),
-    input_shape_population!("ledger", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("lint", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("migrate", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("ledger", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("lint", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("migrate", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("mutate", MUTATE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("refine", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("replay", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("scenarios", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("refine", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("replay", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("scenarios", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("sweep", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("testgen", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("testplan", SOURCE_INPUT_SHAPE_PROFILE),
-    input_shape_population!("typestate", SOURCE_INPUT_SHAPE_PROFILE),
+    input_shape_population!("testgen", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("testplan", AI_LOWERING_INPUT_SHAPE_PROFILE),
+    input_shape_population!("typestate", AI_LOWERING_INPUT_SHAPE_PROFILE),
     input_shape_population!("verify", VERIFY_INPUT_SHAPE_PROFILE),
     input_shape_population!("version", SOURCE_INPUT_SHAPE_PROFILE),
 ];
@@ -971,6 +978,9 @@ enum Diagnostic {
 enum LocationShape {
     Absent,
     LineColumn,
+    /// #1464's CLI contract permits wrappers such as fmt/migrate to discard
+    /// the lowering location. Core and LSP tests separately require its origin.
+    OptionalLineColumn,
     FileOnly,
 }
 
@@ -984,6 +994,7 @@ enum ExpectedField {
 enum MessageExpectation {
     Absent,
     Exact(&'static str),
+    Contains(&'static str),
     MentionsInput,
     OmitsInput,
 }
@@ -1053,6 +1064,31 @@ const AI_UNKNOWN_TOOL_SEMANTIC: Expectation = Expectation::Json(JsonExpectation 
     message: MessageExpectation::Exact("unknown tool 'MissingTool' in authority block"),
     ..SEMANTIC_JSON
 });
+const AI_UNKNOWN_TOOL_MESSAGE: &str = "unknown tool 'MissingTool' in authority block";
+const AI_LOWERING_NAME_COVERAGE: FailureCoverage = FailureCoverage {
+    class: FailureClass::Name,
+    fixture: AI_NAME_FIXTURE,
+    uniform: Expectation::Json(JsonExpectation {
+        location: LocationShape::OptionalLineColumn,
+        message: MessageExpectation::Contains(AI_UNKNOWN_TOOL_MESSAGE),
+        ..SEMANTIC_JSON
+    }),
+};
+// The projector rejects AI components before lowering. The former panic was
+// in document_model_failure's diagnostic recovery, not an RCIR name check.
+const AI_UNSUPPORTED_DOCUMENT_MESSAGE: &str =
+    "document projection does not support dialect 'ai_component' in RCIR v1";
+const AI_DOCUMENT_NAME_COVERAGE: FailureCoverage = FailureCoverage {
+    class: FailureClass::Name,
+    fixture: AI_NAME_FIXTURE,
+    uniform: Expectation::Json(JsonExpectation {
+        kind: ExpectedField::Exact("document"),
+        location: LocationShape::Absent,
+        dialect: ExpectedField::Exact("ai_component"),
+        message: MessageExpectation::Exact(AI_UNSUPPORTED_DOCUMENT_MESSAGE),
+        ..SEMANTIC_JSON
+    }),
+};
 
 const LITERATE_UNIFORM: Expectation = Expectation::Json(JsonExpectation {
     result: ExpectedField::Exact("error"),
@@ -1297,6 +1333,12 @@ const PARSE_KERNEL_COVERAGE: &[FailureCoverage] = &[
         uniform: SEMANTIC_UNIFORM,
     },
 ];
+const AI_LOWERING_KERNEL_COVERAGE: &[FailureCoverage] = &[
+    PARSE_KERNEL_COVERAGE[0],
+    PARSE_KERNEL_COVERAGE[1],
+    PARSE_KERNEL_COVERAGE[2],
+    AI_LOWERING_NAME_COVERAGE,
+];
 const MUTATE_COVERAGE: &[FailureCoverage] = &[
     PARSE_KERNEL_COVERAGE[0],
     FailureCoverage {
@@ -1323,6 +1365,7 @@ const DOCUMENT_COVERAGE: &[FailureCoverage] = &[
         fixture: DOCUMENT_NAME_FIXTURE,
         uniform: SEMANTIC_WITHOUT_INPUT_PATH,
     },
+    AI_DOCUMENT_NAME_COVERAGE,
 ];
 const CHECK_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
@@ -1418,6 +1461,7 @@ const APPROVAL_CREATE_COVERAGE: &[FailureCoverage] = &[
         fixture: NAME_FIXTURE,
         uniform: SEMANTIC_UNIFORM,
     },
+    AI_LOWERING_NAME_COVERAGE,
 ];
 const APPROVAL_CHECK_COVERAGE: &[FailureCoverage] = &[
     FailureCoverage {
@@ -1711,6 +1755,7 @@ const KNOWN_ASYMMETRIES: &[KnownAsymmetry] = &[
 
 struct Actual {
     stdout: String,
+    stderr: String,
     json: Option<Value>,
     exit: i32,
 }
@@ -1795,19 +1840,18 @@ fn has_literate_not_applicable(entry: &CommandRegistration) -> bool {
 }
 
 fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
+    if fixture == AI_NAME_FIXTURE {
+        return InputShape::Component;
+    }
     if matches!(command, "check" | "mutate" | "verify") {
         return match fixture {
             PARSE_AI_PROJECT_FIXTURE | PARSE_AI_PROJECT_DUPLICATE_FIXTURE => InputShape::Project,
             PARSE_CAUSAL_FIXTURE => InputShape::Causal,
-            AI_NAME_FIXTURE if command == "check" => InputShape::Component,
             _ => InputShape::Source,
         };
     }
     if command == "approval create" && fixture == PARSE_APPROVAL_REQUIREMENTS_DOCUMENT_FIXTURE {
         return InputShape::RequirementsDocument;
-    }
-    if command == "kernel" && fixture == AI_NAME_FIXTURE {
-        return InputShape::Component;
     }
     if is_ai_dispatch_command(command) {
         if fixture == PARSE_AI_PROJECT_FIXTURE
@@ -2108,6 +2152,7 @@ fn run_from(
         .unwrap_or_else(|error| panic!("run {command} {arguments:?}: {error}"));
     Actual {
         json: serde_json::from_slice(&output.stdout).ok(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         stdout: String::from_utf8(output.stdout)
             .unwrap_or_else(|error| panic!("{command} stdout is not UTF-8: {error}")),
         exit: output.status.code().expect("native exit status"),
@@ -2160,6 +2205,10 @@ fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) ->
                     location.get("line").and_then(Value::as_u64).is_some()
                         && location.get("column").and_then(Value::as_u64).is_some()
                 }),
+                LocationShape::OptionalLineColumn => output.get("loc").is_none_or(|location| {
+                    location.get("line").and_then(Value::as_u64).is_some()
+                        && location.get("column").and_then(Value::as_u64).is_some()
+                }),
                 LocationShape::FileOnly => output.get("loc").is_some_and(|location| {
                     location.get("file").and_then(Value::as_str) == Some(fixture)
                         && location.get("line").is_none()
@@ -2190,6 +2239,9 @@ fn matches_expectation(actual: &Actual, expected: Expectation, fixture: &str) ->
                 MessageExpectation::Exact(message) => {
                     output.get("message").and_then(Value::as_str) == Some(message)
                 }
+                MessageExpectation::Contains(message) => output["message"]
+                    .as_str()
+                    .is_some_and(|actual| actual.contains(message)),
                 MessageExpectation::MentionsInput => output["message"]
                     .as_str()
                     .is_some_and(|message| message.contains(fixture)),
@@ -2762,6 +2814,161 @@ fn unresolved_identifier_errors_are_uniform_or_pinned_across_frontend_siblings()
 }
 
 #[test]
+fn unknown_authority_tool_has_component_coverage_on_prevalidation_lowering_paths() {
+    let new_cells = cells(FailureClass::Name)
+        .into_iter()
+        .filter(|cell| {
+            cell.fixture == AI_NAME_FIXTURE
+                && matches!(
+                    cell.uniform,
+                    expected if expected == AI_LOWERING_NAME_COVERAGE.uniform
+                        || expected == AI_DOCUMENT_NAME_COVERAGE.uniform
+                )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(new_cells.len(), 20, "review the #1464 lowering population");
+    for cell in new_cells {
+        assert_eq!(cell.shape, InputShape::Component, "{}", cell.command);
+        assert!(
+            !KNOWN_ASYMMETRIES.iter().any(|pin| {
+                pin.command == cell.command
+                    && pin.class == cell.class
+                    && pin.fixture == cell.fixture
+            }),
+            "{} must reject this input, not pin its panic",
+            cell.command
+        );
+    }
+}
+
+/// Expectations follow each command's existing frontend, not a universal AI
+/// validator inserted ahead of it. Unknown entries fail closed in the sweep.
+fn unknown_authority_tool_expected_error(
+    command: &str,
+    input: &str,
+) -> Option<(&'static str, String)> {
+    let (kind, message) = match command {
+        "ai check" | "ai compat" | "ai replay" | "check" | "kernel" | "mutate" | "sweep"
+        | "verify" => ("semantics", AI_UNKNOWN_TOOL_MESSAGE.to_owned()),
+        "ai drift" => (
+            "semantics",
+            "no observed_property declaration found".to_owned(),
+        ),
+        "ai eval" => (
+            "semantics",
+            "no statistical_property declaration found".to_owned(),
+        ),
+        "ai regress" => ("semantics", "no ai_migration declaration found".to_owned()),
+        "compat check" | "db check" | "db observe" => {
+            ("semantics", "expected a dbsystem document".to_owned())
+        }
+        "domain analyze" | "domain check" | "domain expand" | "domain generate"
+        | "domain replay" | "domain testgen" => {
+            ("semantics", "expected a domain document".to_owned())
+        }
+        "causal analyze" | "causal check" | "causal diff" | "causal ledger" => {
+            ("parse", "expected 'causal'".to_owned())
+        }
+        "causal observe-expectations" | "causal verify-expectations" => {
+            ("parse", "expected 'causal' at 3:1".to_owned())
+        }
+        "document check" | "document claims" | "document generate" => {
+            ("document", AI_UNSUPPORTED_DOCUMENT_MESSAGE.to_owned())
+        }
+        "approval check" | "typestate" => {
+            ("semantics", format!("{AI_UNKNOWN_TOOL_MESSAGE} at 14:5"))
+        }
+        "analyze"
+        | "approval create"
+        | "approval diff"
+        | "conformance"
+        | "counterexample export"
+        | "diff"
+        | "explain"
+        | "fmt"
+        | "html"
+        | "ledger"
+        | "lint"
+        | "migrate"
+        | "refine"
+        | "replay"
+        | "scenarios"
+        | "testgen"
+        | "testplan" => (
+            "semantics",
+            format!("{AI_UNKNOWN_TOOL_MESSAGE} at {input}:14:5"),
+        ),
+        _ => return None,
+    };
+    Some((kind, message))
+}
+
+#[test]
+fn unknown_authority_tool_returns_an_error_for_every_document_command() {
+    require_test_git();
+    let contract: Value =
+        serde_json::from_str(include_str!("../cli-contract.json")).expect("valid CLI contract");
+    let mut leaves = BTreeSet::new();
+    cli_contract_leaves(&contract["root"], &mut leaves);
+    let mut failures = Vec::new();
+    let mut tested = 0;
+    for command in leaves {
+        let entry = registration(&command);
+        if !matches!(entry.scope, ParityScope::SpecPath { .. }) {
+            continue;
+        }
+        tested += 1;
+        let input = if approval_command(&command) {
+            approval_positional_name(AI_NAME_FIXTURE)
+        } else {
+            AI_NAME_FIXTURE
+        };
+        let Some((kind, message)) = unknown_authority_tool_expected_error(&command, input) else {
+            failures.push(format!(
+                "{command}: missing unknown-tool fixture expectation"
+            ));
+            continue;
+        };
+        // run() supplies a valid test-owned approval baseline/record. An early
+        // missing/invalid-record io error must not masquerade as coverage.
+        let actual = run(&command, AI_NAME_FIXTURE);
+        let envelope_matches = actual.json.as_ref().is_some_and(|output| {
+            output["fsl"] == "1.0"
+                && output["result"] == "error"
+                && output["kind"] == kind
+                && output["message"] == message
+                && match kind {
+                    "document" => {
+                        // This established envelope uses `code`, not the
+                        // syntax diagnostic's `diagnostic_code` field.
+                        output["code"] == "FSL-DOC-DIALECT-UNSUPPORTED"
+                            && output["dialect"] == "ai_component"
+                            && output["supported_dialects"]
+                                == serde_json::json!(["requirements", "spec"])
+                            && output.get("diagnostic_code").is_none()
+                    }
+                    "parse" => output["diagnostic_code"] == "FSL-PARSE",
+                    _ => true,
+                }
+        });
+        if actual.exit != 2 || !actual.stderr.is_empty() || !envelope_matches {
+            failures.push(format!(
+                "{command}: expected exit=2 result=error kind={kind} message={message:?}; \
+                 produced exit={} stdout={:?} stderr={:?}",
+                actual.exit, actual.stdout, actual.stderr
+            ));
+        }
+    }
+    assert_eq!(tested, 48, "review additions/removals of document commands");
+    assert!(
+        failures.is_empty(),
+        "unknown authority tool: {}/{tested} document commands failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn generic_check_matches_ai_check_for_an_unknown_authority_tool() {
     let generic = run("check", AI_NAME_FIXTURE);
     let specialized = run("ai check", AI_NAME_FIXTURE);
@@ -2916,6 +3123,7 @@ fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
         !matches_expectation(
             &Actual {
                 stdout: actual.stdout,
+                stderr: actual.stderr,
                 json: Some(output),
                 exit: actual.exit,
             },
