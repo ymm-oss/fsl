@@ -22,6 +22,8 @@ ambient state alone does not force an ordinary let to be renamed.
 The same hygiene now covers component property, temporal, initialization, and
 inline-state-initializer roots. Bare component enum reads retain their owning
 enum when an unrenamed public value would capture them, while uncontested
-reads retain their existing representation and enum literals print their source
-member spelling. A single inserted argument pattern without foreign interference
+reads retain their existing representation. Reified bare enum reads print their
+source member spelling; conversion, abstraction, and explicitly qualified enum
+literals retain owner qualification through node-local spelling provenance.
+A single inserted argument pattern without foreign interference
 is no longer renamed merely because its name is reserved for freshness.

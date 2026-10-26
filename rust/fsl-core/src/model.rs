@@ -2080,7 +2080,9 @@ fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
 /// deadlines).
 fn static_index_identity(expr: &Expr, constants: &BTreeMap<String, Value>) -> Option<Value> {
     match expr {
-        Expr::EnumMember { type_name, member } => Some(Value::Enum {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => Some(Value::Enum {
             type_name: type_name.clone(),
             member: member.clone(),
         }),
@@ -3050,6 +3052,7 @@ mod tests {
                 Expr::EnumMember {
                     type_name: "E".into(),
                     member: "One".into(),
+                    source_bare: false,
                 },
                 vec![],
             ),

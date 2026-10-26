@@ -557,6 +557,7 @@ fn elaborate_enum_conversions_inner(
             let mut expanded = Expr::EnumMember {
                 type_name: conversion.target.clone(),
                 member: fallback_member.clone(),
+                source_bare: false,
             };
             for (source_member, target_member) in conversion.members.iter().rev() {
                 expanded = Expr::Conditional {
@@ -566,11 +567,13 @@ fn elaborate_enum_conversions_inner(
                         right: Box::new(Expr::EnumMember {
                             type_name: conversion.source.clone(),
                             member: source_member.clone(),
+                            source_bare: false,
                         }),
                     }),
                     then_expr: Box::new(Expr::EnumMember {
                         type_name: conversion.target.clone(),
                         member: target_member.clone(),
+                        source_bare: false,
                     }),
                     else_expr: Box::new(expanded),
                     spans: Box::new(ConditionalSpans {

@@ -173,7 +173,9 @@ fn eval_inner(
             .or_else(|| model.enum_members.get(name))
             .cloned()
             .ok_or_else(|| runtime_error(format!("unknown identifier '{name}'"))),
-        Expr::EnumMember { type_name, member } => {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => {
             let Some(TypeDef::Enum { members, .. }) = model.types.get(type_name) else {
                 return Err(runtime_error(format!("unknown enum type '{type_name}'")));
             };

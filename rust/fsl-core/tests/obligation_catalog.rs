@@ -918,6 +918,7 @@ fn key_rows_bound_only_typed_index_forms() {
     **index = KernelExpr::EnumMember {
         type_name: "Color".to_owned(),
         member: "Red".to_owned(),
+        source_bare: false,
     };
     let property = |name: &str, key_vacuous: bool, overflow_vacuous: bool| {
         let v = |vacuous: bool| if vacuous { " [v]" } else { "" };

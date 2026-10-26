@@ -237,7 +237,9 @@ pub(crate) fn evaluate(
     Ok(match expression {
         Expr::Num(value) => FslValue::Int(*value),
         Expr::Bool(value) => FslValue::Bool(*value),
-        Expr::EnumMember { type_name, member } => FslValue::Enum {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => FslValue::Enum {
             type_name: type_name.clone(),
             member: member.clone(),
         },

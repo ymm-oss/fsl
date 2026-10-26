@@ -195,12 +195,17 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
-        Expr::EnumMember { type_name, member } if enums.contains_key(member) => {
+        Expr::EnumMember {
+            type_name,
+            member,
+            source_bare,
+        } if enums.contains_key(member) => {
             for sibling in &enums[member] {
                 output.push(ExprMutation {
                     expr: Expr::EnumMember {
                         type_name: type_name.clone(),
                         member: sibling.clone(),
+                        source_bare: *source_bare,
                     },
                     op: "enum_constant_swap",
                     enum_swap: None,

@@ -1735,9 +1735,9 @@ fn resolve_event_names(
                 Expr::Var(name)
             }
         }
-        Expr::EnumMember { type_name, member } if type_name == entity_name => {
-            entity_field(entity, entity_name, &member, span)?
-        }
+        Expr::EnumMember {
+            type_name, member, ..
+        } if type_name == entity_name => entity_field(entity, entity_name, &member, span)?,
         Expr::Field(receiver, field) if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name) => {
             entity_field(entity, entity_name, &field, span)?
         }

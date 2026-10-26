@@ -293,7 +293,9 @@ fn infer_type_inner(
             .get(name)
             .cloned()
             .ok_or_else(|| unresolved_identifier(name, &enum_member_owners(model, name))),
-        Expr::EnumMember { type_name, member } => match model.types.get(type_name) {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => match model.types.get(type_name) {
             Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
                 Ok(TypeRef::Named(type_name.clone()))
             }
@@ -836,7 +838,11 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
     Ok(match value {
         crate::FslValue::Int(value) => Expr::Num(value),
         crate::FslValue::Bool(value) => Expr::Bool(value),
-        crate::FslValue::Enum { type_name, member } => Expr::EnumMember { type_name, member },
+        crate::FslValue::Enum { type_name, member } => Expr::EnumMember {
+            type_name,
+            member,
+            source_bare: false,
+        },
         crate::FslValue::None => Expr::None,
         crate::FslValue::Some(value) => Expr::Some(Box::new(value_expression(*value)?)),
         crate::FslValue::Struct { type_name, fields } => Expr::Struct {

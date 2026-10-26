@@ -1381,13 +1381,13 @@ fn rewrite_expr(
                 // Private capturers are renamed by hygiene; only a public
                 // value can require reifying an otherwise stable enum read.
                 if component.public_bindings.contains(&name) {
-                    Expr::EnumMember {
+                    return Ok(Expr::EnumMember {
                         type_name: prefix(&component.alias, owner),
                         member: name,
-                    }
-                } else {
-                    Expr::Var(name)
+                        source_bare: true,
+                    });
                 }
+                Expr::Var(name)
             }
             Expr::Struct { name, fields } => hygiene::map_children(
                 Expr::Struct {

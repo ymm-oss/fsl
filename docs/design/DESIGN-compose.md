@@ -118,6 +118,9 @@ compose OrderSystem {
     public value could capture it; otherwise its existing representation is
     retained. Its printer uses the source member spelling. Public header names
     remain legal; private capturers use the shared hygiene rules instead.
+    Display-only provenance on the reified node distinguishes these bare reads
+    from conversion, abstraction, and user-qualified enum literals, whose owner
+    qualification is preserved; semantic Kernel AST/JSON output is unchanged.
 
     **Migration contract (#702, limited to original component name resolution):**
 

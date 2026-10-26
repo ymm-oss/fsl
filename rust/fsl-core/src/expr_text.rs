@@ -151,8 +151,21 @@ fn expr_text_with_origins_inner(model: Option<&KernelModel>, expr: &Expr) -> Str
             .join(", ")
         ),
         Expr::Var(name) => unmapped_public_spelling(name),
-        // Resolution retains the owner; source enum literals are bare members.
-        Expr::EnumMember { member, .. } => unmapped_public_spelling(member),
+        Expr::EnumMember {
+            type_name,
+            member,
+            source_bare,
+        } => {
+            if *source_bare {
+                unmapped_public_spelling(member)
+            } else {
+                format!(
+                    "{}.{}",
+                    unmapped_public_spelling(type_name),
+                    unmapped_public_spelling(member)
+                )
+            }
+        }
         Expr::Call { name, args, .. } => format!(
             "{}({})",
             unmapped_public_spelling(name),
