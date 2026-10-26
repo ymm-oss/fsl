@@ -254,8 +254,8 @@
       "outbox_send": "stutter",
       "pay_confirm": "stutter",
       "pay_submit": "pay",
-      "submit_large": "submit.b2",
-      "submit_small": "submit.b1"
+      "submit_large": "submit_large",
+      "submit_small": "submit_small"
     }
   },
   "examples/consulting/tobe_refines_asis.fsl": {

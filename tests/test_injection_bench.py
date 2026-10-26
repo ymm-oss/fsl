@@ -40,7 +40,10 @@ EXPECTED_TYPES = {
 BASELINE_FOR = {
     "specs/bank.fsl": ROOT / "specs" / "bank.fsl",
     "specs/order_workflow.fsl": ROOT / "specs" / "order_workflow.fsl",
-    "examples/layers/return_system.fsl": ROOT / "examples" / "layers" / "return_system.fsl",
+    # Injected headers name the public example; use the legacy copy retained in C1.
+    "examples/layers/return_system.fsl": (
+        ROOT / "rust/fslc/tests/fixtures/legacy_return_branches.fsl"
+    ),
 }
 
 PRIMARY_DETECTOR = {
@@ -231,7 +234,7 @@ def _measure_case(path: Path, case: dict[str, str], tmp_path: Path) -> dict[str,
             "--max-mutants",
             DIFF_MUTATE_MAX,
         ])
-        base_survived = (baseline.get("summary") or {}).get("survived", 0)
+        base_survived = baseline["summary"]["survived"]
         injected_survived = (injected.get("summary") or {}).get("survived", 0)
         status = "caught" if injected_survived > base_survived else "not-caught"
         cells["mutate"] = _cell(

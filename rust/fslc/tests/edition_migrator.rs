@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 
+use fsl_core::FslValue;
+use fsl_runtime::{EnabledAction, Monitor};
 use serde_json::Value;
 
 #[path = "support/id_spelling.rs"]
@@ -1125,11 +1127,13 @@ fn dropping_one_guard_in_the_process_form_converter_fails_the_kernel_contract() 
 }
 
 fn example(name: &str) -> String {
-    text(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples")
-            .join(name),
-    )
+    text(&example_path(name))
+}
+
+fn example_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(name)
 }
 
 fn findings_with_code<'a>(migrated: &'a Value, code: &str) -> Vec<&'a Value> {
@@ -1139,6 +1143,165 @@ fn findings_with_code<'a>(migrated: &'a Value, code: &str) -> Vec<&'a Value> {
         .iter()
         .filter(|finding| finding["code"] == code)
         .collect()
+}
+
+#[test]
+fn canonical_return_example_has_no_inline_maps() {
+    let path = example_path("layers/return_system.fsl");
+    let path = path.to_str().expect("UTF-8 path");
+    let checked = run(&["check", path]);
+    assert_eq!(checked.status.code(), Some(0), "{}", json(&checked));
+    assert_eq!(json(&checked)["result"], "ok");
+    assert_eq!(json(&checked)["implements"]["result"], "refines");
+    let lint = run(&["lint", path, "--edition", "current"]);
+    assert_eq!(lint.status.code(), Some(1), "{}", json(&lint));
+    let lint = json(&lint);
+    assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
+    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
+    let migrate = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
+    assert_eq!(json(&migrate)["changed"], 0);
+    assert!(findings_with_code(&json(&migrate), "inline_action_maps").is_empty());
+}
+
+#[test]
+fn canonical_return_preserves_the_checked_kernel_and_typed_metadata() {
+    let path = example_path("layers/return_system.fsl");
+    let legacy = text(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_return_branches.fsl"),
+    );
+    let import = "../../../../examples/layers/return_policy.fsl";
+    assert_eq!(legacy.matches(import).count(), 1);
+    // Resolve the same policy under one logical source path. Use the existing
+    // migration contract: location-free Kernel plus the full typed annotations.
+    let contract = |source: &str| {
+        fslc_rust::migration::kernel_contract(
+            source,
+            &path,
+            &fsl_syntax::ParseOptions::default(),
+            fslc_rust::migration::Origins::Kept,
+        )
+        .expect("checked return contract")
+    };
+    let mut before = contract(&legacy.replace(import, "return_policy.fsl"));
+    let after = contract(&text(&path));
+    for (old, new) in [
+        ("submit__b1", "submit_small"),
+        ("submit__b2", "submit_large"),
+    ] {
+        let action = before["kernel"]["actions"]
+            .as_array_mut()
+            .expect("actions")
+            .iter_mut()
+            .find(|action| action["name"] == old)
+            .expect("legacy branch");
+        assert_eq!(action["fair"], true);
+        action["name"] = new.into();
+        let annotations = before["annotations"].as_object_mut().expect("annotations");
+        let inherited = annotations
+            .remove(&fsl_core::action_target(old))
+            .expect("inherited requirement annotations");
+        assert!(
+            annotations
+                .insert(fsl_core::action_target(new), inherited)
+                .is_none()
+        );
+    }
+    before["kernel"]["actions"]
+        .as_array_mut()
+        .expect("actions")
+        .sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+    assert_eq!(before, after);
+}
+
+fn return_candidates(monitor: &Monitor) -> Vec<EnabledAction> {
+    monitor
+        .enabled_where(|_, params| params.get("c") == Some(&FslValue::Int(0)))
+        .expect("enabled return actions")
+}
+
+fn return_step(monitor: &mut Monitor, name: &str, amount: Option<i64>) {
+    let action = return_candidates(monitor)
+        .into_iter()
+        .find(|action| {
+            action.action == name
+                && amount.is_none_or(|value| action.params.get("a") == Some(&FslValue::Int(value)))
+        })
+        .expect("expected return action is enabled");
+    let result = monitor.step(&action).expect("return step");
+    assert_eq!(result.violation, None, "{result:?}");
+}
+
+fn return_stage(monitor: &Monitor) -> &str {
+    let FslValue::Map(cases) = &monitor.state["sys"] else {
+        panic!("case map")
+    };
+    let FslValue::Struct { fields, .. } = &cases[&FslValue::Int(0)] else {
+        panic!("case record")
+    };
+    let FslValue::Enum { member, .. } = &fields["st"] else {
+        panic!("case stage")
+    };
+    member
+}
+
+#[test]
+fn canonical_return_threshold_payment_and_manager_guards() {
+    let path = example_path("layers/return_system.fsl");
+    let resolver = fsl_core::FsResolver::new(path.parent().expect("example directory"));
+    let kernel = fsl_core::parse_kernel_source(&text(&path), &resolver).expect("return kernel");
+    let model = fsl_core::build_model(kernel).expect("return model");
+    for amount in 0..=3 {
+        let mut monitor = Monitor::new(model.clone()).expect("deterministic return init");
+        let submits = return_candidates(&monitor)
+            .into_iter()
+            .filter(|action| action.params.get("a") == Some(&FslValue::Int(amount)))
+            .map(|action| action.action)
+            .collect::<Vec<_>>();
+        if amount == 0 {
+            assert!(submits.is_empty(), "zero is not a valid submission");
+            continue;
+        }
+        let submit = if amount == 1 {
+            "submit_small"
+        } else {
+            "submit_large"
+        };
+        assert_eq!(submits, [submit]);
+        return_step(&mut monitor, submit, Some(amount));
+        assert_eq!(
+            return_stage(&monitor),
+            if amount == 1 {
+                "AutoApproved"
+            } else {
+                "MgrQueue"
+            }
+        );
+        let enabled = return_candidates(&monitor)
+            .into_iter()
+            .map(|action| action.action)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            enabled,
+            if amount == 1 {
+                vec!["pay"]
+            } else {
+                vec!["mgr_approve", "mgr_reject"]
+            }
+        );
+        if amount > 1 {
+            let mut rejected = monitor.clone();
+            return_step(&mut rejected, "mgr_reject", None);
+            assert_eq!(return_stage(&rejected), "MgrRejected");
+            assert!(return_candidates(&rejected).is_empty());
+            return_step(&mut monitor, "mgr_approve", None);
+            assert_eq!(return_stage(&monitor), "MgrApproved");
+        }
+        return_step(&mut monitor, "pay", None);
+        assert_eq!(return_stage(&monitor), "Paid");
+        assert_eq!(monitor.state["paid_count"], FslValue::Int(1));
+        assert!(return_candidates(&monitor).is_empty());
+    }
 }
 
 /// decisions 053: the edition derives the terminal states of a process form

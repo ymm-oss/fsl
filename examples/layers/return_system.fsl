@@ -2,10 +2,10 @@
 // Return handling (requirements layer) — kernel-wrapper form (intentional)
 //
 // This spec deliberately uses the kernel-wrapper form (struct / state /
-// branches / explicit maps), NOT the readable `process ... with` profile,
+// explicit fair actions / correspondences), NOT `process ... with`,
 // because it hits the decision-rule triggers the profile does not cover:
-//   - a BRANCHED refinement correspondence — `submit` maps to `approve` for
-//     low amounts but to `stutter` for high amounts (manager queue); and
+//   - amount-dependent refinement — `submit_small` maps to `approve`, while
+//     `submit_large` maps to `stutter` (manager queue); and
 //   - a conservation counter — `paid_count` with the `PaidLedger` invariant.
 // Contrast examples/e2e/2_requirements.fsl, a clean single-entity lifecycle
 // that uses the process+data profile. (See skills/fsl-requirements.)
@@ -19,6 +19,11 @@ requirements ReturnSystemReq {
       else if sys[c].st == MgrApproved then Approved
       else if sys[c].st == MgrRejected then Rejected
       else Refunded
+    action submit_small(c: CaseId, a: Amount) -> approve(c)
+    action submit_large(c: CaseId, a: Amount) -> stutter
+    action mgr_approve(c: CaseId) -> approve(c)
+    action mgr_reject(c: CaseId) -> reject(c)
+    action pay(c: CaseId) -> refund(c)
   }
   type CaseId = 0..2
   type Amount = 0..3
@@ -29,21 +34,25 @@ requirements ReturnSystemReq {
   init { forall c: CaseId { sys[c] = RCase { st: New, amount: 0 } }  paid_count = 0 }
 
   requirement REQ-1 "Returns at or below the threshold are auto-approved" {
-    fair action submit(c: CaseId, a: Amount) {
+    fair action submit_small(c: CaseId, a: Amount) {
       requires sys[c].st == New
       requires a > 0
-      branches {
-        when a <= AUTO_LIMIT { sys[c] = RCase { st: AutoApproved, amount: a } } maps approve(c)
-        when a > AUTO_LIMIT  { sys[c] = RCase { st: MgrQueue,     amount: a } } maps stutter
-      }
+      requires a <= AUTO_LIMIT
+      sys[c] = RCase { st: AutoApproved, amount: a }
+    }
+    fair action submit_large(c: CaseId, a: Amount) {
+      requires sys[c].st == New
+      requires a > 0
+      requires a > AUTO_LIMIT
+      sys[c] = RCase { st: MgrQueue, amount: a }
     }
   }
   requirement REQ-2 "Returns above the threshold are decided by a manager" {
-    fair action mgr_approve(c: CaseId) maps approve(c) { requires sys[c].st == MgrQueue  sys[c].st = MgrApproved }
-    fair action mgr_reject(c: CaseId)  maps reject(c)  { requires sys[c].st == MgrQueue  sys[c].st = MgrRejected }
+    fair action mgr_approve(c: CaseId) { requires sys[c].st == MgrQueue  sys[c].st = MgrApproved }
+    fair action mgr_reject(c: CaseId)  { requires sys[c].st == MgrQueue  sys[c].st = MgrRejected }
   }
   requirement REQ-3 "Payment only after approval; ledger stays consistent" {
-    fair action pay(c: CaseId) maps refund(c) {
+    fair action pay(c: CaseId) {
       requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
       sys[c].st = Paid
       paid_count = paid_count + 1
@@ -51,7 +60,7 @@ requirements ReturnSystemReq {
     invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }
   }
   acceptance AC-1 "Small amounts are auto-approved and paid" {
-    submit(0, 1)
+    submit_small(0, 1)
     pay(0)
     expect sys[0].st == Paid
   }

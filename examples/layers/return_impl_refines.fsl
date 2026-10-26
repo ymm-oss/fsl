@@ -24,9 +24,9 @@ refinement ImplRefinesRequirements {
   }
   map paid_count = paid
 
-  // Requirement-layer actions split by branches are matched via their internal names (submit__b1/b2)
-  action submit_small(c, a) -> submit__b1(c, a)
-  action submit_large(c, a) -> submit__b2(c, a)
+  // Match the requirements layer's explicit amount-specific actions directly.
+  action submit_small(c, a) -> submit_small(c, a)
+  action submit_large(c, a) -> submit_large(c, a)
   action mgr_approve(c)     -> mgr_approve(c)
   action mgr_reject(c)      -> mgr_reject(c)
   action pay_submit(c)      -> pay(c)
