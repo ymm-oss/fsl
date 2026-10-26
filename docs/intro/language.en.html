@@ -3335,7 +3335,11 @@ DESIGN-*.md).</p>
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
   returns the Typed Semantic Graph of requirements, actions, state, properties,
-  and scenarios. Graph projections return connected components, SCCs,
+  and scenarios. Init carrying requirement relations also gets a node with
+  id/kind/name/label <code>init</code>, a spec-to-init <code>declares</code> edge, and requirement-to-init
+  <code>covers</code> edges. It is a useful anchor for <code>disconnected_requirement</code> and is
+  included in <code>requirement_property_graph</code>; init without requirement relations
+  adds no graph output. Graph projections return connected components, SCCs,
   representative cycles, degree, and structural metrics such as cycle rank and
   fan-in/fan-out hubs. <code>--projection action_dependency_graph</code> exposes structural
   action enables/conflict edges; <code>--projection impact_graph --focus NODE</code> emits

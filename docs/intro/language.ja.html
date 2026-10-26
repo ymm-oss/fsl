@@ -3224,6 +3224,10 @@ DESIGN-*.md があります)。</p>
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
+  要件の関係を持つ init には、id/kind/name/label が <code>init</code> のノード、spec から init への
+  <code>declares</code> エッジ、要件から init への <code>covers</code> エッジも生成されます。これは
+  <code>disconnected_requirement</code> に対する有効なアンカーで、<code>requirement_property_graph</code>
+  にも含まれます。要件の関係を持たない init はグラフ出力を追加しません。
   グラフの射影は、連結成分、SCC、代表的なサイクル、次数、そしてサイクルランクや
   ファンイン/ファンアウトのハブのような構造メトリクスを返します。
   <code>--projection action_dependency_graph</code> は、構造的な action の enable/競合の
