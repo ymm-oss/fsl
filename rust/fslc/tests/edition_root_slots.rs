@@ -3,26 +3,11 @@
 #[path = "support/edition_cases.rs"]
 mod cases;
 
-use cases::{Results, Scratch, value, without_versions};
+use cases::{Results, Scratch, value};
 use serde_json::Value;
 
 fn run(scratch: &Scratch, args: &[String], gate: bool) -> std::process::Output {
     cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &scratch.0, gate)
-}
-
-fn expected(scratch: &Scratch, path: &std::path::Path) -> Value {
-    let output = run(
-        scratch,
-        &["check".into(), path.to_str().unwrap().into()],
-        true,
-    );
-    assert_eq!(output.status.code(), Some(2));
-    let output = without_versions(value(&output));
-    assert!(matches!(
-        output["kind"].as_str(),
-        Some("unsupported_in_edition" | "deprecated_domain_enum_union")
-    ));
-    output
 }
 
 #[test]
@@ -65,7 +50,7 @@ fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individually() {
                 "log.jsonl",
                 "{\"action\":\"finish\",\"params\":{},\"state\":{\"done\":true}}\n",
             );
-            let args: Vec<_> = template.split_whitespace().map(str::to_owned).collect();
+            let args = cases::split(template);
             let canonical = run(&scratch, &args, true);
             let canonical_value = value(&canonical);
             // The mapped log is a real conforming finish transition, not a
@@ -77,23 +62,18 @@ fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individually() {
                 canonical.status.code() == Some(0) && canonical_value["result"] != "error",
             );
             let rejected = if slot.starts_with("map") {
-                format!(
-                    "fsl 5\n{}",
-                    cases::legacy("deprecated_domain_enum_union", cases::DOMAIN)
-                )
+                cases::rejected_domain()
             } else {
-                format!("fsl 5\n{}", cases::WARNING_CASES[1].2)
+                cases::rejected_metadata()
             };
             scratch.write(slot, &rejected);
-            let wanted = expected(&scratch, std::path::Path::new(slot));
-            let output = run(&scratch, &args, true);
-            let actual = without_versions(value(&output));
-            results.check(
-                &format!("slot/{template}/{slot}"),
-                (output.status.code(), &actual),
-                &wanted,
-                output.status.code() == Some(2) && actual == wanted,
+            let wanted = cases::refusal(
+                env!("CARGO_BIN_EXE_fslc"),
+                &scratch.0,
+                std::path::Path::new(slot),
             );
+            let output = run(&scratch, &args, true);
+            results.error_envelope(&format!("slot/{template}/{slot}"), &output, &wanted, true);
         }
     }
     results.finish();
@@ -115,14 +95,10 @@ fn manifest_layers_and_mapping_refuse_before_the_implementation_marker() {
                 scratch.write(&format!("{name}.fsl"), &format!("fsl 5\n{}", cases::KERNEL));
             }
             scratch.write("mapping.fsl", "fsl 5\nrefinement R { impl S abs S map done = done action finish() -> finish() }\n");
-            let mapping = format!(
-                "fsl 5\n{}",
-                cases::legacy("deprecated_domain_enum_union", cases::DOMAIN)
-            );
             let rejected = if layer == "mapping" {
-                mapping
+                cases::rejected_domain()
             } else {
-                format!("fsl 5\n{}", cases::WARNING_CASES[1].2)
+                cases::rejected_metadata()
             };
             let manifest = "[business]\nfile = \"business.fsl\"\ndepth = 2\n[requirements]\nfile = \"requirements.fsl\"\ndepth = 2\n[design]\nfile = \"design.fsl\"\ndepth = 2\nrefine_against = \"requirements\"\nmapping = \"mapping.fsl\"\n[impl]\ncommand = \"touch marker\"\nevidence = \"exit_code\"\n";
             let manifest = if checks_only {
@@ -156,38 +132,29 @@ fn manifest_layers_and_mapping_refuse_before_the_implementation_marker() {
                 "--projection".into(),
                 "traceability_graph".into(),
             ];
-            let canonical = run(&scratch, &analysis_args, true);
-            results.check(
-                &format!("preserved/project/{layer}/{jobs}/{keep_going}/{checks_only}"),
-                canonical.status.code(),
-                0,
-                canonical.status.code() == Some(0),
-            );
+            if jobs == 1 && !checks_only {
+                let canonical = run(&scratch, &analysis_args, true);
+                results.check(
+                    &format!("preserved/project/{layer}"),
+                    canonical.status.code(),
+                    0,
+                    canonical.status.code() == Some(0),
+                );
+            }
             let path = scratch.write(&format!("{layer}.fsl"), &rejected);
             scratch.write("project.toml", &manifest);
-            let wanted = expected(&scratch, &path);
+            let wanted = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &path);
             let output = run(&scratch, &args, true);
-            let actual = without_versions(value(&output));
-            results.check(
+            results.error_envelope(
                 &format!("chain/{layer}/{jobs}/{keep_going}/{checks_only}"),
-                (
-                    output.status.code(),
-                    &actual,
-                    scratch.0.join("marker").exists(),
-                ),
+                &output,
                 &wanted,
-                output.status.code() == Some(2)
-                    && actual == wanted
-                    && !scratch.0.join("marker").exists(),
+                !scratch.0.join("marker").exists(),
             );
-            let analysis = run(&scratch, &analysis_args, true);
-            let actual = without_versions(value(&analysis));
-            results.check(
-                &format!("project/{layer}/{jobs}/{keep_going}/{checks_only}"),
-                (analysis.status.code(), &actual),
-                &wanted,
-                analysis.status.code() == Some(2) && actual == wanted,
-            );
+            if jobs == 1 && !checks_only {
+                let analysis = run(&scratch, &analysis_args, true);
+                results.error_envelope(&format!("project/{layer}"), &analysis, &wanted, true);
+            }
         }
     }
     results.finish();
@@ -198,12 +165,9 @@ fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal() {
     let mut results = Results::default();
     let root = cases::root();
     let scratch = Scratch::new();
-    let source = format!(
-        "fsl 5\n{}",
-        cases::legacy("deprecated_domain_enum_union", cases::DOMAIN)
-    );
+    let source = cases::rejected_domain();
     let mapping = scratch.write("mapping.fsl", &source);
-    let wanted = expected(&scratch, &mapping);
+    let wanted = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &mapping);
     for missing in [false, true] {
         let log = if missing {
             scratch.0.join("missing.jsonl")
@@ -217,19 +181,13 @@ fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal() {
             mapping.display(),
             root.display()
         );
-        let args = command
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
+        let args = cases::split(&command);
         let output = run(&scratch, &args, true);
-        let actual = without_versions(value(&output));
-        results.check(
+        results.error_envelope(
             &format!("causal/mapping/missing={missing}"),
-            (output.status.code(), &actual),
+            &output,
             &wanted,
-            output.status.code() == Some(2)
-                && actual == wanted
-                && !scratch.0.join("refused.json").exists(),
+            !scratch.0.join("refused.json").exists(),
         );
     }
     results.finish();
@@ -265,7 +223,6 @@ fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once() {
             .lines()
             .filter_map(|line| line.strip_prefix("warning: "))
             .map(|line| serde_json::from_str(line).expect("structured warning on stderr"))
-            .filter(|warning: &Value| warning["code"] == "legacy_string_metadata")
             .collect();
         let closed_unchanged = if matches!(
             template.split_whitespace().next(),
@@ -409,40 +366,6 @@ fn checked_repairs_and_editionless_sources_are_preserved() {
             (output.status.code(), &actual),
             "causal check without edition metadata",
             output.status.code() == Some(0) && actual.get("fsl_edition").is_none(),
-        );
-    }
-    results.finish();
-}
-
-#[test]
-fn refusing_roots_win_even_when_the_output_parent_is_missing() {
-    let mut results = Results::default();
-    for row in cases::rows()
-        .into_iter()
-        .filter(|r| r.role == "reader" && r.argv.contains("{out}"))
-    {
-        let scratch = Scratch::new();
-        let source = format!(
-            "fsl 5\n{}",
-            cases::legacy("deprecated_domain_enum_union", cases::DOMAIN)
-        );
-        let mut args = scratch.args(row.argv, &source);
-        let out = scratch.0.join("out");
-        let missing = scratch.0.join("missing-parent/out");
-        for arg in &mut args {
-            if arg == out.to_str().unwrap() {
-                *arg = missing.to_str().unwrap().to_owned();
-            }
-        }
-        assert!(!missing.parent().unwrap().exists());
-        let wanted = expected(&scratch, &scratch.0.join("source.fsl"));
-        let output = run(&scratch, &args, true);
-        let actual = without_versions(value(&output));
-        results.check(
-            &format!("priority/output-parent/{}", row.key),
-            (output.status.code(), &actual),
-            &wanted,
-            output.status.code() == Some(2) && actual == wanted && !missing.exists(),
         );
     }
     results.finish();

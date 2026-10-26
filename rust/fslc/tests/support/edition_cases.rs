@@ -22,6 +22,57 @@ pub fn invoke(binary: &str, args: &[String], cwd: &Path, gate: bool) -> std::pro
     command.output().expect("execute working-tree CLI")
 }
 
+pub fn split(template: &str) -> Vec<String> {
+    template.split_whitespace().map(str::to_owned).collect()
+}
+
+pub fn command(binary: &str, cwd: &Path, template: &str, gate: bool) -> std::process::Output {
+    invoke(binary, &split(template), cwd, gate)
+}
+
+pub fn expand(template: &str, replacements: &[(&str, PathBuf)]) -> Vec<String> {
+    split(template)
+        .into_iter()
+        .map(|mut word| {
+            for (key, path) in replacements {
+                word = word.replace(key, path.to_str().unwrap());
+            }
+            assert!(!word.contains('{'), "unknown placeholder {word}");
+            word
+        })
+        .collect()
+}
+
+pub fn refusal(binary: &str, cwd: &Path, path: &Path) -> Value {
+    let output = invoke(
+        binary,
+        &["check".into(), path.to_str().unwrap().into()],
+        cwd,
+        true,
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let output = without_versions(value(&output));
+    assert!(matches!(
+        output["kind"].as_str(),
+        Some("unsupported_in_edition" | "deprecated_domain_enum_union")
+    ));
+    output
+}
+
+pub fn refusal_envelope(
+    source: &str,
+    path: &str,
+    mut envelope: serde_json::Map<String, Value>,
+) -> Value {
+    let findings = findings(source, path, fsl_syntax::Edition::Fsl5);
+    assert!(!findings.is_empty());
+    envelope.extend(serde_json::from_value::<serde_json::Map<String, Value>>(json!({
+        "result":"error", "kind":if findings.iter().all(|f| f["code"] == "deprecated_domain_enum_union") {"deprecated_domain_enum_union"} else {"unsupported_in_edition"},
+        "edition":"next", "fsl_edition":5, "findings":findings
+    })).unwrap());
+    Value::Object(envelope)
+}
+
 pub fn value(output: &std::process::Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
@@ -50,63 +101,63 @@ pub fn without_versions(mut value: Value) -> Value {
     value
 }
 
-// key | owner | role | argv (placeholders are files, never inferred dialects).
-const TABLE: &str = "\
-ai check|native|reader|ai check {src} --depth 2
-ai compare|native|nonreader|ai compare --from {metrics} --to {metrics}
-ai compat|native|reader|ai compat {src}
-ai drift|native|reader|ai drift {src} --logs {records}
-ai eval|native|reader|ai eval {src} --records {records}
-ai regress|native|reader|ai regress {src} --before-records {records} --after-records {records}
-ai replay|native|reader|ai replay {src} --logs {records}
-analyze|native|reader|analyze {src}
-approval check|native|reader|approval check {src} --record {record}
-approval create|native|reader|approval create {src} --kind ledger --artifact {artifact} --approver edition-test -o {out}
-approval diff|native|reader|approval diff {src} --record {record}
-causal analyze|native|reader|causal analyze {src} --projection causal_graph
-causal check|native|reader|causal check {src}
-causal diff|native|reader|causal diff {src} {src}
-causal ledger|native|reader|causal ledger {src}
-causal observe-expectations|native|reader|causal observe-expectations {src} --from-log {log} --mapping {mapping} --scope {scope} --period-start 2026-01-01 --period-end 2026-03-31 --out {out}
-causal verify-expectations|native|reader|causal verify-expectations {src} --depth 2
-chain|native|reader|chain {manifest}
-check|native|reader|check {src}
-compat check|native|reader|compat check {src}
-conformance|native|reader|conformance {src} --depth 2
-counterexample export|native|reader|counterexample export {src} --depth 2 -o {out}
-db check|native|reader|db check {src} --depth 2
-db import|native|nonreader|db import {sql} --source sql -o {out}
-db observe|native|reader|db observe {src} --trace {trace}
-diff|native|reader|diff {src} {src} --depth 2
-document check|native|reader|document check {src} {artifact}
-document claims|native|reader|document claims {src}
-document generate|native|reader|document generate {src} -o {out}
-domain analyze|native|reader|domain analyze {src}
-domain check|native|reader|domain check {src} --depth 2
-domain expand|native|reader|domain expand {src} -o {out}
-domain generate|native|reader|domain generate {src} -o {out}
-domain replay|native|reader|domain replay {src} --logs {domainlog}
-domain testgen|native|reader|domain testgen {src} --depth 2 -o {out}
-explain|native|reader|explain {src} --depth 2
-fmt|native|repair|fmt {src} --check
-html|native|reader|html {src} --depth 2 --no-timing -o {out}
-kernel|native|reader|kernel {src}
-ledger|native|reader|ledger {src} --depth 2 -o {out}
-lint|native|repair|lint {src} --edition next
-migrate|native|repair|migrate {src} --edition next
-mutate|native|reader|mutate {src} --depth 2 --max-mutants 0
-refine|native|reader|refine {src} {src} {mapping} --depth 2
-replay|native|reader|replay {src} --trace {replaytrace}
-scenarios|native|reader|scenarios {src} --depth 2
-sweep|native|reader|sweep {src} --depth 2..2
-testgen|native|reader|testgen {src} --depth 2 -o {out}
-testplan|native|reader|testplan {src} --depth 2
-typestate|native|reader|typestate {src}
-verify|native|reader|verify {src} --depth 2 --no-cache
-version|native|nonreader|version
-worker check|worker|reader|check
-worker verify|worker|reader|verify
-lsp diagnostics|native|lsp|diagnostics_with_model";
+// key | owner | role | argv | canonical CLI exit/result/kind/warnings/artifact.
+// Non-CLI rows and version have their own adapter/cli-contract assertions.
+const TABLE: &str = r#"ai check|native|reader|ai check {src} --depth 2|[2,"error","semantics",null,false]
+ai compare|native|nonreader|ai compare --from {metrics} --to {metrics}|[0,"compared",null,null,false]
+ai compat|native|reader|ai compat {src}|[2,"error","semantics",null,false]
+ai drift|native|reader|ai drift {src} --logs {records}|[2,"error","parse",null,false]
+ai eval|native|reader|ai eval {src} --records {records}|[2,"error","parse",null,false]
+ai regress|native|reader|ai regress {src} --before-records {records} --after-records {records}|[2,"error","parse",null,false]
+ai replay|native|reader|ai replay {src} --logs {records}|[2,"error","semantics",null,false]
+analyze|native|reader|analyze {src}|[0,"analyzed",null,null,false]
+approval check|native|reader|approval check {src} --record {record}|[2,"error","io",null,false]
+approval create|native|reader|approval create {src} --kind ledger --artifact {artifact} --approver edition-test -o {out}|[2,"error","io",null,false]
+approval diff|native|reader|approval diff {src} --record {record}|[2,"error","io",null,false]
+causal analyze|native|reader|causal analyze {src} --projection causal_graph|[2,"error","parse",null,false]
+causal check|native|reader|causal check {src}|[2,"error","parse",null,false]
+causal diff|native|reader|causal diff {src} {src}|[2,"error","parse",null,false]
+causal ledger|native|reader|causal ledger {src}|[2,"error","parse",null,false]
+causal observe-expectations|native|reader|causal observe-expectations {src} --from-log {log} --mapping {mapping} --scope {scope} --period-start 2026-01-01 --period-end 2026-03-31 --out {out}|[2,"error","parse",null,false]
+causal verify-expectations|native|reader|causal verify-expectations {src} --depth 2|[2,"error","parse",null,false]
+chain|native|reader|chain {manifest}|[0,"verified",null,null,false]
+check|native|reader|check {src}|[0,"ok",null,[],false]
+compat check|native|reader|compat check {src}|[2,"error","semantics",null,false]
+conformance|native|reader|conformance {src} --depth 2|[0,"conformance",null,null,false]
+counterexample export|native|reader|counterexample export {src} --depth 2 -o {out}|[2,"error","semantics",null,false]
+db check|native|reader|db check {src} --depth 2|[2,"error","semantics",null,false]
+db import|native|nonreader|db import {sql} --source sql -o {out}|[0,"imported",null,[],true]
+db observe|native|reader|db observe {src} --trace {trace}|[2,"error","semantics",null,false]
+diff|native|reader|diff {src} {src} --depth 2|[0,"semantic_diff",null,null,false]
+document check|native|reader|document check {src} {artifact}|[2,"error","document",null,false]
+document claims|native|reader|document claims {src}|[2,"error","document",null,false]
+document generate|native|reader|document generate {src} -o {out}|[2,"error","document",null,false]
+domain analyze|native|reader|domain analyze {src}|[0,"analyzed",null,null,false]
+domain check|native|reader|domain check {src} --depth 2|[0,"verified_under_assumptions",null,null,false]
+domain expand|native|reader|domain expand {src} -o {out}|[0,"expanded",null,null,true]
+domain generate|native|reader|domain generate {src} -o {out}|[0,"generated",null,null,true]
+domain replay|native|reader|domain replay {src} --logs {domainlog}|[1,"nonconformant",null,null,false]
+domain testgen|native|reader|domain testgen {src} --depth 2 -o {out}|[0,"generated","domain_testgen",[],true]
+explain|native|reader|explain {src} --depth 2|[0,"explained",null,null,false]
+fmt|native|repair|fmt {src} --check|[1,"format_check",null,null,false]
+html|native|reader|html {src} --depth 2 --no-timing -o {out}|[0,"generated","html_report",null,true]
+kernel|native|reader|kernel {src}|[0,"kernel",null,null,false]
+ledger|native|reader|ledger {src} --depth 2 -o {out}|[0,"generated","audit_ledger",null,true]
+lint|native|repair|lint {src} --edition next|[0,"lint",null,null,false]
+migrate|native|repair|migrate {src} --edition next|[0,"migrated",null,null,false]
+mutate|native|reader|mutate {src} --depth 2 --max-mutants 0|[0,"mutated",null,null,false]
+refine|native|reader|refine {src} {src} {mapping} --depth 2|[2,"error","type",null,false]
+replay|native|reader|replay {src} --trace {replaytrace}|[2,"error","io",null,false]
+scenarios|native|reader|scenarios {src} --depth 2|[0,"scenarios",null,[],false]
+sweep|native|reader|sweep {src} --depth 2..2|[0,"sweep_passed",null,null,false]
+testgen|native|reader|testgen {src} --depth 2 -o {out}|[0,"generated",null,null,true]
+testplan|native|reader|testplan {src} --depth 2|[0,"testplan",null,null,false]
+typestate|native|reader|typestate {src}|[0,"typestate",null,null,false]
+verify|native|reader|verify {src} --depth 2 --no-cache|[0,"verified",null,[],false]
+version|native|nonreader|version|null
+worker check|worker|reader|check|null
+worker verify|worker|reader|verify|null
+lsp diagnostics|native|lsp|diagnostics_with_model|null"#;
 
 #[derive(Debug)]
 pub struct Row<'a> {
@@ -114,6 +165,7 @@ pub struct Row<'a> {
     pub owner: &'a str,
     pub role: &'a str,
     pub argv: &'a str,
+    pub preserved: Value,
 }
 
 pub fn rows() -> Vec<Row<'static>> {
@@ -121,12 +173,13 @@ pub fn rows() -> Vec<Row<'static>> {
         .lines()
         .map(|line| {
             let fields: Vec<_> = line.split('|').collect();
-            assert_eq!(fields.len(), 4, "malformed table row: {line}");
+            assert_eq!(fields.len(), 5, "malformed table row: {line}");
             Row {
                 key: fields[0],
                 owner: fields[1],
                 role: fields[2],
                 argv: fields[3],
+                preserved: serde_json::from_str(fields[4]).expect("canonical control fields"),
             }
         })
         .collect()
@@ -135,16 +188,14 @@ pub fn rows() -> Vec<Row<'static>> {
 pub fn assignment(owner: &str, executions: &[String]) {
     let executed: BTreeSet<_> = executions.iter().cloned().collect();
     let rows = rows();
-    let native: BTreeSet<_> = rows
-        .iter()
-        .filter(|r| r.owner == "native")
-        .map(|r| r.key.to_owned())
-        .collect();
-    let worker: BTreeSet<_> = rows
-        .iter()
-        .filter(|r| r.owner == "worker")
-        .map(|r| r.key.to_owned())
-        .collect();
+    let population = |owner: &str| {
+        rows.iter()
+            .filter(|r| r.owner == owner)
+            .map(|r| r.key.to_owned())
+            .collect::<BTreeSet<_>>()
+    };
+    let native = population("native");
+    let worker = population("worker");
     assert_eq!((native.len(), worker.len(), rows.len()), (53, 2, 55));
     assert!(native.is_disjoint(&worker));
     assert_eq!(native.union(&worker).count(), rows.len());
@@ -215,6 +266,27 @@ pub fn legacy(code: &str, body: &str) -> String {
     } else {
         body.to_owned()
     }
+}
+
+pub fn headed(body: &str) -> String {
+    format!("fsl 5\n{body}")
+}
+pub fn rejected_domain() -> String {
+    headed(&legacy("deprecated_domain_enum_union", DOMAIN))
+}
+pub fn rejected_metadata() -> String {
+    headed(WARNING_CASES[1].2)
+}
+pub fn model_error(source: &str) -> String {
+    let broken = source
+        .replace("status == Open or status == Closed", "missing_name")
+        .replace("done == true or done == false", "missing_name")
+        .replace(
+            "invariant Typed { true }",
+            "invariant Typed { missing_name }",
+        );
+    assert_ne!(broken, source);
+    broken
 }
 
 pub fn findings(source: &str, path: &str, edition: fsl_syntax::Edition) -> Vec<Value> {
@@ -298,21 +370,7 @@ impl Scratch {
                 root().join("examples/causal/evidence/incident-replay-scope.json"),
             ),
         ];
-        template
-            .split_whitespace()
-            .map(|word| {
-                replacements
-                    .iter()
-                    .find(|(key, _)| *key == word)
-                    .map_or_else(
-                        || {
-                            assert!(!word.starts_with('{'), "unknown placeholder {word}");
-                            word.to_owned()
-                        },
-                        |(_, path)| path.to_str().unwrap().to_owned(),
-                    )
-            })
-            .collect()
+        expand(template, &replacements)
     }
 }
 
@@ -322,6 +380,21 @@ pub struct Results {
     pub failures: Vec<String>,
 }
 impl Results {
+    pub fn error_envelope(
+        &mut self,
+        label: &str,
+        output: &std::process::Output,
+        expected: &Value,
+        side_effects_absent: bool,
+    ) {
+        let actual = without_versions(value(output));
+        self.check(
+            label,
+            (output.status.code(), &actual, side_effects_absent),
+            (Some(2), expected, true),
+            output.status.code() == Some(2) && actual == *expected && side_effects_absent,
+        );
+    }
     pub fn check(
         &mut self,
         label: &str,

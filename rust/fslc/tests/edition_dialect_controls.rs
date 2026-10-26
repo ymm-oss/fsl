@@ -7,15 +7,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 
 fn run(scratch: &Scratch, template: &str) -> std::process::Output {
-    cases::invoke(
-        env!("CARGO_BIN_EXE_fslc"),
-        &template
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect::<Vec<_>>(),
-        &scratch.0,
-        true,
-    )
+    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template, true)
 }
 
 fn git(scratch: &Scratch, args: &[&str]) -> String {
@@ -42,79 +34,36 @@ fn git(scratch: &Scratch, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
-fn dialect_commands(root: &std::path::Path) -> Vec<String> {
+fn dialect_commands() -> Vec<Vec<String>> {
     // All paths are real; the same-pair wrong-dialect controls in the primary
     // adapter do not stand in for these successful dialect/sidecar executions.
-    let fixtures = root.join("rust/fslc/tests/fixtures");
-    vec![
-        format!("check {}/examples/e2e/1_business.fsl", root.display()),
-        format!("check {}/examples/e2e/2_requirements.fsl", root.display()),
-        format!(
-            "check {}/examples/ai/recursive_support_agent.fsl",
-            root.display()
-        ),
-        format!(
-            "check {}/examples/refinement_liveness/governance_preserves_progress.fsl",
-            root.display()
-        ),
-        "check compose.fsl".to_owned(),
-        format!(
-            "db check {}/examples/db/safe_add_nullable_column.fsl --depth 2",
-            root.display()
-        ),
-        format!(
-            "db observe {}/examples/db/safe_add_nullable_column.fsl --trace {}/error_envelope_empty_records.json",
-            root.display(),
-            fixtures.display()
-        ),
-        format!(
-            "compat check {}/examples/db/safe_add_nullable_column.fsl",
-            root.display()
-        ),
-        format!(
-            "ai check {}/examples/ai/refund_agent_tool_safety.fsl --depth 2",
-            root.display()
-        ),
-        format!(
-            "ai compat {}/examples/ai/refund_agent_tool_safety.fsl",
-            root.display()
-        ),
-        format!(
-            "ai replay {}/examples/ai/refund_agent_tool_safety.fsl --logs {}/error_envelope_empty_records.json",
-            root.display(),
-            fixtures.display()
-        ),
-        format!(
-            "ai eval {0}/examples/ai/support_answer_quality.fsl --property LooseQuality --records {0}/examples/ai/support_eval_v3.jsonl",
-            root.display()
-        ),
-        format!(
-            "domain replay {}/issue_518_domain_replay.fsl --logs {}/issue_518_clean.jsonl",
-            fixtures.display(),
-            fixtures.display()
-        ),
-        format!(
-            "replay {}/replay_trace.fsl --trace {}/replay_trace.valid.v1.json",
-            fixtures.display(),
-            fixtures.display()
-        ),
-        format!(
-            "causal check {}/examples/causal/incident_response.fsl",
-            root.display()
-        ),
-        format!(
-            "causal analyze {}/examples/causal/incident_response.fsl --projection causal_graph",
-            root.display()
-        ),
-        format!(
-            "causal diff {0}/examples/causal/incident_response.fsl {0}/examples/causal/incident_response.fsl",
-            root.display()
-        ),
-        format!(
-            "causal observe-expectations {0}/examples/causal/incident_response.fsl --from-log {0}/examples/causal/evidence/incident-observation-log.jsonl --mapping {0}/examples/causal/evidence/incident-log-mapping.fsl --scope {0}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json",
-            root.display()
-        ),
-    ]
+    const COMMANDS: &str = "\
+check {repo}/examples/e2e/1_business.fsl
+check {repo}/examples/e2e/2_requirements.fsl
+check {repo}/examples/ai/recursive_support_agent.fsl
+check {repo}/examples/refinement_liveness/governance_preserves_progress.fsl
+check compose.fsl
+db check {repo}/examples/db/safe_add_nullable_column.fsl --depth 2
+db observe {repo}/examples/db/safe_add_nullable_column.fsl --trace {fixtures}/error_envelope_empty_records.json
+compat check {repo}/examples/db/safe_add_nullable_column.fsl
+ai check {repo}/examples/ai/refund_agent_tool_safety.fsl --depth 2
+ai compat {repo}/examples/ai/refund_agent_tool_safety.fsl
+ai replay {repo}/examples/ai/refund_agent_tool_safety.fsl --logs {fixtures}/error_envelope_empty_records.json
+ai eval {repo}/examples/ai/support_answer_quality.fsl --property LooseQuality --records {repo}/examples/ai/support_eval_v3.jsonl
+domain replay {fixtures}/issue_518_domain_replay.fsl --logs {fixtures}/issue_518_clean.jsonl
+replay {fixtures}/replay_trace.fsl --trace {fixtures}/replay_trace.valid.v1.json
+causal check {repo}/examples/causal/incident_response.fsl
+causal analyze {repo}/examples/causal/incident_response.fsl --projection causal_graph
+causal diff {repo}/examples/causal/incident_response.fsl {repo}/examples/causal/incident_response.fsl
+causal observe-expectations {repo}/examples/causal/incident_response.fsl --from-log {repo}/examples/causal/evidence/incident-observation-log.jsonl --mapping {repo}/examples/causal/evidence/incident-log-mapping.fsl --scope {repo}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json";
+    let replacements = [
+        ("{repo}", cases::root()),
+        ("{fixtures}", cases::root().join("rust/fslc/tests/fixtures")),
+    ];
+    COMMANDS
+        .lines()
+        .map(|line| cases::expand(line, &replacements))
+        .collect()
 }
 
 #[test]
@@ -126,7 +75,7 @@ fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
         "compose.fsl",
         "compose C { use Dep as d from \"dep.fsl\" }\n",
     );
-    let commands = dialect_commands(&cases::root());
+    let commands = dialect_commands();
     for repeat in 0..2 {
         // Q2 is root-only: a dependency rejected on its own is deliberately
         // still accepted through compose. This is preservation, not a detector
@@ -140,10 +89,10 @@ fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
                 && value(&dependency)["kind"] == "unsupported_in_edition",
         );
         for command in &commands {
-            let output = run(&scratch, command);
+            let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), command, &scratch.0, true);
             let actual = value(&output);
             results.check(
-                &format!("preserved/dialect/{repeat}/{command}"),
+                &format!("preserved/dialect/{repeat}/{}", command.join(" ")),
                 (output.status.code(), &actual),
                 "successful real dialect and sidecar",
                 output.status.code() == Some(0) && actual["result"] != "error",
@@ -182,7 +131,7 @@ fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
 fn approval_records_and_git_roots_refuse_before_output_writes() {
     let mut results = Results::default();
     let scratch = Scratch::new();
-    let rejected = format!("fsl 5\n{}", cases::WARNING_CASES[1].2);
+    let rejected = cases::rejected_metadata();
     let canonical = fslc_rust::migration::plan_migration(
         &rejected,
         "spec.fsl",
@@ -214,21 +163,22 @@ fn approval_records_and_git_roots_refuse_before_output_writes() {
         );
     }
     scratch.write("spec.fsl", &rejected);
-    let oracle = without_versions(value(&run(&scratch, "check spec.fsl")));
+    let oracle = cases::refusal(
+        env!("CARGO_BIN_EXE_fslc"),
+        &scratch.0,
+        std::path::Path::new("spec.fsl"),
+    );
     for command in [
         "approval check spec.fsl --record record.json",
         "approval diff spec.fsl --record record.json --depth 2",
         "approval create spec.fsl --kind ledger --artifact ledger.md --approver edition-test --depth 2 -o refused-record.json",
     ] {
         let output = run(&scratch, command);
-        let actual = without_versions(value(&output));
-        results.check(
+        results.error_envelope(
             &format!("approval/current/{command}"),
-            (output.status.code(), &actual),
+            &output,
             &oracle,
-            output.status.code() == Some(2)
-                && actual == oracle
-                && !scratch.0.join("refused-record.json").exists(),
+            !scratch.0.join("refused-record.json").exists(),
         );
     }
     git(&scratch, &["add", "spec.fsl"]);

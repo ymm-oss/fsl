@@ -11,10 +11,7 @@ fn request(cmd: &str, source: &str, gate: bool) -> Request {
     serde_json::from_value(json!({
         "cmd": cmd, "source": source, "source_file": "source.fsl",
         "files": {"abstract.fsl": cases::ABSTRACT},
-        // Verify's main BMC uses the browser bridge, not the requirements seam.
-        // This accepted-options control stops there; actual native solver reach
-        // is independently exercised by the deferred-requirements case below.
-        "options": {"depth": 2, "deadlock": "edition-priority-probe"},
+        "options": {"depth": 2, "deadlock": "warn"},
         "unstable": if gate { vec!["fsl5"] } else { vec![] }
     })).expect("same Request JSON shape as run")
 }
@@ -39,18 +36,13 @@ fn edition_adapter_executes_both_worker_rows_and_rejects_before_requirements_sol
             // A real model error avoids browser BMC on native but must lose to
             // the source-edition refusal. No model/solver shortcut is asserted
             // to exercise browser JSON dispatch (owned by test-browser.mjs).
-            let body = if code == "deprecated_domain_enum_union" { body } else { body.replace("invariant Typed {", "invariant Typed { missing_name and") };
-            let source = format!("fsl 5\n{body}");
+            let body = cases::model_error(&body);
+            let source = cases::headed(&body);
             let req = request(row.argv, &source, true);
-            let expected_findings = cases::findings(&source, "source.fsl", fsl_syntax::Edition::Fsl5);
-            assert!(expected_findings.iter().any(|finding| finding["code"] == code));
-            let mut expected = crate::envelope(TEST_SOLVER_VERSION);
-            expected.extend(serde_json::from_value::<serde_json::Map<String, Value>>(json!({
-                "result":"error", "kind": if code == "deprecated_domain_enum_union" { "deprecated_domain_enum_union" } else { "unsupported_in_edition" },
-                "edition":"next", "fsl_edition":5, "findings": expected_findings
-            })).unwrap());
+            let expected = cases::refusal_envelope(&source, "source.fsl", crate::envelope(TEST_SOLVER_VERSION));
+            assert!(expected["findings"].as_array().unwrap().iter().any(|finding| finding["code"] == code));
             let output = run(&req, &mut 0);
-            results.check(&format!("{}/refuse/{code}", row.key), &output, &expected, output == Value::Object(expected.clone()));
+            results.check(&format!("{}/refuse/{code}", row.key), &output, &expected, output == expected);
             for header in ["", "fsl 4\n"] {
                 let current = format!("{header}{body}");
                 let output = run(&request(row.argv, &current, true), &mut 0);
@@ -60,16 +52,17 @@ fn edition_adapter_executes_both_worker_rows_and_rejects_before_requirements_sol
             let output = run(&request(row.argv, &source, false), &mut 0);
             results.check(&format!("preserved/{}/gate-off/{code}", row.key), &output, "header rejected by ungated parser", output["kind"] == "parse" && output["diagnostic_code"] == "FSL-DIALECT-UNKNOWN" && output["findings"].is_null());
         }
-        let source = format!("fsl 5\n{}", cases::DOMAIN);
-        let output = run(&request(row.argv, &source, true), &mut 0);
-        let expected = if row.argv == "check" { "ok" } else { "error" };
-        results.check(&format!("preserved/{}/canonical", row.key), &output, expected, output["result"] == expected && output["fsl_edition"] == 5 && output["findings"].is_null());
+        if row.argv == "check" {
+            let output = run(&request(row.argv, &cases::headed(cases::DOMAIN), true), &mut 0);
+            results.check("preserved/worker check/canonical", &output, "ok", output["result"] == "ok" && output["fsl_edition"] == 5 && output["findings"].is_null());
+        }
+        // Accepted verify warning finalization needs the main browser BMC;
+        // test-browser.mjs owns that full-envelope parity cell with warn.
         // Existing large-domain fixture is canonical fsl 5; the real native
         // requirements solver rejects it before browser BMC. Check it twice.
         let canonical = include_str!("../../../fslc/tests/fixtures/fsl5_solver/large_domain.fsl");
         for repeat in 0..2 {
             let mut req = request(row.argv, canonical, true);
-            req.options.deadlock = "warn".to_owned();
             let mut calls = 0;
             let output = run(&req, &mut calls);
             results.check(&format!("preserved/{}/native-solver/{repeat}", row.key), (&output, calls), "decide_not_exhaustive and solver called", output["diagnostic_code"] == "decide_not_exhaustive" && calls > 0);
@@ -78,10 +71,16 @@ fn edition_adapter_executes_both_worker_rows_and_rejects_before_requirements_sol
             let insertion = req.source.find('{').expect("requirements body") + 1;
             req.source.insert_str(insertion, "\n  invariant EditionProbe \"REQ-PROBE-001: legacy\" { true }\n");
             calls = 0;
+            let expected = cases::refusal_envelope(&req.source, "source.fsl", crate::envelope(TEST_SOLVER_VERSION));
             let output = run(&req, &mut calls);
-            results.check(&format!("{}/solver-not-consumed/{repeat}", row.key), (&output, calls), "unsupported_in_edition and zero solver calls", output["kind"] == "unsupported_in_edition" && calls == 0);
+            results.check(&format!("{}/solver-not-consumed/{repeat}", row.key), (&output, calls), (&expected, 0), output == expected && calls == 0);
         }
     }
+    let mut invalid = request("verify", &cases::rejected_domain(), true);
+    invalid.options.deadlock = "edition-priority-probe".into();
+    let expected = crate::error(TEST_SOLVER_VERSION, "usage", "--deadlock must be warn, error, or ignore");
+    let output = run(&invalid, &mut 0);
+    results.check("worker verify/usage-before-edition", &output, &expected, output == expected);
     cases::assignment("worker", &executed);
     results.finish();
 }
