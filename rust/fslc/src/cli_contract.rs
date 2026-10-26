@@ -184,6 +184,9 @@ fn missing_value(command: &str, flag: &str) -> String {
 fn group_unknown(command: &str, word: &str) -> String {
     match command {
         "" => format!("unknown command '{word}'"),
+        "compat" if word.starts_with('-') && word != "--include-ai" => {
+            format!("unknown compat option '{word}'")
+        }
         "compat" => "usage: fslc compat check DBSYSTEM [--include-ai]".to_owned(),
         "causal" => format!(
             "unknown causal subcommand '{word}' (expected check | analyze | verify-expectations | observe-expectations | diff | ledger; there is deliberately no 'causal verify')"
@@ -193,16 +196,11 @@ fn group_unknown(command: &str, word: &str) -> String {
 }
 
 fn unknown_option(command: &str, option: &str, terminal: bool) -> String {
-    // Retain the old helper labels until the separately reviewed diagnostic phase.
-    let label = match command {
-        "ai check" | "domain check" => "specialized check",
-        "domain expand" => "output",
-        "scenarios" => "verify",
-        "db observe" => return "unexpected db observe argument".to_owned(),
-        "ai compare" if terminal => return format!("{option} requires a value"),
-        _ => command,
-    };
-    format!("unknown {label} option '{option}'")
+    // Preserve the already-rejecting terminal diagnostic of this raw argv parser.
+    if command == "ai compare" && terminal {
+        return format!("{option} requires a value");
+    }
+    format!("unknown {command} option '{option}'")
 }
 
 fn extra_positional(command: &str, extra: &str) -> String {
