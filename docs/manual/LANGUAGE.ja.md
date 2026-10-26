@@ -1554,7 +1554,8 @@ refinement CartImplRefinesCart {
   対応を書いてください。互換でない同名の状態候補も同様に `kind: "type"` エラー
   として報告されます。
   `covers`・edition混在・composeを含むautoのactor互換性は§13.2に従います。
-  [v5.0.0移行手順](../design/DESIGN-refinement.md#migration-1441)も参照してください。
+  [DESIGN-refinement](../design/DESIGN-refinement.md)の
+  「#1441: source-actor auto mapping and breaking-source migration」も参照してください。
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   `name: Type` の注釈でもかまいません。
@@ -2368,8 +2369,9 @@ verify {
   `kind: "type"` の check 時エラーです(同じ action を 2 回列挙するマッピング
   ファイルと同じです)。継ぎ目が評価されるとき、autoマップされたprocessのtransitionとeventは、両側で宣言された
   source actorを比較します。edition(4/5)、どちら側の`covers`、`by `で始まる説明本文にも
-  依存しません。登録済みactorはmetadataに優先し、registry entryの無いraw spec/compose
-  actionだけが従来のmetadata規則(`by`、空白、空でないactor)を使います。
+  依存しません。登録済みactorはmetadataに優先します。registry entryの無いaction
+  (raw spec/composeのactionと、単独またはrequirementブロック内のrequirements action項目)は
+  従来のmetadata規則(`by`、空白、空でないactor)を使います。
   両actorを取得できるとき、不一致は
   `error` / `kind: "type"`、exit 2で、既存のmessage
   `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
@@ -2384,11 +2386,14 @@ verify {
   `9ca8630c7f45f1def54c056bf53a852853c7a60c`の完全な4-cell corpus sweepでは、各SHA自身の
   treeの`specs/`・`examples/`・`rust/fslc/tests/fixtures/`の全`.fsl`を両binaryの
   `fslc check`で検査しました(base 579 / head 591 forms)。corpusの
-  **`ok`→`error`は0件、`error`→`ok`も0件**です。別集合の受入対照では、両宣言actorが
-  `System`でimpl(B3)またはbusiness(B4)の`covers ... "by Manager"`だけが異なる正しい
-  ソースが、従来の`error/type/2`から`ok/0`へ変わり、有界verifyは`verified/0`と
-  `implements refines`を返します。[移行手順と測定証拠](../design/DESIGN-refinement.md#migration-1441)
-  にコマンド・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
+  **`ok`→`error`は0件、`error`→`ok`も0件**です。別集合の受理拡大のクラスは、登録済み
+  transitionのmetadataのうち、`by `で始まる要求本文(covers本文と次editionのrule/decide本文)です。
+  両宣言actorが`System`で、implのcovers(B3)、businessのcovers(B4)、coversの無い抽象eventの
+  rule本文`by Manager only`(F1/p5)は、`error/type/2`から`ok/0`へ変わります。
+  有界verifyは`verified/0`と`implements refines`を返し、F1の単独refineは
+  `error/type/2`から`refines/0`へ変わります。[DESIGN-refinement](../design/DESIGN-refinement.md)の
+  「#1441: source-actor auto mapping and breaking-source migration」に
+  コマンド・測定証拠・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
   LSPでの診断配信も約束しません。
 - requirements の process 形式(edition 4)の transition の `by X` は自由なラベルで、
   宣言された actor を指すものではありません。この形式には `actor` の宣言が無く、

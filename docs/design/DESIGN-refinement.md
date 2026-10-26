@@ -65,9 +65,11 @@ refinement CartImplRefinesCart {
   every other authoring route already goes through, not duplicated here.
   Actor compatibility applies only to automatically synthesized action pairs:
   each side uses its declared source actor when registered, regardless of
-  dialect, edition or `covers`; only raw spec/compose actions without an entry
-  use the existing metadata `by ` prefix rule. Both actors must be available
-  to compare them. Explicit action entries and `stutter` are not actor-checked.
+  dialect, edition or requirement text. Actions without a registry entry
+  (raw spec/compose actions and requirements action items, standalone or inside
+  a requirement block) use the existing metadata `by ` prefix rule. Both actors
+  must be available to compare them. Explicit action entries and `stutter` are
+  not actor-checked.
   See the [#1441 amendment and migration](#migration-1441).
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
@@ -826,17 +828,20 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 
 <a id="migration-1441"></a>
 
-### #1441: source-actor auto mapping and breaking-source migration
+## #1441: source-actor auto mapping and breaking-source migration
 
 **v5.0.0 amendment (native Rust).** Requirement annotations and actor identity
-are distinct: `covers` on either side, including text beginning `by Manager`,
-cannot erase or replace a transition's declared actor. The private origin
+are distinct for registered transitions: metadata whose requirement text begins
+with `by ` (covers text and next-edition rule/decide text) cannot erase or replace a
+transition's declared actor. The private origin
 registry records every requirements transition (process or event) and business
 transition. One per-action lookup serves both sides, including cross-edition
 4→5/5→4 and typed↔legacy compose pairs. This replaces #1438's private
 `ActionActor` enum with `BTreeMap<String, String>`; it adds no public Kernel,
-`ActionDef`, schema or JSON fields. The legacy metadata rule is retained only
-for actions with no registry entry, not as a way to infer actors from `covers`.
+`ActionDef`, schema or JSON fields. The legacy metadata rule is retained for
+actions without a registry entry (raw spec/compose actions and requirements
+action items, standalone or inside a requirement block), not for the requirement
+text of registered transitions.
 
 The invariant is that auto-mapped actions with two available source actors
 must compare those actors independently of provenance and traceability text.
@@ -887,17 +892,23 @@ forms to materialize: 0. Binary SHA256: base
 The source-compatibility break is nevertheless exercised by rejecting
 regression controls in `rust/fslc/tests/fsl5_actor_refinement.rs` (A/B covers,
 C cross-edition, D compose) and Worker A1/A3. The separate **acceptance
-expansions** below are not repository-corpus transitions. Both were measured
+expansions** below are not repository-corpus transitions. All three were measured
 twice with the same base/head binaries, `check requirements.fsl` and
 `verify requirements.fsl --depth 6 --no-cache`:
 
-| Control (both declared actors `System`) | Old / new check | Old / new verify |
+| Control (both declared actors `System`) | Old / new check | Old / new verify or refine |
 |---|---|---|
-| B3: impl `covers REQ-1 "by Manager"` | error/type/2 → ok/0 | error/type/2 → verified/0, implements refines |
-| B4: business `covers BIZ-1 "by Manager"` | error/type/2 → ok/0 | error/type/2 → verified/0, implements refines |
+| B3: impl `covers REQ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
+| B4: business `covers BIZ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
+| F1 (p5): abstract fsl 5 event, no covers, `rule REQ-9 "by Manager only"` | inline: error/type/2 → ok/0 | inline verify: error/type/2 → verified/0, implements refines; standalone refine: error/type/2 → refines/0 |
 
-These correct sources need no edit; their prose is no longer treated as an
-actor declaration. `verified` here is bounded, not `proved`.
+The expansion class is registered transition metadata whose requirement text
+begins with `by ` (covers text and next-edition rule/decide text), not only covers.
+Here “next edition” is fsl 5.
+F1 was also measured twice with `refine requirements.fsl business.fsl mapping.fsl
+--depth 6`. These correct sources need no edit; their prose is no longer treated
+as an actor declaration. `verified` here is bounded, not `proved`. Unregistered
+requirements action items retain their metadata-based behavior.
 
 **Migration contract (#702, limited to this change):**
 

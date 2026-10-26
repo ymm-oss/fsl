@@ -1612,7 +1612,8 @@ refinement CartImplRefinesCart {
   Incompatible same-name state candidates are likewise reported as
   `kind: "type"` errors.
   Auto actor compatibility, including `covers`, mixed editions and compose,
-  follows §13.2; see the [v5.0.0 migration](../design/DESIGN-refinement.md#migration-1441).
+  follows §13.2; see [DESIGN-refinement](../design/DESIGN-refinement.md),
+  “#1441: source-actor auto mapping and breaking-source migration”.
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — required for every impl action.
   Formal params may be bare names or `name: Type` annotations matching the impl action declaration.
   `stutter` is an internal step in which the abstract state does not change.
@@ -2462,11 +2463,12 @@ verify {
   An impl action with both a `maps` clause and a matching inline `action ...`
   item is a duplicate-correspondence, `kind: "type"` check-time error naming
   both origins and locations (same as a mapping file that lists the same action
-  twice). Whenever the seam is evaluated, auto-mapped process transitions and events compare the declared
-  source actors on both sides, regardless of edition (4/5) or `covers` on
+  twice). Whenever the seam is evaluated, auto-mapped process transitions and
+  events compare the declared source actors on both sides, regardless of edition (4/5) or `covers` on
   either side, including prose beginning `by `. A registered actor takes
-  precedence over metadata; only raw spec/compose actions without a registry
-  entry use the existing metadata rule (`by` followed by a space and a
+  precedence over metadata. Actions without a registry entry (raw spec/compose
+  actions and requirements action items, standalone or inside a requirement
+  block) use the existing metadata rule (`by` followed by a space and a
   nonempty actor). When both actors are available,
   a mismatch is `error` / `kind: "type"`, exit 2, with
   `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
@@ -2483,12 +2485,17 @@ verify {
   `9ca8630c7f45f1def54c056bf53a852853c7a60c` ran both binaries' `fslc check`
   on every `.fsl` in `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, in each
   SHA's own tree (579 base / 591 head forms): **0 `ok`→`error` and 0
-  `error`→`ok` corpus transitions**. Separately, matching `System` actors with
-  `covers ... "by Manager"` on the impl (B3) or business (B4) now check `ok/0`
-  instead of `error/type/2`; bounded verify now returns `verified/0` with
-  `implements refines`. See the [migration and measured evidence](../design/DESIGN-refinement.md#migration-1441)
-  for commands, gate policy and manual correction; no general automatic
-  semantics-preserving migration exists. LSP delivery is not promised.
+  `error`→`ok` corpus transitions**. Separately, the acceptance-expansion class
+  is registered transition metadata whose requirement text begins with `by `
+  (covers text and next-edition rule/decide text). With matching `System` actors,
+  impl covers (B3), business covers (B4) and an abstract event's rule text
+  `by Manager only` without covers (F1/p5) change `error/type/2`→`ok/0`;
+  bounded verify returns `verified/0` with `implements refines`, and F1's
+  standalone refine changes `error/type/2`→`refines/0`.
+  See [DESIGN-refinement](../design/DESIGN-refinement.md),
+  “#1441: source-actor auto mapping and breaking-source migration”,
+  for commands, measured evidence, gate policy and manual correction; no general
+  automatic semantics-preserving migration exists. LSP delivery is not promised.
 - In a requirements process-form transition (edition 4), `by X` is a free label,
   not a reference to a declared actor: this form has no `actor` declaration,
   and `check` does not ask whether `X` is declared anywhere. Here, “source actor”

@@ -36,8 +36,11 @@ init statements, actions, action guards/statements, properties, and terminal.
 The same identity bound to multiple targets represents one-to-many lowering.
 Secondary sites represent many-to-one lowering. `primary: None` represents a
 generated-only/source-less node; the implementation does not invent a location.
-The registry also carries typed source actors for business-transition and event
-action targets, read by refinement's automatic actor correspondence check.
+The registry also carries declared actors as strings for all requirements
+transition (process/event) and business transition action targets, read by
+refinement's automatic actor correspondence check. Actions without a registry
+entry (raw spec/compose actions and requirements action items) retain the
+existing metadata `by ` rule (#1441).
 
 Requirement traceability is stored independently in `TraceabilityRegistry`.
 It may refer to the same semantic target without becoming part of the origin
@@ -80,6 +83,8 @@ literals. This source-level change does not alter the versioned JSON contract.
   counterexample, explain, and the closed Public Kernel v1 projection.
 - `rust/fslc/tests/fsl5_actor_refinement.rs` covers typed actor correspondence
   checks against business transitions and requirements events, requirement-text
-  independence, canonical actor diagnostics, and explicit-map preservation.
+  independence (including covers and rule text), cross-edition pairs,
+  mixed typed/legacy compose pairs, canonical actor diagnostics, and explicit-map
+  preservation (#1441).
 - `rust/fslc/tests/kernel_contract.rs` continues to compare the complete v1
   golden contract without regeneration.

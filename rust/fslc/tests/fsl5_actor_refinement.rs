@@ -568,7 +568,7 @@ fn issue_1441_b2_business_spoof() {
 }
 
 #[test] // B3 detector: the old metadata lookup falsely rejects matching actors.
-fn issue_1441_b3_impl_false_mismatch() {
+fn issue_1441_b3_impl_text_preserves_matching_actors() {
     check_and_verify_1441(
         "1441_b3",
         &process_1441("System", "covers REQ-1 \"by Manager\""),
@@ -579,7 +579,7 @@ fn issue_1441_b3_impl_false_mismatch() {
 }
 
 #[test] // B4 detector: likewise on the business side.
-fn issue_1441_b4_business_false_mismatch() {
+fn issue_1441_b4_business_text_preserves_matching_actors() {
     check_and_verify_1441(
         "1441_b4",
         &process_1441("System", ""),
@@ -860,4 +860,35 @@ fn issue_1441_diff_covers_actor_mismatch_is_automatic_mapping_failed() {
         output.get("kind").is_none(),
         "diff is not a type-error envelope: {output:#}"
     );
+}
+
+const RULE_ACTOR_TEXT_1441: &str = r#"fsl 5
+requirements Abs {
+  actor System, Manager
+  entity Case { lifecycle Open -> Done }
+  event approve = System approves Case Open -> Done
+  rule REQ-9 "by Manager only" {
+    allow System approves Case only when true
+  }
+}
+verify { instances Case = 1 }
+"#;
+
+#[test] // F1 detector: rule requirement text is not the abstract event's actor.
+fn issue_1441_f1_rule_text_preserves_matching_actors() {
+    let source = process_1441("System", "");
+    check_and_verify_1441(
+        "1441_f1_inline",
+        &source,
+        RULE_ACTOR_TEXT_1441,
+        "approve",
+        false,
+    );
+    let directory = mapping_fixture_1441(
+        "1441_f1_standalone",
+        &source.replace(INLINE_1441, ""),
+        RULE_ACTOR_TEXT_1441,
+        AUTO_1441,
+    );
+    success_1441(&directory, STANDALONE_REFINE, "refines", false);
 }
