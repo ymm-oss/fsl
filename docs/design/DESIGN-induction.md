@@ -217,8 +217,12 @@ the stall is reported exactly as before (`stutter: true`).
 
 **Fail-closed fallback.** The ranking stops at its first failing property;
 only the properties proved before it are discharged, and every other
-`leadsTo` keeps the full search. A ranking error (unsupported measure,
-solver `unknown`, fail-closed `where` filters) discharges nothing and is not
+`leadsTo` keeps the full search. Collection wrapper binders and `where` filters
+are now rejected at the shared source check boundary (#1463), before ranking;
+the earlier general finite-binder language-reference wording did not state
+this restriction. This breaking removal does not implement filtered liveness.
+A ranking error (unsupported measure, solver `unknown`, or a fail-closed
+`where` filter injected into an unchecked model) discharges nothing and is not
 reported — the BMC run then produces whatever it produced before, including
 its own error. The same holds when the pre-pass cannot run at all (no
 thread, no solver) and when it panics: the run proceeds without it (the

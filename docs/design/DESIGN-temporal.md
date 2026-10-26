@@ -337,8 +337,13 @@ requires `Q` in the same observation as `P`.
 This is deliberately only bounded prefix monitoring. A trace that ends early
 reports pending obligations, and declarations without `within` are reported as
 unchecked rather than inferred from a finite prefix. Action and stutter
-observations both advance the logical clock. Unsupported collection binders or
-`where` filters fail closed. Differential tests feed a native BMC
+observations both advance the logical clock. Collection wrapper binders and
+`where` filters are rejected during checked-model construction (#1463), with
+the same core rule used by CLI, LSP and Worker. This is a breaking removal of
+previously check-ok forms, not new response semantics. The static runtime
+expander retains that shared fail-closed rule for callers that mutate a model
+after construction. Expression quantifiers inside P/Q are not wrapper binders.
+Differential tests feed a native BMC
 counterexample into the monitor and require identical property, binding,
 trigger, and deadline evidence. The external contract and JSON fields are
 specified in `DESIGN-replay-trace.md`.
