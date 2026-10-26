@@ -17632,6 +17632,7 @@ mod exit_status_tests {
             std::process::id()
         ));
         assert!(!absent.exists());
+        let expected_message = std::fs::read(&absent).unwrap_err().to_string();
         for replay in [false, true] {
             let evidence = if replay { vec![] } else { vec![absent.clone()] };
             let request = LedgerReportRequest {
@@ -17643,10 +17644,7 @@ mod exit_status_tests {
                 evidence_paths: &evidence,
                 output_path: None,
             };
-            let expected = (
-                error_output("io", "No such file or directory (os error 2)"),
-                2,
-            );
+            let expected = (error_output("io", &expected_message), 2);
             assert_eq!(
                 run_ledger_report_from_source(&request, &source, &[], &[]),
                 expected
