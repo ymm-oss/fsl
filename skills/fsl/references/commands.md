@@ -490,9 +490,13 @@ never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
 verdict). Non-`refines` preservations each add a `GOV` finding; non-`refines`
 inline `implements` adds a spec-level finding without inventing requirement
-links. `unknown_cti` is an unestablished induction finding using the same
-[declaration-owner rule as ordinary violations](../../../docs/design/DESIGN-ledger.md#amendment-to-1316-verdict-findings-1338-decision-2026-10-26),
-not a reachable counterexample. Full CTI/hint/rank-failure evidence stays in the
+links. `unknown_cti` is an unestablished induction finding, not a reachable
+counterexample. Attribution prefers an explicit requirement; otherwise `NameMap`
+uniquely resolves `generated_name` (when present) or public identity to the
+invariant/trans/leadsTo declaration (including rank), the property behind a
+synthetic check, or `last_action` for action checks/ensures/type_bound, while
+deadlock and unresolved/ambiguous owners stay spec-level.
+Full CTI/hint/rank-failure evidence stays in the
 appendix; only each finding's top-level `cost` and `cache` are excluded, not
 same-named nested domain fields. Added findings and corrected attribution change affected
 ledger approval digests and require review and re-approval.

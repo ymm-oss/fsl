@@ -1206,7 +1206,7 @@ The ledger risk table also records each non-`refines` preservation as a `GOV`
 finding and a non-`refines` inline seam as a spec-level finding. Unrelated
 requirement rows keep their own status. `unknown_cti` is an unestablished
 induction finding, attributed by the same declaration-owner rule as ordinary
-violations (see [the ledger amendment](../design/DESIGN-ledger.md#amendment-to-1316-verdict-findings-1338-decision-2026-10-26)),
+violations (see [the ledger amendment](../design/DESIGN-ledger.md)),
 not a reachable counterexample; raw CTI, hint, and rank-failure evidence is
 preserved. Added findings and corrected attribution also change affected ledger
 approval digests.
