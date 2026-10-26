@@ -350,6 +350,8 @@ fn no_timing_artifact_is_rejected_by_html_approval_create() {
             "user.name=Test",
             "-c",
             "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
             "commit",
             "--quiet",
             "-m",
