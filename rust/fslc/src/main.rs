@@ -2831,6 +2831,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
         let mut from_label = None;
         let mut to_label = None;
         while let Some(option) = args.next() {
+            if option == "--" {
+                break;
+            }
             let value = args
                 .next()
                 .ok_or_else(|| format!("{option} requires a value"))?;
@@ -16639,7 +16642,11 @@ fn run_diff_git(
     let Some((base_input, head_input)) = range.split_once("..") else {
         return (error_output("usage", "--git range must be BASE..HEAD"), 2);
     };
-    if base_input.is_empty() || head_input.is_empty() || head_input.contains("..") {
+    if range.contains("...")
+        || base_input.is_empty()
+        || head_input.is_empty()
+        || head_input.contains("..")
+    {
         return (error_output("usage", "--git range must be BASE..HEAD"), 2);
     }
     let cwd = match std::env::current_dir() {
