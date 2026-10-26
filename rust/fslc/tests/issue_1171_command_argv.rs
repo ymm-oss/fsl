@@ -438,7 +438,12 @@ fn testgen_html_ledger_argv() {
         );
         usage(&[command, SPEC, "-o"], "--output requires a path");
         usage(&[command, SPEC, "--output"], "--output requires a path");
-        usage(&[command, SPEC, "--target"], "--target requires a value");
+        let target_missing = if command == "testgen" {
+            "--target requires a value".to_owned()
+        } else {
+            format!("unknown {command} option '--target'")
+        };
+        usage(&[command, SPEC, "--target"], &target_missing);
         let engine_missing = if command == "testgen" {
             "unknown testgen option '--engine'"
         } else {
@@ -781,15 +786,15 @@ fn verify_argv() {
 fn scenarios_argv() {
     help(&["scenarios"], &[]);
     usage(&["scenarios"], "usage: fslc scenarios SPEC [options]");
-    // `scenarios` shares `verify`'s option parser and its wording.
+    // Contract ownership is checked before the shared typed option parser.
     usage(
         &["scenarios", SPEC, "--bogus"],
-        "unknown verify option '--bogus'",
+        "unknown scenarios option '--bogus'",
     );
     usage(&["scenarios", SPEC, "--depth"], "--depth requires a value");
     usage(
         &["scenarios", "--engine", "x", SPEC],
-        "--engine must be bmc, induction, explicit, or auto",
+        "unknown scenarios option '--engine'",
     );
     for extra in [
         &["--engine", "induction"][..],
@@ -810,9 +815,9 @@ fn scenarios_argv() {
         let mut args = vec!["scenarios", "--depth", "1"];
         args.extend_from_slice(extra);
         args.push(SPEC);
-        usage(&args, "scenarios accepts only --depth and --deadlock");
+        usage(&args, &format!("unknown scenarios option '{}'", extra[0]));
     }
-    // Options left at their defaults are not "other options".
+    // Non-owned options are rejected even when their values match defaults.
     for extra in [
         &["--engine", "bmc"][..],
         &["--edition", "current"][..],
@@ -821,7 +826,7 @@ fn scenarios_argv() {
         let mut args = vec!["scenarios", "--depth", "4"];
         args.extend_from_slice(extra);
         args.push(SPEC);
-        assert_ne!(ran(&args, 0)["result"], "error", "{args:?}");
+        usage(&args, &format!("unknown scenarios option '{}'", extra[0]));
     }
     let value = ran(
         &[
