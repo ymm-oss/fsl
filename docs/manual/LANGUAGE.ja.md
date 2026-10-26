@@ -1198,9 +1198,10 @@ panic(exit 101)でなく semantics error(exit 2)になります。
 通る report、warning、metadata と承認 artifact の digest は変わりません。
 この error の訂正は直接の `ledger` と `html` の報告だけが対象です。
 `approval create --kind ledger|html`、`approval check`、`approval diff` と
-`counterexample export` は今も検証や再描画より先に spec を lower するため、不正入力の error の
-優先順と AI authority の未知の tool による panic(exit 101)は変わりません。
-panic は #1464、approval create の diagnostic の優先順は別の issue で扱います。
+`counterexample export` は今も検証や再描画より先に spec を lower し、既存の不正入力の error の
+優先順を保ちます。#1464 の後は、AI authority の未知の tool は panic でなく
+semantics error(exit 2)を返します。approval create の diagnostic の優先順は
+引き続き別の issue で扱います。
 `testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
 `verify` と同じ失敗封筒と exit(検証の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
 ハーネスを書きません。同じ `2` の
