@@ -251,6 +251,12 @@ impl Sweep {
 #[test]
 fn advertised_options_reach_downstream_validation() {
     let contract = contract();
+    let missing_artifact = root().join(MISSING);
+    assert!(!missing_artifact.exists(), "probe artifact must not exist");
+    let artifact_error = std::fs::read_to_string(&missing_artifact)
+        .expect_err("reading the missing artifact must fail");
+    assert_eq!(artifact_error.kind(), std::io::ErrorKind::NotFound);
+    let artifact_message = artifact_error.to_string();
     let mut sweep = Sweep::default();
     for node in nodes(&contract) {
         for action in actions(node) {
@@ -296,7 +302,7 @@ fn advertised_options_reach_downstream_validation() {
                     // OS missing-file message, never accept arbitrary usage errors.
                     let artifact_io = label(node) == "approval create"
                         && usage(&output)
-                        && result["message"] == "No such file or directory (os error 2)";
+                        && result["message"] == artifact_message;
                     sweep.check(
                         "accepted",
                         &args,
@@ -427,6 +433,71 @@ fn every_choice_rejects_a_value_outside_its_domain_before_io() {
         }
     }
     sweep.finish("choices");
+}
+
+#[test]
+fn decision_x_preserved_diagnostics_match_complete_envelopes() {
+    for (args, message) in [
+        (vec![PROBE], "unknown command '--fsl-contract-probe'"),
+        (
+            vec!["ai", PROBE],
+            "unknown ai subcommand '--fsl-contract-probe'",
+        ),
+        (
+            vec!["causal", PROBE],
+            "unknown causal subcommand '--fsl-contract-probe' (expected check | analyze | verify-expectations | observe-expectations | diff | ledger; there is deliberately no 'causal verify')",
+        ),
+        (
+            vec!["compat", "--include-ai"],
+            "usage: fslc compat check DBSYSTEM [--include-ai]",
+        ),
+        (
+            vec!["ai", "compare", PROBE],
+            "--fsl-contract-probe requires a value",
+        ),
+        (
+            vec!["ai", "compare", PROBE, "value"],
+            "unknown ai compare option '--fsl-contract-probe'",
+        ),
+    ] {
+        let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(output.stderr.is_empty(), "{args:?}: {:?}", output.stderr);
+        assert_eq!(
+            decoded(&output),
+            json!({
+                "fsl":"1.0", "result":"error", "kind":"usage", "message":message,
+            }),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn ai_compare_rejects_literal_terminator_in_label_and_dataset_value_positions() {
+    let records = "examples/ai/support_eval_v7.jsonl";
+    assert!(
+        root().join(records).is_file(),
+        "existing evaluation records"
+    );
+    for flag in ["--from-label", "--to-label", "--dataset"] {
+        let args = [
+            "ai", "compare", "--from", records, "--to", records, flag, "--",
+        ]
+        .map(str::to_owned);
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(2), "{flag}");
+        assert!(output.stderr.is_empty(), "{flag}: {:?}", output.stderr);
+        assert_eq!(
+            decoded(&output),
+            json!({
+                "fsl":"1.0", "result":"error", "kind":"usage",
+                "message":format!("{flag} requires a value"),
+            }),
+            "{flag}"
+        );
+    }
 }
 
 #[test]

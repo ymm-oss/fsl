@@ -92,7 +92,9 @@ fn other_refine_argument_errors_remain_usage() {
 fn genuine_missing_spec_remains_io() {
     let missing = format!("rust/target/issue-1343-missing-{}.fsl", std::process::id());
     let path = root().join(&missing);
+    assert!(!path.exists(), "missing fixture must not exist");
     let error = std::fs::read_to_string(&path).expect_err("missing fixture must not exist");
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     assert_eq!(
         run(&["refine", &missing, ABS, MAP]),
         (
