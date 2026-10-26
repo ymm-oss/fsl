@@ -36,3 +36,299 @@ the checked expression.
 Acceptance expressions use the same resolver before Monitor replay. No
 dialect-specific runtime implementation or generated-name source fallback is
 permitted.
+
+## Acceptance expectation typing (#1439)
+
+Requirements `expect <expr>` and the FSL 5 scenario `then <expr>` spelling
+share the acceptance contract. After stage resolution, the existing recursive
+expression checker validates the predicate with expected `Bool` against the
+lowered model. This checks operands and both conditional branches, not just the
+outer comparison's inferred Bool type. For `c: Color`, both `c != 1` and `c == 1`
+are rejected before replay with `kind: "semantics"`, exit 2 and the existing
+`expression of type Int is not assignable to Named("Color")` diagnostic.
+The origin is the authored `expect`/`then` keyword, not the trace declaration.
+
+The lowering check uses a temporary checked model; an invalid model is left to
+the ordinary model-building diagnostic path, as with finite-domain checks.
+No expectation is inserted into Kernel properties or the public schema.
+Expectations remain post-state predicates: `c == Blue` can pass after painting
+an initially Red state, and a well-typed false predicate retains the replay
+`kind: "acceptance"` failure. Stage-form expectations and forbidden's literal
+`expect rejected` grammar are unchanged. Enum/Int compatibility and concrete
+equality semantics are not broadened.
+
+### Measured compatibility
+
+The following historical measurement is for the expectation-only fix; the
+trace-step extension has its own measurement below. The final implementation's
+current commit-to-commit evidence is in the rebase measurement at the end of
+this note.
+
+BASE was materialized with `git archive` at
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`. The expectation-only intermediate
+implementation was measured before commit; it is not the final HEAD identified
+by the current rebase measurement below.
+
+Inventory command: `rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
+In each tree's own directory its binary ran `check FORM` on all 579 forms,
+in both published and gated FSL 5 modes, with two complete repeats under one
+shared heavy-work lock: 4,632 checks. Full parsed JSON, stderr and process exits
+were identical between BASE/HEAD and repeats; no fields were excluded.
+The measured ok-to-error transition set is **empty**, and there are no other
+changes. This paragraph covers the expectation-only fix and its round 1
+revisions only, not the trace-step extension or later review revisions. No
+required tests were renamed, removed or stopped in that phase. Its test changes
+add detectors and make the Worker test oracle honor its request's parser
+options. The empty set is a corpus measurement, not a claim about every inline
+source of those rewritten tests; those sources are measured separately in the
+extension round 1 supplement below.
+
+The post-fix `c != 1` consumer control was also run twice: `check`,
+`analyze --profile ai-review`, and `document generate` all return
+`result: "error"`, `kind: "semantics"`, exit 2. Analyze retains the same
+message/location as check but omits its versions; document reports the location
+in its message only, without check's structured `loc`, file label or versions.
+These existing consumer-envelope differences are observed, not repaired here.
+
+## Trace step argument typing (#1439 extension)
+
+The same shared requirements lowering path checks every argument expression in
+acceptance steps and forbidden setup/final steps. FSL 5 scenario and forbidden
+calls, phrase `with` inputs, particle inputs, hybrid marked/`with` inputs and
+relation-role values all lower to these argument fields. Stage resolution
+precedes the existing recursive expression checker. Conditions, nested operands
+and both conditional branches are checked, including an unselected branch.
+
+Unlike a Bool expectation, an argument has **no outer expected parameter type**
+in this check. Its internal expression must be well-typed, but final-value kind,
+declared-domain membership and values-scope replay classification remain
+unchanged. For example, `paint(if c != 1 then Red else Blue)` with `c: Color`
+is a check-time `semantics` error / exit 2 even if a guard would reject Red.
+The existing assignability message is anchored to the **first authored token of
+the step**: the action name for calls, the actor for actor-first phrases, or
+the first token of a reordered particle phrase (for example `claim1` in
+`claim1 を Employee が ... で submits`). This is not a successful forbidden
+rejection. In contrast, internally well-typed `paint(1)` and
+`paint(if true then 1 else 2)` retain the forbidden `wrong_kind_argument`
+diagnostic. Well-typed arguments excluded only by a values override retain their
+replay skips. No runtime equality, compatibility rule, Kernel schema or replay
+evidence format changes.
+
+### Extension compatibility measurement and breaking removals
+
+This historical extension measurement used BASE
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` in its materialized archive and the
+pre-commit extension implementation. The current rebase measurement below
+identifies the final BASE/HEAD commits and repeats these controls.
+
+Inventory: `rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'` in
+each tree. Each binary ran `check FORM` from its own tree with relative paths,
+both with `FSLC_UNSTABLE` removed and set to `fsl5`, twice under one heavy lock.
+The 579 corpus forms per tree have an **empty ok-to-error transition set** and
+no other full-output differences. A lint-only delimiter rewrite of
+`issue_1439_trace_step_types.rs` also requires checking all its inline fixtures:
+21 per tree (20 distinct source texts; the values-override test reuses the legal
+FSL 5 source). The helper templates and argument strings were mechanically
+expanded without changing their FSL content. Total: 600 forms per tree, 4,800
+checks. Full stdout bytes/JSON, stderr and exits were compared; no exclusions
+or repeat differences.
+
+The original inline fixtures expose **16 breaking removals**, T01–T16 below.
+T17–T21 belong to the separately measured round 1 supplement. Each original form
+formerly returns `ok` / exit 0 and now returns `error` / `semantics` / exit 2
+with the internal assignability mismatch and authored step location. Published
+forms transition in both modes; gated forms transition only in FSL 5 mode:
+21 mode/form transitions, no additional changes. This is a measured removal of
+ill-typed trace expressions, not a removal of a valid parameter value. Repair
+the comparison to use a member of the same enum, including in unselected
+branches; do not substitute numeric ordinals or weaken the forbidden guard.
+
+| Removal | Regression test / measured source | Position / malformed expression |
+|---|---|---|
+| T01 | `acceptance_step_rejects_ill_typed_color_condition` | published acceptance Color argument, `c != 1` condition |
+| T02 | `forbidden_setup_step_rejects_ill_typed_color_condition` | published forbidden setup Color argument, `c != 1` |
+| T03 | `forbidden_final_step_rejects_ill_typed_color_condition_s1` | published forbidden final S1, `paint(if c != 1 then Red else Blue)` |
+| T04 | `fsl5_scenario_call_rejects_ill_typed_stage_condition` | FSL 5 scenario call, `claim_stage[0] != 1` |
+| T05 | `fsl5_scenario_input_rejects_ill_typed_stage_condition` | FSL 5 scenario with input, same malformed stage comparison |
+| T06 | `fsl5_scenario_marked_input_rejects_ill_typed_stage_condition` | FSL 5 scenario particle input, same comparison |
+| T07 | `fsl5_forbidden_call_setup_rejects_ill_typed_stage_condition` | FSL 5 forbidden call setup, same comparison |
+| T08 | `fsl5_forbidden_call_final_rejects_ill_typed_stage_condition` | FSL 5 forbidden call final, same comparison |
+| T09 | `fsl5_forbidden_input_setup_rejects_ill_typed_stage_condition` | FSL 5 forbidden with setup input, same comparison |
+| T10 | `fsl5_forbidden_input_final_rejects_ill_typed_stage_condition` | FSL 5 forbidden with final input, same comparison |
+| T11 | `fsl5_forbidden_marked_setup_rejects_ill_typed_stage_condition` | FSL 5 forbidden particle setup input, same comparison |
+| T12 | `fsl5_forbidden_marked_final_rejects_ill_typed_stage_condition` | FSL 5 forbidden particle final input, same comparison |
+| T13 | `acceptance_numeric_step_rejects_ill_typed_color_condition` | published numeric-result argument, `setn(if c != 1 then 2 else 0)` |
+| T14 | `fsl5_marked_with_input_rejects_ill_typed_stage_condition` | FSL 5 marked/with hybrid input, malformed ClaimStage comparison |
+| T15 | `fsl5_relation_role_input_rejects_ill_typed_stage_condition` | FSL 5 relation-role value, `ticket_stage[0] != 1` |
+| T16 | `acceptance_step_checks_unselected_conditional_branch` | published unselected nested branch, `paint(if true then Blue else (if c != 1 then Red else Blue))` |
+| T17 | `cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes` / acceptance-expect-type | published `expect c != 1` diagnostic row |
+| T18 | `check_error_envelopes_match_native_across_parse_guard_and_name` / acceptance expectation type | the same `expect c != 1` source in the rewritten Worker test |
+| T19 | `trace_argument_rejects_pattern_binding_outside_its_logical_continuation` | `paint(if o is some(z) then z else Red)`, with `o = none`; `z` is outside its scope |
+| T20 | supplemental expectation scope control | `expect (if o is some(z) then z else Red) == Red`, with `o = none`; the same scope escape |
+| T21 | `reordered_particle_argument_error_starts_at_the_instance_token` | `claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits`; first-token location is `claim1` |
+
+### Extension round 1 supplemental inline measurement
+
+No production changes accompanied this historical supplement. Against BASE
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`, the unchanged pre-commit extension
+implementation was rebuilt. Each binary ran `check FORM` in its own tree, both
+with the FSL 5 gate removed and enabled, twice under one lock. The current rebase
+measurement below repeats this entire supplemental inventory.
+
+The supplement includes every source occurrence of both rewritten diagnostic
+tests: seven native/shared cases and six Worker cases (including all four
+`include_str!` fixtures). It also checks the three existing Worker tests whose
+shared native oracle changed: duplicate writes, unproved write distinctness,
+and verify-build errors. Two new regression fixtures and the matching expect
+and invariant scope controls complete **20 forms per tree / 160 checks**.
+Full stdout bytes/JSON, stderr and exits repeat exactly, with no exclusions.
+
+T17–T20 each transition in both modes; T21 transitions only with FSL 5 enabled:
+**five fixture occurrences / nine mode-form transitions**, with no other
+changes. T17 and T18 contain identical FSL, so this is four distinct newly
+recorded source texts. All transition from `ok` / 0 to `error` / `semantics` / 2.
+T17/T18 retain the Int-to-Color message at `expect` (10:5); T19/T20 report
+`public Kernel cannot type identifier 'z'` at the step (9:5) / `expect` (10:5).
+T21 reports the ClaimStage mismatch at `claim1` (8:5), not the actor later in
+the line. The 579-form corpus measurement and original T01–T16 measurement
+above remain separately identified historical observations, not rerun claims.
+
+T19/T20 are intended breaking removals: an `is some(z)` binding is available
+only in its true logical continuation (`=>` / `and`), not a conditional's
+`then` arm. Invariants already reject that form on BASE and HEAD. An unselected
+branch does not legalize the out-of-scope name. Move the use into a supported
+logical continuation or use an expression that does not escape the binding.
+This does not introduce conditional-arm binding semantics or change the shared
+type checker. The new step and reordered-particle detectors both fail on
+`ok` / 0 when only the extension is reverted, and pass after exact restoration.
+
+The five preservation tests remain unchanged in meaning: legal published and
+FSL 5 expressions, literal/conditional wrong parameter kind, and values-override
+skips. The isolated extension revert produces 16 intended detector failures and
+five preservation passes; exact restoration makes all 21 pass.
+
+The S1 consumer control ran twice for `check`, `verify --depth 0`,
+`scenarios --depth 0`, `testgen --depth 0`, `analyze --profile ai-review`,
+`document generate` and `mutate --depth 0 --max-mutants 1`. All refuse the
+malformed baseline with `error` / `semantics` / exit 2 before emitting scenarios,
+tests, a document or mutation results. Mutation's trace replay oracle is not
+reached for this malformed baseline; no claim about every external mutant is
+inferred. Document still carries the position only in its message, as above.
+
+## Unary operand typing (#1439)
+
+The shared recursive model-expression checker validates `not` with expected
+operand type `Bool` and unary minus with expected operand type `Int`, accepting
+the existing numeric-range compatibility. This is not limited to requirements
+traces: every model-expression position using this checker inherits the rule,
+including invariants, guards and effects. Both conditional branches and both
+operands of `and` / `or` are checked regardless of concrete evaluation.
+There is no truthiness conversion or enum-to-integer conversion. Result inference
+is unchanged (`Bool` for `not`, `Int` for unary minus): inference chooses a result
+type, while recursive validation enforces operand types and existing origins.
+No new diagnostic category, parameter-kind coercion, scope rule, runtime or
+Kernel schema is introduced. Existing post-state, wrong-kind and scope behavior
+above is preserved. Option pattern shapes, `abs`, relation signatures/endpoints,
+method receivers and arity are outside this fix (follow-ups #1458 and #1459).
+
+### Unary compatibility measurement and breaking removals
+
+This historical unary measurement used materialized BASE
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and the uncommitted final
+implementation, not a claimed remote main. The current rebase measurement
+below supersedes its provenance and counts for the final committed implementation.
+
+Inventory in each tree:
+`rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
+For every form, each binary ran from its own materialized tree using
+`lockf -k HEAVY_LOCK BINARY check FORM` (the configured advisory heavy-work lock);
+the lock covers **one invocation**, not the sweep. `FSLC_UNSTABLE` is explicitly
+removed and then set to `fsl5`, with two complete repeats in each mode/tree.
+The task-local lock path is an execution detail, not a language requirement.
+
+Both independent inventories contain **579 corpus forms**. The measured corpus
+ok-to-error transition set is **empty**, with no other corpus output changes.
+The sweep also mechanically expands all ten fixtures of
+`issue_1439_unary_operand_types.rs`, the 21 fixtures of the lint-rewritten step
+test and the 20 inherited rewritten-diagnostic/oracle/scope fixture occurrences:
+**51 inline occurrences per tree, 630 total forms per tree, 5,040 invocations**.
+Every stdout byte, parsed JSON value, stderr and exit is compared in full;
+no fields are excluded and all repeat pairs agree.
+
+T01–T21 above remain the inherited removals (30 mode/form transitions).
+The following seven additional forms are **breaking removals**, each `ok` / 0
+on BASE to `error` / `semantics` / 2 on HEAD in both modes: **14 new mode/form
+transitions, 44 total**, with no other full-output differences. U01–U07 identify
+the exact inline sources of `rust/fslc/tests/issue_1439_unary_operand_types.rs`:
+
+| Removal | Regression test | Malformed form |
+|---|---|---|
+| U01 | `step_argument_rejects_not_integer_in_unselected_branch` | forbidden `paint(if true then Red else (if not 1 then Red else Blue))` |
+| U02 | `step_argument_rejects_enum_minus_in_unselected_branch` | forbidden `paint(if true then Red else (if -Red > 0 then Red else Blue))` |
+| U03 | `step_argument_rejects_not_integer_behind_short_circuited_or` | forbidden `paint(if c == Red or not 1 then Red else Blue)` |
+| U04 | `expectation_rejects_not_integer_behind_short_circuited_or` | acceptance `expect c == Blue or not 1` after `paint(Blue)` |
+| U05 | `invariant_rejects_not_integer` | invariant `c == Red or c == Blue or not 1` |
+| U06 | `invariant_rejects_enum_minus` | invariant `c == Red or c == Blue or -Red > 0` |
+| U07 | `expectation_rejects_not_integer_behind_short_circuited_and` | acceptance `expect not (false and not 1)` after `paint(Blue)` |
+
+The `not` diagnostic contains `expression of type Int is not assignable to Bool`;
+the minus diagnostic contains
+`expression of type Named("Color") is not assignable to Int`. The fixed tests
+pin authored locations: step 12:5, expectation 13:5, invariant 10:3. Replace
+the invalid operand with a Bool or numeric expression as appropriate, even in
+skipped expressions. Well-typed `not (c == Red)`, `-(-1)` and numeric `- n`
+remain accepted in both binaries/modes. Isolating only the unary patch's revert
+produces exactly seven original false-green detector failures and three passing
+preservation controls; exact restore makes all ten tests pass again. No required
+test is rewritten, renamed, removed or stopped in this unary phase.
+
+### Rebase compatibility measurement on 23eb5e41
+
+The final implementation was remeasured with BASE
+`23eb5e41326ef4cf81a100ad0e011e81ed9fd507` and HEAD
+`1e27d896b69b395ad8e48c570b4ddbca50e442a0`. BASE was materialized with
+`git archive` and compiled into a fresh target in that tree, without copying a
+target directory. Verbose build output confirms `fsl-syntax`, `fsl-core` and
+`fslc-rust` compiled from those BASE paths. HEAD used its own workspace build;
+both builds used rustc 1.98.0. No mutation was active.
+
+Inventory command in each tree:
+`rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
+Each tree contains **594 corpus forms**. Each binary ran `BINARY check FORM`
+from its own tree, with `FSLC_UNSTABLE` removed and then set to `fsl5`, twice.
+One acquisition of the lane and heavy-work advisory locks covered the entire
+sweep; each binary invocation also waited for the one-minute load to be below 9.
+The S1 forbidden-final detector was calibrated twice: BASE returned `ok` / 0,
+HEAD returned `error` / `semantics` / 2.
+
+All inline forms of the five fixed #1439 test files were included: six acceptance,
+eight nested-expectation, two binding/particle, 21 step-argument and ten unary
+occurrences. The 18 additional historical diagnostic/oracle/scope controls were
+retained: **65 inline occurrences, 659 total forms per tree, 5,272 checks**, plus
+four calibration invocations. Every stdout byte, parsed JSON value, stderr and
+exit was compared in full. There are no exclusions or repeat differences.
+
+The corpus ok-to-error transition set is **empty**, with no other corpus output
+changes. The historical 51-inline subset retains exactly its recorded **44**
+mode/form removals, T01–T21 and U01–U07. The expanded inventory adds the following
+previously omitted acceptance/nested occurrences, not a new implementation change:
+
+| Removal | Predicate in acceptance `expect` / FSL 5 scenario `then` |
+|---|---|
+| E01 | `c != 1` |
+| E02 | `true and c != 1` |
+| E03 | `not (c == 1)` |
+| E04 | `if c != 1 then true else false` |
+| E05 | `forall color: Color { color != 1 }` |
+
+Each row denotes two inline fixtures, one per spelling. With `c: Color`, these
+are **breaking removals**: `ok` / 0 → `error` / `semantics` / 2. Acceptance forms
+transition in both modes; scenario forms transition only with FSL 5 enabled:
+**15 additional mode/form removals, 59 total**. Repair each integer comparison
+to use a member of the same enum, including inside nested expressions.
+
+The two additional `c == 1` fixtures do not change acceptance status: in those
+same three mode/form combinations, they change `error` / `acceptance` / 2 to
+`error` / `semantics` / 2 at the expectation keyword, rather than reporting a
+false post-state predicate. These **three diagnostic changes** account for all
+remaining differences: **62 full-output differences in total, no others**.

@@ -702,7 +702,14 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   検査(<code>Seq</code> 操作。そこでは <code>/</code> <code>%</code> は全域)で部分演算に当たると
   <code>kind: "abs_step_violation"</code> として報告されます。</li>
 <li>比較: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
-<li>論理: <code>and or not =&gt;</code></li>
+<li>論理: <code>and or not =&gt;</code>
+  共通のモデル式チェッカーは、<code>not</code> のオペランドに <code>Bool</code>、単項 <code>-</code> の
+  オペランドに <code>Int</code> と互換の型 (名前付き数値範囲を含む) を要求します。
+  trace とすべてのモデル式に適用され、未選択の分岐や短絡される <code>and</code> / <code>or</code>
+  の内部も検査します。<code>not 1</code> と enum メンバー <code>Red</code> に対する <code>-Red</code> は
+  check 時の <code>kind: "semantics"</code> エラー (exit 2) であり、truthiness や enum から
+  整数への変換ではありません。型が正しい <code>not (c == Red)</code>、<code>-(-1)</code>、数値の
+  <code>- n</code> は引き続き有効です。</li>
 <li>条件: <code>if condition then when_true else when_false</code>。条件は <code>Bool</code> で、両方の
   分岐が検査され、同じ論理型を持たなければなりません。ガード、代入、プロパティ、
   関数引数、ランキング式、定数、refinement マッピングを含む、式が受理される任意の
@@ -2558,28 +2565,235 @@ verify {
   オブジェクト (<code>parameter</code>, <code>value</code>, <code>type</code>)、どの引数がパラメータの型に属さず、
   ガードが評価されなかったことを説明するトップレベルの <code>message</code>、ヒント、および
   そのステップの <code>loc</code> を持つエラーになります。</li>
-<li>カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの
+</ul>
+<p>replay 前に <code>expect &lt;expr&gt;</code> (および FSL 5 scenario の <code>then &lt;expr&gt;</code>) は、
+  invariant と同じく期待型 <code>Bool</code> で再帰的に型検査され、すべてのオペランドと
+  条件式の両分岐も検査されます。enum 状態 <code>c: Color</code> に対する <code>c != 1</code> や
+  <code>c == 1</code> のような異なる種類の比較は、既存の代入可能性メッセージと、記述した
+  <code>expect</code>/<code>then</code> キーワードの位置を持つ check 時の <code>kind: "semantics"</code>
+  エラー (exit 2) です。<code>Blue</code> が <code>Color</code> のメンバーなら <code>c == Blue</code> は型が
+  合います。式はあくまで最終状態の述語であり、初期状態や途中の状態で成立する
+  必要はありません。型が正しく偽になる述語は、引き続き replay 時に
+  <code>kind: "acceptance"</code> で失敗します。読みやすい stage 形式は変わりません。
+  互換性測定 (#1439): base <code>5a539bbe</code> に対し、<code>specs/</code>、<code>examples/</code>、
+  <code>rust/fslc/tests/fixtures/</code> 配下の各 tree の全 579 形式を両方のゲートモードで
+  検査し、ok→error 遷移はありませんでした。コマンドと測定した production の
+  識別情報は<a href="../design/DESIGN-requirements-stage.md#measured-compatibility">設計ノート</a>
+  を参照してください。
+  acceptance と forbidden のすべてのステップ引数も、replay 前に lowering 済み
+  モデルに対して再帰的に型検査されます。setup/final、FSL 5 の呼び出し、句の
+  <code>with</code> 入力、助詞付き入力、混合入力、relation-role 値を含み、選択されない分岐も
+  検査します。式の内部の型を検査し、外側の型をパラメータ型には強制しません。
+  内部の不整合は既存の代入可能性メッセージを持つ <code>kind: "semantics"</code>、exit 2
+  で、位置はステップの最初に記述されたトークンです。呼び出しなら action 名、
+  actor が先頭の句なら actor、助詞で語順を変えた句なら先頭のトークン
+  (例えば後続の actor ではなく <code>claim1</code>) を指します。
+  内部で型が整合する <code>paint(1)</code> と <code>paint(if true then 1 else 2)</code> は、既存の
+  forbidden の <code>wrong_kind_argument</code> 診断を保ち、values scope のみを理由とする
+  skip も変わりません。</p>
+<p>拡張の測定では base <code>5a539bbe</code> に対し、各 tree の corpus 579 形式と、lint のみ
+  修正した trace-step テストの全 inline fixture 21 形式を両モードで 2 回ずつ
+  検査しました (4,800 checks)。corpus の遷移は空ですが、次の inline T01–T16 は
+  <strong>破壊的な受理の削除</strong> (<code>ok</code> / 0 → <code>error</code> / <code>semantics</code> / 2) です。
+  mode/form 遷移は 21 件で、それ以外の全出力・exit 差や反復差はありません。
+  T01–T03、T13、T16 は両モード、それ以外は FSL 5 のみで遷移します。
+  各行は<a href="../design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals">拡張の設計ノート</a>
+  に記録した測定上の削除に対応します。</p>
+<table>
+<thead>
+<tr>
+<th>削除</th>
+<th>新たに拒否する型不整合の trace 形式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T01</td>
+<td>acceptance の Color 引数、条件 <code>c != 1</code></td>
+</tr>
+<tr>
+<td>T02</td>
+<td>forbidden setup の Color 引数、条件 <code>c != 1</code></td>
+</tr>
+<tr>
+<td>T03</td>
+<td>forbidden final の S1: <code>paint(if c != 1 then Red else Blue)</code></td>
+</tr>
+<tr>
+<td>T04</td>
+<td>FSL 5 scenario 呼び出し、条件 <code>claim_stage[0] != 1</code></td>
+</tr>
+<tr>
+<td>T05</td>
+<td>FSL 5 scenario の with 入力、同じ stage 条件の不整合</td>
+</tr>
+<tr>
+<td>T06</td>
+<td>FSL 5 scenario の助詞付き入力、同じ条件</td>
+</tr>
+<tr>
+<td>T07</td>
+<td>FSL 5 forbidden 呼び出しの setup、同じ条件</td>
+</tr>
+<tr>
+<td>T08</td>
+<td>FSL 5 forbidden 呼び出しの final、同じ条件</td>
+</tr>
+<tr>
+<td>T09</td>
+<td>FSL 5 forbidden の with setup 入力、同じ条件</td>
+</tr>
+<tr>
+<td>T10</td>
+<td>FSL 5 forbidden の with final 入力、同じ条件</td>
+</tr>
+<tr>
+<td>T11</td>
+<td>FSL 5 forbidden の助詞付き setup 入力、同じ条件</td>
+</tr>
+<tr>
+<td>T12</td>
+<td>FSL 5 forbidden の助詞付き final 入力、同じ条件</td>
+</tr>
+<tr>
+<td>T13</td>
+<td>acceptance の数値引数: <code>setn(if c != 1 then 2 else 0)</code></td>
+</tr>
+<tr>
+<td>T14</td>
+<td>FSL 5 助詞/with 混合入力、ClaimStage 比較の不整合</td>
+</tr>
+<tr>
+<td>T15</td>
+<td>FSL 5 relation-role 値、条件 <code>ticket_stage[0] != 1</code></td>
+</tr>
+<tr>
+<td>T16</td>
+<td>acceptance の未選択分岐: <code>paint(if true then Blue else (if c != 1 then Red else Blue))</code></td>
+</tr>
+<tr>
+<td>T17</td>
+<td>native/shared 診断テストの <code>expect c != 1</code> 行</td>
+</tr>
+<tr>
+<td>T18</td>
+<td>書き換えた Worker 診断テストの同一の <code>expect c != 1</code> 行</td>
+</tr>
+<tr>
+<td>T19</td>
+<td>step: <code>paint(if o is some(z) then z else Red)</code>、<code>o = none</code></td>
+</tr>
+<tr>
+<td>T20</td>
+<td>期待式: <code>expect (if o is some(z) then z else Red) == Red</code>、<code>o = none</code></td>
+</tr>
+<tr>
+<td>T21</td>
+<td>語順を変えた助詞付き入力: <code>claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits</code></td>
+</tr>
+</tbody>
+</table>
+<p>round 1 では、書き換えた両診断テストの全ソースと変更した共通 oracle を使う
+  テスト、および scope/語順変更の対照を追加測定しました。同じ base と変更のない
+  production コードに対し各 tree 20 形式、両モード各 2 回で 160 checks です。
+  T17–T20 は両モード、T21 は FSL 5 のみで追加の破壊的な受理の削除になります
+  (fixture 5 件 / mode-form 遷移 9 件。それ以外の差や除外はありません)。
+  T17/T18 は 2 つの書き換えたテストにある同一の FSL です。T19/T20 の診断は
+  <code>public Kernel cannot type identifier 'z'</code> です。§5 の <code>is some(z)</code> の束縛は
+  真の論理的継続 (<code>=&gt;</code> / <code>and</code>) に限られ、条件式の <code>then</code> 分岐には及びません。
+  未選択の分岐でも同じです。invariant は既に同じ scope 逸脱を拒否しています。
+  使用箇所をサポートされた継続へ移すか、scope 外の名前を使わないでください。
+  T21 の位置は後続の <code>Employee</code> でなく先頭の <code>claim1</code> (8:5) です。
+  正確な識別情報と fixture 一覧は設計ノートを参照してください。</p>
+<p>単項オペランドの測定 (#1439): base <code>5a539bbe</code> と最終実装をそれぞれの tree で
+  両モード各 2 回検査しました。各 tree の corpus 579 形式と inline fixture
+  51 件、計 5,040 checks です。corpus の ok→error 集合は空です。T01–T21 は
+  既存の削除のままで、次の 7 形式が追加の<strong>破壊的な受理の削除</strong>です。いずれも
+  両モードで <code>ok</code> / 0 → <code>error</code> / <code>semantics</code> / 2 へ遷移します (新規の mode/form
+  遷移 14 件、全体では 44 件)。全 stdout、stderr、exit にそれ以外の差、反復差、
+  除外はありません。コマンドと正確な base/head 識別情報は
+  <a href="../design/DESIGN-requirements-stage.md#unary-operand-typing-1439">単項オペランドの設計ノート</a>
+  を参照してください。</p>
+<table>
+<thead>
+<tr>
+<th>削除</th>
+<th>新たに拒否する単項型不整合の形式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>U01</td>
+<td>forbidden step <code>paint(if true then Red else (if not 1 then Red else Blue))</code></td>
+</tr>
+<tr>
+<td>U02</td>
+<td>forbidden step <code>paint(if true then Red else (if -Red &gt; 0 then Red else Blue))</code></td>
+</tr>
+<tr>
+<td>U03</td>
+<td>forbidden step <code>paint(if c == Red or not 1 then Red else Blue)</code></td>
+</tr>
+<tr>
+<td>U04</td>
+<td><code>paint(Blue)</code> 後の acceptance <code>expect c == Blue or not 1</code></td>
+</tr>
+<tr>
+<td>U05</td>
+<td>invariant <code>c == Red or c == Blue or not 1</code></td>
+</tr>
+<tr>
+<td>U06</td>
+<td>invariant <code>c == Red or c == Blue or -Red &gt; 0</code></td>
+</tr>
+<tr>
+<td>U07</td>
+<td><code>paint(Blue)</code> 後の acceptance <code>expect not (false and not 1)</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>not</code> は Bool オペランド、単項マイナスは数値オペランドを使うよう修正してください。
+  評価が省略されても、型不整合のオペランドは合法になりません。</p>
+<p>現在の rebase 測定 (#1439): BASE
+  <code>23eb5e41326ef4cf81a100ad0e011e81ed9fd507</code>、HEAD
+  <code>1e27d896b69b395ad8e48c570b4ddbca50e442a0</code> を各自の tree でビルドしました。
+  <code>BINARY check FORM</code> で各 tree の全 corpus 594 形式と inline 65 件を両モード
+  各 2 回検査しました (5,272 checks)。corpus の ok→error 集合は空です。
+  上述の以前の件数は履歴です。今回は固定テスト 5 ファイルをすべて含み、既存の
+  mode/form 削除 44 件に加え、acceptance の <code>expect</code> と FSL 5 の <code>then</code> で
+  <code>c != 1</code>、<code>true and c != 1</code>、<code>not (c == 1)</code>、
+  <code>if c != 1 then true else false</code>、<code>forall color: Color { color != 1 }</code> を拒否します。
+  enum <code>c: Color</code> に対する<strong>破壊的な受理の削除</strong>で、acceptance は両モード、
+  scenario は FSL 5 のみで遷移します (追加 15 件、計 59 件)。整数の代わりに同じ
+  enum のメンバーを使ってください。対応する <code>c == 1</code> fixture は期待キーワードで
+  エラーのまま、診断が <code>acceptance</code> から <code>semantics</code> へ変わります
+  (mode/form 3 件、exit 2 は不変)。全出力の差 62 件はこれですべてであり、
+  それ以外の差、反復差、除外はありません。inventory コマンドと calibration は
+  <a href="../design/DESIGN-requirements-stage.md#rebase-compatibility-measurement-on-23eb5e41">現在の設計測定</a>
+  を参照してください。</p>
+<p>未選択の分岐も含め、同じ enum のメンバーを使う比較に修正してください。
+  guard の拒否が、型不整合の引数を正当化することはありません。
+- カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの
   要件、保存則、SLA/時間、carried フィールドとして表現できない履歴、明示の
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
   <code>struct</code> / <code>state</code> / <code>init</code>、<code>fair action</code>、<code>branches</code>、明示の <code>maps</code> をサポート
   します。<code>branches</code> は action を各 when 条件で自動的に分割し
   (mutation の target では <code>submit[a &lt;= AUTO_LIMIT]</code>、それ以外の出力では分けた
   action を <code>submit.b1</code>・<code>submit.b2</code> … と表示します)、<code>maps</code> 節が上位レイヤーへの
-  action の対応を提供します。</li>
-<li><code>terminal { &lt;expr&gt; }</code> は <code>requirements</code> spec のトップレベルで許され、カーネルへ
+  action の対応を提供します。
+- <code>terminal { &lt;expr&gt; }</code> は <code>requirements</code> spec のトップレベルで許され、カーネルへ
   lowering されます(§6) — カーネルと同じく、spec ごとに <code>terminal</code> ブロックは
   ちょうど 1 つです。<code>stage(c)</code> は、<code>c</code> が型付きのエンティティパラメータまたは
   バインダーであるとき、requirements のすべての式文脈で利用できます。エンティティ
   型がその process と stage の enum を選択し、検査済みの式は生成された stage
   マップのインデックスへ lowering されます。requirements では、シンクステージが
-  自動的に terminal になることはありません。</li>
-<li>1 つのエンティティが複数の process に参加するとき、process は修飾パスを使えます:
+  自動的に terminal になることはありません。
+- 1 つのエンティティが複数の process に参加するとき、process は修飾パスを使えます:
   <code>process claims.Claim { ... }</code>。複数の process が <code>Claim</code> に対応するとき、
   非修飾の <code>stage(c)</code> はエラーです。
   <code>claims.Claim.stage(c)</code>(任意深さの <code>SymbolPath</code>)で 1 つを選択してください。
   存在しない process、非エンティティの引数、未知の stage メンバー、未解決の修飾子
-  は、ソース位置付きの型エラーです。</li>
-</ul>
+  は、ソース位置付きの型エラーです。</p>
 <h3 id="133-businessfsl-biz">13.3 業務コンサルティングレイヤー: <code>business</code>(fsl-biz ダイアレクト)</h3>
 <p>業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
 <code>DESIGN-dialects.md</code> §3)。process は enum+Map+transition の action へ、policy は

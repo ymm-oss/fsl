@@ -6,6 +6,80 @@ use std::process::Command;
 use serde_json::Value;
 
 #[test]
+fn trace_step_type_errors_share_native_and_lsp_identity() {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "issue-1439-step-diagnostics-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create step diagnostic fixtures");
+    for (name, source, unstable, type_name, line, word) in [
+        (
+            "published",
+            "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
+            false,
+            "Color",
+            9,
+            "paint",
+        ),
+        (
+            "fsl5-phrase",
+            "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with amount Draft -> Submitted\n  scenario AC-1 \"internal type\" {\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    then claim1 is Submitted\n  }\n}\nverify { instances Claim = 2 values Amount = 0..3 }\n",
+            true,
+            "ClaimStage",
+            8,
+            "Employee",
+        ),
+    ] {
+        let path = directory.join(format!("{name}.fsl"));
+        std::fs::write(&path, source).expect("write step fixture");
+        let path = path.to_str().expect("UTF-8 path");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        command.args(["check", path]).env_remove("FSLC_UNSTABLE");
+        let options = if unstable {
+            command.env("FSLC_UNSTABLE", "fsl5");
+            fsl_syntax::ParseOptions::with_unstable(
+                fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
+            )
+        } else {
+            fsl_syntax::ParseOptions::stable()
+        };
+        let output = command.output().expect("native check");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stderr.is_empty());
+        let cli: Value = serde_json::from_slice(&output.stdout).expect("native envelope");
+        let shared = fslc_rust::source_diagnostic::diagnostics(
+            source,
+            path,
+            &fsl_core::FsResolver::new(&directory),
+            &options,
+        )
+        .into_iter()
+        .find(|diagnostic| diagnostic.kind != "migration")
+        .expect("shared semantic diagnostic");
+        assert_eq!(cli["result"], "error");
+        assert_eq!(cli["kind"], "semantics");
+        assert_eq!(cli["kind"], shared.kind);
+        assert_eq!(cli["message"], shared.message);
+        assert_eq!(cli["loc"], shared.span.python_loc());
+        assert_eq!(cli["loc"], serde_json::json!({"line": line, "column": 5}));
+        assert!(shared.message.contains(&format!(
+            "expression of type Int is not assignable to Named(\"{type_name}\")"
+        )));
+        assert_eq!(shared.code, "FSL-SEMANTIC");
+        assert!(shared.located);
+        assert_eq!(
+            &source[shared.span.start.offset..shared.span.end.offset],
+            word
+        );
+        if unstable {
+            assert_eq!(cli["edition"], "next");
+            assert_eq!(cli["fsl_edition"], 5);
+        }
+    }
+    std::fs::remove_dir_all(directory).expect("remove owned step fixtures");
+}
+
+#[test]
 fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes() {
     let directory =
         std::env::temp_dir().join(format!("fsl-lsp-diagnostics-{}", std::process::id()));
@@ -46,6 +120,12 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             Some((1, 1)),
             None,
         ),
+        (
+            "acceptance-expect-type",
+            "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { c = x }\n  }\n  acceptance AC-1 \"type comparison\" {\n    paint(Blue)\n    expect c != 1\n  }\n}\n",
+            Some((10, 5)),
+            None,
+        ),
     ];
 
     for (name, source, expected_location, expected_hint) in cases {
@@ -71,6 +151,17 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
         assert_eq!(cli["kind"], shared.kind, "{name}");
         assert_eq!(cli["message"], shared.message, "{name}");
         assert_eq!(cli["hint"].as_str(), expected_hint, "{name}");
+        if name == "acceptance-expect-type" {
+            assert_eq!(cli["result"], "error");
+            assert_eq!(cli["kind"], "semantics");
+            assert_eq!(shared.code, "FSL-SEMANTIC");
+            assert!(shared.located);
+            assert_eq!((shared.span.end.line, shared.span.end.column), (10, 11));
+            assert_eq!(
+                &source[shared.span.start.offset..shared.span.end.offset],
+                "expect"
+            );
+        }
         if !cli["loc"].is_null() {
             assert_eq!(cli["loc"], shared.span.python_loc(), "{name}");
         }

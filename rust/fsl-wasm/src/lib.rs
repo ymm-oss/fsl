@@ -1191,9 +1191,10 @@ mod tests {
             assert_eq!(status, 2, "test fixture must be a failing AI project");
             return output;
         }
-        if let Err(failure) =
-            fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&request.source))
-        {
+        if let Err(failure) = fsl_syntax::parse_document_with(
+            fsl_syntax::SourceFile::new(&request.source),
+            &request.parse_options(),
+        ) {
             return fslc_rust::frontend_output::render_surface_parse_error(
                 envelope(solver_version),
                 &failure,
@@ -1644,6 +1645,11 @@ mod tests {
                 "spec Duplicate { state { x: Bool } init { x = false } action write_twice() { x = true x = false } }",
                 "duplicate.fsl",
             ),
+            (
+                "acceptance expectation type",
+                "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { c = x }\n  }\n  acceptance AC-1 \"type comparison\" {\n    paint(Blue)\n    expect c != 1\n  }\n}\n",
+                "acceptance_expect_type.fsl",
+            ),
         ] {
             let request = Request {
                 cmd: "check".to_owned(),
@@ -1654,7 +1660,77 @@ mod tests {
                 unstable: Vec::new(),
             };
             assert_worker_check_error_matches_native(&request, fixture);
+            if fixture == "acceptance expectation type" {
+                let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+                assert_eq!(worker["result"], "error");
+                assert_eq!(worker["kind"], "semantics");
+                assert_eq!(worker["loc"], json!({"line": 10, "column": 5}));
+                assert!(worker["message"].as_str().is_some_and(|message| {
+                    message.contains("expression of type Int is not assignable to Named(\"Color\")")
+                }));
+            }
         }
+    }
+
+    #[test]
+    fn trace_step_type_error_envelopes_match_native() {
+        for (source, unstable, line, type_name) in [
+            (
+                "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
+                false,
+                9,
+                "Color",
+            ),
+            (
+                "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with amount Draft -> Submitted\n  scenario AC-1 \"internal type\" {\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    then claim1 is Submitted\n  }\n}\nverify { instances Claim = 2 values Amount = 0..3 }\n",
+                true,
+                8,
+                "ClaimStage",
+            ),
+        ] {
+            let request = Request {
+                cmd: "check".to_owned(),
+                source: source.to_owned(),
+                source_file: "trace_step_type.fsl".to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+                unstable: if unstable {
+                    vec!["fsl5".to_owned()]
+                } else {
+                    Vec::new()
+                },
+            };
+            assert_worker_check_error_matches_native(&request, "trace step internal type");
+            let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+            assert_eq!(worker["result"], "error");
+            assert_eq!(worker["kind"], "semantics");
+            assert_eq!(worker["loc"], json!({"line": line, "column": 5}));
+            assert!(worker["message"].as_str().is_some_and(|message| {
+                message.contains(&format!(
+                    "expression of type Int is not assignable to Named(\"{type_name}\")"
+                ))
+            }));
+        }
+    }
+
+    #[test]
+    fn fsl5_then_type_error_envelope_matches_native() {
+        let request = Request {
+            cmd: "check".to_owned(),
+            source: "fsl 5\nrequirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { c = x }\n  }\n  scenario AC-1 \"type comparison\" {\n    paint(Blue)\n    then c != 1\n  }\n}\n".to_owned(),
+            source_file: "scenario_then_type.fsl".to_owned(),
+            files: BTreeMap::new(),
+            options: Options::default(),
+            unstable: vec!["fsl5".to_owned()],
+        };
+        assert_worker_check_error_matches_native(&request, "FSL 5 then expectation type");
+        let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+        assert_eq!(worker["result"], "error");
+        assert_eq!(worker["kind"], "semantics");
+        assert_eq!(worker["loc"], json!({"line": 11, "column": 5}));
+        assert!(worker["message"].as_str().is_some_and(|message| {
+            message.contains("expression of type Int is not assignable to Named(\"Color\")")
+        }));
     }
 
     #[test]

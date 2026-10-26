@@ -643,6 +643,79 @@ fn an_acceptance_wrong_kind_step_is_published_as_a_located_error() {
     );
 }
 
+/// #1439: both spellings publish a located semantic error on the authored
+/// keyword token, not an acceptance replay error or the trace declaration.
+#[test]
+fn ill_typed_expect_and_then_publish_semantic_keyword_ranges() {
+    for (header, trace, keyword, unstable, line, end) in [
+        ("", "acceptance", "expect", None, 9, 10),
+        ("fsl 5\n", "scenario", "then", Some("fsl5"), 10, 8),
+    ] {
+        let source = format!(
+            "{header}requirements E {{\n  enum Color {{ Red, Blue }}\n  state {{ c: Color }}\n  init {{ c = Red }}\n  requirement REQ-1 \"paint\" {{\n    action paint(x: Color) {{ c = x }}\n  }}\n  {trace} AC-1 \"type comparison\" {{\n    paint(Blue)\n    {keyword} c != 1\n  }}\n}}\n"
+        );
+        let published = published_diagnostics(&source, unstable);
+        let errors = published
+            .iter()
+            .filter(|diagnostic| diagnostic["severity"] == 1)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{keyword}: {published:#?}");
+        let error = errors[0];
+        assert_eq!(error["code"], "FSL-SEMANTIC");
+        assert_eq!(error["severity"], 1);
+        assert_eq!(error["data"]["kind"], "semantics");
+        assert_eq!(
+            error["range"],
+            json!({"start": {"line": line, "character": 4},
+                   "end": {"line": line, "character": end}})
+        );
+        assert!(error["message"].as_str().is_some_and(|message| {
+            message.contains("expression of type Int is not assignable to Named(\"Color\")")
+        }));
+    }
+}
+
+#[test]
+fn ill_typed_trace_arguments_publish_semantic_step_token_ranges() {
+    for (source, unstable, line, end, type_name) in [
+        (
+            "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
+            None,
+            8,
+            9,
+            "Color",
+        ),
+        (
+            "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with amount Draft -> Submitted\n  scenario AC-1 \"internal type\" {\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    then claim1 is Submitted\n  }\n}\nverify { instances Claim = 2 values Amount = 0..3 }\n",
+            Some("fsl5"),
+            7,
+            12,
+            "ClaimStage",
+        ),
+    ] {
+        let published = published_diagnostics(source, unstable);
+        let errors = published
+            .iter()
+            .filter(|diagnostic| diagnostic["severity"] == 1)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{published:#?}");
+        let error = errors[0];
+        assert_eq!(error["code"], "FSL-SEMANTIC");
+        assert_eq!(error["severity"], 1);
+        assert_eq!(error["data"]["kind"], "semantics");
+        assert_eq!(
+            error["range"],
+            json!({"start": {"line": line, "character": 4},
+                   "end": {"line": line, "character": end}})
+        );
+        assert!(error["message"].as_str().is_some_and(|message| {
+            message.contains(&format!(
+                "expression of type Int is not assignable to Named(\"{type_name}\")"
+            ))
+        }));
+    }
+}
+
 /// One `fslc-lsp` process driven request by request; notifications the
 /// server publishes in between (diagnostics) are skipped.
 struct Session {
