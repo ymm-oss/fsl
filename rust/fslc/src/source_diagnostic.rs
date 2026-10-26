@@ -227,8 +227,9 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
             .map_or_else(
                 || point_span(source, error.line, error.column),
                 |span| {
-                    // AI locations carry line/column only; ai_span uses offset 0.
-                    // Recover their byte offsets before the LSP converts to UTF-16.
+                    // Line/column-only origins (currently AI's AiLoc) use offset 0.
+                    // Recover such spans' byte offsets before LSP UTF-16 conversion,
+                    // regardless of dialect, when their position is not 1:1.
                     if span.start.offset == 0 && (span.start.line, span.start.column) != (1, 1) {
                         Span {
                             start: point_span(source, span.start.line, span.start.column).start,

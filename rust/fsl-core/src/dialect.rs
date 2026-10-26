@@ -3472,9 +3472,9 @@ fn ai_index_assign(map_name: &str, index: Expr, value: Expr, span: fsl_syntax::S
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] when authority references an undeclared tool,
-/// `check hard { rule ... }` names an unknown rule, or the generated kernel
-/// catalog is invalid.
+/// Returns [`CoreError`] when the generated kernel needs a reference to an
+/// undeclared authority tool, `check hard { rule ... }` names an unknown rule,
+/// or the generated kernel catalog is invalid.
 #[allow(clippy::too_many_lines)]
 pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSpec, CoreError> {
     let rules = ai_rule_set(&component)?;
