@@ -672,3 +672,45 @@ fn detector_sync_additional_rhs_monitor() {
 fn detector_sync_additional_let_does_not_capture_the_component_body() {
     sync_addition_free_name("let FREE = true y = FREE", "replay");
 }
+
+fn pattern_diagnostic_context(source: &str, prefix: &str) {
+    let dir = pair("Pattern", source);
+    let direct = check(&dir, "component.fsl");
+    assert_eq!(direct.1, 2, "{}", direct.0);
+    assert_eq!(direct.0["kind"], "semantics");
+    let message = direct.0["message"].as_str().expect("direct diagnostic");
+    assert!(message.starts_with(prefix), "{message}");
+    assert!(message.contains("pattern binding 'value'"), "{message}");
+    assert!(direct.0["loc"].is_object());
+    assert_same(direct, check(&dir, "system.fsl"), false);
+}
+
+fn leads_to_where_pattern_context(binder: &str) {
+    let source = format!(
+        "spec Pattern {{\n  type K = 0..1\n  state {{ value: Int, opt: Option<Int>, ks: Set<K> }}\n  init {{ value = 0 opt = some(1) ks = Set {{ 0 }} }}\n  action read() {{ }}\n  leadsTo Progress {{ forall {binder} where opt is some(value) {{ true ~> true }} }}\n}}"
+    );
+    pattern_diagnostic_context(&source, "invalid model expression: ");
+}
+
+#[test]
+fn detector_leadsto_typed_where_pattern_keeps_its_diagnostic_span() {
+    leads_to_where_pattern_context("k: K");
+}
+
+#[test]
+fn detector_leadsto_range_where_pattern_keeps_its_diagnostic_span() {
+    leads_to_where_pattern_context("k in 0..1");
+}
+
+#[test]
+fn detector_leadsto_collection_where_pattern_keeps_its_diagnostic_span() {
+    leads_to_where_pattern_context("k in ks");
+}
+
+#[test]
+fn detector_init_pattern_keeps_its_direct_diagnostic_context() {
+    pattern_diagnostic_context(
+        "spec Pattern {\n  state { value: Int, opt: Option<Int>, seen: Int }\n  init { value = 0 opt = some(1) if opt is some(value) { seen = 1 } }\n  action read() { }\n}",
+        "invalid init statement: ",
+    );
+}

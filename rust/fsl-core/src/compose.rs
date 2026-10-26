@@ -533,7 +533,9 @@ pub fn lower_compose_with_options(
                     ));
                     init.extend(
                         rewrite_statements(statements.clone(), component, &HashSet::new())
-                            .map_err(component_rewrite_error)?,
+                            .map_err(|error| {
+                                component_rewrite_error(error, "invalid init statement")
+                            })?,
                     );
                     if init_meta.is_none() {
                         init_meta.clone_from(meta);
@@ -696,9 +698,10 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
-fn component_rewrite_error(error: TypecheckError) -> CoreError {
+fn component_rewrite_error(error: TypecheckError, context: &str) -> CoreError {
     let TypecheckError { mut message, span } = error;
-    message.insert_str(0, "invalid model expression: ");
+    message.insert_str(0, ": ");
+    message.insert_str(0, context);
     if let Some(span) = span {
         return error_at(message, span);
     }
@@ -713,7 +716,53 @@ fn component_rewrite_error(error: TypecheckError) -> CoreError {
 }
 
 fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecItem, CoreError> {
-    rewrite_component_item_inner(item, component).map_err(component_rewrite_error)
+    let span = match &item {
+        SpecItem::Action { span, .. }
+        | SpecItem::Invariant { span, .. }
+        | SpecItem::Trans { span, .. }
+        | SpecItem::Reachable { span, .. }
+        | SpecItem::Terminal { span, .. }
+        | SpecItem::Until { span, .. }
+        | SpecItem::Unless { span, .. }
+        | SpecItem::LeadsTo { span, .. }
+        | SpecItem::Struct { span, .. }
+        | SpecItem::VerifyBounds { span, .. } => Some(*span),
+        _ => None,
+    };
+    let context = if matches!(&item, SpecItem::Init { .. }) {
+        "invalid init statement"
+    } else {
+        "invalid model expression"
+    };
+    let initializers = match &item {
+        SpecItem::State(fields) => fields
+            .iter()
+            .filter_map(|field| {
+                field
+                    .initializer_span
+                    .map(|span| (span, field.name.clone()))
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    rewrite_component_item_inner(item, component).map_err(|error| {
+        let error = match span {
+            Some(span) => error.with_span(span),
+            None => error,
+        };
+        let owner = initializers.iter().find(|(initializer, _)| {
+            error.span.is_some_and(|span| {
+                span.start.offset >= initializer.start.offset
+                    && span.end.offset <= initializer.end.offset
+            })
+        });
+        match owner {
+            Some((_, name)) => {
+                component_rewrite_error(error, &format!("invalid inline initializer for '{name}'"))
+            }
+            None => component_rewrite_error(error, context),
+        }
+    })
 }
 
 #[allow(clippy::too_many_lines)]
