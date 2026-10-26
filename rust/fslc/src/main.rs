@@ -1032,9 +1032,6 @@ fn command() -> Result<(Value, i32), String> {
                 Ok(source) => source,
                 Err(error) => return Ok((spec_load_error_output(&error), 2)),
             };
-            if let Err(conflict) = edition_conflict(&source, options.shared.edition) {
-                return Ok(with_version_metadata(conflict));
-            }
             // Standalone causal models are never kernel specs; route them to
             // the causal checker instead of failing dialect dispatch.
             if fsl_syntax::is_causal_source(&source) {
@@ -1415,15 +1412,11 @@ fn command() -> Result<(Value, i32), String> {
                     Ok(source) => source,
                     Err(error) => return Ok((spec_load_error_output(&error), 2)),
                 };
-                if let Err(conflict) = edition_conflict(&source, options.shared.edition) {
-                    return Ok(with_version_metadata(conflict));
-                }
-                let result = run_verify_cli_from_source(path, &display_path, &source, &options);
-                with_version_metadata(apply_domain_edition_from_source(
-                    result,
-                    &source,
+                with_version_metadata(run_verify_cli_from_source(
+                    path,
                     &display_path,
-                    options.shared.edition,
+                    &source,
+                    &options,
                 ))
             } else {
                 if !options.only_depth_and_deadlock() {
@@ -5926,7 +5919,7 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_check_from_source(path, display_path, &source)
+    run_check_with_tags_from_source(path, display_path, &source, false, None, None)
 }
 
 /// Check one caller-owned root-source snapshot.
@@ -6187,6 +6180,17 @@ fn run_check_with_tags_from_source(
     requirements: Option<&Path>,
     edition: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
+    let admission = match fslc_rust::migration::admit_source(
+        source,
+        &display_path.to_string_lossy(),
+        edition,
+        crate::parse_options(),
+        &envelope,
+        true,
+    ) {
+        Ok(admission) => admission,
+        Err(refusal) => return refusal,
+    };
     let (mut output, status) = run_check_from_source(path, display_path, source);
     if status == 0 && strict_tags {
         let model = match load_model_from_source(path, source) {
@@ -6199,16 +6203,7 @@ fn run_check_with_tags_from_source(
             return (error_output("io", &error), 2);
         }
     }
-    apply_domain_edition_from_source((output, status), source, display_path, edition)
-}
-
-/// The rendered `edition_conflict` rejection when `source`'s edition header
-/// and the requested `--edition` differ.
-fn edition_conflict(
-    source: &str,
-    requested: Option<fsl_syntax::Edition>,
-) -> Result<(), (Value, i32)> {
-    fslc_rust::migration::edition_conflict(source, requested, crate::parse_options(), envelope())
+    admission.finish((output, status))
 }
 
 fn apply_domain_edition_from_source(
@@ -12581,9 +12576,6 @@ fn run_testgen_from_source(
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    // Both verifier-failure paths use CLI verify's edition finalizer. Testgen
-    // has no requested-edition flag; the captured source header governs it.
-    let finalize_failure = |result| apply_domain_edition_from_source(result, source, path, None);
     let (scenarios, status) =
         run_scenarios_mode_from_source(path, source, depth, deadlock_mode, !strict);
     if status != 0 {
@@ -12596,13 +12588,13 @@ fn run_testgen_from_source(
         // reclassifying "your spec has a bug" as "fix your input" and
         // destroying the trace. Status 3 (internal) is propagated the same
         // way for the same reason.
-        return finalize_failure((scenarios, status));
+        return (scenarios, status);
     }
     let (scenarios, status) = fold_scenarios_refinements(path, source, depth, scenarios, status);
     if status != 0 {
         // Use the same failure-envelope owner as the kernel-failure path,
         // not the scenarios-shaped fold result. Gate before walk or writes.
-        return finalize_failure(run_verify_from_source(
+        return run_verify_from_source(
             path,
             source,
             depth,
@@ -12610,7 +12602,7 @@ fn run_testgen_from_source(
             "bmc",
             DEFAULT_EXPLICIT_BUDGET,
             1,
-        ));
+        );
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
         Ok(fslc_rust::TestgenWalk::Clean(walk)) => walk,
