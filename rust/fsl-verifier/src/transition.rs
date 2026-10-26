@@ -522,7 +522,11 @@ fn collect_init_statement<S: SmtSolver>(
         Statement::ForAll {
             binder, statements, ..
         } => {
-            fsl_core::check_init_collection_binder(model, binder)?;
+            fsl_core::check_init_collection_binder(
+                model,
+                binder,
+                bindings.keys().map(String::as_str),
+            )?;
             for (name, value, membership) in
                 binder_values(solver, model, binder, state, bindings, None)?
             {

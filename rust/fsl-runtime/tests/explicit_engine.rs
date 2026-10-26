@@ -213,14 +213,28 @@ fn deterministic_init_rejects_state_dependent_forall_domains() {
         "init forall range bounds must be compile-time constants; state variable 'n' is not allowed"
     );
 
-    let state_collection = model(
-        "spec StateCollection { type Slot = 0..2 \
+    let state_collection_source = "spec StateCollection { type Slot = 0..2 \
          state { s: Set<Slot>, m: Map<Slot, Bool> } \
          init { s = Set { 0, 1 } forall i in s { m[i] = true } } \
-         action stay() { s = s } }",
-    );
+         action stay() { s = s } }";
+    let kernel =
+        parse_kernel_source(state_collection_source, &FsResolver::new(".")).expect("parse");
+    let source_error = build_model(kernel).expect_err("source gate rejects the collection domain");
+    assert!(source_error.span.is_some());
+    // Keep testing the public unchecked-model guard, not just the earlier source gate.
+    let mut state_collection =
+        model(&state_collection_source.replace("forall i in s", "forall i in Set { 0, 1 }"));
+    let fsl_core::KernelStatement::ForAll {
+        binder: fsl_core::KernelBinder::Collection { collection, .. },
+        ..
+    } = &mut state_collection.init[1]
+    else {
+        panic!("collection forall")
+    };
+    **collection = fsl_core::KernelExpr::Var("s".into());
     let error = fsl_runtime::verify_explicit(state_collection, 2, 100)
         .expect_err("state collection init domain rejected");
+    assert_eq!(error.message, source_error.message);
     assert_eq!(
         error.message,
         "init forall over a state collection is not supported; state variable 's' is not allowed"

@@ -629,13 +629,13 @@ fn lvalue_json(
             "kind":"var","type":type_json(&ty),"span":span_json(path,span),"name":name
         }),
         LValue::Index(name, index) => {
-            let (TypeRef::Map(key, _) | TypeRef::Relation(key, _)) = resolve(
+            let Some((key, _)) = resolve(
                 model,
                 env.get(name)
                     .ok_or_else(|| error(format!("unknown update target '{name}'")))?,
             )?
-            else {
-                return Err(error("indexed update target requires Map or Relation"));
+            .index_types(false) else {
+                return Err(error("indexed update target requires Map"));
             };
             json!({
                 "kind":"index","type":type_json(&ty),"span":span_json(path,span),

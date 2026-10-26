@@ -72,6 +72,10 @@ pub struct OriginRegistry {
 }
 
 impl OriginRegistry {
+    pub(crate) fn discard_component_check_targets(&mut self) {
+        self.bindings
+            .retain(|target, _| !is_component_check_target(target));
+    }
     pub(crate) fn bind_action_actor(&mut self, name: &str, actor: Option<String>) {
         self.action_actors.insert(action_target(name), actor);
     }
@@ -180,6 +184,14 @@ pub fn init_statement_target(index: usize) -> String {
     format!("init:{index}")
 }
 
+pub(crate) fn component_check_target(target: &str) -> String {
+    format!("component-check:{target}")
+}
+
+pub(crate) fn is_component_check_target(target: &str) -> bool {
+    target.starts_with("component-check:")
+}
+
 #[must_use]
 pub fn action_target(name: &str) -> String {
     format!("action:{name}")
@@ -193,6 +205,10 @@ pub fn action_guard_target(name: &str, index: usize) -> String {
 #[must_use]
 pub fn action_statement_target(name: &str, index: usize) -> String {
     format!("action:{name}:statement:{index}")
+}
+
+pub(crate) fn action_ensure_target(name: &str, index: usize) -> String {
+    format!("action:{name}:ensure:{index}")
 }
 
 #[must_use]

@@ -101,14 +101,47 @@ fn bounded_and_ranked_leadsto_where_filters_fail_closed_through_one_owner() {
     );
     let kernel =
         parse_kernel_source(&source, &FsResolver::new(std::env::temp_dir())).expect("parse");
-    let model = build_model(kernel).expect("build model");
+    let source_error = build_model(kernel).expect_err("source gate rejects where filters");
+    assert!(source_error.span.is_some());
+    let supported_source = source.replace(" where i > 0", "");
+    let mut model = build_model(
+        parse_kernel_source(&supported_source, &FsResolver::new("."))
+            .expect("parse supported form"),
+    )
+    .expect("build supported form");
+    // Deliberately bypass construction, preserving the existing engine-guard contract.
+    let fsl_core::KernelBinder::Typed { where_expr, .. } = &mut model.leadstos[0].binders[0] else {
+        panic!("typed binder")
+    };
+    *where_expr = Some(Box::new(fsl_core::KernelExpr::Binary {
+        op: ">".into(),
+        left: Box::new(fsl_core::KernelExpr::Var("i".into())),
+        right: Box::new(fsl_core::KernelExpr::Num(0)),
+    }));
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
     let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
         .expect_err("where filters must fail closed");
     assert!(error.message.contains("where filters"), "{error}");
+    assert_eq!(error.message, source_error.message);
+    let runtime_error = fsl_runtime::BoundedLivenessMonitor::new(model.clone())
+        .expect_err("unchecked runtime model must use the same rejection");
+    assert_eq!(runtime_error.message, error.message);
 
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create ranked solver");
     let ranked_error = block_on(fsl_verifier::prove_ranked_leadstos(&model, &mut solver))
         .expect_err("ranked where filters must fail closed through the same owner");
     assert_eq!(ranked_error.message, error.message);
+}
+
+#[allow(dead_code)]
+#[path = "../../fslc/tests/support/issue_1463_aggregate_and_component_locations.rs"]
+mod init_collection_fixture;
+
+#[test]
+fn bounded_rejects_unchecked_init_state_collection_through_shared_guard() {
+    let (model, expected) = init_collection_fixture::unchecked_init_collection_model();
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("solver");
+    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 2))
+        .expect_err("unchecked bounded init must reject");
+    assert_eq!(error.message, expected);
 }

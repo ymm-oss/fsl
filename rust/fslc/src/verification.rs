@@ -3013,6 +3013,37 @@ fn add_cli_strict_tag_warnings(
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
+    mod init_collection_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/issue_1463_aggregate_and_component_locations.rs"
+        ));
+    }
+
+    #[test]
+    fn issue_1463_induction_entry_rejects_unchecked_init_via_bounded_base() {
+        let (model, expected) = init_collection_fixture::unchecked_init_collection_model();
+        let path = Path::new("unchecked-init.fsl");
+        let (output, status) = run_induction_filtered(InductionRequest {
+            selection: ModelSelection {
+                path,
+                model: Some(&model),
+                scope: None,
+                property: None,
+                excluded: &[],
+            },
+            depth: 2,
+            deadlock: DeadlockMode::Ignore,
+            k: 1,
+            auxiliary: &[],
+            skip_vacuity_probe: true,
+        });
+        assert_eq!(status, 2, "{output}");
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["message"], expected);
+    }
+
     fn repository_path(relative: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()

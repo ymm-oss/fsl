@@ -2,8 +2,8 @@
 
 //! #1457: one inventory generates accepting/rejecting collection-binder pairs.
 //! Keep every detector, including Set value ordering, when reducing run time.
-//! Stateful init forall has a shared verify refusal; `check` acceptance and
-//! bounded leadsTo remain separately tracked siblings.
+//! Stateful init collection sources are rejected by the shared check boundary
+//! since #1463; all original cells and engine probes remain in this inventory.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -619,9 +619,11 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
     let mut failures = Vec::new();
     let path = fixture(&case.source(negative));
     let checked = run(&path, "check");
-    if checked.0 != 0 || checked.1["result"] != "ok" {
+    let init_state = case.site == "init-state";
+    let (check_status, check_result) = if init_state { (2, "error") } else { (0, "ok") };
+    if checked.0 != check_status || checked.1["result"] != check_result {
         failures.push(format!(
-            "{} negative={negative} check: expected 0 ok; produced {}",
+            "{} negative={negative} check: expected {check_status} {check_result}; produced {}",
             case.name,
             diagnostic(checked.0, &checked.1)
         ));
@@ -653,22 +655,15 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
             }
         }
     }
-    let refusal = (
-        observations[2].1.1["kind"].clone(),
-        observations[2].1.1["message"].clone(),
-    );
     for (engine, (status, report)) in observations {
-        if case.site == "init-state" {
-            // Compare the complete kind/message values with the existing
-            // explicit refusal. Do not duplicate the product diagnostic.
-            let actual = (report["kind"].clone(), report["message"].clone());
-            if status != 2
-                || report["result"] != "error"
-                || refusal.0.as_str().is_none_or(str::is_empty)
-                || refusal.1.as_str().is_none_or(str::is_empty)
-                || actual != refusal
+        if init_state {
+            // The source gate now owns the complete refusal, including its location.
+            if (status, &report) != (checked.0, &checked.1)
+                || checked.1["kind"] != "semantics"
+                || checked.1["loc"].is_null()
+                || checked.1["message"].as_str().is_none_or(str::is_empty)
             {
-                failures.push(format!("{} negative={negative} {engine}: expected 2 error with explicit kind/message {refusal:?}; produced {}", case.name, diagnostic(status, &report)));
+                failures.push(format!("{} negative={negative} {engine}: expected complete check refusal {:?}; produced {}", case.name, checked, diagnostic(status, &report)));
             }
             continue;
         }
