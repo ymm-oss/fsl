@@ -13,7 +13,8 @@ values now use `kind: "usage"` instead of downstream `io` or `semantics`,
 with the existing messages preserved. Unsupported `--kernel-version`
 values on `kernel` and `conformance` likewise change from `semantics` to
 `usage`, retaining the unsupported-public-Kernel-major message and exit 2.
-Odd `refine` chain operands and malformed `diff --git` ranges change from
+Odd `refine` chain operands and malformed `diff --git` ranges (including
+three-dot notation) change from
 `io` to `usage`, preserving their messages, branch order, and exit 2;
 nonexistent Git refs are unchanged. Unknown-option diagnostics now name
 the real command and option on `scenarios`, `ai check`, `domain check`,
@@ -23,3 +24,5 @@ options on the `compat` group. Existing root/other-group wording,
 terminal `ai compare` missing-value wording are preserved.
 `ai compare` no longer accepts literal `--` as an option value, including labels
 and dataset: it reports a missing-value usage error (exit 2) instead.
+An option-position bare `--` now terminates `ai compare`, like other commands;
+following operands remain usage errors.

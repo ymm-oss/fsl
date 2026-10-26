@@ -79,6 +79,8 @@ Value-taking options consume their next token once, including dash-prefixed valu
 options, and `--` in place of a required value is a missing-value error. This preserves the existing
 `CommandArgs` behavior. `ai compare` previously consumed literal `--` as a value with its raw iterator;
 it now rejects that value as missing too, an intentional breaking change with no command exception.
+The second-stage `ai compare` parser also honors bare `--` as an option terminator;
+any following tokens remain excess positional arguments rejected by preflight.
 Every repeated choice is checked, so a later valid occurrence cannot mask an earlier invalid one.
 Existing typed parsers
 retain numeric/type interpretation, required-argument diagnostics, duplicate/combination rules,
