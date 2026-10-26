@@ -129,12 +129,27 @@ The requirement ID and text come from the model metadata attached by governance
 lowering to its catalog invariant, not a copied ID or synthesized catalog text.
 
 `unknown_cti` adds an **unestablished** induction finding, attributed by the
-same metadata/property lookup as `violated`, or to the spec as a whole. Its
+same declaration-owner rule as `violated`, or to the spec as a whole. Its
 summary and translation do not claim a reachable counterexample or violation;
 the appendix preserves the full `cti`, `hint`, and `rank_failure` evidence.
+
+Declaration ownership follows the envelope's obligation, not the historical
+`invariant` field alone: `trans` selects transitions; `leadsTo` / `leadsTo_rank`
+select leadsTo declarations; synthetic partial-operation / key-domain property
+checks select the property declaration; synthetic action checks, `ensures`, and
+`type_bound` select `last_action`; deadlock has no declaration owner. An explicit
+envelope requirement takes precedence. Otherwise the ledger uses `NameMap`'s
+`resolve_action`, `resolve_property`, and `resolve_synthetic` against the selected
+declarations, preferring `generated_name` to an authored display label (including
+on `last_action`). Public compose and branch spellings are resolved by that name
+owner, not by ledger string replacement or copied prefix rules. Only a unique
+resolved declaration supplies requirement metadata; missing or ambiguous owners
+remain spec-level findings.
+
 Ordinary violations, requirement confirmations, assurance classes, and human
-approval status remain separate axes. These new findings change affected
-ledger rendering digests: existing approvals become `drifted` and require
+approval status remain separate axes. Added findings, corrected coverage, and
+corrected declaration attribution change affected ledger rendering digests:
+existing approvals become `drifted` and require
 review and re-approval.
 
 Direct `ledger` additionally returns a verification `result:"error"` envelope

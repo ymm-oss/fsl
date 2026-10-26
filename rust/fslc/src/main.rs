@@ -17537,6 +17537,103 @@ mod exit_status_tests {
     use crate::refinement::preservation_refine_result;
 
     #[test]
+    fn approval_ledger_rerender_bypasses_only_the_direct_verification_error_gate() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path = root.join("tests/fixtures/governance_missing_dependency.fsl");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let request = LedgerReportRequest {
+            path: &path,
+            depth: 3,
+            deadlock_mode: "ignore",
+            engine: "bmc",
+            impl_log: None,
+            evidence_paths: &[],
+            output_path: None,
+        };
+        let expected = run_verify_from_source(
+            &path,
+            &source,
+            3,
+            "ignore",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(expected.1, 2);
+        assert_eq!(expected.0["result"], "error");
+        assert_eq!(expected.0["kind"], "type");
+        assert_eq!(expected.0["loc"], json!({"line":6,"column":5}));
+        assert_eq!(
+            run_ledger_report_from_source(&request, &source, &[], &[]),
+            expected
+        );
+
+        let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source);
+        assert_eq!(
+            status, 0,
+            "approval rendering must bypass verification error: {rendered}"
+        );
+        let content = rendered["content"].as_str().expect("rendered Markdown");
+        assert!(content.contains("## リスク一覧（要件ID別）"), "{content}");
+        // Compare the complete generated envelope, not just its verdict.
+        assert_eq!(
+            rendered,
+            json!({
+                "fsl":"1.0", "result":"generated", "kind":"audit_ledger",
+                "spec":load_model_from_source(&path, &source).unwrap().name,
+                "output":"governance_missing_dependency_ledger.md", "content":content
+            })
+        );
+    }
+
+    #[test]
+    fn both_ledger_entry_points_preserve_non_error_ancillary_failures() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gallery/valid/tiny_bounded_counter.fsl");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let verified = run_verify_from_source(
+            &path,
+            &source,
+            3,
+            "ignore",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(verified.1, 0, "{verified:?}");
+        assert_eq!(verified.0["result"], "verified");
+        let absent = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../target/ledger-tests/absent-ancillary-{}.json",
+            std::process::id()
+        ));
+        assert!(!absent.exists());
+        for replay in [false, true] {
+            let evidence = if replay { vec![] } else { vec![absent.clone()] };
+            let request = LedgerReportRequest {
+                path: &path,
+                depth: 3,
+                deadlock_mode: "ignore",
+                engine: "bmc",
+                impl_log: replay.then_some(absent.as_path()),
+                evidence_paths: &evidence,
+                output_path: None,
+            };
+            let expected = (
+                error_output("io", "No such file or directory (os error 2)"),
+                2,
+            );
+            assert_eq!(
+                run_ledger_report_from_source(&request, &source, &[], &[]),
+                expected
+            );
+            assert_eq!(
+                generate_unapproved_ledger_report_from_source(&request, &source),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn direct_report_gate_preserves_complete_errors_and_both_exit_classes() {
         for (status, kind) in [(2, "type"), (3, "internal")] {
             let error = json!({"result":"error", "kind":kind, "message":"boom", "loc":{"line":4,"column":3}});

@@ -965,7 +965,9 @@ existing action-coverage exploration, then selected or removed by the same mode;
 the structured `action_coverage` evidence remains a separate ledger projection and
 does not change assurance. Generated-only sentinels remain in raw coverage
 (`covered:false` included), but not in public warnings, ledger coverage findings,
-or HTML badges/coverage denominators. Eligibility uses the authored primary
+HTML badges/coverage denominators, or mutate dead-action notes. The current mutate
+CLI cannot reach a generated-only dead-action case; its notes nevertheless use
+the same eligibility classifier. Eligibility uses the authored primary
 origin's positive line/column, then the kernel action's positive source span,
 never a name/prefix test. HTML Raw Data retains the original map; zero eligible
 actions render `0/0`. Corrected ledger/HTML renderings invalidate old artifact
