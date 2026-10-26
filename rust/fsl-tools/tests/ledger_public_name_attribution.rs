@@ -19,7 +19,7 @@ impl FileResolver for Component {
 
 fn check_renderer_cell(case: &cases::Case, composed: bool, annotated: bool) {
     let annotation = case.annotation(annotated);
-    // Domain always emits a legacy requirement (domain_lowering.rs:2913-2917).
+    // Domain always emits a legacy requirement (domain_lowering.rs::lower_properties).
     // An unlinked domain property cannot be authored through that CLI; use an
     // explicit internal-name model for the renderer's unlinked control.
     let source = if case.implicit_requirement {
@@ -29,6 +29,16 @@ fn check_renderer_cell(case: &cases::Case, composed: bool, annotated: bool) {
     } else {
         case.source.replace("OWNER", annotation)
     };
+    let (body, name) = render_cell(case, composed, annotated, source);
+    cases::assert_ledger(&body, case, &name, annotated);
+}
+
+fn render_cell(
+    case: &cases::Case,
+    composed: bool,
+    annotated: bool,
+    source: String,
+) -> (String, String) {
     let kernel = if composed {
         parse_kernel_source(
             "compose Composed { use Subject as ab from \"component.fsl\" }",
@@ -41,9 +51,9 @@ fn check_renderer_cell(case: &cases::Case, composed: bool, annotated: bool) {
     let model = build_model(kernel).unwrap();
     let name = cases::public_name(case.name, composed);
     // Attribution-key projections, not full fabricated verify envelopes:
-    // verification.rs:583-608 has no property last_action/direct requirement;
-    // origin-aware names come from :97-120. V's direct requirement is retained
-    // for linked violations (verification_output.rs:2687-2721).
+    // verification.rs::render_induction_cti has no property last_action/direct requirement;
+    // origin-aware names come from origin_aware_property_name. Direct requirement
+    // is retained for linked violations (verification_output.rs::render_violation).
     let mut value = json!({"result":case.result, "invariant":name,
         "checked_to_depth":3, "completeness":"bounded"});
     if case.implicit_requirement {
@@ -67,6 +77,10 @@ fn check_renderer_cell(case: &cases::Case, composed: bool, annotated: bool) {
         value["trace_type"] = json!("induction_cti");
         value["cti"] = json!({"states":[],"violated_at":1});
         value["hint"] = json!("strengthen the obligation");
+        if case.kind == Some("ensures") {
+            // verification.rs::insert_action_cti_last_action uses the public action name.
+            value["last_action"] = json!({"name":name});
+        }
     } else {
         value["trace"] = json!([]);
         value["trace_type"] = json!("invariant");
@@ -76,7 +90,7 @@ fn check_renderer_cell(case: &cases::Case, composed: bool, annotated: bool) {
         }
     }
     let body = fsl_tools::render_ledger("synthetic.fsl", &model, &value, &json!({}), None, &[]);
-    cases::assert_ledger(&body, case, &name, annotated);
+    (body, name)
 }
 
 #[test]
@@ -122,6 +136,30 @@ fn synthetic_property_group_and_generated_identity_matrix() {
                 });
             }
         }
+    }
+    cases::finish_matrix(&green, &red);
+}
+
+#[test]
+fn competing_candidate_attribution_matrix() {
+    let mut red = Vec::new();
+    let mut green = Vec::new();
+    for cell in cases::competing_cases() {
+        cases::collect_cell(&mut green, &mut red, cell.key(), || {
+            let (body, name) = render_cell(
+                &cell.case,
+                cell.composed,
+                cell.target_id.is_some(),
+                cell.source(),
+            );
+            cases::assert_attribution(&body, &cell.case, &name, cell.target_id);
+            if let Some(id) = cell.competitor_id {
+                assert!(
+                    findings::risk_row(&body, id).contains("🟢"),
+                    "competitor requirement must stay green: {body}"
+                );
+            }
+        });
     }
     cases::finish_matrix(&green, &red);
 }

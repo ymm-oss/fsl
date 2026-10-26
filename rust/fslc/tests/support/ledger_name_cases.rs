@@ -4,6 +4,7 @@
 
 pub const REQUIREMENT: &str = "@requirement(\"REQ-OWNER\", \"obligation owner\")";
 
+#[derive(Clone)]
 pub struct Case {
     pub label: &'static str,
     pub source: String,
@@ -103,7 +104,7 @@ pub fn cases() -> Vec<Case> {
             Some(kind),
             "bmc",
             8,
-            "rust/fslc/src/verification_output.rs:2104-2168,2687-2778",
+            "verification_output.rs::{render_boundary_output,render_violation}",
         );
     }
     for (label, source, name, kind) in [
@@ -146,13 +147,13 @@ pub fn cases() -> Vec<Case> {
             kind,
             "induction",
             1,
-            "rust/fslc/src/verification.rs:534-608",
+            "verification.rs::{insert_action_cti_last_action,render_induction_cti}",
         );
     }
     add("bounded_leadsto", "spec Subject { state { x: 0..5 } init { x = 0 } action step() { requires x < 5 x = x + 1 } OWNER leadsTo Done { x == 1 ~> within 1 x == 4 } }".into(), "Done", "violated", Some("leadsTo"), "bmc", 4,
-        "rust/fslc/src/verification_output.rs:2970-2976");
+        "verification_output.rs::render_leadsto_failure");
     add("ranked_leadsto", "spec Subject { state { x: Int } init { x = 0 } action inc() { requires x < 5 x = x + 1 } invariant Range { x >= 0 and x <= 5 } OWNER leadsTo Done { x < 5 ~> x == 5 decreases x } }".into(), "Done", "unknown_cti", Some("leadsTo_rank"), "induction", 3,
-        "rust/fslc/src/verification.rs:692-698");
+        "verification.rs::render_rank_failure");
     for (label, probe) in [
         (
             "property_partial_I",
@@ -175,13 +176,13 @@ pub fn cases() -> Vec<Case> {
                 "violated",
                 "bmc",
                 3,
-                "rust/fslc/src/verification_output.rs:2114-2168",
+                "verification_output.rs::render_boundary_output",
             ),
             (
                 "unknown_cti",
                 "induction",
                 1,
-                "rust/fsl-verifier/src/induction.rs:905-977,1027-1088; rust/fslc/src/verification.rs:592-608",
+                "induction.rs::step_obligation_cti; verification.rs::render_induction_cti",
             ),
         ] {
             add(
@@ -220,11 +221,11 @@ pub fn cases() -> Vec<Case> {
             Some("key_domain"),
             "induction",
             1,
-            "rust/fsl-verifier/src/induction.rs:536-590,711; rust/fslc/src/verification.rs:592-608",
+            "induction.rs::key_domain_obligation_cti; verification.rs::render_induction_cti",
         );
     }
     add("deadlock", "spec Subject { state { x: 0..1 } init { x = 0 } OWNER action blocked() { requires x == 1 x = 1 } invariant Safe { x == 0 } }".into(), "deadlock", "violated", Some("deadlock"), "bmc", 1,
-        "rust/fslc/src/verification_output.rs:2934-2946");
+        "verification_output.rs::render_deadlock_failure");
     cases
 }
 
@@ -270,7 +271,7 @@ pub fn lowered_cases() -> Vec<Case> {
             label, source: format!("domain Subject {{ aggregate Counter {{ state {{ x: Int = 0; y: Int = 0; }} {body} {declaration} }} }}"),
             name, result, kind: if result == "violated" { Some("invariant") } else { None },
             engine, depth,
-            producer: "rust/fsl-core/src/domain_lowering.rs:2909-2917; rust/fslc/src/verification.rs:97-120,592-608; rust/fslc/src/verification_output.rs:2114-2168,2687-2721",
+            producer: "domain_lowering.rs::lower_properties; verification.rs::{origin_aware_property_name,render_induction_cti}; verification_output.rs::{render_boundary_output,render_violation}",
             generated: (!generated.is_empty()).then_some(generated),
             implicit_requirement: true,
             action_generated: None,
@@ -282,7 +283,7 @@ pub fn lowered_cases() -> Vec<Case> {
             source: "domain Subject { aggregate Counter { state { x: Int = 5; d: Int = 1; } OWNER command Step {} event Stepped {} decide Step { requires x > 0 and x / d < 100 emits Stepped } evolve Stepped { x = x - 1 } command Zap {} event Zapped {} decide Zap { requires x == 3 emits Zapped } evolve Zapped { d = 0 } invariant NonNeg { x >= 0 } } }".into(),
             name: if result == "violated" { "Step" } else { "_partial_counter_step" },
             result, kind: Some("partial_op"), engine, depth,
-            producer: "rust/fsl-core/src/domain_lowering.rs:2538-2557; rust/fslc/src/verification.rs:123-143,534-608; rust/fslc/src/verification_output.rs:2104-2168",
+            producer: "domain_lowering.rs::lower_aggregate_actions; verification.rs::{origin_aware_action_json,render_induction_cti}; verification_output.rs::render_boundary_output",
             generated: (result == "violated").then_some("_partial_counter_step"),
             implicit_requirement: false,
             action_generated: Some("counter_step"),
@@ -352,11 +353,113 @@ pub fn lowered_cases() -> Vec<Case> {
     ] {
         lowered.push(Case {
             label, source: format!("requirements Subject {{ {source} }}"), name, result, kind: Some(kind), engine, depth,
-            producer: "rust/fsl-core/src/dialect.rs:1792-1858,1903-1951; rust/fslc/src/verification.rs:123-143,534-608; rust/fslc/src/verification_output.rs:2104-2168,2687-2778",
+            producer: "dialect.rs::lower_requirement_action; verification.rs::{origin_aware_action_json,render_induction_cti}; verification_output.rs::{render_boundary_output,render_violation}",
             generated: None, implicit_requirement: false, action_generated: Some(generated),
         });
     }
     lowered
+}
+
+pub struct CompetingCase {
+    pub case: Case,
+    pub composed: bool,
+    pub competitor: &'static str,
+    pub declaration: &'static str,
+    pub target_id: Option<&'static str>,
+    pub competitor_id: Option<&'static str>,
+}
+
+impl CompetingCase {
+    pub fn key(&self) -> String {
+        format!(
+            "{}/{}/target={}/competitor={}",
+            self.case.key(
+                if self.composed { "compose" } else { "plain" },
+                self.target_id.is_some()
+            ),
+            self.competitor,
+            self.target_id.unwrap_or("none"),
+            self.competitor_id.unwrap_or("none")
+        )
+    }
+
+    pub fn source(&self) -> String {
+        let annotation = |id: Option<&str>| {
+            id.map_or_else(String::new, |id| {
+                format!("@requirement(\"{id}\", \"{id}\")")
+            })
+        };
+        // Put the competitor first: declaration order cannot select the owner.
+        let declarations = format!(
+            "{} {} {}",
+            annotation(self.competitor_id),
+            self.declaration,
+            annotation(self.target_id)
+        );
+        self.case.source.replace("OWNER", &declarations)
+    }
+}
+
+pub fn competing_cases() -> Vec<CompetingCase> {
+    let mut cells = Vec::new();
+    for (label, composed, competitor, declaration) in [
+        (
+            "property_partial_T",
+            false,
+            "same-name-other-kind",
+            "action Probe() { n = n }",
+        ),
+        (
+            "property_key_domain_L",
+            true,
+            "same-name-other-kind",
+            "action Probe() { cur = cur }",
+        ),
+        (
+            "ensures",
+            true,
+            "other-name-same-kind",
+            "action Other() { x = x }",
+        ),
+        (
+            "invariant",
+            false,
+            "other-name-same-kind",
+            "invariant Other { x >= 0 }",
+        ),
+    ] {
+        let case = cases()
+            .into_iter()
+            .find(|case| case.label == label && case.result == "unknown_cti")
+            .unwrap();
+        for (target_id, competitor_id) in [
+            (None, None),
+            (Some("REQ-OWNER"), None),
+            (None, Some("REQ-COMPETITOR")),
+            (Some("REQ-OWNER"), Some("REQ-COMPETITOR")),
+            (Some("REQ-COMPETITOR"), Some("REQ-OWNER")),
+        ] {
+            cells.push(CompetingCase {
+                case: case.clone(),
+                composed,
+                competitor,
+                declaration,
+                target_id,
+                competitor_id,
+            });
+        }
+        for target_id in [None, Some("REQ-OWNER")] {
+            cells.push(CompetingCase {
+                case: case.clone(),
+                composed,
+                competitor: "none",
+                declaration: "",
+                target_id,
+                competitor_id: None,
+            });
+        }
+    }
+    cells
 }
 
 pub fn public_name(name: &str, composed: bool) -> String {
@@ -387,20 +490,24 @@ pub fn assert_ledger(body: &str, case: &Case, name: &str, annotated: bool) {
     } else {
         "（仕様全体）"
     };
-    let detail = super::findings::assert_issue(body, id, &[name]);
-    if case.result == "unknown_cti" {
-        super::findings::assert_uncertain(detail);
-    }
-    if annotated && case.label != "deadlock" {
-        assert!(
-            !super::findings::section(body, "リスク一覧（要件ID別）").contains("| （仕様全体） |"),
-            "unexpected spec-level attribution"
-        );
-    }
+    assert_attribution(body, case, name, (id != "（仕様全体）").then_some(id));
     if annotated && case.label == "deadlock" {
         assert!(
             super::findings::risk_row(body, "REQ-OWNER").contains("🟢"),
             "deadlock must not blame the blocked action"
+        );
+    }
+}
+
+pub fn assert_attribution(body: &str, case: &Case, name: &str, id: Option<&str>) {
+    let detail = super::findings::assert_issue(body, id.unwrap_or("（仕様全体）"), &[name]);
+    if case.result == "unknown_cti" {
+        super::findings::assert_uncertain(detail);
+    }
+    if id.is_some() {
+        assert!(
+            !super::findings::section(body, "リスク一覧（要件ID別）").contains("| （仕様全体） |"),
+            "unexpected spec-level attribution"
         );
     }
 }
