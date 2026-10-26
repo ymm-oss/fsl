@@ -12,3 +12,11 @@ and HTML digests (`drifted`, exit 0): review and re-approve those artifacts.
 Documents whose verification errors now prevent report generation must be fixed
 before a new artifact can be reviewed. The inline section's noninterference
 claim applies only to that section, not to these separate rendering changes.
+Verdict findings now follow their actual declaration owner, including ranked
+and bounded leadsTo, transitions, action obligations, and synthetic property checks.
+Direct ledger verification errors also precede ancillary replay/evidence errors.
+Each ledger appendix finding omits only raw top-level `cost` and `cache` execution
+metadata, preserving proof evidence and same-named domain fields. Failed-ledger
+approval was already non-reproducible for `violated` reports on main; CTI findings
+exposed the same issue. Their rendered bytes and unchanged approval round trips
+are now reproducible, while genuine reviewed-content changes still cause drift.

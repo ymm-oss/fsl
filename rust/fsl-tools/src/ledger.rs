@@ -1476,7 +1476,17 @@ pub fn render_ledger_with_approvals(
         findings
             .into_iter()
             .chain(evidence_findings)
-            .map(|finding| finding.raw)
+            .map(|finding| {
+                let mut raw = finding.raw;
+                if let Some(fields) = raw.as_object_mut() {
+                    // Same top-level-only set as approval's scenarios digest.
+                    // Proof evidence and same-named domain fields stay bound.
+                    for key in ["cost", "cache"] {
+                        fields.remove(key);
+                    }
+                }
+                raw
+            })
             .collect(),
     );
     output.push_str(&serde_json::to_string_pretty(&raw).unwrap_or_else(|_| "[]".to_owned()));
