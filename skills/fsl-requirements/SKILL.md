@@ -122,9 +122,9 @@ skill produced.
      `--property` and the like), a process transition auto-mapped to a
      same-named business action is actor-checked; a requirements transition
      whose actor differs from that business action's actor is a check-time
-      error even with covers (its text is not an actor declaration; #1441).
-      A transition with no same-named business action maps to `stutter`
-      and is not actor-checked
+     error even with covers (its text is not an actor declaration; #1441); a
+     transition with no same-named business action maps to `stutter` and is not
+     actor-checked
    - the inline block also accepts action correspondence items —
      `action impl(...) -> abs(...) | stutter` — including an arity change
      between impl and abs params, the same syntax a separate refinement file uses

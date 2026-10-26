@@ -1,5 +1,6 @@
-Changed (#1441, breaking): v5.0.0 auto mappings compare declared actors on both
-sides independently of `covers`, including fsl 4 process/business transitions,
+Changed (#1441, breaking): v5.0.0 auto mappings compare source actors on both
+sides (the `by X` label for an edition 4 process transition) independently of
+`covers`, including fsl 4 process/business transitions,
 cross-edition 4/5 pairs and typed/legacy compose pairs. Previously hidden
 mismatches now return the existing located `maps auto actor mismatch` type
 error (exit 2) in check/unscoped verify/refine and Worker; mapping-free diff

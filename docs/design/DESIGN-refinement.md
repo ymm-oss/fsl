@@ -64,8 +64,9 @@ refinement CartImplRefinesCart {
   named parameters is caught by the same `validate_expression_type` check
   every other authoring route already goes through, not duplicated here.
   Actor compatibility applies only to automatically synthesized action pairs:
-  each side uses its declared source actor when registered, regardless of
-  dialect, edition or requirement text. Actions without a registry entry
+  each side uses its source actor from the registry (the `by X` label for an
+  edition 4 process transition), regardless of dialect, edition or requirement
+  text. Actions without a registry entry
   (raw spec/compose actions and requirements action items, standalone or inside
   a requirement block) use the existing metadata `by ` prefix rule. Both actors
   must be available to compare them. Explicit action entries and `stutter` are
@@ -833,7 +834,7 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
 **v5.0.0 amendment (native Rust).** Requirement annotations and actor identity
 are distinct for registered transitions: metadata whose requirement text begins
 with `by ` (covers text and next-edition rule/decide text) cannot erase or replace a
-transition's declared actor. The private origin
+transition's source actor. The private origin
 registry records every requirements transition (process or event) and business
 transition. One per-action lookup serves both sides, including cross-edition
 4→5/5→4 and typed↔legacy compose pairs. This replaces #1438's private
@@ -896,7 +897,7 @@ expansions** below are not repository-corpus transitions. All three were measure
 twice with the same base/head binaries, `check requirements.fsl` and
 `verify requirements.fsl --depth 6 --no-cache`:
 
-| Control (both declared actors `System`) | Old / new check | Old / new verify or refine |
+| Control (both source actors `System`) | Old / new check | Old / new verify or refine |
 |---|---|---|
 | B3: impl `covers REQ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
 | B4: business `covers BIZ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
@@ -917,7 +918,7 @@ requirements action items retain their metadata-based behavior.
    Fixed for v5.0.0: fsl 4 process/business `covers`, mixed fsl 4/5 automatic
    mappings and typed/legacy compose pairs. The earliest affected release has
    not been established. fsl 4→4 without `covers` keeps its existing results.
-2. **New rejection:** previously accepted mismatched declared actors hidden by
+2. **New rejection:** previously accepted mismatched source actors hidden by
    `covers`, cross-edition or mixed-carrier lookup now receive the stable
    diagnostic above. This removes accepted source patterns even though the
    checked repository corpus has no removals.
