@@ -1,0 +1,298 @@
+// SPDX-License-Identifier: Apache-2.0
+
+#[path = "support/edition_cases.rs"]
+mod cases;
+
+use cases::{Results, Scratch, value, without_versions};
+use serde_json::{Value, json};
+
+fn run(scratch: &Scratch, template: &str) -> std::process::Output {
+    cases::invoke(
+        env!("CARGO_BIN_EXE_fslc"),
+        &template
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
+        &scratch.0,
+        true,
+    )
+}
+
+fn git(scratch: &Scratch, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Edition Test",
+            "-c",
+            "user.email=edition@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .args(args)
+        .current_dir(&scratch.0)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+fn dialect_commands(root: &std::path::Path) -> Vec<String> {
+    // All paths are real; the same-pair wrong-dialect controls in the primary
+    // adapter do not stand in for these successful dialect/sidecar executions.
+    let fixtures = root.join("rust/fslc/tests/fixtures");
+    vec![
+        format!("check {}/examples/e2e/1_business.fsl", root.display()),
+        format!("check {}/examples/e2e/2_requirements.fsl", root.display()),
+        format!(
+            "check {}/examples/ai/recursive_support_agent.fsl",
+            root.display()
+        ),
+        format!(
+            "check {}/examples/refinement_liveness/governance_preserves_progress.fsl",
+            root.display()
+        ),
+        "check compose.fsl".to_owned(),
+        format!(
+            "db check {}/examples/db/safe_add_nullable_column.fsl --depth 2",
+            root.display()
+        ),
+        format!(
+            "db observe {}/examples/db/safe_add_nullable_column.fsl --trace {}/error_envelope_empty_records.json",
+            root.display(),
+            fixtures.display()
+        ),
+        format!(
+            "compat check {}/examples/db/safe_add_nullable_column.fsl",
+            root.display()
+        ),
+        format!(
+            "ai check {}/examples/ai/refund_agent_tool_safety.fsl --depth 2",
+            root.display()
+        ),
+        format!(
+            "ai compat {}/examples/ai/refund_agent_tool_safety.fsl",
+            root.display()
+        ),
+        format!(
+            "ai replay {}/examples/ai/refund_agent_tool_safety.fsl --logs {}/error_envelope_empty_records.json",
+            root.display(),
+            fixtures.display()
+        ),
+        format!(
+            "ai eval {0}/examples/ai/support_answer_quality.fsl --property LooseQuality --records {0}/examples/ai/support_eval_v3.jsonl",
+            root.display()
+        ),
+        format!(
+            "domain replay {}/issue_518_domain_replay.fsl --logs {}/issue_518_clean.jsonl",
+            fixtures.display(),
+            fixtures.display()
+        ),
+        format!(
+            "replay {}/replay_trace.fsl --trace {}/replay_trace.valid.v1.json",
+            fixtures.display(),
+            fixtures.display()
+        ),
+        format!(
+            "causal check {}/examples/causal/incident_response.fsl",
+            root.display()
+        ),
+        format!(
+            "causal analyze {}/examples/causal/incident_response.fsl --projection causal_graph",
+            root.display()
+        ),
+        format!(
+            "causal diff {0}/examples/causal/incident_response.fsl {0}/examples/causal/incident_response.fsl",
+            root.display()
+        ),
+        format!(
+            "causal observe-expectations {0}/examples/causal/incident_response.fsl --from-log {0}/examples/causal/evidence/incident-observation-log.jsonl --mapping {0}/examples/causal/evidence/incident-log-mapping.fsl --scope {0}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json",
+            root.display()
+        ),
+    ]
+}
+
+#[test]
+fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
+    let mut results = Results::default();
+    let scratch = Scratch::new();
+    scratch.write("dep.fsl", "fsl 5\nspec Dep { state { ready: Bool = false } invariant Typed { forall i in 0..1: ready == true or ready == false } }\n");
+    scratch.write(
+        "compose.fsl",
+        "compose C { use Dep as d from \"dep.fsl\" }\n",
+    );
+    let commands = dialect_commands(&cases::root());
+    for repeat in 0..2 {
+        // Q2 is root-only: a dependency rejected on its own is deliberately
+        // still accepted through compose. This is preservation, not a detector
+        // for the separately tracked dependency-admission defect.
+        let dependency = run(&scratch, "check dep.fsl");
+        results.check(
+            &format!("preserved/dependency-scope/{repeat}"),
+            value(&dependency),
+            "standalone unsupported_in_edition",
+            dependency.status.code() == Some(2)
+                && value(&dependency)["kind"] == "unsupported_in_edition",
+        );
+        for command in &commands {
+            let output = run(&scratch, command);
+            let actual = value(&output);
+            results.check(
+                &format!("preserved/dialect/{repeat}/{command}"),
+                (output.status.code(), &actual),
+                "successful real dialect and sidecar",
+                output.status.code() == Some(0) && actual["result"] != "error",
+            );
+        }
+        let document = format!("fsl 5\n{}", cases::DOCUMENT_LEGACY);
+        let document = fslc_rust::migration::plan_migration(
+            &document,
+            "spec.fsl",
+            fsl_syntax::Edition::Fsl5,
+            &cases::gated(),
+        )
+        .unwrap()
+        .migrated_source
+        .unwrap();
+        scratch.write("spec.fsl", &document);
+        for command in [
+            "document generate spec.fsl -o document.md",
+            "document claims spec.fsl",
+            "document check spec.fsl document.md",
+        ] {
+            let output = run(&scratch, command);
+            let actual = value(&output);
+            results.check(
+                &format!("preserved/document/{repeat}/{command}"),
+                (output.status.code(), &actual),
+                0,
+                output.status.code() == Some(0),
+            );
+        }
+    }
+    results.finish();
+}
+
+#[test]
+fn approval_records_and_git_roots_refuse_before_output_writes() {
+    let mut results = Results::default();
+    let scratch = Scratch::new();
+    let rejected = format!("fsl 5\n{}", cases::WARNING_CASES[1].2);
+    let canonical = fslc_rust::migration::plan_migration(
+        &rejected,
+        "spec.fsl",
+        fsl_syntax::Edition::Fsl5,
+        &cases::gated(),
+    )
+    .unwrap()
+    .migrated_source
+    .unwrap();
+    scratch.write("spec.fsl", cases::WARNING_CASES[1].2);
+    git(&scratch, &["init", "-q"]);
+    git(&scratch, &["add", "spec.fsl"]);
+    git(&scratch, &["commit", "-qm", "canonical fixture"]);
+    let canonical_sha = git(&scratch, &["rev-parse", "HEAD"]);
+    let create = "approval create spec.fsl --kind ledger --artifact ledger.md --approver edition-test --depth 2 -o record.json";
+    for command in [
+        "ledger spec.fsl --depth 2 -o ledger.md",
+        create,
+        "approval check spec.fsl --record record.json",
+        "approval diff spec.fsl --record record.json --depth 2",
+    ] {
+        let output = run(&scratch, command);
+        let actual = value(&output);
+        results.check(
+            &format!("preserved/{command}"),
+            (output.status.code(), &actual),
+            0,
+            output.status.code() == Some(0),
+        );
+    }
+    scratch.write("spec.fsl", &rejected);
+    let oracle = without_versions(value(&run(&scratch, "check spec.fsl")));
+    for command in [
+        "approval check spec.fsl --record record.json",
+        "approval diff spec.fsl --record record.json --depth 2",
+        "approval create spec.fsl --kind ledger --artifact ledger.md --approver edition-test --depth 2 -o refused-record.json",
+    ] {
+        let output = run(&scratch, command);
+        let actual = without_versions(value(&output));
+        results.check(
+            &format!("approval/current/{command}"),
+            (output.status.code(), &actual),
+            &oracle,
+            output.status.code() == Some(2)
+                && actual == oracle
+                && !scratch.0.join("refused-record.json").exists(),
+        );
+    }
+    git(&scratch, &["add", "spec.fsl"]);
+    git(&scratch, &["commit", "-qm", "rejected edition fixture"]);
+    let rejected_sha = git(&scratch, &["rev-parse", "HEAD"]);
+    scratch.write("spec.fsl", &canonical);
+    git(&scratch, &["add", "spec.fsl"]);
+    git(&scratch, &["commit", "-qm", "canonical current fixture"]);
+    let current_sha = git(&scratch, &["rev-parse", "HEAD"]);
+    for (label, range) in [
+        ("old", format!("{rejected_sha}..{current_sha}")),
+        ("new", format!("{canonical_sha}..{rejected_sha}")),
+    ] {
+        let output = run(&scratch, &format!("diff --git {range} spec.fsl --depth 2"));
+        let actual = without_versions(value(&output));
+        results.check(
+            &format!("git/{label}"),
+            (output.status.code(), &actual),
+            "unsupported_in_edition with complete finding",
+            output.status.code() == Some(2)
+                && actual["kind"] == "unsupported_in_edition"
+                && full_materialized_finding(&actual, &rejected, &rejected_sha),
+        );
+    }
+    // A v1 record is unsigned. Its baseline model digest is unchanged by the
+    // metadata/header spelling, so rebinding to that git root is a valid input
+    // for admission priority (not a fabricated missing/invalid record).
+    let mut record: Value =
+        serde_json::from_str(&std::fs::read_to_string(scratch.0.join("record.json")).unwrap())
+            .unwrap();
+    record["spec"]["git_commit"] = json!(rejected_sha);
+    scratch.write("old-record.json", &record.to_string());
+    let output = run(
+        &scratch,
+        "approval diff spec.fsl --record old-record.json --depth 2",
+    );
+    let actual = without_versions(value(&output));
+    results.check(
+        "approval/old-root",
+        (output.status.code(), &actual),
+        "unsupported_in_edition before baseline digest/diff",
+        output.status.code() == Some(2)
+            && actual["kind"] == "unsupported_in_edition"
+            && full_materialized_finding(&actual, &rejected, &rejected_sha),
+    );
+    results.finish();
+}
+
+fn full_materialized_finding(output: &Value, source: &str, commit: &str) -> bool {
+    // The git materialization directory is allocated per invocation. Its path
+    // is ambient, not discarded: validate the live locator, then compare every
+    // diagnostic field including its exact file identity within this result.
+    let Some(path) = output
+        .pointer("/findings/0/loc/file")
+        .and_then(Value::as_str)
+    else {
+        return false;
+    };
+    let materialized = path.starts_with(cases::root().join(".codex/tmp").to_str().unwrap())
+        && path.ends_with("/spec.fsl");
+    if path != format!("{commit}:spec.fsl") && !materialized {
+        return false;
+    }
+    let findings = cases::findings(source, path, fsl_syntax::Edition::Fsl5);
+    *output
+        == json!({"fsl":"1.0","result":"error","kind":"unsupported_in_edition","edition":"next","fsl_edition":5,"findings":findings})
+}

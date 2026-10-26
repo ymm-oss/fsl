@@ -90,6 +90,97 @@ fn issue_1463_supported_forms_publish_and_clear_located_diagnostics() {
     );
 }
 
+#[path = "../../fslc/tests/support/edition_cases.rs"]
+mod edition_cases;
+
+/// Same migration cases as both primary adapters. Analysis is explicitly on:
+/// next-edition refusal must not return a model for downstream diagnostics.
+#[test]
+fn edition_findings_are_complete_utf16_warnings_or_pre_analysis_errors() {
+    let scratch = edition_cases::Scratch::new();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"))
+        .env("FSLC_UNSTABLE", "fsl5")
+        .env("FSLC_LSP_ANALYSIS_DIAGNOSTICS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 1);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let mut results = edition_cases::Results::default();
+    let mut version = 0;
+    for &(code, _, body) in edition_cases::WARNING_CASES {
+        let body = edition_cases::legacy(code, body).replace(
+            "\"abstract.fsl\"",
+            &json!(scratch.0.join("abstract.fsl")).to_string(),
+        );
+        for (header, edition, severity) in [
+            ("", fsl_syntax::Edition::Fsl4, 2),
+            ("fsl 4\n", fsl_syntax::Edition::Fsl4, 2),
+            ("fsl 5\n", fsl_syntax::Edition::Fsl5, 1),
+        ] {
+            let source = format!("{header}{body}");
+            version += 1;
+            let notification = if version == 1 {
+                json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/edition-1449.fsl","languageId":"fsl","version":version,"text":source}}})
+            } else {
+                json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///tmp/edition-1449.fsl","version":version},"contentChanges":[{"text":source}]}})
+            };
+            send(&mut stdin, &notification);
+            let actual = receive(&mut stdout);
+            let findings = edition_cases::findings(&source, "/tmp/edition-1449.fsl", edition);
+            assert!(findings.iter().any(|f| f["code"] == code));
+            let expected: Vec<_> = findings.iter().map(|finding| {
+                let edits = finding["loc"].as_object().unwrap();
+                let point = |line: &str, column: &str| {
+                    let line = usize::try_from(edits[line].as_u64().unwrap()).unwrap() - 1;
+                    let column = usize::try_from(edits[column].as_u64().unwrap()).unwrap() - 1;
+                    let text = source.lines().nth(line).unwrap();
+                    let utf16: usize = text.chars().take(column).map(char::len_utf16).sum();
+                    json!({"line":line,"character":utf16})
+                };
+                json!({"range":{"start":point("line","column"),"end":point("end_line","end_column")},"severity":severity,"code":finding["code"],"source":"fslc","message":finding["message"],"data":{"kind":"migration"}})
+            }).collect();
+            // Current may also have structural advisory diagnostics; those are
+            // preserved separately. On refusal NONE may run (whole array).
+            let diagnostics = actual["params"]["diagnostics"].as_array().unwrap();
+            let migration: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| d["data"]["kind"] == "migration")
+                .cloned()
+                .collect();
+            results.check(
+                &format!("stdio/{code}/{header:?}"),
+                (&migration, diagnostics),
+                &expected,
+                migration == expected && (severity != 1 || diagnostics == &expected),
+            );
+        }
+    }
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 2);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    );
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    results.finish();
+}
+
 fn send(stdin: &mut ChildStdin, message: &Value) {
     let body = serde_json::to_vec(message).expect("serialize LSP message");
     write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write LSP header");

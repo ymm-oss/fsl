@@ -765,6 +765,10 @@ pub fn internal_error(message: String) -> String {
 mod tests {
     include!("issue_1463_tests.rs");
     include!("issue_1463_aggregate_and_component_locations_tests.rs");
+    #[cfg(not(target_arch = "wasm32"))]
+    mod edition_acceptance {
+        include!("../tests/support/edition_adapter.rs");
+    }
 
     use std::collections::BTreeSet;
     use std::future::Future;
