@@ -1176,12 +1176,13 @@ fn command() -> Result<(Value, i32), String> {
                     options.strict,
                     options.output.as_deref(),
                 ),
-                "html" => run_html_report(
+                "html" => run_html_report_with_timing(
                     path,
                     options.depth,
                     &options.deadlock,
                     &options.engine,
                     options.output.as_deref(),
+                    options.no_timing,
                 ),
                 "ledger" => run_ledger_report(
                     &LedgerReportRequest {
@@ -12541,11 +12542,34 @@ fn run_html_report(
     engine: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
+    run_html_report_with_timing(path, depth, deadlock_mode, engine, output_path, false)
+}
+
+fn run_html_report_with_timing(
+    path: &Path,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
+) -> (Value, i32) {
     let source = match read_spec_source(path) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
+    if no_timing {
+        run_html_report_from_source_with_timing(
+            path,
+            &source,
+            depth,
+            deadlock_mode,
+            engine,
+            output_path,
+            true,
+        )
+    } else {
+        run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
+    }
 }
 
 /// Render one HTML report from one caller-owned root-source snapshot.
@@ -12560,6 +12584,26 @@ fn run_html_report_from_source(
     deadlock_mode: &str,
     engine: &str,
     output_path: Option<&Path>,
+) -> (Value, i32) {
+    run_html_report_from_source_with_timing(
+        path,
+        source,
+        depth,
+        deadlock_mode,
+        engine,
+        output_path,
+        false,
+    )
+}
+
+fn run_html_report_from_source_with_timing(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
 ) -> (Value, i32) {
     let model = match load_model_from_source(path, source) {
         Ok(model) => model,
@@ -12589,11 +12633,17 @@ fn run_html_report_from_source(
             }
         }
     }
+    let timing_free = no_timing.then(|| html_report_without_timing(&explained, &verification));
+    let (explained_view, verification_view) = timing_free
+        .as_ref()
+        .map_or((&explained, &verification), |(explained, verification)| {
+            (explained, verification)
+        });
     let html = fsl_tools::render_html_report(
         &path.display().to_string(),
         source,
-        &explained,
-        &verification,
+        explained_view,
+        verification_view,
         &fsl_tools::undecided_declarations(&model),
     );
     let (result, status) = generated_content_result(
@@ -12615,6 +12665,42 @@ fn run_html_report_from_source(
         result,
         mutate_exit_status(&verification, verification_status),
     )
+}
+
+/// Strip only known execution timings from presentation copies, never source
+/// text or same-named fields in domain state. Keep the authoritative envelopes
+/// intact for verification outcome and exit-code handling.
+fn html_report_without_timing(explained: &Value, verification: &Value) -> (Value, Value) {
+    let mut explained = explained.clone();
+    let mut verification = verification.clone();
+    if let Some(cost) = verification.get_mut("cost").and_then(Value::as_object_mut) {
+        cost.remove("elapsed_s");
+        if let Some(solver) = cost.get_mut("solver").and_then(Value::as_object_mut) {
+            solver.remove("check_elapsed_s");
+        }
+        if let Some(properties) = cost.get_mut("properties").and_then(Value::as_array_mut) {
+            for property in properties {
+                if let Some(property) = property.as_object_mut() {
+                    property.remove("elapsed_s");
+                }
+            }
+        }
+    }
+    if let Some(counterfactuals) = explained
+        .get_mut("counterfactuals")
+        .and_then(Value::as_array_mut)
+    {
+        for counterfactual in counterfactuals {
+            if let Some(cost) = counterfactual
+                .get_mut("violation")
+                .and_then(|violation| violation.get_mut("cost"))
+                .and_then(Value::as_object_mut)
+            {
+                cost.remove("elapsed_s");
+            }
+        }
+    }
+    (explained, verification)
 }
 
 fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {

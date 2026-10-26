@@ -672,7 +672,8 @@ impl MutationFamilyOptions {
 }
 
 /// `fslc testgen`, `fslc html` and `fslc ledger`, which share one option
-/// set; `--allow-unwired` is `testgen`'s and the evidence inputs `ledger`'s.
+/// set; `--allow-unwired` is `testgen`'s, `--no-timing` is `html`'s,
+/// and the evidence inputs are `ledger`'s.
 pub(crate) struct ReportOptions {
     pub(crate) path: PathBuf,
     pub(crate) depth: usize,
@@ -686,6 +687,7 @@ pub(crate) struct ReportOptions {
     pub(crate) trust_keys: Vec<PathBuf>,
     pub(crate) deadlock: String,
     pub(crate) strict: bool,
+    pub(crate) no_timing: bool,
 }
 
 impl ReportOptions {
@@ -706,6 +708,7 @@ impl ReportOptions {
             "warn".to_owned()
         };
         let mut strict = false;
+        let mut no_timing = false;
         while let Some(option) = args.next() {
             match option.as_str() {
                 "--depth" => depth = parse_depth(&mut args)?,
@@ -752,6 +755,7 @@ impl ReportOptions {
                     required_option_value(&mut args, "--trust-key")?,
                 )),
                 "--strict" => strict = true,
+                "--no-timing" if command == "html" => no_timing = true,
                 "--allow-unwired" if command == "testgen" => {
                     unwired = fsl_tools::UnwiredAdapter::Skip;
                 }
@@ -777,6 +781,7 @@ impl ReportOptions {
             trust_keys,
             deadlock,
             strict,
+            no_timing,
         })
     }
 }

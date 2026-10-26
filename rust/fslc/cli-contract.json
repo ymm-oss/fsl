@@ -1434,7 +1434,7 @@
           "html"
         ],
         "prog": "fslc html",
-        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n",
+        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--no-timing] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n  --no-timing           omit execution timing fields from HTML (stdout or file);\n                        keep timings by default\n",
         "actions": [
           {
             "dest": "help",
@@ -1496,6 +1496,16 @@
             ],
             "default": "bmc",
             "action": "store"
+          },
+          {
+            "dest": "no_timing",
+            "required": false,
+            "flags": [
+              "--no-timing"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
           }
         ],
         "commands": []

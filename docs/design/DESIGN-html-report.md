@@ -32,13 +32,26 @@ evaluator, or verifier.
 ## CLI contract
 
 ```
-fslc html spec.fsl --depth 8 -o report.html
+fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
 ```
 
 - With `-o`, writes the HTML file and prints the standard JSON envelope with
   `result:"generated"` and `kind:"html_report"`.
 - Without `-o`, writes the HTML directly to stdout, mirroring `testgen`'s
   "artifact to stdout" behavior.
+- `--no-timing` is HTML-only, defaults to false, and has no alias. It omits
+  only `verification.cost.elapsed_s`,
+  `verification.cost.solver.check_elapsed_s`,
+  `verification.cost.properties[].elapsed_s`, and
+  `explained.counterfactuals[].violation.cost.elapsed_s` from presentation
+  copies before rendering, for both stdout and `-o`/`--output` files. Source,
+  domain-state fields, counts, property identities, and other statistics remain
+  intact. The default report retains nondeterministic timings, as specified in
+  [`DESIGN-verification-cost.md`](DESIGN-verification-cost.md); ordinary verify
+  JSON, verification outcomes, and approval normalization are unchanged.
+  Timing-free reports support byte-stable comparison for the same input path,
+  source, options, and toolchain; they do not normalize different paths,
+  backends, or environments.
 - Parse/type/semantic/io errors use the existing CLI error envelope and exit-code
   convention.
 
