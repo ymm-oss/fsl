@@ -979,7 +979,7 @@ Review round 1: self-relation identity follows both conditional branches
 let aliases. A self-typed then branch cannot hide a selectable N→M branch.
 Projection equality retains the real relation error over context-needed empty
 literals and keeps the authored/precise inner origin; range bounds and terminal
-also avoid generated1:1 origins. Numeric/Set compatibility and valid verdicts
+also avoid generated 1:1 origins. Numeric/Set compatibility and valid verdicts
 are unchanged. This describes visited expression trees, not blanket helpful
 argument typing (currently action existence/arity only) or support for
 relation-valued temporary collections; both gaps remain upstream work.

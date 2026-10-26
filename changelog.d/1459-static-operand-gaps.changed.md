@@ -42,7 +42,7 @@ Review round 1 also rejects non-self selections hidden behind conditional
 then-branch inference, through nesting, old, relation add/remove receivers and
 action let aliases. Projection equality preserves substantive relation errors
 over context-needed empty literals and retains authored locations; range bounds
-and terminal no longer report generated1:1 origins for authored input. Existing
+and terminal no longer report generated 1:1 origins for authored input. Existing
 numeric/Set compatibility and valid dynamic verdicts are unchanged. The checked
 positions do not include parameter-type validation of helpful arguments, and
 this does not add relation-valued temporary collection support; those gaps are
