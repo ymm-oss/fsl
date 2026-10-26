@@ -31,9 +31,11 @@ misdescribe a blocked action as covered.
    proof that the action is permanently dead: it can disappear at K+1 when a delayed
    enabling path is reached. The existing structured `action_coverage` projection and
    this `--vacuity`-selectable warning remain distinct; neither changes assurance. Only
-   actions with an authored primary origin or a non-zero source span become public
-   findings; generated-only zero-span lowering sentinels remain visible in coverage but
-   do not produce a fabricated location or fail `--vacuity error`.
+   actions with a positive line and column in their authored primary origin, or
+   otherwise their kernel declaration span, become public findings through
+   `KernelModel::action_source_span`; generated-only zero-span lowering sentinels
+   remain visible in coverage but do not produce a fabricated location or fail
+   `--vacuity error`.
 2. **`vacuous_implication`**: the antecedent of a **user invariant** with a single `=>`
    directly under `forall*` does not become sat within depth K. The existential closure of the
    antecedent is fed to the existing `eval_expr` by wrapping the AST with

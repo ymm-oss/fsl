@@ -1,9 +1,11 @@
 Fixed (#1338): generated-only sentinel actions no longer appear as dead-action
 coverage findings in `fslc ledger`, or as uncovered badges and coverage
-denominator entries in `fslc html`. Runtime warnings, ledger, and HTML share the
-existing source-location rule through `KernelModel::action_source_span`:
+denominator entries in `fslc html`. Runtime warnings, ledger, HTML, and mutate
+dead-action notes share the existing source-location rule through
+`KernelModel::action_source_span`:
 positive authored primary-origin position, then positive kernel declaration
 position, never a name/prefix test. Authored blocked actions retain their findings.
+The current CLI mutant-enumeration path cannot encounter generated-only dead actions.
 This coverage presentation correction preserves raw coverage,
 verify/induction/Worker JSON, and HTML Raw Data;
 HTML with no eligible coverage entries shows `0/0`. Migration: corrected ledger

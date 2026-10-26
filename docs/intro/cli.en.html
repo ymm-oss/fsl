@@ -70,7 +70,8 @@ JSON error envelope and exit 2/3, before rendering or writing an artifact
 failed/unestablished verdicts still generate reports with their nonzero exit.
 Approval-only ledger rerendering for digest comparison is separate from this gate.
 `testgen` refuses a failed seam or preservation with the same verify failure
-envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
+envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
+internal error), on both kernel and fallback paths,
 and writes no harness. The same
 `2` mapping is fail-closed for `chain`&#x27;s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —

@@ -381,8 +381,9 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             "",
         ));
     }
-    // Governance lowering attaches its catalog requirement to the invariant.
-    // Read that metadata owner, not a copy of its ID or catalog text.
+    // Governance lowering creates only the catalog invariant, the sole invariant
+    // with requirement metadata. Thus the first metadata-bearing invariant owns
+    // preservations; read it rather than copying its ID or catalog text.
     let governance_requirement = model
         .invariants
         .iter()

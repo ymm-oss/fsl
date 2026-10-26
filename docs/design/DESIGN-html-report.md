@@ -46,6 +46,10 @@ fslc html spec.fsl --depth 8 -o report.html
   output-file creation. Stdout is JSON rather than HTML, and `-o` creates no
   artifact. The gate is shared with direct ledger reporting. Non-error failure
   verdicts still render a report and retain their nonzero verification exit.
+- HTML approval rerendering calls the same `run_html_report` path and therefore
+  uses this error gate too. Ledger approval-only rerendering instead calls
+  `generate_unapproved_ledger_report_from_source` and does not use the gate;
+  its digest-comparison behavior is deliberately separate.
 
 ## Report structure
 

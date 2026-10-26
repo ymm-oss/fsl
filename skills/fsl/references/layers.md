@@ -281,7 +281,8 @@ an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8 (`fslc verify`
 and `fslc scenarios` / `fslc testgen` run it too, at depth 8 whatever their `--depth`).
 On a failed seam or preservation, `testgen` returns the verify owner's failure
-envelope and exit (1, or 2 for a contract error), and writes no harness. Each result stays under
+envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
+internal error), and writes no harness. Each result stays under
 `governance.preservations[].result`; the first non-`refines` one in
 declaration order is also the command's verdict, fail-closed:
 `refinement_failed` -> `refinement_failed`, `impl_violated` (the `after` spec
