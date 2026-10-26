@@ -256,14 +256,17 @@ wrappers.
 | `fslc/src/coverage.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
 | `fslc/src/frontend_output.rs` | `declaration_keyword` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/frontend_output.rs` | `parse_ai_project` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/main.rs` | `is_causal_source` | 2 | D8 | CAUSAL_AI |
+| `fslc/src/main.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/main.rs` | `parse_ai_project` | 3 | D8 | CAUSAL_AI |
-| `fslc/src/main.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/origin_coverage.rs` | `parse_kernel_source_with_file` | 1 | Definition | FIXTURE |
 | `fslc/src/source_diagnostic.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/source_diagnostic.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/verification.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/verification.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
+
+The #1417 baseline adapter removes the duplicate causal preparse from `main.rs`;
+baseline verification now reaches the existing `verification.rs` entries above.
+The remaining `main.rs` causal-source check belongs to command dispatch.
 
 Routed at S0 (receive the process's options): every document parse in the
 native CLI's own modules (`main.rs` 15 sites, `causal.rs` 1, `verification.rs`

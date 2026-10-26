@@ -1162,6 +1162,19 @@ inline seam を仕様全体の所見としても載せます。無関係な要�
 witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
 artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
 digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
+native の完全な検証を行うすべての呼び出し元は、検証段の一つの持ち主を共有します。
+baseline の adapter は cache を無効にし、既定の vacuity 警告を保ちます。
+直接の report は、描画用 model の読み込みや trace 契約の取り出しより先に検証し、error を確認します。
+そのため壊れた causal 構文は `FSL-DIALECT-UNKNOWN` でなく `FSL-PARSE` と parser の位置を、
+Agent 入力は state 不在の semantics error でなく parse の拒否を保持します。未知の DB column は
+生成名の位置付きエラーでなく位置のない特化エラーを保持し、AI authority の未知の tool は
+panic(exit 101)でなく semantics error(exit 2)になります。
+通る report、warning、metadata と承認 artifact の digest は変わりません。
+この error の訂正は直接の `ledger` と `html` の報告だけが対象です。
+`approval create --kind ledger|html`、`approval check`、`approval diff` と
+`counterexample export` は今も検証や再描画より先に spec を lower するため、不正入力の error の
+優先順と AI authority の未知の tool による panic(exit 101)は変わりません。
+panic は #1464、approval create の diagnostic の優先順は別の issue で扱います。
 `testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
 `verify` と同じ失敗封筒と exit(検証の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
 ハーネスを書きません。同じ `2` の

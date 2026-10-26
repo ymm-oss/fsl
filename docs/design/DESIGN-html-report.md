@@ -71,10 +71,29 @@ fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
   output-file creation. Stdout is JSON rather than HTML, and `-o` creates no
   artifact. The gate is shared with direct ledger reporting. Non-error failure
   verdicts still render a report and retain their nonzero verification exit.
-- HTML approval rerendering calls the same `run_html_report` path and therefore
-  uses this error gate too. Ledger approval-only rerendering instead calls
+- Before HTML approval rerendering, `approval create` loads its model and
+  `approval check` / `approval diff` lower the spec for its digest. Those preloads
+  process invalid input before `run_html_report`'s error gate, so approvals do not
+  receive the direct-report error-precedence correction. Ledger approval-only rerendering calls
   `generate_unapproved_ledger_report_from_source` and does not use the gate;
   its digest-comparison behavior is deliberately separate.
+
+### Shared verification and error precedence (#1417)
+
+Direct HTML runs the shared native source verification pipeline and its error gate before
+loading the presentation model or running explain. The baseline adapter disables
+caching and uses the default vacuity policy; it no longer owns a second stage list.
+Invalid causal, Agent, DB-column and AI-tool inputs therefore retain verification's
+classified error rather than an earlier presentation-lowering diagnostic or panic.
+The complete field/exit correction inventory and ledger approval-only distinction
+are recorded in `docs/design/DESIGN-ledger.md`, amendment #1417. Passing HTML,
+warnings, metadata and timing-normalized approval target digests are unchanged.
+The invalid-input corrections apply only to direct ledger/HTML reports.
+`approval create --kind ledger|html`, `approval check`, `approval diff`, and
+`counterexample export` still lower the spec before verification or rerendering,
+retaining their old error precedence and unknown-AI-tool panic/exit 101.
+The panics are tracked in #1464; approval create's diagnostic precedence is a
+separate issue.
 
 ## Report structure
 

@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use fsl_core::{
     Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement,
-    ModelWarningContext, ParamDef, TypeDef, TypeRef, finalize_envelope_model_warnings,
-    finalize_model_warnings, insert_requirement_metadata, model_warnings, requirement_metadata,
+    ModelWarningContext, ParamDef, TypeDef, TypeRef, finalize_model_warnings,
+    insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{
@@ -63,14 +63,10 @@ use refinement::{
 use spec_loading::{
     load_kernel_model_from_source, load_model, load_model_from_source, load_model_scoped,
     load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
-    validate_requirement_trace_source, validate_specialized_document_from_source,
+    validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
-use verification::{
-    BmcRequest, DeadlockMode, ExplicitRequest, InductionRequest, ModelSelection,
-    VerificationEngine, run_auto_filtered, run_bmc_filtered, run_explicit_filtered,
-    run_induction_filtered, run_verify_cli, run_verify_cli_from_source,
-};
+use verification::{run_verify_cli, run_verify_cli_from_source};
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 
@@ -12761,10 +12757,6 @@ fn run_html_report_from_source_with_timing(
     output_path: Option<&Path>,
     no_timing: bool,
 ) -> (Value, i32) {
-    let model = match load_model_from_source(path, source) {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
     let (verification, verification_status) = run_verify_from_source(
         path,
         source,
@@ -12777,6 +12769,10 @@ fn run_html_report_from_source_with_timing(
     if let Some(error) = report_verification_error(&verification, verification_status) {
         return error;
     }
+    let model = match load_model_from_source(path, source) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
     let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
     if explain_status != 0 {
         return (explained, explain_status);
@@ -13502,13 +13498,6 @@ fn prepare_ledger_report_from_source(
     source: &str,
     direct_report: bool,
 ) -> Result<PreparedLedgerReport, (Value, i32)> {
-    let model = match load_model_from_source(request.path, source) {
-        Ok(model) => model,
-        Err(error) => return Err((spec_load_error_output(&error), 2)),
-    };
-    // A ledger row per acceptance / forbidden case is a claim about that case,
-    // so a spec whose traces the gate refuses gets no ledger (#1243).
-    let trace_contract = require_trace_gate(source, &model).map_err(|error| (error, 2))?;
     let (verification, verification_status) = run_verify_from_source(
         request.path,
         source,
@@ -13525,6 +13514,13 @@ fn prepare_ledger_report_from_source(
     {
         return Err(error);
     }
+    let model = match load_model_from_source(request.path, source) {
+        Ok(model) => model,
+        Err(error) => return Err((spec_load_error_output(&error), 2)),
+    };
+    // A ledger row per acceptance / forbidden case is a claim about that case,
+    // so a spec whose traces the gate refuses gets no ledger (#1243).
+    let trace_contract = require_trace_gate(source, &model).map_err(|error| (error, 2))?;
     let replay = match request.impl_log {
         Some(trace) => {
             let (detail, status) = run_replay_from_source(request.path, source, trace);
@@ -17129,7 +17125,8 @@ fn run_verify(
 /// The specialized validation, Kernel/model lowering, requirements metadata,
 /// and selected verification engine all derive from `source`. Dependency files
 /// loaded by `FsResolver` deliberately retain their independent read semantics.
-#[allow(clippy::too_many_lines)]
+/// The shared CLI pipeline owns the stages; baseline callers disable caching
+/// and retain the default `warn` vacuity policy, including its probe (#729).
 fn run_verify_from_source(
     path: &Path,
     source: &str,
@@ -17139,142 +17136,16 @@ fn run_verify_from_source(
     explicit_budget: usize,
     k_ind: usize,
 ) -> (Value, i32) {
-    // Causal sources deliberately sit outside `parse_document`'s dialect
-    // registry.  Classify their syntax failure with their own parser before
-    // the generic dispatcher would report the unrelated unknown-dialect
-    // diagnostic.  A valid causal source keeps the existing verify behavior.
-    if fsl_syntax::is_causal_source(source)
-        && let Err(error) = fsl_syntax::parse_causal(source)
-    {
-        return causal::causal_parse_error_output(&error, false);
-    }
-    match fsl_syntax::parse_document_with(
-        fsl_syntax::SourceFile::new(source),
-        crate::parse_options(),
-    ) {
-        Err(error) => return (surface_parse_error_output(&error), 2),
-        Ok(fsl_syntax::ParsedDocument {
-            surface: fsl_syntax::SurfaceDocument::Agent(_),
-            ..
-        }) => {
-            return (
-                error_output(
-                    "parse",
-                    "agent documents cannot be verified as Kernel specs",
-                ),
-                2,
-            );
-        }
-        Ok(_) => {}
-    }
-    if let Err(error) = validate_specialized_document_from_source(path, source) {
-        return (semantic_error_output(&error), 2);
-    }
-    // Preserve the established precedence of usage diagnostics over a Kernel
-    // load failure: the former path-based implementation reached engine
-    // selection before its engine loaded the model. Keep the error deferred,
-    // but never re-read `path` to obtain it.
-    let loaded_model = load_kernel_model_from_source(path, source);
-    let (implements, compose_warnings) = match &loaded_model {
-        Ok((kernel, model)) => {
-            if let Err(refusal) = require_trace_gate(source, model) {
-                return (refusal, 2);
-            }
-            let implements = match implements_result_from_source(path, source, model, depth) {
-                Ok(implements) => implements,
-                Err(error) => return (implements_error_output(&error), 2),
-            };
-            (implements, kernel.diagnostics().to_vec())
-        }
-        Err(_) => (None, Vec::new()),
+    let options = CliVerifyOptions {
+        depth,
+        deadlock: deadlock_mode.to_owned(),
+        engine: engine.to_owned(),
+        explicit_budget,
+        k_ind,
+        use_cache: false,
+        ..CliVerifyOptions::default()
     };
-    let deadlock = match DeadlockMode::parse(deadlock_mode) {
-        Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
-    };
-    let engine = match VerificationEngine::parse(engine) {
-        Ok(engine) => engine,
-        Err(error) => return (error_output("usage", &error), 2),
-    };
-    let (_, model) = match loaded_model {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let selection = ModelSelection {
-        path,
-        model: Some(&model),
-        scope: None,
-        property: None,
-        excluded: &[],
-    };
-    // This is the `ledger`/`html`/`mutate` baseline (`run_verify` has no
-    // `--vacuity` option at all): per the invariant recorded on
-    // `BmcOutputOptions::skip_vacuity_probe` (issue #729), it must always
-    // compute the reachability probe.
-    let skip_vacuity_probe = false;
-    let (mut output, status) = match engine {
-        VerificationEngine::Bmc => run_bmc_filtered(BmcRequest {
-            selection,
-            depth,
-            deadlock,
-            initial_state: None,
-            skip_vacuity_probe,
-        }),
-        VerificationEngine::Induction => run_induction_filtered(InductionRequest {
-            selection,
-            depth,
-            deadlock,
-            k: k_ind,
-            auxiliary: &[],
-            skip_vacuity_probe,
-        }),
-        VerificationEngine::Explicit => run_explicit_filtered(ExplicitRequest {
-            selection,
-            depth,
-            deadlock,
-            budget: explicit_budget,
-            skip_vacuity_probe,
-        }),
-        VerificationEngine::Auto => run_auto_filtered(ExplicitRequest {
-            selection,
-            depth,
-            deadlock,
-            budget: explicit_budget,
-            skip_vacuity_probe,
-        }),
-    };
-    if let Value::Object(envelope) = &mut output
-        && envelope.get("result").and_then(Value::as_str) != Some("error")
-        && !compose_warnings.is_empty()
-        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
-    {
-        // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed
-        // while lowering, before the checked KernelModel drops the per-
-        // component information that produced them, so they cannot be
-        // recovered from `model`/`fsl_runtime::verification_warnings` alone.
-        warnings.splice(0..0, compose_warnings);
-    }
-    let mut implements_exit = None;
-    if let Value::Object(envelope) = &mut output
-        && envelope.get("result").and_then(Value::as_str) != Some("error")
-        && let Some(implements) = implements
-    {
-        implements_exit =
-            fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
-    }
-    if let Ok(ctx) = ModelWarningContext::from_source(&model, source, crate::parse_options()) {
-        finalize_envelope_model_warnings(&mut output, &ctx);
-    }
-    let status = implements_exit.unwrap_or(status);
-    // The `ledger`/`html`/`mutate` baseline folds a failed governance
-    // preservation exactly as `check` and `verify` do (issue #1303).
-    match fold_governance_from_source(path, source, &mut output) {
-        Ok(folded) => {
-            let status = folded.unwrap_or(status);
-            (output, status)
-        }
-        Err(error) => error,
-    }
+    run_verify_cli_from_source(path, path, source, &options)
 }
 
 fn bindings_json(bindings: &[std::collections::BTreeMap<String, FslValue>]) -> Value {
@@ -17679,6 +17550,7 @@ mod exit_status_tests {
     use super::*;
     use crate::property_selection::apply_vacuity_mode;
     use crate::refinement::preservation_refine_result;
+    use crate::spec_loading::validate_specialized_document_from_source;
 
     #[test]
     fn approval_ledger_rerender_bypasses_only_the_direct_verification_error_gate() {

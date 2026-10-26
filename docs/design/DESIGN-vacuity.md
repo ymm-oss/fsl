@@ -157,10 +157,9 @@ silently reusing the closed-search verdict.
   audit (issue #729) found exactly one product call site that ever applies a
   vacuity mode (`rust/fslc/src/verification.rs`'s `execute_cli_verification`,
   reached by both the `verify` and `sweep` CLI commands — `sweep` funnels
-  through the same `run_verify_cli`); `ledger`/`html`/`mutate` share a
-  mode-less baseline (`rust/fslc/src/main.rs`'s `run_verify`, whose signature
-  has no vacuity parameter at all) and the wasm Worker request surface has no
-  `--vacuity` option either. So `skip_vacuity_probe`
+  through the same `run_verify_cli`); no-cache baseline adapters reach this
+  same owner with the default `warn` policy, preserving the probe. The wasm
+  Worker request surface has no `--vacuity` option. So `skip_vacuity_probe`
   (`BmcOutputOptions`/`BmcRequest`/`InductionRequest`/`ExplicitRequest` in
   `rust/fslc/src/verification*.rs`) is an explicit argument threaded only
   from that one derivation point (`options.vacuity == "ignore"`, plus its

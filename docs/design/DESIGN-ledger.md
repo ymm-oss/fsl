@@ -166,6 +166,43 @@ its existing digest-comparison behavior and does not use this direct-report gate
 Its ancillary-input errors retain their existing handling. For non-error
 verification results, direct ledger also retains those ancillary-input errors.
 
+### Amendment: one native verification pipeline (#1417)
+
+`run_verify_from_source` is a no-cache/default-policy adapter to
+`verification.rs::run_verify_cli_from_source`, not a second enumeration of
+verification stages. The caller supplies the captured source and depth, deadlock,
+engine, explicit budget and induction k; the default vacuity probe remains enabled.
+The shared owner retains governance folding outside the verification cache.
+Verify dispatch metadata and edition handling remain caller-owned.
+
+Both direct ledger and HTML run verification and the existing error gate **before**
+presentation-model loading; ledger extracts its checked trace contract afterwards.
+No error conversion, panic catch, duplicate fold or second verification is added.
+Approval-only ledger rerendering still bypasses the direct-report gate and retains
+ancillary-input handling. Non-error verdicts retain their existing reports/exits.
+
+The only public error corrections are in direct ledger/HTML reports on invalid inputs:
+
+| Input | Previous report output | Shared verification output |
+|---|---|---|
+| Broken causal syntax | `FSL-DIALECT-UNKNOWN`, generic message, location 3:1 and `supported_dialects` | `FSL-PARSE`, causal parser message, location 4:3, no `supported_dialects` (regression fixture) |
+| Agent document | semantics error, missing state | parse error, Agent verification refusal; no location |
+| Unknown DB column | generated-name Kernel type message and location 12:5 | specialized unknown-column message, no location (regression fixture) |
+| Unknown AI authority tool | panic, empty stdout, exit 101 | JSON semantics error naming the unknown tool, exit 2 |
+
+The first three retain exit 2. Passing artifacts, warning lists, metadata,
+projection shapes and approval target digests do not change. The regression
+`rust/fslc/tests/issue_1417_verify_pipeline_routes.rs` enumerates all eight native
+routes with applicable dialects, rejecting report controls and passing/failing
+seam, governance, trace, vacuity and specialized-projection preservation controls.
+Lower-only scenarios/explain/testgen preflight and the async Worker pipeline are
+outside this consolidation; it does not claim those paths share native stages.
+`approval create --kind ledger|html`, `approval check`, `approval diff`, and
+`counterexample export` still lower the spec before verification or rerendering.
+Their invalid-input precedence and unknown-AI-tool panic/exit 101 are unchanged.
+The panics are tracked in #1464; approval create's diagnostic precedence is a
+separate issue.
+
 ## Column → source map
 
 Most columns are derived from fields the JSON already carries (issue #23):

@@ -512,6 +512,19 @@ direct ledger stops before ancillary replay, evidence loading, and witness prepa
 unestablished verdicts still render reports with nonzero exit. Approval-only
 ledger rerendering for digest comparison does not use this direct-report gate;
 its artifact bytes can still change with the new findings and coverage rendering.
+All native full-verification callers share one stage owner; baseline adapters
+disable caching and retain default vacuity warnings. For direct reports,
+verification/error checking precedes presentation-model loading
+and trace-contract extraction: broken causal syntax keeps its parser diagnostic,
+Agent input keeps its parse refusal, unknown DB columns keep the specialized
+error without a generated-name location, and unknown AI authority tools produce
+JSON semantics errors (exit 2), not panics. Passing report artifacts, warnings,
+metadata and approval target digests are unchanged by this consolidation (#1417).
+Only direct ledger/HTML error precedence is corrected. `approval create --kind ledger|html`,
+`approval check`, `approval diff`, and `counterexample export` still lower the spec
+before verification or rerendering, retaining their old invalid-input precedence
+and unknown-AI-tool panic/exit 101. The panics are tracked in #1464;
+approval create's diagnostic precedence is a separate issue.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a

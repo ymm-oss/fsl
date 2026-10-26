@@ -107,9 +107,9 @@ pub struct BmcOutputOptions<'a> {
     ///
     /// INVARIANT: only the `verify`/`sweep` CLI option parsing for
     /// `--vacuity ignore` (`rust/fslc/src/verification.rs`'s
-    /// `execute_cli_verification`) may set this `true`. Every other
-    /// caller -- the `ledger`/`html`/`mutate` baseline (`run_verify`), the
-    /// wasm Worker surface (which has no `--vacuity` option at all),
+    /// `execute_cli_verification`) may set this `true`. No-cache baseline
+    /// adapters reach that owner with the default `warn` policy. Other
+    /// callers -- the wasm Worker (which has no `--vacuity` option),
     /// induction's internal BMC base pass, and tests -- must pass `false`
     /// so the probe always runs and `--vacuity error` never silently loses
     /// evidence it would otherwise catch.
