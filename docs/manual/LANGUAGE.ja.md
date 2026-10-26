@@ -1145,11 +1145,13 @@ governance とリスク一覧より前の `## inline implements` 節に畳み込
 描画 digest が変わり、`approval check` で `drifted`(exit 0)になります。節を確認して再承認してください。
 ledger のリスク一覧には、非 `refines` の preservation をそれぞれ `GOV` の所見、非 `refines` の
 inline seam を仕様全体の所見としても載せます。無関係な要件行は自身の状態を保ちます。
-`unknown_cti` は通常の違反と同じ metadata/property の規則で帰属する帰納証明の未確立所見であり、
+`unknown_cti` は通常の違反と同じ宣言の持ち主の規則
+([ledger amendment](../design/DESIGN-ledger.md#amendment-to-1316-verdict-findings-1338-decision-2026-10-26))で帰属する帰納証明の未確立所見であり、
 到達可能な反例ではありません。生の CTI、hint、rank_failure の証跡を保持します。
-この所見追加も、対象 ledger の承認 digest を変えるため再承認が必要です。
+所見の追加と帰属の訂正も、対象 ledger の承認 digest を変えるため再承認が必要です。
 直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を
-返し、描画も artifact の書き込みもしません(`html` は explain より前に止まります)。`-o` でも
+返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
+witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
 artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
 digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
 `testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には

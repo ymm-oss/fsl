@@ -1272,11 +1272,14 @@ documents without <code>implements</code>. Previously approved inline-implements
 The ledger risk table also records each non-<code>refines</code> preservation as a <code>GOV</code>
 finding and a non-<code>refines</code> inline seam as a spec-level finding. Unrelated
 requirement rows keep their own status. <code>unknown_cti</code> is an unestablished
-induction finding, attributed by the ordinary violation metadata/property
-lookup, not a reachable counterexample; raw CTI, hint, and rank-failure evidence
-is preserved. These added findings also change affected ledger approval digests.
+induction finding, attributed by the same declaration-owner rule as ordinary
+violations (see <a href="../design/DESIGN-ledger.md#amendment-to-1316-verdict-findings-1338-decision-2026-10-26">the ledger amendment</a>),
+not a reachable counterexample; raw CTI, hint, and rank-failure evidence is
+preserved. Added findings and corrected attribution also change affected ledger
+approval digests.
 Direct <code>ledger</code> and <code>html</code> return verification <code>result:"error"</code> as the original
-JSON error envelope and exit 2/3, before rendering or writing an artifact
+JSON error envelope and exit 2/3, before rendering or writing an artifact;
+direct <code>ledger</code> stops before ancillary replay, evidence loading, and witness preparation
 (<code>html</code> also stops before explain). With <code>-o</code>, no artifact is created. Other
 failed/unestablished verdicts still generate reports with their nonzero exit.
 Approval-only ledger rerendering for digest comparison is separate from this gate.

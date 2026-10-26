@@ -124,41 +124,71 @@ fn requirement(value: &Value) -> (Option<String>, Option<String>) {
 }
 
 fn metadata_for(model: &KernelModel, group: &str, name: &str) -> Option<RequirementLink> {
-    let annotations = match group {
-        "invariants" => model
-            .invariants
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "transitions" => model
-            .transitions
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "reachables" => model
-            .reachables
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "leadstos" => model
-            .leadstos
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "actions" => model
-            .actions
-            .iter()
-            .find(|action| action.name == name)
-            .map(|action| &action.annotations),
-        _ => None,
+    let declarations: Vec<_> = model
+        .invariants
+        .iter()
+        .map(|item| ("invariants", &item.name, &item.annotations))
+        .chain(
+            model
+                .transitions
+                .iter()
+                .map(|item| ("transitions", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .reachables
+                .iter()
+                .map(|item| ("reachables", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .leadstos
+                .iter()
+                .map(|item| ("leadstos", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .actions
+                .iter()
+                .map(|item| ("actions", &item.name, &item.annotations)),
+        )
+        .filter(|(kind, _, _)| *kind == group || group == "properties" && *kind != "actions")
+        .collect();
+    let synthetic = (group == "properties")
+        .then(|| SyntheticName::parse_internal(name))
+        .flatten();
+    let candidates: Vec<_> = declarations
+        .iter()
+        .map(|(_, name, _)| match synthetic {
+            Some(SyntheticName::PartialProperty { .. }) => {
+                SyntheticName::PartialProperty { property: name }.internal()
+            }
+            Some(SyntheticName::KeyDomainProperty { .. }) => {
+                SyntheticName::KeyDomainProperty { property: name }.internal()
+            }
+            _ => (*name).clone(),
+        })
+        .collect();
+    let names = candidates.iter().map(String::as_str);
+    let resolved = if group == "actions" {
+        model.names().resolve_action(name, names)
+    } else if matches!(
+        synthetic,
+        Some(SyntheticName::PartialProperty { .. } | SyntheticName::KeyDomainProperty { .. })
+    ) {
+        model.names().resolve_synthetic(name, names)
+    } else {
+        model.names().resolve_property(name, names)
     };
-    annotations.and_then(|annotations| {
-        annotations
-            .requirements()
-            .expect("checked model annotations are valid")
-            .into_iter()
-            .next()
-    })
+    // Missing and ambiguous identities stay spec-level; never choose a candidate.
+    let owner = resolved.ok()??;
+    let index = candidates.iter().position(|candidate| candidate == owner)?;
+    declarations[index]
+        .2
+        .requirements()
+        .expect("checked model annotations are valid")
+        .into_iter()
+        .next()
 }
 
 fn finding_requirement(
@@ -173,6 +203,55 @@ fn finding_requirement(
     }
     metadata_for(model, group, name)
         .map_or((None, None), |metadata| (Some(metadata.id), metadata.text))
+}
+
+fn generated_identity<'a>(value: &'a Value, name: &'a str) -> &'a str {
+    value
+        .get("generated_name")
+        .and_then(Value::as_str)
+        .unwrap_or(name)
+}
+
+fn verdict_requirement(
+    model: &KernelModel,
+    value: &Value,
+    name: &str,
+) -> (Option<String>, Option<String>) {
+    // Historical `invariant` fields also carry transition, liveness and action
+    // obligations. Classify the producer's obligation before resolving identity.
+    let (group, owner) = match value.get("violation_kind").and_then(Value::as_str) {
+        Some("deadlock") => ("", value),
+        Some("leadsTo" | "leadsTo_rank") => ("leadstos", value),
+        Some("trans") => ("transitions", value),
+        _ if value.get("trans").is_some() => ("transitions", value),
+        _ if value.get("leadsTo").is_some() => ("leadstos", value),
+        Some("partial_op" | "key_domain") => {
+            match SyntheticName::parse_internal(generated_identity(value, name)) {
+                Some(
+                    SyntheticName::PartialProperty { .. } | SyntheticName::KeyDomainProperty { .. },
+                ) => ("properties", value),
+                Some(
+                    SyntheticName::PartialAction { .. } | SyntheticName::KeyDomainAction { .. },
+                ) => ("actions", &value["last_action"]),
+                _ => ("", value),
+            }
+        }
+        Some("ensures" | "type_bound") => ("actions", &value["last_action"]),
+        _ => ("invariants", value),
+    };
+    finding_requirement(
+        model,
+        value,
+        group,
+        generated_identity(
+            owner,
+            if group == "actions" {
+                owner["name"].as_str().unwrap_or("")
+            } else {
+                name
+            },
+        ),
+    )
 }
 
 fn summarize_violation(value: &Value) -> String {
@@ -222,38 +301,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .or_else(|| verification.get("name"))
             .and_then(Value::as_str)
             .unwrap_or("");
-        // Historical `invariant` fields also carry transition, liveness and
-        // action obligations. Resolve the declaration, not the field spelling.
-        let last_action = verification["last_action"]["name"].as_str().unwrap_or("");
-        let (group, owner) = match verification.get("violation_kind").and_then(Value::as_str) {
-            Some("deadlock") => ("", ""),
-            Some("leadsTo" | "leadsTo_rank") => ("leadstos", name),
-            Some("trans") => ("transitions", name),
-            _ if verification.get("trans").is_some() => ("transitions", name),
-            _ if verification.get("leadsTo").is_some() => ("leadstos", name),
-            Some("partial_op" | "key_domain") => match SyntheticName::parse_internal(name) {
-                Some(
-                    SyntheticName::PartialProperty { property }
-                    | SyntheticName::KeyDomainProperty { property },
-                ) => {
-                    let group = if model.transitions.iter().any(|item| item.name == property) {
-                        "transitions"
-                    } else if model.leadstos.iter().any(|item| item.name == property) {
-                        "leadstos"
-                    } else {
-                        "invariants"
-                    };
-                    (group, property)
-                }
-                Some(
-                    SyntheticName::PartialAction { .. } | SyntheticName::KeyDomainAction { .. },
-                ) => ("actions", last_action),
-                _ => ("", ""),
-            },
-            Some("ensures" | "type_bound") => ("actions", last_action),
-            _ => ("invariants", name),
-        };
-        let metadata = finding_requirement(model, verification, group, owner);
+        let metadata = verdict_requirement(model, verification, name);
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
@@ -287,7 +335,8 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .flatten()
         {
             let name = item.get("name").and_then(Value::as_str).unwrap_or("");
-            let metadata = finding_requirement(model, item, "reachables", name);
+            let metadata =
+                finding_requirement(model, item, "reachables", generated_identity(item, name));
             let mut summary = match item.get("classification").and_then(Value::as_str) {
                 Some("insufficient_depth") => format!(
                     "深さ {} までに到達 trace なし（より深い探索が必要かもしれない）",
@@ -384,10 +433,13 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
     // Governance lowering creates only the catalog invariant, the sole invariant
     // with requirement metadata. Thus the first metadata-bearing invariant owns
     // preservations; read it rather than copying its ID or catalog text.
-    let governance_requirement = model
-        .invariants
-        .iter()
-        .find_map(|property| metadata_for(model, "invariants", &property.name));
+    let governance_requirement = model.invariants.iter().find_map(|property| {
+        metadata_for(
+            model,
+            "invariants",
+            model.names().public_property(&property.name).as_str(),
+        )
+    });
     for preservation in verification["governance"]["preservations"]
         .as_array()
         .into_iter()
@@ -417,7 +469,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         if item.get("covered").and_then(Value::as_bool) != Some(false) {
             continue;
         }
-        let metadata = finding_requirement(model, item, "actions", &name);
+        let metadata = finding_requirement(model, item, "actions", generated_identity(item, &name));
         let mut summary = "深さ内で一度も実行可能にならない（死アクション）".to_owned();
         if let Some(blocking) = item
             .get("blocking_requires")
@@ -1499,6 +1551,53 @@ mod requirement_owner_tests {
     use super::*;
     use fsl_core::{FsResolver, build_model, parse_kernel_source};
     use serde_json::json;
+
+    #[test]
+    fn ambiguous_declaration_names_do_not_guess_requirement_metadata() {
+        let mut model = build_model(
+            parse_kernel_source(
+                r#"spec Ambiguity { state { x: Int } init { x = 0 }
+                @requirement("OWNER") action left() { x = x + 1 }
+                @requirement("OTHER") action right() { x = x - 1 }
+                @requirement("OWNER") invariant Left { x >= 0 }
+                @requirement("OTHER") invariant Right { x <= 10 } }"#,
+                &FsResolver::new("."),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // Deliberately artificial collisions, not a claim about accepted syntax.
+        // Exercise the resolver's all-candidates error for each lookup family.
+        for (index, spelling) in ["step__b1", "step.b1"].into_iter().enumerate() {
+            model.actions[index].name = spelling.to_owned();
+            model.invariants[index].name = spelling.to_owned();
+        }
+        assert!(metadata_for(&model, "actions", "step.b1").is_none());
+        assert!(metadata_for(&model, "invariants", "step.b1").is_none());
+        for synthetic in [
+            SyntheticName::PartialProperty {
+                property: "step__b1",
+            },
+            SyntheticName::KeyDomainProperty {
+                property: "step__b1",
+            },
+        ] {
+            let name = model.names().public_synthetic(&synthetic);
+            assert!(metadata_for(&model, "properties", name.as_str()).is_none());
+        }
+        let value = json!({"result":"unknown_cti", "violation_kind":"ensures",
+            "last_action":{"name":"step.b1"}});
+        assert_eq!(verdict_requirement(&model, &value, "step.b1"), (None, None));
+        let mut explicit = value;
+        explicit["requirement"] = json!({"id":"EXPLICIT", "text":"producer-owned"});
+        assert_eq!(
+            verdict_requirement(&model, &explicit, "step.b1"),
+            (
+                Some("EXPLICIT".to_owned()),
+                Some("producer-owned".to_owned())
+            )
+        );
+    }
 
     #[test]
     fn preservation_finding_reads_both_catalog_requirement_fields_from_model() {
