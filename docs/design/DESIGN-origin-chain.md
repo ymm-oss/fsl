@@ -36,13 +36,17 @@ init statements, actions, action guards/statements, properties, and terminal.
 The same identity bound to multiple targets represents one-to-many lowering.
 Secondary sites represent many-to-one lowering. `primary: None` represents a
 generated-only/source-less node; the implementation does not invent a location.
-The registry also carries source actors as strings for all requirements
-transition (process/event) and business transition action targets, read by
+The registry also carries source actors for all requirements
+transition (process/event), business transition and requirement-action targets, read by
 refinement's automatic actor correspondence check. For an edition 4 process
 transition, the source actor is the `by X` label, not a reference to an actor
-declaration. Actions without a registry
-entry (raw spec/compose actions and requirements action items) retain the
-existing metadata `by ` rule (#1441).
+declaration. Requirement actions (inside a block or standalone, including generated
+branches) register their own metadata's existing `by ` actor, or register absence
+when that prefix has no nonempty actor. The private map stores `Option<String>`
+values: registered absence stops lookup; it must not descend into enclosing
+requirement prose or typed `@requirement` text. Only actions without a registry
+entry (raw spec/compose actions) retain the existing metadata `by ` rule
+(#1441, #1456). Public metadata priority and Kernel v1/v2 projections are unchanged.
 
 Requirement traceability is stored independently in `TraceabilityRegistry`.
 It may refer to the same semantic target without becoming part of the origin

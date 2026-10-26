@@ -6,7 +6,7 @@ mismatches now return the existing located `maps auto actor mismatch` type
 error (exit 2) in check/unscoped verify/refine and Worker; mapping-free diff
 instead reports unknown/automatic_mapping_failed within semantic_diff/exit 0.
 Explicit action correspondences, metadata rules for unregistered actions
-(raw spec/compose actions and requirements action items), and public
+(raw spec/compose actions), and public
 Kernel/JSON schemas are unchanged. The complete four-cell `fslc check` sweep at
 base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and head
 `9ca8630c7f45f1def54c056bf53a852853c7a60c` (579 base / 591 head forms in their

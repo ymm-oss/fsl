@@ -2474,13 +2474,15 @@ verify {
   twice). Whenever the seam is evaluated, auto-mapped process transitions and
   events compare the declared source actors on both sides, regardless of edition (4/5) or `covers` on
   either side, including prose beginning `by `. A registered actor takes
-  precedence over metadata. Actions without a registry entry (raw spec/compose
-  actions and requirements action items, standalone or inside a requirement
-  block) use the existing metadata rule (`by` followed by a space and a
-  nonempty actor). When both actors are available,
+  precedence over metadata. Requirement actions, standalone or inside a block,
+  register only their own metadata's actor (`by` followed by a space and a
+  nonempty trimmed actor), including every generated branch. No annotation,
+  non-`by` text or an empty actor registers absence: neither enclosing prose nor
+  typed `@requirement` text can supply an actor. Only unregistered raw spec/compose
+  actions retain the existing metadata rule. When both actors are available,
   a mismatch is `error` / `kind: "type"`, exit 2, with
   `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
-  at the `implements` or standalone `maps auto` correspondence. The same rule
+  at the implicit `implements` or explicit `maps auto` correspondence. The same rule
   applies in unscoped `verify`, standalone `refine` and Worker; explicit action
   correspondences and `stutter` are not actor-checked. Selected `verify` still
   does not evaluate the seam. Without a supplied mapping, `diff` reports an
@@ -2504,6 +2506,21 @@ verify {
   “#1441: source-actor auto mapping and breaking-source migration”,
   for commands, measured evidence, gate policy and manual correction; no general
   automatic semantics-preserving migration exists. LSP delivery is not promised.
+  **v5.0.0 breaking source change (#1456):** requirement actions whose own actor
+  mismatch was hidden by block text are rejected, including standalone auto maps
+  of generated branches. Explicit action entries, inline branch maps and stutter
+  remain exempt. Conversely, matching or absent own actors falsely rejected by
+  block prose are intentionally accepted; typed requirement text is not an actor
+  declaration. Public metadata priority, Kernel v1/v2, RCIR, spec digests and report
+  attribution are preserved. Both binaries' `fslc check` swept all three roots in
+  their own archived trees at base `ed877bd9622d6042a889a70755fa2d75852c8d48`
+  and head `bfead01a3692754eb9669dd00befa026545126f4`, twice (591 base / 592 head
+  forms per binary): **0 corpus `ok`→`error` and 0 `error`→`ok` transitions**.
+  Acceptance removals/expansions are separate from this empty corpus set.
+  See [DESIGN-refinement](../design/DESIGN-refinement.md), section
+  “#1456: requirement-action own actors and breaking-source migration”,
+  for manual policy correction and checks. No automatic migration, compatibility
+  bypass or grace period is provided; if problems occur, return to a 4.x binary.
 - In a requirements process-form transition (edition 4), `by X` is a free label,
   not a reference to a declared actor: this form has no `actor` declaration,
   and `check` does not ask whether `X` is declared anywhere. Here, “source actor”

@@ -2377,13 +2377,15 @@ verify {
   `kind: "type"` の check 時エラーです(同じ action を 2 回列挙するマッピング
   ファイルと同じです)。継ぎ目が評価されるとき、autoマップされたprocessのtransitionとeventは、両側で宣言された
   source actorを比較します。edition(4/5)、どちら側の`covers`、`by `で始まる説明本文にも
-  依存しません。登録済みactorはmetadataに優先します。registry entryの無いaction
-  (raw spec/composeのactionと、単独またはrequirementブロック内のrequirements action項目)は
-  従来のmetadata規則(`by`、空白、空でないactor)を使います。
+  依存しません。登録済みactorはmetadataに優先します。requirementのactionは、単独でも
+  ブロック内でも、自身のmetadataのactor(`by`、空白、trim後に空でないactor)だけを、
+  生成された全branchにも登録します。注釈無し、`by`で始まらない本文、空のactorは
+  actor不在として登録し、囲む要求本文やtyped `@requirement`本文からactorを補いません。
+  registry entryの無いraw spec/composeのactionだけが従来のmetadata規則を使います。
   両actorを取得できるとき、不一致は
   `error` / `kind: "type"`、exit 2で、既存のmessage
   `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
-  を、`implements`または単独の`maps auto`の対応位置に報告します。スコープ無しの
+  を、暗黙の`implements`または明示の`maps auto`の対応位置に報告します。スコープ無しの
   `verify`、単独の`refine`、Workerも同じ規則です。明示のaction対応と`stutter`は
   actorを比較せず、選択した`verify`は引き続きseamを評価しません。mappingを指定しない
   `diff`は、該当する方向を`unknown` / `automatic_mapping_failed`として
@@ -2403,6 +2405,19 @@ verify {
   「#1441: source-actor auto mapping and breaking-source migration」に
   コマンド・測定証拠・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
   LSPでの診断配信も約束しません。
+  **v5.0.0の破壊的なソース変更(#1456):** requirement action自身のactorの不一致が
+  ブロック本文で隠れていた形を拒否します。生成branchを単独のauto mapsで対応させる形も
+  対象です。明示action対応、インラインのbranch maps、stutterの免除は変わりません。
+  逆に、自身actorが一致または不在なのにブロック本文が偽の不一致を作っていた形の受理は
+  意図した拡大です。typed requirement本文はactor宣言ではありません。公開metadataの優先順、
+  Kernel v1/v2、RCIR、spec digest、reportの帰属は保ちます。base
+  `ed877bd9622d6042a889a70755fa2d75852c8d48`とhead
+  `bfead01a3692754eb9669dd00befa026545126f4`の各archive treeで、3 rootの全formを
+  両binaryの`fslc check`で2回sweepしました(base 591 / head 592 forms、各binary)。
+  **corpusの`ok`→`error`は0件、`error`→`ok`も0件**で、受入テストの拒否・拡大とは別集合です。
+  手動での方針確認・訂正とコマンドは[DESIGN-refinement](../design/DESIGN-refinement.md)の
+  「#1456: requirement-action own actors and breaking-source migration」を参照してください。
+  自動移行、互換bypass、猶予期間は無く、問題が出たら4.xのbinaryに戻します。
 - requirements の process 形式(edition 4)の transition の `by X` は自由なラベルで、
   宣言された actor を指すものではありません。この形式には `actor` の宣言が無く、
   `check` は `X` がどこかで宣言されているかを見ません。ここでいう「source actor」は

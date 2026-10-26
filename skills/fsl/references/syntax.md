@@ -680,9 +680,11 @@ entry.
 
 For auto pairs only, both sides use registered source actors independently of
 `covers` (even text beginning `by `), process/event/business form or fsl 4/5
-edition. Actions without a registry entry (raw spec/compose actions and
-requirements action items, standalone or inside a requirement block) retain the
-legacy metadata `by ` rule; two available actors must match. A mismatch is a located
+edition. Requirement actions, inside a block or standalone, register their own
+metadata's `by ` actor (trimmed and nonempty), including every generated branch.
+Missing/non-`by`/empty own metadata registers absence, never an actor from block
+prose or typed `@requirement` text. Only unregistered raw spec/compose actions retain
+the legacy metadata rule; two available actors must match. A mismatch is a located
 `maps auto actor mismatch` type error (exit 2) in check/unscoped verify/refine
 and Worker. Explicit action entries and stutter are not actor-checked;
 selected verify still skips the seam. Mapping-free diff instead reports
@@ -701,6 +703,20 @@ verify→verified/0 with implements refines; F1 standalone refine expands
 error/type/2→refines/0. Commands and manual migration: repository path
 `docs/design/DESIGN-refinement.md`, section “#1441: source-actor auto mapping
 and breaking-source migration”.
+
+The #1456 v5.0.0 breaking change rejects own-actor mismatches hidden by requirement
+block text, including standalone auto maps of generated branches. Matching or
+absent own actors falsely rejected by prose are intentionally accepted instead.
+Explicit action entries, inline branch maps and stutter remain exempt. Metadata
+priority, Kernel v1/v2, RCIR/digest and attribution are unchanged. Both binaries'
+`fslc check` swept every `.fsl` in the same three roots in each archived tree,
+base `ed877bd9622d6042a889a70755fa2d75852c8d48` / head
+`bfead01a3692754eb9669dd00befa026545126f4`, twice, 591 base / 592 head forms
+per binary: **0 corpus ok→error and 0 error→ok transitions**. Acceptance controls
+are a separate set. See `docs/design/DESIGN-refinement.md`, section
+“#1456: requirement-action own actors and breaking-source migration”. Confirm
+policy and correct the action itself, not enclosing prose. No general automatic
+migration, bypass or grace period; if problems occur, return to a 4.x binary.
 
 Give impl and abs distinct enum/struct type names. Refinement merges type
 metadata by name; a same-named enum/struct with a different member list/field
