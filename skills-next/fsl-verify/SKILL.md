@@ -213,8 +213,9 @@ After the table:
 ## 8. Diagnostics of files headed `fsl 5`
 
 All are `check` results unless marked. Errors exit 2 with `result: "error"` and the code in
-`diagnostic_code`; warnings and infos are `warnings[]` entries of an exit-0
-result, with `code` and `severity`. Messages name the alias with the
+`diagnostic_code`, except rows identified as message-only errors; warnings and infos
+are `warnings[]` entries of an exit-0 result, with `code` and `severity`.
+Unless a row says otherwise, messages name the alias with the
 canonical name in parentheses (`'申請（Claim）'`).
 
 **Edition**
@@ -231,7 +232,7 @@ canonical name in parentheses (`'申請（Claim）'`).
 | Code | Means | Next move |
 |---|---|---|
 | `actor_not_declared` | an event or step names an actor no `actor` declares (the message lists the declared ones) | declare it if the source has it; otherwise fix the name |
-| message `maps auto actor mismatch …` (`kind: "type"`, no `diagnostic_code`) | an automatically matched event's actor differs from the business transition's actor | fix the declared actor to match the source contract; requirement text does not supply the actor |
+| message `maps auto actor mismatch …` (`kind: "type"`, no `diagnostic_code`; `check`, `verify`, `refine`, including chains) | an automatically matched event's actor differs from its abstract business transition or requirements event; actors display canonical names only | fix the declared actor to match the source contract; requirement text does not supply the actor |
 | `event_not_on_lifecycle` | an event's move is not an edge of the lifecycle (or its `in S` is not a stage) | fix the move or the lifecycle to what the source says |
 | `ambiguous_input_field` | a bare name in an event's expression is both its input and a field | write `input amount` or `Return.amount` |
 | field `… needs an initial value` (parse error) | an entity field without `= init` | give the initial value the source states, or ask |

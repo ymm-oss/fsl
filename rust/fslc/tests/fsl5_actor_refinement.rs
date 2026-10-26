@@ -254,6 +254,7 @@ fn assert_exact_actor_mismatch(directory: &Path, args: &[&str], action: &str) {
         (2, Some("error"), Some("type"), Some(expected.as_str())),
         "{args:?}: {output:#}"
     );
+    assert!(output.get("diagnostic_code").is_none(), "{output:#}");
 }
 
 #[test]
@@ -282,25 +283,8 @@ fn explicit_maps_auto_checks_event_actor() {
 
 #[test]
 fn standalone_refinement_maps_auto_checks_event_actor() {
-    let source = case_source("").replace("  implements Abs from \"business.fsl\" { }\n", "");
-    let directory = fixture("standalone_refinement", &source, &business_source(""));
-    std::fs::write(
-        directory.join("mapping.fsl"),
-        "refinement Mapping { impl Impl abs Abs maps auto }\n",
-    )
-    .expect("write standalone refinement");
-    assert_exact_actor_mismatch(
-        &directory,
-        &[
-            "refine",
-            "requirements.fsl",
-            "business.fsl",
-            "mapping.fsl",
-            "--depth",
-            "6",
-        ],
-        "approve",
-    );
+    let directory = standalone_fixture("standalone_refinement", "Manager", &business_source(""));
+    assert_exact_actor_mismatch(&directory, STANDALONE_REFINE, "approve");
 }
 
 #[test]
@@ -360,4 +344,52 @@ fn explicit_action_correspondence_does_not_check_event_actor() {
     assert_eq!(exit, 0, "{output:#}");
     assert_eq!(output["result"], "ok", "{output:#}");
     assert_eq!(output["implements"]["result"], "refines", "{output:#}");
+}
+
+const STANDALONE_REFINE: &[&str] = &[
+    "refine",
+    "requirements.fsl",
+    "business.fsl",
+    "mapping.fsl",
+    "--depth",
+    "6",
+];
+
+fn standalone_source(name: &str, actor: &str) -> String {
+    case_source("")
+        .replace("  implements Abs from \"business.fsl\" { }\n", "")
+        .replace("requirements Impl", &format!("requirements {name}"))
+        .replace("= Manager approves", &format!("= {actor} approves"))
+}
+
+fn standalone_fixture(label: &str, actor: &str, abstraction: &str) -> PathBuf {
+    let directory = fixture(label, &standalone_source("Impl", actor), abstraction);
+    std::fs::write(
+        directory.join("mapping.fsl"),
+        "refinement Mapping { impl Impl abs Abs maps auto }\n",
+    )
+    .expect("write standalone refinement");
+    directory
+}
+
+#[test]
+fn event_abstraction_with_wrong_actor_is_a_refinement_type_error() {
+    let directory = standalone_fixture(
+        "event_abstraction_wrong_actor",
+        "Manager",
+        &standalone_source("Abs", "System"),
+    );
+    assert_exact_actor_mismatch(&directory, STANDALONE_REFINE, "approve");
+}
+
+#[test]
+fn event_abstraction_with_correct_actor_refines() {
+    let directory = standalone_fixture(
+        "event_abstraction_correct_actor",
+        "System",
+        &standalone_source("Abs", "System"),
+    );
+    let (output, exit) = fslc(&directory, STANDALONE_REFINE);
+    assert_eq!(exit, 0, "{output:#}");
+    assert_eq!(output["result"], "refines", "{output:#}");
 }
