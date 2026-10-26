@@ -13,10 +13,12 @@ values now use `kind: "usage"` instead of downstream `io` or `semantics`,
 with the existing messages preserved. Unsupported `--kernel-version`
 values on `kernel` and `conformance` likewise change from `semantics` to
 `usage`, retaining the unsupported-public-Kernel-major message and exit 2.
-Odd `refine` chain operands and malformed `diff --git` ranges (including
-three-dot notation) change from
-`io` to `usage`, preserving their messages, branch order, and exit 2;
-nonexistent Git refs are unchanged. Unknown-option diagnostics now name
+Odd `refine` chain operands and malformed `diff --git` ranges already caught
+by shape validation change from `io` to `usage`, preserving their messages
+and exit 2. Three-dot ranges are now rejected before Git ref resolution
+with `--git range must be BASE..HEAD`. The checks retain their branch
+order, and the handling of nonexistent Git refs is unchanged.
+Unknown-option diagnostics now name
 the real command and option on `scenarios`, `ai check`, `domain check`,
 `domain expand`, and `db observe`, and identify dash-prefixed unknown
 options on the `compat` group. Existing root/other-group wording,

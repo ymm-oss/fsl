@@ -90,7 +90,9 @@ overlays, not a bypass of stable validation or additions to the stable metadata.
 Diagnostics retain already-rejecting wording when it identifies the option and the actual command;
 wrong helper labels and omitted option spellings are corrected. Unsupported Kernel majors keep
 their message but use `usage`, not `semantics`. Odd refine chain operands and malformed diff git
-ranges use `usage`, not `io`, in their original branches, preserving refine's literate-input priority
+ranges already caught by shape validation use `usage`, not `io`, retaining their messages and exit 2.
+Three-dot ranges are rejected before Git ref resolution with `--git range must be BASE..HEAD`.
+The checks remain in their original branches and order, preserving refine's literate-input priority
 and the handling of nonexistent Git refs. `cli_contract_conformance.rs` executes every stable node's
 advertised options, unknown vocabulary, choices, finite positional limits, help, and shape controls.
 
