@@ -106,13 +106,20 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).
 5. **付録** — the raw JSON findings, collapsed (`<details>`), demoted off page 1.
+   Each finding omits only its raw top-level `cost` and `cache` execution metadata,
+   the same set as the scenarios digest. The projection is not recursive: full
+   CTI, hint, rank-failure and other proof evidence, and same-named fields inside
+   domain state, remain bound. Ledger Markdown is hashed as rendered, without
+   additional approval normalization; the appendix itself excludes execution
+   metadata so failed-report bytes and approval rerendering are reproducible.
 
 ### Amendment to #1316: verdict findings (#1338, decision 2026-10-26)
 
 The dedicated governance/implements sections alone are not sufficient for
 requirement-level review. Every non-`refines` preservation now adds a finding
 attributed to the governance catalog's `GOV` requirement, with declaration name,
-result, `before` → `after`, controls, and its complete raw evidence. Passing
+result, `before` → `after`, controls, and its raw evidence subject only to the
+appendix's top-level execution-metadata omission. Passing
 preservations (including an empty list) add no findings. A non-`refines` inline
 `implements` adds a spec-level finding, not a fabricated requirement link; an
 otherwise confirmed requirement row can remain green. Both rules include
