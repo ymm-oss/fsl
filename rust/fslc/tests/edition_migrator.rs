@@ -1465,9 +1465,8 @@ fn findings_with_code<'a>(migrated: &'a Value, code: &str) -> Vec<&'a Value> {
         .collect()
 }
 
-#[test]
-fn canonical_return_example_has_no_inline_maps() {
-    let path = example_path("layers/return_system.fsl");
+fn assert_canonical_example(name: &str) -> Value {
+    let path = example_path(name);
     let path = path.to_str().expect("UTF-8 path");
     let checked = run(&["check", path]);
     assert_eq!(checked.status.code(), Some(0), "{}", json(&checked));
@@ -1477,31 +1476,32 @@ fn canonical_return_example_has_no_inline_maps() {
     assert_eq!(lint.status.code(), Some(1), "{}", json(&lint));
     let lint = json(&lint);
     assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
-    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
     let migrate = run(&["migrate", path, "--edition", "next"]);
     assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
     assert_eq!(json(&migrate)["changed"], 0);
     assert!(findings_with_code(&json(&migrate), "inline_action_maps").is_empty());
+    lint
+}
+
+fn example_contract(path: &Path, source: &str) -> Value {
+    fslc_rust::migration::kernel_contract(
+        source,
+        path,
+        &fsl_syntax::ParseOptions::default(),
+        fslc_rust::migration::Origins::Kept,
+    )
+    .expect("checked example contract")
+}
+
+#[test]
+fn canonical_return_example_has_no_inline_maps() {
+    let lint = assert_canonical_example("layers/return_system.fsl");
+    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
 }
 
 #[test]
 fn canonical_cancel_example_has_no_inline_maps() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/pm/cancel_system.fsl");
-    let path = path.to_str().expect("UTF-8 path");
-    let lint = run(&["lint", path, "--edition", "current"]);
-    assert_eq!(lint.status.code(), Some(1), "{}", json(&lint));
-    assert_eq!(
-        findings_with_code(&json(&lint), "inline_action_maps").len(),
-        0
-    );
-    let checked = run(&["check", path]);
-    assert_eq!(checked.status.code(), Some(0), "{}", json(&checked));
-    assert_eq!(json(&checked)["result"], "ok");
-    assert_eq!(json(&checked)["implements"]["result"], "refines");
-    let migrate = run(&["migrate", path, "--edition", "next"]);
-    assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
-    assert_eq!(json(&migrate)["changed"], 0);
-    assert!(findings_with_code(&json(&migrate), "inline_action_maps").is_empty());
+    assert_canonical_example("pm/cancel_system.fsl");
 }
 
 // The pre-canonicalization program at 5a539bbe, without comments/layout. Keep
@@ -1578,17 +1578,11 @@ const LEGACY_CANCEL_REQUIREMENTS: &str = r#"requirements CancelSystemReq {
 
 #[test]
 fn canonical_cancel_preserves_the_checked_kernel_and_typed_metadata() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/pm/cancel_system.fsl");
-    let contract = |source: &str| {
-        fslc_rust::migration::kernel_contract(
-            source,
-            &path,
-            &fsl_syntax::ParseOptions::default(),
-            fslc_rust::migration::Origins::Kept,
-        )
-        .expect("checked cancel contract")
-    };
-    assert_eq!(contract(LEGACY_CANCEL_REQUIREMENTS), contract(&text(&path)));
+    let path = example_path("pm/cancel_system.fsl");
+    assert_eq!(
+        example_contract(&path, LEGACY_CANCEL_REQUIREMENTS),
+        example_contract(&path, &text(&path))
+    );
 }
 
 #[test]
@@ -1601,17 +1595,8 @@ fn canonical_return_preserves_the_checked_kernel_and_typed_metadata() {
     assert_eq!(legacy.matches(import).count(), 1);
     // Resolve the same policy under one logical source path. Use the existing
     // migration contract: location-free Kernel plus the full typed annotations.
-    let contract = |source: &str| {
-        fslc_rust::migration::kernel_contract(
-            source,
-            &path,
-            &fsl_syntax::ParseOptions::default(),
-            fslc_rust::migration::Origins::Kept,
-        )
-        .expect("checked return contract")
-    };
-    let mut before = contract(&legacy.replace(import, "return_policy.fsl"));
-    let after = contract(&text(&path));
+    let mut before = example_contract(&path, &legacy.replace(import, "return_policy.fsl"));
+    let after = example_contract(&path, &text(&path));
     for (old, new) in [
         ("submit__b1", "submit_small"),
         ("submit__b2", "submit_large"),
