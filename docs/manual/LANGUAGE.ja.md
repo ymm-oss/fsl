@@ -1289,10 +1289,9 @@ range 型の端点(内部の括弧付き部分式も含む)では、この不正
 `FSL-PARSE` 診断を維持します。引き続き拒否され、この例外は構造的な relation の
 矢印を変更しません。
 
-現行エディション(ヘッダのない文書も含む)では、`check` と `verify` も宣言の文字列
+現行エディションでは、`check`、`verify`、`domain check` と Worker の JSON に宣言の文字列
 メタデータ(`legacy_string_metadata`)、コロン量化子(`legacy_quantifier_colon`)、
-インライン action `maps` (`inline_action_maps`)の移行警告を追加します。Worker も
-現行エディションの明示ヘッダがあれば同じ警告を返します。位置、置き換え、編集、
+インライン action `maps` (`inline_action_maps`)の移行警告を追加します。位置、置き換え、編集、
 移行安全性は lint と共通で、verdict と終了コードは変わりません。変換を拒否する
 場合は `machine_applicable: false` を維持し、警告があることは自動移行の安全性を
 意味しません。型付き注釈、中括弧の量化子、`implements` 内の明示 action 対応を

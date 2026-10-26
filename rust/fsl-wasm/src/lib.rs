@@ -237,7 +237,7 @@ async fn check_with<S: fsl_solver::SmtSolver>(
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
     let output = check_kernel(request, solver_version, new_solver).await;
-    apply_edition(request, solver_version, output)
+    finalize_frontend_output(request, solver_version, output).await
 }
 
 async fn check_kernel<S: fsl_solver::SmtSolver>(
@@ -282,13 +282,16 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
         &warning_ctx,
     );
     output.insert("warnings".to_owned(), Value::Array(warnings));
-    let output = match implements_output(request, &model, 8) {
+    match implements_output(request, &model, 8) {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
-        Err(failure) => return implements_error(solver_version, &failure),
-    };
-    // Native check folds governance only after the model/implements path,
-    // never for early project/agent gate envelopes (which can be successful).
-    fold_governance(request, solver_version, output).await
+        Err(failure) => implements_error(solver_version, &failure),
+    }
+}
+
+/// One exit for check/verify success and error envelopes, with native ordering.
+async fn finalize_frontend_output(request: &Request, solver_version: &str, output: Value) -> Value {
+    let output = fold_governance(request, solver_version, output).await;
+    apply_edition(request, solver_version, output)
 }
 
 /// The native edition step also reads headerless documents as current. It owns
@@ -487,8 +490,7 @@ async fn verify_with<S: fsl_solver::SmtSolver>(
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
     let output = verify_kernel(request, solver_version, new_solver).await;
-    let output = fold_governance(request, solver_version, output).await;
-    apply_edition(request, solver_version, output)
+    finalize_frontend_output(request, solver_version, output).await
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1163,16 +1165,13 @@ mod tests {
     /// comparison has no excluded output fields; it is not a native identity
     /// assertion (`versions.verifier` necessarily names `fsl-wasm`).
     fn native_check_error(request: &Request, solver_version: &str) -> Value {
-        expected_edition_output(
+        native_edition_output(
             request,
             native_check_error_unfinalized(request, solver_version),
         )
     }
 
-    // Expected finalization in the native CLI's ordering, not an invocation of
-    // its private completed command. The project-gate test independently pins
-    // which route must bypass model-only governance.
-    fn expected_edition_output(request: &Request, output: Value) -> Value {
+    fn native_edition_output(request: &Request, output: Value) -> Value {
         fslc_rust::migration::apply_edition(
             (output, 2),
             &request.source,
@@ -1183,6 +1182,14 @@ mod tests {
             true,
         )
         .0
+    }
+
+    fn native_simple_success(request: &Request, spec: &str) -> Value {
+        let mut native = envelope(TEST_SOLVER_VERSION);
+        native.insert("result".to_owned(), json!("ok"));
+        native.insert("spec".to_owned(), json!(spec));
+        native.insert("warnings".to_owned(), json!([]));
+        native_edition_output(request, Value::Object(native))
     }
 
     fn native_check_error_unfinalized(request: &Request, solver_version: &str) -> Value {
@@ -1392,10 +1399,11 @@ mod tests {
             &request.parse_options(),
         )
         .expect_err("fixture must fail native implements output");
-        fslc_rust::verification_output::render_requirements_implements_error(
+        let output = fslc_rust::verification_output::render_requirements_implements_error(
             envelope(solver_version),
             &failure,
-        )
+        );
+        native_edition_output(request, output)
     }
 
     fn assert_worker_implements_error_matches_native(request: &Request, fixture: &str) {
@@ -1485,7 +1493,7 @@ mod tests {
                 ))
             })
             .expect_err("native check rejects the fixture");
-            let native = expected_edition_output(&check_request, native);
+            let native = native_edition_output(&check_request, native);
             assert_eq!(status, 2, "{fixture}: {native:#}");
             assert_eq!(
                 native["diagnostic_code"], "decide_not_exhaustive",
@@ -2151,7 +2159,7 @@ mod tests {
   enum ImplStage { A, B }
   state { stage: ImplStage }
   init { stage = A }
-  action step() { stage = B }
+  action step() "REQ-PROBE-001: step" { stage = B }
 }
 "#
             .to_owned(),
@@ -2629,7 +2637,17 @@ mod tests {
             unstable: Vec::new(),
         };
 
+        let request = Request {
+            source: request
+                .source
+                .replace("action step() {", "action step() \"REQ-PROBE-001: step\" {"),
+            ..request
+        };
         assert_worker_implements_error_matches_native(&request, "inline enum conversion");
+        assert_worker_verify_implements_error_matches_native(
+            &request,
+            "inline enum conversion with metadata",
+        );
     }
 
     #[test]
@@ -3105,22 +3123,23 @@ mod tests {
         );
 
         let current = format!("fsl 4\n{body}");
-        let current = block_on(check(&request(&current, &["fsl5"]), TEST_SOLVER_VERSION));
-        assert_eq!(current["result"], "ok", "{current:#}");
-        let findings = current["warnings"]
-            .as_array()
-            .expect("warnings")
+        let current_request = request(&current, &["fsl5"]);
+        let migration = fslc_rust::migration::plan_migration(
+            &current,
+            &current_request.source_file,
+            fsl_syntax::Edition::Fsl4,
+            &current_request.parse_options(),
+        )
+        .expect("current plan");
+        let expected = migration
+            .diagnostics
             .iter()
-            .filter(|finding| finding["code"] == "legacy_quantifier_colon")
+            .map(|f| f.json(&current_request.source_file, fsl_syntax::Edition::Fsl4))
             .collect::<Vec<_>>();
-        assert_eq!(findings.len(), 2, "{current:#}");
-        assert!(
-            findings
-                .iter()
-                .all(|finding| finding["severity"] == "warning"
-                    && finding["edition"] == "current"
-                    && finding["machine_applicable"] == true)
-        );
+        assert_eq!(expected.len(), 2);
+        let current = block_on(check(&current_request, TEST_SOLVER_VERSION));
+        assert_eq!(current["result"], "ok", "{current:#}");
+        assert_eq!(current["warnings"], json!(expected), "{current:#}");
 
         let plain = block_on(check(&request(body, &["fsl5"]), TEST_SOLVER_VERSION));
         let published = block_on(check(&request(body, &[]), TEST_SOLVER_VERSION));
@@ -3149,7 +3168,7 @@ mod tests {
                     envelope(TEST_SOLVER_VERSION),
                     &error,
                 );
-                let native = expected_edition_output(&request, native);
+                let native = native_edition_output(&request, native);
                 assert_eq!(
                     native["diagnostic_code"],
                     if prefix.is_empty() {
@@ -3190,7 +3209,7 @@ mod tests {
         assert_eq!(status, 0);
         assert_eq!(expected["result"], "ok");
         assert_eq!(
-            expected_edition_output(&request, expected.clone()),
+            native_edition_output(&request, expected.clone()),
             expected
         );
         let worker = block_on(check(&request, TEST_SOLVER_VERSION));
@@ -3199,6 +3218,48 @@ mod tests {
             "project gate must not enter model-only governance"
         );
         assert_eq!(worker["result"], "ok");
+    }
+
+    fn legacy_metadata_request() -> Request {
+        let source = "spec S { state { flag: Bool = false } action finish() \"REQ-PROBE-001: finish\" { flag = true } invariant Typed { flag == true or flag == false } }\n";
+        serde_json::from_value(json!({"cmd":"check", "source":source})).expect("request")
+    }
+
+    #[test]
+    fn headerless_legacy_check_success_matches_native() {
+        let request = legacy_metadata_request();
+        let native = native_simple_success(&request, "S");
+        assert_eq!(native["warnings"].as_array().expect("warnings").len(), 1);
+        assert_eq!(block_on(check(&request, TEST_SOLVER_VERSION)), native);
+    }
+
+    #[test]
+    fn headerless_initializer_warning_is_emitted_once() {
+        let source = "domain D { aggregate A { state { ready: Bool } command Finish {} event Finished {} decide Finish { emits Finished } evolve Finished { ready = true } invariant Typed { ready == true or ready == false } } }\n";
+        let request: Request =
+            serde_json::from_value(json!({"cmd":"check", "source":source})).expect("request");
+        let native = native_simple_success(&request, "D");
+        assert_eq!(native["warnings"].as_array().expect("warnings").len(), 1);
+        assert_eq!(native["warnings"][0]["code"], "implicit_initial_value");
+        assert_eq!(block_on(check(&request, TEST_SOLVER_VERSION)), native);
+    }
+
+    #[test]
+    fn headerless_legacy_check_verify_errors_match_native() {
+        let request = legacy_metadata_request();
+        let request = Request {
+            source: request.source.replace("flag = true", "flag = missing"),
+            ..request
+        };
+        let native = native_check_error(&request, TEST_SOLVER_VERSION);
+        assert_eq!(native["result"], "error");
+        assert_eq!(native["warnings"].as_array().expect("warnings").len(), 1);
+        // This failing verify route precedes the browser-only BMC solver.
+        let outputs = [
+            block_on(check(&request, TEST_SOLVER_VERSION)),
+            block_on(verify(&request, TEST_SOLVER_VERSION)),
+        ];
+        assert_eq!(outputs, [native.clone(), native]);
     }
 
     /// fsl 5 plan S2 and S3, as native `check` reports them

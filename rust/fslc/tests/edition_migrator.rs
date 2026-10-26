@@ -303,6 +303,24 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
     }
 }
 
+fn assert_next_legacy_rejection(path: &str, headed: bool, code: &str) {
+    let output = run_edition(path, "check", Some("next"), headed, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = json(&output);
+    assert_eq!(output["result"], "error");
+    if headed {
+        assert_eq!(output["kind"], "parse");
+        assert_eq!(output["diagnostic_code"], "edition_conflict");
+        assert!(output.get("findings").is_none());
+    } else {
+        assert_eq!(output["kind"], "unsupported_in_edition");
+        let findings = output["findings"].as_array().expect("findings");
+        assert_eq!(findings.len(), 1, "{output:#}");
+        assert_eq!(findings[0]["code"], code);
+        assert_eq!(findings[0]["severity"], "error");
+    }
+}
+
 fn assert_token_location(finding: &Value, source: &str, token: &str) {
     let offset = source.find(token).expect("legacy token");
     let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
@@ -353,12 +371,7 @@ fn current_edition_exposes_legacy_findings_without_changing_success() {
             let path = directory.write("current.fsl", &source);
             let path = path.to_str().expect("path");
             let invoke = |verb: &str, extra: &[&str]| {
-                let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-                command.env("FSLC_UNSTABLE", "fsl5").args([verb, path]);
-                if let Some(edition) = edition {
-                    command.args(["--edition", edition]);
-                }
-                command.args(extra).output().expect("run fslc")
+                run_edition(path, verb, edition, prefix.starts_with("fsl 4"), extra)
             };
             // Preservation: lint already reports these findings, including exit 1.
             let lint = invoke("lint", &[]);
@@ -390,7 +403,7 @@ fn current_edition_exposes_legacy_findings_without_changing_success() {
                 let warnings = output["warnings"].as_array().expect("warnings");
                 let actual = warnings
                     .iter()
-                    .filter(|f| f["code"] == code)
+                    .filter(|f| f.get("code").is_some())
                     .collect::<Vec<_>>();
                 assert_eq!(
                     actual,
@@ -409,8 +422,7 @@ fn current_edition_exposes_legacy_findings_without_changing_success() {
                 }
             }
             // Preservation: the existing next-edition rejection stays exit 2.
-            let next = run(&["check", path, "--edition", "next"]);
-            assert_eq!(next.status.code(), Some(2));
+            assert_next_legacy_rejection(path, prefix.starts_with("fsl 4"), code);
         }
     }
 }
@@ -501,16 +513,75 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
 }
 
 #[test]
+fn current_domain_warnings_exclude_unrelated_planner_codes() {
+    let directory = FixtureDir::new();
+    let source = "domain D { enum E { A, B } aggregate X { state { e: E = A } command Finish {} event Finished {} decide Finish { requires e == A || e == B emits Finished } evolve Finished { e = B } invariant I { e == A -> e == A } } }\n";
+    let path = directory.write("logical.fsl", source);
+    let path = path.to_str().expect("path");
+    let lint = run_edition(path, "lint", None, false, &[]);
+    assert_eq!(lint.status.code(), Some(1));
+    assert!(
+        json(&lint)["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|f| f["code"] == "legacy_logical_operator")
+    );
+    for args in [
+        vec!["check", path],
+        vec!["verify", path, "--depth", "2", "--no-cache"],
+        vec!["domain", "check", path, "--depth", "2"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .env_remove("FSLC_UNSTABLE")
+            .args(&args)
+            .output()
+            .expect("run fslc");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let output = json(&output);
+        let warnings = if args[0] == "domain" {
+            assert!(
+                output.get("warnings").is_none(),
+                "unexpected domain edition warnings: {output:#}"
+            );
+            &output["kernel"]["warnings"]
+        } else {
+            &output["warnings"]
+        };
+        let codes = warnings
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter_map(|f| f["code"].as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.is_empty(),
+            "unrelated planner findings leaked: {output:#}"
+        );
+    }
+}
+
+#[test]
 fn current_warnings_preserve_refusals_and_ignore_canonical_and_literal_forms() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = FixtureDir::new();
     let branch = directory.write("branches.fsl", "requirements Branch { state { done: Bool = false } action complete() { branches { when not done { done = true } maps stutter } } }\n");
-    for path in [
-        branch,
-        root.join("tests/fixtures/action_correspondence_duplicate.fsl"),
+    for (path, status, result) in [
+        (branch, 0, "ok"),
+        (
+            root.join("tests/fixtures/action_correspondence_duplicate.fsl"),
+            2,
+            "error",
+        ),
     ] {
         let path = path.to_str().expect("path");
         let check = run(&["check", path]);
+        assert_eq!(check.status.code(), Some(status));
         let lint = run(&["lint", path]);
         assert_eq!(lint.status.code(), Some(1));
         let lint = json(&lint);
@@ -522,6 +593,7 @@ fn current_warnings_preserve_refusals_and_ignore_canonical_and_literal_forms() {
             .collect::<Vec<_>>();
         assert!(expected.iter().any(|f| f["machine_applicable"] == false));
         let check = json(&check);
+        assert_eq!(check["result"], result);
         let actual = check["warnings"]
             .as_array()
             .expect("warnings")

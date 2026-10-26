@@ -141,8 +141,12 @@ that step rather than also appended by success-only metadata finalization.
 
 The shared edition step appends `legacy_string_metadata`,
 `legacy_quantifier_colon`, and `inline_action_maps` to current-edition check and
-verify JSON warnings, including headerless documents. A Worker document with
-an explicit current-edition header uses the same step. Existing warnings,
+verify/domain-check and Worker JSON warnings, including headerless documents.
+All Worker check/verify success, validation-error, and implements-error paths
+pass once through the same outer finalization step. Headerless documents use
+current edition; gated explicit headers select their declared edition. Omitted
+initial-value warnings are added only by this step, not also by success-only
+metadata finalization. Existing warnings,
 verdicts, envelopes, and process exits are retained. Lint already exposes these
 findings and keeps its 0/1/2 exit contract.
 

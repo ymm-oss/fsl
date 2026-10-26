@@ -601,8 +601,9 @@ pub fn edition_conflict(
 
 /// Apply the edition `source` is read in to a finished `check` / `verify`
 /// result: in the next edition every migration finding is an error, otherwise
-/// the deprecated domain enum union (and, with `implicit_warnings`, an
-/// omitted initial value) is a warning.
+/// deprecated domain enum unions, string metadata, colon quantifiers, and inline
+/// action maps are warnings. With `implicit_warnings`, omitted initial values
+/// also warn. The planner owns each finding's code, span, and migration safety.
 ///
 /// `requested` is the `--edition` value (`None` = `current`). The document is
 /// read in its header's edition when it has one; an unreadable header already
