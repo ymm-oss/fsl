@@ -198,10 +198,10 @@ seam, governance, trace, vacuity and specialized-projection preservation control
 Lower-only scenarios/explain/testgen preflight and the async Worker pipeline are
 outside this consolidation; it does not claim those paths share native stages.
 `approval create --kind ledger|html`, `approval check`, `approval diff`, and
-`counterexample export` still lower the spec before verification or rerendering.
-Their invalid-input precedence and unknown-AI-tool panic/exit 101 are unchanged.
-The panics are tracked in #1464; approval create's diagnostic precedence is a
-separate issue.
+`counterexample export` still lower the spec before verification or rerendering,
+retaining their existing invalid-input precedence. After #1464, unknown AI authority
+tools return a semantics error with exit 2 rather than panicking. Approval create's
+diagnostic precedence remains a separate issue.
 
 ## Column → source map
 
