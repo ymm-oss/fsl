@@ -17,7 +17,7 @@ SPEC = ROOT / "examples" / "nfr" / "bounded_response.fsl"
 @pytest.fixture(scope="module", autouse=True)
 def build_native_cli():
     subprocess.run(
-        ["cargo", "build", "--quiet", "--locked", "-p", "fslc-rust"],
+        ["cargo", "build", "--locked", "-p", "fslc-rust"],
         cwd=ROOT / "rust",
         check=True,
     )

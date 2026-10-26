@@ -56,18 +56,6 @@ PRIMARY_DETECTOR = {
     "over-strengthened-guard": "verify",
 }
 
-# Native-only, filed gap: `vacuous_implication` (rust/fsl-runtime/src/lib.rs)
-# only matches an invariant whose top-level expression is a direct `=>`; it
-# does not unwrap a `forall`-quantified implication, the shape
-# docs/design/DESIGN-vacuity.md:22-24 documents as the primary case. See issue #486
-# (distinct from #465, which covers the four vacuity kinds with no native
-# implementation at all). Only applies when CLI == native; against the
-# frozen Python reference these two files' primary detector already catches.
-KNOWN_NATIVE_VACUITY_FORALL_GAP = {
-    "order_workflow__unreachable_antecedent.fsl",
-    "return_system__unreachable_antecedent.fsl",
-}
-
 BLIND_DETECTOR = {
     "omission": "strict_tags",
     "boundary-flip": "strict_tags",
@@ -318,18 +306,7 @@ def test_error_injection_benchmark_matrix(tmp_path):
 
             primary = PRIMARY_DETECTOR[headers["inject"]]
             primary_caught = measured["detectors"][primary]["status"] == "caught"
-            known_gap = CLI == [str(RUST_CLI)] and path.name in KNOWN_NATIVE_VACUITY_FORALL_GAP
-            if known_gap:
-                # Pin the current gap exactly: fail loudly (forcing this
-                # exclusion to be removed) once issue #486 is fixed, instead
-                # of silently staying green either way.
-                if primary_caught:
-                    failures.append(
-                        f"{path.name}: primary {primary} now catches (remove from "
-                        f"KNOWN_NATIVE_VACUITY_FORALL_GAP and close issue #486): "
-                        f"{measured['detectors'][primary]}"
-                    )
-            elif not primary_caught:
+            if not primary_caught:
                 failures.append(
                     f"{path.name}: primary {primary} did not catch "
                     f"{headers['inject']}: {measured['detectors'][primary]}"

@@ -478,8 +478,8 @@
           "status": "not-caught"
         },
         "vacuity": {
-          "signal": "verified",
-          "status": "not-caught"
+          "signal": "vacuous_implication:ImpossibleDraftShipment",
+          "status": "caught"
         },
         "verify": {
           "signal": "verified",
@@ -724,8 +724,8 @@
           "status": "not-caught"
         },
         "vacuity": {
-          "signal": "verified",
-          "status": "not-caught"
+          "signal": "vacuous_implication:ImpossibleNewPaid",
+          "status": "caught"
         },
         "verify": {
           "signal": "verified",
@@ -882,26 +882,12 @@
         "not-caught": 3
       },
       "vacuity": {
-        "caught": 1,
-        "not-caught": 2
+        "caught": 3
       },
       "verify": {
         "not-caught": 3
       }
     }
   },
-  "surprises": [
-    {
-      "actual": "not-caught",
-      "detector": "vacuity",
-      "file": "examples/gallery/injected/order_workflow__unreachable_antecedent.fsl",
-      "kind": "missing-primary"
-    },
-    {
-      "actual": "not-caught",
-      "detector": "vacuity",
-      "file": "examples/gallery/injected/return_system__unreachable_antecedent.fsl",
-      "kind": "missing-primary"
-    }
-  ]
+  "surprises": []
 }
