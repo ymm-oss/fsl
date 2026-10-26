@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// `@requirement("REQ-INIT-ONLY", ...)` is attached only to `init`, which has
-// no TSG node — the requirement is declared but genuinely connected to
-// nothing analyzable, so `disconnected_requirement` must fire on it.
+// Intentional contract replacement under #1351 decision A: a requirement
+// attached only to init has a real TSG anchor and must not be disconnected.
+// Keep the historical fixture name; a separate graph control covers orphans.
 spec AnalyzeOrphanRequirement {
   state { ready: Bool }
 
-  @requirement("REQ-INIT-ONLY", "attached only to init, never to an executable target")
+  @requirement("REQ-INIT-ONLY", "attached only to the initialization target")
   init { ready = false }
 
   action go() {

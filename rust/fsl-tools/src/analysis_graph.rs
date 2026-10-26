@@ -421,6 +421,7 @@ fn action_dependency(tsg: &Value) -> (Vec<Value>, Vec<Value>) {
 
 fn requirement_property(tsg: &Value) -> (Vec<Value>, Vec<Value>) {
     let kinds = BTreeSet::from([
+        "init",
         "invariant",
         "trans",
         "leadsTo",

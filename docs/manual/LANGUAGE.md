@@ -3302,7 +3302,11 @@ DESIGN-*.md).
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — emits structural observation JSON. `--projection tsg`
   returns the Typed Semantic Graph of requirements, actions, state, properties,
-  and scenarios. Graph projections return connected components, SCCs,
+  and scenarios. Init carrying requirement relations also gets a node with
+  id/kind/name/label `init`, a spec-to-init `declares` edge, and requirement-to-init
+  `covers` edges. It is a useful anchor for `disconnected_requirement` and is
+  included in `requirement_property_graph`; init without requirement relations
+  adds no graph output. Graph projections return connected components, SCCs,
   representative cycles, degree, and structural metrics such as cycle rank and
   fan-in/fan-out hubs. `--projection action_dependency_graph` exposes structural
   action enables/conflict edges; `--projection impact_graph --focus NODE` emits

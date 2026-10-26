@@ -122,17 +122,28 @@ Output shape:
 }
 ```
 
-Stable node kinds include `spec`, `requirement`, `state`, `phys_state`,
+Stable node kinds include `spec`, `requirement`, `init`, `state`, `phys_state`,
 `action`, `guard`, `effect`, `ensures`, `invariant`, `trans`, `leadsTo`,
 `reachable`, `acceptance`, and `forbidden`. KPI and control nodes are emitted
 when the validated spec carries that metadata.
 
 `requirement` nodes and their `covers` edges are model-only
 (`KernelModel::requirement_targets`, native `Builder::build`), so every
-dialect reaching `build_tsg` gets them, not only project manifests. A
-requirement attached to nothing the graph represents (e.g. only to `init`,
-which has no node) still gets its own node with zero `covers` edges — this
-is the `disconnected_requirement` review signal, not a dropped node.
+dialect reaching `build_tsg` gets them, not only project manifests. An `init`
+carrying requirement relations gets a node whose id, kind, name, and label are
+all `init`, with requirement metadata through the same helpers as other targets,
+a `spec` → `init` `declares` edge, and a requirement → `init` `covers` edge for
+each linked requirement. Init without requirement relations emits no node or
+edges, preserving existing unannotated output.
+
+Amendment (#1351): init is a useful traceability anchor, not a disconnected
+requirement signal. `@requirement` cannot attach to `def`, so init is the only
+place to record `MODEL-` IDs for initialization/modeling intent; reporting
+these as disconnected contradicts `check --strict-tags` and lint. This rule
+applies to all requirement IDs, not only the `MODEL-` prefix. A requirement
+with no useful graph anchor still receives `disconnected_requirement` rather
+than being dropped. Connectivity remains structural, never a verifier proof.
+
 `acceptance`/`forbidden` scenario nodes are requirements-dialect-only (they
 have no Kernel-lowered form, so building them needs source text, not just
 the checked model) and gain a `covers` edge from any `@requirement(...)`
@@ -181,7 +192,7 @@ structural sources:
   review impact analysis. `direction` is one of `focus`, `upstream`, or
   `downstream`; `directions` records both upstream/downstream when a node is in
   both closures.
-- `requirement_property_graph`: requirements connected to covered actions,
+- `requirement_property_graph`: requirements connected to covered init, actions,
   properties, scenarios, KPI/control nodes.
 - `property_state_graph`: user properties connected to state variables they read.
 - `refinement_graph`: standalone refinement mappings with impl/abs spec names,
@@ -214,9 +225,9 @@ These are trend and review-priority signals for downstream tooling.
 
 `fslc analyze spec.fsl --profile ai-review` emits deterministic review findings:
 
-- `disconnected_requirement`: a requirement node has no useful anchor such as an
-  action, user property, acceptance scenario, forbidden scenario, KPI/control, or
-  governance metadata.
+- `disconnected_requirement`: a requirement node has no useful anchor such as
+  init, an action, user property, acceptance scenario, forbidden scenario,
+  KPI/control, or governance metadata.
 - `unanchored_property`: a user invariant/trans/leadsTo/reachable declaration has
   no requirement tag, scenario/governance anchor, or action-state connection.
 - `progressless_cycle`: a multi-action structural cycle is linked to a

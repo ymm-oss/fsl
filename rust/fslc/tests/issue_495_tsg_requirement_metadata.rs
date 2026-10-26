@@ -48,12 +48,12 @@ fn run(args: &[&str]) -> (Value, i32) {
     (value, output.status.code().expect("exit status"))
 }
 
-/// The actual deliverable: a requirement attached only to `init` (which has
-/// no TSG node) must surface as a `disconnected_requirement` finding under
-/// `--profile ai-review` — not merely a node kind that exists but is never
-/// exercised by a detector.
+/// Intentional contract replacement under #1351 decision A: an init-only
+/// requirement is connected, not an orphan. Genuine orphan detection remains
+/// covered by `a_truly_orphaned_requirement_still_fires_disconnected_requirement`
+/// in `issue_1351_init_requirement_traceability.rs`.
 #[test]
-fn disconnected_requirement_actually_fires_for_an_orphaned_requirement() {
+fn init_only_requirement_is_connected_in_the_existing_regression_fixture() {
     let (output, status) = run(&[
         "analyze",
         "rust/fslc/tests/fixtures/analyze_orphan_requirement.fsl",
@@ -62,13 +62,12 @@ fn disconnected_requirement_actually_fires_for_an_orphaned_requirement() {
     ]);
     assert_eq!(status, 0, "{output:#}");
     let findings = output["findings"].as_array().expect("findings array");
-    let finding = findings
-        .iter()
-        .find(|finding| finding["finding_type"] == "disconnected_requirement")
-        .unwrap_or_else(|| panic!("disconnected_requirement did not fire: {output:#}"));
-    assert_eq!(
-        finding["involved_nodes"],
-        serde_json::json!(["requirement:REQ-INIT-ONLY"])
+    assert!(
+        !findings.iter().any(|finding| {
+            finding["finding_type"] == "disconnected_requirement"
+                && finding["involved_nodes"] == serde_json::json!(["requirement:REQ-INIT-ONLY"])
+        }),
+        "init-only requirement is connected under #1351 decision A: {output:#}"
     );
 }
 
