@@ -16637,10 +16637,10 @@ fn run_diff_git(
     forbid: &[String],
 ) -> (Value, i32) {
     let Some((base_input, head_input)) = range.split_once("..") else {
-        return (error_output("io", "--git range must be BASE..HEAD"), 2);
+        return (error_output("usage", "--git range must be BASE..HEAD"), 2);
     };
     if base_input.is_empty() || head_input.is_empty() || head_input.contains("..") {
-        return (error_output("io", "--git range must be BASE..HEAD"), 2);
+        return (error_output("usage", "--git range must be BASE..HEAD"), 2);
     }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
