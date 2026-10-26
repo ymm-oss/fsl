@@ -2511,9 +2511,30 @@ verify {
   An impl action with both a <code>maps</code> clause and a matching inline <code>action ...</code>
   item is a duplicate-correspondence, <code>kind: "type"</code> check-time error naming
   both origins and locations (same as a mapping file that lists the same action
-  twice). Auto-mapped process
-  transitions are actor-checked; a transition whose actor differs from the
-  business action's actor is a check-time error.</li>
+  twice). Whenever the seam is evaluated, a process transition auto-mapped to
+  a same-named business action is actor-checked; a transition whose actor
+  differs from that business action's actor is a check-time error.</li>
+<li>A requirements transition's <code>by X</code> is a free label, not a reference to a
+  declared actor: the requirements layer has no <code>actor</code> declaration, and
+  <code>check</code> does not ask whether <code>X</code> is declared anywhere. (A <code>business</code> process
+  is the opposite: a transition whose actor no <code>actor</code> line declares is a
+  check-time error.) The label is compared with a business actor only when a
+  refinement maps the transition automatically to the business action of the
+  same name — through <code>maps auto</code>, or through the inline <code>implements</code> seam's
+  implicit auto-mapping of every transition that no explicit inline
+  <code>action ... -&gt; ...</code> item names — and that refinement is evaluated. Where
+  the refinement is checked (<code>check</code>, <code>fslc refine</code>, and the like), a mismatch
+  is a <code>kind: "type"</code> error; <code>fslc diff</code> reports it differently, as described
+  below. For example, the inline seam is
+  evaluated by an unscoped <code>check</code> or <code>verify</code> and by <code>fslc scenarios</code>, but not
+  by a <code>verify</code> scoped with <code>--property</code> and the like (above); a refinement
+  file's <code>maps auto</code> is evaluated by <code>fslc refine</code> or a <code>fslc chain</code> refine
+  layer; and <code>fslc diff</code> without a mapping builds a <code>maps auto</code> refinement
+  between the two versions itself, so a changed <code>by</code> label there surfaces as
+  an automatic-mapping failure. The label is checked against nothing for a
+  transition mapped by an explicit <code>action</code> item, for one the inline seam maps
+  to <code>stutter</code> because the business layer has no action of that name, and
+  whenever no such refinement is evaluated.</li>
 <li><code>acceptance</code> is replay-verified at check time by the concrete Monitor (a
   failure is <code>kind: "acceptance"</code>). It supports <code>expect &lt;Entity&gt; &lt;id&gt; in
   &lt;Stage&gt;</code> alongside <code>expect &lt;expr&gt;</code> and flows directly into scenarios / testgen
