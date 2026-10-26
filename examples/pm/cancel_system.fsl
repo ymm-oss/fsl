@@ -33,6 +33,10 @@ requirements CancelSystemReq {
       else if scr[c].st == OfferDialog then OfferShown
       else if scr[c].st == ThanksStay  then Retained
       else Churned
+    action tap_cancel(c: Sub) -> request_cancel(c)
+    action submit_cancel(c: Sub) -> show_offer(c)
+    action accept(c: Sub) -> accept_offer(c)
+    action decline(c: Sub) -> decline_offer(c)
   }
 
   // ── System state (screens and internal flags) ──────────────────
@@ -55,14 +59,14 @@ requirements CancelSystemReq {
   // ── Requirements (written with the ID and original text verbatim) ──────────────────────
 
   requirement REQ-1 "Pressing the cancel button transitions to the cancellation form" {
-    fair action tap_cancel(c: Sub) maps request_cancel(c) {
+    fair action tap_cancel(c: Sub) {
       requires scr[c].st == Browsing
       scr[c].st = CancelForm
     }
   }
 
   requirement REQ-2 "On cancellation-form submission, show the retention offer exactly once per subscription" {
-    fair action submit_cancel(c: Sub) maps show_offer(c) {
+    fair action submit_cancel(c: Sub) {
       requires scr[c].st == CancelForm
       requires not scr[c].offered        // No double-showing (only once)
       scr[c] = SubView { st: OfferDialog, offered: true }
@@ -70,12 +74,12 @@ requirements CancelSystemReq {
   }
 
   requirement REQ-3 "Accepting the offer goes to retention (thanks screen); declining goes to the cancellation-complete screen" {
-    fair action accept(c: Sub) maps accept_offer(c) {
+    fair action accept(c: Sub) {
       requires scr[c].st == OfferDialog
       scr[c].st = ThanksStay
       retain_count = retain_count + 1
     }
-    fair action decline(c: Sub) maps decline_offer(c) {
+    fair action decline(c: Sub) {
       requires scr[c].st == OfferDialog
       scr[c].st = GoodbyePage
       churn_count = churn_count + 1
