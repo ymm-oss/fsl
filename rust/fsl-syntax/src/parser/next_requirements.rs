@@ -845,9 +845,14 @@ impl Parser<'_> {
         });
         origins.push(index);
         let mut cursor = 0;
-        let expression =
-            parse_tokens_expression(&tokens, &mut cursor, self.expression_mode(), false)?
-                .into_kernel()?;
+        let expression = parse_tokens_expression(
+            &tokens,
+            &mut cursor,
+            self.expression_mode(),
+            false,
+            self.diagnose_legacy_operators,
+        )?
+        .into_kernel()?;
         self.cursor = origins[cursor];
         let end = self.tokens[self.cursor].span.start.offset;
         for span in inputs.into_iter().filter(|span| span.start.offset < end) {
@@ -1034,10 +1039,14 @@ impl Parser<'_> {
                 break;
             }
             let mut cursor = self.cursor;
-            let Ok(value) =
-                parse_tokens_expression(&self.tokens, &mut cursor, self.expression_mode(), true)
-                    .and_then(crate::SyntaxExpr::into_kernel)
-            else {
+            let Ok(value) = parse_tokens_expression(
+                &self.tokens,
+                &mut cursor,
+                self.expression_mode(),
+                true,
+                self.diagnose_legacy_operators,
+            )
+            .and_then(crate::SyntaxExpr::into_kernel) else {
                 break;
             };
             let value_start = self.cursor;

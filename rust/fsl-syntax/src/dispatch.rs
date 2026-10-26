@@ -308,7 +308,33 @@ fn parse_shared(
     tokens: Vec<Token>,
     cursor: usize,
 ) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
-    crate::parser::parse_shared_tokens(source.source(), tokens, cursor, source.edition())
+    crate::parser::parse_shared_tokens(
+        source.source(),
+        tokens,
+        cursor,
+        source.edition(),
+        source.edition() == Edition::Fsl5,
+    )
+}
+
+/// Diagnose an already-rejected legacy expression operator without changing the
+/// source's grammar edition. Used for a CLI-requested edition without a header.
+/// Returns only an expression-position diagnostic, never a replacement model.
+#[must_use]
+pub fn legacy_expression_operator_error(
+    source: &str,
+    options: &ParseOptions,
+) -> Option<ParseError> {
+    let (tokens, edition) = document_tokens(source, *options).ok()?;
+    let mut cursor = 0;
+    leading_annotations(&tokens, &mut cursor).ok()?;
+    let frontend = select_frontend(&tokens, cursor, edition).ok()?;
+    if !["spec", "requirements", "compose", "business", "refinement"].contains(&frontend.keyword) {
+        return None;
+    }
+    crate::parser::parse_shared_tokens(source, tokens, cursor, edition, true)
+        .err()
+        .filter(|error| error.code() == "unsupported_in_edition")
 }
 
 fn parse_db(

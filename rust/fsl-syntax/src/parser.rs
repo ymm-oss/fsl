@@ -147,9 +147,11 @@ pub(crate) fn parse_shared_tokens(
     tokens: Vec<Token>,
     cursor: usize,
     edition: Edition,
+    diagnose_legacy_operators: bool,
 ) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
     let mut parser = Parser::new(source, tokens, cursor);
     parser.edition = edition;
+    parser.diagnose_legacy_operators = diagnose_legacy_operators;
     let document = if parser.peek_ident("spec") {
         SurfaceDocument::Spec(parser.surface_spec()?)
     } else if parser.peek_ident("refinement") {
@@ -180,6 +182,7 @@ struct Parser<'a> {
     pending_annotations: Annotations,
     /// The edition the document is read in ([`crate::SourceFile::edition`]).
     edition: Edition,
+    diagnose_legacy_operators: bool,
     /// Every identifier [`Self::req_id`] has read, in source order.
     ids: Vec<IdSpelling>,
     /// Whether keywords are read through the keyword table, in English or in
@@ -203,6 +206,7 @@ impl<'a> Parser<'a> {
             cursor,
             pending_annotations: Annotations::default(),
             edition: Edition::Fsl4,
+            diagnose_legacy_operators: false,
             ids: Vec::new(),
             keywords: false,
             spellings: crate::SourceSpellings::default(),
@@ -2185,8 +2189,13 @@ impl<'a> Parser<'a> {
         );
         let start = self.cursor;
         let mut cursor = self.cursor;
-        let expression =
-            parse_tokens_expression(&self.tokens, &mut cursor, self.expression_mode(), false)?;
+        let expression = parse_tokens_expression(
+            &self.tokens,
+            &mut cursor,
+            self.expression_mode(),
+            false,
+            self.diagnose_legacy_operators,
+        )?;
         self.cursor = cursor;
         self.note_expression(start);
         expression.into_kernel()

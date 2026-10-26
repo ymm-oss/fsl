@@ -67,6 +67,92 @@ fn text(path: &Path) -> String {
 }
 
 #[test]
+fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() {
+    let directory = FixtureDir::new();
+    for body in [
+        "spec Probe { state { flag: Bool = false } action finish() { flag = true } invariant I { (flag or false) and (flag => true) } }",
+        "requirements Probe { state { flag: Bool = false } action finish() { flag = true } invariant I { (flag or false) and (flag => true) } }",
+        "compose Probe { state { flag: Bool = false } invariant I { (flag or false) and (flag => true) } }",
+        "business Probe { actor User entity Case process Case { stages New, Done initial New transition finish New -> Done by User } policy POL-PROBE-001 \"operator probe\" invariant { (true or false) and (true => true) } } verify { instances Case = 1 }",
+        "refinement Probe { impl I abs A map flag = (true or false) and (true => true) }",
+        "requirements Probe { entity Case { flag: Bool = false lifecycle New -> Done } concept Ready = Case where (flag or false) and (flag => true) } verify { instances Case = 1 }",
+    ] {
+        let readable = body.contains("concept Ready");
+        let verb = if body.starts_with("refinement") {
+            "fmt"
+        } else {
+            "check"
+        };
+        for (canonical, legacy, replacement) in [(" or ", " || ", "or"), (" => ", " -> ", "=>")] {
+            for headed in [false, true] {
+                if readable && !headed {
+                    continue;
+                }
+                let prefix = if headed {
+                    "fsl 5\n// 日本語😀\n"
+                } else {
+                    "// 日本語😀\n"
+                };
+                let invoke = |source: &str, edition: Option<&str>| {
+                    let path = directory.write("operator.fsl", source);
+                    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+                    command
+                        .env_remove("FSLC_UNSTABLE")
+                        .args([verb, path.to_str().expect("path")]);
+                    if headed {
+                        command.env("FSLC_UNSTABLE", "fsl5");
+                    }
+                    if verb == "fmt" {
+                        command.arg("--check");
+                    }
+                    if let Some(edition) = edition {
+                        command.args(["--edition", edition]);
+                    }
+                    command.output().expect("run fslc")
+                };
+                let twin = invoke(&format!("{prefix}{body}\n"), (!headed).then_some("next"));
+                assert_ne!(
+                    twin.status.code(),
+                    Some(2),
+                    "canonical: {}",
+                    String::from_utf8_lossy(&twin.stdout)
+                );
+                let source = format!("{prefix}{}\n", body.replace(canonical, legacy));
+                let output = invoke(&source, (!headed).then_some("next"));
+                assert_eq!(output.status.code(), Some(2));
+                let output = json(&output);
+                assert_eq!(output["kind"], "parse");
+                assert_eq!(
+                    output["diagnostic_code"], "unsupported_in_edition",
+                    "expected edition diagnostic, produced {output:#}"
+                );
+                let start = prefix.len() + body.find(canonical).expect("expression operator") + 1;
+                let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
+                assert_eq!(
+                    output["loc"]["line"],
+                    source[..start].matches('\n').count() + 1
+                );
+                assert_eq!(
+                    output["loc"]["column"],
+                    source[line_start..start].chars().count() + 1
+                );
+                let message = output["message"].as_str().expect("message");
+                assert!(
+                    message.contains(&format!("use '{replacement}'"))
+                        && message.contains("fslc migrate <file> --edition next"),
+                    "{message}"
+                );
+                if !headed {
+                    let current = invoke(&source, Some("current"));
+                    assert_eq!(current.status.code(), Some(2));
+                    assert_eq!(json(&current)["diagnostic_code"], "FSL-PARSE");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn dry_run_write_repeat_and_formatter_contracts_are_consistent() {
     let directory = FixtureDir::new();
     let original = r"domain Legacy {

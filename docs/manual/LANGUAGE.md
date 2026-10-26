@@ -950,6 +950,14 @@ invalid token and is therefore reported with an `and` suggestion but is never
 machine-applied. See `docs/design/DESIGN-migration.md` for atomicity and bulk-update
 steps.
 
+For already-invalid expression `||` and `->` in spec, requirements, compose,
+business policy, or refinement mappings, checking for the next edition reports
+`kind: parse` with `diagnostic_code: unsupported_in_edition`. The diagnostic
+points to the operator and suggests `or` / `=>` and `fslc migrate <file> --edition
+next`. This is a diagnostic improvement, not a new removal: current-edition
+rejection and exit 2 are unchanged. Structural composition `||`, correspondence
+and transition arrows, and domain expressions retain their existing behavior.
+
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while
 walking them, and the combined file set is deduplicated and sorted

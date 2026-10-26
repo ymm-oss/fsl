@@ -86,3 +86,22 @@ Rust planner.
 4. Require `fslc migrate PATH... --edition next` to report zero changes,
    `fslc fmt PATH... --check --edition next` to exit 0, and the project check /
    verification gates to retain their verdicts.
+
+## Amendment: legacy expression operator diagnostics (#251)
+
+In the observed shared expression entries (spec, requirements kernel wrapper and
+readable concept, compose invariant, business policy, refinement map), fsl 5
+returns the parser code `unsupported_in_edition` at the two-byte `||` / `->`
+operator, with `or` / `=>` and migration-command guidance. Kind stays `parse` and
+exit stays 2. This changes no accepted-source set, typed model or semantics.
+
+Only the expression parser classifies these spellings. Structural composition,
+correspondence/transition arrows, quoted strings/comments, Domain's accepted
+legacy expressions, and standalone editionless `parse_expr` are unchanged.
+Headers select diagnostics in the shared parser; for a headerless CLI request,
+a diagnostic-only reparse keeps the original grammar edition and yields no
+replacement model. The formatter shares that diagnostic classifier. LSP retains
+the exact span and publishes its UTF-16 range. All Worker check/verify exits pass
+through the same edition finalization, including parser/semantic/implements
+errors and headerless documents. Implicit-initial-value warnings are owned by
+that step rather than also appended by success-only metadata finalization.

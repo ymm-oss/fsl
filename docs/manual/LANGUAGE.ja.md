@@ -914,6 +914,13 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 不正なトークンであり、そのため `and` の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は `docs/design/DESIGN-migration.md` を参照。
 
+spec、requirements、compose、business policy、refinement の map の式で既に不正な
+`||` / `->` は、次のエディション向けの検査で `kind: parse` のまま
+`diagnostic_code: unsupported_in_edition` を返します。位置は演算子を指し、
+`or` / `=>` と `fslc migrate <file> --edition next` を提案します。これは新たな
+構文削除ではなく診断の改善です。現行の拒否と exit 2 は不変です。構造的な合成の
+`||`、対応や遷移の矢印、domain の式の既存の挙動は維持します。
+
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの
 エントリと他の拡張子が除外されます。統合されたファイル集合は重複排除され、決定的に

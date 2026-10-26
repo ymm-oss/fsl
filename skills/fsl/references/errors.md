@@ -1,5 +1,11 @@
 ## Repair protocol (result → next move)
 
+For `kind: parse`, `diagnostic_code: unsupported_in_edition` on an expression
+operator points at `||` / `->`: use `or` / `=>` and review the suggested
+`fslc migrate <file> --edition next` command. This improves an existing rejection;
+it does not make current-edition expressions accept these spellings. Do not
+replace structural composition/arrows or domain expressions indiscriminately.
+
 Machine-readable `faithfulness_class` tags are a quick routing layer over the
 existing result/kind fields:
 

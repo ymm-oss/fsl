@@ -1417,6 +1417,7 @@ impl DomainParser {
             &mut self.cursor,
             ExpressionMode::Domain,
             line_terminated,
+            false,
         )
     }
 

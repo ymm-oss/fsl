@@ -1025,6 +1025,13 @@ It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;<
 invalid token and is therefore reported with an <code>and</code> suggestion but is never
 machine-applied. See <code>docs/design/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
+<p>For already-invalid expression <code>||</code> and <code>-&gt;</code> in spec, requirements, compose,
+business policy, or refinement mappings, checking for the next edition reports
+<code>kind: parse</code> with <code>diagnostic_code: unsupported_in_edition</code>. The diagnostic
+points to the operator and suggests <code>or</code> / <code>=&gt;</code> and <code>fslc migrate &lt;file&gt; --edition
+next</code>. This is a diagnostic improvement, not a new removal: current-edition
+rejection and exit 2 are unchanged. Structural composition <code>||</code>, correspondence
+and transition arrows, and domain expressions retain their existing behavior.</p>
 <p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
 to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
 walking them, and the combined file set is deduplicated and sorted

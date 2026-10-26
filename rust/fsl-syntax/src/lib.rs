@@ -62,7 +62,8 @@ pub use db::{
 };
 pub use dispatch::{
     DIALECT_KEYWORDS, ParsedDocument, SourceFile, declaration_keyword, dialect_keyword,
-    dialect_keyword_with, parse_document, parse_document_with, validate_frontend_registry,
+    dialect_keyword_with, legacy_expression_operator_error, parse_document, parse_document_with,
+    validate_frontend_registry,
 };
 pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,

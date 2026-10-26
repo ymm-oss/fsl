@@ -236,6 +236,15 @@ async fn check_with<S: fsl_solver::SmtSolver>(
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
+    let output = check_kernel(request, solver_version, new_solver).await;
+    finalize_frontend_output(request, solver_version, output).await
+}
+
+async fn check_kernel<S: fsl_solver::SmtSolver>(
+    request: &Request,
+    solver_version: &str,
+    new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+) -> Value {
     let resolver = MemoryResolver {
         files: request.files.clone(),
     };
@@ -273,25 +282,22 @@ async fn check_with<S: fsl_solver::SmtSolver>(
         &warning_ctx,
     );
     output.insert("warnings".to_owned(), Value::Array(warnings));
-    let output = match implements_output(request, &model, 8) {
+    match implements_output(request, &model, 8) {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
-        Err(failure) => return implements_error(solver_version, &failure),
-    };
+        Err(failure) => implements_error(solver_version, &failure),
+    }
+}
+
+/// One exit for check/verify success and error envelopes, with native ordering.
+async fn finalize_frontend_output(request: &Request, solver_version: &str, output: Value) -> Value {
     let output = fold_governance(request, solver_version, output).await;
     apply_edition(request, solver_version, output)
 }
 
-/// The native edition step for a document with an edition header. Without a
-/// header the Worker envelope keeps its shape; it already carries the
-/// omitted-initial-value warnings the native step adds.
+/// The native edition step also reads headerless documents as current. It owns
+/// implicit-initial-value warnings, so they are appended exactly once here.
 fn apply_edition(request: &Request, solver_version: &str, output: Value) -> Value {
     let options = request.parse_options();
-    if !matches!(
-        fsl_syntax::edition_header(&request.source, &options),
-        Ok(Some(_))
-    ) {
-        return output;
-    }
     fslc_rust::migration::apply_edition(
         (output, 0),
         &request.source,
@@ -299,7 +305,7 @@ fn apply_edition(request: &Request, solver_version: &str, output: Value) -> Valu
         None,
         &options,
         &|| envelope(solver_version),
-        false,
+        true,
     )
     .0
 }
@@ -470,21 +476,6 @@ fn add_frontend_metadata(
     {
         finalize_envelope_model_warnings(&mut output, &ctx);
     }
-    let additions = fslc_rust::frontend_output::implicit_initial_value_warnings(
-        &request.source,
-        &request.source_file,
-        &request.parse_options(),
-    );
-    if !additions.is_empty() {
-        output
-            .as_object_mut()
-            .expect("verify envelope")
-            .entry("warnings")
-            .or_insert_with(|| Value::Array(Vec::new()))
-            .as_array_mut()
-            .expect("warnings array")
-            .extend(additions);
-    }
     output
 }
 
@@ -499,8 +490,7 @@ async fn verify_with<S: fsl_solver::SmtSolver>(
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
     let output = verify_kernel(request, solver_version, new_solver).await;
-    let output = fold_governance(request, solver_version, output).await;
-    apply_edition(request, solver_version, output)
+    finalize_frontend_output(request, solver_version, output).await
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1172,6 +1162,26 @@ mod tests {
     /// comparison has no excluded output fields; it is not a native identity
     /// assertion (`versions.verifier` necessarily names `fsl-wasm`).
     fn native_check_error(request: &Request, solver_version: &str) -> Value {
+        native_edition_output(
+            request,
+            native_check_error_unfinalized(request, solver_version),
+        )
+    }
+
+    fn native_edition_output(request: &Request, output: Value) -> Value {
+        fslc_rust::migration::apply_edition(
+            (output, 2),
+            &request.source,
+            &request.source_file,
+            None,
+            &request.parse_options(),
+            &|| envelope(TEST_SOLVER_VERSION),
+            true,
+        )
+        .0
+    }
+
+    fn native_check_error_unfinalized(request: &Request, solver_version: &str) -> Value {
         if let Some((output, status)) = fslc_rust::frontend_output::ai_project_check_output(
             &request.source,
             &request.source_file,
@@ -1470,6 +1480,7 @@ mod tests {
                 ))
             })
             .expect_err("native check rejects the fixture");
+            let native = native_edition_output(&check_request, native);
             assert_eq!(status, 2, "{fixture}: {native:#}");
             assert_eq!(
                 native["diagnostic_code"], "decide_not_exhaustive",
@@ -2990,6 +3001,49 @@ mod tests {
         assert_eq!(plain, published, "a document without a header is unchanged");
         assert_eq!(plain["result"], "ok", "{plain:#}");
         assert!(plain.get("fsl_edition").is_none(), "{plain:#}");
+    }
+
+    #[test]
+    fn legacy_operator_parse_errors_keep_the_complete_native_edition_envelope() {
+        for prefix in ["", "fsl 5\n"] {
+            for operator in ["||", "->"] {
+                let source = format!(
+                    "{prefix}spec S {{ state {{ flag: Bool = false }} invariant I {{ true {operator} false }} }}\n"
+                );
+                let request: Request = serde_json::from_value(
+                    json!({"cmd":"check", "source":source, "unstable": if prefix.is_empty() {vec![]} else {vec!["fsl5"]}}),
+                )
+                .expect("request");
+                let error = fsl_syntax::parse_document_with(
+                    fsl_syntax::SourceFile::new(&source),
+                    &request.parse_options(),
+                )
+                .expect_err("legacy expression");
+                let native = fslc_rust::frontend_output::render_surface_parse_error(
+                    envelope(TEST_SOLVER_VERSION),
+                    &error,
+                );
+                let native = native_edition_output(&request, native);
+                assert_eq!(
+                    native["diagnostic_code"],
+                    if prefix.is_empty() {
+                        "FSL-PARSE"
+                    } else {
+                        "unsupported_in_edition"
+                    }
+                );
+                assert_eq!(
+                    block_on(check(&request, TEST_SOLVER_VERSION)),
+                    native,
+                    "check {operator}"
+                );
+                assert_eq!(
+                    block_on(verify(&request, TEST_SOLVER_VERSION)),
+                    native,
+                    "verify {operator}"
+                );
+            }
+        }
     }
 
     /// fsl 5 plan S2 and S3, as native `check` reports them

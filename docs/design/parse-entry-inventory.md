@@ -15,13 +15,19 @@ published tree except this directory.
   `parse_surface_document_with`, `dialect_keyword_with`, `lex_with`,
   `lexical_warnings`, `IdentifierRule::for_source`, `edition_header`,
   `document_edition`, `lossless_document_with`, `format_source_with`,
-  `canonical_rewrites_with`, and in fsl-core one `_with_options` entry beside
+   `canonical_rewrites_with`, `legacy_expression_operator_error`, and in fsl-core one `_with_options` entry beside
   each function that reads source text (`parse_kernel_source_with_options`,
   `governance_contract_with_options`, ...). The old
   names (`parse_document`, ...) stay as the published-language entries and are
   the `_with` entry under `ParseOptions::stable()`. Every registered dialect
   frontend is reached only through `parse_document_with`, on the token stream
-  it lexed with the same options.
+   it lexed with the same options.
+- `legacy_expression_operator_error` is a diagnostic-only reparse of an already
+  rejected expression under the original header/grammar and caller's options.
+  It uses the same shared parser, never returns a model or broadens acceptance,
+  and excludes domain, governance, dbsystem and editionless frontends. It serves
+  a headerless CLI `--edition next` and formatter errors without silently
+  parsing the document as a different grammar edition.
 - The library never reads the environment. Three process entry points decide
   the options, once:
   - native CLI: `main` reads `FSLC_UNSTABLE` (comma-separated feature names)

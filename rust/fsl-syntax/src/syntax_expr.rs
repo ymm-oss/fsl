@@ -716,6 +716,7 @@ pub(crate) fn parse_tokens_expression(
     cursor: &mut usize,
     mode: ExpressionMode,
     line_terminated: bool,
+    diagnose_legacy_operators: bool,
 ) -> Result<SyntaxExpr, ParseError> {
     let line = line_terminated.then(|| tokens[*cursor].span.start.line);
     let mut parser = SyntaxParser {
@@ -723,6 +724,7 @@ pub(crate) fn parse_tokens_expression(
         cursor: *cursor,
         mode,
         line,
+        diagnose_legacy_operators,
     };
     let expression = parser.expression(0)?;
     *cursor = parser.cursor;
@@ -739,6 +741,7 @@ pub(crate) fn parse_tokens_lvalue(
         cursor: *cursor,
         mode,
         line: None,
+        diagnose_legacy_operators: false,
     };
     let target = parser.lvalue()?;
     *cursor = parser.cursor;
@@ -750,6 +753,7 @@ struct SyntaxParser<'a> {
     cursor: usize,
     mode: ExpressionMode,
     line: Option<u32>,
+    diagnose_legacy_operators: bool,
 }
 
 impl SyntaxParser<'_> {
@@ -822,6 +826,22 @@ impl SyntaxParser<'_> {
                 continue;
             }
 
+            if self.diagnose_legacy_operators
+                && let TokenKind::Symbol(operator) = &self.peek().kind
+                && let Some(replacement) = match operator.as_str() {
+                    "||" => Some("or"),
+                    "->" => Some("=>"),
+                    _ => None,
+                }
+            {
+                return Err(ParseError::coded(
+                    "unsupported_in_edition",
+                    format!(
+                        "expression operator '{operator}' is unsupported in this edition; use '{replacement}'; review fslc migrate <file> --edition next"
+                    ),
+                    self.peek().span,
+                ));
+            }
             let Some((canonical, spelling, left_power, right_power)) = self.infix() else {
                 break;
             };
