@@ -256,6 +256,8 @@ requirements ReturnRequirements {
 - An event whose name matches a business transition is matched
   automatically only when the parameters match too; the business transition's
   parameter is `c`, so write the correspondence explicitly.
+  An automatically matched event whose actor differs from the business
+  transition's actor is a check-time `kind: "type"` error (`maps auto actor mismatch …`).
 - The stage enum must be the same on both sides: list the lifecycle so the
   stages first appear in the order of the business `stages` line (otherwise
   `type 'ReturnStage' is declared differently in the impl and abs specs`).

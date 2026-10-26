@@ -1069,7 +1069,13 @@ fn insert_action_correspondence(
             )
         })?;
     validate_impl_params(&source, implementation_action, context)?;
-    let target = lower_action_target(&source, implementation_action, abstraction, context)?;
+    let target = lower_action_target(
+        &source,
+        implementation_action,
+        implementation,
+        abstraction,
+        context,
+    )?;
     correspondences.insert(
         source.impl_action.clone(),
         ActionCorrespondence {
@@ -1126,6 +1132,7 @@ fn validate_impl_params(
 fn lower_action_target(
     source: &ActionCorrespondenceSource,
     implementation_action: &ActionDef,
+    implementation: &KernelModel,
     abstraction: &KernelModel,
     context: &KernelModel,
 ) -> Result<ActionCorrespondenceTarget, RefinementError> {
@@ -1182,9 +1189,11 @@ fn lower_action_target(
                 })?;
             }
             if source.origin == CorrespondenceOrigin::Auto
-                && let (Some(impl_actor), Some(abs_actor)) = (
-                    action_actor(implementation_action.meta.as_ref()),
-                    action_actor(abstraction_action.meta.as_ref()),
+                && let Some((impl_actor, abs_actor)) = action_actors(
+                    implementation,
+                    implementation_action,
+                    abstraction,
+                    abstraction_action,
                 )
                 && impl_actor != abs_actor
             {
@@ -1205,11 +1214,38 @@ fn lower_action_target(
     Ok(target)
 }
 
-fn action_actor(meta: Option<&MetaTag>) -> Option<&str> {
-    meta.and_then(|tag| tag.text.as_deref())
-        .and_then(|text| text.strip_prefix("by "))
-        .map(str::trim)
-        .filter(|actor| !actor.is_empty())
+fn action_actors<'a>(
+    implementation: &'a KernelModel,
+    implementation_action: &'a ActionDef,
+    abstraction: &'a KernelModel,
+    abstraction_action: &'a ActionDef,
+) -> Option<(&'a str, &'a str)> {
+    use crate::origin::ActionActor;
+
+    // Preserve the metadata-based actor check for legacy process actions,
+    // including its treatment of covers annotations (tracked separately).
+    fn metadata_actor(meta: Option<&MetaTag>) -> Option<&str> {
+        meta.and_then(|tag| tag.text.as_deref())
+            .and_then(|text| text.strip_prefix("by "))
+            .map(str::trim)
+            .filter(|actor| !actor.is_empty())
+    }
+
+    if let Some(ActionActor::Event(impl_actor)) = implementation
+        .origins()
+        .action_actor(&implementation_action.name)
+    {
+        let (ActionActor::BusinessTransition(abs_actor) | ActionActor::Event(abs_actor)) =
+            abstraction
+                .origins()
+                .action_actor(&abstraction_action.name)?;
+        return Some((impl_actor, abs_actor));
+    }
+
+    Some((
+        metadata_actor(implementation_action.meta.as_ref())?,
+        metadata_actor(abstraction_action.meta.as_ref())?,
+    ))
 }
 
 fn refinement_error(message: impl Into<String>, span: Option<Span>) -> RefinementError {

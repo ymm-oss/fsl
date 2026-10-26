@@ -1569,7 +1569,13 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         .filter(|item| matches!(item, BusinessItem::Kpi { .. }))
         .map(|item| kpi_projection(item, &processes))
         .collect::<Result<Vec<_>, _>>()?;
-    let origins = resolve_stage_items(&mut items, &processes, "business")?;
+    let mut origins = resolve_stage_items(&mut items, &processes, "business")?;
+    for transition in processes.iter().flat_map(|process| &process.transitions) {
+        origins.bind_action_actor(
+            &transition.name,
+            crate::origin::ActionActor::BusinessTransition(transition.actor.clone()),
+        );
+    }
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
             name: business.name,
@@ -3004,6 +3010,16 @@ pub(crate) fn lower_resolved_requirements(
         )?);
     }
     let mut origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    for transition in processes
+        .iter()
+        .flat_map(|process| &process.process.transitions)
+        .filter(|transition| transition.event.is_some())
+    {
+        origins.bind_action_actor(
+            &transition.name,
+            crate::origin::ActionActor::Event(transition.actor.clone()),
+        );
+    }
     for (target, origin) in extra_origins {
         origins.bind(target, origin);
     }
