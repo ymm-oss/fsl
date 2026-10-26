@@ -3027,6 +3027,37 @@ pub(crate) fn lower_resolved_requirements(
     for (name, actor) in action_actors {
         origins.bind_action_actor(&name, actor);
     }
+    let stage_resolver = StageResolver::new(&stage_processes);
+    let expectations = requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Acceptance {
+                expectation: fsl_syntax::AcceptanceExpectation::Expr(expr, span),
+                ..
+            } => Some((expr.clone(), *span)),
+            _ => None,
+        })
+        .map(|(mut expr, span)| {
+            resolve_stage_expression(&stage_resolver, &mut expr, &BTreeMap::new())?;
+            Ok((expr, span))
+        })
+        .collect::<Result<Vec<_>, CoreError>>()?;
+    let step_arguments = requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Acceptance { steps, .. }
+            | RequirementsItem::Forbidden { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .flatten()
+        .flat_map(|step| step.args.iter().map(move |expr| (expr.clone(), step.span)))
+        .map(|(mut expr, span)| {
+            resolve_stage_expression(&stage_resolver, &mut expr, &BTreeMap::new())?;
+            Ok((expr, span))
+        })
+        .collect::<Result<Vec<_>, CoreError>>()?;
     for (target, origin) in extra_origins {
         origins.bind(target, origin);
     }
@@ -3066,6 +3097,45 @@ pub(crate) fn lower_resolved_requirements(
         }));
     let domain_warnings = crate::finite_domain::check(&decision_tables, &rule_guards, &kernel)?;
     kernel.diagnostics.extend(domain_warnings);
+    // Trace expectations are post-state predicates, not invariants. Check
+    // their operands recursively against the same lowered types without
+    // adding a property to the Kernel. As with finite-domain checks above,
+    // leave an invalid model to the ordinary model-building diagnostic path.
+    // Step arguments need internal typing only: their final parameter kind
+    // and domain membership remain the replay checker's responsibility.
+    if (!expectations.is_empty() || !step_arguments.is_empty())
+        && let Ok(model) = crate::build_model(kernel.clone())
+    {
+        let expressions = expectations
+            .into_iter()
+            .map(|(expr, span)| (expr, span, Some(crate::TypeRef::Bool), "expect"))
+            .chain(
+                step_arguments
+                    .into_iter()
+                    .map(|(expr, span)| (expr, span, None, "step")),
+            );
+        for (expr, span, expected, position) in expressions {
+            crate::typecheck::validate_public_expression(&expr, &model, span, expected.as_ref())
+                .map_err(|error| {
+                    let mut diagnostic =
+                        core_error(format!("invalid model expression: {}", error.message), span);
+                    diagnostic.origin = Some(Box::new(OriginChain {
+                        id: OriginId(format!("requirements:{position}:{}", span.start.offset)),
+                        dialect: "requirements".to_owned(),
+                        primary: Some(OriginSite {
+                            source_file: None,
+                            span: Some(span),
+                            dialect: "requirements".to_owned(),
+                            declaration_path: Vec::new(),
+                        }),
+                        secondary: Vec::new(),
+                        lowering_steps: Vec::new(),
+                        generated: false,
+                    }));
+                    diagnostic
+                })?;
+        }
+    }
     Ok(kernel)
 }
 

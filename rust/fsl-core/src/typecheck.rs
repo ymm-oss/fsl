@@ -961,8 +961,11 @@ fn validate_expression_inner(
             extend_pattern_binding(left, &mut right_env, model)?;
             validate_expression(right, &right_env, model, span, Some(&right_ty))?;
         }
-        Expr::Neg(operand) | Expr::Not(operand) => {
-            validate_expression(operand, env, model, span, None)?;
+        Expr::Neg(operand) => {
+            validate_expression(operand, env, model, span, Some(&TypeRef::Int))?;
+        }
+        Expr::Not(operand) => {
+            validate_expression(operand, env, model, span, Some(&TypeRef::Bool))?;
         }
         Expr::Conditional {
             condition,

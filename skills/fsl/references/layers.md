@@ -117,7 +117,9 @@ the relevant role skill directs it.
   (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
   syntax a separate refinement file uses. `acceptance` is replay-checked at
   check time and supports `expect E id in Stage` as well as `expect <expr>`,
-  then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
+  whose operands are recursively type-checked with expected `Bool` before replay
+  (also FSL 5 scenario `then <expr>`). The predicate is not an invariant.
+  Acceptance flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
   must match the parameter's kind. Enum parameters take member names, not numeric
   ordinals (`paint(1)` is not `paint(Blue)`); const names work where their values
   match the parameter's kind. `forbidden` (must-forbid)
@@ -404,6 +406,27 @@ verify {
   (`parameter`, `value`, `type`), a top-level `message` naming the argument and
   expected type and explaining that no guard was evaluated, a hint, and a `loc`
   at that step.
+  Expression expectations
+  (also FSL 5 scenario `then`) use the invariant's recursive checker with expected
+  `Bool` before replay. Enum-vs-integer comparisons (`c != 1` or `c == 1` for
+  `c: Color`) fail with `kind: "semantics"`, exit 2, the assignability message,
+  and the authored `expect`/`then` keyword location. A well-typed false predicate
+  still reports `kind: "acceptance"`. It is tested only in the post-state, not
+  promoted to an invariant.
+- All acceptance/forbidden step arguments, including setup/final calls and FSL 5
+  scenario/forbidden `with`, particle, hybrid and relation-role inputs, use the
+  same lowered-model recursive checker before replay. No parameter type is
+  imposed at the outer boundary: internal mismatches, including in unselected
+  branches, are `kind: "semantics"`, exit 2, with the assignability message at
+  the first authored token of the step: action name for calls, actor for
+  actor-first phrases, or the first token (for example the instance) of a
+  reordered particle phrase. `paint(if c != 1 then Red else Blue)`
+  is malformed even if a guard would reject its value. Internally well-typed
+  `paint(1)` and `paint(if true then 1 else 2)` keep the forbidden
+  `wrong_kind_argument` diagnostic below, and well-typed values-scope-only
+  exclusions retain replay skips. For measured breaking removals and repair
+  guidance, see [syntax.md](syntax.md#5-semantic-rules) and
+  [the design note](../../../docs/design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals).
 - `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected**, i.e. not enabled. If accepted,

@@ -113,6 +113,16 @@ A copy of `acceptance_def`. `expect rejected` is an inline marker (unlike `accep
     if implementations are to reject an `entity` / `number` outside its scope as part of
     their type contract; then this case returns to `bad_call` and the testgen contract
     must say so.
+- **Internally ill-typed argument expression (issue #1439).** Before replay, every
+  setup and final argument is recursively checked against the lowered model,
+  including unselected conditional branches, without imposing the parameter type
+  on the outer expression. An enum/integer comparison inside
+  `paint(if c != 1 then Red else Blue)` is `kind: "semantics"`, exit 2, at
+  the authored step-start token; its guard refusal cannot satisfy the forbidden.
+  This differs from a well-typed expression whose final value has the wrong
+  parameter kind: both `paint(1)` and `paint(if true then 1 else 2)` still use
+  the #1241 diagnostic below. Declared-range and values-scope classifications
+  are unchanged. See `DESIGN-requirements-stage.md` for the measured removals.
 - **Argument of the wrong kind (issue #1241, breaking).** A last step whose argument is not
   of its parameter's kind at all — an enum member or a Bool for an `entity` / `number` /
   range parameter (`respond(Waiting)` or `respond(true)` with `c: Case`, `withdraw(Red)`

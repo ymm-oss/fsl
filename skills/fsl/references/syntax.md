@@ -851,6 +851,111 @@ never a state variable named `true`), so the declaration is rejected. No other w
 
 ## 5. Semantic rules
 
+The shared model-expression checker requires `Bool` for the operand of `not`
+and an `Int`-compatible type (including named numeric ranges) for unary `-`.
+This applies in traces and every model expression, including unselected branches
+and short-circuited `and` / `or`. `not 1` and enum `-Red` are check-time
+`kind: "semantics"` errors, exit 2; they are not conversions. Well-typed
+`not (c == Red)`, `-(-1)` and numeric `- n` remain valid.
+
+Requirements `acceptance ... { ... expect <expr> }` and FSL 5 scenario
+`then <expr>` require a recursively well-typed `Bool` expression before replay,
+using the invariant checker for all operands and conditional branches. For enum
+state `c: Color`, `c == Blue` is valid if `Blue` belongs to `Color`; `c != 1`
+and `c == 1` are assignability errors (`kind: "semantics"`, exit 2), located at
+the authored `expect`/`then` keyword. This is a post-state predicate, not an
+invariant; a well-typed false expectation still reports `kind: "acceptance"`.
+The readable `expect E id in Stage` and forbidden's `expect rejected` are unchanged.
+
+Compatibility measurement (#1439): against base `5a539bbe`, all 579 forms per
+tree under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` were checked in
+both gate modes, with no ok-to-error transition. See the
+[design note](../../../docs/design/DESIGN-requirements-stage.md#measured-compatibility)
+for the command and measured production identity.
+
+Every acceptance/forbidden step argument is recursively checked against the
+lowered model before replay, without an outer expected parameter type. This
+includes setup/final calls, FSL 5 scenario/forbidden phrase `with` inputs,
+particle inputs, marked/with hybrids and relation-role values. Unselected
+conditional branches are checked. Internal mismatches use the existing
+assignability message, `kind: "semantics"`, exit 2, at the first authored token of the step
+(action name for calls, actor for actor-first phrases, or the first token of a
+reordered particle phrase, for example its instance). Internally well-typed `paint(1)` and
+`paint(if true then 1 else 2)` retain the forbidden `wrong_kind_argument`
+diagnostic; values-scope-only skips are unchanged.
+
+Extension measurement against base `5a539bbe`: 579 corpus forms plus all 21
+inline fixtures of the lint-rewritten trace-step test per tree, both modes
+twice (4,800 checks). Corpus transitions are empty. Inline forms T01–T16 below are
+**breaking removals**, `ok` / 0 → `error` / `semantics` / 2. T01–T03, T13 and
+T16 transition in both modes, the others only in FSL 5: 21 mode/form transitions,
+no other full-output/exit or repeat differences, no exclusions. IDs identify
+the exact test sources in the
+[extension design note](../../../docs/design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals).
+
+| Removal | Ill-typed trace form now rejected |
+|---|---|
+| T01 | acceptance Color argument with condition `c != 1` |
+| T02 | forbidden setup Color argument with condition `c != 1` |
+| T03 | forbidden final S1: `paint(if c != 1 then Red else Blue)` |
+| T04 | FSL 5 scenario call with condition `claim_stage[0] != 1` |
+| T05 | FSL 5 scenario with input, same malformed stage condition |
+| T06 | FSL 5 scenario particle input, same condition |
+| T07 | FSL 5 forbidden call setup, same condition |
+| T08 | FSL 5 forbidden call final, same condition |
+| T09 | FSL 5 forbidden with setup input, same condition |
+| T10 | FSL 5 forbidden with final input, same condition |
+| T11 | FSL 5 forbidden particle setup input, same condition |
+| T12 | FSL 5 forbidden particle final input, same condition |
+| T13 | acceptance numeric argument: `setn(if c != 1 then 2 else 0)` |
+| T14 | FSL 5 marked/with hybrid input, malformed ClaimStage comparison |
+| T15 | FSL 5 relation-role value with condition `ticket_stage[0] != 1` |
+| T16 | acceptance unselected branch: `paint(if true then Blue else (if c != 1 then Red else Blue))` |
+| T17 | native/shared diagnostic test's `expect c != 1` row |
+| T18 | rewritten Worker diagnostic test's identical `expect c != 1` row |
+| T19 | step: `paint(if o is some(z) then z else Red)` with `o = none` |
+| T20 | expectation: `expect (if o is some(z) then z else Red) == Red` with `o = none` |
+| T21 | reordered particle input: `claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits` |
+
+Round 1 additionally checks all sources of the two rewritten diagnostic tests
+and their changed-oracle consumers, plus scope/reordered-particle controls:
+20 forms per tree, both modes twice, 160 checks against the same base and
+unchanged production code. T17–T20 are additional breaking removals in both
+modes; T21 only in FSL 5 (five fixture occurrences / nine mode-form transitions,
+no other differences or exclusions). T17/T18 are identical FSL in two tests.
+T19/T20 report `public Kernel cannot type identifier 'z'`: an `is some(z)`
+binding is limited to its true logical continuation (`=>` / `and`), not a
+conditional's `then` arm, even if unselected. Invariants already reject that
+scope escape; move the use into a supported continuation or avoid the escaped
+name. T21's diagnostic starts at `claim1` (8:5), not the later actor. See the
+design note for exact identities and inventory.
+
+Unary operand measurement (#1439): base `5a539bbe` and the final implementation,
+each in its own tree, both modes twice, 579 corpus forms plus 51 inline fixture
+occurrences per tree: 5,040 checks. The corpus ok-to-error set is empty. T01–T21
+remain the earlier removals. U01–U07 below are additional **breaking removals**,
+each `ok` / 0 → `error` / `semantics` / 2 in both modes (14 new mode/form
+transitions, 44 total). Full stdout, stderr and exits have no other differences,
+repeat differences or exclusions. See
+[unary operand typing](../../../docs/design/DESIGN-requirements-stage.md#unary-operand-typing-1439)
+for commands and exact identities.
+
+| Removal | Ill-typed unary form now rejected |
+|---|---|
+| U01 | forbidden step `paint(if true then Red else (if not 1 then Red else Blue))` |
+| U02 | forbidden step `paint(if true then Red else (if -Red > 0 then Red else Blue))` |
+| U03 | forbidden step `paint(if c == Red or not 1 then Red else Blue)` |
+| U04 | acceptance `expect c == Blue or not 1` after `paint(Blue)` |
+| U05 | invariant `c == Red or c == Blue or not 1` |
+| U06 | invariant `c == Red or c == Blue or -Red > 0` |
+| U07 | acceptance `expect not (false and not 1)` after `paint(Blue)` |
+
+Repair `not` to use a Bool operand and unary minus to use a numeric operand;
+skipping evaluation cannot legalize an ill-typed operand.
+
+Repair the comparisons using members of the same enum, including unselected
+branches. A guard refusal does not legitimize an ill-typed argument expression.
+
 1. One step = one action instance (name × parameters) executes atomically.
 2. **Simultaneous assignment**: every RHS in the body reads the old state.
    Unassigned variables are unchanged (automatic framing).

@@ -648,6 +648,13 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `kind: "abs_step_violation"` として報告されます。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
+  共通のモデル式チェッカーは、`not` のオペランドに `Bool`、単項 `-` の
+  オペランドに `Int` と互換の型 (名前付き数値範囲を含む) を要求します。
+  trace とすべてのモデル式に適用され、未選択の分岐や短絡される `and` / `or`
+  の内部も検査します。`not 1` と enum メンバー `Red` に対する `-Red` は
+  check 時の `kind: "semantics"` エラー (exit 2) であり、truthiness や enum から
+  整数への変換ではありません。型が正しい `not (c == Red)`、`-(-1)`、数値の
+  `- n` は引き続き有効です。
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
   分岐が検査され、同じ論理型を持たなければなりません。ガード、代入、プロパティ、
   関数引数、ランキング式、定数、refinement マッピングを含む、式が受理される任意の
@@ -2483,6 +2490,104 @@ verify {
   オブジェクト (`parameter`, `value`, `type`)、どの引数がパラメータの型に属さず、
   ガードが評価されなかったことを説明するトップレベルの `message`、ヒント、および
   そのステップの `loc` を持つエラーになります。
+
+  replay 前に `expect <expr>` (および FSL 5 scenario の `then <expr>`) は、
+  invariant と同じく期待型 `Bool` で再帰的に型検査され、すべてのオペランドと
+  条件式の両分岐も検査されます。enum 状態 `c: Color` に対する `c != 1` や
+  `c == 1` のような異なる種類の比較は、既存の代入可能性メッセージと、記述した
+  `expect`/`then` キーワードの位置を持つ check 時の `kind: "semantics"`
+  エラー (exit 2) です。`Blue` が `Color` のメンバーなら `c == Blue` は型が
+  合います。式はあくまで最終状態の述語であり、初期状態や途中の状態で成立する
+  必要はありません。型が正しく偽になる述語は、引き続き replay 時に
+  `kind: "acceptance"` で失敗します。読みやすい stage 形式は変わりません。
+  互換性測定 (#1439): base `5a539bbe` に対し、`specs/`、`examples/`、
+  `rust/fslc/tests/fixtures/` 配下の各 tree の全 579 形式を両方のゲートモードで
+  検査し、ok→error 遷移はありませんでした。コマンドと測定した production の
+  識別情報は[設計ノート](../design/DESIGN-requirements-stage.md#measured-compatibility)
+  を参照してください。
+  acceptance と forbidden のすべてのステップ引数も、replay 前に lowering 済み
+  モデルに対して再帰的に型検査されます。setup/final、FSL 5 の呼び出し、句の
+  `with` 入力、助詞付き入力、混合入力、relation-role 値を含み、選択されない分岐も
+  検査します。式の内部の型を検査し、外側の型をパラメータ型には強制しません。
+  内部の不整合は既存の代入可能性メッセージを持つ `kind: "semantics"`、exit 2
+  で、位置はステップの最初に記述されたトークンです。呼び出しなら action 名、
+  actor が先頭の句なら actor、助詞で語順を変えた句なら先頭のトークン
+  (例えば後続の actor ではなく `claim1`) を指します。
+  内部で型が整合する `paint(1)` と `paint(if true then 1 else 2)` は、既存の
+  forbidden の `wrong_kind_argument` 診断を保ち、values scope のみを理由とする
+  skip も変わりません。
+
+  拡張の測定では base `5a539bbe` に対し、各 tree の corpus 579 形式と、lint のみ
+  修正した trace-step テストの全 inline fixture 21 形式を両モードで 2 回ずつ
+  検査しました (4,800 checks)。corpus の遷移は空ですが、次の inline T01–T16 は
+  **破壊的な受理の削除** (`ok` / 0 → `error` / `semantics` / 2) です。
+  mode/form 遷移は 21 件で、それ以外の全出力・exit 差や反復差はありません。
+  T01–T03、T13、T16 は両モード、それ以外は FSL 5 のみで遷移します。
+  各行は[拡張の設計ノート](../design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals)
+  に記録した測定上の削除に対応します。
+
+  | 削除 | 新たに拒否する型不整合の trace 形式 |
+  |---|---|
+  | T01 | acceptance の Color 引数、条件 `c != 1` |
+  | T02 | forbidden setup の Color 引数、条件 `c != 1` |
+  | T03 | forbidden final の S1: `paint(if c != 1 then Red else Blue)` |
+  | T04 | FSL 5 scenario 呼び出し、条件 `claim_stage[0] != 1` |
+  | T05 | FSL 5 scenario の with 入力、同じ stage 条件の不整合 |
+  | T06 | FSL 5 scenario の助詞付き入力、同じ条件 |
+  | T07 | FSL 5 forbidden 呼び出しの setup、同じ条件 |
+  | T08 | FSL 5 forbidden 呼び出しの final、同じ条件 |
+  | T09 | FSL 5 forbidden の with setup 入力、同じ条件 |
+  | T10 | FSL 5 forbidden の with final 入力、同じ条件 |
+  | T11 | FSL 5 forbidden の助詞付き setup 入力、同じ条件 |
+  | T12 | FSL 5 forbidden の助詞付き final 入力、同じ条件 |
+  | T13 | acceptance の数値引数: `setn(if c != 1 then 2 else 0)` |
+  | T14 | FSL 5 助詞/with 混合入力、ClaimStage 比較の不整合 |
+  | T15 | FSL 5 relation-role 値、条件 `ticket_stage[0] != 1` |
+  | T16 | acceptance の未選択分岐: `paint(if true then Blue else (if c != 1 then Red else Blue))` |
+  | T17 | native/shared 診断テストの `expect c != 1` 行 |
+  | T18 | 書き換えた Worker 診断テストの同一の `expect c != 1` 行 |
+  | T19 | step: `paint(if o is some(z) then z else Red)`、`o = none` |
+  | T20 | 期待式: `expect (if o is some(z) then z else Red) == Red`、`o = none` |
+  | T21 | 語順を変えた助詞付き入力: `claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits` |
+
+  round 1 では、書き換えた両診断テストの全ソースと変更した共通 oracle を使う
+  テスト、および scope/語順変更の対照を追加測定しました。同じ base と変更のない
+  production コードに対し各 tree 20 形式、両モード各 2 回で 160 checks です。
+  T17–T20 は両モード、T21 は FSL 5 のみで追加の破壊的な受理の削除になります
+  (fixture 5 件 / mode-form 遷移 9 件。それ以外の差や除外はありません)。
+  T17/T18 は 2 つの書き換えたテストにある同一の FSL です。T19/T20 の診断は
+  `public Kernel cannot type identifier 'z'` です。§5 の `is some(z)` の束縛は
+  真の論理的継続 (`=>` / `and`) に限られ、条件式の `then` 分岐には及びません。
+  未選択の分岐でも同じです。invariant は既に同じ scope 逸脱を拒否しています。
+  使用箇所をサポートされた継続へ移すか、scope 外の名前を使わないでください。
+  T21 の位置は後続の `Employee` でなく先頭の `claim1` (8:5) です。
+  正確な識別情報と fixture 一覧は設計ノートを参照してください。
+
+  単項オペランドの測定 (#1439): base `5a539bbe` と最終実装をそれぞれの tree で
+  両モード各 2 回検査しました。各 tree の corpus 579 形式と inline fixture
+  51 件、計 5,040 checks です。corpus の ok→error 集合は空です。T01–T21 は
+  既存の削除のままで、次の 7 形式が追加の**破壊的な受理の削除**です。いずれも
+  両モードで `ok` / 0 → `error` / `semantics` / 2 へ遷移します (新規の mode/form
+  遷移 14 件、全体では 44 件)。全 stdout、stderr、exit にそれ以外の差、反復差、
+  除外はありません。コマンドと正確な base/head 識別情報は
+  [単項オペランドの設計ノート](../design/DESIGN-requirements-stage.md#unary-operand-typing-1439)
+  を参照してください。
+
+  | 削除 | 新たに拒否する単項型不整合の形式 |
+  |---|---|
+  | U01 | forbidden step `paint(if true then Red else (if not 1 then Red else Blue))` |
+  | U02 | forbidden step `paint(if true then Red else (if -Red > 0 then Red else Blue))` |
+  | U03 | forbidden step `paint(if c == Red or not 1 then Red else Blue)` |
+  | U04 | `paint(Blue)` 後の acceptance `expect c == Blue or not 1` |
+  | U05 | invariant `c == Red or c == Blue or not 1` |
+  | U06 | invariant `c == Red or c == Blue or -Red > 0` |
+  | U07 | `paint(Blue)` 後の acceptance `expect not (false and not 1)` |
+
+  `not` は Bool オペランド、単項マイナスは数値オペランドを使うよう修正してください。
+  評価が省略されても、型不整合のオペランドは合法になりません。
+
+  未選択の分岐も含め、同じ enum のメンバーを使う比較に修正してください。
+  guard の拒否が、型不整合の引数を正当化することはありません。
 - カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの
   要件、保存則、SLA/時間、carried フィールドとして表現できない履歴、明示の
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
