@@ -18194,14 +18194,15 @@ spec InitTraceability {
     }
 
     #[test]
-    fn html_timing_projection_preserves_every_other_value() {
+    fn html_timing_projection_omits_ambient_statistics_and_preserves_every_other_value() {
         let explained = json!({
-            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s",
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s memory_mb conflicts decisions propagations",
             "counterfactuals": [{"property": "Safe", "violation": {
                 "result": "violated", "loc": {"line": 7, "column": 3},
                 "assurance": "bounded", "cost": {"elapsed_s": 0.5, "checks": 17},
                 "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
-                    "cost": {"elapsed_s": 33}}}]
+                    "cost": {"elapsed_s": 33}, "memory_mb": 1.25,
+                    "conflicts": 3, "decisions": 5, "propagations": 7}}]
             }}, {"property": "Other", "result": "unreachable"}],
             "state": {"elapsed_s": 34}, "elapsed_s": 35
         });
@@ -18209,7 +18210,8 @@ spec InitTraceability {
             "result": "violated", "spec": "Synthetic", "depth": 4,
             "loc": {"line": 9, "column": 5}, "assurance": "bounded",
             "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
-                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}}}],
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}, "memory_mb": 2.5,
+                "conflicts": 11, "decisions": 13, "propagations": 17}}],
             "cost": {"elapsed_s": 0.25, "checks": 19,
                 "solver": {"check_elapsed_s": 0.125, "checks": 23,
                     "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
@@ -18220,12 +18222,13 @@ spec InitTraceability {
         });
         // Independent full expected payloads: do not derive them with the projection.
         let expected_explained = json!({
-            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s",
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s memory_mb conflicts decisions propagations",
             "counterfactuals": [{"property": "Safe", "violation": {
                 "result": "violated", "loc": {"line": 7, "column": 3},
                 "assurance": "bounded", "cost": {"checks": 17},
                 "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
-                    "cost": {"elapsed_s": 33}}}]
+                    "cost": {"elapsed_s": 33}, "memory_mb": 1.25,
+                    "conflicts": 3, "decisions": 5, "propagations": 7}}]
             }}, {"property": "Other", "result": "unreachable"}],
             "state": {"elapsed_s": 34}, "elapsed_s": 35
         });
@@ -18233,10 +18236,10 @@ spec InitTraceability {
             "result": "violated", "spec": "Synthetic", "depth": 4,
             "loc": {"line": 9, "column": 5}, "assurance": "bounded",
             "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
-                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}}}],
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}, "memory_mb": 2.5,
+                "conflicts": 11, "decisions": 13, "propagations": 17}}],
             "cost": {"checks": 19,
-                "solver": {"checks": 23,
-                    "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
+                "solver": {"checks": 23},
                 "properties": [
                     {"kind": "invariant", "name": "Safe", "checks": 7},
                     {"kind": "reachable", "name": "Goal", "checks": 11}]},
