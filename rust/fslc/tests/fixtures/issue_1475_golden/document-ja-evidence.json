@@ -1,0 +1,36 @@
+{
+  "base": "c25f8653b9c83a247321f375f98cd59f430b6326",
+  "observed": {
+    "generate": {
+      "fsl": "1.0",
+      "result": "generated",
+      "kind": "requirements_document",
+      "output": "document.md",
+      "spec_digest": "sha256:ac2ebc65c1c5a506b236f20c24f6598118ff5421a289ad1fe9820f11cfc696d7",
+      "claim_set_digest": "sha256:aced99e4fb64eef47485f90233d84139f1895d16352268ec52f7de1c55310185",
+      "artifact_digest": "sha256:f5d0eced29d822b82d6631da5f4aca8771593b17924a7ead13cc8cb23136d4a6",
+      "coverage": {
+        "authored_targets": 10,
+        "rendered_targets": 8,
+        "unattributed_targets": 0,
+        "unsupported_targets": 2,
+        "formula_fallbacks": 0
+      },
+      "provenance": {
+        "completeness": "complete"
+      },
+      "evidence": {
+        "digest": "sha256:52584968b41acef056208c8fcccf00bcb7e8d32247ecf9c36a048d1c15c094c7",
+        "files": 1
+      }
+    },
+    "check": {
+      "fsl": "1.0",
+      "artifact": "document.md",
+      "spec_digest": "sha256:ac2ebc65c1c5a506b236f20c24f6598118ff5421a289ad1fe9820f11cfc696d7",
+      "claim_set_digest": "sha256:aced99e4fb64eef47485f90233d84139f1895d16352268ec52f7de1c55310185",
+      "result": "document_conformant"
+    },
+    "markdown_sha256": "f5d0eced29d822b82d6631da5f4aca8771593b17924a7ead13cc8cb23136d4a6"
+  }
+}

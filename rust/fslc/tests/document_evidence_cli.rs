@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 static NEXT_OUTPUT: AtomicU64 = AtomicU64::new(0);
 
@@ -64,6 +65,138 @@ fn write_evidence(json: &str) -> PathBuf {
 }
 
 const CANCEL_SYSTEM: &str = "examples/pm/cancel_system.fsl";
+
+fn assert_base_golden(actual: &Value) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/issue_1475_golden/document-ja-evidence.json");
+    let expected: Value = serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
+        .expect("base golden JSON");
+    assert_eq!(expected["base"], "c25f8653b9c83a247321f375f98cd59f430b6326");
+    assert_eq!(actual, &expected["observed"], "full base document output");
+}
+
+struct NormalEvidenceFixture(PathBuf);
+
+impl Drop for NormalEvidenceFixture {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).expect("remove normal evidence fixture");
+    }
+}
+
+impl NormalEvidenceFixture {
+    fn new() -> Self {
+        let directory = temp_path(".normal-evidence");
+        std::fs::create_dir_all(directory.join("examples/pm")).expect("create fixture directory");
+        for name in ["cancel_system.fsl", "cancel_flow.fsl"] {
+            let relative = Path::new("examples/pm").join(name);
+            let source =
+                std::fs::read_to_string(root().join(&relative)).expect("read original source");
+            std::fs::write(directory.join(relative), source.replace("\r\n", "\n"))
+                .expect("copy source bytes");
+        }
+        std::fs::write(
+            directory.join("evidence.json"),
+            r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded","result":"verified"}"#,
+        )
+        .expect("write fixed evidence bytes");
+        Self(directory)
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(args)
+            .current_dir(&self.0)
+            .output()
+            .expect("run native fslc")
+    }
+}
+
+// #1475: valid artifact, hostile *fresh-side* evidence. An artifact-only
+// malformed marker exercises drift/1, not this renderer/checker panic.
+#[test]
+fn issue_1475_marker_in_fresh_evidence_is_a_document_refusal() {
+    let evidence = write_evidence(
+        r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded","result":"verified"}"#,
+    );
+    let (artifact, _) = generate_to_file(&[&evidence]);
+    let before = std::fs::read(&artifact).expect("normal artifact bytes");
+    std::fs::write(&evidence, r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded","result":"verified\n<!-- fsl:bogus -->\n"}"#).expect("write hostile evidence");
+    let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        json_stdout(&output),
+        serde_json::json!({
+            "fsl": "1.0", "result": "error", "kind": "document",
+            "message": "malformed generated-block marker: \"<!-- fsl:bogus -->\""
+        })
+    );
+    assert_eq!(
+        std::fs::read(&artifact).expect("artifact not overwritten"),
+        before
+    );
+}
+
+#[test]
+fn issue_1475_normal_evidence_bytes_and_full_check_envelope_are_stable() {
+    // Stable relative labels prevent ambient scratch paths entering Markdown,
+    // evidence digests or JSON. No output field/digest is excluded.
+    let fixture = NormalEvidenceFixture::new();
+    let generate_args = [
+        "document",
+        "generate",
+        CANCEL_SYSTEM,
+        "--lang",
+        "ja",
+        "--evidence",
+        "evidence.json",
+        "-o",
+        "document.md",
+    ];
+    let generation = fixture.run(&generate_args);
+    assert_eq!(generation.status.code(), Some(0));
+    assert!(generation.stderr.is_empty());
+    let generated = json_stdout(&generation);
+    let artifact = fixture.0.join("document.md");
+    let before = std::fs::read(&artifact).expect("normal artifact bytes");
+    let check_args = [
+        "document",
+        "check",
+        CANCEL_SYSTEM,
+        "document.md",
+        "--evidence",
+        "evidence.json",
+    ];
+    let output = fixture.run(&check_args);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let value = json_stdout(&output);
+    assert_eq!(value["result"], "document_conformant");
+    println!(
+        "DOCUMENT NORMAL GENERATE {generated}\nDOCUMENT NORMAL CHECK {value}\n{}",
+        String::from_utf8_lossy(&before)
+    );
+    assert_eq!(value["spec_digest"], generated["spec_digest"]);
+    assert_eq!(value["claim_set_digest"], generated["claim_set_digest"]);
+    assert_base_golden(&serde_json::json!({
+        "generate": generated, "check": value,
+        "markdown_sha256": format!("{:x}", Sha256::digest(&before)),
+    }));
+    assert_eq!(
+        value,
+        json_stdout(&fixture.run(&check_args)),
+        "same-binary repeat determinism"
+    );
+    let regenerated = fixture.run(&generate_args);
+    assert_eq!(regenerated.status.code(), Some(0));
+    assert_eq!(generated, json_stdout(&regenerated));
+    assert_eq!(std::fs::read(&artifact).expect("regenerated bytes"), before);
+}
 
 fn generate(extra_args: &[&str]) -> Output {
     let mut args = vec!["document", "generate", CANCEL_SYSTEM, "--lang", "ja"];
