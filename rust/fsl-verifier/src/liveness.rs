@@ -8,7 +8,7 @@ use fsl_core::{FslValue, KernelBinder, KernelModel, LeadsToDef, static_leadsto_b
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
-use crate::eval::{binder_values, eval};
+use crate::eval::{eval, static_binder_values};
 use crate::value::{Bindings, SymbolicState, bool_term};
 
 #[derive(Clone)]
@@ -24,7 +24,7 @@ pub(crate) fn leadsto_bindings<S: SmtSolver>(
 ) -> Result<Vec<LeadstoBinding<S::Term>>, VerifyError> {
     let mut expanded = vec![Bindings::new()];
     for binder in &property.binders {
-        let symbolic = binder_values(solver, model, binder)?;
+        let symbolic = static_binder_values(solver, model, binder)?;
         let name = match binder {
             KernelBinder::Typed { name, .. }
             | KernelBinder::Range { name, .. }

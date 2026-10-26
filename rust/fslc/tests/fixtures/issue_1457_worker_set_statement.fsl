@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+spec WorkerSetBinder {
+  type K = 0..1
+  state { xs: Set<K>, flag: Bool, done: Bool }
+  init { xs = Set { 1 } flag = false done = false }
+  action go() {
+    forall z in xs { }
+    flag = true
+    done = true
+  }
+  invariant Capture { not done or flag }
+}

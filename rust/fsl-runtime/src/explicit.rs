@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use fsl_core::{
     FslValue as Value, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue,
     KernelModel, KernelStatement as Statement, TraceAction, TraceStep, TypeDef, TypeRef,
+    state_references,
 };
 
 use super::trace::{ParentLink, reconstruct_trace, state_changes};
@@ -871,12 +872,9 @@ fn walk_init(
                             )));
                         }
                     }
-                    Binder::Collection { collection, .. } => {
-                        if let Some(name) = state_references(collection, model).first() {
-                            return Err(runtime_error(format!(
-                                "init forall over a state collection is not supported; state variable '{name}' is not allowed"
-                            )));
-                        }
+                    Binder::Collection { .. } => {
+                        fsl_core::check_init_collection_binder(model, binder)
+                            .map_err(|error| runtime_error(error.message))?;
                     }
                     Binder::Typed { .. } => {}
                 }
@@ -946,139 +944,6 @@ fn check_init_expr(
         )));
     }
     Ok(())
-}
-
-fn state_references(expr: &Expr, model: &KernelModel) -> BTreeSet<String> {
-    let state_names = model
-        .state
-        .iter()
-        .map(|(name, _)| name.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut references = BTreeSet::new();
-    collect_state_references(expr, &state_names, &mut references);
-    references
-}
-
-fn collect_state_references(
-    expr: &Expr,
-    state_names: &BTreeSet<&str>,
-    output: &mut BTreeSet<String>,
-) {
-    match expr {
-        Expr::Var(name) => {
-            if state_names.contains(name.as_str()) {
-                output.insert(name.clone());
-            }
-        }
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => {}
-        Expr::Some(value)
-        | Expr::Neg(value)
-        | Expr::Not(value)
-        | Expr::Field(value, _)
-        | Expr::Stage { entity: value, .. }
-        | Expr::UnaryNamed { expr: value, .. }
-        | Expr::Is { expr: value, .. } => {
-            collect_state_references(value, state_names, output);
-        }
-        Expr::Set(items) | Expr::Seq(items) => {
-            for item in items {
-                collect_state_references(item, state_names, output);
-            }
-        }
-        Expr::Struct { fields, .. } => {
-            for (_, value) in fields {
-                collect_state_references(value, state_names, output);
-            }
-        }
-        Expr::Call { args, .. } => {
-            for argument in args {
-                collect_state_references(argument, state_names, output);
-            }
-        }
-        Expr::Index(base, index)
-        | Expr::Binary {
-            left: base,
-            right: index,
-            ..
-        }
-        | Expr::BinaryNamed {
-            left: base,
-            right: index,
-            ..
-        } => {
-            collect_state_references(base, state_names, output);
-            collect_state_references(index, state_names, output);
-        }
-        Expr::Method { receiver, args, .. } => {
-            collect_state_references(receiver, state_names, output);
-            for argument in args {
-                collect_state_references(argument, state_names, output);
-            }
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            collect_state_references(condition, state_names, output);
-            collect_state_references(then_expr, state_names, output);
-            collect_state_references(else_expr, state_names, output);
-        }
-        Expr::Quantified { binder, body, .. } => {
-            collect_binder_references(binder, state_names, output);
-            collect_state_references(body, state_names, output);
-        }
-        Expr::Aggregate { binder, value, .. } => {
-            collect_binder_references(binder, state_names, output);
-            if let Some(value) = value {
-                collect_state_references(value, state_names, output);
-            }
-        }
-        Expr::TernaryNamed {
-            first,
-            second,
-            third,
-            ..
-        } => {
-            collect_state_references(first, state_names, output);
-            collect_state_references(second, state_names, output);
-            collect_state_references(third, state_names, output);
-        }
-    }
-}
-
-fn collect_binder_references(
-    binder: &Binder,
-    state_names: &BTreeSet<&str>,
-    output: &mut BTreeSet<String>,
-) {
-    match binder {
-        Binder::Typed { where_expr, .. } => {
-            if let Some(where_expr) = where_expr {
-                collect_state_references(where_expr, state_names, output);
-            }
-        }
-        Binder::Range {
-            lo, hi, where_expr, ..
-        } => {
-            collect_state_references(lo, state_names, output);
-            collect_state_references(hi, state_names, output);
-            if let Some(where_expr) = where_expr {
-                collect_state_references(where_expr, state_names, output);
-            }
-        }
-        Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => {
-            collect_state_references(collection, state_names, output);
-            if let Some(where_expr) = where_expr {
-                collect_state_references(where_expr, state_names, output);
-            }
-        }
-    }
 }
 
 fn logical_var(target: &LValue) -> Option<&str> {

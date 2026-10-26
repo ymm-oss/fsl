@@ -2114,14 +2114,54 @@ fn statement_root_spans(statements: &[Statement]) -> Vec<(String, Span)> {
 }
 
 fn first_state_reference(expr: &Expr, state_names: &BTreeSet<String>) -> Option<String> {
+    let mut references = Vec::new();
+    collect_state_references(expr, state_names, &mut references);
+    references.into_iter().next()
+}
+
+fn collect_state_references(
+    expr: &Expr,
+    state_names: &BTreeSet<String>,
+    references: &mut Vec<String>,
+) {
     if let Expr::Var(name) = expr
         && state_names.contains(name)
     {
-        return Some(name.clone());
+        references.push(name.clone());
     }
-    expr_children(expr)
-        .into_iter()
-        .find_map(|child| first_state_reference(child, state_names))
+    for child in expr_children(expr) {
+        collect_state_references(child, state_names, references);
+    }
+}
+
+/// State names referenced anywhere in an expression, in lexicographic name order.
+#[must_use]
+pub fn state_references(expr: &Expr, model: &KernelModel) -> BTreeSet<String> {
+    let state_names = model.state.iter().map(|(name, _)| name.clone()).collect();
+    let mut references = Vec::new();
+    collect_state_references(expr, &state_names, &mut references);
+    references.into_iter().collect()
+}
+
+/// Reject state-dependent collection domains in an init statement's `forall`.
+///
+/// This is a verification-time restriction, not a type-checking restriction.
+///
+/// # Errors
+/// Returns the shared diagnostic for the first state name in lexicographic order.
+pub fn check_init_collection_binder(
+    model: &KernelModel,
+    binder: &Binder,
+) -> Result<(), ModelError> {
+    let Binder::Collection { collection, .. } = binder else {
+        return Ok(());
+    };
+    if let Some(name) = state_references(collection, model).first() {
+        return Err(model_error(format!(
+            "init forall over a state collection is not supported; state variable '{name}' is not allowed"
+        )));
+    }
+    Ok(())
 }
 
 fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {

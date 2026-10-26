@@ -27,8 +27,8 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{
-    binder_values, binder_where, eval, evaluation_status, i64_term_is_in_range, index_accessible,
-    method_definedness,
+    binder_source_expressions, binder_values, binder_where, binder_where_expression, eval,
+    evaluation_status, i64_term_is_in_range, index_accessible, method_definedness,
 };
 use crate::value::{Bindings, SymbolicState, SymbolicValue, bool_term, int_term};
 
@@ -236,6 +236,21 @@ fn located(message: &str, span: Span) -> String {
     )
 }
 
+fn extend_located_sites<T>(
+    sites: &mut Vec<InitFailureSite<T>>,
+    local: Vec<(T, &'static str)>,
+    span: Span,
+) {
+    sites.extend(
+        local
+            .into_iter()
+            .map(|(condition, message)| InitFailureSite {
+                condition,
+                message: located(message, span),
+            }),
+    );
+}
+
 #[allow(clippy::too_many_lines)]
 fn statement_sites<S: SmtSolver>(
     solver: &S,
@@ -266,14 +281,7 @@ fn statement_sites<S: SmtSolver>(
                 &target_reached,
                 &mut local,
             )?;
-            sites.extend(
-                local
-                    .into_iter()
-                    .map(|(condition, message)| InitFailureSite {
-                        condition,
-                        message: located(message, *span),
-                    }),
-            );
+            extend_located_sites(sites, local, *span);
         }
         Statement::If {
             condition,
@@ -285,14 +293,7 @@ fn statement_sites<S: SmtSolver>(
             expression_sites(
                 solver, model, condition, state, bindings, reached, &mut local,
             )?;
-            sites.extend(
-                local
-                    .into_iter()
-                    .map(|(condition, message)| InitFailureSite {
-                        condition,
-                        message: located(message, *span),
-                    }),
-            );
+            extend_located_sites(sites, local, *span);
             let condition_defined =
                 evaluation_status(solver, model, condition, state, bindings, None)?.fully_defined;
             let value = eval(solver, model, condition, state, &mut bindings.clone(), None)?;
@@ -329,15 +330,36 @@ fn statement_sites<S: SmtSolver>(
             statements,
             span,
         } => {
-            let where_expr = match binder {
-                Binder::Typed { where_expr, .. }
-                | Binder::Range { where_expr, .. }
-                | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
-            };
-            for (name, value) in binder_values(solver, model, binder)? {
+            let source = binder_source_expressions(binder);
+            let mut source_sites = Vec::new();
+            ordered_sites(
+                solver,
+                model,
+                source.iter().copied(),
+                state,
+                bindings,
+                reached,
+                &mut source_sites,
+            )?;
+            extend_located_sites(sites, source_sites, *span);
+            let source_defined = solver.and(
+                &source
+                    .into_iter()
+                    .map(|expr| defined(solver, model, expr, state, bindings))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?;
+            let source_reached = solver.and(&[reached.clone(), source_defined])?;
+            let where_expr = binder_where_expression(binder);
+            for (name, value, membership) in
+                binder_values(solver, model, binder, state, bindings, None)?
+            {
                 let mut local = bindings.clone();
                 local.insert(name, value);
-                let mut body_reached = reached.clone();
+                let where_reached = solver.and(&[
+                    source_reached.clone(),
+                    membership.unwrap_or_else(|| solver.bool_value(true)),
+                ])?;
+                let mut body_reached = where_reached.clone();
                 if let Some(where_expr) = where_expr {
                     let mut where_sites = Vec::new();
                     expression_sites(
@@ -346,15 +368,10 @@ fn statement_sites<S: SmtSolver>(
                         where_expr,
                         state,
                         &local,
-                        reached,
+                        &where_reached,
                         &mut where_sites,
                     )?;
-                    sites.extend(where_sites.into_iter().map(|(condition, message)| {
-                        InitFailureSite {
-                            condition,
-                            message: located(message, *span),
-                        }
-                    }));
+                    extend_located_sites(sites, where_sites, *span);
                     let where_defined =
                         evaluation_status(solver, model, where_expr, state, &local, None)?
                             .fully_defined;
