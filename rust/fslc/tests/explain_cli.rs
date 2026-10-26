@@ -378,7 +378,7 @@ fn explain_kernel_number_reachable_counterfactual_matches_type_control() {
     assert_eq!(scoped, typed);
 }
 
-const BRANCHED_SPEC: &str = "examples/layers/return_system.fsl";
+const BRANCHED_SPEC: &str = "rust/fslc/tests/fixtures/legacy_return_branches.fsl";
 
 #[test]
 fn explain_counterfactuals_declare_that_liveness_is_skipped() {

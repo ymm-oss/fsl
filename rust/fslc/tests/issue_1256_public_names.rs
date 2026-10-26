@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
 
-const BRANCHES: &str = "examples/layers/return_system.fsl";
+const BRANCHES: &str = "rust/fslc/tests/fixtures/legacy_return_branches.fsl";
 const BANK: &str = "specs/bank_system.fsl";
 
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
@@ -180,7 +180,7 @@ fn a_reference_to_a_generated_name_is_still_accepted() {
         "refine",
         "examples/layers/return_impl.fsl",
         BRANCHES,
-        "examples/layers/return_impl_refines.fsl",
+        "rust/fslc/tests/fixtures/legacy_return_impl_refines.fsl",
         "--depth",
         "2",
     ]);
