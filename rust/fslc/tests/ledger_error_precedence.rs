@@ -65,6 +65,7 @@ fn successful_verification_still_reports_missing_impl_log_as_io() {
     assert_eq!(verified["result"], "verified", "{verified}");
     let absent = support::directory("io-control").join("absent.json");
     assert!(!absent.exists());
+    let expected_message = std::fs::read(&absent).unwrap_err().to_string();
     let (actual, status) = cli::run_json(
         "ledger",
         fixture,
@@ -79,8 +80,5 @@ fn successful_verification_still_reports_missing_impl_log_as_io() {
     assert_eq!(status, 2, "{actual}");
     assert_eq!(actual["result"], "error", "{actual}");
     assert_eq!(actual["kind"], "io", "{actual}");
-    assert_eq!(
-        actual["message"], "No such file or directory (os error 2)",
-        "{actual}"
-    );
+    assert_eq!(actual["message"], expected_message, "{actual}");
 }
