@@ -17,4 +17,4 @@ impl/business covers text `by Manager` (B3/B4) or abstract event rule text
 `by Manager only` without covers (F1/p5) now check ok/0 rather than error/type/2;
 bounded verify returns verified/0 with implements refines and F1 standalone
 refine returns refines/0 instead of error/type/2. There is no general automatic
-semantics-preserving migration; see the [measured removals, expansions and migration contract](docs/design/DESIGN-refinement.md#migration-1441).
+semantics-preserving migration; see the measured removals, expansions and migration contract in `docs/design/DESIGN-refinement.md`, section "#1441: source-actor auto mapping and breaking-source migration".
