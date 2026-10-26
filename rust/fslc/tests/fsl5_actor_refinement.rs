@@ -923,7 +923,9 @@ fn requirement_routes_1456(cases: Vec<(&str, String, String)>, wrong: bool) {
         all_1456(commands, |(args, result)| {
             eprintln!("1456 cell {label} {args:?}");
             if wrong && (inline || result == "refines") {
-                let (located, marker) = if inline {
+                let (located, marker) = if inline && source.contains("{ maps auto }") {
+                    (source.as_str(), "auto")
+                } else if inline {
                     (source.as_str(), "implements")
                 } else {
                     (AUTO_1441, "maps auto")
