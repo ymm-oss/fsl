@@ -873,9 +873,9 @@ never a state variable named `true`), so the declaration is rejected. No other w
   enum `Red` in a numeric relation) are rejected before evaluation. Do not repair
   this by coercing enum ordinals or weakening a property; use the declared types.
   `domain(r)` infers `Set<A>` and `range(r)` infers `Set<B>` (not always
-  `Set<Int>`); collection binders and public Kernel annotations inherit the
-  endpoint type. Enum-relation idioms such as
-  `not (exists x in domain(r): reachable(r, x, x))` check again; their runtime
+  `Set<Int>`); binders over the projections and their public Kernel projection/
+  binder annotations inherit the endpoint type. Enum-typed projection uses such as
+  `not (exists x in domain(r): reachable(r, x, x))` are accepted; their runtime
   meaning is unchanged and false invariants still violate. Numeric projections
   remain integer-compatible. The restacked boundary sweep used BASE
   `e8cf78f0162530e264128f588981d49790f2767f`: **zero corpus `ok` → `error`
@@ -899,6 +899,19 @@ never a state variable named `true`), so the declaration is rejected. No other w
   `forall x in range(s): not r.contains(x, x)`, `not domain(s).contains(0)`,
   `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
   `forall x in range(s): x != 0`. Do not coerce enum elements to numeric ordinals.
+  General breaking rule: projection elements/sets take their endpoint type, so
+  enum or Bool elements reject anywhere `Int` is expected, and their whole sets
+  reject where a numeric Set is expected. This includes comparison, ordering,
+  arithmetic, `min`/`max`, membership, set-literal equality, Option and pattern
+  payloads, numeric Set state assignments and refinement maps. The measured
+  fixture list is not exhaustive. Newly accepted families: `count` over finite
+  endpoint-typed domain/range projections; `sum` over numeric projections; enum
+  set-literal equality, enum-typed `where` filters and conditional projection
+  membership; `let`-bound projections consumed as matching typed sets; matching
+  enum Set assignments and refinement maps. `unique` over enum domain/range was
+  already accepted on released main and remains accepted. Do not confuse acceptance
+  with a verified invariant. The three enum-binder/cycle idioms already accepted
+  on released main remain accepted; they are not new user-facing additions.
   `reachable(r,a,a)` is **not reflexive**: true only via a real path of ≥1
   edges back to `a` (empty/acyclic `r` gives `false`, never a free 0-hop
   `a==a`). Use `acyclic(r)` for "no self-loops or cycles anywhere".

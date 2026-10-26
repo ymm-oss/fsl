@@ -765,9 +765,10 @@ variable capture instead of inventing internal binder names. See
   removal (#1458) rejects previously accepted ill-typed expressions rather than
   assigning them a runtime meaning. `domain(r)` now has type `Set<A>` and
   `range(r)` has type `Set<B>`, rather than `Set<Int>` for every relation.
-  Collection binders and public Kernel type annotations inherit those endpoint
-  types. This restores legitimate enum-relation idioms such as
-  `not (exists x in domain(r): reachable(r, x, x))`; it does not change their
+  Collection binders over these projections and their public Kernel projection
+  and binder annotations inherit those endpoint types. Enum-typed uses of
+  `domain` and `range` are accepted, including
+  `not (exists x in domain(r): reachable(r, x, x))`; this does not change their
   runtime meaning or guarantee that their invariants hold. Numeric projections
   retain integer compatibility. The restacked boundary sweep used BASE
   `e8cf78f0162530e264128f588981d49790f2767f`: all 591 corpus forms have a
@@ -795,6 +796,20 @@ variable capture instead of inventing internal binder names. See
   `forall x in domain(s): x != 0`, `forall x in range(s): x != 0`.
   Enum projection elements cannot be used as numeric endpoints or compared with
   integer values; use the declared endpoint type, not an enum ordinal.
+  More generally, projection elements and whole projection sets take the declared
+  endpoint type: enum or Bool elements cannot be used wherever `Int` is expected,
+  nor their sets wherever a numeric Set is expected. This breaking rule applies
+  to comparison, ordering, arithmetic, `min`/`max`, membership, set-literal
+  equality, Option comparisons and pattern payloads, assignment to numeric Set
+  state, and refinement maps; the listed measured removals are not exhaustive.
+  Newly accepted families include `count` over finite endpoint-typed domain/range
+  projections, `sum` over numeric projections, enum set-literal equality,
+  enum-typed `where` filters and conditional projection membership, `let`-bound
+  projections consumed as matching typed sets, assignment to a matching enum Set,
+  and refinement maps into a matching enum Set. `unique` over enum domain/range
+  was already accepted on released main and remains accepted. Acceptance
+  does not imply that an invariant holds. The three enum-binder/cycle idioms
+  above already checked on released main; they are preserved, not new additions.
   `reachable(r, a, a)` is **not** reflexive by construction: it is true only
   if a real path of one or more edges leads from `a` back to `a` (so an empty
   or acyclic relation gives `reachable(r, a, a) == false` for every `a`). A
