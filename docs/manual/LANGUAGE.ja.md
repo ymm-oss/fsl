@@ -3190,6 +3190,10 @@ DESIGN-*.md があります)。
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — 構造的な観測 JSON を出力します。`--projection tsg` は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
+  要件の関係を持つ init には、id/kind/name/label が `init` のノード、spec から init への
+  `declares` エッジ、要件から init への `covers` エッジも生成されます。これは
+  `disconnected_requirement` に対する有効なアンカーで、`requirement_property_graph`
+  にも含まれます。要件の関係を持たない init はグラフ出力を追加しません。
   グラフの射影は、連結成分、SCC、代表的なサイクル、次数、そしてサイクルランクや
   ファンイン/ファンアウトのハブのような構造メトリクスを返します。
   `--projection action_dependency_graph` は、構造的な action の enable/競合の

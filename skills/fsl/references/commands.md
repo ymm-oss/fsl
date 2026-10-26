@@ -384,6 +384,11 @@ sequential per-file loop.
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
 properties, acceptance/forbidden scenarios, and traceability metadata.
+Init carrying requirement relations adds a node with id/kind/name/label `init`,
+a spec-to-init `declares` edge, and requirement-to-init `covers` edges. Init is
+a useful anchor for `disconnected_requirement` and is included in
+`requirement_property_graph`. Init without requirement relations adds no graph
+output; structural connectivity is not a proof of the requirement.
 `--projection action_state_graph`, `action_dependency_graph`,
 `impact_graph --focus NODE`, `requirement_property_graph`, and
 `property_state_graph` summarize deterministic components/SCCs/cycles, degree,
