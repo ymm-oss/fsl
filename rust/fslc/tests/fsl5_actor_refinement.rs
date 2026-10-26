@@ -892,3 +892,295 @@ fn issue_1441_f1_rule_text_preserves_matching_actors() {
     );
     success_1441(&directory, STANDALONE_REFINE, "refines", false);
 }
+
+const REQUIREMENT_1456: &str = include_str!("fixtures/actor_refinement/requirement-action.fsl");
+const RAW_ABS_1456: &str = include_str!("fixtures/actor_refinement/raw-abs.fsl");
+const BRANCHES_1456: &str = "{ branches { when not done { done = true } maps approve()\n when done { done = true } maps approve() } }";
+
+// Run every table cell even on the pre-fix implementation, retaining each
+// assertion's diagnostic. A red first cell must not hide uncalibrated siblings.
+fn all_1456<T>(cases: impl IntoIterator<Item = T>, mut run: impl FnMut(T)) {
+    let mut failed = 0;
+    for case in cases {
+        failed += usize::from(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(case))).is_err(),
+        );
+    }
+    assert_eq!(failed, 0, "{failed} acceptance cells failed");
+}
+
+fn requirement_routes_1456(cases: Vec<(&str, String, String)>, wrong: bool) {
+    all_1456(cases, |(label, source, abstraction)| {
+        let inline = source.contains("implements");
+        let directory = mapping_fixture_1441(label, &source, &abstraction, AUTO_1441);
+        let mut commands = vec![
+            (&["check", "requirements.fsl"][..], "ok"),
+            (VERIFY_1441, "verified"),
+        ];
+        if !inline {
+            commands.push((STANDALONE_REFINE, "refines"));
+        }
+        all_1456(commands, |(args, result)| {
+            eprintln!("1456 cell {label} {args:?}");
+            if wrong && (inline || result == "refines") {
+                let (located, marker) = if inline {
+                    (source.as_str(), "implements")
+                } else {
+                    (AUTO_1441, "maps auto")
+                };
+                let action = if source.contains("branches") {
+                    "approve__b1"
+                } else {
+                    "approve"
+                };
+                mismatch_1441(&directory, args, action, located, marker);
+            } else {
+                success_1441(&directory, args, result, inline);
+            }
+        });
+    });
+}
+
+fn abstract_requirement_1456() -> String {
+    REQUIREMENT_1456
+        .replace(INLINE_1441, "")
+        .replace("Impl", "Abs")
+        .replace("REQ-1 \"by System\"", "ABS-REQ \"by Manager\"")
+        .replace("IMPL-1: by Manager", "ABS-1: by System")
+}
+
+#[test] // A detectors: block, ordinary text, abstract side, standalone and branches.
+fn issue_1456_a_requirement_own_actor_mismatch() {
+    let raw = include_str!("fixtures/actor_refinement/raw-impl.fsl");
+    let branches = REQUIREMENT_1456.replace("{ done = true }", BRANCHES_1456);
+    let branch_abs = branches
+        .replace(INLINE_1441, "")
+        .replace("Impl", "Abs")
+        .replace("IMPL-1: by Manager", "ABS-1: by System")
+        .replace("maps approve()", "maps stutter");
+    requirement_routes_1456(
+        vec![
+            ("1456_a_issue", REQUIREMENT_1456.into(), RAW_ABS_1456.into()),
+            (
+                "1456_a_ordinary",
+                REQUIREMENT_1456.replace("\"by System\"", "\"Approval policy\""),
+                RAW_ABS_1456.into(),
+            ),
+            (
+                "1456_a_reverse_inline",
+                raw.into(),
+                abstract_requirement_1456(),
+            ),
+            (
+                "1456_a_explicit_auto",
+                REQUIREMENT_1456.replace("{ }", "{ maps auto }"),
+                RAW_ABS_1456.into(),
+            ),
+            (
+                "1456_a_standalone",
+                REQUIREMENT_1456.replace(INLINE_1441, ""),
+                RAW_ABS_1456.into(),
+            ),
+            (
+                "1456_a_reverse",
+                raw.replace(INLINE_1441, ""),
+                abstract_requirement_1456(),
+            ),
+            (
+                "1456_a_branch_auto",
+                branches.replace(INLINE_1441, ""),
+                branch_abs,
+            ),
+        ],
+        true,
+    );
+}
+
+#[test] // B detectors: matching own actors cannot be rejected by either block's text.
+fn issue_1456_b_requirement_text_is_not_actor() {
+    let spoof = REQUIREMENT_1456
+        .replace("\"by System\"", "\"by Manager\"")
+        .replace("IMPL-1: by Manager", "IMPL-1: by System");
+    requirement_routes_1456(
+        vec![
+            ("1456_b_impl", spoof.clone(), RAW_ABS_1456.into()),
+            (
+                "1456_b_both",
+                spoof,
+                abstract_requirement_1456().replace("by Manager", "by Finance"),
+            ),
+            (
+                "1456_b_abs",
+                REQUIREMENT_1456.replace("IMPL-1: by Manager", "IMPL-1: by System"),
+                abstract_requirement_1456(),
+            ),
+        ],
+        false,
+    );
+}
+
+#[test] // C detectors (D1): registered absence must never descend into block text.
+fn issue_1456_c_requirement_actor_absence() {
+    let mut cases = Vec::new();
+    for (label, edition, annotation) in [
+        ("none", "", ""),
+        ("nonby", "", " \"IMPL-1: Approve request\""),
+        ("empty", "", " \"IMPL-1: by   \""),
+        ("fsl5_none", "fsl 5\n", ""),
+        ("fsl5_typed", "fsl 5\n", ""),
+        ("fsl5_typed_spoof", "fsl 5\n", ""),
+    ] {
+        for text in ["by System", "by Manager", "Approval policy"] {
+            let mut source = format!("{edition}{REQUIREMENT_1456}")
+                .replace(" \"IMPL-1: by Manager\"", annotation)
+                .replace("\"by System\"", &format!("\"{text}\""));
+            if label.starts_with("fsl5_typed") {
+                source = source.replace(
+                    "action approve",
+                    &format!(
+                        "@requirement(\"IMPL-1\", \"by {}\")\n    action approve",
+                        if label == "fsl5_typed" {
+                            "System"
+                        } else {
+                            "Manager"
+                        }
+                    ),
+                );
+            }
+            cases.push((
+                format!("1456_c_{label}_{text}"),
+                source,
+                RAW_ABS_1456.to_owned(),
+            ));
+        }
+    }
+    cases.push((
+        "1456_c_abs_none".into(),
+        REQUIREMENT_1456.replace("IMPL-1: by Manager", "IMPL-1: by System"),
+        abstract_requirement_1456().replace(" \"ABS-1: by System\"", ""),
+    ));
+    requirement_routes_1456(
+        cases
+            .iter()
+            .map(|(label, source, abs)| (label.as_str(), source.clone(), abs.clone()))
+            .collect(),
+        false,
+    );
+}
+
+#[test] // D preservation, not detectors: outside-block, explicit, branches, stutter and edition gate.
+fn issue_1456_d_preserved_boundaries() {
+    requirement_routes_1456(
+        vec![(
+            "1456_d_outside",
+            include_str!("fixtures/actor_refinement/raw-impl.fsl").into(),
+            RAW_ABS_1456.into(),
+        )],
+        true,
+    );
+    requirement_routes_1456(
+        vec![
+            (
+                "1456_d_same",
+                REQUIREMENT_1456.replace("IMPL-1: by Manager", "IMPL-1: by System"),
+                RAW_ABS_1456.into(),
+            ),
+            (
+                "1456_d_explicit",
+                REQUIREMENT_1456.replace("{ }", "{ action approve() -> approve() }"),
+                RAW_ABS_1456.into(),
+            ),
+            (
+                "1456_d_branches",
+                REQUIREMENT_1456.replace("{ done = true }", BRANCHES_1456),
+                RAW_ABS_1456.into(),
+            ),
+            (
+                "1456_d_stutter",
+                REQUIREMENT_1456
+                    .replace("{ }", "{ action approve() -> stutter }")
+                    .replace("{ done = true }", "{ done = done }"),
+                RAW_ABS_1456.into(),
+            ),
+        ],
+        false,
+    );
+    let legacy = format!("fsl 5\n{REQUIREMENT_1456}");
+    let directory = fixture("1456_d_legacy", &legacy, RAW_ABS_1456);
+    for args in [&["check", "requirements.fsl"][..], VERIFY_1441] {
+        let (output, exit) = fslc(&directory, args);
+        assert_eq!(
+            (exit, output["result"].as_str(), output["kind"].as_str()),
+            (2, Some("error"), Some("unsupported_in_edition")),
+            "{output:#}"
+        );
+        assert!(
+            output["findings"]
+                .as_array()
+                .expect("edition findings")
+                .iter()
+                .any(|finding| finding["code"] == "legacy_string_metadata"),
+            "{output:#}"
+        );
+    }
+}
+
+fn diff_1456(wrong: bool) {
+    let source = REQUIREMENT_1456.replace(INLINE_1441, "");
+    let correct = source.replace("IMPL-1: by Manager", "IMPL-1: by System");
+    let directory = fixture(
+        if wrong { "1456_g_wrong" } else { "1456_g_same" },
+        if wrong { &source } else { &correct },
+        RAW_ABS_1456,
+    );
+    let (output, exit) = fslc(
+        &directory,
+        &["diff", "requirements.fsl", "business.fsl", "--depth", "3"],
+    );
+    assert_eq!(
+        (exit, output["result"].as_str()),
+        (0, Some("semantic_diff")),
+        "{output:#}"
+    );
+    assert!(output.get("kind").is_none(), "{output:#}");
+    all_1456(
+        [
+            ("old_to_new", "Manager", "System"),
+            ("new_to_old", "System", "Manager"),
+        ],
+        |(direction, actor, abstract_actor)| {
+            if wrong {
+                assert_eq!(
+                    output["directions"][direction],
+                    serde_json::json!({
+                        "result": "unknown", "reason": "automatic_mapping_failed",
+                        "message": format!("maps auto actor mismatch for action 'approve': impl actor '{actor}' != abstract actor '{abstract_actor}'")
+                    }),
+                    "{output:#}"
+                );
+            } else {
+                assert_eq!(
+                    output["directions"][direction]["result"], "refines",
+                    "{output:#}"
+                );
+            }
+        },
+    );
+    if !wrong {
+        assert_eq!(
+            output["summary"],
+            serde_json::json!(["no_semantic_change"]),
+            "{output:#}"
+        );
+    }
+}
+
+#[test] // G detector: directional unknown is not a top-level type error.
+fn issue_1456_g_diff_mismatch() {
+    diff_1456(true);
+}
+
+#[test] // G preservation: same actors still have no semantic change.
+fn issue_1456_g_diff_same_actor() {
+    diff_1456(false);
+}

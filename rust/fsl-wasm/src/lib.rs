@@ -3077,4 +3077,33 @@ mod tests {
         );
         assert_worker_actor_mismatch_1441(&legacy, "approve");
     }
+
+    #[test] // F detector: exact error plus full check/verify native JSON equality.
+    fn issue_1456_f_worker_requirement_own_actor() {
+        let request = actor_request_1441(
+            include_str!("../../fslc/tests/fixtures/actor_refinement/requirement-action.fsl"),
+            include_str!("../../fslc/tests/fixtures/actor_refinement/raw-abs.fsl"),
+        );
+        assert_worker_actor_mismatch_1441(&request, "approve");
+    }
+
+    #[test] // F preservation: check success only, not full positive JSON parity.
+    fn issue_1456_f_worker_preservation() {
+        let source =
+            include_str!("../../fslc/tests/fixtures/actor_refinement/requirement-action.fsl");
+        for source in [
+            source.replace("IMPL-1: by Manager", "IMPL-1: by System"),
+            source
+                .replace(" \"IMPL-1: by Manager\"", "")
+                .replace("\"by System\"", "\"Approval policy\""),
+        ] {
+            let request = actor_request_1441(
+                &source,
+                include_str!("../../fslc/tests/fixtures/actor_refinement/raw-abs.fsl"),
+            );
+            let output = block_on(check(&request, TEST_SOLVER_VERSION));
+            assert_eq!(output["result"], "ok", "{output:#}");
+            assert_eq!(output["implements"]["result"], "refines", "{output:#}");
+        }
+    }
 }
