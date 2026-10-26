@@ -48,11 +48,17 @@ compose OrderSystem {
   - body = the union of each action's body + additional statements (simultaneous
     assignment; since the write targets are disjoint across components and additional
     statements can only write composition-side state, there is no conflict —
-     synchronizing two actions of the same component is not allowed)
-   - Breaking removal (#1334): additional statements also reject component-state
-     assignments written with physical names such as `alias__x`, at the assignment's
-     location; those spellings previously passed `check`. The corpus transition set
-     is recorded by the orchestrator's base/head sweep, not inferred from this note.
+    synchronizing two actions of the same component is not allowed)
+  - Breaking removal (#1334): additional statements also reject component-state
+    assignments written with physical names such as `alias__x`, at the assignment's
+    location; those spellings previously passed `check`. This removal changes
+    acceptance only for physical-name component-state assignments in sync additions.
+    The base `5a539bbe` and head `a7dbe0e2` binaries, each in its own materialized
+    tree, ran `fslc check` on all 579 `.fsl` files under `specs/`, `examples/`, and
+    `rust/fslc/tests/fixtures/`. The sweep's recorded exit codes, results, and
+    messages agree for every file: **zero ok-to-error transitions** (this write
+    form does not occur in that corpus). No pre-existing required tests were
+    rewritten, renamed, deleted, or stopped; only new regression tests were added.
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state
     expressions
