@@ -649,6 +649,8 @@ that previously passed `check` (breaking removal, #1334).
 
 Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
 
+Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.
+
 A glue action reads and writes local and component state directly via `alias.var`.
 Compose `init` may also initialize component state (including physical names), but
 overlap with a component's own init is rejected as duplicate initialization.

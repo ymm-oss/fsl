@@ -359,16 +359,13 @@ impl KernelModel {
             LValue::Var(name) => self
                 .state_type(name)
                 .cloned()
-                .ok_or_else(|| model_error(format!("unknown update target '{}'", shown(name)))),
+                .ok_or_else(|| unknown_update_target(name)),
             LValue::Index(name, _) => match self.state_type(name) {
                 Some(ty) => ty
                     .index_types(false)
                     .map(|(_, value)| value)
                     .ok_or_else(|| model_error("indexed update target requires Map")),
-                None => Err(model_error(format!(
-                    "unknown update target '{}'",
-                    shown(name)
-                ))),
+                None => Err(unknown_update_target(name)),
             },
             LValue::Field(base, field) => {
                 let TypeRef::Named(name) = self.state_lvalue_type(base)? else {
@@ -2762,6 +2759,10 @@ fn reject_duplicate_property_names(spec: &SurfaceSpec) -> Result<(), ModelError>
 /// uses (`acct.bal` for the compose component state `acct__bal`).
 fn shown(name: &str) -> String {
     crate::unmapped_public_spelling(name)
+}
+
+pub(crate) fn unknown_update_target(name: &str) -> ModelError {
+    model_error(format!("unknown update target '{}'", shown(name)))
 }
 
 fn model_error(message: impl Into<String>) -> ModelError {

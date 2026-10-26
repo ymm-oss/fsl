@@ -19,3 +19,9 @@ each source's original collision refusals. Header arguments are inserted in
 their header-parameter scope, not under another source's guards. Ambient state
 or enum names cannot falsely reject private component patterns; an unread
 ambient state alone does not force an ordinary let to be renamed.
+The same hygiene now covers component property, temporal, initialization, and
+inline-state-initializer roots. Bare component enum reads retain their owning
+enum when an unrenamed public value would capture them, while uncontested
+reads retain their existing representation and enum literals print their source
+member spelling. A single inserted argument pattern without foreign interference
+is no longer renamed merely because its name is reserved for freshness.

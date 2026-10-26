@@ -796,3 +796,25 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
         assert_eq!(accepted.0["result"], "ok", "{name}: {}", accepted.0);
     }
 }
+
+#[test]
+fn preservation_uncontested_component_enum_read_keeps_unqualified_explain_text() {
+    let part = "spec Payment {\n  enum PSt { Created, Captured }\n  state { st: PSt }\n  init { st = Created }\n  action authorize() { requires st == Created st = Captured }\n  invariant NeverCaptured { st != Captured }\n}\n";
+    let source = "compose System { use Payment as pay from \"payment.fsl\" }";
+    let dir = scratch(
+        "issue-1442-uncontested-enum",
+        &[("payment.fsl", part), ("system.fsl", source)],
+    );
+    assert_eq!(check(&dir, "system.fsl").1, 0);
+    let explained = run(&dir, &["explain", "system.fsl", "--depth", "2"]);
+    assert_eq!(explained.1, 0, "{}", explained.0);
+    assert_eq!(explained.0["result"], "explained");
+    assert_eq!(
+        explained.0["skeleton"]["actions"][0]["requires_text"],
+        json!(["requires pay.st == Created"])
+    );
+    let output = explained.0.to_string();
+    for qualified in ["pay.PSt.Created", "pay.PSt.Captured"] {
+        assert!(!output.contains(qualified), "{qualified}: {output}");
+    }
+}

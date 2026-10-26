@@ -62,6 +62,20 @@ fn shown(name: &str) -> String {
     crate::unmapped_public_spelling(name)
 }
 
+pub(crate) fn unresolved_identifier(name: &str, owners: &[String]) -> TypecheckError {
+    if owners.len() > 1 {
+        error(format!(
+            "ambiguous enum member '{name}' belongs to [{}]; use enum conversion/convert for a bijection or enum abstraction/abstract for a many-to-one mapping",
+            owners.join(", ")
+        ))
+    } else {
+        error(format!(
+            "public Kernel cannot type identifier '{}'",
+            shown(name)
+        ))
+    }
+}
+
 /// `ty` with every named type respelled by [`shown`], for a message that
 /// prints the type's debug form.
 fn shown_type(ty: &TypeRef) -> TypeRef {
@@ -275,30 +289,18 @@ fn infer_type_inner(
             ))
         }
         Expr::Struct { name, .. } => Ok(TypeRef::Named(name.clone())),
-        Expr::Var(name) => env.get(name).cloned().ok_or_else(|| {
-            let owners = enum_member_owners(model, name);
-            if owners.len() > 1 {
-                error(format!(
-                    "ambiguous enum member '{name}' belongs to [{}]; use enum conversion/convert for a bijection or enum abstraction/abstract for a many-to-one mapping",
-                    owners.join(", ")
-                ))
-            } else {
-                error(format!(
-                    "public Kernel cannot type identifier '{}'",
-                    shown(name)
-                ))
-            }
-        }),
+        Expr::Var(name) => env
+            .get(name)
+            .cloned()
+            .ok_or_else(|| unresolved_identifier(name, &enum_member_owners(model, name))),
         Expr::EnumMember { type_name, member } => match model.types.get(type_name) {
             Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
                 Ok(TypeRef::Named(type_name.clone()))
             }
-            Some(TypeDef::Enum { .. }) => {
-                Err(error(format!(
-                    "unknown enum member '{}.{member}'",
-                    shown(type_name)
-                )))
-            }
+            Some(TypeDef::Enum { .. }) => Err(error(format!(
+                "unknown enum member '{}.{member}'",
+                shown(type_name)
+            ))),
             Some(_) => Err(error(format!("'{}' is not an enum", shown(type_name)))),
             None => Err(error(format!("unknown enum type '{}'", shown(type_name)))),
         },

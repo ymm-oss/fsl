@@ -110,6 +110,62 @@ compose OrderSystem {
        not evidence that the input satisfies the v5 contract; revalidate its
        artifacts with that binary. No support duration is promised. This note
        does not implement #702's general release gate.
+  - Breaking removal (#1442, original component names): a composition cannot
+    make an originally undeclared component value read or update root valid.
+    Resolution uses the component's own declarations and lexical bindings
+    before prefixing and merging, for actions, properties, and initialization.
+    A bare enum member retains its owning enum identity when an unrenamed
+    public value could capture it; otherwise its existing representation is
+    retained. Its printer uses the source member spelling. Public header names
+    remain legal; private capturers use the shared hygiene rules instead.
+
+    **Migration contract (#702, limited to original component name resolution):**
+
+    1. **Versions/editions:** reproduced with native 4.12.0, default/current
+       edition, at base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`: a component
+       with an undeclared read can fail alone yet check inside a composition
+       whose header or state supplies that spelling. This is removed for
+       v5.0.0. The earliest affected release has not been established.
+    2. **New rejection:** an undeclared `u` in a component is no longer supplied
+       implicitly by a sync header parameter, composition state, foreign enum
+       member, or an own/foreign generated state or const spelling. The paired
+       composition retains the standalone component's full error, not a new
+       capture diagnostic. The aligned regression's read reports exit 2,
+       `kind: "semantics"`, message
+       `invalid model expression: public Kernel cannot type identifier 'u' at 12:3`,
+       and `loc: {"line": 12, "column": 3}`. Update roots retain the original
+       `invalid model expression: unknown update target ...` diagnostic with
+       their own source position. Locations depend on the input layout.
+    3. **Rewrite:** correct or declare the intended name in the component's
+       original scope. A local must precede a guard that reads it; bodies and
+       ensures still use the complete normalized guard environment. If data
+       comes from the composition, declare a component action parameter and
+       pass the header/state value explicitly. Properties and initialization
+       must reference their own declared inputs. Review the intended state and
+       interface semantics; there is no automatic migration.
+    4. **Commands:** run `fslc check component.fsl` and
+       `fslc check composed.fsl`, fix the source-owned declaration/reference,
+       repeat both checks, then run
+       `fslc verify composed.fsl --depth 8 --no-cache` on the corrected input.
+       No lint/migrate auto-fix or selected-property verification bypass is
+       provided for missing component declarations.
+    5. **Verdicts/evidence:** a formerly accepted composition can become the
+       same exit-2 error as its standalone component; old verification evidence
+       does not justify the removed source form. JSON envelopes and assurance
+       classes are unchanged. The base-to-fixed `fslc check` sweep of all 579
+       `.fsl` forms under `specs/`, `examples/`, and
+       `rust/fslc/tests/fixtures/` has zero ok-to-error transitions; the invalid
+       forms are covered separately by 182 paired standalone-refusal cells.
+       Corrected sources require fresh verification evidence.
+    6. **Consumers/artifacts:** native CLI, Worker/shared loading, hooks, CI,
+       and downstream consumers must handle the preserved component error;
+       editor silence is not an acceptance gate. Reverify corrected inputs,
+       regenerate affected scenario/testgen/replay/ledger/document/HTML
+       artifacts, and recheck approval bindings and implementation conformance.
+    7. **Rollback:** there is no compatibility bypass or grace period. An
+       older accepting binary is a version rollback, not v5 conformance; its
+       artifacts must be revalidated against that binary. No support duration
+       is promised. This is not #702's general release gate.
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state
     expressions

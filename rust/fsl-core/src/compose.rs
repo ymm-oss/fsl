@@ -158,12 +158,14 @@ struct Component {
     use_span: fsl_syntax::Span,
     names: ComponentNames,
     spec: SurfaceSpec,
+    ambient: HashSet<String>,
+    public_bindings: HashSet<String>,
 }
 
 #[derive(Clone, Default)]
 struct ComponentNames {
     consts: HashSet<String>,
-    enum_members: HashSet<String>,
+    enum_members: HashMap<String, Vec<String>>,
     types: HashSet<String>,
     state: HashSet<String>,
     actions: HashSet<String>,
@@ -183,7 +185,13 @@ impl ComponentNames {
                 }
                 SpecItem::Enum { name, members, .. } => {
                     names.types.insert(name.clone());
-                    names.enum_members.extend(members.iter().cloned());
+                    for member in members {
+                        names
+                            .enum_members
+                            .entry(member.clone())
+                            .or_default()
+                            .push(name.clone());
+                    }
                 }
                 SpecItem::State(fields) => {
                     names
@@ -203,6 +211,9 @@ impl ComponentNames {
                 }
                 _ => {}
             }
+        }
+        for owners in names.enum_members.values_mut() {
+            owners.sort();
         }
         names
     }
@@ -492,6 +503,8 @@ pub fn lower_compose_with_options(
                 use_span: *span,
                 names: ComponentNames::collect(&spec),
                 spec,
+                ambient: HashSet::new(),
+                public_bindings: HashSet::new(),
             },
         );
     }
@@ -513,15 +526,36 @@ pub fn lower_compose_with_options(
         }
     }
     for component in components.values() {
-        composition_names
-            .enum_members
-            .extend(component.names.enum_members.iter().cloned());
+        for (member, owners) in &component.names.enum_members {
+            composition_names
+                .enum_members
+                .entry(member.clone())
+                .or_default()
+                .extend(owners.iter().map(|owner| prefix(&component.alias, owner)));
+        }
     }
     let ambient = composition_names
         .state
-        .union(&composition_names.enum_members)
+        .iter()
+        .chain(composition_names.enum_members.keys())
         .cloned()
         .collect::<HashSet<_>>();
+    for component in components.values_mut() {
+        component.ambient.clone_from(&ambient);
+        component
+            .public_bindings
+            .clone_from(&composition_names.state);
+        component.public_bindings.extend(
+            component
+                .names
+                .enum_members
+                .iter()
+                .filter(|(member, owners)| {
+                    composition_names.enum_members[*member].len() > owners.len()
+                })
+                .map(|(member, _)| member.clone()),
+        );
+    }
 
     let mut warnings = Vec::new();
     let mut static_items = Vec::new();
@@ -554,6 +588,9 @@ pub fn lower_compose_with_options(
                     ));
                     init.extend(
                         rewrite_statements(statements.clone(), component, &HashSet::new())
+                            .and_then(|statements| {
+                                hygiene::root_statements(statements, &component.names, &ambient)
+                            })
                             .map_err(|error| {
                                 component_rewrite_error(error, ExpressionErrorContext::Init)
                             })?,
@@ -846,7 +883,7 @@ fn rewrite_component_item_inner(
                         initializer: field
                             .initializer
                             .map(|expr| {
-                                rewrite_expr_at(
+                                rewrite_root_expr_at(
                                     expr,
                                     component,
                                     &HashSet::new(),
@@ -865,7 +902,11 @@ fn rewrite_component_item_inner(
             meta,
             annotations,
         } => SpecItem::Init {
-            statements: rewrite_statements(statements, component, &HashSet::new())?,
+            statements: hygiene::root_statements(
+                rewrite_statements(statements, component, &HashSet::new())?,
+                &component.names,
+                &component.ambient,
+            )?,
             meta,
             annotations,
         },
@@ -904,7 +945,12 @@ fn rewrite_component_item_inner(
             annotations,
         } => SpecItem::Invariant {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -917,7 +963,12 @@ fn rewrite_component_item_inner(
             annotations,
         } => SpecItem::Trans {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -930,13 +981,23 @@ fn rewrite_component_item_inner(
             annotations,
         } => SpecItem::Reachable {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
         },
         SpecItem::Terminal { expr, span } => SpecItem::Terminal {
-            expr: Box::new(rewrite_expr_at(*expr, component, &HashSet::new(), span)?),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
         },
         SpecItem::LeadsTo {
@@ -956,6 +1017,8 @@ fn rewrite_component_item_inner(
                 .into_iter()
                 .map(|binder| {
                     let binder = rewrite_binder(binder, component, &bound)?;
+                    let binder =
+                        hygiene::root_binder(binder, &component.names, &bound, &component.ambient)?;
                     bound.insert(binder_name(&binder).to_owned());
                     Ok(binder)
                 })
@@ -963,15 +1026,15 @@ fn rewrite_component_item_inner(
             SpecItem::LeadsTo {
                 name: prefix(alias, &name),
                 binders,
-                before: Box::new(rewrite_expr_at(*before, component, &bound, span)?),
-                after: Box::new(rewrite_expr_at(*after, component, &bound, span)?),
+                before: Box::new(rewrite_root_expr_at(*before, component, &bound, span)?),
+                after: Box::new(rewrite_root_expr_at(*after, component, &bound, span)?),
                 span,
                 meta,
                 decreases: decreases
-                    .map(|expr| rewrite_expr_at(*expr, component, &bound, span).map(Box::new))
+                    .map(|expr| rewrite_root_expr_at(*expr, component, &bound, span).map(Box::new))
                     .transpose()?,
                 within: within
-                    .map(|expr| rewrite_expr_at(*expr, component, &bound, span).map(Box::new))
+                    .map(|expr| rewrite_root_expr_at(*expr, component, &bound, span).map(Box::new))
                     .transpose()?,
                 helpful: helpful
                     .into_iter()
@@ -980,7 +1043,7 @@ fn rewrite_component_item_inner(
                         helper.args = helper
                             .args
                             .into_iter()
-                            .map(|arg| rewrite_expr_at(arg, component, &bound, helper.span))
+                            .map(|arg| rewrite_root_expr_at(arg, component, &bound, helper.span))
                             .collect::<Result<_, TypecheckError>>()?;
                         Ok(helper)
                     })
@@ -1002,8 +1065,18 @@ fn rewrite_component_item_inner(
             annotations,
         } => SpecItem::Until {
             name: prefix(alias, &name),
-            before: Box::new(rewrite_expr_at(*before, component, &HashSet::new(), span)?),
-            after: Box::new(rewrite_expr_at(*after, component, &HashSet::new(), span)?),
+            before: Box::new(rewrite_root_expr_at(
+                *before,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
+            after: Box::new(rewrite_root_expr_at(
+                *after,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -1017,8 +1090,18 @@ fn rewrite_component_item_inner(
             annotations,
         } => SpecItem::Unless {
             name: prefix(alias, &name),
-            before: Box::new(rewrite_expr_at(*before, component, &HashSet::new(), span)?),
-            after: Box::new(rewrite_expr_at(*after, component, &HashSet::new(), span)?),
+            before: Box::new(rewrite_root_expr_at(
+                *before,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
+            after: Box::new(rewrite_root_expr_at(
+                *after,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -1229,9 +1312,9 @@ fn rewrite_lvalue(
     bound: &HashSet<String>,
 ) -> Result<LValue, TypecheckError> {
     Ok(match lvalue {
-        LValue::Var(name) => LValue::Var(rewrite_state_name(name, component)),
+        LValue::Var(name) => LValue::Var(rewrite_state_name(&name, component)?),
         LValue::Index(name, expr) => LValue::Index(
-            rewrite_state_name(name, component),
+            rewrite_state_name(&name, component)?,
             rewrite_expr(expr, component, bound)?,
         ),
         LValue::Field(base, field) => {
@@ -1240,12 +1323,26 @@ fn rewrite_lvalue(
     })
 }
 
-fn rewrite_state_name(name: String, component: &Component) -> String {
-    if component.names.state.contains(&name) {
-        prefix(&component.alias, &name)
+fn rewrite_state_name(name: &str, component: &Component) -> Result<String, TypecheckError> {
+    if component.names.state.contains(name) {
+        Ok(prefix(&component.alias, name))
     } else {
-        name
+        Err(TypecheckError {
+            message: crate::model::unknown_update_target(name).message,
+            span: None,
+        })
     }
+}
+
+fn rewrite_root_expr_at(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+    span: fsl_syntax::Span,
+) -> Result<Expr, TypecheckError> {
+    let expr = rewrite_expr_at(expr, component, bound, span)?;
+    hygiene::root_expression(expr, &component.names, bound, &component.ambient)
+        .map_err(|error| error.with_span(span))
 }
 
 fn rewrite_expr_at(
@@ -1265,16 +1362,32 @@ fn rewrite_expr(
     crate::recursion::guard(|| {
         let rewrite = |expr| rewrite_expr(expr, component, bound);
         Ok(match expr {
+            Expr::Var(name) if bound.contains(&name) => Expr::Var(name),
+            Expr::Var(name)
+                if component.names.state.contains(&name)
+                    || component.names.consts.contains(&name) =>
+            {
+                Expr::Var(prefix(&component.alias, &name))
+            }
             Expr::Var(name) => {
-                let name = if !bound.contains(&name)
-                    && (component.names.state.contains(&name)
-                        || component.names.consts.contains(&name))
-                {
-                    prefix(&component.alias, &name)
-                } else {
-                    name
+                let owners = component
+                    .names
+                    .enum_members
+                    .get(&name)
+                    .map_or(&[][..], Vec::as_slice);
+                let [owner] = owners else {
+                    return Err(crate::typecheck::unresolved_identifier(&name, owners));
                 };
-                Expr::Var(name)
+                // Private capturers are renamed by hygiene; only a public
+                // value can require reifying an otherwise stable enum read.
+                if component.public_bindings.contains(&name) {
+                    Expr::EnumMember {
+                        type_name: prefix(&component.alias, owner),
+                        member: name,
+                    }
+                } else {
+                    Expr::Var(name)
+                }
             }
             Expr::Struct { name, fields } => hygiene::map_children(
                 Expr::Struct {
@@ -1302,7 +1415,7 @@ fn rewrite_expr(
                         name,
                         component.names.state.iter().map(String::as_str),
                         component.names.consts.iter().map(String::as_str),
-                        component.names.enum_members.iter().map(String::as_str),
+                        component.names.enum_members.keys().map(String::as_str),
                         bound.iter().map(String::as_str),
                     )?;
                 }
@@ -1812,9 +1925,11 @@ fn sync_component_sources(
     let mut sources = Vec::new();
     let mut fair_constituents = Vec::new();
     for reference in &action.refs {
-        let component = components
+        let mut component = components
             .get(&reference.alias)
-            .ok_or_else(|| error_at(format!("unknown alias '{}'", reference.alias), action.span))?;
+            .ok_or_else(|| error_at(format!("unknown alias '{}'", reference.alias), action.span))?
+            .clone();
+        component.public_bindings.extend(bound.iter().cloned());
         let source = component
             .spec
             .items
@@ -1840,7 +1955,7 @@ fn sync_component_sources(
             items: source_items,
             span: source_span,
             ..
-        } = rewrite_component_item(source, component)?
+        } = rewrite_component_item(source, &component)?
         else {
             unreachable!()
         };
@@ -1925,7 +2040,16 @@ fn sync_action(
     for names in &inventories {
         used.extend(names.all.iter().cloned());
     }
-    let argument_avoid = used.clone();
+    let argument_names = sources
+        .iter()
+        .map(|source| {
+            source
+                .replacements
+                .values()
+                .flat_map(|value| crate::capture_names(value, &HashSet::new()))
+                .collect::<HashSet<_>>()
+        })
+        .collect::<Vec<_>>();
     let mut pattern_ambient = ambient.clone();
     pattern_ambient.extend(bound.iter().cloned());
     let mut items = Vec::new();
@@ -1933,10 +2057,13 @@ fn sync_action(
     for (index, source) in sources.into_iter().enumerate() {
         let mut avoid = protected.clone();
         let mut pattern_avoid = HashSet::new();
+        let mut argument_avoid = HashSet::new();
         for (other, names) in inventories.iter().enumerate() {
+            argument_avoid.extend(names.guards.iter().cloned());
             if other != index {
                 avoid.extend(names.capture.iter().cloned());
                 pattern_avoid.extend(names.guards.iter().cloned());
+                argument_avoid.extend(argument_names[other].iter().cloned());
             }
         }
         item_origins.extend(source.item_origins);

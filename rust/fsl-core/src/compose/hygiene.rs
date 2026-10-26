@@ -29,15 +29,13 @@ pub(super) struct Source<'a> {
 
 #[derive(Clone)]
 struct Scope {
-    original: HashSet<String>,
     renamed: HashMap<String, String>,
     exporting: bool,
 }
 
 impl Scope {
-    fn new(params: &HashSet<String>) -> Self {
+    fn new() -> Self {
         Self {
-            original: params.clone(),
             renamed: HashMap::new(),
             exporting: true,
         }
@@ -50,7 +48,45 @@ struct Renamer<'a> {
     pattern_avoid: &'a HashSet<String>,
     ambient: &'a HashSet<String>,
     incoming: HashSet<String>,
+    inserted: HashSet<String>,
     used: &'a mut HashSet<String>,
+}
+
+pub(super) fn root_expression(
+    expr: Expr,
+    globals: &ComponentNames,
+    params: &HashSet<String>,
+    ambient: &HashSet<String>,
+) -> Result<Expr, TypecheckError> {
+    let mut used = HashSet::new();
+    crate::collect_names(&expr, &mut used);
+    Renamer::root(globals, params, ambient, &mut used).local(expr, &Scope::new())
+}
+
+pub(super) fn root_binder(
+    binder: Binder,
+    globals: &ComponentNames,
+    params: &HashSet<String>,
+    ambient: &HashSet<String>,
+) -> Result<Binder, TypecheckError> {
+    let mut used = HashSet::new();
+    crate::collect_binder_names(&binder, &mut used);
+    Renamer::root(globals, params, ambient, &mut used)
+        .binder(binder, &Scope::new())
+        .map(|(binder, _)| binder)
+}
+
+pub(super) fn root_statements(
+    statements: Vec<Statement>,
+    globals: &ComponentNames,
+    ambient: &HashSet<String>,
+) -> Result<Vec<Statement>, TypecheckError> {
+    let mut used = HashSet::new();
+    for statement in &statements {
+        super::collect_statement_names(statement, &mut used, None);
+    }
+    Renamer::root(globals, &HashSet::new(), ambient, &mut used)
+        .statements(statements, &Scope::new())
 }
 
 pub(super) fn rewrite(
@@ -61,7 +97,7 @@ pub(super) fn rewrite(
     ambient: &HashSet<String>,
     used: &mut HashSet<String>,
 ) -> Result<Vec<ActionItem>, CoreError> {
-    let mut scope = Scope::new(source.params);
+    let mut scope = Scope::new();
     let span = source.span;
     let mut incoming = HashSet::new();
     if let Some(arguments) = &source.arguments {
@@ -75,6 +111,7 @@ pub(super) fn rewrite(
         pattern_avoid,
         ambient,
         incoming,
+        inserted: HashSet::new(),
         used,
     };
     map_normalized_action_items(items, &mut scope, |item, scope| {
@@ -108,7 +145,29 @@ enum Binding {
     Closed,
 }
 
-impl Renamer<'_> {
+impl<'a> Renamer<'a> {
+    fn root(
+        globals: &'a ComponentNames,
+        params: &'a HashSet<String>,
+        ambient: &'a HashSet<String>,
+        used: &'a mut HashSet<String>,
+    ) -> Self {
+        used.extend(ambient.iter().chain(params).cloned());
+        Self {
+            source: Source {
+                globals,
+                params,
+                span: crate::typecheck::unknown_span(),
+                arguments: None,
+            },
+            avoid: ambient,
+            pattern_avoid: ambient,
+            ambient,
+            incoming: HashSet::new(),
+            inserted: HashSet::new(),
+            used,
+        }
+    }
     /// One declaration operation for lets, patterns and every binder form.
     fn bind(
         &mut self,
@@ -121,8 +180,12 @@ impl Renamer<'_> {
                 &name,
                 self.source.globals.state.iter().map(String::as_str),
                 self.source.globals.consts.iter().map(String::as_str),
-                self.source.globals.enum_members.iter().map(String::as_str),
-                scope.original.iter().map(String::as_str),
+                self.source.globals.enum_members.keys().map(String::as_str),
+                self.source
+                    .params
+                    .iter()
+                    .chain(scope.renamed.keys())
+                    .map(String::as_str),
             )?;
         }
         let collides = match binding {
@@ -144,7 +207,6 @@ impl Renamer<'_> {
             name.clone()
         };
         self.used.insert(fresh.clone());
-        scope.original.insert(name.clone());
         scope.renamed.insert(name, fresh.clone());
         Ok(fresh)
     }
@@ -173,8 +235,15 @@ impl Renamer<'_> {
                     if let Some(value) = arguments.values.get(&name) {
                         // An actual is a separate lexical source. Rewrite each
                         // inserted copy in header scope, never receiver scope.
-                        let mut argument_scope = Scope::new(arguments.params);
+                        let mut argument_scope = Scope::new();
                         argument_scope.exporting = false;
+                        let mut avoid = arguments.avoid.clone();
+                        for (formal, other) in arguments.values {
+                            if formal != &name || self.inserted.contains(&name) {
+                                avoid.extend(capture_names(other, &HashSet::new()));
+                            }
+                        }
+                        self.inserted.insert(name.clone());
                         let source = Source {
                             globals: arguments.globals,
                             params: arguments.params,
@@ -183,10 +252,11 @@ impl Renamer<'_> {
                         };
                         Renamer {
                             source,
-                            avoid: arguments.avoid,
-                            pattern_avoid: arguments.avoid,
+                            avoid: &avoid,
+                            pattern_avoid: &avoid,
                             ambient: self.ambient,
                             incoming: HashSet::new(),
+                            inserted: HashSet::new(),
                             used: &mut *self.used,
                         }
                         .expression(value.clone(), &mut argument_scope)
