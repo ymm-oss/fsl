@@ -446,7 +446,7 @@ const PROPERTY_EVALUATION: EvaluationPolicy = EvaluationPolicy {
     classify: FailureClass::PartialOperation,
 };
 
-fn safe_status<S: SmtSolver>(solver: &S) -> EvaluationStatus<S::Term> {
+pub(crate) fn safe_status<S: SmtSolver>(solver: &S) -> EvaluationStatus<S::Term> {
     EvaluationStatus {
         fully_defined: solver.bool_value(true),
         first_partial: solver.bool_value(false),
@@ -1076,7 +1076,7 @@ fn quantified_evaluation_status<S: SmtSolver>(
     let mut has_partial_operation = source_status.has_partial_operation;
     let mut active = source_status.fully_defined;
     for (name, value, membership) in
-        binder_candidates(solver, model, binder, state, bindings, old_state)?
+        binder_values(solver, model, binder, state, bindings, old_state)?
     {
         let mut local = bindings.clone();
         local.insert(name, value);
@@ -1158,7 +1158,7 @@ fn aggregate_evaluation_status<S: SmtSolver>(
     let mut active = source_status.fully_defined;
     let mut sum = solver.int_value(0);
     for (name, candidate, membership) in
-        binder_candidates(solver, model, binder, state, bindings, old_state)?
+        binder_values(solver, model, binder, state, bindings, old_state)?
     {
         let mut local = bindings.clone();
         local.insert(name, candidate);
@@ -1237,24 +1237,26 @@ fn binder_source_evaluation_status<S: SmtSolver>(
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    ordered_evaluation_status_refs(
+        solver,
+        model,
+        &binder_source_expressions(binder),
+        state,
+        bindings,
+        old_state,
+        policy,
+    )
+}
+
+pub(crate) fn binder_source_expressions(binder: &Binder) -> Vec<&Expr> {
     match binder {
-        Binder::Typed { .. } => Ok(safe_status(solver)),
-        Binder::Range { lo, hi, .. } => ordered_evaluation_status_refs(
-            solver,
-            model,
-            &[lo.as_ref(), hi.as_ref()],
-            state,
-            bindings,
-            old_state,
-            policy,
-        ),
-        Binder::Collection { collection, .. } => evaluation_status_with_policy(
-            solver, model, collection, state, bindings, old_state, policy,
-        ),
+        Binder::Typed { .. } => Vec::new(),
+        Binder::Range { lo, hi, .. } => vec![lo, hi],
+        Binder::Collection { collection, .. } => vec![collection],
     }
 }
 
-fn binder_where_expression(binder: &Binder) -> Option<&Expr> {
+pub(crate) fn binder_where_expression(binder: &Binder) -> Option<&Expr> {
     match binder {
         Binder::Typed { where_expr, .. }
         | Binder::Range { where_expr, .. }
@@ -1716,7 +1718,7 @@ fn eval_quantified<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    let candidates = binder_candidates(solver, model, binder, state, bindings, old_state)?;
+    let candidates = binder_values(solver, model, binder, state, bindings, old_state)?;
     let mut terms = Vec::new();
     for (name, value, membership) in candidates {
         let mut local = bindings.clone();
@@ -1724,11 +1726,7 @@ fn eval_quantified<S: SmtSolver>(
         let body = eval(solver, model, body, state, &mut local, old_state)?;
         let body = bool_term(&body)?.clone();
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
-        let condition = match (membership, where_term) {
-            (Some(membership), Some(where_term)) => Some(solver.and(&[membership, where_term])?),
-            (Some(condition), None) | (None, Some(condition)) => Some(condition),
-            (None, None) => None,
-        };
+        let condition = binder_condition(solver, membership, where_term)?;
         terms.push(if let Some(condition) = condition {
             if quantifier == "forall" {
                 solver.implies(&condition, &body)?
@@ -1755,17 +1753,16 @@ fn binder_conditions<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<Vec<S::Term>, VerifyError> {
-    let candidates = binder_candidates(solver, model, binder, state, bindings, old_state)?;
+    let candidates = binder_values(solver, model, binder, state, bindings, old_state)?;
     let mut terms = Vec::new();
     for (name, value, membership) in candidates {
         let mut local = bindings.clone();
         local.insert(name, value);
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
-        terms.push(match (membership, where_term) {
-            (Some(membership), Some(where_term)) => solver.and(&[membership, where_term])?,
-            (Some(condition), None) | (None, Some(condition)) => condition,
-            (None, None) => solver.bool_value(true),
-        });
+        terms.push(
+            binder_condition(solver, membership, where_term)?
+                .unwrap_or_else(|| solver.bool_value(true)),
+        );
     }
     Ok(terms)
 }
@@ -1805,17 +1802,13 @@ fn eval_aggregate<S: SmtSolver>(
     let value = value.ok_or_else(|| VerifyError::new("sum aggregate requires a value"))?;
     let mut terms = Vec::new();
     for (name, candidate, membership) in
-        binder_candidates(solver, model, binder, state, bindings, old_state)?
+        binder_values(solver, model, binder, state, bindings, old_state)?
     {
         let mut local = bindings.clone();
         local.insert(name, candidate);
         let value = eval(solver, model, value, state, &mut local, old_state)?;
         let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
-        let condition = match (membership, where_term) {
-            (Some(membership), Some(where_term)) => Some(solver.and(&[membership, where_term])?),
-            (Some(condition), None) | (None, Some(condition)) => Some(condition),
-            (None, None) => None,
-        };
+        let condition = binder_condition(solver, membership, where_term)?;
         terms.push(if let Some(condition) = condition {
             solver.ite(&condition, int_term(&value)?, &solver.int_value(0))?
         } else {
@@ -1827,7 +1820,19 @@ fn eval_aggregate<S: SmtSolver>(
 
 type ConditionalBinderCandidates<T> = Vec<(String, SymbolicValue<T>, Option<T>)>;
 
-fn binder_candidates<S: SmtSolver>(
+pub(crate) fn binder_condition<S: SmtSolver>(
+    solver: &S,
+    membership: Option<S::Term>,
+    where_term: Option<S::Term>,
+) -> Result<Option<S::Term>, VerifyError> {
+    Ok(match (membership, where_term) {
+        (Some(membership), Some(where_term)) => Some(solver.and(&[membership, where_term])?),
+        (Some(condition), None) | (None, Some(condition)) => Some(condition),
+        (None, None) => None,
+    })
+}
+
+pub(crate) fn binder_values<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     binder: &Binder,
@@ -1839,7 +1844,7 @@ fn binder_candidates<S: SmtSolver>(
         name, collection, ..
     } = binder
     else {
-        return binder_values(solver, model, binder).map(|values| {
+        return static_binder_values(solver, model, binder).map(|values| {
             values
                 .into_iter()
                 .map(|(name, value)| (name, value, None))
@@ -1849,10 +1854,12 @@ fn binder_candidates<S: SmtSolver>(
     let mut local = bindings.clone();
     let collection = eval(solver, model, collection, state, &mut local, old_state)?;
     match collection {
-        SymbolicValue::Set { ty, entries } => {
+        SymbolicValue::Set { ty, mut entries } => {
             let TypeRef::Set(element_ty) = ty else {
                 unreachable!();
             };
+            // Concrete Sets use BTreeSet<Value>, not enum declaration order.
+            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
             entries
                 .into_iter()
                 .map(|(element, present)| {
@@ -1875,13 +1882,93 @@ fn binder_candidates<S: SmtSolver>(
                 ))
             })
             .collect(),
+        SymbolicValue::SeqLiteral(items) => Ok(items
+            .into_iter()
+            .map(|value| (name.clone(), value, None))
+            .collect()),
+        SymbolicValue::SetLiteral(items) => set_literal_candidates(solver, model, name, items),
         _ => Err(VerifyError::new(
             "collection binder expects a Set or Seq expression",
         )),
     }
 }
 
-pub(crate) fn binder_values<S: SmtSolver>(
+fn set_literal_candidates<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    name: &str,
+    items: Vec<SymbolicValue<S::Term>>,
+) -> Result<ConditionalBinderCandidates<S::Term>, VerifyError> {
+    let mut ordered = items
+        .into_iter()
+        .map(|value| Ok((set_order_key(solver, model, &value)?, value)))
+        .collect::<Result<Vec<_>, VerifyError>>()?;
+    // A fixed insertion network orders symbolic values even when their
+    // relative order depends on the current state or action arguments.
+    for end in 1..ordered.len() {
+        for index in (1..=end).rev() {
+            let (left_key, left) = &ordered[index - 1];
+            let (right_key, right) = &ordered[index];
+            let swap = solver.gt(left_key, right_key)?;
+            let lower = (
+                solver.ite(&swap, right_key, left_key)?,
+                ite_value(solver, model, &swap, right, left)?,
+            );
+            let upper = (
+                solver.ite(&swap, left_key, right_key)?,
+                ite_value(solver, model, &swap, left, right)?,
+            );
+            ordered[index - 1] = lower;
+            ordered[index] = upper;
+        }
+    }
+    ordered
+        .iter()
+        .enumerate()
+        .map(|(index, (_, value))| {
+            let membership = index
+                .checked_sub(1)
+                .map(|previous| {
+                    solver
+                        .not(&logical_equal(solver, model, value, &ordered[previous].1)?)
+                        .map_err(VerifyError::from)
+                })
+                .transpose()?;
+            Ok((name.to_owned(), value.clone(), membership))
+        })
+        .collect()
+}
+
+/// Scalar keys follow concrete Value order, including enum member spelling.
+/// Composite literal elements remain unsupported rather than guessed.
+fn set_order_key<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    value: &SymbolicValue<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    let SymbolicValue::Scalar { ty, term } = value else {
+        return Err(VerifyError::new(
+            "Set literal binder requires scalar elements",
+        ));
+    };
+    match ty {
+        TypeRef::Bool => Ok(solver.ite(term, &solver.int_value(1), &solver.int_value(0))?),
+        TypeRef::Named(name) if matches!(model.types.get(name), Some(TypeDef::Enum { .. })) => {
+            let mut values = model.domain_values(ty)?;
+            values.sort();
+            let mut rank = solver.int_value(0);
+            for (index, value) in values.iter().enumerate() {
+                let value = concrete_value(solver, model, ty, value)?;
+                let matches = solver.equal(term, int_term(&value)?)?;
+                rank = solver.ite(&matches, &solver.int_value(i64_index(index)?), &rank)?;
+            }
+            Ok(rank)
+        }
+        _ => Ok(term.clone()),
+    }
+}
+
+pub(crate) fn static_binder_values<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     binder: &Binder,
@@ -1927,12 +2014,7 @@ pub(crate) fn binder_where<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<Option<S::Term>, VerifyError> {
-    let where_expr = match binder {
-        Binder::Typed { where_expr, .. }
-        | Binder::Range { where_expr, .. }
-        | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
-    };
-    where_expr
+    binder_where_expression(binder)
         .map(|expr| {
             let value = eval(solver, model, expr, state, bindings, old_state)?;
             Ok(bool_term(&value)?.clone())

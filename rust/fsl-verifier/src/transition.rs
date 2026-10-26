@@ -10,8 +10,9 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{
-    EvaluationStatus, FailureClass, binder_values, binder_where, classified_evaluation_status,
-    eval, eval_expected, index_access_status, index_accessible, sequence_statuses,
+    EvaluationStatus, FailureClass, binder_condition, binder_source_expressions, binder_values,
+    binder_where, binder_where_expression, classified_evaluation_status, eval, eval_expected,
+    index_access_status, index_accessible, safe_status, sequence_statuses,
 };
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
@@ -318,42 +319,47 @@ fn statement_evaluation_status<S: SmtSolver>(
         Statement::ForAll {
             binder, statements, ..
         } => {
-            let mut active = solver.bool_value(true);
-            let mut fully_defined = solver.bool_value(true);
-            let mut first_partial = solver.bool_value(false);
-            let mut has_partial_operation = false;
-            for (name, value) in binder_values(solver, model, binder)? {
+            let source_status = sequence_statuses(
+                solver,
+                binder_source_expressions(binder)
+                    .into_iter()
+                    .map(|expr| {
+                        classified_evaluation_status(
+                            solver, model, expr, read_state, bindings, None, class,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?;
+            let mut active = source_status.fully_defined.clone();
+            let mut fully_defined = source_status.fully_defined;
+            let mut first_partial = source_status.first_partial;
+            let mut has_partial_operation = source_status.has_partial_operation;
+            for (name, value, membership) in
+                binder_values(solver, model, binder, read_state, bindings, None)?
+            {
                 let mut local = bindings.clone();
                 local.insert(name, value);
-                let where_status = match binder {
-                    fsl_core::KernelBinder::Typed { where_expr, .. }
-                    | fsl_core::KernelBinder::Range { where_expr, .. }
-                    | fsl_core::KernelBinder::Collection { where_expr, .. } => {
-                        where_expr.as_deref().map_or_else(
-                            || {
-                                Ok(EvaluationStatus {
-                                    fully_defined: solver.bool_value(true),
-                                    first_partial: solver.bool_value(false),
-                                    has_partial_operation: false,
-                                })
-                            },
-                            |expression| {
-                                classified_evaluation_status(
-                                    solver, model, expression, read_state, &local, None, class,
-                                )
-                            },
-                        )?
-                    }
-                };
+                let where_reached = solver.and(&[
+                    active.clone(),
+                    membership.unwrap_or_else(|| solver.bool_value(true)),
+                ])?;
+                let where_status = binder_where_expression(binder).map_or_else(
+                    || Ok(safe_status(solver)),
+                    |expression| {
+                        classified_evaluation_status(
+                            solver, model, expression, read_state, &local, None, class,
+                        )
+                    },
+                )?;
                 first_partial = solver.or(&[
                     first_partial,
-                    solver.and(&[active.clone(), where_status.first_partial])?,
+                    solver.and(&[where_reached.clone(), where_status.first_partial])?,
                 ])?;
                 has_partial_operation |= where_status.has_partial_operation;
                 let where_term = binder_where(solver, model, binder, read_state, &mut local, None)?
                     .unwrap_or_else(|| solver.bool_value(true));
                 let body_reached = solver.and(&[
-                    active.clone(),
+                    where_reached.clone(),
                     where_status.fully_defined.clone(),
                     where_term,
                 ])?;
@@ -366,7 +372,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                     solver.and(&[body_reached.clone(), body_status.first_partial])?,
                 ])?;
                 let iteration_ok = solver.and(&[
-                    where_status.fully_defined,
+                    solver.implies(&where_reached, &where_status.fully_defined)?,
                     solver.implies(&body_reached, &body_status.fully_defined)?,
                 ])?;
                 fully_defined = solver.and(&[fully_defined, iteration_ok.clone()])?;
@@ -516,10 +522,14 @@ fn collect_init_statement<S: SmtSolver>(
         Statement::ForAll {
             binder, statements, ..
         } => {
-            for (name, value) in binder_values(solver, model, binder)? {
+            fsl_core::check_init_collection_binder(model, binder)?;
+            for (name, value, membership) in
+                binder_values(solver, model, binder, state, bindings, None)?
+            {
                 let mut local = bindings.clone();
                 local.insert(name, value);
                 let where_term = binder_where(solver, model, binder, state, &mut local, None)?;
+                let condition = binder_condition(solver, membership, where_term)?;
                 let mut body_constraints = Vec::new();
                 for statement in statements {
                     collect_init_statement(
@@ -531,11 +541,11 @@ fn collect_init_statement<S: SmtSolver>(
                         &mut body_constraints,
                     )?;
                 }
-                if let Some(where_term) = where_term {
+                if let Some(condition) = condition {
                     constraints.extend(
                         body_constraints
                             .into_iter()
-                            .map(|term| solver.implies(&where_term, &term))
+                            .map(|term| solver.implies(&condition, &term))
                             .collect::<Result<Vec<_>, _>>()?,
                     );
                 } else {
@@ -650,10 +660,13 @@ fn compute_statement<S: SmtSolver>(
         Statement::ForAll {
             binder, statements, ..
         } => {
-            for (name, value) in binder_values(solver, model, binder)? {
+            for (name, value, membership) in
+                binder_values(solver, model, binder, read_state, bindings, None)?
+            {
                 let mut local = bindings.clone();
                 local.insert(name, value);
                 let where_term = binder_where(solver, model, binder, read_state, &mut local, None)?;
+                let condition = binder_condition(solver, membership, where_term)?;
                 let candidate = compute_updates(
                     solver,
                     model,
@@ -662,8 +675,8 @@ fn compute_statement<S: SmtSolver>(
                     pending.clone(),
                     &mut local,
                 )?;
-                pending = if let Some(where_term) = where_term {
-                    merge_states(solver, model, &where_term, &candidate, &pending)?
+                pending = if let Some(condition) = condition {
+                    merge_states(solver, model, &condition, &candidate, &pending)?
                 } else {
                     candidate
                 };
