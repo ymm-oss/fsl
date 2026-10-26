@@ -1186,7 +1186,7 @@ indeterminate (`chain` when its `[impl]` layer has no evidence that a test execu
 `--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
 result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
-governance `preservation` folds into `check`/`verify`/`scenarios` through the same mapping (§13). The fold
+governance `preservation` folds into `check`/`verify`/`scenarios`/`testgen` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
 `verify`: on a spec whose seam fails, `mutate` re-emits the baseline verdict (generating no
 mutants, because its baseline is no longer `verified`), `ledger` and `fslc html` inherit the
@@ -1194,7 +1194,32 @@ same exit from the folded verification envelope, and `sweep` reports `sweep_fail
 failure or `sweep_inconclusive` when some scope has only depth-limited cells. `scenarios`
 folds the seam and every preservation into its own envelope the same way (the folded
 `result`, exit 1, with the `implements` / `governance` section attached), whether it
-answered from its own bounded run or fell back to the `verify` envelope. The same
+answered from its own bounded run or fell back to the `verify` envelope.
+For inline `implements`, the ledger body also shows the folded verdict and
+`abs` / `result` in `## inline implements`, before governance and the risk lists;
+only `refines` is green, including passing seams. The section addition alone
+does not change ledgers without `implements`; sentinel coverage removal and
+verdict findings separately change affected ledgers, including governance
+documents without `implements`. Previously approved inline-implements ledgers now report
+`drifted` in `approval check` (exit 0): review the section and re-approve them.
+The ledger risk table also records each non-`refines` preservation as a `GOV`
+finding and a non-`refines` inline seam as a spec-level finding. Unrelated
+requirement rows keep their own status. `unknown_cti` is an unestablished
+induction finding, attributed by the same declaration-owner rule as ordinary
+violations (see [the ledger amendment](../design/DESIGN-ledger.md)),
+not a reachable counterexample; raw CTI, hint, and rank-failure evidence is
+preserved. Added findings and corrected attribution also change affected ledger
+approval digests.
+Direct `ledger` and `html` return verification `result:"error"` as the original
+JSON error envelope and exit 2/3, before rendering or writing an artifact;
+direct `ledger` stops before ancillary replay, evidence loading, and witness preparation
+(`html` also stops before explain). With `-o`, no artifact is created. Other
+failed/unestablished verdicts still generate reports with their nonzero exit.
+Approval-only ledger rerendering for digest comparison is separate from this gate.
+`testgen` refuses a failed seam or preservation with the same verify failure
+envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
+internal error), on both kernel and fallback paths,
+and writes no harness. The same
 `2` mapping is fail-closed for `chain`'s project-manifest reader (unrecognized
 section, zero recognized sections, or an unparseable `depth`/`refine_depth` —
 `docs/design/DESIGN-layers.md` §7) and for `ledger --impl-log`'s replay input (a
@@ -1321,6 +1346,17 @@ and `decreases`. When a `trans` is declared, the success output carries
 The blocking requires clause is identified by a minimized unsat core when that is
 cheap. For requirements `branches`, a false coverage diagnostic keeps the
 internal split-action `name` and adds `display_name`.
+Raw `action_coverage` retains generated-only sentinel entries, including
+`covered:false`; verify, induction, and Worker JSON are unchanged. Public coverage
+findings require a positive line/column on the authored primary origin, or else
+the kernel action declaration. This shared source-location rule, not a name or
+prefix, excludes scaffolding from runtime warnings, ledger coverage findings,
+mutate dead-action notes, and HTML badges and coverage denominators. The current
+CLI mutant-enumeration path cannot encounter generated-only dead actions.
+With no eligible action the HTML
+metric is `0/0`; HTML Raw Data still contains the original coverage map.
+Affected ledger/HTML approvals become `drifted` (exit 0) because the rendering
+changes; review the corrected artifact and re-approve it.
 
 ### Explicit action execution profile
 
@@ -2003,6 +2039,12 @@ Schema/version/spec mismatches, unknown state/action/parameter names, and
 malformed input fail closed. Compose uses an explicit checked names/order bridge because
 Public Kernel intentionally rejects incomplete multi-file provenance; it enters
 the same adapter rather than falling back after an export error.
+Before the walk, output-path handling, or generation, `testgen` checks inline
+`implements` and governance preservations through the same fold as `scenarios`.
+If either fails, it returns the `verify` owner's failure envelope and exit
+(1 for a failed seam/preservation, 2 for a contract error, 3 for an internal error), not a scenarios-shaped
+envelope, and writes no harness. Passing documents and non-strict partially
+reachable scenarios retain their ordinary generation behavior.
 
 The fixed-seed walk is a concrete Monitor run capped at 100 steps, and it stops
 early when no action is enabled; it is **not** bounded by `--depth`. It can
@@ -2728,7 +2770,9 @@ Consumers of the `check`/`verify` envelope read the folded verdict: a
 exit 1 from the same baseline (the ledger body also states that verdict and
 lists every preservation with its result, failing ones marked), `fslc
 scenarios` folds the preservations into its own envelope as `verify` does,
-and the browser Worker folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
+`testgen` returns the verify failure envelope and exit without a harness when
+a preservation fails (including on the kernel path), and the browser Worker
+folds `check` and `verify` the same way. This changed exit codes: before 4.11 a failed
 preservation left `check` at `ok` and `verify` at `verified`, both exit 0, and
 `verify` reported no `governance` section at all (and answered `verified` even
 for a contract `check` rejected). A CI that gated on the exit
@@ -3273,6 +3317,11 @@ DESIGN-*.md).
   whose age is proven to remain zero across every transition), and
   `vacuity_probe_truncated`†. `error` exits 2. →
   [`DESIGN-vacuity.md`](../design/DESIGN-vacuity.md)
+
+  `never_enabled_action` findings apply only to source-backed actions (authored
+  primary origin, then kernel declaration, with positive line/column).
+  Generated-only sentinels remain in raw coverage evidence but not in these
+  warnings, ledger coverage findings, or HTML badges/coverage denominators.
 
   † `vacuity_probe_truncated`: the `vacuous_implication`/`vacuous_leadsto`
   reachability probe shares one budgeted concrete BFS across every

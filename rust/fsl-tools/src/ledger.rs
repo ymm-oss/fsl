@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use fsl_core::KernelModel;
+use fsl_core::{KernelModel, SyntheticName};
 use fsl_syntax::{Annotations, RequirementLink};
 use serde_json::Value;
 
@@ -124,41 +124,71 @@ fn requirement(value: &Value) -> (Option<String>, Option<String>) {
 }
 
 fn metadata_for(model: &KernelModel, group: &str, name: &str) -> Option<RequirementLink> {
-    let annotations = match group {
-        "invariants" => model
-            .invariants
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "transitions" => model
-            .transitions
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "reachables" => model
-            .reachables
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "leadstos" => model
-            .leadstos
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "actions" => model
-            .actions
-            .iter()
-            .find(|action| action.name == name)
-            .map(|action| &action.annotations),
-        _ => None,
+    let declarations: Vec<_> = model
+        .invariants
+        .iter()
+        .map(|item| ("invariants", &item.name, &item.annotations))
+        .chain(
+            model
+                .transitions
+                .iter()
+                .map(|item| ("transitions", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .reachables
+                .iter()
+                .map(|item| ("reachables", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .leadstos
+                .iter()
+                .map(|item| ("leadstos", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .actions
+                .iter()
+                .map(|item| ("actions", &item.name, &item.annotations)),
+        )
+        .filter(|(kind, _, _)| *kind == group || group == "properties" && *kind != "actions")
+        .collect();
+    let synthetic = (group == "properties")
+        .then(|| SyntheticName::parse_internal(name))
+        .flatten();
+    let candidates: Vec<_> = declarations
+        .iter()
+        .map(|(_, name, _)| match synthetic {
+            Some(SyntheticName::PartialProperty { .. }) => {
+                SyntheticName::PartialProperty { property: name }.internal()
+            }
+            Some(SyntheticName::KeyDomainProperty { .. }) => {
+                SyntheticName::KeyDomainProperty { property: name }.internal()
+            }
+            _ => (*name).clone(),
+        })
+        .collect();
+    let names = candidates.iter().map(String::as_str);
+    let resolved = if group == "actions" {
+        model.names().resolve_action(name, names)
+    } else if matches!(
+        synthetic,
+        Some(SyntheticName::PartialProperty { .. } | SyntheticName::KeyDomainProperty { .. })
+    ) {
+        model.names().resolve_synthetic(name, names)
+    } else {
+        model.names().resolve_property(name, names)
     };
-    annotations.and_then(|annotations| {
-        annotations
-            .requirements()
-            .expect("checked model annotations are valid")
-            .into_iter()
-            .next()
-    })
+    // Missing and ambiguous identities stay spec-level; never choose a candidate.
+    let owner = resolved.ok()??;
+    let index = candidates.iter().position(|candidate| candidate == owner)?;
+    declarations[index]
+        .2
+        .requirements()
+        .expect("checked model annotations are valid")
+        .into_iter()
+        .next()
 }
 
 fn finding_requirement(
@@ -173,6 +203,55 @@ fn finding_requirement(
     }
     metadata_for(model, group, name)
         .map_or((None, None), |metadata| (Some(metadata.id), metadata.text))
+}
+
+fn generated_identity<'a>(value: &'a Value, name: &'a str) -> &'a str {
+    value
+        .get("generated_name")
+        .and_then(Value::as_str)
+        .unwrap_or(name)
+}
+
+fn verdict_requirement(
+    model: &KernelModel,
+    value: &Value,
+    name: &str,
+) -> (Option<String>, Option<String>) {
+    // Historical `invariant` fields also carry transition, liveness and action
+    // obligations. Classify the producer's obligation before resolving identity.
+    let (group, owner) = match value.get("violation_kind").and_then(Value::as_str) {
+        Some("deadlock") => ("", value),
+        Some("leadsTo" | "leadsTo_rank") => ("leadstos", value),
+        Some("trans") => ("transitions", value),
+        _ if value.get("trans").is_some() => ("transitions", value),
+        _ if value.get("leadsTo").is_some() => ("leadstos", value),
+        Some("partial_op" | "key_domain") => {
+            match SyntheticName::parse_internal(generated_identity(value, name)) {
+                Some(
+                    SyntheticName::PartialProperty { .. } | SyntheticName::KeyDomainProperty { .. },
+                ) => ("properties", value),
+                Some(
+                    SyntheticName::PartialAction { .. } | SyntheticName::KeyDomainAction { .. },
+                ) => ("actions", &value["last_action"]),
+                _ => ("", value),
+            }
+        }
+        Some("ensures" | "type_bound") => ("actions", &value["last_action"]),
+        _ => ("invariants", value),
+    };
+    finding_requirement(
+        model,
+        value,
+        group,
+        generated_identity(
+            owner,
+            if group == "actions" {
+                owner["name"].as_str().unwrap_or("")
+            } else {
+                name
+            },
+        ),
+    )
 }
 
 fn summarize_violation(value: &Value) -> String {
@@ -214,24 +293,15 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         .get("trace_type")
         .and_then(Value::as_str)
         .unwrap_or("");
-    if result == "violated" {
-        let (group, name) =
-            if let Some(name) = verification.get("invariant").and_then(Value::as_str) {
-                ("invariants", name)
-            } else if let Some(name) = verification.get("leadsTo").and_then(Value::as_str) {
-                ("leadstos", name)
-            } else if let Some(name) = verification.get("trans").and_then(Value::as_str) {
-                ("transitions", name)
-            } else {
-                (
-                    "",
-                    verification
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                )
-            };
-        let metadata = finding_requirement(model, verification, group, name);
+    if matches!(result, "violated" | "unknown_cti") {
+        let name = verification
+            .get("trans")
+            .or_else(|| verification.get("leadsTo"))
+            .or_else(|| verification.get("invariant"))
+            .or_else(|| verification.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let metadata = verdict_requirement(model, verification, name);
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
@@ -242,9 +312,17 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             }
             .to_owned(),
             name: name.to_owned(),
-            summary: summarize_violation(verification),
+            summary: if result == "unknown_cti" {
+                format!("帰納証明は未確立（{result}）")
+            } else {
+                summarize_violation(verification)
+            },
             next_action: verification
-                .get("recommended_action")
+                .get(if result == "unknown_cti" {
+                    "hint"
+                } else {
+                    "recommended_action"
+                })
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             raw: verification.clone(),
@@ -257,7 +335,8 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .flatten()
         {
             let name = item.get("name").and_then(Value::as_str).unwrap_or("");
-            let metadata = finding_requirement(model, item, "reachables", name);
+            let metadata =
+                finding_requirement(model, item, "reachables", generated_identity(item, name));
             let mut summary = match item.get("classification").and_then(Value::as_str) {
                 Some("insufficient_depth") => format!(
                     "深さ {} までに到達 trace なし（より深い探索が必要かもしれない）",
@@ -342,16 +421,55 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             raw: verification.clone(),
         });
     }
-    for (name, item) in verification
-        .get("action_coverage")
-        .and_then(Value::as_object)
+    if let Some(implements) = verification.get("implements") {
+        findings.extend(refinement_finding(
+            implements,
+            "implements",
+            implements.get("abs").and_then(Value::as_str).unwrap_or("—"),
+            None,
+            "",
+        ));
+    }
+    // Governance lowering creates only the catalog invariant, the sole invariant
+    // with requirement metadata. Thus the first metadata-bearing invariant owns
+    // preservations; read it rather than copying its ID or catalog text.
+    let governance_requirement = model.invariants.iter().find_map(|property| {
+        metadata_for(
+            model,
+            "invariants",
+            model.names().public_property(&property.name).as_str(),
+        )
+    });
+    for preservation in verification["governance"]["preservations"]
+        .as_array()
         .into_iter()
         .flatten()
+    {
+        findings.extend(refinement_finding(
+            preservation,
+            "preservation",
+            preservation
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("—"),
+            governance_requirement.clone(),
+            &format!(
+                "{} → {} / control: {}",
+                preservation["before"].as_str().unwrap_or("—"),
+                preservation["after"].as_str().unwrap_or("—"),
+                preservation["preserve"],
+            ),
+        ));
+    }
+    for (name, item) in
+        crate::coverage::source_action_coverage(model, &verification["action_coverage"])
+            .into_iter()
+            .flatten()
     {
         if item.get("covered").and_then(Value::as_bool) != Some(false) {
             continue;
         }
-        let metadata = finding_requirement(model, item, "actions", name);
+        let metadata = finding_requirement(model, item, "actions", generated_identity(item, &name));
         let mut summary = "深さ内で一度も実行可能にならない（死アクション）".to_owned();
         if let Some(blocking) = item
             .get("blocking_requires")
@@ -409,6 +527,28 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         });
     }
     findings
+}
+
+fn refinement_finding(
+    raw: &Value,
+    kind: &str,
+    name: &str,
+    requirement: Option<RequirementLink>,
+    context: &str,
+) -> Option<Finding> {
+    let result = raw.get("result").and_then(Value::as_str);
+    if refinement_passes(result) {
+        return None;
+    }
+    Some(Finding {
+        requirement_id: requirement.as_ref().map(|link| link.id.clone()),
+        requirement_text: requirement.and_then(|link| link.text),
+        trace_type: kind.to_owned(),
+        name: name.to_owned(),
+        summary: format!("{}: {} {context}", name, result.unwrap_or("—")),
+        next_action: None,
+        raw: raw.clone(),
+    })
 }
 
 /// What a `trace_type: "forbidden"` error reports. Only `Accepted` carries an
@@ -509,6 +649,15 @@ fn translate(finding: &Finding) -> String {
             "応答性『{}』の停止性（ランキング）が示せない。進行が単調に進むことを確認する。",
             finding.name
         ),
+        "induction_cti" => format!(
+            "性質『{}』の帰納証明は未確立。補助不変条件やランキングを確認する。",
+            finding.name
+        ),
+        "implements" | "preservation" => if finding.raw["result"] == "unknown_budget" {
+            "対応関係の探索が未完了。範囲と対応付けを見直す。".to_owned()
+        } else {
+            "上位契約との対応関係が成立していない。対応付けと仕様を確認する。".to_owned()
+        },
         "refinement" => "詳細仕様が上位契約から逸脱している。対応付け（mapping）かガードを修正する。".to_owned(),
         "conformance" => "実装ログが仕様に非適合。実装か仕様のどちらが正かを確定する。".to_owned(),
         "external_evidence" => format!(
@@ -872,6 +1021,36 @@ fn guarantee_line(verification: &Value) -> String {
     )
 }
 
+fn refinement_text(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .map_or_else(|| "—".to_owned(), escape)
+}
+
+fn refinement_passes(result: Option<&str>) -> bool {
+    result == Some("refines")
+}
+
+fn refinement_mark(result: Option<&str>) -> &'static str {
+    if refinement_passes(result) {
+        "🟢"
+    } else {
+        "🔴"
+    }
+}
+
+/// State the folded verdict and seam result, including a passing seam (#1336).
+fn render_implements_section(output: &mut String, verification: &Value, implements: &Value) {
+    let _ = writeln!(
+        output,
+        "\n## inline implements\n\n- 検証判定: `{}`\n\n| abs | result |\n|---|---|\n| `{}` | {} `{}` |",
+        refinement_text(verification.get("result")),
+        refinement_text(implements.get("abs")),
+        refinement_mark(implements.get("result").and_then(Value::as_str)),
+        refinement_text(implements.get("result")),
+    );
+}
+
 /// The verdict and preservation results of a governance document (#1316).
 ///
 /// Since #1303 the first non-`refines` preservation folds into the
@@ -881,15 +1060,10 @@ fn guarantee_line(verification: &Value) -> String {
 /// marked failing. Rendered only when the verification envelope carries a
 /// `governance` section, so no other ledger changes.
 fn render_governance_section(output: &mut String, verification: &Value, governance: &Value) {
-    let text = |value: Option<&Value>| {
-        value
-            .and_then(Value::as_str)
-            .map_or_else(|| "—".to_owned(), escape)
-    };
     let _ = write!(
         output,
         "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
-        text(verification.get("result"))
+        refinement_text(verification.get("result"))
     );
     for preservation in governance
         .get("preservations")
@@ -906,23 +1080,19 @@ fn render_governance_section(output: &mut String, verification: &Value, governan
             .map(|control| format!("`{}`", escape(control)))
             .collect::<Vec<_>>();
         let result = preservation.get("result").and_then(Value::as_str);
-        let mark = if result == Some("refines") {
-            "🟢"
-        } else {
-            "🔴"
-        };
+        let mark = refinement_mark(result);
         let _ = writeln!(
             output,
             "| `{}` | `{}` → `{}` | {} | {mark} `{}` |",
-            text(preservation.get("name")),
-            text(preservation.get("before")),
-            text(preservation.get("after")),
+            refinement_text(preservation.get("name")),
+            refinement_text(preservation.get("before")),
+            refinement_text(preservation.get("after")),
             if preserve.is_empty() {
                 "—".to_owned()
             } else {
                 preserve.join(", ")
             },
-            text(preservation.get("result")),
+            refinement_text(preservation.get("result")),
         );
     }
 }
@@ -1078,6 +1248,9 @@ pub fn render_ledger_with_approvals(
         output.push_str(
             "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n",
         );
+    }
+    if let Some(implements) = verification.get("implements") {
+        render_implements_section(&mut output, verification, implements);
     }
     if let Some(governance) = verification.get("governance") {
         render_governance_section(&mut output, verification, governance);
@@ -1269,9 +1442,14 @@ pub fn render_ledger_with_approvals(
             );
         }
         for finding in requirement_findings {
+            let summary_label = match finding.trace_type.as_str() {
+                "induction_cti" => "未確立の要約",
+                "implements" | "preservation" => "判定要約",
+                _ => "反例要約",
+            };
             let _ = writeln!(
                 output,
-                "- **検出**: `{}` — {}\n  - 反例要約: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
+                "- **検出**: `{}` — {}\n  - {summary_label}: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
                 finding.trace_type,
                 escape(&finding.name),
                 escape(&finding.summary),
@@ -1350,10 +1528,104 @@ pub fn render_ledger_with_approvals(
         findings
             .into_iter()
             .chain(evidence_findings)
-            .map(|finding| finding.raw)
+            .map(|finding| {
+                let mut raw = finding.raw;
+                if let Some(fields) = raw.as_object_mut() {
+                    // Same top-level-only set as approval's scenarios digest.
+                    // Proof evidence and same-named domain fields stay bound.
+                    for key in ["cost", "cache"] {
+                        fields.remove(key);
+                    }
+                }
+                raw
+            })
             .collect(),
     );
     output.push_str(&serde_json::to_string_pretty(&raw).unwrap_or_else(|_| "[]".to_owned()));
     output.push_str("\n```\n\n</details>\n");
     output
+}
+
+#[cfg(test)]
+mod requirement_owner_tests {
+    use super::*;
+    use fsl_core::{FsResolver, build_model, parse_kernel_source};
+    use serde_json::json;
+
+    #[test]
+    fn ambiguous_declaration_names_do_not_guess_requirement_metadata() {
+        let mut model = build_model(
+            parse_kernel_source(
+                r#"spec Ambiguity { state { x: Int } init { x = 0 }
+                @requirement("OWNER") action left() { x = x + 1 }
+                @requirement("OTHER") action right() { x = x - 1 }
+                @requirement("OWNER") invariant Left { x >= 0 }
+                @requirement("OTHER") invariant Right { x <= 10 } }"#,
+                &FsResolver::new("."),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // Deliberately artificial collisions, not a claim about accepted syntax.
+        // Exercise the resolver's all-candidates error for each lookup family.
+        for (index, spelling) in ["step__b1", "step.b1"].into_iter().enumerate() {
+            model.actions[index].name = spelling.to_owned();
+            model.invariants[index].name = spelling.to_owned();
+        }
+        assert!(metadata_for(&model, "actions", "step.b1").is_none());
+        assert!(metadata_for(&model, "invariants", "step.b1").is_none());
+        for synthetic in [
+            SyntheticName::PartialProperty {
+                property: "step__b1",
+            },
+            SyntheticName::KeyDomainProperty {
+                property: "step__b1",
+            },
+        ] {
+            let name = model.names().public_synthetic(&synthetic);
+            assert!(metadata_for(&model, "properties", name.as_str()).is_none());
+        }
+        let value = json!({"result":"unknown_cti", "violation_kind":"ensures",
+            "last_action":{"name":"step.b1"}});
+        assert_eq!(verdict_requirement(&model, &value, "step.b1"), (None, None));
+        let mut explicit = value;
+        explicit["requirement"] = json!({"id":"EXPLICIT", "text":"producer-owned"});
+        assert_eq!(
+            verdict_requirement(&model, &explicit, "step.b1"),
+            (
+                Some("EXPLICIT".to_owned()),
+                Some("producer-owned".to_owned())
+            )
+        );
+    }
+
+    #[test]
+    fn preservation_finding_reads_both_catalog_requirement_fields_from_model() {
+        let model = build_model(
+            parse_kernel_source(
+                r#"spec Catalog { state { ok: Bool } init { ok = true }
+                @requirement("CATALOG-ALT", "catalog intent from metadata")
+                invariant CatalogValid { ok } }"#,
+                &FsResolver::new("."),
+            )
+            .expect("parse catalog model"),
+        )
+        .expect("build model");
+        let findings = collect_findings(
+            &model,
+            &json!({
+                "result":"refinement_failed",
+                "governance":{"preservations":[{
+                    "name":"P", "before":"A", "after":"I", "preserve":["CTRL"],
+                    "result":"refinement_failed"
+                }]}
+            }),
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].requirement_id.as_deref(), Some("CATALOG-ALT"));
+        assert_eq!(
+            findings[0].requirement_text.as_deref(),
+            Some("catalog intent from metadata")
+        );
+    }
 }

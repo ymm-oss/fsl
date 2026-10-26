@@ -356,6 +356,19 @@ impl KernelModel {
         self.origins.primary_for(&action_target(name))
     }
 
+    /// The authored location for an action coverage finding: prefer its
+    /// primary origin, then its kernel declaration. Generated-only scaffolding
+    /// with zero source positions has no public finding location.
+    #[must_use]
+    pub fn action_source_span(&self, action: &ActionDef) -> Option<Span> {
+        self.action_origin(&action.name)
+            .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
+            .filter(|span| span.start.line > 0 && span.start.column > 0)
+            .or_else(|| {
+                (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
+            })
+    }
+
     /// The owner of this model's internal-to-public name mapping.
     #[must_use]
     pub fn names(&self) -> &crate::NameMap {
@@ -2561,6 +2574,86 @@ fn contains_map_int_key(ty: &TypeExpr) -> bool {
         }
         TypeExpr::Set(inner) | TypeExpr::Seq(inner, _) | TypeExpr::Option(inner) => {
             contains_map_int_key(inner)
+        }
+    }
+}
+
+#[cfg(test)]
+mod action_source_span_tests {
+    use super::*;
+    use crate::{FsResolver, build_model, parse_kernel_source};
+
+    fn model() -> KernelModel {
+        build_model(
+            parse_kernel_source(
+                "spec Source { state { x: Bool } init { x = false } action step() { x = true } }",
+                &FsResolver::new("."),
+            )
+            .expect("parse kernel"),
+        )
+        .expect("build model")
+    }
+
+    fn span(line: u32, column: u32) -> Span {
+        let position = SourcePos {
+            offset: 0,
+            line,
+            column,
+        };
+        Span {
+            start: position,
+            end: position,
+        }
+    }
+
+    fn set_origin(model: &mut KernelModel, primary: Option<Span>) {
+        let mut origin = OriginChain::generated_only("test-action", "test");
+        origin.primary = primary.map(|span| OriginSite {
+            source_file: None,
+            span: Some(span),
+            dialect: "test".to_owned(),
+            declaration_path: vec!["step".to_owned()],
+        });
+        model.origins = OriginRegistry::default();
+        model
+            .origins
+            .bind(action_target(&model.actions[0].name), origin);
+    }
+
+    #[test]
+    fn authored_origin_wins_over_kernel_and_zero_spans() {
+        let mut model = model();
+        let authored = span(7, 3);
+        set_origin(&mut model, Some(authored));
+        assert_eq!(model.action_source_span(&model.actions[0]), Some(authored));
+        model.actions[0].span = span(0, 0);
+        assert_eq!(model.action_source_span(&model.actions[0]), Some(authored));
+    }
+
+    #[test]
+    fn generated_only_sentinel_has_no_source_span() {
+        let mut model = model();
+        set_origin(&mut model, None);
+        for position in [span(0, 0), span(0, 3), span(7, 0)] {
+            model.actions[0].span = position;
+            assert_eq!(model.action_source_span(&model.actions[0]), None);
+        }
+    }
+
+    #[test]
+    fn kernel_declaration_is_used_without_a_positive_origin() {
+        let mut model = model();
+        let declaration = model.actions[0].span;
+        assert_eq!(
+            model.action_source_span(&model.actions[0]),
+            Some(declaration)
+        );
+        for primary in [None, Some(span(0, 0)), Some(span(0, 3)), Some(span(7, 0))] {
+            set_origin(&mut model, primary);
+            assert_eq!(
+                model.action_source_span(&model.actions[0]),
+                Some(declaration)
+            );
         }
     }
 }

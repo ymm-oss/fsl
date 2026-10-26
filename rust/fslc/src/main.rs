@@ -5295,8 +5295,9 @@ fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32)
 /// is folded here, in `run_verify_from_source`'s order (seam, then
 /// preservations) and through the same owners, so there is no second
 /// mapping; any other envelope is an error or the already-folded fallback.
-/// The `testgen` / `explain` / `ledger` callers of the builder are not
-/// changed.
+/// `testgen` uses this same fold as a gate, returning the verify owner's
+/// envelope on failure before generating a harness. The `explain` / `ledger`
+/// callers of the builder are unchanged.
 fn fold_scenarios_refinements(
     path: &Path,
     source: &str,
@@ -11693,9 +11694,7 @@ fn run_mutate_with(
     };
     let all_mutants = fsl_tools::enumerate_builtin_mutants(&spec);
     let discovered = all_mutants.len();
-    let dead_actions = baseline
-        .get("action_coverage")
-        .and_then(Value::as_object)
+    let dead_actions = fsl_tools::source_action_coverage(&model, &baseline["action_coverage"])
         .into_iter()
         .flatten()
         .filter(|(_, covered)| **covered != Value::Bool(true))
@@ -12400,6 +12399,7 @@ fn run_testgen(
 }
 
 /// Generate a test scaffold from one caller-owned root-source snapshot.
+#[allow(clippy::too_many_lines)]
 fn run_testgen_from_source(
     path: &Path,
     source: &str,
@@ -12426,6 +12426,20 @@ fn run_testgen_from_source(
         // destroying the trace. Status 3 (internal) is propagated the same
         // way for the same reason.
         return (scenarios, status);
+    }
+    let (scenarios, status) = fold_scenarios_refinements(path, source, depth, scenarios, status);
+    if status != 0 {
+        // Use the same failure-envelope owner as the kernel-failure path,
+        // not the scenarios-shaped fold result. Gate before walk or writes.
+        return run_verify_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
         Ok(fslc_rust::TestgenWalk::Clean(walk)) => walk,
@@ -12535,6 +12549,12 @@ fn testgen_path_context(
     }
 }
 
+/// Direct reports expose verification errors, not successful artifact envelopes.
+/// Approval-only ledger rerendering deliberately does not use this gate.
+fn report_verification_error(verification: &Value, status: i32) -> Option<(Value, i32)> {
+    (verification["result"] == "error").then(|| (verification.clone(), status))
+}
+
 fn run_html_report(
     path: &Path,
     depth: usize,
@@ -12618,6 +12638,9 @@ fn run_html_report_from_source_with_timing(
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
+    if let Some(error) = report_verification_error(&verification, verification_status) {
+        return error;
+    }
     let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
     if explain_status != 0 {
         return (explained, explain_status);
@@ -12642,6 +12665,7 @@ fn run_html_report_from_source_with_timing(
     let html = fsl_tools::render_html_report(
         &path.display().to_string(),
         source,
+        &model,
         explained_view,
         verification_view,
         &fsl_tools::undecided_declarations(&model),
@@ -13282,9 +13306,9 @@ fn run_ledger_report_from_source(
     approval_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source) {
+    let prepared = match prepare_ledger_report_from_source(request, source, true) {
         Ok(prepared) => prepared,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     let approvals = if approval_paths.is_empty() {
         None
@@ -13326,9 +13350,9 @@ fn generate_unapproved_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source) {
+    let prepared = match prepare_ledger_report_from_source(request, source, false) {
         Ok(prepared) => prepared,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     render_ledger_report(request, &prepared, None)
 }
@@ -13336,14 +13360,15 @@ fn generate_unapproved_ledger_report_from_source(
 fn prepare_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
-) -> Result<PreparedLedgerReport, Value> {
+    direct_report: bool,
+) -> Result<PreparedLedgerReport, (Value, i32)> {
     let model = match load_model_from_source(request.path, source) {
         Ok(model) => model,
-        Err(error) => return Err(spec_load_error_output(&error)),
+        Err(error) => return Err((spec_load_error_output(&error), 2)),
     };
     // A ledger row per acceptance / forbidden case is a claim about that case,
     // so a spec whose traces the gate refuses gets no ledger (#1243).
-    let trace_contract = require_trace_gate(source, &model)?;
+    let trace_contract = require_trace_gate(source, &model).map_err(|error| (error, 2))?;
     let (verification, verification_status) = run_verify_from_source(
         request.path,
         source,
@@ -13353,6 +13378,13 @@ fn prepare_ledger_report_from_source(
         DEFAULT_EXPLICIT_BUDGET,
         1,
     );
+    // Approval-only rerendering deliberately keeps processing ancillary inputs.
+    // Direct reports must preserve this error before replay, evidence or witnesses.
+    if direct_report
+        && let Some(error) = report_verification_error(&verification, verification_status)
+    {
+        return Err(error);
+    }
     let replay = match request.impl_log {
         Some(trace) => {
             let (detail, status) = run_replay_from_source(request.path, source, trace);
@@ -13360,7 +13392,7 @@ fn prepare_ledger_report_from_source(
             // evidence; io/parse/internal errors (>=2) must fail the ledger
             // command instead of silently omitting the implementation-log row.
             if status >= 2 {
-                return Err(detail);
+                return Err((detail, 2));
             }
             Some(detail)
         }
@@ -13382,7 +13414,8 @@ fn prepare_ledger_report_from_source(
             }
             Ok((evidence_path.clone(), value))
         })
-        .collect::<Result<Vec<_>, Value>>()?;
+        .collect::<Result<Vec<_>, Value>>()
+        .map_err(|error| (error, 2))?;
     let scenarios = witness_scenarios(
         request.path,
         source,
@@ -17502,6 +17535,120 @@ mod exit_status_tests {
     use super::*;
     use crate::property_selection::apply_vacuity_mode;
     use crate::refinement::preservation_refine_result;
+
+    #[test]
+    fn approval_ledger_rerender_bypasses_only_the_direct_verification_error_gate() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path = root.join("tests/fixtures/governance_missing_dependency.fsl");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let request = LedgerReportRequest {
+            path: &path,
+            depth: 3,
+            deadlock_mode: "ignore",
+            engine: "bmc",
+            impl_log: None,
+            evidence_paths: &[],
+            output_path: None,
+        };
+        let expected = run_verify_from_source(
+            &path,
+            &source,
+            3,
+            "ignore",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(expected.1, 2);
+        assert_eq!(expected.0["result"], "error");
+        assert_eq!(expected.0["kind"], "type");
+        assert_eq!(expected.0["loc"], json!({"line":6,"column":5}));
+        assert_eq!(
+            run_ledger_report_from_source(&request, &source, &[], &[]),
+            expected
+        );
+
+        let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source);
+        assert_eq!(
+            status, 0,
+            "approval rendering must bypass verification error: {rendered}"
+        );
+        let content = rendered["content"].as_str().expect("rendered Markdown");
+        assert!(content.contains("## リスク一覧（要件ID別）"), "{content}");
+        // Compare the complete generated envelope, not just its verdict.
+        assert_eq!(
+            rendered,
+            json!({
+                "fsl":"1.0", "result":"generated", "kind":"audit_ledger",
+                "spec":load_model_from_source(&path, &source).unwrap().name,
+                "output":"governance_missing_dependency_ledger.md", "content":content
+            })
+        );
+    }
+
+    #[test]
+    fn both_ledger_entry_points_preserve_non_error_ancillary_failures() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gallery/valid/tiny_bounded_counter.fsl");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let verified = run_verify_from_source(
+            &path,
+            &source,
+            3,
+            "ignore",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(verified.1, 0, "{verified:?}");
+        assert_eq!(verified.0["result"], "verified");
+        let absent = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../target/ledger-tests/absent-ancillary-{}.json",
+            std::process::id()
+        ));
+        assert!(!absent.exists());
+        for replay in [false, true] {
+            let evidence = if replay { vec![] } else { vec![absent.clone()] };
+            let request = LedgerReportRequest {
+                path: &path,
+                depth: 3,
+                deadlock_mode: "ignore",
+                engine: "bmc",
+                impl_log: replay.then_some(absent.as_path()),
+                evidence_paths: &evidence,
+                output_path: None,
+            };
+            let expected = (
+                error_output("io", "No such file or directory (os error 2)"),
+                2,
+            );
+            assert_eq!(
+                run_ledger_report_from_source(&request, &source, &[], &[]),
+                expected
+            );
+            assert_eq!(
+                generate_unapproved_ledger_report_from_source(&request, &source),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn direct_report_gate_preserves_complete_errors_and_both_exit_classes() {
+        for (status, kind) in [(2, "type"), (3, "internal")] {
+            let error = json!({"result":"error", "kind":kind, "message":"boom", "loc":{"line":4,"column":3}});
+            assert_eq!(
+                report_verification_error(&error, status),
+                Some((error, status))
+            );
+        }
+        for verdict in ["verified", "violated", "unknown_cti", "refinement_failed"] {
+            assert_eq!(
+                report_verification_error(&json!({"result":verdict}), 1),
+                None
+            );
+        }
+    }
 
     /// Issue #1303: a preservation refinement that exits 3 is an internal
     /// failure of the run (`kind:"internal"`, exit 3), never re-labelled a

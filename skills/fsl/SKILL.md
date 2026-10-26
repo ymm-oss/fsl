@@ -58,8 +58,8 @@ Python AST or source re-parsing. Validate independent implementations with
 `fslc conformance <spec> --depth N`.
 
 Most commands print a single JSON document on stdout; `fslc ledger` and
-`fslc document generate` print Markdown instead, so gate on the exit code, not
-on stdout being parseable.
+`fslc document generate` print Markdown instead. Ledger verification errors return
+the original JSON error, not Markdown. Gate on the exit code, not on stdout being parseable.
 
 exit: 0=success, 1=property not satisfied, 2=spec error
 (parse/type/semantics/io), 3=internal error. **Do not treat any list of
@@ -83,7 +83,7 @@ statuses).
 
 **Inline `implements` failures are fail-closed.** A requirements spec with
 `implements Abs from "business.fsl" { ... }` has its refinement to the upper
-layer checked during `check`/`verify`/`scenarios`. A `refines` verdict preserves the
+layer checked during `check`/`verify`/`scenarios`/`testgen`. A `refines` verdict preserves the
 command's ordinary top-level `result` and exit code. Any of the three failing
 nested values (`refinement_failed`, `impl_violated`, or `unknown_budget` — the
 correspondence search hit its fixed internal state-count budget before
@@ -92,13 +92,25 @@ separately) becomes the top-level `result` verbatim and the process exits 1,
 while `implements.violation` (or `implements.states_explored` for
 `unknown_budget`) keeps the seam-specific evidence. Gate on
 `implements.result == "refines"` (the only passing value), or run
-`fslc chain`, which applies that gate for you.
+`fslc chain`, which applies that gate for you. The ledger's `## inline implements`
+section shows the folded verdict and `abs` / `result` for passing seams too;
+only `refines` is green. Previously approved ledgers with this seam need review
+and re-approval because their rendering digest changes (`drifted`).
 
 **Governance preservations are fail-closed the same way.** `check`,
-`verify`, and `scenarios` of a `governance` document run every `preservation` refinement at
+`verify`, `scenarios`, and `testgen` of a `governance` document run every `preservation` refinement at
 depth 8; the first one that is not `refines` becomes the top-level `result`
 (`refinement_failed`, `impl_violated`, or `unknown_budget`) with exit 1, while `governance.preservations[].result`
-keeps each one's own value.
+keeps each one's own value. On a seam or preservation failure, `testgen` returns
+the verify owner's envelope and exit (1 for failed verification, 2 for a contract
+error, 3 for an internal error) and writes
+no harness; passing documents retain generation.
+The ledger additionally lists each failed preservation under the model-owned
+governance requirement and a failed inline seam at spec level. CTIs are
+unestablished proof findings, not reachable counterexamples. Direct ledger/HTML
+verification errors return the full JSON error and exit 2/3 without an artifact;
+other failed verdicts still render. Review and re-approve artifacts with changed
+rendering digests.
 
 ## Before writing a spec: source fidelity and the formalization memo
 

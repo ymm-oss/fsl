@@ -3528,12 +3528,7 @@ pub fn never_enabled_action_warning(
     // source-backed lowered action reports the authored primary location,
     // while a kernel action retains its own declaration span. Zero spans are
     // reserved for generated-only sentinels and are not public findings.
-    let source_span = origin
-        .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
-        .filter(|span| span.start.line > 0 && span.start.column > 0)
-        .or_else(|| {
-            (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
-        })?;
+    let source_span = model.action_source_span(action)?;
     let loc = source_span.python_loc();
     let mut warning = json!({
         "kind": "never_enabled_action",

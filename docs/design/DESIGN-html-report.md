@@ -55,6 +55,15 @@ fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
   `approval create --kind html` regenerates the default timing-bearing report and normalizes timing values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 - Parse/type/semantic/io errors use the existing CLI error envelope and exit-code
   convention.
+- A verification `result:"error"` returns that full error envelope and exit
+  (2 for document errors, 3 for internal errors) before explain, rendering, or
+  output-file creation. Stdout is JSON rather than HTML, and `-o` creates no
+  artifact. The gate is shared with direct ledger reporting. Non-error failure
+  verdicts still render a report and retain their nonzero verification exit.
+- HTML approval rerendering calls the same `run_html_report` path and therefore
+  uses this error gate too. Ledger approval-only rerendering instead calls
+  `generate_unapproved_ledger_report_from_source` and does not use the gate;
+  its digest-comparison behavior is deliberately separate.
 
 ## Report structure
 
@@ -87,6 +96,14 @@ the verifier's verdict on it:
 - counterfactual table
 - escaped source with line numbers
 - collapsed raw `explain` and `verify` JSON
+
+Coverage badges and the coverage denominator include only source-backed
+actions: a positive authored primary-origin position, then a positive kernel
+declaration position, through `KernelModel::action_source_span`. Generated-only
+sentinels are excluded regardless of name; zero eligible entries render `0/0`.
+The model tables/diagrams and original Raw Data are not filtered by this rule.
+Correcting these findings changes affected HTML rendering digests; review and
+re-approve existing artifacts whose approvals become `drifted` (exit 0).
 
 `ID: sentence` requirement/policy meta renders as a caption under the
 declaration's own name (not a trailing "Requirement" column), and is omitted

@@ -473,7 +473,9 @@ positive form. A spec whose acceptance / forbidden traces the requirement-trace
 gate refuses (the `kind: "acceptance"` / `"forbidden"` / `"forbidden_setup"`
 error of `check`) gets that error and exit 2 instead of a ledger, as it does
 from `explain`, `html`, the `document` commands, and `approval create` /
-`check`; fix the case it names first. Raw JSON is demoted to a collapsed appendix. `--impl-log
+`check`; fix the case it names first. Raw JSON is demoted to a collapsed appendix,
+omitting only each finding's top-level `cost` and `cache` execution metadata.
+`--impl-log
 <trace.json>` folds a `run_replay` conformance row into the ledger, but a
 replay **error** (missing file, malformed JSON, wrong-spec trace,
 schema-invalid trace) fails the whole `ledger` command through the standard
@@ -486,7 +488,25 @@ a `requirement.id` nested inside a `findings`/`checks` array item — or a
 spec-level（仕様全体）finding when it fails with no attribution at all; it
 never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
-verdict).
+verdict). Non-`refines` preservations each add a `GOV` finding; non-`refines`
+inline `implements` adds a spec-level finding without inventing requirement
+links. `unknown_cti` is an unestablished induction finding, not a reachable
+counterexample. Attribution prefers an explicit requirement; otherwise `NameMap`
+uniquely resolves `generated_name` (when present) or public identity to the
+invariant/trans/leadsTo declaration (including rank), the property behind a
+synthetic check, or `last_action` for action checks/ensures/type_bound, while
+deadlock and unresolved/ambiguous owners stay spec-level.
+Full CTI/hint/rank-failure evidence stays in the
+appendix; only each finding's top-level `cost` and `cache` are excluded, not
+same-named nested domain fields. Added findings and corrected attribution change affected
+ledger approval digests and require review and re-approval.
+Direct `ledger` and `html` return verification `result:"error"` with the full
+JSON error envelope and exit 2/3, before rendering or output-file creation;
+direct ledger stops before ancillary replay, evidence loading, and witness preparation
+(HTML before explain too). No `-o` artifact is created. Non-error failed or
+unestablished verdicts still render reports with nonzero exit. Approval-only
+ledger rerendering for digest comparison does not use this direct-report gate;
+its artifact bytes can still change with the new findings and coverage rendering.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a

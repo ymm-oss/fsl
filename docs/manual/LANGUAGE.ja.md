@@ -1137,14 +1137,34 @@ indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が
 `--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
 `imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
-`preservation` も同じ対応付けで `check` / `verify` / `scenarios` に畳み込まれます(§13)。畳み込みは検証封筒を
+`preservation` も同じ対応付けで `check` / `verify` / `scenarios` / `testgen` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
 真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。
 `scenarios` も、自身の有界実行で答えた場合と `verify` の封筒へフォールバックした場合のどちらでも、
 seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた `result`、exit 1、
-`implements` / `governance` セクション付き)。同じ `2` の
+`implements` / `governance` セクション付き)。inline `implements` がある ledger の本文は、
+governance とリスク一覧より前の `## inline implements` 節に畳み込み後の判定と
+`abs` / `result` も示します。通る seam も表示し、`refines` だけが緑です。
+この節の追加だけでは `implements` のない ledger は変わりません。ただし sentinel coverage の除去と
+判定所見の追加は別に対象の本文を変え、`implements` のない governance 文書も対象です。
+既承認の inline-implements ledger は
+描画 digest が変わり、`approval check` で `drifted`(exit 0)になります。節を確認して再承認してください。
+ledger のリスク一覧には、非 `refines` の preservation をそれぞれ `GOV` の所見、非 `refines` の
+inline seam を仕様全体の所見としても載せます。無関係な要件行は自身の状態を保ちます。
+`unknown_cti` は通常の違反と同じ宣言の持ち主の規則
+([ledger amendment](../design/DESIGN-ledger.md))で帰属する帰納証明の未確立所見であり、
+到達可能な反例ではありません。生の CTI、hint、rank_failure の証跡を保持します。
+所見の追加と帰属の訂正も、対象 ledger の承認 digest を変えるため再承認が必要です。
+直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を
+返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
+witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
+artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
+digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
+`testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
+`verify` と同じ失敗封筒と exit(検証の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
+ハーネスを書きません。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1271,6 +1291,15 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
 ブロックしている requires 節は、それが安価な場合、最小化された unsat core によって
 特定されます。requirements の `branches` については、偽のカバレッジ診断は内部の
 分割 action の `name` を保持し、`display_name` を追加します。
+生の `action_coverage` は生成だけの sentinel の `covered:false` も保持し、verify、induction、
+Worker の JSON は変わりません。公開の coverage 所見には、著者の primary origin、なければ
+kernel action の宣言に正の行・列が必要です。名前や prefix ではない、この共通の位置判定で
+scaffolding を runtime の警告、ledger の coverage 所見、mutate の死アクションの注記、
+HTML の badge と分母から除外します。現在の CLI の mutant 列挙経路には、生成だけの
+死アクションが到達する経路はありません。
+対象 action がなければ HTML の指標は `0/0` です。HTML Raw Data は元の coverage map を保持します。
+描画が変わる ledger/HTML の既存承認は `drifted`(exit 0)になります。修正された artifact を確認して
+再承認してください。
 
 ### explicit action 実行プロファイル
 
@@ -1924,6 +1953,10 @@ requirements の `acceptance` は**その層**の scenarios/testgen へ流れる
 fail closed です。compose は、明示の検査済み names/order ブリッジを使います。
 Public Kernel は不完全なマルチファイルの provenance を意図的に拒否するためです。
 エクスポートエラーの後のフォールバックではなく、同じアダプタに入ります。
+ウォーク、出力パスの処理、生成より前に、`testgen` は `scenarios` と同じ畳み込みで
+inline `implements` と governance preservation を検査します。失敗した場合は scenarios 形ではなく
+`verify` の生成元による失敗封筒と exit(seam/preservation の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
+ハーネスを書きません。通る文書と、non-strict で一部だけ到達したシナリオの通常の生成動作は変わりません。
 
 固定シードのウォークは 100 ステップを上限とする具象 Monitor の実行であり、
 enabled な action が無くなればそこで止まります。`--depth` には束縛され **ません**。
@@ -2622,7 +2655,8 @@ governance 契約のエラー(委譲先の business ファイル、control、`sa
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
 `fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
 すべての preservation とその結果を、失敗したものに印を付けて示します)、`fslc scenarios` は
-`verify` と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
+`verify` と同じように preservation を自身の封筒へ畳み込み、`testgen` は preservation の失敗時に
+kernel 経路でも verify の失敗封筒と exit を返してハーネスを書かず、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
 exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が
@@ -3159,6 +3193,10 @@ DESIGN-*.md があります)。
   `vacuity_probe_truncated`†を警告します。
   `error` は exit 2 です。→
   [`DESIGN-vacuity.md`](../design/DESIGN-vacuity.md)
+
+  `never_enabled_action` の所見は source-backed action だけが対象です(著者の primary origin、
+  次に kernel 宣言を調べ、正の行・列を要求します)。生成だけの sentinel は生の coverage 証跡に
+  残りますが、これらの警告、ledger coverage 所見、HTML の badge・coverage 分母には含めません。
 
   † `vacuity_probe_truncated`: `vacuous_implication`/`vacuous_leadsto` の
   到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の

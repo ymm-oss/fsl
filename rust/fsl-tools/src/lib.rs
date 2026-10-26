@@ -15,6 +15,7 @@ mod causal_expectation;
 mod causal_ledger_projection;
 mod causal_plan;
 mod causal_projection;
+mod coverage;
 mod db;
 mod db_import;
 mod document;
@@ -75,6 +76,7 @@ pub use causal_projection::{
     causal_diff_json, causal_dot, causal_graph_projection, causal_mermaid, causal_review_json,
     causal_timeline_projection, causal_traceability_projection,
 };
+pub use coverage::source_action_coverage;
 pub use db::{DbToolError, check_db, observe_db, validate_db};
 pub use db_import::{DbImport, import_db};
 pub use document::{

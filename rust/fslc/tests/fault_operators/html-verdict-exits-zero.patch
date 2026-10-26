@@ -1,10 +1,12 @@
-Restores #1009: `fslc html` discards the verification status after rendering
-the report and always returns exit 0 from `generated_content_result`, so a gate
-reading only the process exit code sees a pass over a `violated` baseline.
+Restores #1009: `fslc html` discards the verification status, bypasses the
+report-verification-error gate, and returns `generated_content_result`'s exit 0
+after successful rendering. A process-exit-only gate sees a pass over a
+`violated` baseline. Remove the early error gate as well as the final status
+fold so the discarded status has no remaining use on the shared timing path.
 
 --- a/rust/fslc/src/main.rs
 +++ b/rust/fslc/src/main.rs
-@@ -12609,7 +12609,7 @@ fn run_html_report_from_source_with_timing(
+@@ -12629,7 +12629,7 @@ fn run_html_report_from_source_with_timing(
          Ok(model) => model,
          Err(error) => return (spec_load_error_output(&error), 2),
      };
@@ -13,7 +15,17 @@ reading only the process exit code sees a pass over a `violated` baseline.
          path,
          source,
          depth,
-@@ -12646,7 +12646,7 @@ fn run_html_report_from_source_with_timing(
+@@ -12638,9 +12638,6 @@ fn run_html_report_from_source_with_timing(
+         DEFAULT_EXPLICIT_BUDGET,
+         1,
+     );
+-    if let Some(error) = report_verification_error(&verification, verification_status) {
+-        return error;
+-    }
+     let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
+     if explain_status != 0 {
+         return (explained, explain_status);
+@@ -12670,7 +12667,7 @@ fn run_html_report_from_source_with_timing(
          verification_view,
          &fsl_tools::undecided_declarations(&model),
      );
@@ -22,7 +34,7 @@ reading only the process exit code sees a pass over a `violated` baseline.
          "html_report",
          &model.name,
          format!(
-@@ -12657,13 +12657,6 @@ fn run_html_report_from_source_with_timing(
+@@ -12681,13 +12678,6 @@ fn run_html_report_from_source_with_timing(
          ),
          &html,
          output_path,

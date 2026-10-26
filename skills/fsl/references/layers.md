@@ -79,8 +79,8 @@ the relevant role skill directs it.
   `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
   then carry both the broken policy/goal and satisfied controls. A standalone
   `governance Name { ... }` catalog can require controls across business specs
-  and run preservation refinements during `fslc check`, `fslc verify`, and
-  `fslc scenarios`; a
+  and run preservation refinements during `fslc check`, `fslc verify`,
+  `fslc scenarios`, and `fslc testgen`; a
   preservation that does not `refines` fails the command (exit 1).
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
@@ -88,7 +88,10 @@ the relevant role skill directs it.
   clauses carry inputs (`with`), guards (`when`), field updates (`set`), and
   traceability (`covers`). Put verifier bounds in `verify { instances E = N
   values T = lo..hi }`. With `implements`, verify simultaneously runs the refine
-  to the upper layer (the `implements` field in the result JSON); CLI
+  to the upper layer (the `implements` field in the result JSON). The ledger
+  body shows its folded verdict and `abs` / `result` in `## inline implements`,
+  even when the seam passes (only `refines` is green); old approvals of such
+  ledgers become `drifted` and need review and re-approval. CLI
   `--instances` / `--values` overrides propagate into the abstract spec for that
   refinement, restricted to entity/number names the abstraction declares (impl-only
   names stay on the implementation side). An empty body
@@ -277,7 +280,10 @@ catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8 (`fslc verify`
-and `fslc scenarios` run it too, at depth 8 whatever their `--depth`). Each result stays under
+and `fslc scenarios` / `fslc testgen` run it too, at depth 8 whatever their `--depth`).
+On a failed seam or preservation, `testgen` returns the verify owner's failure
+envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
+internal error), and writes no harness. Each result stays under
 `governance.preservations[].result`; the first non-`refines` one in
 declaration order is also the command's verdict, fail-closed:
 `refinement_failed` -> `refinement_failed`, `impl_violated` (the `after` spec
