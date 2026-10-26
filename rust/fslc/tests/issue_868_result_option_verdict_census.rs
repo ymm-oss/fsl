@@ -637,6 +637,14 @@ const CLASSIFICATIONS: &[Classification] = &[
         "load_approvals_for_check",
         ResultOption
     ),
+    // `Some` carries an explain entry's trace evidence; discarding it reports a false preemption.
+    entry!(
+        Verdict,
+        "rust/fslc/src/main.rs",
+        9487,
+        "canonical_concrete_violation_trace",
+        ResultOption
+    ),
     entry!(
         Verdict,
         "rust/fslc/src/refinement.rs",
