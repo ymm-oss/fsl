@@ -79,6 +79,14 @@ the verifier's verdict on it:
 - escaped source with line numbers
 - collapsed raw `explain` and `verify` JSON
 
+Coverage badges and the coverage denominator include only source-backed
+actions: a positive authored primary-origin position, then a positive kernel
+declaration position, through `KernelModel::action_source_span`. Generated-only
+sentinels are excluded regardless of name; zero eligible entries render `0/0`.
+The model tables/diagrams and original Raw Data are not filtered by this rule.
+Correcting these findings changes affected HTML rendering digests; review and
+re-approve existing artifacts whose approvals become `drifted` (exit 0).
+
 `ID: sentence` requirement/policy meta renders as a caption under the
 declaration's own name (not a trailing "Requirement" column), and is omitted
 entirely for a row that has none — no `none` filler cells. The same principle

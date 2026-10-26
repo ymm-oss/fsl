@@ -11693,9 +11693,7 @@ fn run_mutate_with(
     };
     let all_mutants = fsl_tools::enumerate_builtin_mutants(&spec);
     let discovered = all_mutants.len();
-    let dead_actions = baseline
-        .get("action_coverage")
-        .and_then(Value::as_object)
+    let dead_actions = fsl_tools::source_action_coverage(&model, &baseline["action_coverage"])
         .into_iter()
         .flatten()
         .filter(|(_, covered)| **covered != Value::Bool(true))

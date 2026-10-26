@@ -1264,8 +1264,10 @@ folds the seam and every preservation into its own envelope the same way (the fo
 answered from its own bounded run or fell back to the <code>verify</code> envelope.
 For inline <code>implements</code>, the ledger body also shows the folded verdict and
 <code>abs</code> / <code>result</code> in <code>## inline implements</code>, before governance and the risk lists;
-only <code>refines</code> is green, including passing seams. Ledgers without <code>implements</code>
-are byte-identical. Previously approved inline-implements ledgers now report
+only <code>refines</code> is green, including passing seams. The section addition alone
+does not change ledgers without <code>implements</code>; sentinel coverage removal and
+verdict findings separately change affected ledgers, including governance
+documents without <code>implements</code>. Previously approved inline-implements ledgers now report
 <code>drifted</code> in <code>approval check</code> (exit 0): review the section and re-approve them.
 The ledger risk table also records each non-<code>refines</code> preservation as a <code>GOV</code>
 finding and a non-<code>refines</code> inline seam as a spec-level finding. Unrelated
