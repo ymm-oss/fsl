@@ -633,7 +633,7 @@ Composite spec (a separate top-level form):
 ```fsl
 compose <Name> {
   use <SpecName> as <alias> from "<relative path>"   // multiple allowed. nested compose not allowed
-  state { ... }  init { ... }                    // additional state on the composite side (optional)
+  state { ... }  init { ... }                    // optional local state; init may also initialize component state
   action <n>(<p>: <alias>.<Type>, ...) =
       <a>.<act>(<expr>...) [ || <b>.<act2>(<expr>...) ] {  // synchronize (run atomically together)
     [requires <expr>]... [<stmt>...]             // extra guards / assignments to composite-side state
@@ -646,6 +646,10 @@ compose <Name> {
 Sync additional statements may assign only composition-side state: component
 targets are rejected with a located error, including physical `alias__x` names
 that previously passed `check` (breaking removal, #1334).
+
+A glue action reads and writes local and component state directly via `alias.var`.
+Compose `init` may also initialize component state (including physical names), but
+overlap with a component's own init is rejected as duplicate initialization.
 
 Compose synchronization does **not** inherit `fair` from component actions. If a
 fair constituent action is synchronized into a non-fair composite action, the

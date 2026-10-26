@@ -2273,7 +2273,8 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
 <li><strong>Synchronized action</strong> <code>action &lt;name&gt;(...) = &lt;a&gt;.&lt;act&gt;(...) || &lt;b&gt;.&lt;act2&gt;(...) { ... }</code>:
   merges the requires / body / ensures of each component action, and the
   additional statements may only assign to the composition-side state
-  (synchronizing two actions of the same component is not allowed).</li>
+  (synchronizing two actions of the same component is not allowed).
+  Breaking removal (#1334): additional statements assigning component state via physical names such as <code>alias__x</code>, which previously passed <code>check</code>, now produce a located error too.</li>
 <li>Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, <code>check</code> / <code>verify</code> emits a
   <code>fair_not_inherited</code> warning in JSON <code>warnings</code>; write
@@ -2293,7 +2294,9 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   <code>requires</code> guard on the synchronized action or model a conversion in one
   component.</li>
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — excludes that action from interleaving.</li>
-<li>An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).</li>
+<li>An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).
+  A glue action reads and writes composition-side state and component state directly via <code>alias.var</code>.
+  Compose <code>init</code> can also initialize component state via <code>alias.var</code>; overlapping a component's own <code>init</code> assignment is rejected as duplicate initialization.</li>
 <li>Names and <code>__</code>: a name you declare in a <code>spec</code>, <code>requirements</code>, <code>business</code>, or
   <code>compose</code> document (a spec, action, parameter, <code>let</code>, state variable, property,
   type, const, enum member, struct field, process, stage, actor, or <code>use</code> alias)

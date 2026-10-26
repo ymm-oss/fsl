@@ -71,6 +71,10 @@ compose OrderSystem {
   interleaving (it is executed only via a synchronized action).
 - An ordinary `action` (without `=`) may also be written (a glue action; reads and writes
   composition-side state and component state directly via `alias.var`).
+- Compose `init` may assign initial values to composition-side state and component
+  state, using `alias.var` or its physical `alias__var` spelling. If it overlaps a
+  component's own `init` assignment to the same location, the existing duplicate
+  initialization error rejects it; neither assignment takes precedence.
 
 ## 2. Semantics (= definition of the transformation)
 

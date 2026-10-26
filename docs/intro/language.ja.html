@@ -2164,7 +2164,8 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 <li><strong>同期 action</strong> <code>action &lt;name&gt;(...) = &lt;a&gt;.&lt;act&gt;(...) || &lt;b&gt;.&lt;act2&gt;(...) { ... }</code>:
   各コンポーネント action の requires / 本体 / ensures をマージします。追加の文は
   合成側の状態にのみ代入できます
-  (同じコンポーネントの 2 つの action を同期させることはできません)。</li>
+  (同じコンポーネントの 2 つの action を同期させることはできません)。
+  破壊的な削除 (#1334): 以前は <code>check</code> を通った <code>alias__x</code> のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。</li>
 <li>公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、<code>check</code> / <code>verify</code> は JSON の <code>warnings</code> に
   <code>fair_not_inherited</code> 警告を出します。同期 action が fair でなければならないとき
@@ -2184,7 +2185,9 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
   より狭い場合は、同期 action に明示の <code>requires</code> ガードを追加するか、片方の
   コンポーネントで変換をモデル化してください。</li>
 <li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — その action をインターリービングから除外します。</li>
-<li>(<code>=</code> のない)通常の <code>action</code> も書けます(グルー action)。</li>
+<li>(<code>=</code> のない)通常の <code>action</code> も書けます(グルー action)。
+  グルー action は compose 側の状態と部品の状態を <code>alias.var</code> で直接読み書きできます。
+  compose の <code>init</code> も <code>alias.var</code> で部品の状態に初期値を与えられますが、部品自身の <code>init</code> の代入と重なる場合は二重の初期化として拒否します。</li>
 <li>名前と <code>__</code>: <code>spec</code>・<code>requirements</code>・<code>business</code>・<code>compose</code> の文書で宣言する名前
   (spec、action、パラメータ、<code>let</code>、状態変数、property、型、const、enum の
   メンバー、struct のフィールド、process、stage、actor、<code>use</code> の alias)には
