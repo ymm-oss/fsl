@@ -1908,6 +1908,68 @@ mod tests {
         }
     }
 
+    /// #1346: acceptance reports a malformed enum argument with the native
+    /// wrong-kind object, message, hint and step location on both surfaces.
+    #[test]
+    fn worker_reports_a_wrong_kind_acceptance_step_like_native() {
+        let source = r#"requirements Shop {
+  enum Color { Red, Blue }
+  state { color: Color }
+  init { color = Red }
+  requirement REQ-1 "paint" {
+    action paint(c: Color) { requires c != color  color = c }
+  }
+  acceptance AC-1 "paint blue" {
+    paint(1)
+    expect color == Blue
+  }
+}
+"#;
+        for command in ["check", "verify"] {
+            let request = Request {
+                cmd: command.to_owned(),
+                source: source.to_owned(),
+                source_file: "paint.fsl".to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+                unstable: Vec::new(),
+            };
+            assert_worker_requirement_trace_error_matches_native(
+                &request,
+                "acceptance step of the wrong kind",
+                command,
+            );
+            let worker = match command {
+                "check" => block_on(check(&request, TEST_SOLVER_VERSION)),
+                _ => block_on(verify(&request, TEST_SOLVER_VERSION)),
+            };
+            assert_eq!(worker["result"], "error", "{command}: {worker:#}");
+            assert_eq!(worker["kind"], "acceptance", "{command}: {worker:#}");
+            assert_eq!(worker["failed_step"], 0, "{command}: {worker:#}");
+            assert_eq!(
+                worker["wrong_kind_argument"],
+                json!({"parameter": "c", "value": 1, "type": "Color"}),
+                "{command}: {worker:#}"
+            );
+            assert_eq!(
+                worker["message"],
+                "argument 1 for 'c' of 'paint' is not a value of type 'Color' in acceptance, so no guard was evaluated",
+                "{command}: {worker:#}"
+            );
+            assert!(
+                worker["hint"]
+                    .as_str()
+                    .is_some_and(|hint| hint.contains("Change the step to a value of 'Color'.")),
+                "{command}: {worker:#}"
+            );
+            assert_eq!(
+                worker["loc"],
+                json!({"line": 9, "column": 5}),
+                "{command}: {worker:#}"
+            );
+        }
+    }
+
     /// Parity control for #1008 (mutation: the Worker gains a selection
     /// option that skips the trace replay the way native `--instances` does).
     /// A request carrying the native selection keys is still a full run: it

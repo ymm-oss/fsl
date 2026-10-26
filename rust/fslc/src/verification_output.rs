@@ -1420,6 +1420,37 @@ fn validate_requirement_trace_contract(
             let (arguments, instance) = requirement_step_match(&monitor, step)?;
             let Some(instance) = instance else {
                 let mut output = requirement_failure_base(envelope, "acceptance", case);
+                if let UnenabledStep::WrongKind {
+                    parameter,
+                    value,
+                    expected,
+                } =
+                    requirement_unenabled_step(&monitor, step, &arguments, contract.scope_types())?
+                {
+                    output.insert(
+                        "wrong_kind_argument".to_owned(),
+                        json!({
+                            "parameter": parameter,
+                            "value": fsl_value_json(&value),
+                            "type": expected,
+                        }),
+                    );
+                    output.insert(
+                        "message".to_owned(),
+                        json!(format!(
+                            "argument {} for '{parameter}' of '{}' is not a value of type '{expected}' in acceptance, so no guard was evaluated",
+                            fsl_value_json(&value),
+                            step.name,
+                        )),
+                    );
+                    output.insert(
+                        "hint".to_owned(),
+                        json!(format!(
+                            "an acceptance case requires every step to be enabled and ok. {} is not a value of '{expected}' at all, so the step is malformed rather than rejected and no guard was tested. Change the step to a value of '{expected}'.",
+                            fsl_value_json(&value),
+                        )),
+                    );
+                }
                 output.insert("failed_step".to_owned(), json!(index));
                 output.insert("step".to_owned(), requirement_step_json(step, &arguments));
                 output.insert("step_results".to_owned(), json!([]));

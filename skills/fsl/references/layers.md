@@ -118,7 +118,9 @@ the relevant role skill directs it.
   syntax a separate refinement file uses. `acceptance` is replay-checked at
   check time and supports `expect E id in Stage` as well as `expect <expr>`,
   then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
-  accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
+  must match the parameter's kind. Enum parameters take member names, not numeric
+  ordinals (`paint(1)` is not `paint(Blue)`); const names work where their values
+  match the parameter's kind. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
   verifies at check time that the last step is rejected (not enabled; neither a
   runtime violation nor an argument outside the `entity` / `number` verify scope
@@ -394,9 +396,14 @@ verify {
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
-  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments accept
-  enum member names and const names, not just numeric literals (`answer(0, Triggered)`
-  == `answer(0, 1)`); an undefined name is a check-time error.
+  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments must
+  match the parameter's kind: enum parameters take member names, not numeric
+  ordinals (`paint(1)` is not `paint(Blue)`). Const names work where their values
+  match the parameter's kind; an undefined name is a check-time error. A wrong-kind
+  acceptance argument produces `kind: "acceptance"` with `wrong_kind_argument`
+  (`parameter`, `value`, `type`), a top-level `message` naming the argument and
+  expected type and explaining that no guard was evaluated, a hint, and a `loc`
+  at that step.
 - `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected**, i.e. not enabled. If accepted,

@@ -110,7 +110,8 @@ skill produced.
    often stays silent when an invalid operation is accepted. Prefer
    `expect Entity id in Stage` for process-stage checks; use `expect <expr>` for
    other predicates. `acceptance`/`forbidden` action arguments accept enum member
-   names (not just numeric ordinals); an action parameter may also be typed
+   names, not numeric ordinals (`paint(1)` is not `paint(Blue)`); const names work
+   where their values match the parameter's kind. An action parameter may also be typed
    `Bool` (a first-class boolean, not a 0/1 int — `Int` is still rejected as
    unbounded).
 7. For `implements`:

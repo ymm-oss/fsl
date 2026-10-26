@@ -2588,10 +2588,14 @@ verify {
   failure is `kind: "acceptance"`). It supports `expect <Entity> <id> in
   <Stage>` alongside `expect <expr>` and flows directly into scenarios / testgen
   (= the acceptance criteria become conformance tests for the implementation).
-  Action arguments in `acceptance`/`forbidden` steps accept enum member names
-  and const names in addition to numeric literals (e.g. `answer(0, Triggered)`
-  is equivalent to `answer(0, 1)` when `Triggered` is `Trigger`'s second
-  member) — an undefined name is a check-time error.
+  Action arguments in `acceptance`/`forbidden` steps must match the parameter's
+  kind: enum parameters take member names, not numeric ordinals (`paint(1)` is
+  not `paint(Blue)`). Const names are also accepted where their values match
+  the parameter's kind; an undefined name is a check-time error. An acceptance
+  step with a wrong-kind argument fails with `kind: "acceptance"`, a
+  `wrong_kind_argument` object (`parameter`, `value`, `type`), a top-level
+  `message` explaining which argument does not belong to the parameter's type
+  and that no guard was evaluated, a hint, and a `loc` at that step.
 - Use the kernel-wrapper form only for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history not expressible as a carried field, or
   behavior that needs explicit kernel state. That fallback still supports
