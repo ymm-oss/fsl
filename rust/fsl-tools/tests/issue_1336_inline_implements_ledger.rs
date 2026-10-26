@@ -58,15 +58,16 @@ fn assert_inline_section(verdict: &str, seam_result: &str) {
         body.contains("| `Kept` | `A` → `I` | `CTRL-1` | 🟢 `refines` |\n"),
         "{body}"
     );
-    // Same additive-section control as #1316: removing only the new
-    // section gives the complete ledger produced without implements.
-    let mut without_inline = body.clone();
-    without_inline.replace_range(inline..governance, "");
-    verification
-        .as_object_mut()
-        .expect("envelope")
-        .remove("implements");
-    assert_eq!(without_inline, render(&verification));
+    // G2, representative decision 2026-10-26: failed seams also add findings outside this section.
+    if seam_result == "refines" {
+        let mut without_inline = body.clone();
+        without_inline.replace_range(inline..governance, "");
+        verification
+            .as_object_mut()
+            .expect("envelope")
+            .remove("implements");
+        assert_eq!(without_inline, render(&verification));
+    }
 }
 
 #[test]

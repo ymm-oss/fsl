@@ -1267,6 +1267,12 @@ For inline <code>implements</code>, the ledger body also shows the folded verdic
 only <code>refines</code> is green, including passing seams. Ledgers without <code>implements</code>
 are byte-identical. Previously approved inline-implements ledgers now report
 <code>drifted</code> in <code>approval check</code> (exit 0): review the section and re-approve them.
+The ledger risk table also records each non-<code>refines</code> preservation as a <code>GOV</code>
+finding and a non-<code>refines</code> inline seam as a spec-level finding. Unrelated
+requirement rows keep their own status. <code>unknown_cti</code> is an unestablished
+induction finding, attributed by the ordinary violation metadata/property
+lookup, not a reachable counterexample; raw CTI, hint, and rank-failure evidence
+is preserved. These added findings also change affected ledger approval digests.
 <code>testgen</code> refuses a failed seam or preservation with the same verify failure
 envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
 and writes no harness. The same

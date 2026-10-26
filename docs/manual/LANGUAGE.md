@@ -1192,6 +1192,12 @@ For inline `implements`, the ledger body also shows the folded verdict and
 only `refines` is green, including passing seams. Ledgers without `implements`
 are byte-identical. Previously approved inline-implements ledgers now report
 `drifted` in `approval check` (exit 0): review the section and re-approve them.
+The ledger risk table also records each non-`refines` preservation as a `GOV`
+finding and a non-`refines` inline seam as a spec-level finding. Unrelated
+requirement rows keep their own status. `unknown_cti` is an unestablished
+induction finding, attributed by the ordinary violation metadata/property
+lookup, not a reachable counterexample; raw CTI, hint, and rank-failure evidence
+is preserved. These added findings also change affected ledger approval digests.
 `testgen` refuses a failed seam or preservation with the same verify failure
 envelope and exit 1 (contract errors: exit 2), on both kernel and fallback paths,
 and writes no harness. The same

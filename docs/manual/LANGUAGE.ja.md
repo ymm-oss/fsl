@@ -1141,6 +1141,11 @@ governance とリスク一覧より前の `## inline implements` 節に畳み込
 `abs` / `result` も示します。通る seam も表示し、`refines` だけが緑です。
 `implements` のない ledger は byte 一致のままです。既承認の inline-implements ledger は
 描画 digest が変わり、`approval check` で `drifted`(exit 0)になります。節を確認して再承認してください。
+ledger のリスク一覧には、非 `refines` の preservation をそれぞれ `GOV` の所見、非 `refines` の
+inline seam を仕様全体の所見としても載せます。無関係な要件行は自身の状態を保ちます。
+`unknown_cti` は通常の違反と同じ metadata/property の規則で帰属する帰納証明の未確立所見であり、
+到達可能な反例ではありません。生の CTI、hint、rank_failure の証跡を保持します。
+この所見追加も、対象 ledger の承認 digest を変えるため再承認が必要です。
 `testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
 `verify` と同じ失敗封筒と exit 1(契約エラーは exit 2)を返し、ハーネスを書きません。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
