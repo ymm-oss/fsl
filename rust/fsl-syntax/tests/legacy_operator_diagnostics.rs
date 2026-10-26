@@ -39,6 +39,20 @@ fn expression_positions_have_exact_operator_spans_but_standalone_is_unchanged() 
 }
 
 #[test]
+fn parenthesized_range_bounds_retain_the_documented_generic_diagnostic() {
+    for operator in ["||", "->"] {
+        let source = format!("fsl 5\nspec Bounds {{ state {{ b: 0..(1 {operator} 2) }} }}\n");
+        let error = parse_document_with(SourceFile::new(&source), &options())
+            .expect_err("invalid range bound");
+        assert_eq!(error.code(), "FSL-PARSE");
+        assert_eq!(
+            &source[error.span.start.offset..error.span.end.offset],
+            operator
+        );
+    }
+}
+
+#[test]
 fn structural_operators_domain_and_literals_are_preserved() {
     for body in [
         "compose C { action both() = a.finish() || b.finish() {} }",

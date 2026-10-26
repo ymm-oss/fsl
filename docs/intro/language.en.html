@@ -1035,7 +1035,10 @@ retain a parse failure (exit 2) until they are repaired. This is a diagnostic
 improvement, not a new removal: current-edition
 rejection and exit 2 are unchanged. Structural composition <code>||</code>, correspondence
 and transition arrows (including anonymous range endpoints in relation types),
-and domain expressions retain their existing behavior.</p>
+and domain expressions retain their existing behavior.
+Range type endpoints, including parenthesized subexpressions within them,
+retain generic <code>FSL-PARSE</code> diagnostics for these invalid spellings. They remain
+rejected; this exception does not change structural relation arrows.</p>
 <p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
 to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
 walking them, and the combined file set is deduplicated and sorted

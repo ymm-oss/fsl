@@ -961,6 +961,9 @@ improvement, not a new removal: current-edition
 rejection and exit 2 are unchanged. Structural composition `||`, correspondence
 and transition arrows (including anonymous range endpoints in relation types),
 and domain expressions retain their existing behavior.
+Range type endpoints, including parenthesized subexpressions within them,
+retain generic `FSL-PARSE` diagnostics for these invalid spellings. They remain
+rejected; this exception does not change structural relation arrows.
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while

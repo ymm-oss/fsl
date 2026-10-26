@@ -6,3 +6,4 @@ Worker check/verify now finalize successful and error envelopes with native
 edition policy, including declared-edition fields and current enum-union warnings,
 while check preserves early project-gate results instead of folding model-only
 governance over them.
+Type-range endpoints, including parenthesized parts, retain generic parse diagnostics.

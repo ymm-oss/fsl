@@ -922,6 +922,9 @@ spec、requirements、compose、business policy、refinement の map の式で�
 lint/migrate も parse 失敗(exit 2)を維持します。これは新たな
 構文削除ではなく診断の改善です。現行の拒否と exit 2 は不変です。構造的な合成の
 `||`、対応や遷移の矢印(relation 型の匿名 range 端点を含む)、domain の式の既存の挙動は維持します。
+range 型の端点(内部の括弧付き部分式も含む)では、この不正な綴りに対して汎用の
+`FSL-PARSE` 診断を維持します。引き続き拒否され、この例外は構造的な relation の
+矢印を変更しません。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの

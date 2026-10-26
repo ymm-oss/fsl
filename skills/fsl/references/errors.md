@@ -7,6 +7,8 @@ expressions are not automatically rewritten; lint/migrate keep exit 2 until
 manual repair. This improves an existing rejection;
 it does not make current-edition expressions accept these spellings. Do not
 replace structural composition/arrows or domain expressions indiscriminately.
+Range type endpoints, including their parenthesized subexpressions, are a
+diagnostic exception: invalid `||` / `->` still fail with generic `FSL-PARSE`.
 
 Machine-readable `faithfulness_class` tags are a quick routing layer over the
 existing result/kind fields:

@@ -104,8 +104,10 @@ Headers select diagnostics in the shared parser; for a headerless CLI request,
 a diagnostic-only reparse keeps the original grammar edition and yields no
 replacement model. `ParseError::for_edition` is the single classifier used by
 check/verify, formatter, lint and migrate. Type-bound range endpoints leave
-structural relation arrows to their enclosing grammar. LSP retains
-the exact span and publishes its UTF-16 range. All Worker check/verify exits pass
+structural relation arrows to their enclosing grammar. The diagnostic exception
+covers the whole bound, including grouped subexpressions:
+these remain generic `FSL-PARSE` failures, not accepted legacy operators.
+LSP retains the exact span and publishes its UTF-16 range. All Worker check/verify exits pass
 through the same edition finalization, including parser/semantic/implements
 errors and headerless documents. Governance is not part of that shared exit:
 check folds it only on the model path, preserving early successful AI-project

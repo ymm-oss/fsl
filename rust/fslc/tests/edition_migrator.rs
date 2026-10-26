@@ -129,6 +129,7 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
     for endpoints in [
         "0..1 -> 0..1",
         "0..1 -> Bool",
+        "0..(1) -> Bool",
         "0..N -> Bool",
         "Node -> Node",
     ] {
@@ -332,6 +333,27 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
     };
     let mut command = edition_command(verb, headed);
     let expected = if source.contains("refinement Probe") {
+        // Match the negative twin's fmt --check entry as well as proving the
+        // mapping below. Normalize layout first so a positive check exits 0.
+        let mut layout = edition_command("fmt", headed);
+        layout.arg(path.to_str().expect("path"));
+        if !headed {
+            layout.args(["--edition", "next"]);
+        }
+        let formatted = layout.output().expect("format canonical twin");
+        assert_eq!(formatted.status.code(), Some(0));
+        let formatted = String::from_utf8(formatted.stdout).expect("formatted FSL");
+        let formatted = directory.write("canonical-format.fsl", &formatted);
+        let checked = run_edition(
+            formatted.to_str().expect("path"),
+            "fmt",
+            (!headed).then_some("next"),
+            headed,
+            &["--check"],
+        );
+        assert_eq!(checked.status.code(), Some(0));
+        assert_eq!(json(&checked)["result"], "format_check");
+        assert_eq!(json(&checked)["changed"], false);
         let model = |name| {
             format!(
                 "spec {name} {{ state {{ flag: Bool = false }} action finish() {{ flag = true }} invariant Typed {{ true }} }}\n"
