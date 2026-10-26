@@ -5,6 +5,91 @@ use std::process::{ChildStdin, ChildStdout, Command, Stdio};
 
 use serde_json::{Value, json};
 
+#[allow(dead_code)] // CLI/Worker also consume this inventory's engine metadata.
+#[path = "../../fslc/tests/support/issue_1463_forms.rs"]
+mod issue_1463_forms;
+
+#[test]
+fn issue_1463_supported_forms_publish_and_clear_located_diagnostics() {
+    let cases = issue_1463_forms::cases();
+    // Each invalid didOpen/didChange is followed by a valid document, so stale
+    // errors cannot masquerade as the diagnostic for the next fixture.
+    let valid =
+        "spec Good { state { done: Bool } init { done = false } action go() { done = true } }";
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../target/issue-1463-lsp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("worktree-local resolver fixture");
+    let mut texts = Vec::new();
+    for c in &cases {
+        for (name, source) in &c.files {
+            std::fs::write(dir.join(name), source).expect("resolved component");
+        }
+        texts.push(c.source.as_str());
+        texts.push(valid);
+    }
+    let uri = format!("file://{}", dir.join("support.fsl").display());
+    let published = published_diagnostics_each_at(&texts, None, &uri);
+    let (pairs, remainder) = published.as_chunks::<2>();
+    assert!(remainder.is_empty());
+    assert_eq!(pairs.len(), cases.len());
+    let mut failures = Vec::new();
+    for (c, pair) in cases.iter().zip(pairs) {
+        let errors: Vec<_> = pair[0].iter().filter(|d| d["severity"] == 1).collect();
+        assert!(
+            pair[1].iter().all(|d| d["severity"] != 1),
+            "{}: didChange failed to clear errors: {:?}",
+            c.id,
+            pair[1]
+        );
+        if c.rejection.is_some() {
+            if errors.len() != 1 {
+                failures.push(format!(
+                    "{}: expected one source rejection; produced {:?}",
+                    c.id, pair[0]
+                ));
+                continue;
+            }
+            let diagnostic = errors[0];
+            let (line, column) = issue_1463_forms::utf16_location(c);
+            assert_eq!(
+                diagnostic["data"]["kind"], "semantics",
+                "{}: {diagnostic}",
+                c.id
+            );
+            assert_eq!(diagnostic["code"], "FSL-SEMANTIC", "{}: {diagnostic}", c.id);
+            assert_eq!(
+                diagnostic["range"]["start"],
+                json!({"line":line,"character":column}),
+                "{}: {diagnostic}",
+                c.id
+            );
+            assert!(
+                diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|m| !m.is_empty())
+            );
+        } else if c.expected[0] == issue_1463_forms::Outcome::Ok {
+            assert!(
+                errors.is_empty(),
+                "{}: accepted source was rejected: {errors:?}",
+                c.id
+            );
+        } else {
+            assert!(
+                !errors.is_empty(),
+                "{}: existing rejection disappeared",
+                c.id
+            );
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failing LSP cells:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 fn send(stdin: &mut ChildStdin, message: &Value) {
     let body = serde_json::to_vec(message).expect("serialize LSP message");
     write!(stdin, "Content-Length: {}\r\n\r\n", body.len()).expect("write LSP header");
@@ -283,6 +368,14 @@ fn shared_expression_entries_publish_both_operator_endpoints() {
 /// unset, replace the document's text with each of the others in turn, and
 /// return the diagnostics the server publishes for each.
 fn published_diagnostics_each(texts: &[&str], unstable: Option<&str>) -> Vec<Vec<Value>> {
+    published_diagnostics_each_at(texts, unstable, "file:///tmp/fsl-lsp-astral.fsl")
+}
+
+fn published_diagnostics_each_at(
+    texts: &[&str],
+    unstable: Option<&str>,
+    uri: &str,
+) -> Vec<Vec<Value>> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
     command
         .stdin(Stdio::piped())
@@ -307,7 +400,6 @@ fn published_diagnostics_each(texts: &[&str], unstable: Option<&str>) -> Vec<Vec
         &mut stdin,
         &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    let uri = "file:///tmp/fsl-lsp-astral.fsl";
     let mut published = Vec::new();
     for (version, text) in texts.iter().enumerate() {
         if version == 0 {
