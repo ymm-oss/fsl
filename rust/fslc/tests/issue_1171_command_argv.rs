@@ -211,7 +211,7 @@ fn kernel_argv() {
     ] {
         let run = run(args);
         assert_eq!(run.status, 2, "{args:?}");
-        assert_eq!(run.json()["kind"], "semantics", "{args:?}");
+        assert_eq!(run.json()["kind"], "usage", "{args:?}");
     }
     let schema = |value: &Value| value["$schema"].as_str().unwrap_or_default().to_owned();
     assert!(
@@ -274,7 +274,7 @@ fn conformance_and_testplan_argv() {
     let run_bad = run(&["conformance", "--kernel-version", "9", "--bogus", SPEC]);
     assert_eq!(
         (run_bad.status, run_bad.json()["kind"].clone()),
-        (2, json!("semantics"))
+        (2, json!("usage"))
     );
     assert_eq!(
         ran(&["conformance", "--depth", "2", "--depth", "1", SPEC], 0)["depth"],

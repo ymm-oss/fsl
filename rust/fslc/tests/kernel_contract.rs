@@ -600,7 +600,7 @@ fn native_cli_negotiates_kernel_and_conformance_majors_fail_closed() {
     assert_eq!(unsupported.status.code(), Some(2));
     let unsupported: Value = serde_json::from_slice(&unsupported.stdout).expect("error envelope");
     assert_eq!(unsupported["result"], "error");
-    assert_eq!(unsupported["kind"], "semantics");
+    assert_eq!(unsupported["kind"], "usage");
     assert!(
         unsupported["message"]
             .as_str()
