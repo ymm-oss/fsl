@@ -545,7 +545,7 @@ jobs:
 
       - name: Test pinned native solver and BMC crates
         working-directory: rust
-        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+        run: cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
 
   production-native-z3-linux:
     name: native Z3 4.16 (ubuntu-latest)

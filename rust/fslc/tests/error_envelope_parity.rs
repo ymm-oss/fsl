@@ -1951,6 +1951,9 @@ impl ApprovalFixture {
         };
         approval.write("spec.fsl", APPROVAL_BASELINE);
         approval.git(&["init", "-q"]);
+        // Keep LF-written fixtures independent of the runner's Git defaults.
+        approval.git(&["config", "core.autocrlf", "false"]);
+        approval.git(&["config", "core.eol", "lf"]);
         approval.git(&["config", "user.email", "envelope-parity@example.com"]);
         approval.git(&["config", "user.name", "Envelope Parity"]);
         approval.git(&["config", "commit.gpgsign", "false"]);
