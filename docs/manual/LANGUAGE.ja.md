@@ -738,11 +738,15 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   これにより `not (exists x in domain(r): reachable(r, x, x))` のような
   enum 型を使う `domain` / `range` の記法を受理しますが、実行時の意味を変更したり、
   不変条件の成立を保証したりはしません。数値射影は整数互換性を保ちます。
-  restack 後の境界測定の BASE は `e8cf78f0162530e264128f588981d49790f2767f`
-  です。コーパス591形式の `ok` → `error` 遷移集合は**測定の結果、空**でした。
-  inline fixture 全122件も検査し、#1458 は23件(異なるソース21種)を両モードで
-  拒否します(モード・形式の組で46遷移)。各ツリーで両モードを2回ずつ実行し、
-  除外なしで出力全体を比較しました。コマンド、識別情報、測定結果は
+  restack 後の境界測定の BASE は `8e54e862cb809121bcd33de53645795bf94a1df5`、
+  HEAD は `870d03e7aa0be837a43c4c5c15f10d32853941bb` です。
+  コーパス597形式の `ok` → `error` 遷移集合は**測定の結果、空**でした。
+  inline fixture 全134件も検査し、#1458 は24件(異なるソース22種)を両モードで
+  拒否します(モード・形式の組で48遷移)。従来の46遷移の集合は不変で、
+  拡張した入力により下記の数値 Set への代入を追加計上しました。
+  `count`、enum 集合リテラルとの等価比較、対応する enum Set への代入の3形式は、
+  両モードで `error` → `ok` となります(6組)。各ツリーで両モードを2回ずつ、
+  計5,848回実行し、除外なしで出力全体を比較しました。コマンド、識別情報、測定結果は
   [設計ノート](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
   を参照してください。端点の破壊的な受理範囲の縮小に該当する式は、
   数値の `N -> N` について `not reachable(r, Red, Blue)`、
@@ -761,6 +765,8 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `forall x in range(s): not r.contains(x, x)`、
   `not domain(s).contains(0)`、`not range(s).contains(0)`、
   `forall x in domain(s): x != 0`、`forall x in range(s): x != 0`。
+  拡張した入力では、`s: relation Color -> Color` と `xs: Set<N>` に対する
+  `xs = domain(s)` も拒否されます(代入の位置8:19)。
   enum 射影要素を数値端点や整数との比較に使うことはできません。
   enum の序数ではなく、宣言された端点の型を使ってください。
   一般に、射影要素と射影集合全体は宣言された端点の型を持ちます。enum や Bool の

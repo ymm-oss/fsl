@@ -771,11 +771,15 @@ variable capture instead of inventing internal binder names. See
   `not (exists x in domain(r): reachable(r, x, x))`; this does not change their
   runtime meaning or guarantee that their invariants hold. Numeric projections
   retain integer compatibility. The restacked boundary sweep used BASE
-  `e8cf78f0162530e264128f588981d49790f2767f`: all 591 corpus forms have a
-  **measured empty** `ok` → `error` transition set. All 122 inline fixture
-  occurrences were also checked; #1458 removes 23 occurrences (21 distinct
-  sources) in both modes, 46 mode-form transitions. Both modes ran twice in
-  each tree with full outputs and no exclusions. See
+  `8e54e862cb809121bcd33de53645795bf94a1df5` and HEAD
+  `870d03e7aa0be837a43c4c5c15f10d32853941bb`: all 597 corpus forms have a
+  **measured empty** `ok` → `error` transition set. All 134 inline fixture
+  occurrences were also checked; #1458 removes 24 occurrences (22 distinct
+  sources) in both modes, 48 mode-form transitions. The previous 46-transition
+  subset is unchanged; the expanded inventory counts numeric Set assignment
+  below. Three counted forms (`count`, enum set-literal equality and matching
+  enum Set assignment) add six `error` → `ok` pairs. Both modes ran twice in
+  each tree: 5,848 checks, full outputs and no exclusions. See
   [the design note](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
   for commands, identities and measurements. The endpoint breaking removals are:
   for numeric `N -> N`, `not reachable(r, Red, Blue)`,
@@ -794,6 +798,8 @@ variable capture instead of inventing internal binder names. See
   `forall x in range(s): not r.contains(x, x)`,
   `not domain(s).contains(0)`, `not range(s).contains(0)`,
   `forall x in domain(s): x != 0`, `forall x in range(s): x != 0`.
+  The expanded inventory also rejects `xs = domain(s)` when
+  `s: relation Color -> Color` and `xs: Set<N>` (assignment origin 8:19).
   Enum projection elements cannot be used as numeric endpoints or compared with
   integer values; use the declared endpoint type, not an enum ordinal.
   More generally, projection elements and whole projection sets take the declared

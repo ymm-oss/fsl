@@ -315,38 +315,12 @@ The additional breaking removals for `s: relation Color -> Color` and
 | enum-domain-integer-comparison | `forall x in domain(s): x != 0` |
 | enum-range-integer-comparison | `forall x in range(s): x != 0` |
 
-#### Historical endpoint-only measurement (before projection typing/restack)
+#### Removed endpoint forms
 
-BASE and the HEAD commit reference are both
-`75ce67832faf063f3ffb850ddb6ef6465b5b62ef`: HEAD here is that commit plus
-the uncommitted production patch SHA-256
-`0caed026d28c3653628f821ed912b420e740941fe3843c9665b17c298cc7e945`,
-not a claimed new commit. BASE was materialized by `git archive` under
-`.claude/work/base-tree`; HEAD is the working tree. Each binary checked forms
-in its own tree. The supplied BASE binary `.claude/work/fslc-1439` has SHA-256
-`ed375b54aea571629ab3cd3f1e7d0e07c4a5b8b6aac034c3d871eff4908eb3fd`;
-the final built HEAD `rust/target/debug/fslc` has SHA-256
-`b72f3ccf797fecc628e898e3127df13dcb0cfcc6b0353ba7a9f3e53f65a7139a`.
-
-Exact driver commands: `python3 .claude/work/sweep-1458.py prepare`,
-`python3 .claude/work/sweep-1458.py base`,
-`python3 .claude/work/sweep-1458.py head`,
-`python3 .claude/work/sweep-1458.py compare`. Each check invocation acquires
-the lane lock followed by the heavy lock. The driver checks every `.fsl` under
-`specs/`, `examples/`, `rust/fslc/tests/fixtures/` (**579 forms**), plus every
-inline fixture occurrence in the fixed regression file (35), the augmented
-native/LSP diagnostic test (8), and the augmented Worker parity test (7):
-**629 forms per tree**, twice with `FSLC_UNSTABLE` removed and twice with
-`FSLC_UNSTABLE=fsl5`, **5,032 checks**. This includes deliberately rejecting
-corpus outcomes such as governance `refinement_failed` / exit 1; those are
-compared, not dropped. Repeat stdout bytes, JSON, stderr and exit codes agree
-exactly, without any excluded field.
-
-The measured corpus `ok` → `error` transition set is **empty**. The following
-17 inline occurrences (15 distinct source texts) each change from `ok` / 0 to
-`error` / `semantics` / 2 in **both modes**: **34 mode-form transitions**.
-All other full outputs are unchanged. Here `N = 0..2` and `Color = {Red, Blue}`;
-all new errors retain invariant origin 7:3 and the endpoint repair hint.
+These 17 inline occurrences (15 distinct sources) change from `ok` / 0 to
+`error` / `semantics` / 2 in both modes in the final measurement below.
+Here `N = 0..2` and `Color = {Red, Blue}`; endpoint errors retain invariant
+origin 7:3 and the endpoint repair hint. Projection removals are listed above.
 
 | Inline fixture label | Relation | Removed invariant expression |
 |---|---|---|
@@ -370,91 +344,107 @@ all new errors retain invariant origin 7:3 and the endpoint repair hint.
 
 #### Restacked endpoint and projection boundary measurement
 
-This is the final #1458 measurement, including endpoint-typed `domain`/`range`,
-not a transfer of the historical endpoint-only observation above:
+This is the final #1458 measurement on the frozen integration base:
 
-- BASE: `e8cf78f0162530e264128f588981d49790f2767f`, materialized with
-  `git archive e8cf78f0 | tar -x -C .claude/work/base-tree-e8cf`.
-- HEAD: restacked implementation commit
-  `c11d5ed399807979c3bf89b07e06e4d2cbde9adc`, on the rebased #1439 commit
-  `73d7def57dc7da0ca60cdf9480ccf0bda8762159`. The pre-restack implementation
-  `17134b6dc6245a036a7487d8c58081ab25fc826b` is retained on
-  `v5/1458-pre-restack`; `git range-diff` reports identical patches. There were
-  no rebase conflicts. This evidence-only documentation follow-up does not
-  change production or test sources.
-- BASE binary: `.claude/work/base-tree-e8cf/rust/target/debug/fslc`, SHA-256
-  `2208f37aa85ed5535c7132ff008af90e235cbb09face9dc367bdbf3b0f8b9367`.
-  HEAD binary: `rust/target/debug/fslc`, SHA-256
-  `a3bf584becb4f2ce98e03b5a03be0b3aa32f668627ef5fd6d7e7a017c6e6f1d6`.
-  Checker SHA-256 values respectively:
-  `a7d9fa098655a325fe184cc6d849fb37d6dbfc32288dc66e9436c026447ebe9b` and
-  `61dcd7feb19f120b53f3df6fc3cde8240a9a86f345462075f0a7c32b8e6888b8`.
+- BASE: `8e54e862cb809121bcd33de53645795bf94a1df5`, materialized by
+  `git archive` and built in that archive's own fresh, unpopulated target.
+- Measured HEAD: `870d03e7aa0be837a43c4c5c15f10d32853941bb`; production
+  commit `dba6456882a75ab34695767383ed86fccbc5ea38`. Subsequent commits
+  change no `rust/*/src` files. The three fixed test files are byte-identical
+  to `764a00c37750ef271a8407ca9785a5d27251406e`.
+- All five original #1458 patches remain identical under `git range-diff`;
+  the rebases had no conflicts. This records-only follow-up changes no source,
+  test, corpus or CLI contract JSON.
 
-The first post-restack HEAD build was
-`cargo build --manifest-path rust/Cargo.toml --workspace --locked --offline`.
-BASE was then built with a **fresh, unpopulated target**, not cloned artifacts:
-`cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked --offline -v`
-from the archived tree. Its verbose log confirms `fsl-syntax`, `fsl-core` and
-`fslc-rust` compiled from that tree's paths. Both builds exited 0, acquired the
-lane lock followed by the heavy lock, and used toolchain 1.98.0 with four build
-jobs/test threads and worktree-local TMPDIR. Calibration ran the #1439 S1
-`paint(if c != 1 then Red else Blue)` forbidden final-step form and #1458
-`not reachable(r, Red, Blue)` numeric-relation form: both are `ok` / 0 on BASE
-and `error` / `semantics` / 2 on HEAD, **twice**.
+On BASE `8e54e862`, both the workspace HEAD build
+(`cargo build --manifest-path rust/Cargo.toml --workspace --locked --offline`)
+and the fresh archived BASE build
+(`cargo build -v --manifest-path rust/Cargo.toml --locked --offline -p fslc-rust --bin fslc`)
+exit 0. Verbose compilation witnesses identify `fsl-syntax`, `fsl-core` and
+`fslc-rust` under the base paths. Toolchain is 1.98.0, with four build jobs/test
+threads and worktree-local TMPDIR. Each binary executes `fslc check FORM` in
+its own tree. One lane-D-then-heavy lock acquisition encloses the **whole
+sweep**, with no per-invocation locks. Each invocation waits for one-minute
+load below 9. Stable mode removes `FSLC_UNSTABLE`; the other mode sets it to
+`fsl5`; cache is disabled.
 
-Exact orchestration command: `python3 .claude/work/restack-v4-1458.py` (exit 0).
-It builds BASE, mechanically expands the inline fixtures, calibrates the
-binaries, then invokes `python3 .claude/work/restack-sweep-1458.py base`,
-`python3 .claude/work/restack-sweep-1458.py head`, and
-`python3 .claude/work/restack-sweep-1458.py compare` (each exit 0).
-`python3 .claude/work/restack-audit-1458.py` also exits 0 and accounts for every
-changed output. Each binary runs `check FORM` in its own materialized tree,
-acquiring the lane lock followed by the heavy lock **per invocation**. All runs
-remove `FSLC_UNSTABLE` for stable mode or set it to `fsl5`, with cache disabled.
-Uptime is checked before each invocation, waiting for one-minute load <= 9.
+Binary-identity controls within the sweep on BASE `8e54e862` run the #1439 S1
+`paint(if c != 1 then Red else Blue)` forbidden final-step form and the #1458
+`not reachable(r, Red, Blue)` numeric-relation form, twice in both modes:
+S1 is `error` / `semantics` / 2 on **both** binaries; the endpoint detector is
+`ok` / 0 on BASE and `error` / `semantics` / 2 on HEAD (16 calibration checks).
+Because #1439 is already in BASE, its removals and expectation-envelope
+reclassifications are not inherited #1458 transitions in this measurement.
 
 | Forms per tree | Count |
 |---|---:|
-| Every `.fsl` under `specs/`, `examples/`, `rust/fslc/tests/fixtures/` | 591 |
+| Every `.fsl` under `specs/`, `examples/`, `rust/fslc/tests/fixtures/` | 597 |
 | All five `issue_1439_*.rs` files: expect/nested/scope/step/unary | 6 + 8 + 2 + 21 + 10 = 47 |
 | Fixed #1458 endpoint and domain/range files | 35 + 16 = 51 |
+| Fixed #1458 projection-acceptance file: four models, two refinement-input triples, two Kernel forms | 12 |
 | Native/shared diagnostic step and parity fixtures | 2 + 8 = 10 |
 | Worker parity, step and scenario-then fixtures | 7 + 2 + 1 = 10 |
 | LSP stdio expectation and step fixtures | 2 + 2 = 4 |
-| Total | **713 (591 corpus + 122 inline)** |
+| Total | **731 (597 corpus + 134 inline)** |
 
-All #1458 inline expansions are byte-checked against the actual fixtures written
-by the immutable tests. Each mode/tree runs twice: **5,704 checks**. Complete
+Written #1458 inline expansions are byte-checked against the actual fixtures
+from the immutable tests; the two in-memory Kernel sources are mechanically
+expanded from their test template. Each mode/tree runs twice: **5,848 checks**. Complete
 stdout bytes, parsed JSON, stderr and exits repeat exactly; **no fields or forms
-are excluded**. The **591-form corpus `ok` → `error` transition set is empty**,
+are excluded**. The **597-form corpus `ok` → `error` transition set is empty**,
 with no other corpus output drift.
 
-Within the corpus and inline fixtures included in this measurement, the observed
+Within the original inline subset retained in this measurement, the observed
 #1458 breaking removals are exactly the 15 endpoint source expressions in
 the table above, the duplicate native target-only contains / Worker target-only
 reachable occurrences, and all six enum projection expressions in the earlier
-projection table: **23 occurrences, 21 distinct sources, 46 mode-form transitions**.
+projection table: **23 occurrences, 21 distinct sources, 46 mode-form transitions**,
+with exactly the same membership as the earlier inventory. The expanded third
+fixed file additionally counts `xs = domain(s)` with `s: relation Color -> Color`
+and `xs: Set<N>`: `ok` / 0 → `error` / `semantics` / 2 at assignment origin
+8:19 in both modes. This is the already documented q01 family below, not a new
+removal caused by the rebase. Totals are **24 occurrences, 22 distinct sources,
+48 mode-form removals**.
 All are `ok` / 0 → `error` / `semantics` / 2 in both modes. Endpoint and bypass
 errors retain their repair hint; projection membership/comparison errors retain
 the existing assignability message and authored origin without inventing a new
 hint. The three legitimate enum projection idioms check on both BASE and final
 HEAD; only the intermediate endpoint-only patch regressed them.
 
-The larger comparison also observes the inherited #1439 change: **70 additional
-mode-form removals**, already governed by `DESIGN-requirements-stage.md`, and
-**three error-envelope reclassifications**, not removals or excluded drift.
-The latter are the published `expect c == 1` fixture in both modes and the FSL 5
-`then c == 1` fixture with the gate enabled: both binaries exit 2, but BASE
-reports `kind: "acceptance"` after replay, while HEAD reports `kind: "semantics"`
-with the Int-to-Color diagnostic at the authored keyword. In total there are
-116 mode-form removals, these three reclassifications, and **1,307 entirely
-unchanged mode-form pairs**. No further output changes were observed.
+The third file also adds three counted accepting forms: `COUNT`, `SET_EQUALITY`
+and `COLOR_ASSIGNMENT`, each `error` / `semantics` / 2 → `ok` / 0 in both modes
+(six mode-form additions, not error-envelope reclassifications). Of **1,462
+mode-form pairs**, **1,408 are entirely unchanged**. No further output changes
+were observed. Standalone checks of refinement input components do not replace
+the fixed tests' multi-file `refine` assertions.
 
-Direct public Kernel controls also run twice for `N -> Color` and `Color -> N`:
-`python3 .claude/work/kernel-projection-1458.py` exits 0, requires `rel_domain`
-and `rel_range` set-item annotations to retain the correct named endpoint, and
-compares complete repeat outputs without exclusions. This checks projection
-annotations, not independent semantic triangulation or unbounded verification.
+The two new corpus fixtures are included without exclusions:
+`rust/fslc/tests/fixtures/legacy_return_branches.fsl` is `ok` / 0 with
+`implements.result: "refines"`; `legacy_return_impl_refines.fsl`, a standalone
+refinement fragment, is `error` / `semantics` / 2, `spec has no state block`.
+Both retain identical complete outputs on BASE and HEAD in both modes and
+repetitions. All **5,832 shared observations** also match the earlier
+`6e99702c05c92be39791ab1b0effe78f8ab0e60d` measurement in full; the 16
+observations of the two added corpus forms are retained separately because
+those paths did not exist in that base.
+
+On BASE `8e54e862`, `cargo test --manifest-path rust/Cargo.toml --workspace --locked --offline`
+exits 0: **3,063 passed, zero failed or ignored**. CLI conformance, the three
+fixed targets (52 tests) and formatting also pass on that base. Public Kernel
+controls require `rel_domain`/`rel_range` item and binder annotations for both
+`N -> Color` and `Color -> N`; these are shared-checker controls, not independent
+semantic triangulation or unbounded verification.
+
+The production-src-only revert calibration was **measured on BASE
+`6e99702c05c92be39791ab1b0effe78f8ab0e60d`**, producing **28 intended failures
+and 24 preservation passes** (endpoint 15/14, domain/range 6/10, acceptance 7/0).
+The three legitimate enum-binder/cycle idioms are preserved under this full
+revert, while detecting a projection-only revert. Exact source/diff/status
+restore was proved clean. Clippy was also **measured on 6e99702c**, exit 101
+only for authorized #1444 (`claims_next_edition`, requirement_trace_large_domain:65).
+Neither is relabeled or rerun on `8e54e862`: COMMON rev 4/4.1 carries them
+across 26 changed main files, with zero production/golden/CLI-contract/lock
+overlap and only the two corpus additions, both `A` in `git diff --name-status`.
 
 #### Projection categories and final-review regression controls
 
@@ -482,23 +472,18 @@ on BASE and HEAD and produce real step-2 violations on both engines. The three
 enum-binder/cycle idioms a02/a03/a05 also check on released BASE and final HEAD;
 only the unreleased intermediate endpoint-only patch rejected them.
 
-The final-review probes were independently rerun twice, not inferred solely
-from reviewer output. BASE is the named archived binary above. The main probe
-run uses the named HEAD binary above; after compiling the new test file, the
-supplement uses HEAD SHA-256
-`7d83c46d060b37dc3b6bd30341ea7a31b26485f0edabcee386d0319aeb31c25f`,
-with unchanged production checker SHA-256
-`61dcd7feb19f120b53f3df6fc3cde8240a9a86f345462075f0a7c32b8e6888b8`.
-The CLI build fingerprint includes test sources, so a test-only addition changes
-the binary identity without changing the production code. Exact commands:
-`python3 .claude/work/review-round1-probes-1458.py` (228 observations) and
-`python3 .claude/work/review-round1-supplement-1458.py` (76 observations), both
-exit 0. Each direct call removes `FSLC_UNSTABLE`, disables cache, and retains
-complete source, stdout, JSON, stderr and exit. An accepted check is followed by
+The broader final-review probes below are **historical measurements on BASE
+`e8cf78f0162530e264128f588981d49790f2767f` and production HEAD
+`c11d5ed399807979c3bf89b07e06e4d2cbde9adc`**, not measurements on the final
+integration base. They were independently run twice: 228 main observations and
+76 supplements, both runs exiting 0. The supplement adds test sources but no
+production change. Each direct call removes `FSLC_UNSTABLE`, disables cache,
+and retains complete source, stdout, JSON, stderr and exit. An accepted check
+is followed by
 `verify FORM --engine bmc --depth 3 --no-cache` and the analogous explicit call;
-maps use `refine IMPL ABS MAP --depth 3`. No lock is needed for these authorized
-direct probes, no field is excluded, and no cross-engine envelope equality is
-claimed. The tables report both repetitions' matching semantic outcomes.
+maps use `refine IMPL ABS MAP --depth 3`. No field is excluded, and no
+cross-engine envelope equality is claimed. The tables report both repetitions'
+matching semantic outcomes.
 
 Here E is check `error/semantics/2`, O is check `ok/0`, and Xn is a real
 invariant violation at step n, exit 1, on **both** BMC and explicit. All ordinary
@@ -552,15 +537,15 @@ before evaluation/simulation; and one asserts exact public Kernel projection
 item **and binder** types for both `N -> Color` and `Color -> N`. The Kernel
 fixture uses binder self-comparison so its revert failure is an `int` annotation,
 not an incidental model-loader rejection. Reversing only the domain/range hunk
-of `c11d5ed3` produces **seven intended failures / zero passes**; exact checker
-bytes and diff are restored, then all three #1458 targets pass twice (52 tests
-per run). The two fixed files remain unchanged. Formatting passes; CLI
-all-target Clippy retains only authorized #1444.
+of `c11d5ed3`, measured on historical BASE `e8cf78f0`, produces **seven intended
+failures / zero passes**; exact checker bytes and diff are restored, then all
+three #1458 targets pass twice (52 tests per run). The two fixed files remain
+unchanged. In that historical round on BASE `e8cf78f0`, formatting passes and
+CLI all-target Clippy retains only authorized #1444.
 
-No new corpus sweep is run or claimed for this review round: production and
-the 591 corpus sources are unchanged. The earlier 5,704-call measurement remains
-scoped to its named commit and 122 inline occurrences; this supplement does not
-retroactively add new probes or the new test file to that inventory.
+These historical probes are not retroactively added to the final sweep. The
+final measurement above explicitly includes all forms of the third fixed file;
+the broader probe tables retain their original base and head identities.
 
 Out-of-scope leftovers are explicitly retained: cross-range numeric Set coercion
 (u01/u02/q03) checks on both binaries but BMC reports a type/coercion error while

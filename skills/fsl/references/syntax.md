@@ -878,10 +878,15 @@ never a state variable named `true`), so the declaration is rejected. No other w
   `not (exists x in domain(r): reachable(r, x, x))` are accepted; their runtime
   meaning is unchanged and false invariants still violate. Numeric projections
   remain integer-compatible. The restacked boundary sweep used BASE
-  `e8cf78f0162530e264128f588981d49790f2767f`: **zero corpus `ok` → `error`
-  transitions** across all 591 forms. All 122 inline occurrences were checked;
-  #1458 removes 23 occurrences (21 distinct sources) in both modes, 46 mode-form
-  transitions. Each mode/tree ran twice, full outputs without exclusions.
+  `8e54e862cb809121bcd33de53645795bf94a1df5` and HEAD
+  `870d03e7aa0be837a43c4c5c15f10d32853941bb`: **zero corpus `ok` → `error`
+  transitions** across all 597 forms. All 134 inline occurrences were checked;
+  #1458 removes 24 occurrences (22 distinct sources) in both modes, 48 mode-form
+  transitions. The former 46-transition subset is unchanged; the expanded
+  inventory additionally counts numeric Set assignment below. Three counted
+  forms (`count`, enum set-literal equality and matching enum Set assignment)
+  add six `error` → `ok` pairs. Each mode/tree ran twice: 5,848 checks, full
+  outputs without exclusions.
   Commands and identities are in
   `docs/design/DESIGN-nested-option-support.md`, section #1458.
   The endpoint removals for numeric `N -> N` are
@@ -898,7 +903,9 @@ never a state variable named `true`), so the declaration is rejected. No other w
   and `r: relation N -> N`, `forall x in domain(s): not r.contains(x, x)`,
   `forall x in range(s): not r.contains(x, x)`, `not domain(s).contains(0)`,
   `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
-  `forall x in range(s): x != 0`. Do not coerce enum elements to numeric ordinals.
+  `forall x in range(s): x != 0`. The expanded inventory also rejects
+  `xs = domain(s)` for `s: relation Color -> Color`, `xs: Set<N>`, at assignment
+  origin 8:19. Do not coerce enum elements to numeric ordinals.
   General breaking rule: projection elements/sets take their endpoint type, so
   enum or Bool elements reject anywhere `Int` is expected, except for the
   pre-existing `abs` operand-check gap tracked in #1459; their whole sets reject

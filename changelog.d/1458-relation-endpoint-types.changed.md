@@ -13,10 +13,15 @@ The change rejects enum/Int confusion. Enum nominality, numeric/range
 compatibility, public Kernel schemas
 and runtime semantics are unchanged; LSP/Worker inherit the shared checker.
 The restacked boundary sweep used BASE
-`e8cf78f0162530e264128f588981d49790f2767f`: zero `ok` to `error` transitions
-among all 591 corpus forms. All 122 inline fixture occurrences were checked;
-#1458 removes 23 occurrences (21 distinct sources) in both modes, 46 mode-form
-transitions. Each mode/tree ran twice, full outputs without exclusions. See
+`8e54e862cb809121bcd33de53645795bf94a1df5` and HEAD
+`870d03e7aa0be837a43c4c5c15f10d32853941bb`: zero `ok` to `error` transitions
+among all 597 corpus forms. All 134 inline fixture occurrences were checked;
+#1458 removes 24 occurrences (22 distinct sources) in both modes, 48 mode-form
+transitions. The former 46-transition subset is unchanged; the expanded
+inventory additionally counts numeric Set assignment below. Three counted forms
+(count, enum set-literal equality and matching enum Set assignment) add six
+error-to-ok pairs. Each mode/tree ran twice: 5,848 checks, full outputs without
+exclusions. See
 `docs/design/DESIGN-nested-option-support.md`, section #1458, for commands,
 identities and measurements. Removed numeric `N -> N` invariants are
 `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,
@@ -33,6 +38,8 @@ Projection typing additionally removes, for `s: relation Color -> Color` and
 `forall x in range(s): not r.contains(x, x)`, `not domain(s).contains(0)`,
 `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
 `forall x in range(s): x != 0`.
+The expanded inventory also rejects `xs = domain(s)` for
+`s: relation Color -> Color`, `xs: Set<N>` (assignment origin 8:19).
 General breaking rule: projection elements and sets take the endpoint type.
 Enum or Bool elements are rejected anywhere Int is expected, except for the
 pre-existing abs operand-check gap tracked in #1459; their sets are rejected
