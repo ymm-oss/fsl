@@ -1146,7 +1146,7 @@ governance とリスク一覧より前の `## inline implements` 節に畳み込
 ledger のリスク一覧には、非 `refines` の preservation をそれぞれ `GOV` の所見、非 `refines` の
 inline seam を仕様全体の所見としても載せます。無関係な要件行は自身の状態を保ちます。
 `unknown_cti` は通常の違反と同じ宣言の持ち主の規則
-([ledger amendment](../design/DESIGN-ledger.md#amendment-to-1316-verdict-findings-1338-decision-2026-10-26))で帰属する帰納証明の未確立所見であり、
+([ledger amendment](../design/DESIGN-ledger.md))で帰属する帰納証明の未確立所見であり、
 到達可能な反例ではありません。生の CTI、hint、rank_failure の証跡を保持します。
 所見の追加と帰属の訂正も、対象 ledger の承認 digest を変えるため再承認が必要です。
 直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を

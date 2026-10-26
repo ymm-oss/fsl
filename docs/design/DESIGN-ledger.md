@@ -145,6 +145,8 @@ on `last_action`). Public compose and branch spellings are resolved by that name
 owner, not by ledger string replacement or copied prefix rules. Only a unique
 resolved declaration supplies requirement metadata; missing or ambiguous owners
 remain spec-level findings.
+Reachable-failure and dead-action coverage findings likewise use `generated_name`
+when present to resolve their property or action declaration through `NameMap`.
 
 Ordinary violations, requirement confirmations, assurance classes, and human
 approval status remain separate axes. Added findings, corrected coverage, and
