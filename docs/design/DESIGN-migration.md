@@ -140,10 +140,16 @@ that step rather than also appended by success-only metadata finalization.
 ## Amendment: current-edition warning exposure (#251)
 
 The shared edition step appends `legacy_string_metadata`,
-`legacy_quantifier_colon`, and `inline_action_maps` to current-edition check and
-verify/domain-check and Worker JSON warnings, including headerless documents.
+`legacy_quantifier_colon`, and `inline_action_maps` to current-edition check,
+verify, and Worker JSON warnings, including headerless documents. Domain check
+shares the adapter, but none of these three legacy forms occurs in an accepted
+domain document: string slots/maps are not domain forms and quantified domain
+expressions fail closed. Its existing enum-union warning remains unchanged.
 All Worker check/verify success, validation-error, and implements-error paths
-pass once through the same outer finalization step. Headerless documents use
+pass once through the same outer edition finalization step. Check folds
+governance only on its model/implements path, never on successful early
+AI-project/agent gate results; verify retains its native outer governance fold
+before edition finalization. Headerless documents use
 current edition; gated explicit headers select their declared edition. Omitted
 initial-value warnings are added only by this step, not also by success-only
 metadata finalization. Existing warnings,

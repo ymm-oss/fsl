@@ -1362,7 +1362,7 @@ Range type endpoints, including parenthesized subexpressions within them,
 retain generic `FSL-PARSE` diagnostics for these invalid spellings. They remain
 rejected; this exception does not change structural relation arrows.
 
-In the current edition, `check`, `verify`, `domain check`, and Worker JSON
+In the current edition, `check`, `verify`, and Worker JSON
 append migration warnings for declaration string metadata
 (`legacy_string_metadata`), colon quantifiers (`legacy_quantifier_colon`), and
 inline action `maps` (`inline_action_maps`). These reuse lint's exact locations,
@@ -1371,6 +1371,9 @@ or exit codes. A refused rewrite remains `machine_applicable: false`; a warning
 does not mean automatic migration is safe. Prefer typed annotations, braced
 quantifiers, and explicit action correspondences in `implements`. Lint retains
 exit 0 for no findings, 1 for findings, and 2 for parse/check failure.
+Domain checking rejects quantified domain expressions instead of emitting a
+colon-quantifier warning; legacy string metadata and requirement action mappings
+are not accepted domain forms.
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while

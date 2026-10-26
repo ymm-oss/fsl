@@ -513,6 +513,48 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
 }
 
 #[test]
+fn domain_quantifier_rejection_and_warning_absence_match_the_base_contract() {
+    let directory = FixtureDir::new();
+    let source = concat!(
+        "// SPDX-License-Identifier: Apache-2.0\n",
+        "// Domain check's current projection rejects quantified expressions (exit 2).\n",
+        "domain D { aggregate A { state { ready: Bool = false } command Finish {} event Finished {} decide Finish { emits Finished } evolve Finished { ready = true } invariant Typed { forall i in 0..1: ready == true or ready == false } } }\n"
+    );
+    let path = directory.write("quantifier.fsl", source);
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .env_remove("FSLC_UNSTABLE")
+        .args([
+            "domain",
+            "check",
+            path.to_str().expect("path"),
+            "--depth",
+            "2",
+        ])
+        .output()
+        .expect("domain check");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let output = json(&output);
+    let offset = source.find("forall i").expect("quantifier");
+    let line = source[..offset].matches('\n').count() + 1;
+    let start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let column = source[start..offset].chars().count() + 1;
+    assert_eq!(
+        output,
+        serde_json::json!({
+            "fsl":"1.0", "result":"error", "kind":"semantics",
+            "message":format!("unsupported domain expression construct at {line}:{column}"),
+            "loc":{"line":line,"column":column}
+        }),
+        "the base rejects this domain form without migration warnings"
+    );
+}
+
+#[test]
 fn current_domain_warnings_exclude_unrelated_planner_codes() {
     let directory = FixtureDir::new();
     let source = "domain D { enum E { A, B } aggregate X { state { e: E = A } command Finish {} event Finished {} decide Finish { requires e == A || e == B emits Finished } evolve Finished { e = B } invariant I { e == A -> e == A } } }\n";

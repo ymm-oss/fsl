@@ -82,10 +82,12 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
 
 ## 7. CLI and JSON essentials
 
-Current-edition `check`, `verify`, `domain check`, and Worker JSON append migration warnings for string metadata,
-colon quantifiers, and inline action `maps`, without changing verdicts or exits.
-Codes and complete
-finding data match lint; lint still exits 1 when findings exist, not 0.
+Current-edition `check`, `verify`, and Worker JSON append migration
+warnings for string metadata, colon quantifiers, and inline action `maps`, without
+changing verdicts or exits. Codes and complete finding data match lint; lint still
+exits 1 when findings exist, not 0.
+Domain checking rejects quantified domain expressions, so it does not emit this
+colon-quantifier warning for them; metadata slots and requirement maps are not domain forms.
 
 ```
 fslc check <f>                                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)

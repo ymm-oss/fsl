@@ -368,7 +368,8 @@ verify {
   correspondence can also still be written as the `maps <abs_act>(...)` clause
   **on the requirement-level action** (auto-synthesized for matching names;
   `maps auto` covers same-name kernel-wrapper actions). This legacy clause emits
-  `inline_action_maps` in current-edition check/verify warnings; prefer the explicit
+  `inline_action_maps` through the shared current-edition check, verify,
+  and Worker JSON warning policy; prefer the explicit
   correspondence inside `implements`. Branch-specific mappings require manual
   conversion rather than one unconditional correspondence. Writing both a `maps`
   clause on an action and a matching inline `action ...` item for the same impl

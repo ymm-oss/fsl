@@ -286,11 +286,14 @@ policy, and refinement maps get `diagnostic_code: unsupported_in_edition` when
 checking for the next edition, retaining `kind: parse` and exit 2. Use `or` / `=>`.
 This does not ban structural composition/arrows or change domain expressions.
 
-Current-edition `check`/`verify` also warn on declaration string metadata,
+Current-edition `check`, `verify`, and Worker JSON warn on
+applicable legacy forms: declaration string metadata,
 colon quantifiers, and inline action `maps`, using `legacy_string_metadata`,
 `legacy_quantifier_colon`, and `inline_action_maps`. Prefer typed annotations,
 braced quantifiers, and action correspondences in `implements`. Warnings retain
 the planner's exact spans and safety flags; refused edits are not safe fixes.
+Domain checking rejects quantified domain expressions rather than producing this
+quantifier warning; legacy metadata slots and requirement mappings are not domain forms.
 
 ```fsl
 domain <Name> {
