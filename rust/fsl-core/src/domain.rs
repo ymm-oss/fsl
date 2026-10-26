@@ -488,8 +488,19 @@ impl<'a> Context<'a> {
         })
     }
 
-    fn fold_binary(op: &str, spelling: &str, mut parts: Vec<SyntaxExpr>, span: Span) -> SyntaxExpr {
-        let mut output = parts.pop().expect("non-empty fold");
+    fn fold_binary(
+        op: &str,
+        spelling: &str,
+        mut parts: Vec<SyntaxExpr>,
+        span: Span,
+        identity: bool,
+    ) -> SyntaxExpr {
+        let Some(mut output) = parts.pop() else {
+            return SyntaxExpr {
+                kind: SyntaxExprKind::Bool(identity),
+                span,
+            };
+        };
         while let Some(left) = parts.pop() {
             output = SyntaxExpr {
                 kind: SyntaxExprKind::Binary {
@@ -573,7 +584,13 @@ impl<'a> Context<'a> {
                 span: decide.loc.span(),
             }
         } else {
-            Self::parenthesize(Self::fold_binary("and", "and", pieces, decide.loc.span()))
+            Self::parenthesize(Self::fold_binary(
+                "and",
+                "and",
+                pieces,
+                decide.loc.span(),
+                true,
+            ))
         })
     }
 
@@ -733,7 +750,7 @@ impl<'a> Context<'a> {
                         }))
                     })
                     .collect::<Result<Vec<_>, CoreError>>()?;
-                Ok(Self::fold_binary("or", "or", comparisons, span))
+                Ok(Self::fold_binary("or", "or", comparisons, span, false))
             }
             SyntaxExprKind::Binary { op, left, right } => {
                 let right_expected = match op.canonical.as_str() {

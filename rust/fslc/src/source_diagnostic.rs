@@ -224,7 +224,22 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
             .as_deref()
             .and_then(|origin| origin.primary.as_ref())
             .and_then(|site| site.span)
-            .unwrap_or_else(|| point_span(source, error.line, error.column)),
+            .map_or_else(
+                || point_span(source, error.line, error.column),
+                |span| {
+                    // Line/column-only origins (currently AI's AiLoc) use offset 0.
+                    // Recover such spans' byte offsets before LSP UTF-16 conversion,
+                    // regardless of dialect, when their position is not 1:1.
+                    if span.start.offset == 0 && (span.start.line, span.start.column) != (1, 1) {
+                        Span {
+                            start: point_span(source, span.start.line, span.start.column).start,
+                            end: point_span(source, span.end.line, span.end.column).end,
+                        }
+                    } else {
+                        span
+                    }
+                },
+            ),
         // `line`/`column` also carry legacy placeholders such as `(1, 1)`.
         // Only an authored origin proves that the public location is real.
         located: diagnostic.loc.is_some(),

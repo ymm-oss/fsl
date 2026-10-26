@@ -344,3 +344,102 @@ domain Recursive {
                 .is_some_and(|item| item == "Touch")
     }));
 }
+
+const AI_UNKNOWN_TOOL: &str =
+    include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
+
+fn ai_authority_source(authority: &str) -> String {
+    AI_UNKNOWN_TOOL.replace(
+        "may_execute MissingTool;",
+        &format!("{authority} MissingTool;"),
+    )
+}
+
+fn assert_unknown_ai_authority_has_authored_origin(authority: &str) {
+    let source = ai_authority_source(authority);
+    let fsl_syntax::SurfaceDocument::AiComponent(component) =
+        fsl_syntax::parse_surface_document(&source).expect("syntactically valid AI component")
+    else {
+        panic!("fixture must select the AI-component frontend");
+    };
+    // Bypass the source gate deliberately: validation added to a caller must
+    // not conceal a partial lower_ai_component implementation (#1464).
+    let error = fsl_core::lower_ai_component(component)
+        .expect_err("an unknown authority tool must return CoreError, not panic");
+    assert_eq!(
+        error.message, "unknown tool 'MissingTool' in authority block",
+        "{authority}: {error}"
+    );
+    assert_eq!((error.line, error.column), (14, 5), "{authority}");
+    assert!(error.is_located(), "{authority}: {error}");
+    let origin = error.origin.as_ref().expect("authored lowering origin");
+    assert!(!origin.generated, "{authority}: {origin:?}");
+    let site = origin.primary.as_ref().expect("authored primary site");
+    let span = site.span.expect("authority reference location");
+    assert_eq!(
+        (span.start.line, span.start.column),
+        (14, 5),
+        "{authority}: point at the authority clause, not the tool declaration"
+    );
+
+    // The resolver-backed source seam must retain that same location and add
+    // the caller-known file identity, so CLI/LSP can render it honestly.
+    let file_error = fsl_core::parse_kernel_source_with_file(
+        &source,
+        &FsResolver::new("."),
+        "unknown-authority.fsl",
+    )
+    .expect_err("source lowering must reject the same reference");
+    let file_site = file_error
+        .origin
+        .as_ref()
+        .and_then(|origin| origin.primary.as_ref())
+        .expect("source gate retains authored origin");
+    assert_eq!(
+        file_site.source_file.as_deref(),
+        Some("unknown-authority.fsl")
+    );
+    let file_span = file_site
+        .span
+        .expect("source gate retains authority location");
+    assert_eq!(
+        (file_span.start.line, file_span.start.column),
+        (span.start.line, span.start.column),
+        "{authority}"
+    );
+}
+
+#[test]
+fn unknown_ai_may_suggest_returns_an_authored_lowering_error() {
+    assert_unknown_ai_authority_has_authored_origin("may_suggest");
+}
+
+#[test]
+fn unknown_ai_may_execute_returns_an_authored_lowering_error() {
+    assert_unknown_ai_authority_has_authored_origin("may_execute");
+}
+
+#[test]
+fn unknown_ai_requires_human_approval_returns_an_authored_lowering_error() {
+    assert_unknown_ai_authority_has_authored_origin("requires_human_approval");
+}
+
+#[test]
+fn unknown_ai_forbidden_returns_an_authored_lowering_error() {
+    assert_unknown_ai_authority_has_authored_origin("forbidden");
+}
+
+#[test]
+fn declared_ai_authority_tools_still_lower_and_build() {
+    for authority in [
+        "may_suggest",
+        "may_execute",
+        "requires_human_approval",
+        "forbidden",
+    ] {
+        let source = ai_authority_source(authority).replace("MissingTool", "SearchOrder");
+        let kernel = fsl_core::parse_kernel_source(&source, &FsResolver::new("."))
+            .unwrap_or_else(|error| panic!("{authority}: {error}"));
+        build_model(kernel).unwrap_or_else(|error| panic!("{authority}: {error}"));
+    }
+}

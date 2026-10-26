@@ -732,10 +732,13 @@ fn walk_partial(
             Some(operation @ (PartialOperation::Head | PartialOperation::Pop)),
             Expr::Method { receiver, .. },
         ) => Some((operation, empty_failure(receiver))),
-        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => Some((
-            PartialOperation::At,
-            out_of_prefix_failure(receiver, &args[0]),
-        )),
+        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => {
+            let index = args.first().ok_or_else(|| PublicKernelError {
+                message: "method 'at' requires an index argument".to_owned(),
+                span: Some(span),
+            })?;
+            Some((PartialOperation::At, out_of_prefix_failure(receiver, index)))
+        }
         (Some(PartialOperation::Index), Expr::Index(collection, index))
             if matches!(
                 resolve(model, &infer_type(collection, env, model, None)?)?,
@@ -1742,6 +1745,56 @@ pub fn public_kernel_contract_for_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at_method_model(index: &str) -> (KernelSpec, KernelModel) {
+        let source = format!(
+            "spec EmptyAt {{ state {{ q: Seq<Int, 2>, n: Int }} \
+             init {{ q = Seq {{}} n = 0 }} \
+             action Touch() {{ n = q.at({index}) }} invariant Safe {{ true }} }}"
+        );
+        let kernel = crate::parse_direct_kernel_spec(&source).expect("parse at method");
+        let model = crate::build_model(kernel.clone()).expect("check still accepts this model");
+        (kernel, model)
+    }
+
+    #[test]
+    fn missing_at_index_returns_a_public_kernel_error_without_changing_check() {
+        let (kernel, model) = at_method_model("");
+        for version in [PublicKernelVersion::V1, PublicKernelVersion::V2] {
+            let error = public_kernel_contract_for_version(
+                &kernel,
+                &model,
+                "empty-at.fsl",
+                "kernel",
+                version,
+            )
+            .expect_err("missing at index must return PublicKernelError, not panic");
+            assert!(
+                error.message.contains("at")
+                    && (error.message.contains("index") || error.message.contains("argument")),
+                "{version:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_present_at_index_keeps_its_partial_operation_projection() {
+        let (kernel, model) = at_method_model("0");
+        for version in [PublicKernelVersion::V1, PublicKernelVersion::V2] {
+            let contract = public_kernel_contract_for_version(
+                &kernel,
+                &model,
+                "empty-at.fsl",
+                "kernel",
+                version,
+            )
+            .expect("a valid at call still projects");
+            let operation = &contract["actions"][0]["partial_operations"][0];
+            assert_eq!(operation["operation"], "at");
+            assert!(operation["failure_condition"].is_object(), "{operation}");
+            assert_eq!(operation["state_effect_on_failure"], "rollback");
+        }
+    }
     use crate::{build_model, parse_direct_kernel_spec};
 
     #[test]

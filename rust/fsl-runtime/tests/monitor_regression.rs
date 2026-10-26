@@ -10,6 +10,42 @@ fn model(source: impl AsRef<str>) -> fsl_core::KernelModel {
 }
 
 #[test]
+fn domain_empty_membership_is_an_initial_invariant_violation_in_monitor_and_bfs() {
+    let model = model(include_str!(
+        "../../fslc/tests/fixtures/domain_empty_membership.fsl"
+    ));
+    let monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize domain Monitor");
+    let expected = fsl_runtime::Violation {
+        kind: "invariant".to_owned(),
+        name: "Order_empty".to_owned(),
+        step: 0,
+    };
+    assert_eq!(
+        monitor
+            .current_violation()
+            .expect("check initial invariant"),
+        Some(expected.clone())
+    );
+    let explored = fsl_runtime::bfs(model, 2).expect("solver-free BFS");
+    assert_eq!(explored.violation, Some(expected));
+}
+
+#[test]
+fn domain_nonempty_membership_still_holds_in_monitor_and_bfs() {
+    let source = include_str!("../../fslc/tests/fixtures/domain_empty_membership.fsl")
+        .replace("status in []", "status in [Draft]");
+    let model = model(source);
+    let monitor = fsl_runtime::Monitor::new(model.clone()).expect("initialize domain Monitor");
+    assert_eq!(monitor.current_violation().expect("check invariant"), None);
+    assert_eq!(
+        fsl_runtime::bfs(model, 2)
+            .expect("solver-free BFS")
+            .violation,
+        None
+    );
+}
+
+#[test]
 fn monitor_enforces_guards_and_updates_state() {
     let model = model(
         "spec Counter { type Count = 0..2 state { count: Count } init { count = 0 } ".to_owned()
