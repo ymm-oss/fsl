@@ -39,8 +39,8 @@ the exact tests in `docs/design/DESIGN-requirements-stage.md`):
 | T20 | expectation: `expect (if o is some(z) then z else Red) == Red` with `o = none` |
 | T21 | reordered particle input: `claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits` |
 
-Against base `5a539bbe`, all 579 forms per tree under `specs/`, `examples/`
-and `rust/fslc/tests/fixtures/` in both modes still have a measured empty
+Historically, against base `5a539bbe`, all 579 forms per tree under `specs/`,
+`examples/` and `rust/fslc/tests/fixtures/` in both modes still have a measured empty
 ok-to-error transition set. Including the lint-rewritten test's 21 inline
 fixtures, both modes twice give 4,800 checks: the original T01–T16 removals produce
 21 mode/form transitions (T01–T03, T13, T16 in both modes; others only in
@@ -83,3 +83,20 @@ full-output/exit differences, repeat differences or excluded fields. Use Bool
 for `not` and numeric operands for unary minus, even in skipped expressions.
 See `DESIGN-requirements-stage.md`, Unary operand typing, for commands and
 the exact measured base/head identities.
+
+Current rebase sweep: BASE `23eb5e41326ef4cf81a100ad0e011e81ed9fd507`,
+HEAD `1e27d896b69b395ad8e48c570b4ddbca50e442a0`, built in their own trees.
+`BINARY check FORM` covers 594 corpus forms and 65 inline occurrences per tree
+in both modes twice (5,272 checks). The corpus ok-to-error set remains empty;
+the historical 51-inline subset retains all 44 recorded mode/form removals.
+Including every inline form from all five fixed test files additionally records
+acceptance `expect` / FSL 5 `then` predicates `c != 1`, `true and c != 1`,
+`not (c == 1)`, `if c != 1 then true else false` and
+`forall color: Color { color != 1 }` as **breaking removals** for enum `c: Color`:
+acceptance in both modes, scenario only in FSL 5 (15 additional mode/form
+transitions, 59 total). Repair comparisons with same-enum members. The two
+corresponding `c == 1` fixtures remain errors but change their diagnostic from
+`acceptance` to `semantics` at the expectation keyword, with exit 2 unchanged (three mode/form
+changes). These account for all 62 full-output differences, with no others,
+repeat differences or exclusions. S1 calibration passed BASE and rejected HEAD
+twice. See the design note for inventory commands and full measurement scope.

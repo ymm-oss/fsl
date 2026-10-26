@@ -867,8 +867,8 @@ the authored `expect`/`then` keyword. This is a post-state predicate, not an
 invariant; a well-typed false expectation still reports `kind: "acceptance"`.
 The readable `expect E id in Stage` and forbidden's `expect rejected` are unchanged.
 
-Compatibility measurement (#1439): against base `5a539bbe`, all 579 forms per
-tree under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` were checked in
+Historical compatibility measurement (#1439): against base `5a539bbe`, all 579
+forms per tree under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` were checked in
 both gate modes, with no ok-to-error transition. See the
 [design note](../../../docs/design/DESIGN-requirements-stage.md#measured-compatibility)
 for the command and measured production identity.
@@ -952,6 +952,25 @@ for commands and exact identities.
 
 Repair `not` to use a Bool operand and unary minus to use a numeric operand;
 skipping evaluation cannot legalize an ill-typed operand.
+
+Current rebase measurement (#1439): BASE
+`23eb5e41326ef4cf81a100ad0e011e81ed9fd507`, HEAD
+`1e27d896b69b395ad8e48c570b4ddbca50e442a0`, each built in its own tree.
+`BINARY check FORM` covers 594 corpus forms plus 65 inline occurrences per tree,
+both modes twice (5,272 checks), with an empty corpus ok-to-error set. Earlier
+counts above are historical. The historical 51-inline subset retains its 44
+mode/form removals. Complete coverage of all five fixed test files additionally
+records acceptance `expect` / FSL 5 `then` predicates `c != 1`,
+`true and c != 1`, `not (c == 1)`, `if c != 1 then true else false` and
+`forall color: Color { color != 1 }` as **breaking removals** for enum `c: Color`.
+Acceptance forms transition in both modes, scenarios only in FSL 5: 15 additional
+mode/form removals, 59 total. Use a same-enum member instead of the integer.
+The corresponding `c == 1` fixtures remain errors but change their diagnostic from
+`acceptance` to `semantics` at the expectation keyword (three mode/form changes,
+exit 2 unchanged). These account for all 62 full-output differences; there are no others,
+repeat differences or exclusions. See the
+[current design measurement](../../../docs/design/DESIGN-requirements-stage.md#rebase-compatibility-measurement-on-23eb5e41)
+for inventory commands and the twice-calibrated S1 detector.
 
 Repair the comparisons using members of the same enum, including unselected
 branches. A guard refusal does not legitimize an ill-typed argument expression.

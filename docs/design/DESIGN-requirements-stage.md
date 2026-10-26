@@ -59,19 +59,15 @@ equality semantics are not broadened.
 
 ### Measured compatibility
 
-The following measurement is for the expectation-only fix; the trace-step
-extension has its own measurement below.
+The following historical measurement is for the expectation-only fix; the
+trace-step extension has its own measurement below. The final implementation's
+current commit-to-commit evidence is in the rebase measurement at the end of
+this note.
 
 BASE was materialized with `git archive` at
-`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`. HEAD is the commit introducing
-this note. The measured production patch has SHA-256
-`a1452e647639f8ce471470df759c48915e779ec17b9c3e4dcef2c778a0d82686`.
-This identifies the production change in `rust/fsl-core/src/dialect.rs`;
-test-only revisions do not change that measured implementation.
-The BASE binary SHA-256 was
-`d4f8ada816cc6367d318cd35732d6a08a27b617f11ade6c803555ced0a333124`;
-the measured HEAD binary SHA-256 was
-`9a29d76a277275a7a2376808bee9e525fc1f0fc14b16fba2eccdf499eb408c53`.
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`. The expectation-only intermediate
+implementation was measured before commit; it is not the final HEAD identified
+by the current rebase measurement below.
 
 Inventory command: `rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
 In each tree's own directory its binary ran `check FORM` on all 579 forms,
@@ -120,13 +116,10 @@ evidence format changes.
 
 ### Extension compatibility measurement and breaking removals
 
-BASE is `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` in its materialized archive.
-HEAD is the commit introducing this extension, measured before commit on that
-same base plus the complete dialect.rs production patch SHA-256
-`aab6e87cae34da2a9a11e2161698164ee5fda4caa8ce4a5abd8c9702eb28273e`.
-The BASE binary remains the coordinator-built binary identified above; HEAD
-binary SHA-256 is
-`6d57532041b90403815f2e6f40f34fcb0dd85900853221cb56dbfaf889e8a26d`.
+This historical extension measurement used BASE
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` in its materialized archive and the
+pre-commit extension implementation. The current rebase measurement below
+identifies the final BASE/HEAD commits and repeats these controls.
 
 Inventory: `rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'` in
 each tree. Each binary ran `check FORM` from its own tree with relative paths,
@@ -176,13 +169,11 @@ branches; do not substitute numeric ordinals or weaken the forbidden guard.
 
 ### Extension round 1 supplemental inline measurement
 
-No production changes accompany this supplement. Against BASE
-`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`, the unchanged HEAD implementation
-has the production-patch identity above. The explicitly rebuilt HEAD binary
-has SHA-256
-`5f1f55ea8e30eee1abb0666a5ebe38c66c96f0244e933fc0e899763440df1733`;
-the BASE binary identity is unchanged. Each binary ran `check FORM` in its own
-tree, both with the FSL 5 gate removed and enabled, twice under one lock.
+No production changes accompanied this historical supplement. Against BASE
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`, the unchanged pre-commit extension
+implementation was rebuilt. Each binary ran `check FORM` in its own tree, both
+with the FSL 5 gate removed and enabled, twice under one lock. The current rebase
+measurement below repeats this entire supplemental inventory.
 
 The supplement includes every source occurrence of both rewritten diagnostic
 tests: seven native/shared cases and six Worker cases (including all four
@@ -242,23 +233,14 @@ method receivers and arity are outside this fix (follow-ups #1458 and #1459).
 
 ### Unary compatibility measurement and breaking removals
 
-BASE is `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`, materialized under
-`.claude/work/base-tree`. HEAD is that same commit plus the uncommitted final
-implementation measured for this note, not a claimed new commit or remote main.
-The combined production diff for `dialect.rs` and `typecheck.rs` has SHA-256
-`9b04a4ca9e9ea9ba4dfe8c880d81b9ff4a028020c96be921779a3e6416e07d43`;
-the isolated unary patch has SHA-256
-`8e6d6c9e64d9368964786cba8af4b7447269e0d4d92a9582ae1b9db18614064c`.
-The approved BASE executable is the coordinator-built binary identified above,
-SHA-256 `d4f8ada816cc6367d318cd35732d6a08a27b617f11ade6c803555ced0a333124`.
-The final workspace build produced HEAD `rust/target/debug/fslc`, SHA-256
-`ed375b54aea571629ab3cd3f1e7d0e07c4a5b8b6aac034c3d871eff4908eb3fd`.
+This historical unary measurement used materialized BASE
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and the uncommitted final
+implementation, not a claimed remote main. The current rebase measurement
+below supersedes its provenance and counts for the final committed implementation.
 
 Inventory in each tree:
 `rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
-The fresh sweep command is
-`./scripts/cx-log d1439-tc-v4-sweep -- python3 .claude/work/typecheck-sweep-1439.py`.
-For every form, each binary runs from its own materialized tree using
+For every form, each binary ran from its own materialized tree using
 `lockf -k HEAVY_LOCK BINARY check FORM` (the configured advisory heavy-work lock);
 the lock covers **one invocation**, not the sweep. `FSLC_UNSTABLE` is explicitly
 removed and then set to `fsl5`, with two complete repeats in each mode/tree.
@@ -299,3 +281,54 @@ remain accepted in both binaries/modes. Isolating only the unary patch's revert
 produces exactly seven original false-green detector failures and three passing
 preservation controls; exact restore makes all ten tests pass again. No required
 test is rewritten, renamed, removed or stopped in this unary phase.
+
+### Rebase compatibility measurement on 23eb5e41
+
+The final implementation was remeasured with BASE
+`23eb5e41326ef4cf81a100ad0e011e81ed9fd507` and HEAD
+`1e27d896b69b395ad8e48c570b4ddbca50e442a0`. BASE was materialized with
+`git archive` and compiled into a fresh target in that tree, without copying a
+target directory. Verbose build output confirms `fsl-syntax`, `fsl-core` and
+`fslc-rust` compiled from those BASE paths. HEAD used its own workspace build;
+both builds used rustc 1.98.0. No mutation was active.
+
+Inventory command in each tree:
+`rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
+Each tree contains **594 corpus forms**. Each binary ran `BINARY check FORM`
+from its own tree, with `FSLC_UNSTABLE` removed and then set to `fsl5`, twice.
+One acquisition of the lane and heavy-work advisory locks covered the entire
+sweep; each binary invocation also waited for the one-minute load to be below 9.
+The S1 forbidden-final detector was calibrated twice: BASE returned `ok` / 0,
+HEAD returned `error` / `semantics` / 2.
+
+All inline forms of the five fixed #1439 test files were included: six acceptance,
+eight nested-expectation, two binding/particle, 21 step-argument and ten unary
+occurrences. The 18 additional historical diagnostic/oracle/scope controls were
+retained: **65 inline occurrences, 659 total forms per tree, 5,272 checks**, plus
+four calibration invocations. Every stdout byte, parsed JSON value, stderr and
+exit was compared in full. There are no exclusions or repeat differences.
+
+The corpus ok-to-error transition set is **empty**, with no other corpus output
+changes. The historical 51-inline subset retains exactly its recorded **44**
+mode/form removals, T01–T21 and U01–U07. The expanded inventory adds the following
+previously omitted acceptance/nested occurrences, not a new implementation change:
+
+| Removal | Predicate in acceptance `expect` / FSL 5 scenario `then` |
+|---|---|
+| E01 | `c != 1` |
+| E02 | `true and c != 1` |
+| E03 | `not (c == 1)` |
+| E04 | `if c != 1 then true else false` |
+| E05 | `forall color: Color { color != 1 }` |
+
+Each row denotes two inline fixtures, one per spelling. With `c: Color`, these
+are **breaking removals**: `ok` / 0 → `error` / `semantics` / 2. Acceptance forms
+transition in both modes; scenario forms transition only with FSL 5 enabled:
+**15 additional mode/form removals, 59 total**. Repair each integer comparison
+to use a member of the same enum, including inside nested expressions.
+
+The two additional `c == 1` fixtures do not change acceptance status: in those
+same three mode/form combinations, they change `error` / `acceptance` / 2 to
+`error` / `semantics` / 2 at the expectation keyword, rather than reporting a
+false post-state predicate. These **three diagnostic changes** account for all
+remaining differences: **62 full-output differences in total, no others**.

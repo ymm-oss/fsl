@@ -2586,6 +2586,24 @@ verify {
   `not` は Bool オペランド、単項マイナスは数値オペランドを使うよう修正してください。
   評価が省略されても、型不整合のオペランドは合法になりません。
 
+  現在の rebase 測定 (#1439): BASE
+  `23eb5e41326ef4cf81a100ad0e011e81ed9fd507`、HEAD
+  `1e27d896b69b395ad8e48c570b4ddbca50e442a0` を各自の tree でビルドしました。
+  `BINARY check FORM` で各 tree の全 corpus 594 形式と inline 65 件を両モード
+  各 2 回検査しました (5,272 checks)。corpus の ok→error 集合は空です。
+  上述の以前の件数は履歴です。今回は固定テスト 5 ファイルをすべて含み、既存の
+  mode/form 削除 44 件に加え、acceptance の `expect` と FSL 5 の `then` で
+  `c != 1`、`true and c != 1`、`not (c == 1)`、
+  `if c != 1 then true else false`、`forall color: Color { color != 1 }` を拒否します。
+  enum `c: Color` に対する**破壊的な受理の削除**で、acceptance は両モード、
+  scenario は FSL 5 のみで遷移します (追加 15 件、計 59 件)。整数の代わりに同じ
+  enum のメンバーを使ってください。対応する `c == 1` fixture は期待キーワードで
+  エラーのまま、診断が `acceptance` から `semantics` へ変わります
+  (mode/form 3 件、exit 2 は不変)。全出力の差 62 件はこれですべてであり、
+  それ以外の差、反復差、除外はありません。inventory コマンドと calibration は
+  [現在の設計測定](../design/DESIGN-requirements-stage.md#rebase-compatibility-measurement-on-23eb5e41)
+  を参照してください。
+
   未選択の分岐も含め、同じ enum のメンバーを使う比較に修正してください。
   guard の拒否が、型不整合の引数を正当化することはありません。
 - カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの

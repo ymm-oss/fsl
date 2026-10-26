@@ -2701,6 +2701,24 @@ verify {
   Repair `not` to use a Bool operand and unary minus to use a numeric operand;
   skipping evaluation does not make an ill-typed operand legal.
 
+  Current rebase measurement (#1439): BASE
+  `23eb5e41326ef4cf81a100ad0e011e81ed9fd507`, HEAD
+  `1e27d896b69b395ad8e48c570b4ddbca50e442a0`, each built in its own tree.
+  `BINARY check FORM` covered all 594 corpus forms and 65 inline occurrences per
+  tree in both modes twice (5,272 checks); the corpus ok-to-error set is empty.
+  The earlier counts above are historical. All five fixed test files are now
+  covered: in addition to the 44 recorded mode/form removals, acceptance `expect`
+  and FSL 5 `then` reject `c != 1`, `true and c != 1`, `not (c == 1)`,
+  `if c != 1 then true else false` and `forall color: Color { color != 1 }`.
+  These are **breaking removals** for enum `c: Color`: acceptance in both modes,
+  scenario only in FSL 5, adding 15 transitions (59 total). Use a same-enum member
+  instead of the integer. The corresponding `c == 1` fixtures remain errors but
+  change their diagnostic from `acceptance` to `semantics` at the expectation
+  keyword (three mode/form changes, exit 2 unchanged). All 62 full-output differences are thus
+  accounted for; there are no others, repeat differences or exclusions. See the
+  [current design measurement](../design/DESIGN-requirements-stage.md#rebase-compatibility-measurement-on-23eb5e41)
+  for inventory commands and calibration.
+
   Repair these comparisons using members of the same enum, including in
   unselected branches; a guard refusal cannot legitimize an ill-typed argument.
 - Use the kernel-wrapper form only for hard cases: multi-entity requirements,
