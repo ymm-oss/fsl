@@ -760,3 +760,39 @@ fn preservation_unused_ambient_state_keeps_downstream_diagnostic_name() {
         );
     }
 }
+
+#[test]
+fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
+    let part = "spec V {\n  state { flag: Bool }\n  init { flag = false }\n  action go(v: Bool) { flag = v }\n}\n";
+    let source = "compose S {\n  use V as b from \"bv.fsl\"\n  internal b.go\n  action s() = b.go(t) { let t = true }\n  invariant NotFlag { not b.flag }\n}\n";
+    let dir = scratch(
+        "issue-1442-sync-argument-scope",
+        &[("bv.fsl", part), ("s.fsl", source)],
+    );
+    // The base binary accepted this input (exit 0); this branch rejects it.
+    let rejected = check(&dir, "s.fsl");
+    assert_eq!(rejected.1, 2, "{}", rejected.0);
+    assert_eq!(rejected.0["result"], "error");
+    assert_eq!(rejected.0["kind"], "semantics");
+    assert_eq!(
+        rejected.0["message"],
+        "invalid model expression: public Kernel cannot type identifier 't' at 4:24"
+    );
+    assert_eq!(rejected.0["loc"], json!({"line": 4, "column": 24}));
+
+    for (name, declarations, params) in [
+        ("param", "", "h: Bool"),
+        ("state", "state { h: Bool } init { h = true }", ""),
+    ] {
+        let source = format!(
+            "compose S {{\n  use V as b from \"bv.fsl\"\n  internal b.go\n  {declarations}\n  action s({params}) = b.go(h) {{ let t = true }}\n  invariant NotFlag {{ not b.flag }}\n}}\n"
+        );
+        let dir = scratch(
+            &format!("issue-1442-sync-argument-{name}"),
+            &[("bv.fsl", part), ("s.fsl", &source)],
+        );
+        let accepted = check(&dir, "s.fsl");
+        assert_eq!(accepted.1, 0, "{name}: {}", accepted.0);
+        assert_eq!(accepted.0["result"], "ok", "{name}: {}", accepted.0);
+    }
+}
