@@ -28,6 +28,9 @@ struct Case {
     enumeration: bool,
     expected: bool,
     partial: bool,
+    parameters: &'static str,
+    upper: u8,
+    failure_stage: &'static str,
 }
 
 impl Case {
@@ -43,6 +46,9 @@ impl Case {
             enumeration: false,
             expected: true,
             partial: false,
+            parameters: "",
+            upper: 1,
+            failure_stage: "",
         }
     }
 
@@ -55,15 +61,11 @@ impl Case {
         let declaration = if self.enumeration {
             "enum K { One, Other }"
         } else {
-            "type K = 0..1"
+            &format!("type K = 0..{}", self.upper)
         };
         let literal = format!("{} {{ {} }}", self.kind, self.values);
         let mut init = format!("xs = {literal} flag = false done = false");
-        let parameter = if self.setup.contains("requires p ==") {
-            "p: K"
-        } else {
-            ""
-        };
+        let parameter = self.parameters;
         let mut action = format!(
             "action go({parameter}) {{ {} flag = {} done = true }}",
             self.setup, self.expression
@@ -109,7 +111,9 @@ impl Case {
         let source = format!(
             "spec Collection {{\n {declaration}\n state {{ xs: {ty}, flag: Bool, done: Bool }}\n init {{ {init} }}\n {action}\n invariant Domain {{ xs == {literal} }}\n {property}\n}}\n"
         );
-        if self.name.starts_with("order-enum/") {
+        if !self.failure_stage.is_empty() {
+            source.replace("ZERO", if negative { "0" } else { "1" })
+        } else if self.name.starts_with("order-enum/") {
             source.replace("One", "Z").replace("Other", "A")
         } else {
             source
@@ -299,6 +303,7 @@ fn cases() -> Vec<Case> {
                     expression(op, &domain, false),
                 );
                 case.setup = if origin == "argument-derived" {
+                    case.parameters = "p: K";
                     "requires p == 1".into()
                 } else {
                     format!("let ys = {kind} {{ 1 }}")
@@ -372,11 +377,86 @@ fn cases() -> Vec<Case> {
             "exists z in Set { p, 1 } { z == 1 or 1 / z == 1 }",
             true,
         ),
+        (
+            "dynamic-set/swap-p0",
+            "requires p == 0",
+            "exists z in Set { 1, p } { z == 1 or 1 / z == 1 }",
+            true,
+        ),
     ] {
         let mut case = Case::new(name.into(), "Set", expr.into());
         case.setup = setup.into();
+        case.parameters = "p: K";
         case.partial = partial;
         cases.push(case);
+    }
+    for (pattern, values) in [("reverse", "2, 1, 0"), ("nonadjacent-duplicate", "2, 1, 2")] {
+        let domain = format!("Set {{ {values} }}");
+        for op in ["exists", "count", "sum", "unique", "exactlyOne"] {
+            let expr = match op {
+                "exists" if pattern == "reverse" => {
+                    format!("exists z in {domain} {{ z == 2 or 1 / z == 1 }}")
+                }
+                "exists" => format!("exists z in {domain} {{ z == 2 }}"),
+                "count" => format!("count(z in {domain} where z == 2) == 1"),
+                "sum" => format!("sum(z in {domain} of z) == 3"),
+                _ => format!("{op}(z in {domain} where z == 2)"),
+            };
+            let mut case = Case::new(format!("three-items/{pattern}/{op}"), "Set", expr);
+            case.upper = 2;
+            // A finite-typed element makes count/sum's domain finite without
+            // changing the literal's order or duplicate pattern.
+            if ["count", "sum"].contains(&op) {
+                case.parameters = "p: K";
+                case.setup = "requires p == 2".into();
+                case.expression = case.expression.replacen("2, 1,", "p, 1,", 1);
+            }
+            case.partial = op == "exists" && pattern == "reverse";
+            cases.push(case);
+        }
+    }
+    let mut case = Case::new(
+        "three-items/dynamic-swap/exists".into(),
+        "Set",
+        "exists z in Set { p, 1, q } { z == 2 or 1 / z == 1 }".into(),
+    );
+    case.upper = 2;
+    case.parameters = "p: K, q: K";
+    case.setup = "requires p == 2 requires q == 0".into();
+    case.partial = true;
+    cases.push(case);
+    for site in ["init-statement", "statement"] {
+        for kind in KINDS {
+            for stage in [
+                "source",
+                "where",
+                "body",
+                "source-where",
+                "source-body",
+                "where-body",
+                "source-where-body",
+            ] {
+                let element = if stage.contains("source") {
+                    "1 / ZERO"
+                } else {
+                    "ZERO"
+                };
+                let mut case = Case::new(
+                    format!("failure-stage/{site}/{kind}/{stage}"),
+                    kind,
+                    format!("{kind} {{ {element} }}"),
+                );
+                case.site = site;
+                case.failure_stage = stage;
+                if stage.contains("where") {
+                    case.expression.push_str(" where 1 / ZERO == 1");
+                }
+                if stage.contains("body") {
+                    case.body = "\n if 1 / ZERO == 1 {}\n".into();
+                }
+                cases.push(case);
+            }
+        }
     }
     cases
 }
@@ -422,6 +502,53 @@ fn diagnostic(status: i32, report: &Value) -> String {
     )
 }
 
+fn init_failure_evidence(case: &Case, observations: &[(&str, (i32, Value)); 3]) -> Vec<String> {
+    let mut failures = Vec::new();
+    let (oracle_status, oracle) = &observations[2].1;
+    let source = case.source(true);
+    // Init errors have no loc/trace. The symbolic diagnostic appends the
+    // enclosing failure-site statement's position; explicit omits it. This
+    // is the only normalization (r2 lane decision), with a live suffix check.
+    let marker = if case.failure_stage == "body" {
+        "if 1 /"
+    } else {
+        "forall z in"
+    };
+    let offset = source
+        .find(marker)
+        .expect("generated failure-site statement");
+    let prefix = &source[..offset];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix.rsplit('\n').next().expect("line prefix").len() + 1;
+    for (engine, (status, report)) in observations {
+        let expected_message = if *engine == "explicit" {
+            oracle["message"]
+                .as_str()
+                .expect("explicit init error message")
+                .to_owned()
+        } else {
+            format!(
+                "{} in init at {line}:{column}",
+                oracle["message"]
+                    .as_str()
+                    .expect("explicit init error message")
+            )
+        };
+        let mut normalized = report.clone();
+        normalized["message"] = oracle["message"].clone();
+        if *oracle_status != 2
+            || oracle["result"] != "error"
+            || oracle["kind"] != "semantics"
+            || *status != *oracle_status
+            || report["message"] != expected_message
+            || normalized != *oracle
+        {
+            failures.push(format!("{} {engine}: expected exit 2 and explicit error envelope with message {expected_message:?}; produced exit {status} {report}", case.name));
+        }
+    }
+    failures
+}
+
 fn exercise(case: &Case, negative: bool) -> Vec<String> {
     let mut failures = Vec::new();
     let path = fixture(&case.source(negative));
@@ -433,8 +560,33 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
             diagnostic(checked.0, &checked.1)
         ));
     }
-    let mut partial_evidence = None;
     let observations = ["bmc", "induction", "explicit"].map(|engine| (engine, run(&path, engine)));
+    if negative && case.site == "init-statement" && !case.failure_stage.is_empty() {
+        failures.extend(init_failure_evidence(case, &observations));
+        return failures;
+    }
+    let partial = case.partial || (negative && !case.failure_stage.is_empty());
+    let oracle = &observations[2].1.1;
+    if case.site != "init-state" && (negative || partial) {
+        for (engine, (_, report)) in &observations {
+            for key in ["loc", "trace"] {
+                // Every generated action has fixed arguments and reaches the
+                // violation in at most one step, including no-op/init cases.
+                let produced = &report[key];
+                let expected = &oracle[key];
+                let missing_trace = key == "trace"
+                    && (produced.as_array().is_none_or(Vec::is_empty)
+                        || expected.as_array().is_none_or(Vec::is_empty));
+                if produced.is_null() || expected.is_null() || missing_trace || produced != expected
+                {
+                    failures.push(format!(
+                        "{} negative={negative} {engine}: expected explicit {key}={expected}; produced {produced}",
+                        case.name
+                    ));
+                }
+            }
+        }
+    }
     let refusal = (
         observations[2].1.1["kind"].clone(),
         observations[2].1.1["message"].clone(),
@@ -454,20 +606,16 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
             }
             continue;
         }
-        let expected = if negative || case.partial {
+        let expected = if negative || partial {
             "violated"
         } else if engine == "bmc" {
             "verified"
         } else {
             "proved"
         };
-        let expected_status = i32::from(negative || case.partial);
-        let expected_name = if case.partial {
-            "_partial_go"
-        } else {
-            "Capture"
-        };
-        let expected_kind = if case.partial {
+        let expected_status = i32::from(negative || partial);
+        let expected_name = if partial { "_partial_go" } else { "Capture" };
+        let expected_kind = if partial {
             "partial_op"
         } else if case.site == "trans" {
             "trans"
@@ -476,29 +624,11 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
         };
         let valid = status == expected_status
             && report["result"] == expected
-            && (!(negative || case.partial)
+            && (!(negative || partial)
                 || (report["invariant"] == expected_name
                     && report["violation_kind"] == expected_kind));
         if !valid {
             failures.push(format!("{} negative={negative} {engine}: expected {expected_status} {expected} {expected_kind}/{expected_name}; produced {}", case.name, diagnostic(status, &report)));
-        }
-        if case.partial && report["result"] == "violated" {
-            // The comparison scope is the entire location and replay trace,
-            // not a projection/shape of selected state or action fields.
-            let evidence = (report["loc"].clone(), report["trace"].clone());
-            if evidence.0.is_null() || evidence.1.as_array().is_none_or(Vec::is_empty) {
-                failures.push(format!(
-                    "{} {engine}: missing partial location/trace",
-                    case.name
-                ));
-            }
-            if let Some(previous) = &partial_evidence {
-                if previous != &evidence {
-                    failures.push(format!("{} {engine}: partial location/trace mismatch: {previous:?} != {evidence:?}", case.name));
-                }
-            } else {
-                partial_evidence = Some(evidence);
-            }
         }
     }
     failures
@@ -508,7 +638,8 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
 fn generated_collection_binder_matrix() {
     let started = Instant::now();
     let inventory = cases();
-    assert_eq!(inventory.len(), 287, "do not lose matrix cells");
+    assert_eq!(inventory.len(), 327, "do not lose matrix cells");
+    let total = inventory.len();
     assert_eq!(
         inventory
             .iter()
@@ -535,7 +666,7 @@ fn generated_collection_binder_matrix() {
         "MATRIX elapsed={:?} red={} preserved={}",
         started.elapsed(),
         red.len(),
-        287 - red.len()
+        total - red.len()
     );
     assert!(
         started.elapsed().as_secs() < 180,
