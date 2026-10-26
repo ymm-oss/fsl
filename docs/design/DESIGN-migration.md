@@ -94,6 +94,9 @@ Rust planner.
 
 1. Run `fslc lint PATH... --edition next` and resolve every refusal.
 2. Review `fslc migrate PATH... --edition next` machine edits.
+   The cancellation requirements example applies the four safe local action
+   correspondences in its single `implements` block, preserving its checked
+   Kernel, typed requirement metadata, history flag and conservation counters.
 3. Run the same command with `--write`.
 4. Require `fslc migrate PATH... --edition next` to report zero changes,
    `fslc fmt PATH... --check --edition next` to exit 0, and the project check /

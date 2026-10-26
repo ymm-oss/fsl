@@ -538,10 +538,7 @@ fn claim_digest_changes_when_a_referenced_enum_member_changes() {
 fn claim_digest_changes_when_fairness_is_removed() {
     let (source, root) = cancel_system();
     let before = project(&source, "cancel_system.fsl", &root);
-    let after = mutated_cancel_system(
-        "fair action accept(c: Sub) maps accept_offer(c)",
-        "action accept(c: Sub) maps accept_offer(c)",
-    );
+    let after = mutated_cancel_system("fair action accept(c: Sub) {", "action accept(c: Sub) {");
     assert_only_target_changed(
         &before,
         &after,
