@@ -71,8 +71,8 @@ pub(crate) fn required_option_value(
 ///
 /// Every usage line in `cli-contract.json` lists options before positionals,
 /// and the frozen Python CLI (argparse) accepts either order, so a native
-/// command must too. The command's own `match` arms stay the only owner of
-/// each option's arity: a value-taking arm pulls its value with
+/// command must too. After central contract validation, the command's own
+/// `match` arms interpret each option: a value-taking arm pulls its value with
 /// `Iterator::next` (`--depth 3` never turns `3` into a positional, and
 /// `--depth` with nothing after it stays `--depth requires a value`). Every
 /// token the arms do not recognise goes through [`CommandArgs::positional`] —
@@ -605,25 +605,6 @@ impl MutationFamilyOptions {
                         &required_option_value(&mut args, "--names")?,
                     )?);
                 }
-                // Issues #1237/#1341: mutation options belong to `mutate`
-                // alone; the other two commands sharing this loop reject it
-                // instead of silently accepting a flag that cannot apply.
-                "--fail-on-survivors"
-                | "--min-kill-rate"
-                | "--max-mutants"
-                | "--by-requirement"
-                | "--oracle-attribution"
-                | "--from"
-                    if command != "mutate" =>
-                {
-                    return Err(format!("unknown {command} option '{option}'"));
-                }
-                "--depth" | "--readable" if command == "typestate" => {
-                    return Err(format!("unknown {command} option '{option}'"));
-                }
-                "--ts" if command == "explain" => {
-                    return Err(format!("unknown {command} option '{option}'"));
-                }
                 "--fail-on-survivors" => fail_on_survivors = true,
                 "--min-kill-rate" => {
                     let rate = args
@@ -735,9 +716,6 @@ impl ReportOptions {
                     target = args
                         .next()
                         .ok_or_else(|| "--target requires a value".to_owned())?;
-                }
-                "--engine" if command == "testgen" => {
-                    return Err(format!("unknown {command} option '{option}'"));
                 }
                 "--engine" => {
                     engine = args

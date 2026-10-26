@@ -25,6 +25,7 @@ use serde_json::{Map, Value, json};
 
 mod approval;
 mod causal;
+mod cli_contract;
 mod cli_options;
 mod cli_output;
 mod code_audit;
@@ -152,6 +153,15 @@ fn main() {
 fn run() {
     if print_cli_metadata() {
         return;
+    }
+    let argv = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Err(message) = cli_contract::validate_argv(CLI_CONTRACT, &argv, *parse_options()) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&error_output("usage", &message))
+                .expect("serialize CLI argument error")
+        );
+        std::process::exit(2);
     }
     if let Some((output, status)) = fmt_command() {
         match output {
@@ -2705,9 +2715,6 @@ fn db_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
                         deadlock = args
                             .next()
                             .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--deadlock must be warn, error, or ignore".to_owned());
-                        }
                     }
                     "--engine" => {
                         engine = args
