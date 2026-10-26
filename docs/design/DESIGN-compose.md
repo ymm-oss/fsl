@@ -53,11 +53,12 @@ compose OrderSystem {
     assignments written with physical names such as `alias__x`, at the assignment's
     location; those spellings previously passed `check`. This removal changes
     acceptance only for physical-name component-state assignments in sync additions.
-    The base `5a539bbe` and head `a7dbe0e2` binaries, each in its own materialized
-    tree, ran `fslc check` on all 579 `.fsl` files under `specs/`, `examples/`, and
-    `rust/fslc/tests/fixtures/`. The sweep's recorded exit codes, results, and
-    messages agree for every file: **zero ok-to-error transitions** (this write
-    form does not occur in that corpus). No pre-existing required tests were
+    Before/after binaries, each in its own materialized tree, ran `fslc check`
+    on all 579 `.fsl` files under `specs/`, `examples/`, and
+    `rust/fslc/tests/fixtures/`. Recorded exit codes, results, and the first
+    160 characters of each message agree for every file. There were
+    **zero ok-to-error transitions** (this write form does not occur in that
+    corpus). No pre-existing required tests were
     rewritten, renamed, deleted, or stopped; only new regression tests were added.
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state

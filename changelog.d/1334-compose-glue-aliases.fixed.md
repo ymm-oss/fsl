@@ -9,6 +9,9 @@ overlap with the component's own init is rejected by the existing duplicate
 initialization check, never resolved by picking one assignment. Component
 invariants continue to check glue writes. Alias resolution
 respects parameters, model-normalized guard bindings, quantifiers, aggregates,
-patterns, and temporal binders. Guards see preceding bindings; body statements
+logical/guard pattern continuations, and temporal binders. A pattern payload is
+visible on the right of `and` or `=>`, and a `requires` also exposes it to later
+guards and the normalized body/ensures; neither statement nor expression `if`
+introduces it into a branch. Guards see preceding bindings; body statements
 and ensures see the final guard scope regardless of their source position, so a
 local binding named like an alias keeps its referent.
