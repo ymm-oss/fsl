@@ -728,7 +728,14 @@ variable capture instead of inventing internal binder names. See
   its <code>ensures</code>, or a partial operation in an abstract post-state check
   (<code>Seq</code> operations; <code>/</code> <code>%</code> are total there), is <code>kind: "abs_step_violation"</code>.</li>
 <li>Comparison: <code>== != &lt; &lt;= &gt; &gt;=</code></li>
-<li>Logical: <code>and or not =&gt;</code></li>
+<li>Logical: <code>and or not =&gt;</code>
+  The shared model-expression checker requires a <code>Bool</code> operand for <code>not</code> and
+  an <code>Int</code>-compatible operand for unary <code>-</code> (including named numeric ranges).
+  This applies in traces and every model expression, even in unselected
+  branches and short-circuited <code>and</code> / <code>or</code>. <code>not 1</code> and <code>-Red</code> for enum member
+  <code>Red</code> are check-time <code>kind: "semantics"</code> errors (exit 2), not truthiness or
+  enum-to-integer conversions. Well-typed <code>not (c == Red)</code>, <code>-(-1)</code> and numeric
+  <code>- n</code> remain valid.</li>
 <li>Conditional: <code>if condition then when_true else when_false</code>. The condition is
   <code>Bool</code>; both branches are checked and must have the same logical type. It is
   available anywhere an expression is accepted, including guards, assignments,
@@ -2646,28 +2653,237 @@ verify {
   <code>wrong_kind_argument</code> object (<code>parameter</code>, <code>value</code>, <code>type</code>), a top-level
   <code>message</code> explaining which argument does not belong to the parameter's type
   and that no guard was evaluated, a hint, and a <code>loc</code> at that step.</li>
-<li>Use the kernel-wrapper form only for hard cases: multi-entity requirements,
+</ul>
+<p>Before replay, <code>expect &lt;expr&gt;</code> (and FSL 5 scenario <code>then &lt;expr&gt;</code>) is checked
+  recursively with expected type <code>Bool</code>, just like an invariant, including all
+  operands and conditional branches. A wrong-kind comparison such as <code>c != 1</code>
+  or <code>c == 1</code> for enum state <code>c: Color</code> is a check-time <code>kind: "semantics"</code>
+  error (exit 2), with the existing assignability message and a location at the
+  authored <code>expect</code>/<code>then</code> keyword. <code>c == Blue</code> is well-typed when <code>Blue</code> belongs
+  to <code>Color</code>. The expression remains a post-state predicate: it need not hold
+  initially or between steps. A well-typed false predicate still fails replay
+  with <code>kind: "acceptance"</code>; the readable stage form is unchanged.
+  Compatibility measurement (#1439): against base <code>5a539bbe</code>, all 579 forms
+  per tree under <code>specs/</code>, <code>examples/</code> and <code>rust/fslc/tests/fixtures/</code> were
+  checked in both gate modes, with no ok-to-error transition. See the
+  <a href="../design/DESIGN-requirements-stage.md#measured-compatibility">design note</a>
+  for the command and measured production identity.
+  Every acceptance and forbidden step argument is also checked recursively
+  against the lowered model before replay, including setup/final steps,
+  FSL 5 calls, phrase <code>with</code> and particle inputs, hybrid inputs and relation-role
+  values. All branches are checked even when unselected. This validates the
+  expression internally, without forcing its outer type to the parameter type.
+  An internal mismatch is <code>kind: "semantics"</code>, exit 2, with the existing
+  assignability message at the first authored token of the step: the action
+  name for calls, the actor for actor-first phrases, or the first token of a
+  reordered particle phrase (for example <code>claim1</code>, not the later actor).
+  Internally consistent <code>paint(1)</code> and <code>paint(if true then 1 else 2)</code> keep the
+  existing forbidden <code>wrong_kind_argument</code> diagnostic; values-scope-only skips
+  are unchanged.</p>
+<p>Extension measurement against base <code>5a539bbe</code>: 579 corpus forms plus all 21
+  inline fixtures of the lint-rewritten trace-step test per tree, both modes
+  twice (4,800 checks). Corpus transitions are empty; inline forms T01–T16 below
+  are <strong>breaking removals</strong> (<code>ok</code> / 0 → <code>error</code> / <code>semantics</code> / 2), with
+  21 mode/form transitions and no other full-output/exit or repeat changes.
+  T01–T03, T13 and T16 transition in both modes; the others only in FSL 5.
+  Each row identifies the corresponding measured removal in the
+  <a href="../design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals">extension design note</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Removal</th>
+<th>Ill-typed trace form now rejected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T01</td>
+<td>acceptance Color argument with condition <code>c != 1</code></td>
+</tr>
+<tr>
+<td>T02</td>
+<td>forbidden setup Color argument with condition <code>c != 1</code></td>
+</tr>
+<tr>
+<td>T03</td>
+<td>forbidden final S1: <code>paint(if c != 1 then Red else Blue)</code></td>
+</tr>
+<tr>
+<td>T04</td>
+<td>FSL 5 scenario call with condition <code>claim_stage[0] != 1</code></td>
+</tr>
+<tr>
+<td>T05</td>
+<td>FSL 5 scenario with input, same malformed stage condition</td>
+</tr>
+<tr>
+<td>T06</td>
+<td>FSL 5 scenario particle input, same condition</td>
+</tr>
+<tr>
+<td>T07</td>
+<td>FSL 5 forbidden call setup, same condition</td>
+</tr>
+<tr>
+<td>T08</td>
+<td>FSL 5 forbidden call final, same condition</td>
+</tr>
+<tr>
+<td>T09</td>
+<td>FSL 5 forbidden with setup input, same condition</td>
+</tr>
+<tr>
+<td>T10</td>
+<td>FSL 5 forbidden with final input, same condition</td>
+</tr>
+<tr>
+<td>T11</td>
+<td>FSL 5 forbidden particle setup input, same condition</td>
+</tr>
+<tr>
+<td>T12</td>
+<td>FSL 5 forbidden particle final input, same condition</td>
+</tr>
+<tr>
+<td>T13</td>
+<td>acceptance numeric argument: <code>setn(if c != 1 then 2 else 0)</code></td>
+</tr>
+<tr>
+<td>T14</td>
+<td>FSL 5 marked/with hybrid input, malformed ClaimStage comparison</td>
+</tr>
+<tr>
+<td>T15</td>
+<td>FSL 5 relation-role value with condition <code>ticket_stage[0] != 1</code></td>
+</tr>
+<tr>
+<td>T16</td>
+<td>acceptance unselected branch: <code>paint(if true then Blue else (if c != 1 then Red else Blue))</code></td>
+</tr>
+<tr>
+<td>T17</td>
+<td>native/shared diagnostic test's <code>expect c != 1</code> row</td>
+</tr>
+<tr>
+<td>T18</td>
+<td>rewritten Worker diagnostic test's identical <code>expect c != 1</code> row</td>
+</tr>
+<tr>
+<td>T19</td>
+<td>step: <code>paint(if o is some(z) then z else Red)</code> with <code>o = none</code></td>
+</tr>
+<tr>
+<td>T20</td>
+<td>expectation: <code>expect (if o is some(z) then z else Red) == Red</code> with <code>o = none</code></td>
+</tr>
+<tr>
+<td>T21</td>
+<td>reordered particle input: <code>claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits</code></td>
+</tr>
+</tbody>
+</table>
+<p>Round 1 supplements the original measurement with all sources of both
+  rewritten diagnostic tests and the tests using their changed shared oracle,
+  plus the scope/reordered-particle controls: 20 forms per tree, both modes
+  twice, 160 checks against the same base and unchanged production code.
+  T17–T20 are additional breaking removals in both modes; T21 only in FSL 5
+  (five fixture occurrences / nine mode-form transitions, no other differences
+  or exclusions). T17/T18 are identical FSL in two rewritten tests. T19/T20
+  report <code>public Kernel cannot type identifier 'z'</code>: §5's <code>is some(z)</code> binding
+  is confined to the true logical continuation (<code>=&gt;</code> / <code>and</code>), not a
+  conditional's <code>then</code> arm, even if that arm is unselected. Invariants already
+  reject the same scope escape. Move the use to a supported continuation or
+  avoid the escaped name. T21's location is the first token <code>claim1</code> (8:5),
+  not <code>Employee</code>. See the design note for exact identities and fixture inventory.</p>
+<p>Unary operand measurement (#1439): base <code>5a539bbe</code> and the final implementation
+  were checked in their own trees, both modes twice: 579 corpus forms plus 51
+  inline fixture occurrences per tree, 5,040 checks. The corpus ok-to-error set
+  is empty. T01–T21 remain the earlier removals; these seven additional inline
+  forms are <strong>breaking removals</strong>, each <code>ok</code> / 0 → <code>error</code> / <code>semantics</code> / 2 in
+  both modes (14 new mode/form transitions; 44 total). Full stdout, stderr and
+  exits have no other differences, repeat differences or exclusions. See
+  <a href="../design/DESIGN-requirements-stage.md#unary-operand-typing-1439">unary operand typing</a>
+  for the command and exact base/head identities.</p>
+<table>
+<thead>
+<tr>
+<th>Removal</th>
+<th>Ill-typed unary form now rejected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>U01</td>
+<td>forbidden step <code>paint(if true then Red else (if not 1 then Red else Blue))</code></td>
+</tr>
+<tr>
+<td>U02</td>
+<td>forbidden step <code>paint(if true then Red else (if -Red &gt; 0 then Red else Blue))</code></td>
+</tr>
+<tr>
+<td>U03</td>
+<td>forbidden step <code>paint(if c == Red or not 1 then Red else Blue)</code></td>
+</tr>
+<tr>
+<td>U04</td>
+<td>acceptance <code>expect c == Blue or not 1</code> after <code>paint(Blue)</code></td>
+</tr>
+<tr>
+<td>U05</td>
+<td>invariant <code>c == Red or c == Blue or not 1</code></td>
+</tr>
+<tr>
+<td>U06</td>
+<td>invariant <code>c == Red or c == Blue or -Red &gt; 0</code></td>
+</tr>
+<tr>
+<td>U07</td>
+<td>acceptance <code>expect not (false and not 1)</code> after <code>paint(Blue)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Repair <code>not</code> to use a Bool operand and unary minus to use a numeric operand;
+  skipping evaluation does not make an ill-typed operand legal.</p>
+<p>Current rebase measurement (#1439): BASE
+  <code>23eb5e41326ef4cf81a100ad0e011e81ed9fd507</code>, HEAD
+  <code>1e27d896b69b395ad8e48c570b4ddbca50e442a0</code>, each built in its own tree.
+  <code>BINARY check FORM</code> covered all 594 corpus forms and 65 inline occurrences per
+  tree in both modes twice (5,272 checks); the corpus ok-to-error set is empty.
+  The earlier counts above are historical. All five fixed test files are now
+  covered: in addition to the 44 recorded mode/form removals, acceptance <code>expect</code>
+  and FSL 5 <code>then</code> reject <code>c != 1</code>, <code>true and c != 1</code>, <code>not (c == 1)</code>,
+  <code>if c != 1 then true else false</code> and <code>forall color: Color { color != 1 }</code>.
+  These are <strong>breaking removals</strong> for enum <code>c: Color</code>: acceptance in both modes,
+  scenario only in FSL 5, adding 15 transitions (59 total). Use a same-enum member
+  instead of the integer. The corresponding <code>c == 1</code> fixtures remain errors but
+  change their diagnostic from <code>acceptance</code> to <code>semantics</code> at the expectation
+  keyword (three mode/form changes, exit 2 unchanged). All 62 full-output differences are thus
+  accounted for; there are no others, repeat differences or exclusions. See the
+  <a href="../design/DESIGN-requirements-stage.md#rebase-compatibility-measurement-on-23eb5e41">current design measurement</a>
+  for inventory commands and calibration.</p>
+<p>Repair these comparisons using members of the same enum, including in
+  unselected branches; a guard refusal cannot legitimize an ill-typed argument.
+- Use the kernel-wrapper form only for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history not expressible as a carried field, or
   behavior that needs explicit kernel state. That fallback still supports
   <code>struct</code> / <code>state</code> / <code>init</code>, <code>fair action</code>, <code>branches</code>, and explicit <code>maps</code>.
   <code>branches</code> automatically splits an action by each when condition (displayed as
   <code>submit[a &lt;= AUTO_LIMIT]</code> in mutation targets; the split actions are
   <code>submit.b1</code>, <code>submit.b2</code>, … in every other output), and the <code>maps</code> clause
-  provides the action correspondence to the upper layer.</li>
-<li><code>terminal { &lt;expr&gt; }</code> is allowed at the top level of a <code>requirements</code> spec
+  provides the action correspondence to the upper layer.
+- <code>terminal { &lt;expr&gt; }</code> is allowed at the top level of a <code>requirements</code> spec
   and lowers to the kernel (§6) — there is exactly one <code>terminal</code> block per
   spec, same as the kernel. <code>stage(c)</code> is available in all requirements
   expression contexts when <code>c</code> is a typed entity parameter or binder. The
   entity type selects its process and stage enum, and the checked expression
   lowers to the generated stage-map index. No sink stage becomes terminal
-  automatically in requirements.</li>
-<li>A process may use a qualified path when one entity participates in several
+  automatically in requirements.
+- A process may use a qualified path when one entity participates in several
   processes: <code>process claims.Claim { ... }</code>. Unqualified <code>stage(c)</code> is an error
   when several processes correspond to <code>Claim</code>; use
   <code>claims.Claim.stage(c)</code> (arbitrary-depth <code>SymbolPath</code>) to select one. A
   missing process, non-entity argument, unknown stage member, or unresolved
-  qualifier is a source-located type error.</li>
-</ul>
+  qualifier is a source-located type error.</p>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation
 vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). A process expands into
