@@ -87,11 +87,19 @@ impl Case {
                 init = format!("xs = {literal} flag = {} done = true", self.expression);
                 action = "action go() {}".into();
             }
-            "invariant" | "trans" => {
-                action = "action go() {}".into();
+            "invariant" | "trans" | "snapshot" => {
+                action = if self.site == "snapshot" {
+                    format!("action go() {{ {} }}", self.setup)
+                } else {
+                    "action go() {}".into()
+                };
                 property = format!(
                     "{} Capture {{ {}({}) }}",
-                    self.site,
+                    if self.site == "snapshot" {
+                        "trans"
+                    } else {
+                        self.site
+                    },
                     if negative { "not " } else { "" },
                     self.expression
                 );
@@ -108,8 +116,14 @@ impl Case {
             }
             _ => panic!("unknown site: {}", self.site),
         }
+        // Snapshot controls must permit xs to change across the transition.
+        let domain = if self.site == "snapshot" {
+            String::new()
+        } else {
+            format!("invariant Domain {{ xs == {literal} }}")
+        };
         let source = format!(
-            "spec Collection {{\n {declaration}\n state {{ xs: {ty}, flag: Bool, done: Bool }}\n init {{ {init} }}\n {action}\n invariant Domain {{ xs == {literal} }}\n {property}\n}}\n"
+            "spec Collection {{\n {declaration}\n state {{ xs: {ty}, flag: Bool, done: Bool }}\n init {{ {init} }}\n {action}\n {domain}\n {property}\n}}\n"
         );
         if !self.failure_stage.is_empty() {
             source.replace("ZERO", if negative { "0" } else { "1" })
@@ -449,11 +463,63 @@ fn cases() -> Vec<Case> {
                 case.site = site;
                 case.failure_stage = stage;
                 if stage.contains("where") {
-                    case.expression.push_str(" where 1 / ZERO == 1");
+                    case.expression.push_str(
+                        if site == "init-statement" && stage == "source-where" {
+                            " where 1 % ZERO == 0"
+                        } else {
+                            " where 1 / ZERO == 1"
+                        },
+                    );
                 }
                 if stage.contains("body") {
                     case.body = "\n if 1 / ZERO == 1 {}\n".into();
                 }
+                cases.push(case);
+            }
+        }
+    }
+    for kind in KINDS {
+        let mut case = Case::new(
+            format!("failure-priority/init-statement/{kind}/where-after-safe-source"),
+            kind,
+            format!("{kind} {{ 1 / 1 }} where 1 % ZERO == 0"),
+        );
+        case.site = "init-statement";
+        case.failure_stage = "where";
+        cases.push(case);
+
+        let mut case = Case::new(
+            format!("snapshots/trans/{kind}/old-and-current"),
+            kind,
+            "(exists z in old(xs) { z == 0 }) and (exists z in xs { z == 1 })".into(),
+        );
+        case.site = "snapshot";
+        case.values = "0".into();
+        case.setup = format!("requires xs == {kind} {{ 0 }} xs = {kind} {{ 1 }}");
+        cases.push(case);
+
+        for (stage, expr) in [
+            (
+                "body",
+                format!("forall z in {kind} {{ 0 }} {{ 1 / z == 0 }}"),
+            ),
+            (
+                "where",
+                format!("exists z in {kind} {{ 0 }} where 1 / z == 0 {{ true }}"),
+            ),
+            (
+                "source",
+                format!("exists z in {kind} {{ 1 / 0 }} {{ z == 0 }}"),
+            ),
+        ] {
+            for site in ["invariant", "trans", "rhs"] {
+                let mut case = Case::new(
+                    format!("evaluation-policy/{site}/{kind}/{stage}"),
+                    kind,
+                    expr.clone(),
+                );
+                case.site = site;
+                case.partial = site == "rhs";
                 cases.push(case);
             }
         }
@@ -617,7 +683,7 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
         let expected_name = if partial { "_partial_go" } else { "Capture" };
         let expected_kind = if partial {
             "partial_op"
-        } else if case.site == "trans" {
+        } else if ["trans", "snapshot"].contains(&case.site) {
             "trans"
         } else {
             "invariant"
@@ -638,7 +704,7 @@ fn exercise(case: &Case, negative: bool) -> Vec<String> {
 fn generated_collection_binder_matrix() {
     let started = Instant::now();
     let inventory = cases();
-    assert_eq!(inventory.len(), 327, "do not lose matrix cells");
+    assert_eq!(inventory.len(), 349, "do not lose matrix cells");
     let total = inventory.len();
     assert_eq!(
         inventory
