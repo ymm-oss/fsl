@@ -2146,8 +2146,12 @@ fn run_from(
     current_dir: &Path,
 ) -> Actual {
     let arguments = invoke(command, shape_fixture, spec_path, approval_record);
+    run_arguments(command, &arguments, current_dir)
+}
+
+fn run_arguments(command: &str, arguments: &[String], current_dir: &Path) -> Actual {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(&arguments)
+        .args(arguments)
         .current_dir(current_dir)
         .output()
         .unwrap_or_else(|error| panic!("run {command} {arguments:?}: {error}"));
@@ -2932,32 +2936,49 @@ fn unknown_authority_tool_returns_an_error_for_every_document_command() {
         };
         // run() supplies a valid test-owned approval baseline/record. An early
         // missing/invalid-record io error must not masquerade as coverage.
-        let actual = run(&command, AI_NAME_FIXTURE);
-        let envelope_matches = actual.json.as_ref().is_some_and(|output| {
-            output["fsl"] == "1.0"
-                && output["result"] == "error"
-                && output["kind"] == kind
-                && output["message"] == message
-                && match kind {
-                    "document" => {
-                        // This established envelope uses `code`, not the
-                        // syntax diagnostic's `diagnostic_code` field.
-                        output["code"] == "FSL-DOC-DIALECT-UNSUPPORTED"
-                            && output["dialect"] == "ai_component"
-                            && output["supported_dialects"]
-                                == serde_json::json!(["requirements", "spec"])
-                            && output.get("diagnostic_code").is_none()
-                    }
-                    "parse" => output["diagnostic_code"] == "FSL-PARSE",
-                    _ => true,
-                }
-        });
-        if actual.exit != 2 || !actual.stderr.is_empty() || !envelope_matches {
-            failures.push(format!(
-                "{command}: expected exit=2 result=error kind={kind} message={message:?}; \
-                 produced exit={} stdout={:?} stderr={:?}",
-                actual.exit, actual.stdout, actual.stderr
+        let mut variants = vec![(command.clone(), run(&command, AI_NAME_FIXTURE))];
+        if command == "approval create" {
+            // HTML is another kind of this leaf, not a 49th document command.
+            // Reuse run()'s baseline/record setup before replacing the kind.
+            let approval = ApprovalFixture::new(AI_NAME_FIXTURE);
+            let mut arguments = invoke(&command, AI_NAME_FIXTURE, input, Some(&approval.record));
+            let kind_index = arguments
+                .iter()
+                .position(|argument| argument == "--kind")
+                .expect("approval create kind argument");
+            arguments[kind_index + 1] = "html".to_owned();
+            variants.push((
+                format!("{command} --kind html"),
+                run_arguments(&command, &arguments, &approval.root),
             ));
+        }
+        for (variant, actual) in variants {
+            let envelope_matches = actual.json.as_ref().is_some_and(|output| {
+                output["fsl"] == "1.0"
+                    && output["result"] == "error"
+                    && output["kind"] == kind
+                    && output["message"] == message
+                    && match kind {
+                        "document" => {
+                            // This established envelope uses `code`, not the
+                            // syntax diagnostic's `diagnostic_code` field.
+                            output["code"] == "FSL-DOC-DIALECT-UNSUPPORTED"
+                                && output["dialect"] == "ai_component"
+                                && output["supported_dialects"]
+                                    == serde_json::json!(["requirements", "spec"])
+                                && output.get("diagnostic_code").is_none()
+                        }
+                        "parse" => output["diagnostic_code"] == "FSL-PARSE",
+                        _ => true,
+                    }
+            });
+            if actual.exit != 2 || !actual.stderr.is_empty() || !envelope_matches {
+                failures.push(format!(
+                    "{variant}: expected exit=2 result=error kind={kind} message={message:?}; \
+                     produced exit={} stdout={:?} stderr={:?}",
+                    actual.exit, actual.stdout, actual.stderr
+                ));
+            }
         }
     }
     assert_eq!(tested, 48, "review additions/removals of document commands");
