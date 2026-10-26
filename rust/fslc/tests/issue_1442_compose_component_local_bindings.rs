@@ -714,3 +714,49 @@ fn detector_init_pattern_keeps_its_direct_diagnostic_context() {
         "invalid init statement: ",
     );
 }
+
+#[test]
+fn preservation_unused_ambient_state_keeps_downstream_diagnostic_name() {
+    let part = "spec B { state { flag: Bool } init { flag = false } action go() { let x = 1 forall k in 0..x { if k == 0 { } } flag = true } }";
+    for addition in ["", "x = 0"] {
+        let system = format!(
+            "compose S {{ use B as b from \"b.fsl\" internal b.go state {{ x: Int }} init {{ x = 0 }} action go() = b.go() {{ {addition} }} }}"
+        );
+        let dir = scratch(
+            "issue-1442-unused-ambient",
+            &[("b.fsl", part), ("s.fsl", &system)],
+        );
+        for file in ["b.fsl", "s.fsl"] {
+            assert_eq!(check(&dir, file).1, 0);
+        }
+        let direct = run(
+            &dir,
+            &[
+                "verify",
+                "b.fsl",
+                "--engine",
+                "bmc",
+                "--depth",
+                "2",
+                "--no-cache",
+            ],
+        );
+        assert_eq!(direct.1, 2, "{}", direct.0);
+        assert_eq!(direct.0["message"], "'x' is not an integer const");
+        assert_eq!(
+            run(
+                &dir,
+                &[
+                    "verify",
+                    "s.fsl",
+                    "--engine",
+                    "bmc",
+                    "--depth",
+                    "2",
+                    "--no-cache"
+                ]
+            ),
+            direct
+        );
+    }
+}

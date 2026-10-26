@@ -12,5 +12,10 @@ binding that collides with an original component declaration is now rejected
 in compose with the same message, kind, and location as the standalone spec;
 these invalid compositions previously passed `check` after prefixing hid the
 collision. The pattern-collision rule is shared with the ordinary type checker.
-Synchronized component lets are renamed when needed to avoid sync additions'
-free names or final guard bindings, as well as sync parameters and arguments.
+Private lets, patterns, quantifiers, aggregates, and statement-forall binders
+share one hygienic rewrite across synchronized sources. It inventories both
+reads and declarations, including non-exported pattern labels, and preserves
+each source's original collision refusals. Header arguments are inserted in
+their header-parameter scope, not under another source's guards. Ambient state
+or enum names cannot falsely reject private component patterns; an unread
+ambient state alone does not force an ordinary let to be renamed.
