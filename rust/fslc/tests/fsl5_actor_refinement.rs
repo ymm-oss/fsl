@@ -991,10 +991,47 @@ fn issue_1456_a_requirement_own_actor_mismatch() {
             (
                 "1456_a_branch_auto",
                 branches.replace(INLINE_1441, ""),
-                branch_abs,
+                branch_abs.clone(),
             ),
         ],
         true,
+    );
+    let source = branches.replace(INLINE_1441, "");
+    all_1456(
+        [
+            (
+                "1456_t1a_later_branch",
+                source.clone(),
+                AUTO_1441.replace(
+                    "maps auto",
+                    "action approve__b1() -> approve__b1()\n  maps auto",
+                ),
+                true,
+            ),
+            (
+                "1456_t1b_branch_absence",
+                source
+                    .replace(" \"IMPL-1: by Manager\"", "")
+                    .replace("\"by System\"", "\"by Manager\""),
+                AUTO_1441.to_owned(),
+                false,
+            ),
+        ],
+        |(label, source, mapping, wrong)| {
+            let directory = mapping_fixture_1441(label, &source, &branch_abs, &mapping);
+            eprintln!("1456 cell {label} {STANDALONE_REFINE:?}");
+            if wrong {
+                mismatch_1441(
+                    &directory,
+                    STANDALONE_REFINE,
+                    "approve__b2",
+                    &mapping,
+                    "maps auto",
+                );
+            } else {
+                success_1441(&directory, STANDALONE_REFINE, "refines", false);
+            }
+        },
     );
 }
 
