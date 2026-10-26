@@ -1302,7 +1302,7 @@
               "testgen"
             ],
             "prog": "fslc domain testgen",
-            "help": "usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [--allow-unwired] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  --allow-unwired       emit runtime skips instead of failures for unwired adapters\n  -o, --output OUTPUT\n",
             "actions": [
               {
                 "dest": "help",
@@ -1365,6 +1365,16 @@
                 "required": false,
                 "flags": [
                   "--strict"
+                ],
+                "nargs": 0,
+                "default": false,
+                "action": "store_true"
+              },
+              {
+                "dest": "allow_unwired",
+                "required": false,
+                "flags": [
+                  "--allow-unwired"
                 ],
                 "nargs": 0,
                 "default": false,
@@ -2120,7 +2130,7 @@
           "testgen"
         ],
         "prog": "fslc testgen",
-        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n",
+        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [--allow-unwired] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n  --allow-unwired       emit runtime skips instead of failures for unwired adapters\n",
         "actions": [
           {
             "dest": "help",
@@ -2192,6 +2202,16 @@
             "required": false,
             "flags": [
               "--strict"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "allow_unwired",
+            "required": false,
+            "flags": [
+              "--allow-unwired"
             ],
             "nargs": 0,
             "default": false,
