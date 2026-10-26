@@ -73,6 +73,18 @@ remain in the typed annotation registry and are not collapsed into that field.
 Refused findings prevent every write in the invocation; safe edits are still
 returned for review but are not partially applied.
 
+### Manual return example normalization
+
+The return example expresses its amount-dependent correspondence with explicit
+fair `submit_small` / `submit_large` actions and local `implements` action mappings.
+These replace the old `submit__b1` / `submit__b2` pair one-to-one, preserving the
+common guards, threshold equality, updates, requirement annotations and fairness.
+The small action still approves; the large action still stutters until a manager
+decides. Payment retains `PaidLedger`, and the downstream design mapping and
+acceptance trace use the declared action names. Legacy branch/name regressions
+remain in dedicated fixtures; this manual rewrite does not make branch `maps`
+machine-applicable or alter the migrator's refusal boundary.
+
 The retained Python implementation is not a second migrator. The native
 `fslc-lsp` preserves migration data on diagnostics and exposes
 machine-applicable edits as quick-fix Code Actions through the authoritative

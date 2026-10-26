@@ -79,6 +79,7 @@ fn baseline_for(base: &str) -> PathBuf {
     match base {
         "specs/bank.fsl" => root().join("specs/bank.fsl"),
         "specs/order_workflow.fsl" => root().join("specs/order_workflow.fsl"),
+        // Injected headers name the public example; C1's legacy copy is the baseline.
         "examples/layers/return_system.fsl" => {
             root().join("rust/fslc/tests/fixtures/legacy_return_branches.fsl")
         }
@@ -114,7 +115,6 @@ fn warning_names(value: &Value, kind: &str) -> Vec<String> {
         .collect()
 }
 
-#[derive(Debug)]
 struct Cell {
     caught: bool,
     signal: String,
@@ -267,7 +267,9 @@ fn mutate_differential_cell(path_str: &str, base: &str) -> Cell {
         "--max-mutants",
         DIFF_MUTATE_MAX,
     ]);
-    let base_survived = baseline["summary"]["survived"].as_i64().unwrap_or(0);
+    let base_survived = baseline["summary"]["survived"]
+        .as_i64()
+        .expect("baseline mutate must report its survivor count");
     let injected_survived = injected["summary"]["survived"].as_i64().unwrap_or(0);
     cell(
         injected_survived > base_survived,
@@ -319,7 +321,6 @@ fn native_injected_corpus_primary_blind_matrix() {
         let case_headers = headers(path);
         let inject = case_headers["inject"].as_str();
         let cells = measure(path, &case_headers, &scratch);
-        eprintln!("{file_name}: {cells:?}");
 
         let primary = primary_detector(inject);
         if !cells[primary].caught {
