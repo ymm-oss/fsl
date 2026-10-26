@@ -449,12 +449,12 @@ fn shadowed_pattern_branch(action: &str) {
 }
 
 #[test]
-fn a1334_shadow_pattern_in_statement_branch_is_not_a_component_alias() {
+fn a1334_pattern_name_in_statement_branch_resolves_the_component_alias() {
     shadowed_pattern_branch("action glue() { if opt is some(BINDING) { seen = BINDING.on } }");
 }
 
 #[test]
-fn a1334_shadow_pattern_in_expression_branch_is_not_a_component_alias() {
+fn a1334_pattern_name_in_expression_branch_resolves_the_component_alias() {
     shadowed_pattern_branch(
         "action glue() { seen = if opt is some(BINDING) then BINDING.on else false }",
     );

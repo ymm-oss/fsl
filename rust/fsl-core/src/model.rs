@@ -19,6 +19,28 @@ use crate::{
 /// index distinctness across `forall` iterations could not be proved (issue #698).
 pub const WRITE_DISTINCTNESS_UNPROVED_CODE: &str = "FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED";
 
+/// Context shared by ordinary model validation and pre-prefix compose errors.
+pub(crate) enum ExpressionErrorContext<'a> {
+    Model,
+    Init,
+    InlineInitializer(&'a str),
+}
+
+impl ExpressionErrorContext<'_> {
+    pub(crate) fn message(self, mut message: String) -> String {
+        let prefix = match self {
+            Self::Model => "invalid model expression".to_owned(),
+            Self::Init => "invalid init statement".to_owned(),
+            Self::InlineInitializer(name) => {
+                format!("invalid inline initializer for '{}'", shown(name))
+            }
+        };
+        message.insert_str(0, ": ");
+        message.insert_str(0, &prefix);
+        message
+    }
+}
+
 /// A machine-applicable source edit carried by a typed model diagnostic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiagnosticEdit {
@@ -1160,17 +1182,12 @@ impl ModelBuilder {
         for (index, statement) in model.init.iter().enumerate() {
             crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
-                let mut failure = if let Some((name, _)) = inline_initializers.get(&index) {
-                    model_error(format!(
-                        "invalid inline initializer for '{}': {}",
-                        shown(name),
-                        error.message
-                    ))
-                    .with_origin(origin)
+                let context = if let Some((name, _)) = inline_initializers.get(&index) {
+                    ExpressionErrorContext::InlineInitializer(name)
                 } else {
-                    model_error(format!("invalid init statement: {}", error.message))
-                        .with_origin(origin)
+                    ExpressionErrorContext::Init
                 };
+                let mut failure = model_error(context.message(error.message)).with_origin(origin);
                 if let Some(span) = error.span {
                     failure = failure.at(span);
                 }
@@ -1188,7 +1205,7 @@ impl ModelBuilder {
         }
         crate::typecheck::validate_model_expression_types(&model).map_err(|error| {
             let origin = error.span.map(type_diagnostic_origin);
-            model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
+            model_error(ExpressionErrorContext::Model.message(error.message)).with_origin(origin)
         })?;
         for (index, statement) in model.init.iter().enumerate() {
             check_init_collection_binders(

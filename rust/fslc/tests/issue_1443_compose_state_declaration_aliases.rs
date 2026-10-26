@@ -106,3 +106,37 @@ fn initializer_state_alias_keeps_the_direct_spec_state_read_rejection() {
     );
     assert_eq!(result.0["loc"], control.0["loc"]);
 }
+
+fn component_initializer_error(initializer: &str, displayed_field: &str) {
+    let part = format!(
+        "spec A {{\n  const value = 0\n  state {{ seen: Bool = {initializer} }}\n  action stay() {{ }}\n}}"
+    );
+    let system = "compose System { use A as a from \"a.fsl\" }";
+    let dir = scratch(
+        "issue-1443-component-initializer",
+        &[("a.fsl", &part), ("system.fsl", system)],
+    );
+    let (mut direct, status) = check(&dir, "a.fsl");
+    assert_eq!(status, 2, "{direct}");
+    assert_eq!(direct["kind"], "semantics");
+    let message = direct["message"].as_str().expect("direct diagnostic");
+    assert!(
+        message.starts_with("invalid inline initializer for 'seen': "),
+        "{direct}"
+    );
+    let expected = message.replacen("'seen'", &format!("'{displayed_field}'"), 1);
+    direct["message"] = serde_json::Value::String(expected);
+    let (composed, status) = check(&dir, "system.fsl");
+    assert_eq!(status, 2, "{composed}");
+    assert_eq!(composed, direct, "complete initializer diagnostic differs");
+}
+
+#[test]
+fn component_inline_pattern_diagnostic_matches_the_direct_source() {
+    component_initializer_error("some(1) is some(value)", "seen");
+}
+
+#[test]
+fn component_inline_type_diagnostic_uses_the_public_field_name() {
+    component_initializer_error("1", "a.seen");
+}

@@ -11,6 +11,7 @@ use fsl_syntax::{
 };
 use serde_json::{Value, json};
 
+use crate::model::ExpressionErrorContext;
 use crate::naming::NameMap;
 use crate::typecheck::TypecheckError;
 use crate::{
@@ -534,7 +535,7 @@ pub fn lower_compose_with_options(
                     init.extend(
                         rewrite_statements(statements.clone(), component, &HashSet::new())
                             .map_err(|error| {
-                                component_rewrite_error(error, "invalid init statement")
+                                component_rewrite_error(error, ExpressionErrorContext::Init)
                             })?,
                     );
                     if init_meta.is_none() {
@@ -698,10 +699,12 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
-fn component_rewrite_error(error: TypecheckError, context: &str) -> CoreError {
-    let TypecheckError { mut message, span } = error;
-    message.insert_str(0, ": ");
-    message.insert_str(0, context);
+fn component_rewrite_error(
+    error: TypecheckError,
+    context: ExpressionErrorContext<'_>,
+) -> CoreError {
+    let TypecheckError { message, span } = error;
+    let message = context.message(message);
     if let Some(span) = span {
         return error_at(message, span);
     }
@@ -729,11 +732,6 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecI
         | SpecItem::VerifyBounds { span, .. } => Some(*span),
         _ => None,
     };
-    let context = if matches!(&item, SpecItem::Init { .. }) {
-        "invalid init statement"
-    } else {
-        "invalid model expression"
-    };
     let initializers = match &item {
         SpecItem::State(fields) => fields
             .iter()
@@ -758,9 +756,9 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecI
         });
         match owner {
             Some((_, name)) => {
-                component_rewrite_error(error, &format!("invalid inline initializer for '{name}'"))
+                component_rewrite_error(error, ExpressionErrorContext::InlineInitializer(name))
             }
-            None => component_rewrite_error(error, context),
+            None => component_rewrite_error(error, ExpressionErrorContext::Model),
         }
     })
 }
