@@ -242,7 +242,7 @@ fn less_equal_max_omits_unrepresentable_reject_without_panicking() {
 }
 
 /// Detector (fails on 9ad07c7a): > MAX panics in debug computing its accept;
-/// only the representable requires_failed vector may become a boundary case.
+/// only the representable `requires_failed` vector may become a boundary case.
 #[test]
 fn greater_max_omits_unrepresentable_accept_without_panicking() {
     assert_extreme(">", i64::MAX, "requires_failed", "boundary_reject_q");
