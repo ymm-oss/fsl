@@ -208,6 +208,12 @@ pub fn build_test_plan_v1(kernel: &Value, conformance: &Value) -> Result<Value, 
             .cmp(right["name"].as_str().unwrap_or_default())
     });
     unique_boundary_names(&mut cases);
+    cases.sort_by(|left, right| {
+        left["name"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["name"].as_str().unwrap_or_default())
+    });
 
     let plan = json!({
         "$schema": TEST_PLAN_V1_SCHEMA_ID,
@@ -239,10 +245,14 @@ pub fn build_test_plan_v1(kernel: &Value, conformance: &Value) -> Result<Value, 
 }
 
 fn unique_boundary_names(cases: &mut [Value]) {
-    let mut used_names = BTreeSet::new();
+    let mut used_names: BTreeSet<_> = cases
+        .iter()
+        .map(|case| case["name"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    let mut seen_plain_names = BTreeSet::new();
     for case in cases {
         let name = case["name"].as_str().unwrap_or_default();
-        if used_names.insert(name.to_owned()) {
+        if seen_plain_names.insert(name.to_owned()) {
             continue;
         }
         let Some((prefix, param)) = name
