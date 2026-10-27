@@ -1042,7 +1042,13 @@ fn command() -> Result<(Value, i32), String> {
                             .to_owned(),
                     );
                 }
-                return Ok(run_causal_check(path));
+                return Ok(run_admitted_root(
+                    &display_path,
+                    Ok(source),
+                    None,
+                    false,
+                    |source| run_causal_check(path, source),
+                ));
             }
             Ok(with_version_metadata(run_check_with_tags_from_source(
                 path,

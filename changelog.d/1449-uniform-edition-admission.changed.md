@@ -17,3 +17,6 @@ the captured source, with readable and graph output warnings kept on stderr.
 Domain check now finalizes each result once instead of duplicating migration
 warnings across its specialized result and nested verification result, including
 non-definitive verification errors; requested editions and read-error kinds are retained.
+Causal consumers admit captured roots and explicit observation mappings before
+analysis or output, preserve specialized warnings, and reuse the same source for
+expectation parsing and model construction instead of rereading the root.
