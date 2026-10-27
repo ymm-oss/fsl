@@ -293,6 +293,21 @@ fn metadata_and_dispatch_population_is_exact() {
 }
 
 #[test]
+fn preserved_failure_is_not_deferred_evidence_even_with_a_red_route() {
+    let cells = vec![
+        ("preserved/ai check".to_owned(), false),
+        ("ai check".to_owned(), false),
+    ];
+    let panic = std::panic::catch_unwind(|| cases::assert_deferred_evidence(&cells))
+        .expect_err("a broken preserved control must fail before counting route evidence");
+    let message = panic.downcast_ref::<String>().expect("assertion message");
+    assert!(message.contains("preserved control failed: preserved/ai check"));
+    let mut results = cases::Results::default();
+    results.check("preserved/ai check", false, true, false);
+    assert!(std::panic::catch_unwind(|| results.finish()).is_err());
+}
+
+#[test]
 fn deferred_modes_have_live_disagreements_across_the_complete_native_adapters() {
     let mut cells = all_commands::cases::capture(|| {
         all_commands::every_registered_root_has_the_same_admission_before_dialect_or_sidecars();

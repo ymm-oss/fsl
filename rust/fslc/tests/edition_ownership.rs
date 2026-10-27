@@ -51,6 +51,222 @@ fn finding(source: &str, code: &str, line: usize, column: usize, end_column: usi
 }
 
 #[test]
+pub(crate) fn successful_consumers_keep_one_complete_legacy_warning() {
+    let mut results = Results::default();
+    let source = cases::WARNING_CASES[1].2;
+    let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
+    for (command, result, artifact) in [
+        ("scenarios source.fsl --depth 2", "scenarios", false),
+        (
+            "testgen source.fsl --depth 2 -o generated.py",
+            "generated",
+            true,
+        ),
+        ("explain source.fsl --depth 2", "explained", false),
+        ("typestate source.fsl", "typestate", false),
+        ("analyze source.fsl", "analyzed", false),
+        ("replay source.fsl --trace trace.json", "conformant", false),
+    ] {
+        let scratch = Scratch::new();
+        scratch.write("source.fsl", source);
+        scratch.write(
+            "trace.json",
+            &json!({
+                "$schema":"https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json",
+                "schema_version":"1.0.0", "kernel_schema_version":"1.0.0", "spec":"S",
+                "initial":{"done":false},
+                "events":[{"tick":1,"action":"finish","params":{},"state":{"done":true}}]
+            })
+            .to_string(),
+        );
+        let output = run(&scratch, command);
+        let produced = json!([
+            summary(&output),
+            output.stderr,
+            scratch.0.join("generated.py").exists()
+        ]);
+        let wanted = json!([[0, result, null, [expected]], [], artifact]);
+        results.check(
+            &format!("success/{command}"),
+            &produced,
+            &wanted,
+            produced == wanted,
+        );
+    }
+    results.finish();
+}
+
+#[test]
+pub(crate) fn successful_raw_consumers_deliver_one_complete_warning_only_on_stderr() {
+    let mut results = Results::default();
+    let source = cases::WARNING_CASES[1].2;
+    let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
+    for (command, marker) in [
+        ("testgen source.fsl --depth 2", "def test_"),
+        ("typestate source.fsl --ts", "export"),
+        ("analyze source.fsl --format dot", "digraph"),
+        ("analyze source.fsl --format mermaid", "graph"),
+    ] {
+        let scratch = Scratch::new();
+        let domain = cases::legacy("deprecated_domain_enum_union", cases::DOMAIN);
+        let (source, expected) = if command.starts_with("typestate ") {
+            (
+                domain.as_str(),
+                finding(&domain, "deprecated_domain_enum_union", 1, 12, 39),
+            )
+        } else {
+            (source, expected.clone())
+        };
+        scratch.write("source.fsl", source);
+        let output = run(&scratch, command);
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        // Parse every line, so an extra unstructured diagnostic is not ignored.
+        let actual: Vec<Value> = stderr
+            .lines()
+            .map(|line| {
+                serde_json::from_str(line.strip_prefix("warning: ").expect("warning delivery"))
+                    .unwrap()
+            })
+            .collect();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let produced = json!([
+            output.status.code(),
+            actual,
+            stdout.contains(marker),
+            !stdout.contains(expected["code"].as_str().unwrap())
+        ]);
+        let wanted = json!([0, [expected], true, true]);
+        results.check(
+            &format!("success/raw/{command}"),
+            &produced,
+            &wanted,
+            produced == wanted,
+        );
+    }
+    results.finish();
+}
+
+#[test]
+pub(crate) fn db_check_success_has_no_migration_warning_forms() {
+    let scratch = Scratch::new();
+    scratch.write(
+        "source.fsl",
+        include_str!("../../../examples/db/safe_add_nullable_column.fsl"),
+    );
+    let output = run(&scratch, "db check source.fsl --depth 2");
+    let actual = value(&output);
+    let produced = json!([
+        output.status.code(),
+        actual["result"],
+        warnings(&actual),
+        output.stderr
+    ]);
+    let wanted = json!([0, "verified_under_assumptions", [], []]);
+    let mut results = Results::default();
+    results.check(
+        "success/db check/no-migration-forms",
+        &produced,
+        &wanted,
+        produced == wanted,
+    );
+    results.finish();
+}
+
+#[test]
+pub(crate) fn verify_cache_miss_and_hit_each_finish_one_complete_warning() {
+    let scratch = Scratch::new();
+    let source = cases::WARNING_CASES[1].2;
+    scratch.write("source.fsl", source);
+    let cache = scratch.0.join("cache");
+    assert!(!cache.exists());
+    let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
+    let mut results = Results::default();
+    for hit in [false, true] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(["verify", "source.fsl", "--depth", "2"])
+            .current_dir(&scratch.0)
+            .env("FSLC_CACHE", "on")
+            .env("FSLC_CACHE_DIR", &cache)
+            .env("TMPDIR", cases::root().join(".codex/tmp"))
+            .env_remove("FSLC_UNSTABLE")
+            .output()
+            .expect("verify with isolated enabled cache");
+        let actual = value(&output);
+        let produced = json!([summary(&output), output.stderr, actual["cache"]["hit"]]);
+        let wanted = json!([
+            [0, "verified", null, [expected]],
+            [],
+            if hit { json!(true) } else { Value::Null }
+        ]);
+        results.check(
+            &format!("success/verify/cache-hit={hit}"),
+            &produced,
+            &wanted,
+            produced == wanted,
+        );
+    }
+    results.finish();
+}
+
+#[test]
+pub(crate) fn causal_unreadable_later_root_precedes_earlier_parse_error() {
+    let scratch = Scratch::new();
+    scratch.write("broken.fsl", "causal Broken {\n");
+    assert!(!scratch.0.join("missing.fsl").exists());
+    let mut results = Results::default();
+    for command in [
+        "causal diff broken.fsl missing.fsl",
+        "causal observe-expectations broken.fsl --mapping missing.fsl --from-log {repo}/examples/causal/evidence/incident-observation-log.jsonl --scope {repo}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json",
+    ] {
+        let args = cases::expand(command, &[("{repo}", cases::root())]);
+        let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &scratch.0, true);
+        let actual = without_versions(value(&output));
+        let io = std::fs::read_to_string(scratch.0.join("missing.fsl")).unwrap_err();
+        let wanted = json!({"fsl":"1.0", "result":"error", "kind":"io",
+            "message":if command.starts_with("causal diff ") {format!("cannot read missing.fsl: {io}")} else {io.to_string()}});
+        results.error_envelope(
+            &format!("causal/later-io/{command}"),
+            &output,
+            &wanted,
+            !scratch.0.join("observations.json").exists(),
+        );
+        assert!(actual.get("warnings").is_none());
+    }
+    results.finish();
+}
+
+#[test]
+pub(crate) fn causal_primary_root_owns_metadata_not_the_mapping_slot() {
+    let scratch = Scratch::new();
+    let source = include_str!("../../../examples/causal/evidence/incident-log-mapping.fsl");
+    scratch.write("mapping.fsl", &cases::headed(source));
+    let repo = cases::root();
+    let command = format!(
+        "causal observe-expectations {0}/examples/causal/incident_response.fsl --mapping mapping.fsl --from-log {0}/examples/causal/evidence/incident-observation-log.jsonl --scope {0}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json",
+        repo.display()
+    );
+    let output = run(&scratch, &command);
+    let actual = value(&output);
+    let produced = json!([
+        output.status.code(),
+        actual["result"],
+        actual.get("fsl_edition").is_some(),
+        actual.get("edition").is_some(),
+        warnings(&actual),
+        output.stderr
+    ]);
+    let wanted = json!([0, "causal_expectations_observed", false, false, [], []]);
+    let mut results = Results::default();
+    results.check(
+        "causal/primary-metadata",
+        &produced,
+        &wanted,
+        produced == wanted,
+    );
+    results.finish();
+}
+
+#[test]
 pub(crate) fn domain_check_finishes_once_for_definitive_and_non_definitive_verdicts() {
     let mut results = Results::default();
     let legacy = cases::legacy("deprecated_domain_enum_union", cases::DOMAIN);

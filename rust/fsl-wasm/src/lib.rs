@@ -1181,33 +1181,128 @@ mod tests {
         expected_edition_output(
             request,
             native_check_error_unfinalized(request, solver_version),
+            &fixture_findings(request),
         )
     }
 
-    // Expected finalization in the native CLI's ordering, not an invocation of
-    // its private completed command. The project-gate test independently pins
-    // which route must bypass model-only governance.
-    fn expected_edition_output(request: &Request, output: Value) -> Value {
-        fslc_rust::migration::apply_edition(
-            (output, 2),
-            &request.source,
-            &request.source_file,
-            None,
-            &request.parse_options(),
-            &|| envelope(TEST_SOLVER_VERSION),
-            true,
+    // Findings are fixture-owned literals, not a call to admission/finalization.
+    fn expected_edition_output(request: &Request, mut output: Value, findings: &[Value]) -> Value {
+        if request.source.starts_with("fsl 5\n") {
+            output["fsl_edition"] = json!(5);
+            if output["diagnostic_code"] != "unsupported_in_edition" {
+                output["edition"] = json!("next");
+            }
+        } else if request.source.starts_with("fsl 4\n") {
+            output["fsl_edition"] = json!(4);
+        }
+        if !findings.is_empty() {
+            let warnings = output
+                .as_object_mut()
+                .unwrap()
+                .entry("warnings")
+                .or_insert(json!([]));
+            warnings.as_array_mut().unwrap().extend_from_slice(findings);
+        }
+        output
+    }
+
+    fn metadata_finding(file: &str) -> Value {
+        metadata_finding_at(
+            file,
+            "REQ-PROBE-001",
+            "finish",
+            [1, 55, 78],
+            [38, 54, 77],
+            38,
         )
-        .0
+    }
+
+    fn metadata_finding_at(
+        file: &str,
+        id: &str,
+        text: &str,
+        loc: [usize; 3],
+        offsets: [usize; 3],
+        indent: usize,
+    ) -> Value {
+        let annotation = format!("@requirement({id:?}, {text:?})");
+        json!({"code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+            "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+            "message":"legacy string metadata is deprecated; use a typed annotation",
+            "loc":{"file":file,"line":loc[0],"column":loc[1],"end_line":loc[0],"end_column":loc[2]},
+            "canonical_replacement":annotation,
+            "machine_applicable":true,
+            "edits":[{"start":offsets[0],"end":offsets[0],"replacement":format!("{annotation}\n{}", " ".repeat(indent))},
+                {"start":offsets[1],"end":offsets[2],"replacement":""}]})
+    }
+
+    // The existing error fixtures carry these exact findings, independently of
+    // which admission/classification path the Worker takes.
+    fn fixture_findings(request: &Request) -> Vec<Value> {
+        let file = request.source_file.as_str();
+        if request.source
+            == include_str!(
+                "../../fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl"
+            )
+        {
+            return vec![
+                json!({"code":"deprecated_domain_enum_union", "kind":"deprecated_domain_enum_union",
+                "taxonomy":"deprecated","severity":"warning","edition":"current",
+                "message":"legacy domain enum union syntax is deprecated",
+                "loc":{"file":file,"line":3,"column":3,"end_line":3,"end_column":33},
+                "canonical_replacement":"enum Status { Draft, Approved }","machine_applicable":true,
+                "edits":[{"start":71,"end":101,"replacement":"enum Status { Draft, Approved }"}],
+                "suggestion":{"kind":"replace","replacement":"enum Status { Draft, Approved }",
+                    "span":{"start":71,"end":101},"machine_applicable":true}}),
+            ];
+        }
+        if request
+            .source
+            .contains("action step() \"REQ-PROBE-001: step\"")
+        {
+            return vec![metadata_finding_at(
+                file,
+                "REQ-PROBE-001",
+                "step",
+                [10, 17, 38],
+                [262, 276, 297],
+                2,
+            )];
+        }
+        if request.source
+            == include_str!("../../fslc/tests/fixtures/actor_refinement/requirement-action.fsl")
+        {
+            return vec![metadata_finding_at(
+                file,
+                "IMPL-1",
+                "by Manager",
+                [7, 22, 42],
+                [185, 202, 222],
+                4,
+            )];
+        }
+        vec![]
+    }
+
+    fn implicit_initializer_finding(file: &str) -> Value {
+        json!({"kind":"implicit_initial_value", "code":"implicit_initial_value",
+            "severity":"warning", "edition_severity":{"current":"warning","next":"error"},
+            "message":"field 'A.ready' implicitly selects false; add an explicit initializer",
+            "field":"A.ready", "selected_value":"false", "reason":"Bool defaults to false",
+            "loc":{"file":file,"line":1,"column":34,"end_line":1,"end_column":45},
+            "canonical_replacement":" = false",
+            "suggestion":{"kind":"insert","replacement":" = false",
+                "span":{"start":44,"end":44},"machine_applicable":true}})
     }
 
     // Known simple model fixtures only: their model-level warnings are empty.
     // This expected envelope is not an execution of the completed native CLI.
-    fn expected_simple_check_success(request: &Request, spec: &str) -> Value {
+    fn expected_simple_check_success(request: &Request, spec: &str, findings: &[Value]) -> Value {
         let mut native = envelope(TEST_SOLVER_VERSION);
         native.insert("result".to_owned(), json!("ok"));
         native.insert("spec".to_owned(), json!(spec));
         native.insert("warnings".to_owned(), json!([]));
-        expected_edition_output(request, Value::Object(native))
+        expected_edition_output(request, Value::Object(native), findings)
     }
 
     fn native_check_error_unfinalized(request: &Request, solver_version: &str) -> Value {
@@ -1421,7 +1516,7 @@ mod tests {
             envelope(solver_version),
             &failure,
         );
-        expected_edition_output(request, output)
+        expected_edition_output(request, output, &fixture_findings(request))
     }
 
     fn assert_worker_implements_error_matches_native(request: &Request, fixture: &str) {
@@ -1511,7 +1606,7 @@ mod tests {
                 ))
             })
             .expect_err("native check rejects the fixture");
-            let native = expected_edition_output(&check_request, native);
+            let native = expected_edition_output(&check_request, native, &[]);
             assert_eq!(status, 2, "{fixture}: {native:#}");
             assert_eq!(
                 native["diagnostic_code"], "decide_not_exhaustive",
@@ -3189,7 +3284,7 @@ mod tests {
                     envelope(TEST_SOLVER_VERSION),
                     &error,
                 );
-                let native = expected_edition_output(&request, native);
+                let native = expected_edition_output(&request, native, &[]);
                 assert_eq!(
                     native["diagnostic_code"],
                     if prefix.is_empty() {
@@ -3220,7 +3315,8 @@ mod tests {
     #[test]
     fn headerless_legacy_check_success_matches_native_ordered_expectation() {
         let request = legacy_metadata_request();
-        let native = expected_simple_check_success(&request, "S");
+        let native =
+            expected_simple_check_success(&request, "S", &[metadata_finding(&request.source_file)]);
         assert_eq!(native["warnings"].as_array().expect("warnings").len(), 1);
         assert_eq!(block_on(check(&request, TEST_SOLVER_VERSION)), native);
     }
@@ -3230,7 +3326,11 @@ mod tests {
         let source = "domain D { aggregate A { state { ready: Bool } command Finish {} event Finished {} decide Finish { emits Finished } evolve Finished { ready = true } invariant Typed { ready == true or ready == false } } }\n";
         let request: Request =
             serde_json::from_value(json!({"cmd":"check", "source":source})).expect("request");
-        let native = expected_simple_check_success(&request, "D");
+        let native = expected_simple_check_success(
+            &request,
+            "D",
+            &[implicit_initializer_finding(&request.source_file)],
+        );
         assert_eq!(native["warnings"].as_array().expect("warnings").len(), 1);
         assert_eq!(native["warnings"][0]["code"], "implicit_initial_value");
         assert_eq!(block_on(check(&request, TEST_SOLVER_VERSION)), native);
@@ -3243,7 +3343,11 @@ mod tests {
             source: request.source.replace("flag = true", "flag = missing"),
             ..request
         };
-        let native = native_check_error(&request, TEST_SOLVER_VERSION);
+        let native = expected_edition_output(
+            &request,
+            native_check_error_unfinalized(&request, TEST_SOLVER_VERSION),
+            &[metadata_finding(&request.source_file)],
+        );
         assert_eq!(native["result"], "error");
         assert_eq!(native["warnings"].as_array().expect("warnings").len(), 1);
         // This failing verify route precedes the browser-only BMC solver.
@@ -3272,7 +3376,7 @@ mod tests {
         assert_eq!(status, 0);
         assert_eq!(expected["result"], "ok");
         assert_eq!(
-            expected_edition_output(&request, expected.clone()),
+            expected_edition_output(&request, expected.clone(), &[]),
             expected
         );
         let worker = block_on(check(&request, TEST_SOLVER_VERSION));
@@ -3288,7 +3392,11 @@ mod tests {
         let source = "domain D { aggregate A { state { ready: Bool } invariant Bad { missing == true } } }\n";
         let request: Request =
             serde_json::from_value(json!({"cmd":"check", "source":source})).expect("request");
-        let expected = native_check_error(&request, TEST_SOLVER_VERSION);
+        let expected = expected_edition_output(
+            &request,
+            native_check_error_unfinalized(&request, TEST_SOLVER_VERSION),
+            &[implicit_initializer_finding(&request.source_file)],
+        );
         assert_eq!(expected["result"], "error");
         assert_eq!(expected["warnings"].as_array().expect("warnings").len(), 1);
         assert_eq!(expected["warnings"][0]["code"], "implicit_initial_value");

@@ -230,10 +230,18 @@ pub fn capture(run: impl FnOnce()) -> Vec<(String, bool)> {
 }
 
 pub fn assert_deferred_evidence(cells: &[(String, bool)]) {
+    for (label, agrees) in cells
+        .iter()
+        .filter(|(label, _)| label.starts_with("preserved/"))
+    {
+        assert!(agrees, "preserved control failed: {label}");
+    }
     for &(leaf, mode, reason) in DEFERRED_TO_SECOND_PR {
         let group: Vec<_> = cells
             .iter()
-            .filter(|(label, _)| deferred(label) == Some((leaf, mode)))
+            .filter(|(label, _)| {
+                !label.starts_with("preserved/") && deferred(label) == Some((leaf, mode))
+            })
             .collect();
         let red = group.iter().filter(|(_, agrees)| !agrees).count();
         for (label, agrees) in &group {
@@ -700,7 +708,10 @@ impl Results {
         let unexpected: Vec<_> = self
             .failures
             .iter()
-            .filter(|label| deferred(label).is_none() && !out_of_scope(label))
+            .filter(|label| {
+                label.starts_with("preserved/")
+                    || (deferred(label).is_none() && !out_of_scope(label))
+            })
             .collect();
         assert!(
             unexpected.is_empty(),

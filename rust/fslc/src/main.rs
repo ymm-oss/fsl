@@ -6344,24 +6344,6 @@ fn run_check_with_tags_from_source(
     admission.finish((output, status))
 }
 
-#[cfg(test)]
-fn apply_domain_edition_from_source(
-    result: (Value, i32),
-    source: &str,
-    display_path: &Path,
-    requested: Option<fsl_syntax::Edition>,
-) -> (Value, i32) {
-    fslc_rust::migration::apply_edition(
-        result,
-        source,
-        &display_path.to_string_lossy(),
-        requested,
-        crate::parse_options(),
-        &envelope,
-        true,
-    )
-}
-
 fn parse_surface_document_from_source(
     path: &Path,
     source: &str,
@@ -18190,6 +18172,40 @@ spec InitTraceability {
         }
     }
 
+    fn expected_snapshot_findings(
+        source: &str,
+        path: &Path,
+        edition: fsl_syntax::Edition,
+    ) -> Vec<Value> {
+        fslc_rust::migration::plan_migration(
+            source,
+            &path.to_string_lossy(),
+            edition,
+            parse_options(),
+        )
+        .expect("migration control")
+        .diagnostics
+        .into_iter()
+        .map(|finding| finding.json(&path.to_string_lossy(), edition))
+        .collect()
+    }
+
+    fn verify_snapshot(
+        path: &Path,
+        source: &str,
+        engine: &str,
+        edition: Option<fsl_syntax::Edition>,
+    ) -> (Value, i32) {
+        let options = CliVerifyOptions {
+            depth: 4,
+            engine: engine.to_owned(),
+            use_cache: false,
+            shared: SharedOptions { edition },
+            ..CliVerifyOptions::default()
+        };
+        run_verify_cli_from_source(path, path, source, &options)
+    }
+
     /// Platform-neutral #808 control. Capturing source A from a regular file
     /// before replacing it with malformed source B must leave every
     /// `*_from_source` helper bound to A. No scheduling, thread, rename, or
@@ -18239,20 +18255,32 @@ spec InitTraceability {
             ("induction", "current", "proved"),
             ("induction", "next", "proved"),
         ] {
-            let result = run_verify_from_source(
-                &fixture.path,
-                &captured,
-                4,
-                "warn",
-                engine,
-                DEFAULT_EXPLICIT_BUDGET,
-                1,
-            );
             let requested =
                 fsl_syntax::Edition::parse_option(edition, &fsl_syntax::ParseOptions::stable())
                     .expect("a published --edition value");
-            let (output, status) =
-                apply_domain_edition_from_source(result, &captured, &fixture.path, requested);
+            let source = if edition == "current" {
+                captured.replace(
+                    "action finish()",
+                    "action finish() \"REQ-PROBE-001: finish\"",
+                )
+            } else {
+                captured.clone()
+            };
+            let fixture = SnapshotFixture::new("finished-helpers", &source);
+            let source = read_spec_source(&fixture.path).expect("capture warning control");
+            std::fs::write(&fixture.path, "not valid FSL source").expect("replace root");
+            let (output, status) = verify_snapshot(&fixture.path, &source, engine, requested);
+            let expected =
+                expected_snapshot_findings(&source, &fixture.path, fsl_syntax::Edition::Fsl4);
+            assert_eq!(expected.len(), usize::from(edition == "current"));
+            let actual = output["warnings"]
+                .as_array()
+                .expect("warnings")
+                .iter()
+                .filter(|warning| warning["code"] == "legacy_string_metadata")
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "one finish for {engine}/{edition}");
             assert_eq!(
                 status, 0,
                 "{engine}/{edition} must verify source A: {output:#}"
@@ -18623,24 +18651,27 @@ spec InitTraceability {
         let captured = read_domain_command_source(&fixture.path).expect("capture source A");
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
-        let verified = run_verify_from_source(
-            &fixture.path,
-            &captured,
-            4,
-            "warn",
-            "bmc",
-            DEFAULT_EXPLICIT_BUDGET,
-            1,
-        );
-        let (output, status) = apply_domain_edition_from_source(
-            verified,
-            &captured,
-            &fixture.path,
-            Some(fsl_syntax::Edition::Fsl5),
-        );
-        assert_eq!(status, 0, "{output:#}");
-        assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
-        assert_eq!(output["edition"], "next", "{output:#}");
+        for (edition, source, count) in [
+            (fsl_syntax::Edition::Fsl5, captured.clone(), 0),
+            (
+                fsl_syntax::Edition::Fsl4,
+                captured.replace(
+                    "enum Status { Open, Closed }",
+                    "type Status = Open | Closed",
+                ),
+                1,
+            ),
+        ] {
+            let (output, status) = verify_snapshot(&fixture.path, &source, "bmc", Some(edition));
+            assert_eq!(status, 0, "{output:#}");
+            assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
+            if edition == fsl_syntax::Edition::Fsl5 {
+                assert_eq!(output["edition"], "next", "{output:#}");
+            }
+            let expected = expected_snapshot_findings(&source, &fixture.path, edition);
+            assert_eq!(expected.len(), count);
+            assert_eq!(output["warnings"], json!(expected));
+        }
     }
 
     /// The requirements `implements` path invokes the native refinement
