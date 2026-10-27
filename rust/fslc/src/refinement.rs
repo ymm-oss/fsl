@@ -7,6 +7,7 @@ use std::path::Path;
 
 use fsl_core::{FslValue, KernelModel, TraceStep, TypeRef};
 use fslc_rust::outcome::Verdict;
+use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
 use crate::cli_options::ScopeBounds;
@@ -282,12 +283,30 @@ pub(crate) fn refine_budget_output(
     output
 }
 
-#[allow(clippy::too_many_lines)]
 pub(crate) fn run_refine(
     implementation_path: &Path,
     abstraction_path: &Path,
     mapping_path: &Path,
     depth: usize,
+) -> (Value, i32) {
+    run_refine_with_loaders(
+        implementation_path,
+        abstraction_path,
+        mapping_path,
+        depth,
+        load_model,
+        |path| std::fs::read_to_string(path),
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+pub(crate) fn run_refine_with_loaders(
+    implementation_path: &Path,
+    abstraction_path: &Path,
+    mapping_path: &Path,
+    depth: usize,
+    load_model: impl Fn(&Path) -> Result<KernelModel, SpecLoadError>,
+    read_mapping: impl Fn(&Path) -> std::io::Result<String>,
 ) -> (Value, i32) {
     let implementation = match load_model(implementation_path) {
         Ok(model) => model,
@@ -297,7 +316,7 @@ pub(crate) fn run_refine(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let source = match std::fs::read_to_string(mapping_path) {
+    let source = match read_mapping(mapping_path) {
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };

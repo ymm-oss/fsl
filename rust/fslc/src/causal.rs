@@ -332,12 +332,19 @@ fn load_causal_model(
             2,
         )
     })?;
+    load_causal_model_from_source(path, &source)
+}
+
+fn load_causal_model_from_source(
+    path: &Path,
+    source: &str,
+) -> Result<(fsl_tools::CausalModel, Vec<fsl_tools::CausalWarning>), (Value, i32)> {
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let resolver = fsl_core::FsResolver::new(base);
     let legacy_literate = path.extension().and_then(std::ffi::OsStr::to_str) == Some("md");
-    fsl_tools::build_causal_model_with_options(&source, &resolver, crate::process::parse_options())
+    fsl_tools::build_causal_model_with_options(source, &resolver, crate::process::parse_options())
         .map_err(|error| causal_error_output(&error, legacy_literate))
 }
 
