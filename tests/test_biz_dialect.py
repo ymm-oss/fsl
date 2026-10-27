@@ -306,7 +306,7 @@ def test_biz_policy_can_replace_handwritten_return_policy_for_refinement(tmp_pat
     )
 
     result = run_refine(
-        str(ROOT / "examples/layers/return_system.fsl"),
+        str(ROOT / "rust/fslc/tests/fixtures/legacy_return_branches.fsl"),
         str(abs_file),
         str(mapping),
         depth=6,
