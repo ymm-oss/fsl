@@ -673,8 +673,40 @@ Calls must name a `def` in the same source file and match its arity. Definitions
 may call earlier or later definitions but cannot be directly or mutually
 recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
-variable capture instead of inventing internal binder names. See
+variable capture instead of inventing internal binder names, with the known
+`leadsTo` property-binder exception below. See
 [`DESIGN-def.md`](../design/DESIGN-def.md).
+
+**Breaking removal (#1450):** a call is rejected when an action parameter,
+`let`, expression quantifier/aggregate binder, or statement `forall` at the call
+site would capture a free name in the definition's expanded body. The def's own
+parameters are excluded. For example, if `on` is a state variable read by
+`def p(z: Bool) = (not on) or z`, a call `p(false)` under `let on = ...` now
+fails with exit 2, `kind: "semantics"`, and a `would capture variable` error at
+the call. Rename the caller's binding and recheck; no synthetic rename or
+compatibility bypass is supplied. Existing `is some(x)` pattern-shadowing
+rejections are unchanged. This applies to direct specs and source-local defs
+in compose components and synchronized actions.
+A non-global `is some(v)` binding exported by a `requires` guard or the left
+operand of a binary expression is also a caller binding for this check.
+
+**Remaining soundness risk (Refs #1528):** a binder declared directly by a
+`leadsTo` property is not propagated into the property's before/after expressions,
+`helpful` arguments, `decreases`, or `within` by this capture check. Such a binder
+can still capture a def-body free name and produce a false green. Rename that
+binder; do not treat a successful check or verification of the capturing form
+as evidence of the intended state reference. Expression quantifiers and
+aggregates inside the property's expressions are covered by #1450.
+The declaration binder's own `where` expression is checked for capture; an
+earlier capture error can therefore precede the existing rejection of unsupported
+property-wrapper `where` filters.
+
+The final implementation's `check` sweep of all 597 `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, using base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` in their respective materialized
+trees, has an empty ok-to-error transition set. The newly rejected inline
+forms and the still-open #1528 path are not negated by that corpus result.
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a, b)` / `max(a, b)` / `abs(a)`
   (since `a//b` would turn everything after `//` into a comment, write division

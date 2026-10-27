@@ -1028,6 +1028,8 @@ struct Definition {
 
 struct PredicateExpander {
     definitions: HashMap<String, Definition>,
+    locals: std::cell::RefCell<HashSet<String>>,
+    globals: HashSet<String>,
 }
 
 impl PredicateExpander {
@@ -1093,7 +1095,21 @@ impl PredicateExpander {
                 },
             );
         }
-        let expander = Self { definitions };
+        let globals = spec
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                SpecItem::State(fields) => fields.iter().map(|field| field.name.clone()).collect(),
+                SpecItem::Const { name, .. } => vec![name.clone()],
+                SpecItem::Enum { members, .. } => members.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let expander = Self {
+            definitions,
+            locals: std::cell::RefCell::default(),
+            globals,
+        };
         for name in expander.definitions.keys() {
             expander.validate_definition(name, &mut Vec::new())?;
         }
@@ -1222,13 +1238,10 @@ impl PredicateExpander {
                 annotations,
             } => SpecItem::Action {
                 name,
+                items: self.expand_action_items(items, &params)?,
                 params: params
                     .into_iter()
                     .map(|param| self.expand_param(param))
-                    .collect::<Result<_, _>>()?,
-                items: items
-                    .into_iter()
-                    .map(|item| self.expand_action_item(item))
                     .collect::<Result<_, _>>()?,
                 span,
                 fair,
@@ -1386,6 +1399,43 @@ impl PredicateExpander {
         })
     }
 
+    fn scoped<T>(
+        &self,
+        bound: HashSet<String>,
+        f: impl FnOnce() -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let outer = self.locals.replace(bound);
+        let result = f();
+        self.locals.replace(outer);
+        result
+    }
+
+    fn bound_with(&self, name: &str) -> HashSet<String> {
+        let mut bound = self.locals.borrow().clone();
+        bound.insert(name.to_owned());
+        bound
+    }
+
+    fn expand_action_items(
+        &self,
+        items: Vec<ActionItem>,
+        params: &[Param],
+    ) -> Result<Vec<ActionItem>, CoreError> {
+        let mut bound = compose::param_names(params);
+        compose::map_scoped_action_items(items, &mut bound, &self.globals, |item, bound| {
+            self.scoped(bound.clone(), || self.expand_action_item(item))
+        })
+    }
+
+    fn expand_bound(
+        &self,
+        expr: Expr,
+        name: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<Expr, CoreError> {
+        self.scoped(self.bound_with(name), || self.expand_expr(expr, stack))
+    }
+
     fn expand_param(&self, param: Param) -> Result<Param, CoreError> {
         Ok(match param {
             Param::Typed(..) => param,
@@ -1464,11 +1514,16 @@ impl PredicateExpander {
                 binder,
                 statements,
                 span,
-            } => Statement::ForAll {
-                binder: self.expand_binder(binder, stack)?,
-                statements: self.expand_statements(statements, stack)?,
-                span,
-            },
+            } => {
+                let binder = self.expand_binder(binder, stack)?;
+                self.scoped(self.bound_with(binder_name(&binder)), || {
+                    Ok(Statement::ForAll {
+                        binder,
+                        statements: self.expand_statements(statements, stack)?,
+                        span,
+                    })
+                })?
+            }
         })
     }
 
@@ -1489,10 +1544,10 @@ impl PredicateExpander {
                 type_name,
                 where_expr,
             } => Binder::Typed {
-                name,
+                name: name.clone(),
                 type_name,
                 where_expr: where_expr
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| self.expand_bound(*expr, &name, stack).map(Box::new))
                     .transpose()?,
             },
             Binder::Range {
@@ -1501,11 +1556,11 @@ impl PredicateExpander {
                 hi,
                 where_expr,
             } => Binder::Range {
-                name,
+                name: name.clone(),
                 lo: Box::new(self.expand_expr(*lo, stack)?),
                 hi: Box::new(self.expand_expr(*hi, stack)?),
                 where_expr: where_expr
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| self.expand_bound(*expr, &name, stack).map(Box::new))
                     .transpose()?,
             },
             Binder::Collection {
@@ -1513,10 +1568,10 @@ impl PredicateExpander {
                 collection,
                 where_expr,
             } => Binder::Collection {
-                name,
+                name: name.clone(),
                 collection: Box::new(self.expand_expr(*collection, stack)?),
                 where_expr: where_expr
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| self.expand_bound(*expr, &name, stack).map(Box::new))
                     .transpose()?,
             },
         })
@@ -1578,9 +1633,21 @@ impl PredicateExpander {
                     span,
                 ));
             }
-            stack.push(name);
-            let body = self.expand_expr(definition.body.clone(), stack)?;
+            stack.push(name.clone());
+            let params: HashSet<_> = definition.params.iter().cloned().collect();
+            let body = self.scoped(params.clone(), || {
+                self.expand_expr(definition.body.clone(), stack)
+            })?;
             stack.pop();
+            let free = free_vars_bound(&body, &params);
+            if let Some(captured) = free.intersection(&self.locals.borrow()).min() {
+                return Err(core_error(
+                    format!(
+                        "predicate '{name}' call would capture variable '{captured}'; rename the binder at the call site"
+                    ),
+                    span,
+                ));
+            }
             let replacements = definition
                 .params
                 .iter()
@@ -1589,6 +1656,12 @@ impl PredicateExpander {
                 .collect::<HashMap<_, _>>();
             return Ok(substitute(body, &replacements, &IndexedReplacements::new()));
         }
+        let bound = match &expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
+                self.bound_with(binder_name(binder))
+            }
+            _ => HashSet::new(),
+        };
         Ok(match expr {
             Expr::Some(expr) => Expr::Some(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Set(items) => Expr::Set(
@@ -1627,11 +1700,17 @@ impl PredicateExpander {
                     .map(|arg| self.expand_expr(arg, stack))
                     .collect::<Result<_, _>>()?,
             },
-            Expr::Binary { op, left, right } => Expr::Binary {
-                op,
-                left: Box::new(self.expand_expr(*left, stack)?),
-                right: Box::new(self.expand_expr(*right, stack)?),
-            },
+            Expr::Binary { op, left, right } => {
+                let left = self.expand_expr(*left, stack)?;
+                let bound = compose::pattern_scope(&left, &self.locals.borrow(), &self.globals);
+                self.scoped(bound, || {
+                    Ok(Expr::Binary {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(self.expand_expr(*right, stack)?),
+                    })
+                })?
+            }
             Expr::Neg(expr) => Expr::Neg(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Not(expr) => Expr::Not(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Conditional {
@@ -1656,7 +1735,7 @@ impl PredicateExpander {
             } => Expr::Quantified {
                 quantifier,
                 binder: self.expand_binder(binder, stack)?,
-                body: Box::new(self.expand_expr(*body, stack)?),
+                body: Box::new(self.scoped(bound, || self.expand_expr(*body, stack))?),
             },
             Expr::Aggregate {
                 kind,
@@ -1666,7 +1745,10 @@ impl PredicateExpander {
                 kind,
                 binder: self.expand_binder(binder, stack)?,
                 value: value
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| {
+                        self.scoped(bound, || self.expand_expr(*expr, stack))
+                            .map(Box::new)
+                    })
                     .transpose()?,
             },
             Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
