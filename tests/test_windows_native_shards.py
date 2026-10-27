@@ -44,9 +44,10 @@ def test_checker_emit_skip_args():
         manifest = Path(directory) / "names.txt"
         manifest.write_text("  # names\n\n" + "\n\n".join(f"  {name}  " for name in names).rstrip(), encoding="utf-8")
         result = subprocess.run([sys.executable, "tools/check_windows_long_poles.py", "--names", str(manifest),
-                                 "--emit-skip-args"], cwd=ROOT, text=True, capture_output=True)
+                                 "--emit-skip-args"], cwd=ROOT, capture_output=True)
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "".join(f"--skip\n{name}\n" for name in names), result.stdout
+    assert b"\r" not in result.stdout, result.stdout
+    assert result.stdout == "".join(f"--skip\n{name}\n" for name in names).encode(), result.stdout
 
 
 def test_checker_stale_name():
@@ -112,7 +113,9 @@ def test_workflow_structure():
         assert f"        if: matrix.part == '{part}'\n" in step
         assert "        shell: bash\n        working-directory: rust\n" in step
     assert 'cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -- --exact "${skips[@]}"\n' in rest
-    assert f"mapfile -t skips < <(python ../tools/check_windows_long_poles.py --names ../{NAMES} --emit-skip-args)\n" in rest
+    assert f'python ../tools/check_windows_long_poles.py --names ../{NAMES} --emit-skip-args > "$RUNNER_TEMP/windows-skip-args.txt"\n' in rest
+    assert 'mapfile -t skips < "$RUNNER_TEMP/windows-skip-args.txt"\n' in rest
+    assert rest.index("skips=(\"${skips[@]%$'\\r'}\")\n") < rest.index("cargo test ")
     assert "      - rust-native-z3-windows\n" in _job(text, "product-gate")
     try:
         import yaml
