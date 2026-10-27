@@ -288,16 +288,19 @@ fn issue_1475_valid_chain_full_output_is_preserved() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value = json(&output);
+    // main.rs uses Path::display; the Windows failure log shows native `.\spec.fsl` paths.
+    let spec = format!(".{}spec.fsl", std::path::MAIN_SEPARATOR);
+    let mapping = format!(".{}identity.fsl", std::path::MAIN_SEPARATOR);
     assert_eq!(
         value,
         serde_json::json!({
             "fsl":"1.0", "result":"verified", "manifest":"project.toml", "keep_going":true,
             "layers":[
-                {"layer":"requirements", "kind":"check", "file":"./spec.fsl", "status":"passed", "result":"ok", "exit_code":0,
+                {"layer":"requirements", "kind":"check", "file":spec, "status":"passed", "result":"ok", "exit_code":0,
                  "detail":{"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]}},
-                {"layer":"design", "kind":"check", "file":"./spec.fsl", "status":"passed", "result":"ok", "exit_code":0,
+                {"layer":"design", "kind":"check", "file":spec, "status":"passed", "result":"ok", "exit_code":0,
                  "detail":{"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]}},
-                {"layer":"design->requirements", "kind":"refine", "file":"./spec.fsl", "against":"requirements", "abs_file":"./spec.fsl", "mapping":"./identity.fsl", "depth":8,
+                {"layer":"design->requirements", "kind":"refine", "file":spec, "against":"requirements", "abs_file":spec, "mapping":mapping, "depth":8,
                  "status":"passed", "result":"refines", "exit_code":0,
                  "detail":{"fsl":"1.0", "impl":"ApprovalReview", "abs":"ApprovalReview", "result":"refines", "checked_to_depth":8, "action_map":{"approve":"approve"}}}
             ]

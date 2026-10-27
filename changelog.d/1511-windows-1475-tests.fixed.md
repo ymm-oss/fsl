@@ -1,0 +1,1 @@
+Fixed (#1511): Make the #1475 chain regression expect native path separators while retaining full JSON equality, and gate the newline-filename approval regression to Unix because Windows rejects its fixture filename. Product output and Unix refusal coverage are unchanged.
