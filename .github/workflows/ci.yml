@@ -568,7 +568,7 @@ jobs:
         working-directory: rust
         run: |
           cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix -- --list > "$RUNNER_TEMP/windows-long-poles.txt"
-          python3 ../tools/check_windows_long_poles.py --list-output "$RUNNER_TEMP/windows-long-poles.txt" --names ../tools/windows-native-long-poles.txt
+          python ../tools/check_windows_long_poles.py --list-output "$RUNNER_TEMP/windows-long-poles.txt" --names ../tools/windows-native-long-poles.txt
           cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix
 
       - name: Test pinned native solver and BMC crates except long poles
