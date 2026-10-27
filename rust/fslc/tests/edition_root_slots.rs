@@ -196,6 +196,10 @@ fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal() {
 #[test]
 fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once() {
     let mut results = Results::default();
+    let testplan_source = include_str!("fixtures/testplan_limit.fsl").replace(
+        "action submit(q: Qty) {",
+        "action submit(q: Qty) \"REQ-PROBE-001: 日本語😀\" {",
+    );
     for template in [
         "kernel {src}",
         "conformance {src} --depth 2",
@@ -207,7 +211,11 @@ fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once() {
         "ledger {src} --depth 2",
     ] {
         let scratch = Scratch::new();
-        let source = cases::DOCUMENT_LEGACY;
+        let source = if template.starts_with("testplan ") {
+            &testplan_source
+        } else {
+            cases::DOCUMENT_LEGACY
+        };
         let mut args = scratch.args(template, source);
         // Closed document/Kernel v2 source identities must be portable, not
         // absolute host paths. The command executes inside this scratch tree.
