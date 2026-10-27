@@ -20,6 +20,19 @@ remainder by zero remain totalized to zero in property context and remain
 
 The symbolic evaluator may retain bounded slots beyond a Seq's live prefix as
 an encoding detail, but no property value or witness may observe such a slot.
+Expression temporaries, including full-sequence `push` results and literals,
+retain every live element even beyond the declared state capacity; the declared
+N bounds state, not temporary storage. Checked state bounds enforce `len <= N`;
+when a sequence's bound is not checked, a possibly over-capacity frame instead
+fails closed before any property or action can read its missing suffix.
+For a checked overflow caused by an action assignment, trace projection
+reconstructs the actual attempted value from that action without displaying
+padding or truncating the sequence. This reconstruction does not cover init:
+symbolic projection of an initial frame with unrepresented elements fails closed
+rather than inventing a witness, while the default concrete pre-pass can instead
+report that overflow as `type_bound`. Non-bound invariant, `trans`, and ranked
+`leadsTo` induction CTIs with missing slots also fail closed; bound-property CTIs
+retain action-based reconstruction without changing the induction premises.
 Before testing an invariant, transition, pending reachable predicate, or
 `leadsTo` side, BMC probes the path-sensitive definedness condition. Terminal
 definedness is probed under the deadlock condition, matching concrete
