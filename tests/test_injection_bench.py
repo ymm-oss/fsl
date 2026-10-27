@@ -37,15 +37,6 @@ EXPECTED_TYPES = {
     "over-strengthened-guard",
 }
 
-BASELINE_FOR = {
-    "specs/bank.fsl": ROOT / "specs" / "bank.fsl",
-    "specs/order_workflow.fsl": ROOT / "specs" / "order_workflow.fsl",
-    # Injected headers name the public example; use the legacy copy retained in C1.
-    "examples/layers/return_system.fsl": (
-        ROOT / "rust/fslc/tests/fixtures/legacy_return_branches.fsl"
-    ),
-}
-
 PRIMARY_DETECTOR = {
     "omission": "strict_tags_requirements",
     "boundary-flip": "forbidden_acceptance",
@@ -208,7 +199,7 @@ def _measure_case(path: Path, case: dict[str, str], tmp_path: Path) -> dict[str,
     if case["inject"] == "invariant-weakening":
         baseline = _run([
             "mutate",
-            str(BASELINE_FOR[case["base"]]),
+            str(ROOT / case["base"]),
             "--depth",
             DIFF_MUTATE_DEPTH,
             "--max-mutants",
