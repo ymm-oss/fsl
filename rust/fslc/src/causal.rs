@@ -469,7 +469,7 @@ fn run_causal_analyze(
                         2,
                     );
                 };
-                fsl_tools::causal_evidence_graph(&model, artifacts, overlay)
+                Ok(fsl_tools::causal_evidence_graph(&model, artifacts, overlay))
             }
             other => {
                 return (
@@ -488,7 +488,10 @@ fn run_causal_analyze(
                     2,
                 );
             }
-            let mut review = fsl_tools::causal_review_json(&model);
+            let mut review = match fsl_tools::causal_review_json(&model) {
+                Ok(review) => review,
+                Err(error) => return causal_error_output(&error, false),
+            };
             if let Some((_, overlay)) = &evidence
                 && let Some(object) = review.as_object_mut()
             {
@@ -500,7 +503,7 @@ fn run_causal_analyze(
                 }
                 object.insert("causal_support".to_owned(), json!(overlay.support));
             }
-            review
+            Ok(review)
         }
         (None, Some(other)) => {
             return (
@@ -517,6 +520,10 @@ fn run_causal_analyze(
                 2,
             );
         }
+    };
+    let analysis = match analysis {
+        Ok(analysis) => analysis,
+        Err(error) => return causal_error_output(&error, false),
     };
     if format == "json" {
         return merge_causal_envelope(analysis);

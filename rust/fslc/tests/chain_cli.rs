@@ -129,6 +129,182 @@ fn layer<'a>(value: &'a Value, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("layer '{name}' present in {value}"))
 }
 
+fn issue_1475_project(design: &str) -> PathBuf {
+    let dir = scratch_dir("1475-missing-own-file");
+    fs::copy(
+        repo_root().join("tests/fixtures/approval.fsl"),
+        dir.join("spec.fsl"),
+    )
+    .expect("copy checked source");
+    fs::write(dir.join("identity.fsl"), "refinement Identity { impl ApprovalReview abs ApprovalReview map approved = approved map ever_approved = ever_approved action approve() -> approve() }\n")
+        .expect("write valid mapping");
+    fs::write(
+        dir.join("project.toml"),
+        format!("[requirements]\nfile = \"spec.fsl\"\n[design]\n{design}\n"),
+    )
+    .expect("write manifest");
+    dir
+}
+
+fn issue_1475_missing_file(jobs: &str) {
+    let dir = issue_1475_project("refine_against = \"requirements\"\nmapping = \"identity.fsl\"");
+    let output = run(
+        &dir,
+        &["chain", "project.toml", "--keep-going", "--jobs", jobs],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
+    let value = json(&output);
+    assert_eq!(value["result"], "error");
+    assert_eq!(value["kind"], "chain");
+    assert_eq!(
+        value["message"],
+        "one or more chain layers returned an error"
+    );
+    assert_eq!(
+        value["failed"],
+        serde_json::json!(["design", "design->requirements"])
+    );
+    assert_eq!(value["layers"].as_array().expect("layers").len(), 3);
+    assert_eq!(layer(&value, "requirements")["status"], "passed");
+    assert_eq!(
+        layer(&value, "requirements")["detail"],
+        serde_json::json!({"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]})
+    );
+    for (name, kind) in [("design", "check"), ("design->requirements", "refine")] {
+        let entry = layer(&value, name);
+        assert_eq!(entry["status"], "failed");
+        assert_eq!(entry["kind"], kind);
+        assert_eq!(entry["exit_code"], 2);
+        assert_eq!(
+            entry["detail"],
+            serde_json::json!({"result":"error", "kind":"io", "message":"[design] file is required"})
+        );
+    }
+    let again = run(
+        &dir,
+        &["chain", "project.toml", "--keep-going", "--jobs", jobs],
+    );
+    assert_eq!(again.status.code(), Some(2));
+    assert_eq!(
+        value,
+        json(&again),
+        "entire ordered envelope, no exclusions"
+    );
+}
+
+#[test]
+fn issue_1475_missing_own_file_jobs_one() {
+    issue_1475_missing_file("1");
+}
+
+#[test]
+fn issue_1475_missing_own_file_jobs_two() {
+    issue_1475_missing_file("2");
+}
+
+#[test]
+fn issue_1475_missing_own_file_preserves_cutoff() {
+    let dir = issue_1475_project("refine_against = \"requirements\"\nmapping = \"identity.fsl\"");
+    for jobs in ["1", "2"] {
+        let output = run(&dir, &["chain", "project.toml", "--jobs", jobs]);
+        assert_eq!(output.status.code(), Some(2));
+        let value = json(&output);
+        assert_eq!(value["result"], "error");
+        assert_eq!(layer(&value, "requirements")["status"], "passed");
+        assert_eq!(
+            layer(&value, "design")["detail"],
+            serde_json::json!({"result":"error", "kind":"io", "message":"[design] file is required"})
+        );
+        assert_eq!(
+            layer(&value, "design->requirements"),
+            &serde_json::json!({
+                "layer":"design->requirements", "kind":"refine", "status":"skipped", "result":"skipped", "exit_code":0
+            })
+        );
+    }
+}
+
+#[test]
+fn issue_1475_missing_target_or_mapping_preserves_precedence() {
+    for (design, missing_target_file) in [
+        (
+            "refine_against = \"absent\"\nmapping = \"identity.fsl\"",
+            false,
+        ),
+        ("refine_against = \"requirements\"", false),
+        (
+            "refine_against = \"requirements\"\nmapping = \"identity.fsl\"",
+            true,
+        ),
+    ] {
+        let dir = issue_1475_project(design);
+        if missing_target_file {
+            fs::write(
+                dir.join("project.toml"),
+                format!("[requirements]\n[design]\n{design}\n"),
+            )
+            .expect("omit only the target section file");
+        }
+        let output = run(
+            &dir,
+            &["chain", "project.toml", "--keep-going", "--jobs", "1"],
+        );
+        assert_eq!(output.status.code(), Some(2));
+        let value = json(&output);
+        assert_eq!(value["result"], "error");
+        let target = if design.contains("absent") {
+            "absent"
+        } else {
+            "requirements"
+        };
+        assert_eq!(
+            layer(&value, &format!("design->{target}"))["detail"],
+            serde_json::json!({
+                "result":"error", "kind":"io", "message":format!("[design] unknown refine_against layer: {target}")
+            })
+        );
+    }
+}
+
+#[test]
+fn issue_1475_valid_chain_full_output_is_preserved() {
+    let dir = issue_1475_project(
+        "file = \"spec.fsl\"\nrefine_against = \"requirements\"\nmapping = \"identity.fsl\"",
+    );
+    let output = run(
+        &dir,
+        &["chain", "project.toml", "--keep-going", "--jobs", "1"],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = json(&output);
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "fsl":"1.0", "result":"verified", "manifest":"project.toml", "keep_going":true,
+            "layers":[
+                {"layer":"requirements", "kind":"check", "file":"./spec.fsl", "status":"passed", "result":"ok", "exit_code":0,
+                 "detail":{"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]}},
+                {"layer":"design", "kind":"check", "file":"./spec.fsl", "status":"passed", "result":"ok", "exit_code":0,
+                 "detail":{"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]}},
+                {"layer":"design->requirements", "kind":"refine", "file":"./spec.fsl", "against":"requirements", "abs_file":"./spec.fsl", "mapping":"./identity.fsl", "depth":8,
+                 "status":"passed", "result":"refines", "exit_code":0,
+                 "detail":{"fsl":"1.0", "impl":"ApprovalReview", "abs":"ApprovalReview", "result":"refines", "checked_to_depth":8, "action_map":{"approve":"approve"}}}
+            ]
+        })
+    );
+}
+
 #[test]
 fn chain_clean_manifest_runs_five_layers_and_verifies() {
     let dir = scratch_dir("clean");

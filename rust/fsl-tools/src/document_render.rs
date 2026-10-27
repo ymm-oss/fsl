@@ -29,6 +29,7 @@ use serde_json::Value;
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
 use crate::document_evidence::{AppliedEvidence, requirement_assurance};
 use crate::document_glossary::AppliedGlossary;
+use crate::document_markers::{parse_body, parse_frontmatter};
 use crate::document_presentation::Locale;
 use crate::document_project::project_renderer_contract;
 use crate::document_render_expr;
@@ -97,6 +98,7 @@ struct Ctx<'a> {
 ///
 /// Returns an error before rendering when the embedded Public Kernel differs
 /// from the supplied checked model or a semantic target does not resolve once.
+/// Also rejects generated frontmatter or body that violates the marker grammar.
 #[allow(clippy::too_many_arguments)]
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
@@ -214,6 +216,9 @@ pub fn render_requirements_document_with_options(
     if !out.is_empty() {
         out.push('\n');
     }
+
+    let (_, consumed) = parse_frontmatter(&out).map_err(|issue| issue.to_string())?;
+    parse_body(out.get(consumed..).unwrap_or("")).map_err(|issue| issue.to_string())?;
 
     Ok(RenderedDocument {
         markdown: out,

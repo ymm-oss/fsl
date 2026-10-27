@@ -21,7 +21,7 @@ use fsl_syntax::{
 pub const TIMEBASE_UNITS: &[&str] = &["tick", "hour", "day", "week"];
 pub const SCOPE_DIMENSIONS: &[&str] = &["population", "environment", "segment"];
 
-/// A fatal well-formedness error (analysis never starts).
+/// A fatal causal well-formedness or analysis time-range error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[must_use]
 pub struct CausalError {

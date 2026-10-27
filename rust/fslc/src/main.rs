@@ -4021,6 +4021,34 @@ fn run_chain_steps(
     results
 }
 
+fn chain_step_file(section: &ManifestSection, layer: &str, base: &Path) -> Result<PathBuf, Value> {
+    section
+        .values
+        .get("file")
+        .map(|file| base.join(file))
+        .ok_or_else(|| {
+            json!({
+                "result": "error",
+                "kind": "io",
+                "message": format!("[{layer}] file is required"),
+            })
+        })
+}
+
+fn chain_step_input_error(layer: &str, kind: &str, detail: &Value) -> (Value, bool) {
+    (
+        json!({
+            "layer": layer,
+            "kind": kind,
+            "status": "failed",
+            "result": "error",
+            "exit_code": 2,
+            "detail": detail,
+        }),
+        true,
+    )
+}
+
 /// Runs one planned chain step and returns its `layers[]` entry plus whether
 /// it failed. A step reads only its own manifest section, the target section
 /// of a refine link, and the files they name: its result never depends on
@@ -4041,10 +4069,11 @@ fn run_chain_step(
 ) -> (Value, bool) {
     let section = &sections[layer];
     if kind == "spec" {
-        if let Some(file) = section.values.get("file") {
-            let file_path = base.join(file);
-            let (detail, status, check_kind, depth) =
-                if let Some(raw_depth) = section.values.get("depth") {
+        match chain_step_file(section, layer, base) {
+            Ok(file_path) => {
+                let (detail, status, check_kind, depth) = if let Some(raw_depth) =
+                    section.values.get("depth")
+                {
                     match parse_manifest_depth(layer, "depth", raw_depth) {
                         Ok(depth) => {
                             // Issue #1147: go through the same options path
@@ -4074,46 +4103,31 @@ fn run_chain_step(
                     let (detail, status) = run_check(&file_path, &file_path);
                     (detail, status, "check", None)
                 };
-            let passed = chain_layer_passes(&detail, status);
-            let layer_status = if passed { "passed" } else { "failed" };
-            let result = detail.get("result").cloned().unwrap_or(Value::Null);
-            let effective_status = if passed {
-                SUCCESS_EXIT
-            } else {
-                status.max(FAILURE_EXIT)
-            };
-            let mut entry = json!({
-                "layer": layer,
-                "kind": check_kind,
-                "file": file_path.display().to_string(),
-                "status": layer_status,
-                "result": result,
-                "exit_code": effective_status,
-                "detail": detail,
-            });
-            if let Some(depth) = depth
-                && let Value::Object(entry) = &mut entry
-            {
-                entry.insert("depth".to_owned(), json!(depth));
-            }
-            (entry, !passed)
-        } else {
-            let detail = json!({
-                "result": "error",
-                "kind": "io",
-                "message": format!("[{layer}] file is required"),
-            });
-            (
-                json!({
+                let passed = chain_layer_passes(&detail, status);
+                let layer_status = if passed { "passed" } else { "failed" };
+                let result = detail.get("result").cloned().unwrap_or(Value::Null);
+                let effective_status = if passed {
+                    SUCCESS_EXIT
+                } else {
+                    status.max(FAILURE_EXIT)
+                };
+                let mut entry = json!({
                     "layer": layer,
-                    "kind": "check",
-                    "status": "failed",
-                    "result": "error",
-                    "exit_code": 2,
+                    "kind": check_kind,
+                    "file": file_path.display().to_string(),
+                    "status": layer_status,
+                    "result": result,
+                    "exit_code": effective_status,
                     "detail": detail,
-                }),
-                true,
-            )
+                });
+                if let Some(depth) = depth
+                    && let Value::Object(entry) = &mut entry
+                {
+                    entry.insert("depth".to_owned(), json!(depth));
+                }
+                (entry, !passed)
+            }
+            Err(detail) => chain_step_input_error(layer, "check", &detail),
         }
     } else if kind == "refine" {
         let target = section
@@ -4144,7 +4158,16 @@ fn run_chain_step(
                 true,
             )
         } else {
-            let file_path = base.join(&section.values["file"]);
+            let file_path = match chain_step_file(section, layer, base) {
+                Ok(path) => path,
+                Err(detail) => {
+                    return chain_step_input_error(
+                        &format!("{layer}->{target}"),
+                        "refine",
+                        &detail,
+                    );
+                }
+            };
             let target_path = base.join(&target_section.expect("checked").values["file"]);
             let mapping_path = base.join(mapping.expect("checked"));
             // Precedence: an explicit `refine_depth` or `depth` on this layer wins

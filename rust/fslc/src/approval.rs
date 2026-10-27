@@ -790,7 +790,7 @@ fn is_canonical_utc_timestamp(value: &str) -> bool {
     let number = |start: usize, end: usize| {
         bytes[start..end].iter().try_fold(0_u32, |value, byte| {
             byte.is_ascii_digit()
-                .then_some(value * 10 + u32::from(*byte - b'0'))
+                .then(|| value * 10 + u32::from(*byte - b'0'))
         })
     };
     let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
