@@ -2229,10 +2229,27 @@ fn collect_state_references(
     state_names: &BTreeSet<String>,
     references: &mut Vec<String>,
 ) {
+    visit_free_names(expr, &BTreeSet::new(), &mut |name| {
+        if state_names.contains(name) {
+            references.push(name.to_owned());
+        }
+    });
+}
+
+/// Visit free variable occurrences in source order, including duplicates.
+pub(crate) fn visit_free_names(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    visit: &mut impl FnMut(&str),
+) {
+    crate::recursion::guard(|| visit_free_names_inner(expr, bound, visit));
+}
+
+fn visit_free_names_inner(expr: &Expr, bound: &BTreeSet<String>, visit: &mut impl FnMut(&str)) {
     if let Expr::Var(name) = expr
-        && state_names.contains(name)
+        && !bound.contains(name)
     {
-        references.push(name.clone());
+        visit(name);
     }
     let scoped = match expr {
         Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
@@ -2240,24 +2257,36 @@ fn collect_state_references(
         _ => None,
     };
     if let Some((binder, body)) = scoped {
-        let (name, filter) = binder_scope(binder);
-        let mut sources = binder_exprs(binder);
-        if filter.is_some() {
-            sources.pop();
-        }
-        for source in sources {
-            collect_state_references(source, state_names, references);
-        }
-        let mut local = state_names.clone();
-        local.remove(name);
-        for child in filter.into_iter().chain(body) {
-            collect_state_references(child, &local, references);
+        let local = visit_free_binder_names(binder, bound, visit);
+        if let Some(body) = body {
+            visit_free_names(body, &local, visit);
         }
     } else {
         for child in expr_children(expr) {
-            collect_state_references(child, state_names, references);
+            visit_free_names(child, bound, visit);
         }
     }
+}
+
+pub(crate) fn visit_free_binder_names(
+    binder: &Binder,
+    bound: &BTreeSet<String>,
+    visit: &mut impl FnMut(&str),
+) -> BTreeSet<String> {
+    let (name, filter) = binder_scope(binder);
+    let mut sources = binder_exprs(binder);
+    if filter.is_some() {
+        sources.pop();
+    }
+    for source in sources {
+        visit_free_names(source, bound, visit);
+    }
+    let mut local = bound.clone();
+    local.insert(name.to_owned());
+    if let Some(filter) = filter {
+        visit_free_names(filter, &local, visit);
+    }
+    local
 }
 
 /// Free state references, excluding enclosing locals, in lexicographic name order.
