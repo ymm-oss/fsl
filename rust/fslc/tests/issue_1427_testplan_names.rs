@@ -371,3 +371,51 @@ fn equal_state_values_keep_first_id_and_failure_setup_path() {
         "produced plan={plan}"
     );
 }
+
+/// Control on 2234a830: reserve future plain names on every suffix retry, not
+/// only on the first qualified candidate. b keeps `boundary_accept_a`; c's
+/// qualified `boundary_accept_c_a` belongs to d's plain name, and candidate
+/// `boundary_accept_c_a_2` belongs to e's plain name, so c must get _3. Reject
+/// names follow the same derivation. HEAD already handles both reservations.
+#[test]
+fn qualified_suffix_candidate_cannot_steal_a_future_plain_name() {
+    let plan = plan(
+        "spec FutureSuffix { type N = 0..4 state { done: Bool } init { done = false }
+         action b(a: N) { requires a <= 3 done = true }
+         action c(a: N) { requires a <= 3 done = true }
+         action d(c_a: N) { requires c_a <= 3 done = true }
+         action e(c_a_2: N) { requires c_a_2 <= 3 done = true } }",
+    );
+    assert_unique(&plan);
+    let produced: Vec<_> = plan["cases"]
+        .as_array()
+        .unwrap_or_else(|| panic!("produced plan={plan}"))
+        .iter()
+        .filter(|case| {
+            case["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("boundary_"))
+        })
+        .map(|case| {
+            json!([
+                case["name"],
+                case["target"]["action"],
+                case["target"]["params"]
+            ])
+        })
+        .collect();
+    assert_eq!(
+        produced,
+        vec![
+            json!(["boundary_accept_a", "b", {"a": 3}]),
+            json!(["boundary_accept_c_a", "d", {"c_a": 3}]),
+            json!(["boundary_accept_c_a_2", "e", {"c_a_2": 3}]),
+            json!(["boundary_accept_c_a_3", "c", {"a": 3}]),
+            json!(["boundary_reject_a", "b", {"a": 4}]),
+            json!(["boundary_reject_c_a", "d", {"c_a": 4}]),
+            json!(["boundary_reject_c_a_2", "e", {"c_a_2": 4}]),
+            json!(["boundary_reject_c_a_3", "c", {"a": 4}]),
+        ],
+        "produced names/actions/params={produced:?}; plan={plan}"
+    );
+}
