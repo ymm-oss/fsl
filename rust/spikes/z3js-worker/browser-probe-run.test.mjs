@@ -31,10 +31,14 @@ async function withinBound(promise) {
 
 function trackTimers(t) {
   const created = [];
+  const expired = new Set();
   const cleared = new Set();
   // Keep real timers: this exercises actual expiry, not a fake timeout rejection.
-  t.mock.method(globalThis, "setTimeout", (...args) => {
-    const timer = realSetTimeout(...args);
+  t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+    const timer = realSetTimeout(() => {
+      expired.add(timer);
+      callback(...args);
+    }, delay);
     created.push(timer);
     return timer;
   });
@@ -49,7 +53,7 @@ function trackTimers(t) {
       assert.ok(cleared.has(timer), "every acquired probe timer is explicitly cleared");
     }
   });
-  return created;
+  return { created, expired };
 }
 
 async function fixture(t, overrides = {}, onLaunch = () => {}) {
@@ -128,7 +132,8 @@ test("the real result timer rejects with status 124 and finishes cleanup within 
     return true;
   });
   assert.ok(performance.now() - started < 1_000, "timer expiry and cleanup must not hang");
-  assert.ok(f.timers.length > 0, "expiry comes from the probe's actual timer");
+  assert.ok(f.timers.created.length > 0, "the probe acquires a real timer");
+  assert.ok(f.timers.expired.size > 0, "status 124 follows an actual timer callback, not an immediate throw");
   assert.deepEqual(f.calls, [
     "startServer", "makeProfile", "launchChrome", "killChrome", "closeServer", "removeProfile",
   ]);
