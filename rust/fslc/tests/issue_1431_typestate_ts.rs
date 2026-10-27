@@ -493,3 +493,153 @@ fn phantom_generic_and_parameter_bindings_are_distinct() {
         "expected signature={expected}; produced TS={ts}"
     );
 }
+
+fn round_two_typestate_report(source: &str) -> Value {
+    let (status, checked) = cli("check", source);
+    assert_eq!(status, 0, "produced check={checked}; source={source}");
+    let (status, report) = cli("typestate", source);
+    assert_eq!(status, 0, "produced typestate={report}; source={source}");
+    report
+}
+
+fn round_two_entity_typescript<'a>(report: &'a Value, name: &str) -> &'a str {
+    report["entities"]
+        .as_array()
+        .unwrap_or_else(|| panic!("produced report={report}"))
+        .iter()
+        .find(|entity| entity["entity"] == name)
+        .and_then(|entity| entity["typescript"].as_str())
+        .unwrap_or_else(|| panic!("missing {name}; produced report={report}"))
+}
+
+/// Control on 2234a830: pin the entire R1 model-name capture skeleton at both
+/// depths, including a variant with a model-typed data field. Model enum S makes
+/// the generic S_; adding model enum S_ makes it S__. Generated `Item`/`ItemState`
+/// occupy neither candidate. The field and parameter must still refer to model
+/// S, while the interface binder, brand and every signature use the fresh name.
+#[test]
+fn model_type_capture_full_skeleton_preserves_field_and_phantom_brand() {
+    for (extra_types, generic) in [("", "S_"), ("enum S_ { Low, High }", "S__")] {
+        for (field, initial, expected_field) in
+            [("", "", ""), (", mode: S", ", mode: Fast", "  mode: S;\n")]
+        {
+            let ts = typescript(&format!(
+                "spec Capture {{ enum St {{ Open, Closed }} enum S {{ Fast, Slow }}
+                 {extra_types} struct Item {{ status: St{field} }} state {{ item: Item }}
+                 init {{ item = Item {{ status: Open{initial} }} }}
+                 action inspect(mode: S) {{ requires item.status == Open }} }}"
+            ));
+            let expected = format!(
+                concat!(
+                    "// Typestate skeleton for `Item` from spec `Capture`.\n",
+                    "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+                    "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+                    "export type ItemState = \"Open\" | \"Closed\";\n\n",
+                    "declare const __state: unique symbol;\n",
+                    "export interface Item<{generic} extends ItemState> {{\n",
+                    "{expected_field}  readonly [__state]: {generic};\n}}\n\n",
+                    "export function inspect<{generic} extends \"Open\">(self: Item<{generic}>, mode: S): Item<{generic}>;"
+                ),
+                generic = generic,
+                expected_field = expected_field,
+            );
+            assert_eq!(
+                ts, expected,
+                "generic={generic}; field={field:?}; produced TS={ts}"
+            );
+        }
+    }
+}
+
+/// Detector on 2234a830: Option variable s_ uppercases only its first character,
+/// yielding interface S_ and alias `S_State` (interface name plus State). Model
+/// enum S occupies S and the generated interface occupies S_, so S__ is the
+/// first free generic; `S_State` is not an underscore-only candidate. HEAD uses
+/// S_ and captures its own handle in S_<S_>. Pin the full skeleton, not just the
+/// function, so a partial fix cannot leave the interface binder or brand behind.
+#[test]
+fn option_entity_name_is_reserved_when_freshening_the_full_skeleton() {
+    let report = round_two_typestate_report(
+        "spec GeneratedCapture { type N = 0..3 enum S { Fast, Slow }
+         state { s_: Option<N> } init { s_ = none }
+         action inspect(n: N) { requires s_ == none } }",
+    );
+    let ts = round_two_entity_typescript(&report, "s_ (Option)");
+    let expected = concat!(
+        "// Typestate skeleton for `S_` from spec `GeneratedCapture`.\n",
+        "// `s_` is an Option slot; states are Empty (none) / Filled (some).\n",
+        "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+        "export type S_State = \"Empty\" | \"Filled\";\n\n",
+        "declare const __state: unique symbol;\n",
+        "export interface S_<S__ extends S_State> {\n",
+        "  value: number | null;\n",
+        "  readonly [__state]: S__;\n}\n\n",
+        "export function inspect<S__ extends \"Empty\">(self: S_<S__>, n: number): S_<S__>;"
+    );
+    assert_eq!(ts, expected, "produced TS={ts}; report={report}");
+}
+
+/// Detector on 2234a830: enum-state variable s is camel-cased to interface S,
+/// with generated alias `SState`. Neither is a model type (`Phase` is), but S must
+/// be reserved, making S_ the first free generic. HEAD emits peek<S ...>(self:
+/// S<S>), capturing the handle. Pin all bytes, including both the generic
+/// self-loop and ordinary close transition, interface binder and phantom brand.
+#[test]
+fn enum_state_entity_name_is_reserved_when_freshening_the_full_skeleton() {
+    let report = round_two_typestate_report(
+        "spec Cap2 { enum Phase { Open, Closed }
+         state { s: Phase } init { s = Open }
+         action peek(flag: Bool) { requires s == Open }
+         action close() { requires s == Open s = Closed } }",
+    );
+    let ts = round_two_entity_typescript(&report, "s (Phase)");
+    let expected = concat!(
+        "// Typestate skeleton for `S` from spec `Cap2`.\n",
+        "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+        "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+        "export type SState = \"Open\" | \"Closed\";\n\n",
+        "declare const __state: unique symbol;\n",
+        "export interface S<S_ extends SState> {\n",
+        "  readonly [__state]: S_;\n}\n\n",
+        "export function peek<S_ extends \"Open\">(self: S<S_>, flag: boolean): S<S_>;\n",
+        "export function close(self: S<\"Open\">): S<\"Closed\">;"
+    );
+    assert_eq!(ts, expected, "produced TS={ts}; report={report}");
+}
+
+/// Detector on 2234a830: allocate once in FSL declaration order for the whole
+/// spec. Reserved delete gets delete_; the distinct action delete_ then gets
+/// delete__. A sees both actions, B sees only delete_, which must still reuse
+/// delete__. HEAD resets the allocator for B and incorrectly emits delete_.
+#[test]
+fn action_name_allocation_is_shared_across_entity_declarations() {
+    let report = round_two_typestate_report(
+        "spec EntityNames { enum St { Open, Closed }
+         struct A { status: St } struct B { status: St }
+         state { a: A, b: B }
+         init { a = A { status: Open } b = B { status: Open } }
+         action delete() { requires a.status == Open a.status = Closed }
+         action delete_() { requires a.status == Open requires b.status == Open
+                            a.status = Closed b.status = Closed } }",
+    );
+    let declarations: Vec<_> = ["A.status", "B.status"]
+        .into_iter()
+        .map(|entity| {
+            round_two_entity_typescript(&report, entity)
+                .lines()
+                .filter(|line| line.starts_with("export function"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert_eq!(
+        declarations,
+        vec![
+            vec![
+                "export function delete_(self: A<\"Open\">): A<\"Closed\">;",
+                "export function delete__(self: A<\"Open\">): A<\"Closed\">;",
+            ],
+            vec!["export function delete__(self: B<\"Open\">): B<\"Closed\">;"],
+        ],
+        "produced declarations={declarations:?}; report={report}"
+    );
+}
