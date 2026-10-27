@@ -1465,9 +1465,8 @@ fn findings_with_code<'a>(migrated: &'a Value, code: &str) -> Vec<&'a Value> {
         .collect()
 }
 
-#[test]
-fn canonical_return_example_has_no_inline_maps() {
-    let path = example_path("layers/return_system.fsl");
+fn assert_canonical_example(name: &str) -> Value {
+    let path = example_path(name);
     let path = path.to_str().expect("UTF-8 path");
     let checked = run(&["check", path]);
     assert_eq!(checked.status.code(), Some(0), "{}", json(&checked));
@@ -1477,11 +1476,113 @@ fn canonical_return_example_has_no_inline_maps() {
     assert_eq!(lint.status.code(), Some(1), "{}", json(&lint));
     let lint = json(&lint);
     assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
-    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
     let migrate = run(&["migrate", path, "--edition", "next"]);
     assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
     assert_eq!(json(&migrate)["changed"], 0);
     assert!(findings_with_code(&json(&migrate), "inline_action_maps").is_empty());
+    lint
+}
+
+fn example_contract(path: &Path, source: &str) -> Value {
+    fslc_rust::migration::kernel_contract(
+        source,
+        path,
+        &fsl_syntax::ParseOptions::default(),
+        fslc_rust::migration::Origins::Kept,
+    )
+    .expect("checked example contract")
+}
+
+#[test]
+fn canonical_return_example_has_no_inline_maps() {
+    let lint = assert_canonical_example("layers/return_system.fsl");
+    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
+}
+
+#[test]
+fn canonical_cancel_example_has_no_inline_maps() {
+    assert_canonical_example("pm/cancel_system.fsl");
+}
+
+// The pre-canonicalization program at 5a539bbe, without comments/layout. Keep
+// this independent of the public example so metadata or semantic loss is caught.
+const LEGACY_CANCEL_REQUIREMENTS: &str = r#"requirements CancelSystemReq {
+  implements CancelFlow from "cancel_flow.fsl" {
+    map sub_stage[c: Sub] =
+      if scr[c].st == Browsing then Active
+      else if scr[c].st == CancelForm then CancelRequested
+      else if scr[c].st == OfferDialog then OfferShown
+      else if scr[c].st == ThanksStay then Retained
+      else Churned
+  }
+  type Sub = 0..2
+  enum Screen { Browsing, CancelForm, OfferDialog, ThanksStay, GoodbyePage }
+  struct SubView { st: Screen, offered: Bool }
+  state { scr: Map<Sub, SubView>, churn_count: Int, retain_count: Int }
+  init {
+    forall c: Sub { scr[c] = SubView { st: Browsing, offered: false } }
+    churn_count = 0
+    retain_count = 0
+  }
+  requirement REQ-1 "Pressing the cancel button transitions to the cancellation form" {
+    fair action tap_cancel(c: Sub) maps request_cancel(c) {
+      requires scr[c].st == Browsing
+      scr[c].st = CancelForm
+    }
+  }
+  requirement REQ-2 "On cancellation-form submission, show the retention offer exactly once per subscription" {
+    fair action submit_cancel(c: Sub) maps show_offer(c) {
+      requires scr[c].st == CancelForm
+      requires not scr[c].offered
+      scr[c] = SubView { st: OfferDialog, offered: true }
+    }
+  }
+  requirement REQ-3 "Accepting the offer goes to retention (thanks screen); declining goes to the cancellation-complete screen" {
+    fair action accept(c: Sub) maps accept_offer(c) {
+      requires scr[c].st == OfferDialog
+      scr[c].st = ThanksStay
+      retain_count = retain_count + 1
+    }
+    fair action decline(c: Sub) maps decline_offer(c) {
+      requires scr[c].st == OfferDialog
+      scr[c].st = GoodbyePage
+      churn_count = churn_count + 1
+    }
+    invariant CountsMatchScreens {
+      churn_count == count(c: Sub where scr[c].st == GoodbyePage)
+        and retain_count == count(c: Sub where scr[c].st == ThanksStay)
+    }
+  }
+  requirement REQ-4 "An offer is not re-shown to a subscription that has already been shown one" {
+    invariant OfferedFlagConsistent {
+      forall c: Sub {
+        (scr[c].st == OfferDialog or scr[c].st == ThanksStay or scr[c].st == GoodbyePage)
+          => scr[c].offered
+      }
+    }
+  }
+  acceptance AC-1 "Acceptance flow: request -> show -> accept results in retention" {
+    tap_cancel(0)
+    submit_cancel(0)
+    accept(0)
+    expect scr[0].st == ThanksStay and retain_count == 1
+  }
+  acceptance AC-2 "Decline flow: request -> show -> decline completes the cancellation" {
+    tap_cancel(1)
+    submit_cancel(1)
+    decline(1)
+    expect scr[1].st == GoodbyePage and churn_count == 1
+  }
+}
+"#;
+
+#[test]
+fn canonical_cancel_preserves_the_checked_kernel_and_typed_metadata() {
+    let path = example_path("pm/cancel_system.fsl");
+    assert_eq!(
+        example_contract(&path, LEGACY_CANCEL_REQUIREMENTS),
+        example_contract(&path, &text(&path))
+    );
 }
 
 #[test]
@@ -1494,17 +1595,8 @@ fn canonical_return_preserves_the_checked_kernel_and_typed_metadata() {
     assert_eq!(legacy.matches(import).count(), 1);
     // Resolve the same policy under one logical source path. Use the existing
     // migration contract: location-free Kernel plus the full typed annotations.
-    let contract = |source: &str| {
-        fslc_rust::migration::kernel_contract(
-            source,
-            &path,
-            &fsl_syntax::ParseOptions::default(),
-            fslc_rust::migration::Origins::Kept,
-        )
-        .expect("checked return contract")
-    };
-    let mut before = contract(&legacy.replace(import, "return_policy.fsl"));
-    let after = contract(&text(&path));
+    let mut before = example_contract(&path, &legacy.replace(import, "return_policy.fsl"));
+    let after = example_contract(&path, &text(&path));
     for (old, new) in [
         ("submit__b1", "submit_small"),
         ("submit__b2", "submit_large"),
