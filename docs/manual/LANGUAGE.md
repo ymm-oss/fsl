@@ -790,16 +790,83 @@ variable.
 An `init` statement's collection `forall` source must not contain a free state
 reference. `check` rejects `forall x in xs { ... }` when `xs` is state, even
 after an assignment to `xs`, for an empty domain/body, or in an unreachable
-branch. This is a breaking removal (#1463), not a prohibition on ordinary
-assigned-state reads in init expressions, filters, or bodies. A local binder
+branch. This breaking removal (#1463) does not itself prohibit assigned-state
+reads in init expressions, filters, or bodies; those reads must also satisfy
+the same-forall root-read boundary below (#1518). A local binder
 that shadows a state name is not a state reference: its source/bounds are read
 in the enclosing scope, and only its filter/body/value uses the new local scope.
 State-independent collection literals remain allowed. Correcting this lexical
 distinction also removes the old symbolic/explicit false rejection of valid
 shadowed names; that fix does not narrow `check` acceptance.
 
-A nested statement `forall` in `init` remains accepted by `check` and supported
-by the symbolic engines, but `--engine explicit` rejects nested init `forall`.
+Within an init statement `forall`'s filter or body, reading a state root that
+the **same forall writes** is rejected (#1518), including assignment keys,
+right-hand sides, and `if` conditions. The exception is a location at the
+current binder key that the body has already written in this iteration:
+`m[k] = value` permits later `m[k]` and `m[k].flag` reads; `m[k].flag = true`
+permits a later read of that field, not the whole entry or another field.
+Existing ownership restrictions still apply. For example,
+`forall k: K { m[k] = true seen[k] = m[k] }` is allowed, but using `m[1]`
+instead of `m[k]`, or reading before the write, is rejected. Reads of a
+different root initialized before the forall remain allowed. This is a
+**breaking removal** of previously check-ok scalar-map and whole-entry forms.
+The semantics message identifies the root, not the individual read expression;
+check and verification locate the containing statement, while legacy replay
+does not require a location.
+
+This removal deliberately includes conservative cases, without a per-key
+dependency proof: `forall k in 0..0 { m[k] = true }` followed by
+`forall k in 1..1 { m[k] = m[0] }` is rejected even though the preceding
+forall initialized the other key, because the second forall writes the same
+root it reads. Likewise,
+`forall outer in 0..0 { forall k: K { m[k] = true seen[k] = m[k] } }`
+is rejected even immediately after the inner write, since the outer forall
+also writes `m` and the read is not at its binder key. Explicit and Monitor
+already refused these forms on the base with `before it is assigned` and
+`nested forall in init is not supported`, respectively. #1518 also rejects
+them at check; it does not refine the rule to admit them.
+
+The rule is root-based, not limited to iteration-order disagreements: with
+`m` indexed by `0..1`, `m[0] = true forall k in 1..1 { m[k] = true x = m[0] }`
+is also rejected even though all engines agreed on this correct init on the
+base, because the loop reads a previously initialized other key of `m`.
+
+For deterministic concrete init, a forall with an empty or not statically
+provable nonempty domain contributes no definite coverage for its fixed
+targets. A static filter such as `where k == 0` over `0..1` can establish
+nonemptiness; a state-dependent filter cannot. Write ownership is still
+checked. Missing deterministic assignments are rejected by explicit and
+Monitor (exit 2), not filled with defaults. Symbolic init keeps unwritten
+components free: its verdict follows those free values (type-bound/invariant
+violations exit 1, or verification if every admissible value satisfies the
+property). Auto may fall back to BMC for this unsupported explicit init.
+This is also a conservative concrete-support breaking removal: after
+`flag = true`, a fixed-target write under `where flag and k == 0` is refused
+by explicit and Monitor with `init does not assign` even if the runtime domain
+is nonempty, rather than producing an incorrect verdict.
+
+There is a separate pre-existing explicit limitation (#1520): with a
+where-filtered or collection binder, reading the current key after writing it
+is allowed by the #1518 read-order rule, but explicit and Monitor still refuse
+with `before it is assigned`, as they did on the base. This is a conservative
+binder-key coverage limitation, not an incorrect verdict; `--engine auto`
+falls back to BMC. #1520 tracks support for these forms.
+
+Breaking-removal sweep (#1518): base
+`28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head
+`9d94c5cb5447834f329002200afa0f3404d9a9a0` plus the production runtime change
+(`explicit.rs` SHA-256
+`b20b92e9945fd7a05eb8462c4a7ad3816fcd06cd2c34a871910b7b652090c17b`).
+The coordinator built each binary in its own git-archive materialized tree
+and ran `fslc check <form>` on all 597 `.fsl` forms in `specs/`, `examples/`,
+and `rust/fslc/tests/fixtures/`: 397 `ok` in each tree, **0 `ok`→`error`,
+0 `error`→`ok`, 0 other changes**. The corpus removal set is empty; A1–A5 pin
+five regression forms within this removal, which also includes the
+conservative examples above.
+
+A nested statement `forall` in `init` remains supported by `check` and the
+symbolic engines subject to the read-order and ownership rules above, but
+`--engine explicit` rejects nested init `forall`.
 `--engine auto` routes this documented explicit limitation to symbolic BMC;
 it does not extend explicit execution or make state-dependent collection
 sources acceptable.

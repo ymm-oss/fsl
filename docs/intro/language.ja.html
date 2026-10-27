@@ -807,12 +807,64 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <p><code>init</code> の文 <code>forall</code> のコレクション source は、自由な状態参照を含んではなりません。
 <code>xs</code> が状態なら <code>forall x in xs { ... }</code> は、<code>xs</code> への代入の後でも、domain/本体が空でも、
 到達しない分岐の中でも <code>check</code> が拒否します。これは breaking removal (#1463) であり、
-通常の init 式・フィルター・本体で代入済みの状態を読むことまで禁じる規則ではありません。
+この規則自体は init 式・フィルター・本体で代入済みの状態を読むことを禁じませんが、
+それらの読み出しにも後述の同 forall のルート読み出しの境界 (#1518) が適用されます。
 状態と同名のローカルバインダーは状態参照ではなく、source/範囲境界は外側のスコープで、
 フィルター・本体・集約値だけは新しいローカルスコープで読みます。状態に依存しない
 コレクションリテラルは引き続き使えます。この字句的区別の修正により、有効な shadow を
 symbolic/explicit が誤って拒否していた挙動も解消しますが、こちらは check の受理の縮小ではありません。</p>
-<p><code>init</code> の文 <code>forall</code> の入れ子は、引き続き <code>check</code> と symbolic engine が受理しますが、
+<p>init の文 <code>forall</code> のフィルターまたは本体では、<strong>同じ forall が書く状態ルート</strong>を
+読むことを拒否します (#1518)。代入先の key 式、右辺、<code>if</code> の条件も対象です。
+例外は、今の iteration の binder の key で、本体の中で先に書いた場所です。
+<code>m[k] = value</code> の後には <code>m[k]</code> と <code>m[k].flag</code> を読めますが、<code>m[k].flag = true</code>
+の後に読めるのはその field であり、entry 全体や他の field ではありません。
+既存の ownership の制限は維持します。例えば
+<code>forall k: K { m[k] = true seen[k] = m[k] }</code> は許しますが、読み出しを <code>m[1]</code>
+に替える、または書き込みより前に読む形は拒否します。forall より前に初期化した
+別のルートを読む形は引き続き許します。これは、従来 check-ok だった scalar map と
+entry 全体の形の <strong>breaking removal</strong> です。semantics message が名指しするのはルートであり、
+個々の読み出し式ではありません。
+check と verification は読み出しを含む文の位置を返します。legacy replay の位置は必須にしません。</p>
+<p>この removal は key ごとの依存性を証明せず、意図して保守的な形も含めます。
+例えば <code>forall k in 0..0 { m[k] = true }</code> の後の
+<code>forall k in 1..1 { m[k] = m[0] }</code> は、前の forall が別の key を初期化していても、
+後の forall が読むのと同じルートを書くため拒否します。また、
+<code>forall outer in 0..0 { forall k: K { m[k] = true seen[k] = m[k] } }</code>
+も、内側で書いた直後の読み出しであっても、外側の forall も <code>m</code> を書き、その binder の
+key での読み出しではないため拒否します。どちらも base の explicit と Monitor が既に、
+それぞれ <code>before it is assigned</code>、<code>nested forall in init is not supported</code> で拒否していました。
+#1518 では check でも拒否し、これらを許すための規則の精密化は行いません。</p>
+<p>規則はルートごとであり、iteration の順で食い違う形だけに限りません。
+<code>m</code> の key が <code>0..1</code> のとき、
+<code>m[0] = true forall k in 1..1 { m[k] = true x = m[0] }</code> は、base で全 engine が
+一致していた正しい init ですが、同じルートの先に初期化した別の key を読むため拒否します。</p>
+<p>決定的な concrete init では、domain が空、または静的に非空と証明できない forall の
+固定 target は、確実な代入の覆いに数えません。<code>0..1</code> の <code>where k == 0</code> のような
+静的フィルターは非空性を証明できますが、状態に依存するフィルターはできません。
+書き込みの ownership は引き続き検査します。決定的な代入が足りなければ explicit と
+Monitor は exit 2 で拒否し、既定値で埋めません。symbolic init は未代入の成分を自由な値
+として扱い、その意味に従う verdict を返します (型境界・invariant 違反は exit 1、
+許容する全ての値で成り立てば検証成功)。auto はこの explicit 未対応 init を BMC へ回せます。
+これも concrete 対応範囲の保守的な breaking removal であり、<code>flag = true</code> の後の
+<code>where flag and k == 0</code> の固定 target の書き込みは、実行時の domain が非空でも
+explicit と Monitor が <code>init does not assign</code> で拒否するのであって、誤った verdict ではありません。</p>
+<p>別の既存の explicit の制限も残ります (#1520)。where の付いた binder や collection の
+binder では、今の key を書いた後に読む形は #1518 の読み出し規則では許しますが、
+explicit と Monitor は base と同じく <code>before it is assigned</code> で拒否します。
+これは binder-key の覆いの保守的な制限であり、誤った verdict ではありません。
+<code>--engine auto</code> は BMC へ回ります。これらの形への対応は #1520 で扱います。</p>
+<p>breaking removal の sweep (#1518): base
+<code>28c4eab710f8d83e766bb0e7c7e006d09d7777d8</code> と、head
+<code>9d94c5cb5447834f329002200afa0f3404d9a9a0</code> に production runtime の変更を加えた状態
+(<code>explicit.rs</code> の SHA-256:
+<code>b20b92e9945fd7a05eb8462c4a7ad3816fcd06cd2c34a871910b7b652090c17b</code>) を比較しました。
+coordinator がそれぞれ別の git-archive materialized tree で native binary を build し、
+<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全 <code>.fsl</code> 597 形に
+<code>fslc check &lt;form&gt;</code> を実行しました。両方で 397 <code>ok</code>、<strong><code>ok</code>→<code>error</code> 0 件、
+<code>error</code>→<code>ok</code> 0 件、その他の変化 0 件</strong> です。corpus の removal の集合は空であり、
+受入 fixture A1–A5 はこの removal の5形の回帰対照であり、上記の保守的な例も removal に含めます。</p>
+<p><code>init</code> の文 <code>forall</code> の入れ子は、上記の読み出し順と ownership の規則に従う場合、
+引き続き <code>check</code> と symbolic engine が受理しますが、
 <code>--engine explicit</code> は入れ子の init forall を拒否します。<code>--engine auto</code> は、この
 文書化された explicit の制限を symbolic BMC へ回します。explicit の実行能力を
 広げるものでも、状態依存のコレクション source を受理するものでもありません。</p>

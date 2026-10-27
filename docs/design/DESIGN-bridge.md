@@ -117,6 +117,89 @@ Concrete execution requires a deterministic initial state. Static check at
   (BMC explores every admissible value there), and a concrete run pinned to
   one already-admissible value has nothing left for the gate to check.
 
+#### Init forall read order and coverage (#1518)
+
+The native runtime shares a read-order check between init ownership validation
+(`check` and symbolic verification) and deterministic-init validation
+(`Monitor::new` and explicit verification). In a statement `forall`'s filter
+or body, a read of a state root written by that same `forall` is rejected,
+including reads in assignment keys, right-hand sides, and `if` conditions.
+Only a location at the current binder key that has already been written in
+the current iteration is allowed. Writing `m[k]` permits later reads of
+`m[k]` and `m[k].flag`; writing `m[k].flag` permits a later read of that field,
+not the entire entry or another field. A write on only one `if` branch is not
+a definite preceding write after the `if`. This does not introduce new
+assignment shapes or relax existing ownership checks.
+
+For example, `forall k: K { m[k] = true seen[k] = m[k] }` remains valid;
+replacing the read with `m[1]`, or moving the read before the write, is now
+rejected. A read of a different root initialized before the `forall` remains
+valid. This is a **breaking removal of check acceptance**, including scalar-map
+and whole-struct-entry forms; rejection is root-based, not restricted to
+symbolic/concrete iteration-order disagreement. The semantics message identifies
+the root, not the individual read expression.
+Check and verification retain the enclosing statement's location (assignment,
+`if`, or `forall` for a filter); legacy replay retains its existing error
+envelope without a required location.
+
+The removal is intentionally conservative, not a per-key dependency proof.
+For example, `forall k in 0..0 { m[k] = true }` followed by
+`forall k in 1..1 { m[k] = m[0] }` is rejected: the second forall reads a
+different key of the same root it writes, even though the preceding forall
+initialized that key. Likewise,
+`forall outer in 0..0 { forall k: K { m[k] = true seen[k] = m[k] } }`
+is rejected even immediately after the inner write: the outer forall also
+writes `m`, and the read is not at its binder key. Both forms were already
+refused by explicit and Monitor on the base, with `before it is assigned`
+and `nested forall in init is not supported`, respectively; #1518 also
+rejects them at check. The rule is not refined to admit these cases.
+
+It also removes correct forms whose base-engine results agreed: with `m`
+indexed by `0..1`, `m[0] = true forall k in 1..1 { m[k] = true x = m[0] }`
+reads an already-initialized other key, but is rejected because the loop
+writes the same root.
+
+Definite coverage and write ownership are distinct. A forall whose domain is
+empty, or not statically provable nonempty, contributes no definite coverage
+for its fixed targets. Static filters may establish nonemptiness using only
+the binder and constants (for example `where k == 0` over `0..1`). A
+state-dependent filter is not such a proof, even when its state was initialized
+earlier. Ownership validation still inspects the body, and the existing
+conservative binder-key coverage classification is unchanged. Thus an
+unexecuted write cannot initialize state computed by `Monitor::new` or explicit
+through an arbitrary default. Refinement's free-root `concrete_initial_states`
+path does not use `Monitor::new`: #1518 adds the ownership and read-order gate
+there, but its empty-domain coverage remains a soundness limitation tracked in
+#1521.
+Explicit and Monitor reject missing deterministic assignments with exit 2;
+symbolic init retains its free-value semantics, so it may violate a type bound
+or invariant with exit 1, or verify when all admissible values satisfy the
+property. Auto falls back from unsupported explicit init to BMC as before.
+This is also a conservative concrete-support breaking removal: after
+`flag = true`, a fixed-target write under `where flag and k == 0` is refused
+by explicit and Monitor with `init does not assign` even when its runtime
+domain is nonempty, rather than producing an incorrect verdict.
+
+A separate pre-existing explicit limitation remains: for a where-filtered or
+collection binder, reading the current key after writing it is allowed by the
+#1518 read-order rule, but explicit and Monitor still refuse with
+`before it is assigned` because their binder-key coverage is conservative.
+This refusal already occurred on the base; it is an unsupported concrete-init
+shape, not an incorrect verdict. `--engine auto` falls back to BMC for it.
+Improving that binder-key coverage is tracked in #1520, not part of #1518.
+
+Breaking-removal sweep (#1518): base
+`28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head
+`9d94c5cb5447834f329002200afa0f3404d9a9a0` plus the production runtime change
+(`explicit.rs` SHA-256
+`b20b92e9945fd7a05eb8462c4a7ad3816fcd06cd2c34a871910b7b652090c17b`).
+The coordinator built each native binary in its own git-archive materialized
+tree and ran `fslc check <form>` over every `.fsl` under `specs/`, `examples/`,
+and `rust/fslc/tests/fixtures/`: 597 forms, 397 `ok` in each tree,
+**0 `ok`→`error`, 0 `error`→`ok`, and 0 other changes**. The corpus removal set
+is empty; A1–A5 pin five regression forms within this removal, which also
+includes the conservative examples above. No corpus spec was rewritten.
+
 ### 1.4 Expression evaluation
 
 Implement the concrete evaluator `eval_concrete(expr, state, binds, spec, old_state)`

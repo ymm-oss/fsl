@@ -89,15 +89,19 @@ Key points:
   value. Symbolic BMC encodes each `init forall` iteration as a constraint
   conjunct and reports the resulting UNSAT as `result:"error"`,
   `kind:"vacuous"`, `message:"init constraints are unsatisfiable"` (exit 2,
-  §3 of `docs/design/DESIGN-vacuity.md`). The Rust `fsl-runtime` Monitor (used by
-  every concrete-initial-state caller, not only this engine) detects the same
-  contradiction without a solver: it tracks the concrete value written to
+  §3 of `docs/design/DESIGN-vacuity.md`). The Rust `fsl-runtime` Monitor detects
+  the same contradiction without a solver: it tracks the concrete value written to
   each resolved lvalue location across the whole `init` block and fails with
   the identical message the instant a later write disagrees with an earlier
   one at the same location. A later write that repeats the *same* value is
   not a conflict and is accepted, so the ordinary "assign this literal for
   every binder value" idiom (`forall k: K { m[k] = 0 }`, and even a
   non-indexed `forall k: K { ready = true }`) is unaffected.
+
+Refinement's `concrete_initial_states` free-root path does not call
+`Monitor::new`. #1518 adds ownership and forall read-order validation before
+that enumeration, but empty-domain coverage on this path remains a soundness
+limitation tracked in #1521; the Monitor-construction guarantee does not cover it.
 
 ## 3. Verdict and JSON contract
 
@@ -179,6 +183,11 @@ engine rejects them too. Accepting them would let the engine concretely
 evaluate a domain the symbolic engines call ill-formed, and emit verdicts for
 specs the language rejects. Constant bounds (`0..CAP` with `const CAP`) are
 resolved before the kernel AST and remain accepted.
+
+Init reads also obey #1518's same-forall root-read rule and its
+already-written current-key exception (see [DESIGN-bridge.md](DESIGN-bridge.md));
+these read-order errors remain input rejections for symbolic verification too,
+not an explicit-only limitation that switching to BMC can bypass.
 
 ## 6. Integration
 

@@ -12,8 +12,12 @@ every verify engine, LSP diagnostics, and Worker preflight:
 | Previously check-ok form | New boundary | Preserved sibling |
 |---|---|---|
 | A leadsTo wrapper with a Set/Seq collection binder, or any where filter | Reject with the authored property location | Supported unfiltered typed/range wrappers and quantifiers inside P/Q |
-| An init statement forall whose collection source contains a free state reference | Reject with the offending ForAll location, even in dead branches or with empty domains/bodies | State-independent literal sources and ordinary assigned-state reads outside the source |
+| An init statement forall whose collection source contains a free state reference | Reject with the offending ForAll location, even in dead branches or with empty domains/bodies | State-independent literal sources and assigned-state reads outside the source that satisfy #1518's same-forall root-read rule |
 | Relation indexing, whether a read or indexed assignment | Reject through the shared index-type projection | Map indexing and relation contains/add/remove/domain/range |
+
+The later #1518 init root-read boundary is recorded in
+[DESIGN-bridge.md](DESIGN-bridge.md); the preserved reads above remain subject
+to that rule and its current-binder-key exception.
 
 These are breaking removals of accepted forms without executable semantics,
 not implementations of filtered or collection-bound liveness. The old general
@@ -70,7 +74,8 @@ binding, evaluation order, solver dependency, or fallback is introduced.
 ## Engine-specific exclusion and unchecked models
 
 Nested statement forall in init remains accepted by check and executable by
-the symbolic engines, but explicit rejects it. Existing auto routing sends
+the symbolic engines subject to #1518's read-order rule, but explicit rejects
+it. Existing auto routing sends
 that limitation to symbolic BMC. This change does not extend explicit init
 coverage or route around newly invalid source forms.
 

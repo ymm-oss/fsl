@@ -477,6 +477,7 @@ fn collect_assigned_init_roots(statements: &[Statement], assigned: &mut BTreeSet
 }
 
 pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
+    walk_init_forall_reads(&model.init, &mut [], &[], model)?;
     let (assigned, _) = walk_init(
         &model.init,
         BTreeMap::new(),
@@ -615,12 +616,12 @@ fn meet_branches(
     merged
 }
 
-/// The finite domain a `forall` binder ranges over, when it is knowable
-/// without evaluating against a concrete state — i.e. everything except a
-/// `where`-filtered domain, a `Collection` binder, or `Range` bounds that
-/// are not compile-time constants. `None` means the binder's body cannot be
-/// used to prove full coverage (a `where` filter might skip every
-/// iteration).
+/// Finite binder values used for binder-key coverage and write ownership,
+/// without evaluating against a concrete state. Filtered or collection binders
+/// and non-constant range bounds return `None`, so assignments at the binder key
+/// cannot prove coverage through this function. Fixed targets are separate:
+/// `init_binder_is_nonempty` can prove a static filtered domain nonempty
+/// (including a singleton) and permit their coverage even when this returns `None`.
 fn compute_binder_values(
     binder: &Binder,
     model: &KernelModel,
@@ -644,6 +645,44 @@ fn compute_binder_values(
             _ => Ok(None),
         },
         Binder::Typed { .. } | Binder::Range { .. } | Binder::Collection { .. } => Ok(None),
+    }
+}
+
+/// Fixed targets only gain coverage if at least one iteration is guaranteed.
+/// This does not change ownership or the conservative binder-key coverage of
+/// `compute_binder_values`: a state-dependent filter can still skip every write.
+fn init_binder_is_nonempty(binder: &Binder, model: &KernelModel) -> bool {
+    let (sources, filter) = init_binder_exprs(binder);
+    if sources
+        .iter()
+        .any(|expr| !state_references(expr, model, []).is_empty())
+        || filter
+            .is_some_and(|expr| !state_references(expr, model, [binder_name(binder)]).is_empty())
+    {
+        return false;
+    }
+    let state = State::new();
+    let Ok(values) = super::binder_values(binder, &state, &Bindings::new(), model, None) else {
+        return false;
+    };
+    values.into_iter().any(|(value, mut bindings)| {
+        bindings.insert(binder_name(binder).to_owned(), value);
+        super::binder_where_holds(binder, &state, &mut bindings, model, None) == Ok(true)
+    })
+}
+
+/// Binder sources are evaluated outside its scope; only the filter is inside.
+fn init_binder_exprs(binder: &Binder) -> (Vec<&Expr>, Option<&Expr>) {
+    match binder {
+        Binder::Typed { where_expr, .. } => (vec![], where_expr.as_deref()),
+        Binder::Range {
+            lo, hi, where_expr, ..
+        } => (vec![lo, hi], where_expr.as_deref()),
+        Binder::Collection {
+            collection,
+            where_expr,
+            ..
+        } => (vec![collection], where_expr.as_deref()),
     }
 }
 
@@ -736,13 +775,258 @@ fn assignment_coverage(
 
 /// Enforce init's assign-once ownership rule without requiring a concrete
 /// initial state. Symbolic verification may admit partially assigned init,
-/// but it must reject two writes that can own the same state location.
+/// but it must reject two writes that can own the same state location and
+/// reads of a root written by the same forall outside its already-written entry.
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError`] when two writes may overlap on one logical root.
+/// Returns [`RuntimeError`] when two writes may overlap on one logical root,
+/// or an init forall read can depend on iteration order.
 pub fn check_init_write_ownership(model: &KernelModel) -> Result<(), RuntimeError> {
+    walk_init_forall_reads(&model.init, &mut [], &[], model)?;
     walk_init_write_ownership(&model.init, BTreeSet::new(), false, &BTreeMap::new(), model)?;
+    Ok(())
+}
+
+#[derive(Clone)]
+struct InitForallReads {
+    binder_depth: usize,
+    written_roots: BTreeSet<String>,
+    // The key is implicitly this scope's binder; an empty path owns the entry.
+    assigned: BTreeSet<(String, Vec<String>)>,
+}
+
+/// Return a root, optional map key, and field path, without treating a field
+/// read as a read of the entire enclosing entry.
+fn init_read_place(expr: &Expr) -> Option<(&str, Option<&Expr>, Vec<String>)> {
+    match expr {
+        Expr::Var(root) => Some((root, None, vec![])),
+        Expr::Index(base, key) => match base.as_ref() {
+            Expr::Var(root) => Some((root, Some(key), vec![])),
+            _ => None,
+        },
+        Expr::Field(base, field) => {
+            let (root, key, mut fields) = init_read_place(base)?;
+            fields.push(field.clone());
+            Some((root, key, fields))
+        }
+        _ => None,
+    }
+}
+
+fn init_target_expr(target: &LValue) -> Expr {
+    match target {
+        LValue::Var(root) => Expr::Var(root.clone()),
+        LValue::Index(root, key) => {
+            Expr::Index(Box::new(Expr::Var(root.clone())), Box::new(key.clone()))
+        }
+        LValue::Field(base, field) => Expr::Field(Box::new(init_target_expr(base)), field.clone()),
+    }
+}
+
+fn is_current_init_key(key: Option<&Expr>, depth: usize, locals: &[String]) -> bool {
+    matches!(key, Some(Expr::Var(name))
+        if locals.iter().rposition(|local| local == name) == Some(depth))
+}
+
+/// Shared by the check/symbolic ownership gate and the Monitor/explicit gate.
+/// Locations are enclosing statement spans, as for duplicate-write diagnostics.
+fn walk_init_forall_reads(
+    statements: &[Statement],
+    scopes: &mut [InitForallReads],
+    locals: &[String],
+    model: &KernelModel,
+) -> Result<(), RuntimeError> {
+    for statement in statements {
+        match statement {
+            Statement::Assign {
+                target,
+                value,
+                span,
+            } => {
+                let target_expr = init_target_expr(target);
+                let (root, key, fields) = init_read_place(&target_expr)
+                    .ok_or_else(|| runtime_error("invalid init assignment target"))?;
+                if let Some(key) = key {
+                    check_init_forall_read_expr(key, scopes, locals, *span)?;
+                }
+                check_init_forall_read_expr(value, scopes, locals, *span)?;
+                for scope in &mut *scopes {
+                    if is_current_init_key(key, scope.binder_depth, locals) {
+                        scope.assigned.insert((root.to_owned(), fields.clone()));
+                    }
+                }
+            }
+            Statement::If {
+                condition,
+                then_statements,
+                else_statements,
+                span,
+            } => {
+                check_init_forall_read_expr(condition, scopes, locals, *span)?;
+                let mut then_scopes = scopes.to_vec();
+                walk_init_forall_reads(then_statements, &mut then_scopes, locals, model)?;
+                let mut else_scopes = scopes.to_vec();
+                walk_init_forall_reads(else_statements, &mut else_scopes, locals, model)?;
+                for ((scope, then_scope), else_scope) in
+                    scopes.iter_mut().zip(then_scopes).zip(else_scopes)
+                {
+                    // Whole-entry ownership also covers a branch's field write.
+                    scope.assigned = then_scope
+                        .assigned
+                        .union(&else_scope.assigned)
+                        .filter(|place| {
+                            init_place_was_assigned(place, &then_scope.assigned)
+                                && init_place_was_assigned(place, &else_scope.assigned)
+                        })
+                        .cloned()
+                        .collect();
+                }
+            }
+            Statement::ForAll {
+                binder,
+                statements,
+                span,
+            } => {
+                let (sources, filter) = init_binder_exprs(binder);
+                for source in sources {
+                    check_init_forall_read_expr(source, scopes, locals, *span)?;
+                }
+                let mut nested_scopes = scopes.to_vec();
+                let mut written_roots = BTreeSet::new();
+                collect_assigned_init_roots(statements, &mut written_roots);
+                written_roots.retain(|root| model.state_type(root).is_some());
+                nested_scopes.push(InitForallReads {
+                    binder_depth: locals.len(),
+                    written_roots,
+                    assigned: BTreeSet::new(),
+                });
+                let mut nested_locals = locals.to_vec();
+                nested_locals.push(binder_name(binder).to_owned());
+                if let Some(filter) = filter {
+                    check_init_forall_read_expr(filter, &nested_scopes, &nested_locals, *span)?;
+                }
+                walk_init_forall_reads(statements, &mut nested_scopes, &nested_locals, model)?;
+                // A nested forall may execute zero times: do not promote its
+                // writes to the enclosing iteration's definite write set.
+            }
+        }
+    }
+    Ok(())
+}
+
+fn init_place_was_assigned(
+    (root, fields): &(String, Vec<String>),
+    assigned: &BTreeSet<(String, Vec<String>)>,
+) -> bool {
+    assigned.iter().any(|(written_root, written_fields)| {
+        written_root == root && fields.starts_with(written_fields)
+    })
+}
+
+fn check_init_forall_read_expr(
+    expr: &Expr,
+    scopes: &[InitForallReads],
+    locals: &[String],
+    span: fsl_core::Span,
+) -> Result<(), RuntimeError> {
+    fsl_core::recursion::guard(|| check_init_forall_read_expr_inner(expr, scopes, locals, span))
+}
+
+#[allow(clippy::too_many_lines)]
+fn check_init_forall_read_expr_inner(
+    expr: &Expr,
+    scopes: &[InitForallReads],
+    locals: &[String],
+    span: fsl_core::Span,
+) -> Result<(), RuntimeError> {
+    if let Some((root, key, fields)) = init_read_place(expr) {
+        if !locals.iter().any(|local| local == root) {
+            for scope in scopes {
+                if scope.written_roots.contains(root)
+                    && !(is_current_init_key(key, scope.binder_depth, locals)
+                        && init_place_was_assigned(
+                            &(root.to_owned(), fields.clone()),
+                            &scope.assigned,
+                        ))
+                {
+                    return Err(runtime_error_at(
+                        format!(
+                            "init forall cannot read state variable '{root}' except at an already assigned current binder key"
+                        ),
+                        span,
+                    ));
+                }
+            }
+        }
+        if let Some(key) = key {
+            check_init_forall_read_expr(key, scopes, locals, span)?;
+        }
+        return Ok(());
+    }
+    let children: Vec<&Expr> = match expr {
+        Expr::Some(expr)
+        | Expr::Neg(expr)
+        | Expr::Not(expr)
+        | Expr::Stage { entity: expr, .. }
+        | Expr::UnaryNamed { expr, .. }
+        | Expr::Is { expr, .. }
+        | Expr::Field(expr, _) => vec![expr],
+        Expr::Set(items) | Expr::Seq(items) => items.iter().collect(),
+        Expr::Struct { fields, .. } => fields.iter().map(|(_, expr)| expr).collect(),
+        Expr::Call { args, .. } => args.iter().collect(),
+        Expr::Index(left, right)
+        | Expr::Binary { left, right, .. }
+        | Expr::BinaryNamed { left, right, .. } => vec![left, right],
+        Expr::Method { receiver, args, .. } => std::iter::once(receiver.as_ref())
+            .chain(args.iter())
+            .collect(),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => vec![condition, then_expr, else_expr],
+        Expr::Quantified { binder, body, .. } => {
+            check_init_forall_read_binder(binder, Some(body), scopes, locals, span)?;
+            vec![]
+        }
+        Expr::Aggregate { binder, value, .. } => {
+            check_init_forall_read_binder(binder, value.as_deref(), scopes, locals, span)?;
+            vec![]
+        }
+        Expr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => vec![first, second, third],
+        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
+            vec![]
+        }
+    };
+    for child in children {
+        check_init_forall_read_expr(child, scopes, locals, span)?;
+    }
+    Ok(())
+}
+
+fn check_init_forall_read_binder(
+    binder: &Binder,
+    body: Option<&Expr>,
+    scopes: &[InitForallReads],
+    locals: &[String],
+    span: fsl_core::Span,
+) -> Result<(), RuntimeError> {
+    let (sources, filter) = init_binder_exprs(binder);
+    for source in sources {
+        check_init_forall_read_expr(source, scopes, locals, span)?;
+    }
+    let mut nested_locals = locals.to_vec();
+    nested_locals.push(binder_name(binder).to_owned());
+    for child in filter.into_iter().chain(body) {
+        check_init_forall_read_expr(child, scopes, &nested_locals, span)?;
+    }
     Ok(())
 }
 
@@ -898,6 +1182,7 @@ fn walk_init(
                 if let Some(where_expr) = where_expr {
                     check_init_expr(where_expr, &definitely_assigned, &nested_bound, model)?;
                 }
+                let before_forall = definitely_assigned.clone();
                 (definitely_assigned, possibly_assigned) = walk_init(
                     statements,
                     definitely_assigned,
@@ -906,6 +1191,9 @@ fn walk_init(
                     &nested_bound,
                     model,
                 )?;
+                if !init_binder_is_nonempty(binder, model) {
+                    definitely_assigned = before_forall;
+                }
             }
             Statement::If {
                 condition,
