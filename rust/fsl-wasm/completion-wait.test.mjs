@@ -111,3 +111,37 @@ test("an immediate completion returns the observation after one evaluate and no 
   assert.equal(clock.elapsed(), 0);
   assert.deepEqual(clock.sleeps, []);
 });
+
+test("an in-flight CDP timeout retains its details and adds elapsed time and the last phase", async () => {
+  const clock = fakeClock();
+  let evaluations = 0;
+  const phase = "verify-final-batch";
+  const diagnostic = "CDP Runtime.evaluate timed out; id=17; socket=open; outstanding=1; stderr=fake Chrome";
+  await assert.rejects(waitForCompletion({
+    deadlineMs: completionDeadlineMs, intervalMs: 250, now: clock.now, sleep: clock.sleep,
+    evaluate: async () => {
+      evaluations += 1;
+      if (evaluations === 1) {
+        clock.advance(completionDeadlineMs - 1_000);
+        return { done: "false", ok: "false", text: "pending", phase };
+      }
+      assert.equal(evaluations, 2, "do not retry a failed CDP evaluation");
+      clock.advance(30_000); // The call already in flight crosses the completion deadline.
+      throw new ProbeTimeoutError("cdp", diagnostic);
+    },
+  }), (error) => {
+    assert.ok(error instanceof ProbeTimeoutError);
+    assert.equal(error.mode, "cdp", "a CDP timeout must not be relabeled as poll");
+    assert.deepEqual(classifyOutcome(error), { outcome: "probe_timeout", status: 124, mode: "cdp" });
+    assert.ok(error.message.includes(diagnostic), "retain the original CDP diagnostic in full");
+    assert.ok(error.message.includes(phase), "report the most recent observed client phase");
+    const seconds = [...error.message.matchAll(/(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?\b/gi)]
+      .map((match) => Number(match[1]));
+    assert.ok(seconds.some((value) => Math.abs(value - clock.elapsed() / 1_000) <= 1),
+      `report elapsed seconds (${clock.elapsed() / 1_000}), got: ${error.message}`);
+    return true;
+  });
+  assert.equal(evaluations, 2);
+  assert.equal(clock.elapsed(), 389_250);
+  assert.deepEqual(clock.sleeps, [250]);
+});
