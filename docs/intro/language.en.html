@@ -764,7 +764,14 @@ variable capture instead of inventing internal binder names. See
   scope is exactly that predicate and the quantifier/aggregate body: naming it
   outside is a type error, and when it shadows an enclosing name (an action
   parameter, say) the shadowing is confined to that scope — a satisfied
-  <code>exists</code> never exports its witness to the enclosing bindings.</li>
+  <code>exists</code> never exports its witness to the enclosing bindings.
+  This expression rule does not promise executable <code>leadsTo</code> wrapper binders:
+  <code>check</code> rejects a collection domain or any <code>where</code> filter on an outer
+  <code>leadsTo</code> binder. Unfiltered supported typed/range wrappers remain available,
+  and collection quantifiers inside P or Q are not wrapper binders. This is a
+  breaking removal (#1463) of forms that previously checked but no verification
+  engine could execute, aligning the reference with the accepted temporal and
+  induction designs' fail-closed boundary; it does not implement those forms.</li>
 <li>Quantification (bounded): the canonical forms are <code>forall binder { expr }</code>
   and <code>exists binder { expr }</code>. The 2.x legacy colon/no-braces spelling such as
   <code>forall i in lo..hi: expr</code> remains accepted but is non-canonical. A Seq binder
@@ -800,7 +807,11 @@ variable capture instead of inventing internal binder names. See
   or acyclic relation gives <code>reachable(r, a, a) == false</code> for every <code>a</code>). A
   reflexive reading would make <code>not reachable(r, a, a)</code> unsatisfiable by
   construction for any inhabited domain, draining the predicate of meaning;
-  use <code>acyclic(r)</code> to state "no self-loops or cycles anywhere in <code>r</code>".</li>
+  use <code>acyclic(r)</code> to state "no self-loops or cycles anywhere in <code>r</code>".
+  A relation is not a Map: <code>r[a]</code> and indexed assignment <code>r[a] = b</code> are rejected
+  by <code>check</code>, even when <code>functional(r)</code> holds. Use the relation methods instead.
+  This is a breaking removal (#1463) of previously accepted reads and writes
+  without executable index semantics; Map indexing is unchanged.</li>
 <li>Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code></li>
 <li>Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
   optional <code>within K</code> before Q for a bounded deadline, and optional
@@ -823,7 +834,155 @@ variable.</p></div></details>
 <li><code>if expr { stmt... } else { stmt... }</code> is allowed in both <code>init</code> and action bodies
   (can be nested with an if inside the else)</li>
 <li><code>forall x: T { stmt... }</code> (bulk initialization / bulk update)</li>
-</ul></div></details>
+</ul>
+<p>An <code>init</code> statement's collection <code>forall</code> source must not contain a free state
+reference. <code>check</code> rejects <code>forall x in xs { ... }</code> when <code>xs</code> is state, even
+after an assignment to <code>xs</code>, for an empty domain/body, or in an unreachable
+branch. This is a breaking removal (#1463), not a prohibition on ordinary
+assigned-state reads in init expressions, filters, or bodies. A local binder
+that shadows a state name is not a state reference: its source/bounds are read
+in the enclosing scope, and only its filter/body/value uses the new local scope.
+State-independent collection literals remain allowed. Correcting this lexical
+distinction also removes the old symbolic/explicit false rejection of valid
+shadowed names; that fix does not narrow <code>check</code> acceptance.</p>
+<p>A nested statement <code>forall</code> in <code>init</code> remains accepted by <code>check</code> and supported
+by the symbolic engines, but <code>--engine explicit</code> rejects nested init <code>forall</code>.
+<code>--engine auto</code> routes this documented explicit limitation to symbolic BMC;
+it does not extend explicit execution or make state-dependent collection
+sources acceptable.</p>
+<p>Breaking-removal evidence (#1463): base <code>5738cc2c711b691a9d453b0190ead1a2ff77fc50</code>
+and the #1463 change (exact measured head recorded in the PR), each in its
+own materialized tree, ran <code>FSLC_CACHE=off fslc check &lt;form&gt;</code> over 597 corpus forms
+and 1016 inline IDs (1613 total) twice. Both runs exited 0; their full reports
+were identical without field exclusions: 110 new input errors, 1 corpus and
+109 inline. Both added legacy-return fixtures were included and unchanged;
+the full measurement was retaken on this base. Acceptance means result is not <code>error</code>;
+refinement/trace verdicts with exit 1 are not syntax/semantic input rejection.
+The complete breaking list follows; braces mean every Cartesian choice.</p>
+<table>
+<thead>
+<tr>
+<th>Removed check acceptance: form ID set</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>corpus/rust/fslc/tests/fixtures/explicit_init_state_collection.fsl</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/1457/init-stmt/{empty-body,empty-domain}/{Set,Seq}/state/{positive,negative}</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>inline/L1/{Set,Seq}/{state,literal}/{false,true}</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>inline/L1/{utf16-prefix,resolved-component}</code></td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>inline/L2/{z: K,z in 0..1}/{z == 1,not done,true,false}</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>inline/L3/z in Set { 1 }</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/L3/z: K where z == 1</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/I1/{Set,Seq}/{false,true}/{plain,conditional,unreachable,nested}</code></td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr>
+<td><code>inline/S4/{own-source,sibling-restored,aggregate-source}</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>inline/R1/read/{init,action,invariant,trans,leadsTo,reachable}/{false,true}</code></td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td><code>inline/R1/write/{init,action}</code></td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>inline/R1/receiver/{old,conditional,domain-binder}</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>inline/guard/{StateCollection,ranked-where}</code></td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/case-{00,04,08,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68}</code></td>
+<td style="text-align: right;">18</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/case-{01,05,09,25,29,33}</code></td>
+<td style="text-align: right;">6</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/case-{72,73,74}</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/unchecked-init/state-source</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/nested-aggregates-and-sync-ownership/case-{68,69,70,71}</code></td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr>
+<td><code>inline/nested-aggregates-and-sync-ownership/case-{76,77,78,79,80,81,82,83,84,85,86}</code></td>
+<td style="text-align: right;">11</td>
+</tr>
+</tbody>
+</table>
+<p>The 110 removals are 22 wrapper forms, 31 init-source forms, 51 relation-index
+forms (18 in aggregates), and 6 Bool-index forms inside empty literal-range or
+zero-capacity Seq aggregates. Written aggregate binder/filter/value validation
+now precedes normalization even for an empty domain under the #1463 source-typing
+decision: existing type errors cannot disappear, and source diagnostics retain
+the property span.
+Empty Count/Sum now reports every existing type error in the written expressions,
+such as the non-Bool filter in <code>count(x in 1..0 where x + 1)</code>; the 6 Bool-index
+removals are examples in the measured corpus/inline inputs, not an exhaustive
+list of type-error kinds.
+The Bool-index closure is an intentional #1459-class consequence; no new type
+rules are added, and valid empty/nonempty Map aggregates retain their verdicts.
+Raw checking does not enumerate inner Count/Sum before outer-binder substitution
+or prematurely reject a pattern name awaiting substitution. All 66 nested-aggregate
+and pattern check controls remain accepted with identical base/head envelopes.
+The 15 added removal IDs are only four quantifier relation-index bounds and
+eleven sync-expanded/root relation-index forms, not those preservation controls.</p>
+<p>Of 128 full-output differences, the other 18 remain error/semantics, exit 2:
+<code>inline/1457/boundary/nonfinite</code> gains authored message/loc 1:161;
+<code>inline/R2/seq-write-remains-rejected</code> keeps loc 7:17 but requires Map, not Map or
+Relation; <code>inline/aggregate-and-component-locations/case-{13,17,37,41,49,53,61,65}</code> replaces synthetic
+1:1 with authored 6:3 and the Map/Relation/Seq repair with Map/Seq;
+<code>inline/aggregate-and-component-locations/case-{21,45,57,69}</code> changes only that repair text, retaining 6:3.
+<code>inline/nested-aggregates-and-sync-ownership/case-{72,74}</code> already failed static aggregate bounds; the relation
+index now reports authored 6:3 instead of no location. For
+<code>inline/nested-aggregates-and-sync-ownership/case-{73,75}</code>, the existing error now anchors at root use 2:3
+with the part.Capture cause at piece.fsl:6:3.
+All other envelope fields are unchanged. Component refusals anchor at the owning
+root use, preserve the component cause location, and use public names such as
+<code>part.xs</code>, not lowered <code>part__xs</code>. These are intentional output changes.
+Model-expression type errors now point to their owning declaration, including
+errors whose base check envelope already had a loc; component type errors,
+including pre-existing ones, anchor at the owning root use and retain their
+component cause.
+The inline IDs include actual #1457, aggregate/component and nested/sync emissions, fixed acceptance,
+and rewritten guard/constructor inputs. Remaining range/domain limitations
+are #1480; init/zero-capacity issues are #1481, other typing gaps #1459, literal
+shape relatives #1467. They are not additional removals in #1463.</p></div></details>
 <details id="5-semantics"><summary>5. Semantics<span class="tree-blurb"> — Transition semantics — enabling, firing, stutter.</span></summary><div class="tree-body"><ul>
 <li><strong>Transition system</strong>: one step = exactly one action instance
   (action name × parameter values) is executed atomically.</li>

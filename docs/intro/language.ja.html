@@ -734,7 +734,13 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   スコープされます。Map と非有界のコレクションはバインダーのドメインになりません。
   <code>x</code> のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
   なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
-  充足した <code>exists</code> が witness を外側の束縛へ出すことはありません。</li>
+  充足した <code>exists</code> が witness を外側の束縛へ出すことはありません。
+  この式の一般則は、<code>leadsTo</code> を外から包むバインダーの実行可能性までは約束しません。
+  <code>leadsTo</code> の外側のコレクションバインダーと、<code>where</code> 付きバインダーは <code>check</code> が拒否します。
+  対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は
+  この wrapper 制限には含めません。これは、従来 check は通るのにどの engine も
+  実行できなかった形の breaking removal (#1463) です。言語参照を、受理済みの
+  temporal / induction 設計の fail-closed な境界に合わせるもので、実行意味の追加ではありません。</li>
 <li>量化(有界): 正準形は <code>forall binder { expr }</code> と <code>exists binder { expr }</code>
   です。<code>forall i in lo..hi: expr</code> のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス
@@ -770,7 +776,11 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
   や非巡回の関係では、すべての <code>a</code> について <code>reachable(r, a, a) == false</code>)。
   反射的な読みだと、任意の非空ドメインで <code>not reachable(r, a, a)</code> が構造上
   充足不能になり、述語から意味が失われます。「<code>r</code> のどこにも自己ループや
-  サイクルがない」を述べるには <code>acyclic(r)</code> を使ってください。</li>
+  サイクルがない」を述べるには <code>acyclic(r)</code> を使ってください。
+  relation は Map ではありません。<code>r[a]</code> と <code>r[a] = b</code> は、<code>functional(r)</code> が真でも
+  <code>check</code> が拒否するため、relation のメソッドを使います。これは実行可能な index の
+  意味がないまま受理していた読み・書きの breaking removal (#1463) です。
+  Map のインデックス操作は変えません。</li>
 <li>ensures / trans の内側のみ: <code>old(expr)</code> で遷移前の状態を読む</li>
 <li>leadsTo ブロックの内側のみ: <code>P ~&gt; Q</code>(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り <code>within K</code> を、応答本体の後に induction のランキング用の
@@ -793,7 +803,147 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <li><code>if expr { stmt... } else { stmt... }</code> は <code>init</code> と action 本体の両方で使えます
   (else の内側の if でネストできます)</li>
 <li><code>forall x: T { stmt... }</code>(一括初期化 / 一括更新)</li>
-</ul></div></details>
+</ul>
+<p><code>init</code> の文 <code>forall</code> のコレクション source は、自由な状態参照を含んではなりません。
+<code>xs</code> が状態なら <code>forall x in xs { ... }</code> は、<code>xs</code> への代入の後でも、domain/本体が空でも、
+到達しない分岐の中でも <code>check</code> が拒否します。これは breaking removal (#1463) であり、
+通常の init 式・フィルター・本体で代入済みの状態を読むことまで禁じる規則ではありません。
+状態と同名のローカルバインダーは状態参照ではなく、source/範囲境界は外側のスコープで、
+フィルター・本体・集約値だけは新しいローカルスコープで読みます。状態に依存しない
+コレクションリテラルは引き続き使えます。この字句的区別の修正により、有効な shadow を
+symbolic/explicit が誤って拒否していた挙動も解消しますが、こちらは check の受理の縮小ではありません。</p>
+<p><code>init</code> の文 <code>forall</code> の入れ子は、引き続き <code>check</code> と symbolic engine が受理しますが、
+<code>--engine explicit</code> は入れ子の init forall を拒否します。<code>--engine auto</code> は、この
+文書化された explicit の制限を symbolic BMC へ回します。explicit の実行能力を
+広げるものでも、状態依存のコレクション source を受理するものでもありません。</p>
+<p>breaking removal の実測 (#1463): base <code>5738cc2c711b691a9d453b0190ead1a2ff77fc50</code> と
+測定対象の #1463 の変更 (測定した正確な head は PR に記録) の各 materialized tree で、
+corpus 597 形と inline 1016 ID (計 1613) に <code>FSLC_CACHE=off fslc check &lt;form&gt;</code> を
+それぞれ 2 回実行しました。両 run は exit 0、JSON の field を除外せず全報告が一致し、
+新たな入力 error は 110 (corpus 1、inline 109) でした。追加の legacy-return fixture 2 つも
+含めて差がなく、この base で全体を新しく測り直しています。
+受理とは result が <code>error</code> でないことで、exit 1 の refinement/trace verdict を入力拒否と
+混同しません。次が breaking removal の全一覧です。中括弧は選択肢の全直積を表します。</p>
+<table>
+<thead>
+<tr>
+<th>check の受理を削除した form ID の集合</th>
+<th style="text-align: right;">数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>corpus/rust/fslc/tests/fixtures/explicit_init_state_collection.fsl</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/1457/init-stmt/{empty-body,empty-domain}/{Set,Seq}/state/{positive,negative}</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>inline/L1/{Set,Seq}/{state,literal}/{false,true}</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>inline/L1/{utf16-prefix,resolved-component}</code></td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>inline/L2/{z: K,z in 0..1}/{z == 1,not done,true,false}</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>inline/L3/z in Set { 1 }</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/L3/z: K where z == 1</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/I1/{Set,Seq}/{false,true}/{plain,conditional,unreachable,nested}</code></td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr>
+<td><code>inline/S4/{own-source,sibling-restored,aggregate-source}</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>inline/R1/read/{init,action,invariant,trans,leadsTo,reachable}/{false,true}</code></td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td><code>inline/R1/write/{init,action}</code></td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>inline/R1/receiver/{old,conditional,domain-binder}</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>inline/guard/{StateCollection,ranked-where}</code></td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/case-{00,04,08,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68}</code></td>
+<td style="text-align: right;">18</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/case-{01,05,09,25,29,33}</code></td>
+<td style="text-align: right;">6</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/case-{72,73,74}</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>inline/aggregate-and-component-locations/unchecked-init/state-source</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>inline/nested-aggregates-and-sync-ownership/case-{68,69,70,71}</code></td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr>
+<td><code>inline/nested-aggregates-and-sync-ownership/case-{76,77,78,79,80,81,82,83,84,85,86}</code></td>
+<td style="text-align: right;">11</td>
+</tr>
+</tbody>
+</table>
+<p>110 件の内訳は wrapper 22、init source 31、relation index 51 (集約内 18)、空の
+リテラル範囲または容量 0 の Seq の集約内 Bool index 6 です。書かれた集約の
+binder/filter/value は空 domain でも正規化より先に既存の型規則で検査します
+(#1463 で承認された、候補数に依存しない集約 source の型検査)。型エラーを空展開で消さず、
+診断の位置は書かれた property に保ちます。
+空の Count/Sum でも、<code>count(x in 1..0 where x + 1)</code> の非 Bool filter のように、
+書かれた式の既存の型エラーをすべて報告するようになり、6 件の Bool index の削除は
+測定した corpus/inline 入力の実例であって、型エラーの種類の網羅的な一覧ではありません。
+Bool index の拒否は意図した #1459 類の縮小ですが、新しい型規則は追加していません。
+有効な空・非空 Map 集約の verdict は保全します。
+raw 検査では外側 binder の代入より先に内側の Count/Sum を列挙せず、代入待ちの名前と
+同じ pattern 名も早まって拒否しません。入れ子集約・pattern の check 対照 66 件は
+すべて受理を保ち、base/head の全 envelope が一致します。追加の削除 15 件は quantifier
+の relation index 境界 4 件と sync 展開・root の relation index 11 件だけです。</p>
+<p>全出力の差 128 ID の残り 18 は、いずれも引き続き error/semantics、exit 2 です。
+<code>inline/1457/boundary/nonfinite</code> は message/loc に書かれた位置 1:161 を追加します。
+<code>inline/R2/seq-write-remains-rejected</code> は loc 7:17 のまま必要型を Map or Relation から
+Map に修正します。<code>inline/aggregate-and-component-locations/case-{13,17,37,41,49,53,61,65}</code> は合成の 1:1 を
+property の 6:3 に直し、必要型の案内を Map/Relation/Seq から Map/Seq にします。
+<code>inline/aggregate-and-component-locations/case-{21,45,57,69}</code> は 6:3 を保ち、その案内だけを修正します。
+<code>inline/nested-aggregates-and-sync-ownership/case-{72,74}</code> は元から static aggregate bounds で拒否されており、
+位置なしから property の 6:3 で relation index を示す拒否になります。
+<code>inline/nested-aggregates-and-sync-ownership/case-{73,75}</code> は同じ既存の拒否を root use の 2:3 に anchor し、
+原因の part.Capture と piece.fsl:6:3 を保ちます。
+他の envelope field は不変です。component の拒否は所有する root の use に anchor し、
+原因の component の位置を保ち、lower 済みの <code>part__xs</code> でなく <code>part.xs</code> のような
+公開名を示します。いずれも意図した公開出力の変更です。
+model-expression の型エラーは、base の check envelope にすでに loc があったものも含め、
+所有する宣言の位置を示します。既存のものを含む component の型エラーは原因を保って
+所有する root use に anchor します。
+inline ID は #1457、集約/component・入れ子/sync の実際の出力、固定受入、書き換えた guard/constructor
+入力に由来します。残る範囲・ドメインの制限は #1480、init/zero-capacity は #1481、
+他の型の穴は #1459、リテラルの形の同類は #1467 です。
+これらを #1463 の追加の削除へ混ぜていません。</p></div></details>
 <details id="5-semantics"><summary>5. 意味論<span class="tree-blurb"> — 状態遷移の意味論 — 有効化・実行・stutter。</span></summary><div class="tree-body"><ul>
 <li><strong>遷移系</strong>: 1 ステップ = ちょうど 1 つの action インスタンス
   (action 名 × パラメータ値)がアトミックに実行される。</li>
