@@ -1653,6 +1653,11 @@ mod tests {
                 "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { c = x }\n  }\n  acceptance AC-1 \"type comparison\" {\n    paint(Blue)\n    expect c != 1\n  }\n}\n",
                 "acceptance_expect_type.fsl",
             ),
+            (
+                "relation endpoint type",
+                "spec RelEndpoint {\n  enum Color { Red, Blue }\n  type N = 0..2\n  state { r: relation N -> N }\n  init { r = Set {} }\n  action stay() { }\n  invariant P { not reachable(r, 1, Blue) }\n}\n",
+                "relation_endpoint_type.fsl",
+            ),
         ] {
             let request = Request {
                 cmd: "check".to_owned(),
@@ -1663,6 +1668,15 @@ mod tests {
                 unstable: Vec::new(),
             };
             assert_worker_check_error_matches_native(&request, fixture);
+            if fixture == "relation endpoint type" {
+                let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+                assert_eq!(worker["result"], "error");
+                assert_eq!(worker["kind"], "semantics");
+                assert_eq!(worker["loc"], json!({"line": 7, "column": 3}));
+                assert!(worker["message"].as_str().is_some_and(|message| {
+                    message.contains("expression of type Named(\"Color\") is not assignable to Named(\"N\"); hint: use endpoints matching the relation's declared source and target types")
+                }));
+            }
             if fixture == "acceptance expectation type" {
                 let worker = block_on(check(&request, TEST_SOLVER_VERSION));
                 assert_eq!(worker["result"], "error");

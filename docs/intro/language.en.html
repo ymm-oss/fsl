@@ -808,6 +808,81 @@ variable capture instead of inventing internal binder names. See
   <code>reachable(r, a, b)</code>, <code>acyclic(r)</code>, <code>functional(r)</code>, <code>injective(r)</code>,
   <code>domain(r)</code>, <code>range(r)</code>. <code>reachable</code> and <code>acyclic</code> require a self-relation
   (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.
+  For <code>r: relation A -&gt; B</code>, <code>contains</code>, <code>add</code>, <code>remove</code>, and <code>reachable</code>
+  check <code>a</code> against <code>A</code> and <code>b</code> against <code>B</code> independently. Incompatible
+  endpoints are check-time <code>kind: "semantics"</code> errors (exit 2), with the
+  assignability message followed by <code>hint: use endpoints matching the relation's
+  declared source and target types</code>. Named enums remain nominal; numeric ranges
+  retain their existing integer compatibility. For example, enum <code>Red</code> cannot
+  be an endpoint of <code>relation N -&gt; N</code> when <code>N</code> is a numeric range. This breaking
+  removal (#1458) rejects previously accepted ill-typed expressions rather than
+  assigning them a runtime meaning. <code>domain(r)</code> now has type <code>Set&lt;A&gt;</code> and
+  <code>range(r)</code> has type <code>Set&lt;B&gt;</code>, rather than <code>Set&lt;Int&gt;</code> for every relation.
+  Collection binders over these projections and their public Kernel projection
+  and binder annotations inherit those endpoint types. Enum-typed uses of
+  <code>domain</code> and <code>range</code> are accepted, including
+  <code>not (exists x in domain(r): reachable(r, x, x))</code>; this does not change their
+  runtime meaning or guarantee that their invariants hold. Numeric projections
+  retain integer compatibility. The restacked boundary sweep used BASE
+  <code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> and HEAD
+  <code>3a8a6019a5bed3ae62f960afedf2bdcf6d129341</code>: all 597 corpus forms have a
+  <strong>measured empty</strong> <code>ok</code> → <code>error</code> transition set. All 134 inline fixture
+  occurrences were also checked; #1458 removes 24 occurrences (22 distinct
+  sources) in both modes, 48 mode-form transitions. The previous 46-transition
+  subset is unchanged; the expanded inventory counts numeric Set assignment
+  below. Three counted forms (<code>count</code>, enum set-literal equality and matching
+  enum Set assignment) add six <code>error</code> → <code>ok</code> pairs. Both modes ran twice in
+  each tree: 5,848 checks, full outputs and no exclusions. On this base, the
+  source-only revert calibration produces 28 intended failures and 24 preservation
+  passes, followed by exact restoration and 52 passing fixed tests; workspace
+  Clippy is warning-free. The workspace suite passed 3,468 tests on
+  <code>fc77124b31744f1c1728295db6f09508265b8285</code>, carried across only the
+  whitespace-only commit to the measured HEAD, with whole-file equality after
+  removing whitespace. Builds, CLI conformance, fixed tests twice and formatting
+  pass on that HEAD. Compared with the earlier <code>8e54e862</code> measurement, main's
+  #1463 now rejects <code>explicit_init_state_collection.fsl</code> on both BASE and HEAD
+  and adds the authored location to the BASE count diagnostic; neither changes
+  the #1458 removal/addition sets. See
+  <a href="../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458">the design note</a>
+  for commands, identities and measurements. The endpoint breaking removals are:
+  for numeric <code>N -&gt; N</code>, <code>not reachable(r, Red, Blue)</code>,
+  <code>not reachable(r, Red, 1)</code>, <code>not reachable(r, 1, Blue)</code>,
+  <code>not r.contains(Red, Blue)</code>, <code>not r.contains(Red, 1)</code>,
+  <code>not r.contains(1, Blue)</code>, <code>r.add(Red, Blue).contains(Red, Blue)</code>,
+  <code>r.add(Red, 1) != r</code>, <code>r.add(1, Blue) != r</code>,
+  <code>r.remove(Red, Blue) == r</code>, <code>r.remove(Red, 1) == r</code>,
+  <code>r.remove(1, Blue) == r</code>; for <code>N -&gt; Color</code>, <code>not r.contains(1, 2)</code>,
+  <code>r.add(1, 2) != r</code>, <code>r.remove(1, 2) == r</code>.
+  <code>Red</code>/<code>Blue</code> are <code>Color</code> enum members. The additional LSP and Worker
+  occurrences repeat the numeric target-only <code>contains</code> and <code>reachable</code> forms.
+  Projection typing also removes these previously accepted enum/Int forms for
+  <code>s: relation Color -&gt; Color</code> and <code>r: relation N -&gt; N</code>:
+  <code>forall x in domain(s): not r.contains(x, x)</code>,
+  <code>forall x in range(s): not r.contains(x, x)</code>,
+  <code>not domain(s).contains(0)</code>, <code>not range(s).contains(0)</code>,
+  <code>forall x in domain(s): x != 0</code>, <code>forall x in range(s): x != 0</code>.
+  The expanded inventory also rejects <code>xs = domain(s)</code> when
+  <code>s: relation Color -&gt; Color</code> and <code>xs: Set&lt;N&gt;</code> (assignment origin 8:19).
+  Enum projection elements cannot be used as numeric endpoints or compared with
+  integer values; use the declared endpoint type, not an enum ordinal.
+  More generally, projection elements and whole projection sets take the declared
+  endpoint type: enum or Bool elements cannot be used wherever <code>Int</code> is expected,
+  except for the pre-existing <code>abs</code> operand-check gap tracked in #1459; their sets
+  cannot be used wherever a numeric Set is expected. This breaking rule applies
+  to comparison, ordering, arithmetic, <code>min</code>/<code>max</code>, membership, set-literal
+  equality, Option comparisons and pattern payloads, assignment to numeric Set
+  state, and refinement maps; the listed measured removals are not exhaustive.
+  Newly accepted families include <code>count</code> over finite endpoint-typed domain/range
+  projections, <code>sum</code> over numeric projections, enum set-literal equality,
+  enum-typed <code>where</code> filters and conditional projection membership, <code>let</code>-bound
+  projections consumed as matching typed sets, assignment to a matching enum Set,
+  and refinement maps into a matching enum Set. <code>unique</code> over enum domain/range
+  was already accepted on released main and remains accepted. Acceptance
+  does not imply that an invariant holds. The preserved enum-binder/cycle idioms
+  are <code>not (exists x in domain(r): reachable(r, x, x))</code>,
+  <code>forall x in domain(r): not r.contains(x, Blue)</code>, and
+  <code>forall y in range(r): not r.contains(1, y)</code>. They already checked on released
+  main; they are not new additions.
   <code>reachable(r, a, a)</code> is <strong>not</strong> reflexive by construction: it is true only
   if a real path of one or more edges leads from <code>a</code> back to <code>a</code> (so an empty
   or acyclic relation gives <code>reachable(r, a, a) == false</code> for every <code>a</code>). A

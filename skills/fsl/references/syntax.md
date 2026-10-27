@@ -864,6 +864,73 @@ never a state variable named `true`), so the declaration is rejected. No other w
 - Relation: `.contains(a,b) .add(a,b) .remove(a,b)`,
   `reachable(r,a,b) acyclic(r) functional(r) injective(r) domain(r) range(r)`.
   `reachable`/`acyclic` require a self-relation (`relation T -> T`).
+  For `r: relation A -> B`, `contains`/`add`/`remove`/`reachable` require
+  source `a` assignable to `A` and target `b` assignable to `B` independently.
+  A mismatch is `kind: "semantics"`, exit 2, with the existing assignability
+  message and `hint: use endpoints matching the relation's declared source and
+  target types`. Enums are nominal; numeric ranges retain integer compatibility.
+  Breaking removal (#1458): previously accepted mismatched endpoints (such as
+  enum `Red` in a numeric relation) are rejected before evaluation. Do not repair
+  this by coercing enum ordinals or weakening a property; use the declared types.
+  `domain(r)` infers `Set<A>` and `range(r)` infers `Set<B>` (not always
+  `Set<Int>`); binders over the projections and their public Kernel projection/
+  binder annotations inherit the endpoint type. Enum-typed projection uses such as
+  `not (exists x in domain(r): reachable(r, x, x))` are accepted; their runtime
+  meaning is unchanged and false invariants still violate. Numeric projections
+  remain integer-compatible. The restacked boundary sweep used BASE
+  `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and HEAD
+  `3a8a6019a5bed3ae62f960afedf2bdcf6d129341`: **zero corpus `ok` → `error`
+  transitions** across all 597 forms. All 134 inline occurrences were checked;
+  #1458 removes 24 occurrences (22 distinct sources) in both modes, 48 mode-form
+  transitions. The former 46-transition subset is unchanged; the expanded
+  inventory additionally counts numeric Set assignment below. Three counted
+  forms (`count`, enum set-literal equality and matching enum Set assignment)
+  add six `error` → `ok` pairs. Each mode/tree ran twice: 5,848 checks, full
+  outputs without exclusions. On this base, the source-only revert calibration
+  produces 28 intended failures / 24 preservation passes; exact restoration is
+  followed by 52 passing fixed tests. Workspace Clippy is warning-free. The
+  workspace suite passed 3,468 tests on `fc77124b31744f1c1728295db6f09508265b8285`;
+  only a proved whitespace-only commit follows it to the measured HEAD (the whole
+  source file is equal after removing whitespace). Builds, CLI, fixed tests twice
+  and fmt pass on that HEAD. Since the earlier `8e54e862` measurement, main's
+  #1463 rejects `explicit_init_state_collection.fsl` on both trees and locates
+  the BASE count diagnostic; #1458 removal/addition membership is unchanged.
+  Commands and identities are in
+  `docs/design/DESIGN-nested-option-support.md`, section #1458.
+  The endpoint removals for numeric `N -> N` are
+  `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,
+  `not reachable(r, 1, Blue)`, `not r.contains(Red, Blue)`,
+  `not r.contains(Red, 1)`, `not r.contains(1, Blue)`,
+  `r.add(Red, Blue).contains(Red, Blue)`, `r.add(Red, 1) != r`,
+  `r.add(1, Blue) != r`, `r.remove(Red, Blue) == r`,
+  `r.remove(Red, 1) == r`, `r.remove(1, Blue) == r`;
+  for `N -> Color`: `not r.contains(1, 2)`, `r.add(1, 2) != r`,
+  `r.remove(1, 2) == r`. `Red`/`Blue` belong to enum `Color`.
+  LSP repeats the numeric target-only contains form; Worker repeats target-only
+  reachable. Projection typing additionally removes, for `s: relation Color -> Color`
+  and `r: relation N -> N`, `forall x in domain(s): not r.contains(x, x)`,
+  `forall x in range(s): not r.contains(x, x)`, `not domain(s).contains(0)`,
+  `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
+  `forall x in range(s): x != 0`. The expanded inventory also rejects
+  `xs = domain(s)` for `s: relation Color -> Color`, `xs: Set<N>`, at assignment
+  origin 8:19. Do not coerce enum elements to numeric ordinals.
+  General breaking rule: projection elements/sets take their endpoint type, so
+  enum or Bool elements reject anywhere `Int` is expected, except for the
+  pre-existing `abs` operand-check gap tracked in #1459; their whole sets reject
+  where a numeric Set is expected. This includes comparison, ordering,
+  arithmetic, `min`/`max`, membership, set-literal equality, Option and pattern
+  payloads, numeric Set state assignments and refinement maps. The measured
+  fixture list is not exhaustive. Newly accepted families: `count` over finite
+  endpoint-typed domain/range projections; `sum` over numeric projections; enum
+  set-literal equality, enum-typed `where` filters and conditional projection
+  membership; `let`-bound projections consumed as matching typed sets; matching
+  enum Set assignments and refinement maps. `unique` over enum domain/range was
+  already accepted on released main and remains accepted. Do not confuse acceptance
+  with a verified invariant. The preserved enum-binder/cycle idioms are
+  `not (exists x in domain(r): reachable(r, x, x))`,
+  `forall x in domain(r): not r.contains(x, Blue)`, and
+  `forall y in range(r): not r.contains(1, y)`. They already checked on released
+  main and are not new user-facing additions.
   `reachable(r,a,a)` is **not reflexive**: true only via a real path of ≥1
   edges back to `a` (empty/acyclic `r` gives `false`, never a free 0-hop
   `a==a`). Use `acyclic(r)` for "no self-loops or cycles anywhere".

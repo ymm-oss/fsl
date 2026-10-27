@@ -723,7 +723,79 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `reachable(r, a, b)`、`acyclic(r)`、`functional(r)`、`injective(r)`、
   `domain(r)`、`range(r)`。`reachable` と `acyclic` は自己関係
   (`relation T -> T`)を要求します。端点の型/アリティのエラーは修復ヒントを
-  含みます。`reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
+  含みます。
+  `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
+  `a` を `A`、`b` を `B` に対して独立に型検査します。不適合な端点は
+  check 時の `kind: "semantics"` エラー(終了コード 2)となり、代入可能性の
+  メッセージに `hint: use endpoints matching the relation's declared source and target types`
+  が続きます。名前付き enum は公称型のままで、数値範囲は従来の整数互換性を
+  保ちます。例えば `N` が数値範囲なら、enum の `Red` は `relation N -> N` の
+  端点にできません。この破壊的な受理範囲の縮小(#1458)は、以前受理されていた
+  型不正な式を実行時に意味付けせず拒否します。`domain(r)` の型は `Set<A>`、
+  `range(r)` の型は `Set<B>` となり、一律の `Set<Int>` ではなくなります。
+  射影上のコレクション束縛子と、その public Kernel 射影・束縛子の型注釈にも
+  端点の型が伝わります。
+  これにより `not (exists x in domain(r): reachable(r, x, x))` のような
+  enum 型を使う `domain` / `range` の記法を受理しますが、実行時の意味を変更したり、
+  不変条件の成立を保証したりはしません。数値射影は整数互換性を保ちます。
+  restack 後の境界測定の BASE は `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db`、
+  HEAD は `3a8a6019a5bed3ae62f960afedf2bdcf6d129341` です。
+  コーパス597形式の `ok` → `error` 遷移集合は**測定の結果、空**でした。
+  inline fixture 全134件も検査し、#1458 は24件(異なるソース22種)を両モードで
+  拒否します(モード・形式の組で48遷移)。従来の46遷移の集合は不変で、
+  拡張した入力により下記の数値 Set への代入を追加計上しました。
+  `count`、enum 集合リテラルとの等価比較、対応する enum Set への代入の3形式は、
+  両モードで `error` → `ok` となります(6組)。各ツリーで両モードを2回ずつ、
+  計5,848回実行し、除外なしで出力全体を比較しました。この BASE でソース変更だけを
+  戻す calibration は、意図した失敗28件と互換性維持の成功24件を検出し、完全復元後は
+  固定テスト52件が成功しました。workspace Clippy に警告はありません。
+  workspace 全3,468件の成功は `fc77124b31744f1c1728295db6f09508265b8285` で測定し、
+  空白除去後のファイル全体の一致を証明した空白のみのコミットを挟んで測定 HEAD に
+  引き継ぎました。その HEAD でビルド、CLI 適合、固定テスト2回、整形検査も成功しました。
+  以前の `8e54e862` の測定との差は、main の #1463 が BASE と HEAD の両方で
+  `explicit_init_state_collection.fsl` を拒否し、BASE の count 診断に記述位置を
+  追加したことです。#1458 の拒否・受理追加の集合は変わりません。
+  コマンド、識別情報、測定結果は
+  [設計ノート](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
+  を参照してください。端点の破壊的な受理範囲の縮小に該当する式は、
+  数値の `N -> N` について `not reachable(r, Red, Blue)`、
+  `not reachable(r, Red, 1)`、`not reachable(r, 1, Blue)`、
+  `not r.contains(Red, Blue)`、`not r.contains(Red, 1)`、
+  `not r.contains(1, Blue)`、`r.add(Red, Blue).contains(Red, Blue)`、
+  `r.add(Red, 1) != r`、`r.add(1, Blue) != r`、
+  `r.remove(Red, Blue) == r`、`r.remove(Red, 1) == r`、
+  `r.remove(1, Blue) == r`、`N -> Color` について `not r.contains(1, 2)`、
+  `r.add(1, 2) != r`、`r.remove(1, 2) == r` です。
+  `Red` と `Blue` は `Color` の enum メンバーです。追加の LSP と Worker の
+  fixture は数値関係の target のみが不正な `contains` と `reachable` の再掲です。
+  射影の型付けにより、`s: relation Color -> Color` と `r: relation N -> N` に
+  対する、以前受理されていた次の enum/Int 形式も拒否されます:
+  `forall x in domain(s): not r.contains(x, x)`、
+  `forall x in range(s): not r.contains(x, x)`、
+  `not domain(s).contains(0)`、`not range(s).contains(0)`、
+  `forall x in domain(s): x != 0`、`forall x in range(s): x != 0`。
+  拡張した入力では、`s: relation Color -> Color` と `xs: Set<N>` に対する
+  `xs = domain(s)` も拒否されます(代入の位置8:19)。
+  enum 射影要素を数値端点や整数との比較に使うことはできません。
+  enum の序数ではなく、宣言された端点の型を使ってください。
+  一般に、射影要素と射影集合全体は宣言された端点の型を持ちます。enum や Bool の
+  要素を `Int` が必要な場所で使うことはできません。ただし、`abs` のオペランド型検査の
+  不足は既存の例外で、#1459 で追跡しています。その集合を数値 Set が必要な場所で
+  使うこともできません。この破壊的変更は比較、順序、算術、`min`/`max`、所属、
+  集合リテラルとの等価比較、Option 比較とパターンのペイロード、数値 Set 状態への
+  代入、refinement map に適用されます。列挙した測定例だけに限りません。
+  新たに受理される形式には、有限の端点型を持つ domain/range 射影上の `count`、
+  数値射影上の `sum`、enum 集合リテラルとの等価比較、enum 型の `where` フィルター、
+  条件式で選んだ射影の所属判定、対応する型の集合として使う `let` 束縛の射影、
+  対応する enum Set への代入、および同じ型の enum Set への refinement map が
+  含まれます。enum domain/range 上の `unique` は公開済み main でも受理されており、
+  引き続き受理されます。受理は不変条件の成立を意味しません。
+  互換性を維持する enum 束縛子・巡回の記法は、
+  `not (exists x in domain(r): reachable(r, x, x))`、
+  `forall x in domain(r): not r.contains(x, Blue)`、
+  `forall y in range(r): not r.contains(1, y)` です。これらは公開済み main でも
+  受理されていたため、新規追加ではありません。
+  `reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
   `a` に戻る、1本以上の辺からなる本物のパスがある場合にのみ真です(空の関係
   や非巡回の関係では、すべての `a` について `reachable(r, a, a) == false`)。
   反射的な読みだと、任意の非空ドメインで `not reachable(r, a, a)` が構造上
