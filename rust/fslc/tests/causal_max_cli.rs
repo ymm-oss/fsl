@@ -239,6 +239,10 @@ fn reachable_scc(last_max: u64) -> Model {
 }
 
 fn disconnected_scc(include_scc: bool) -> Model {
+    disconnected_scc_with_bridge(include_scc, None)
+}
+
+fn disconnected_scc_with_bridge(include_scc: bool, bridge_lag: Option<&str>) -> Model {
     let mut source = header("MaxDisconnectedScc", CHAIN_VARIABLES);
     source.push_str(&claim("AB", "a", "b", 0, 1));
     source.push_str(&claim("BC", "b", "c", 0, 1));
@@ -248,6 +252,9 @@ fn disconnected_scc(include_scc: bool) -> Model {
         source.push_str(&claim("XY", "x", "y", 0, Q));
         source.push_str(&claim("YZ", "y", "z", 0, Q));
         source.push_str(&claim("ZY", "z", "x", 1, Q + 1));
+        if let Some(lag) = bridge_lag {
+            write!(source, "  claim AX a -> x {{\n    version 1\n    status active\n    polarity positive\n    lag {lag}\n    persists 0..0\n    basis hypothesis\n  }}\n").expect("write bridge claim");
+        }
     }
     source.push_str("}\n");
     let model = Model::new(source);
@@ -256,6 +263,21 @@ fn disconnected_scc(include_scc: bool) -> Model {
     } else {
         model
     }
+}
+
+fn intervention_scc(last_max: u64) -> Model {
+    let mut source = header("MaxInterventionScc", CHAIN_VARIABLES);
+    // Declaration order CA, AB, BC differs from internal summation order AB, BC, CA.
+    for (id, from, to, min, max) in [
+        ("CA", "c", "a", 1, last_max),
+        ("AB", "a", "b", 0, Q),
+        ("BC", "b", "c", 0, Q),
+        ("CD", "c", "d", 0, 0),
+    ] {
+        source.push_str(&claim(id, from, to, min, max));
+    }
+    source.push_str("}\n");
+    Model::new(source).undeclared_cycle(&["a", "b", "c"], &["AB", "BC", "CA"])
 }
 
 fn feedback(last_max: u64) -> Model {
@@ -375,6 +397,49 @@ fn s2_unreachable_internal_max_overflow_does_not_refuse_reachable_pair() {
         disconnected.success("causal_timeline")["timelines"],
         expected
     );
+}
+
+#[test]
+fn s2_unknown_bridge_does_not_explore_overflowing_scc() {
+    // XY + YZ + ZY overflows, but an unknown-lag bridge must not explore its SCC.
+    assert_eq!(3 * u128::from(Q) + 1, 18_446_744_073_709_551_616);
+    let plain = disconnected_scc(false);
+    let bridged = disconnected_scc_with_bridge(true, Some("unknown"));
+    plain.check();
+    bridged.check();
+    // Compare the complete reachable-pair collection, as in the disconnected control.
+    let expected = json!([{"intervention": "variable:a", "outcome": "variable:d",
+        "first_pass": {"min": 0, "max": 3}, "via_feedback": false}]);
+    assert_eq!(plain.success("causal_timeline")["timelines"], expected);
+    assert_eq!(bridged.success("causal_timeline")["timelines"], expected);
+}
+
+#[test]
+fn s2_known_bridge_explores_overflowing_scc_in_claim_id_order() {
+    // Only the bridge lag differs from the unknown case; XY + YZ + ZY overflows at ZY.
+    assert_eq!(3 * u128::from(Q) + 1, 18_446_744_073_709_551_616);
+    disconnected_scc_with_bridge(true, Some("0..0")).overflow("causal_timeline", "ZY");
+}
+
+#[test]
+fn s2_intervention_inside_scc_internal_max_boundary() {
+    assert_eq!(3 * u128::from(Q), 18_446_744_073_709_551_615);
+    let model = intervention_scc(Q);
+    model.check();
+    assert_eq!(
+        model.success("causal_timeline")["timelines"],
+        json!([{
+            "intervention": "variable:a", "outcome": "variable:d",
+            "first_pass": {"min": 0, "max": MAX}, "via_feedback": true
+        }])
+    );
+}
+
+#[test]
+fn s2_intervention_inside_scc_internal_max_overflow_in_claim_id_order() {
+    // AB + BC + CA: the third ID overflows, even though CA is declared first.
+    assert_eq!(3 * u128::from(Q) + 1, 18_446_744_073_709_551_616);
+    intervention_scc(Q + 1).overflow("causal_timeline", "CA");
 }
 
 #[test]
