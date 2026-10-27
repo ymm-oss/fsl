@@ -34,6 +34,8 @@ import re
 from pathlib import Path
 
 import markdown
+from markdown.blockprocessors import HashHeaderProcessor
+from markdown.extensions import Extension
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LANGUAGE_MD = REPO_ROOT / "docs" / "manual" / "LANGUAGE.md"
@@ -184,6 +186,21 @@ def _rewrite_relative_md_links(html_text: str) -> str:
     return _RELATIVE_MD_LINK.sub(blob, html_text)
 
 
+class _SpacedHashHeaderProcessor(HashHeaderProcessor):
+    # Keep Python-Markdown's captures and trailing-hash handling, but require a
+    # space/tab or end of line after 1-6 hashes so wrapped #1234 stays prose.
+    RE = re.compile(r"(?:^|\n)(?P<level>#{1,6})(?=[ \t\n]|$)(?P<header>.*?)#*(?:\n|$)")
+
+
+class _SpacedHashHeaderExtension(Extension):
+    def extendMarkdown(self, md):
+        # Replace the built-in processor at its original priority. Fenced code
+        # is already stashed by its preprocessor before block parsing begins.
+        md.parser.blockprocessors.register(
+            _SpacedHashHeaderProcessor(md.parser), "hashheader", 70
+        )
+
+
 def render_language_tree(lang: str) -> str:
     en_text = LANGUAGE_MD.read_text(encoding="utf-8")
     en_sections = split_language_md(en_text)
@@ -249,7 +266,9 @@ def render_language_tree(lang: str) -> str:
     else:
         render_sections = en_sections
 
-    md = markdown.Markdown(extensions=["tables", "fenced_code", "toc"])
+    md = markdown.Markdown(
+        extensions=["tables", "fenced_code", "toc", _SpacedHashHeaderExtension()]
+    )
     nodes = []
     for (en_heading, _), (heading, body) in zip(en_sections, render_sections):
         md.reset()
