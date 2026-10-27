@@ -6,14 +6,19 @@
 //! forall/Collection may instead report the exact known BMC unsupported error;
 //! check must still succeed and explicit must still violate Capture at step1.
 
+#[path = "support/compose_aggregate_pattern.rs"]
+mod aggregate;
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
 #[path = "support/compose_binding_extra.rs"]
 mod extra;
 #[path = "support/compose_binding_matrix.rs"]
 mod matrix;
+#[path = "support/compose_source_owner.rs"]
+mod source_owner;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
@@ -78,6 +83,50 @@ impl Cell {
             }
         }
     }
+    fn source_owner(&self) -> aggregate::Owner {
+        use aggregate::Owner;
+        let id = self.id();
+        let parts: Vec<_> = id.split('|').collect();
+        match self.family() {
+            "alias-top" => {
+                if parts[1].starts_with("glue-") {
+                    Owner::Glue
+                } else if parts[1].starts_with("header-component-") {
+                    Owner::Arguments
+                } else {
+                    Owner::Additional
+                }
+            }
+            "alias-nested" | "alias-local-pattern" => {
+                if parts[1].starts_with("glue-") {
+                    Owner::Glue
+                } else if parts[1].starts_with("argument-") {
+                    Owner::Arguments
+                } else {
+                    Owner::Additional
+                }
+            }
+            "merge-guard" | "merge-local-pattern" => {
+                if parts[2].starts_with("c-") {
+                    Owner::Component("c.fsl")
+                } else if parts[2].starts_with("additional-") {
+                    Owner::Additional
+                } else {
+                    Owner::Component("b.fsl")
+                }
+            }
+            "merge-argument" | "argument-scope" | "argument-no-interference" => Owner::Arguments,
+            _ => Owner::Component("b.fsl"),
+        }
+    }
+}
+
+fn original_cells() -> Vec<Cell> {
+    matrix::cells()
+        .into_iter()
+        .map(Cell::Legacy)
+        .chain(extra::cells().into_iter().map(Cell::Added))
+        .collect()
 }
 
 fn invoke(dir: &Path, args: &[&str]) -> (Value, i32) {
@@ -304,11 +353,7 @@ fn compare(
 // All cells are collected before either oracle assertion is allowed to fail.
 #[allow(clippy::too_many_lines)]
 fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
-    let cells: Vec<_> = matrix::cells()
-        .into_iter()
-        .map(Cell::Legacy)
-        .chain(extra::cells().into_iter().map(Cell::Added))
-        .collect();
+    let cells = original_cells();
     assert_eq!(cells.len(), 2368);
     assert_eq!(
         cells.iter().map(Cell::id).collect::<BTreeSet<_>>().len(),
@@ -537,4 +582,168 @@ fn root_limits_are_factor_and_exact_message_gated_and_do_not_waive_supported_res
         BTreeSet::from(["__u_substitution_0".into()])
     );
     assert!(forbidden_names(&json!({"state":"b__flag","label":"u_substitution_0"})).is_empty());
+}
+
+struct SourceCheckCase {
+    id: String,
+    bundle: matrix::SourceBundle,
+    owner: aggregate::Owner,
+    aggregate_accepts: Option<bool>,
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // Collect all source owners before failing either contract.
+fn aggregate_pattern_and_owner_source_checks() {
+    let mut cases = Vec::new();
+    for cell in original_cells() {
+        for fresh in [false, true] {
+            cases.push(SourceCheckCase {
+                id: format!("{}|{}", cell.id(), if fresh { "fresh" } else { "same" }),
+                bundle: cell.render(fresh),
+                owner: cell.source_owner(),
+                aggregate_accepts: None,
+            });
+        }
+    }
+    for cell in aggregate::cells() {
+        cases.push(SourceCheckCase {
+            id: cell.id.clone(),
+            owner: cell.owner(),
+            bundle: cell.render(),
+            aggregate_accepts: Some(cell.accepts()),
+        });
+    }
+    assert_eq!(cases.len(), 5960);
+    let report_dir = compose_scratch::scratch("aggregate-pattern-report", &[]);
+    let started = Instant::now();
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut aggregate_counts: BTreeMap<String, [usize; 3]> = BTreeMap::new();
+    let mut reference_errors = 0;
+    let mut forbidden = 0;
+    let mut reports = Vec::new();
+    let mut table = "case\towner\tstandalone\ttype-identities-or-reason\n".to_owned();
+    for case in cases {
+        let dir = materialize(&case.bundle);
+        let composed = invoke(&dir, &["check", "s.fsl"]);
+        let holder = source_owner::standalone(&case.bundle, case.owner);
+        let mut error = None;
+        let (standalone, classification) = match holder {
+            Err(reason) => {
+                writeln!(
+                    table,
+                    "{}\t{}\tunrepresentable\t{}",
+                    case.id,
+                    case.owner.name(),
+                    reason
+                )
+                .expect("owner table");
+                (None, "unrepresentable".to_owned())
+            }
+            Ok(holder) => {
+                std::fs::write(dir.join("owner.fsl"), &holder.source)
+                    .expect("standalone owner source");
+                let direct = invoke(&dir, &["check", "owner.fsl"]);
+                writeln!(
+                    table,
+                    "{}\t{}\towner.fsl\t{:?}",
+                    case.id, holder.description, holder.type_names
+                )
+                .expect("owner table");
+                let classification = match (direct.1, composed.1) {
+                    (0, 0) => "ok_ok",
+                    (0, _) => {
+                        forbidden += 1;
+                        error = Some("owner ok but composition rejected");
+                        "ok_error"
+                    }
+                    (2, 2) if direct.0["kind"] == composed.0["kind"] => {
+                        if direct.0["message"] == composed.0["message"] {
+                            "error_error_same_message"
+                        } else {
+                            "error_error_different_message"
+                        }
+                    }
+                    (2, _) => {
+                        forbidden += 1;
+                        error = Some("owner refusal or kind not preserved");
+                        "error_not_preserved"
+                    }
+                    _ => {
+                        reference_errors += 1;
+                        error = Some("unexpected standalone check exit");
+                        "invalid_reference"
+                    }
+                };
+                if let Some(expected) = case.aggregate_accepts
+                    && ((direct.1 == 0) != expected || !matches!(direct.1, 0 | 2))
+                {
+                    reference_errors += 1;
+                    error = Some(
+                        "standalone aggregate expectation disagrees with the existing scope contract",
+                    );
+                }
+                (Some(direct), classification.to_owned())
+            }
+        };
+        *counts.entry(classification.clone()).or_default() += 1;
+        if let Some(expected) = case.aggregate_accepts {
+            let kind = case
+                .id
+                .split('/')
+                .nth(1)
+                .expect("aggregate kind")
+                .to_owned();
+            let entry = aggregate_counts.entry(kind).or_default();
+            let valid = standalone
+                .as_ref()
+                .is_some_and(|(_, code)| (*code == 0) == expected && matches!(*code, 0 | 2));
+            entry[if valid {
+                usize::from(error.is_none())
+            } else {
+                2
+            }] += 1;
+            if !valid && standalone.is_none() {
+                reference_errors += 1;
+                error = Some("new aggregate owner scope unrepresentable");
+            }
+        }
+        if error.is_some() {
+            eprintln!(
+                "AGG_PATTERN_RED {} classification={} reason={:?} standalone={} composed={}",
+                case.id,
+                classification,
+                error,
+                standalone.as_ref().map_or(
+                    Value::Null,
+                    |(j, c)| json!({"exit":c,"message":j.get("message"),"result":j["result"]})
+                ),
+                json!({"exit":composed.1,"message":composed.0.get("message"),"result":composed.0["result"]})
+            );
+        }
+        reports.push(json!({"id":case.id,"owner":case.owner.name(),"aggregate_accepts":case.aggregate_accepts,"standalone":standalone,"composed":composed,"classification":classification,"error":error,"directory":dir}));
+    }
+    std::fs::write(report_dir.join("owners.tsv"), table).expect("owner map table");
+    let elapsed = started.elapsed().as_secs_f64();
+    std::fs::write(report_dir.join("report.json"),serde_json::to_vec(&json!({"cases":reports,"counts":counts,"aggregate_counts":aggregate_counts,"forbidden":forbidden,"invalid":reference_errors,"inapplicable":aggregate::INAPPLICABLE_COUNT,"inapplicable_reason":aggregate::INAPPLICABLE_REASON,"elapsed_s":elapsed})).expect("report JSON")).expect("owner report");
+    eprintln!(
+        "AGG_PATTERN_N count={} reason={}",
+        aggregate::INAPPLICABLE_COUNT,
+        aggregate::INAPPLICABLE_REASON
+    );
+    eprintln!(
+        "AGG_PATTERN_RESULT counts={counts:?} aggregate={aggregate_counts:?} forbidden={forbidden} invalid={reference_errors} n={} elapsed_s={elapsed:.3} report={} owners={}",
+        aggregate::INAPPLICABLE_COUNT,
+        report_dir.display(),
+        report_dir.join("owners.tsv").display()
+    );
+    assert_eq!(
+        reference_errors, 0,
+        "standalone expectation mismatch: stop before changing the aggregate scope contract"
+    );
+    assert_eq!(
+        counts.get("unrepresentable"),
+        Some(&394),
+        "owner-scope coverage changed"
+    );
+    assert_eq!(forbidden, 0, "standalone-to-compose admissibility drift");
 }
