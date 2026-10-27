@@ -1854,6 +1854,10 @@ pub(crate) fn free_vars(expr: &Expr) -> HashSet<String> {
     free_vars_bound(expr, &HashSet::new())
 }
 
+#[cfg(test)]
+#[path = "../tests/internal/pattern_scope_projection.rs"]
+mod pattern_scope_projection;
+
 fn free_vars_bound(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
     let mut out = HashSet::new();
     model::visit_free_names(expr, &bound.iter().cloned().collect(), &mut |name| {

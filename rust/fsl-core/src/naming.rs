@@ -444,6 +444,7 @@ impl Glossary {
 /// Empty for any document that is not a compose.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NameMap {
+    pub(crate) pattern_scopes: crate::typecheck::PatternScopes,
     actions: BTreeMap<String, ComposeName>,
     states: BTreeMap<String, ComposeName>,
     properties: BTreeMap<String, ComposeName>,

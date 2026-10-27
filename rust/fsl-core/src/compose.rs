@@ -164,6 +164,7 @@ struct Component {
 
 #[derive(Clone, Default)]
 struct ComponentNames {
+    pattern_scopes: std::rc::Rc<std::cell::RefCell<crate::typecheck::PatternScopes>>,
     consts: HashSet<String>,
     enum_members: HashMap<String, Vec<String>>,
     types: HashSet<String>,
@@ -519,6 +520,9 @@ pub fn lower_compose_with_options(
 
     let mut composition_names = ComponentNames::default();
     for item in &compose.items {
+        if let ComposeItem::Common(SpecItem::Const { name, .. }) = item {
+            composition_names.consts.insert(name.clone());
+        }
         if let ComposeItem::Common(SpecItem::State(fields)) = item {
             composition_names
                 .state
@@ -534,13 +538,23 @@ pub fn lower_compose_with_options(
                 .extend(owners.iter().map(|owner| prefix(&component.alias, owner)));
         }
     }
-    let ambient = composition_names
+    let mut ambient = composition_names
         .state
         .iter()
+        .chain(composition_names.consts.iter())
         .chain(composition_names.enum_members.keys())
         .cloned()
         .collect::<HashSet<_>>();
+    ambient.extend(components.values().flat_map(|component| {
+        component
+            .names
+            .state
+            .iter()
+            .chain(&component.names.consts)
+            .map(|name| prefix(&component.alias, name))
+    }));
     for component in components.values_mut() {
+        component.names.pattern_scopes = composition_names.pattern_scopes.clone();
         component.ambient.clone_from(&ambient);
         component
             .public_bindings
@@ -678,6 +692,7 @@ pub fn lower_compose_with_options(
     static_items.extend(actions);
     let mut kernel = composed_kernel(compose.name, static_items, component_annotations, warnings);
     kernel.names = names;
+    kernel.names.pattern_scopes = composition_names.pattern_scopes.borrow().clone();
     for (target, origin) in origins {
         kernel
             .origins
@@ -1401,6 +1416,7 @@ fn rewrite_expr_in_phase(
                 if let fsl_syntax::Pattern::Some(name) = &pattern {
                     crate::typecheck::reject_pattern_binding_name(
                         phase,
+                        None,
                         name,
                         component.names.state.iter().map(String::as_str),
                         component.names.consts.iter().map(String::as_str),

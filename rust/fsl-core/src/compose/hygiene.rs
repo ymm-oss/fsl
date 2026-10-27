@@ -32,6 +32,7 @@ pub(super) struct Source<'a> {
 #[derive(Clone)]
 struct Scope {
     renamed: HashMap<String, String>,
+    locals: HashSet<String>,
     exporting: bool,
     phase: ValidationPhase,
 }
@@ -40,6 +41,7 @@ impl Scope {
     fn new() -> Self {
         Self {
             renamed: HashMap::new(),
+            locals: HashSet::new(),
             exporting: true,
             phase: ValidationPhase::normalized(),
         }
@@ -76,7 +78,7 @@ pub(super) fn root_binder(
     let mut used = HashSet::new();
     crate::collect_binder_names(&binder, &mut used);
     Renamer::root(globals, params, ambient, &mut used)
-        .binder(binder, &Scope::new(), None)
+        .binder(binder, &Scope::new(), None, false)
         .map(|(binder, _)| binder)
 }
 
@@ -146,7 +148,19 @@ pub(super) fn rewrite(
 enum Binding {
     Let,
     Pattern,
-    Closed,
+    Closed(bool),
+}
+
+fn contains_binder_pattern(binder: &Binder, value: Option<&Expr>) -> bool {
+    crate::model::binder_scope(binder)
+        .1
+        .into_iter()
+        .chain(value)
+        .any(|expr| {
+            let mut names = HashSet::new();
+            crate::collect_pattern_names(expr, &mut names);
+            names.contains(super::binder_name(binder))
+        })
 }
 
 impl<'a> Renamer<'a> {
@@ -179,9 +193,12 @@ impl<'a> Renamer<'a> {
         scope: &mut Scope,
         binding: Binding,
     ) -> Result<String, TypecheckError> {
+        let mut contexts = self.source.globals.pattern_scopes.borrow_mut();
+        self.used.extend(contexts.keys().cloned());
         if matches!(binding, Binding::Pattern) {
             let decision = reject_pattern_binding_name(
                 &scope.phase,
+                None,
                 &name,
                 self.source.globals.state.iter().map(String::as_str),
                 self.source.globals.consts.iter().map(String::as_str),
@@ -195,18 +212,47 @@ impl<'a> Renamer<'a> {
             if decision == PatternBinding::Substituted {
                 // Keep the aggregate binder's identity so normalization still
                 // substitutes its reads, rather than introducing a payload read.
-                return Ok(scope
+                let renamed = scope
                     .renamed
                     .get(&name)
                     .expect("substituted aggregate binder is in scope")
-                    .clone());
+                    .clone();
+                contexts
+                    .entry(renamed.clone())
+                    .or_insert(Ok(PatternBinding::Fresh));
+                return Ok(renamed);
             }
         }
+        let original = if matches!(binding, Binding::Closed(true)) && scope.phase.substitutes(&name)
+        {
+            Some(reject_pattern_binding_name(
+                &ValidationPhase::normalized(),
+                None,
+                &name,
+                self.source.globals.state.iter().map(String::as_str),
+                self.source.globals.consts.iter().map(String::as_str),
+                self.source.globals.enum_members.keys().map(String::as_str),
+                self.source
+                    .params
+                    .iter()
+                    .chain(&scope.locals)
+                    .map(String::as_str),
+            ))
+        } else {
+            None
+        };
+        let scoped = original.as_ref().is_some_and(|decision| {
+            decision.is_err()
+                || self.ambient.contains(&name)
+                || self.pattern_avoid.contains(&name)
+                || self.incoming.contains(&name)
+        });
         let collides = match binding {
             Binding::Let => self.avoid.contains(&name),
-            Binding::Closed => self.incoming.contains(&name),
+            Binding::Closed(_) => self.incoming.contains(&name) || scoped,
             Binding::Pattern => {
-                self.ambient.contains(&name)
+                contexts.get(&name).is_some_and(Result::is_err)
+                    || self.ambient.contains(&name)
                     || self.incoming.contains(&name)
                     || if scope.exporting {
                         self.avoid.contains(&name)
@@ -221,6 +267,19 @@ impl<'a> Renamer<'a> {
             name.clone()
         };
         self.used.insert(fresh.clone());
+        if scoped {
+            contexts.insert(
+                fresh.clone(),
+                original.expect("scoped aggregate has a source decision"),
+            );
+        } else if matches!(binding, Binding::Pattern) {
+            contexts
+                .entry(fresh.clone())
+                .or_insert(Ok(PatternBinding::Fresh));
+        }
+        if !matches!(binding, Binding::Closed(_)) || !scope.phase.substitutes(&name) {
+            scope.locals.insert(name.clone());
+        }
         scope.renamed.insert(name, fresh.clone());
         Ok(fresh)
     }
@@ -312,7 +371,7 @@ impl<'a> Renamer<'a> {
                 binder,
                 body,
             } => {
-                let (binder, nested) = self.binder(binder, scope, None)?;
+                let (binder, nested) = self.binder(binder, scope, None, false)?;
                 Expr::Quantified {
                     quantifier,
                     binder,
@@ -324,7 +383,8 @@ impl<'a> Renamer<'a> {
                 binder,
                 value,
             } => {
-                let (binder, nested) = self.binder(binder, scope, Some(kind))?;
+                let patterned = contains_binder_pattern(&binder, value.as_deref());
+                let (binder, nested) = self.binder(binder, scope, Some(kind), patterned)?;
                 Expr::Aggregate {
                     kind,
                     binder,
@@ -345,6 +405,7 @@ impl<'a> Renamer<'a> {
         binder: Binder,
         scope: &Scope,
         aggregate: Option<AggregateKind>,
+        patterned: bool,
     ) -> Result<(Binder, Scope), TypecheckError> {
         let mut nested = scope.clone();
         nested.exporting = false;
@@ -352,7 +413,7 @@ impl<'a> Renamer<'a> {
         let name = self.bind(
             super::binder_name(&binder).to_owned(),
             &mut nested,
-            Binding::Closed,
+            Binding::Closed(patterned),
         )?;
         let binder = match binder {
             Binder::Typed {
@@ -433,7 +494,7 @@ impl<'a> Renamer<'a> {
                 span,
             } => {
                 let (binder, nested) = self
-                    .binder(binder, scope, None)
+                    .binder(binder, scope, None, false)
                     .map_err(|error| error.with_span(span))?;
                 Statement::ForAll {
                     binder,

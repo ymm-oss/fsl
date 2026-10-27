@@ -613,6 +613,7 @@ fn reject_colliding_pattern_binding(
 ) -> Result<(), TypecheckError> {
     reject_pattern_binding_name(
         phase,
+        model.names().pattern_scopes.get(binding),
         binding,
         model.state.iter().map(|(name, _)| name.as_str()),
         model.consts.keys().map(String::as_str),
@@ -623,23 +624,29 @@ fn reject_colliding_pattern_binding(
     .map_err(|error| error.with_span(span))
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PatternBinding {
     Fresh,
     Substituted,
 }
 
+pub(crate) type PatternScopes = BTreeMap<String, Result<PatternBinding, TypecheckError>>;
+
 /// The same collision rule applies before compose prefixes global names.
 pub(crate) fn reject_pattern_binding_name<'a>(
     phase: &ValidationPhase,
+    source_scope: Option<&Result<PatternBinding, TypecheckError>>,
     binding: &str,
     state: impl IntoIterator<Item = &'a str>,
     constants: impl IntoIterator<Item = &'a str>,
     enum_members: impl IntoIterator<Item = &'a str>,
     local: impl IntoIterator<Item = &'a str>,
 ) -> Result<PatternBinding, TypecheckError> {
-    if phase.substituted.contains(binding) {
+    if phase.substitutes(binding) {
         return Ok(PatternBinding::Substituted);
+    }
+    if let Some(decision) = source_scope {
+        return decision.clone();
     }
     let is_binding = |name: &str| name == binding;
     let collides_with = if state.into_iter().any(is_binding) {
@@ -892,6 +899,9 @@ pub(crate) struct ValidationPhase {
 }
 
 impl ValidationPhase {
+    pub(crate) fn substitutes(&self, name: &str) -> bool {
+        self.substituted.contains(name)
+    }
     pub(crate) fn normalized() -> Self {
         Self {
             normalize_aggregates: true,

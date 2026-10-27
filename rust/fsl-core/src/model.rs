@@ -1243,6 +1243,7 @@ impl ModelBuilder {
             })?;
         }
         model.origins.discard_component_check_targets();
+        model.names.pattern_scopes.clear();
         Ok(model)
     }
 
@@ -2448,7 +2449,7 @@ fn binder_exprs(binder: &Binder) -> Vec<&Expr> {
     }
 }
 
-fn binder_scope(binder: &Binder) -> (&str, Option<&Expr>) {
+pub(crate) fn binder_scope(binder: &Binder) -> (&str, Option<&Expr>) {
     match binder {
         Binder::Typed {
             name, where_expr, ..
