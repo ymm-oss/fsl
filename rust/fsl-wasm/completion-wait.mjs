@@ -21,7 +21,15 @@ export async function waitForCompletion({
   // An in-flight evaluation retains its own CDP timeout; its elapsed time
   // consumes this budget rather than granting another observation-count loop.
   while (now() < deadline) {
-    details = await evaluate();
+    try {
+      details = await evaluate();
+    } catch (error) {
+      if (error instanceof ProbeTimeoutError && error.mode === "cdp") {
+        error.message += `; completion wait elapsed ${((now() - started) / 1_000).toFixed(3)}s; `
+          + `last phase: ${details?.phase ?? "unknown"}`;
+      }
+      throw error;
+    }
     if (details?.done === "true") return details;
     const remaining = deadline - now();
     if (remaining <= 0) break;
