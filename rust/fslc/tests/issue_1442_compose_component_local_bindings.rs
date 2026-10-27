@@ -11,6 +11,8 @@
 
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
+#[path = "support/compose_owner_refusal.rs"]
+mod owner_refusal;
 
 use std::path::PathBuf;
 
@@ -169,8 +171,8 @@ fn assert_same(direct: (Value, i32), composed: (Value, i32), has_cost: bool) {
     if has_cost {
         mask_cost(&mut left, &mut right);
     }
-    // No loc exclusion: a component action error retains its original span,
-    // as calibrated by preservation_type_error_keeps_component_location.
+    // No loc exclusion. Pre-compose source refusals use the separate #1463
+    // wrapped-diagnostic comparison rather than this unwrapped-output oracle.
     assert_eq!(right, left, "complete normalized output differs");
 }
 
@@ -431,7 +433,7 @@ fn preservation_monitor_rejects_wrong_observation() {
 
 #[test]
 fn preservation_type_error_keeps_component_location() {
-    // Calibrated independently of #1442: original action span, not use span.
+    // #1463 anchors loc at use, retaining the original action span inside.
     let dir = pair(
         "TypeError",
         "spec TypeError {\n  state { on: Bool }\n  init { on = false }\n  action read() { on = 1 }\n}\n",
@@ -444,7 +446,15 @@ fn preservation_type_error_keeps_component_location() {
         direct.0["message"],
         "invalid model expression: expression of type Int is not assignable to Bool at 4:19"
     );
-    assert_same(direct, check(&dir, "system.fsl"), false);
+    let preserved = owner_refusal::checks(
+        &direct,
+        &check(&dir, "system.fsl"),
+        "component.fsl",
+        "a.read",
+        "system.fsl",
+        (2, 3),
+    );
+    owner_refusal::assert_preserved(preserved.map(|passed| usize::from(!passed)));
 }
 
 fn checked_late_guard_source(body: &str) -> String {
@@ -774,11 +784,22 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
     assert_eq!(rejected.1, 2, "{}", rejected.0);
     assert_eq!(rejected.0["result"], "error");
     assert_eq!(rejected.0["kind"], "semantics");
+    // The component itself is valid. Check the substituted body independently
+    // without the additional let: header actuals cannot see that declaration.
+    assert_eq!(check(&dir, "bv.fsl").1, 0);
+    std::fs::write(
+        dir.join("substituted.fsl"),
+        part.replace("flag = v", "flag = t"),
+    )
+    .expect("independent substituted component");
+    let direct = check(&dir, "substituted.fsl");
+    assert_eq!(direct.0["loc"], json!({"line":4,"column":24}));
     assert_eq!(
-        rejected.0["message"],
+        direct.0["message"],
         "invalid model expression: public Kernel cannot type identifier 't' at 4:24"
     );
-    assert_eq!(rejected.0["loc"], json!({"line": 4, "column": 24}));
+    let preserved = owner_refusal::checks(&direct, &rejected, "bv.fsl", "b.go", "s.fsl", (2, 3));
+    owner_refusal::assert_preserved(preserved.map(|passed| usize::from(!passed)));
 
     for (name, declarations, params) in [
         ("param", "", "h: Bool"),

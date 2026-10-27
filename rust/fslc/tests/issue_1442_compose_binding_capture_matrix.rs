@@ -14,6 +14,8 @@ mod compose_scratch;
 mod extra;
 #[path = "support/compose_binding_matrix.rs"]
 mod matrix;
+#[path = "support/compose_owner_refusal.rs"]
+mod owner_refusal;
 #[path = "support/compose_source_owner.rs"]
 mod source_owner;
 
@@ -164,12 +166,17 @@ fn observe(
     bundle: &matrix::SourceBundle,
     cell: &Cell,
     with_explain: bool,
-) -> (Observations, Option<Observation>) {
+) -> (Observations, Option<Observation>, Option<Observation>) {
     let dir = materialize(bundle);
     let check = invoke(&dir, &["check", "s.fsl"]);
     if cell.rejection() {
-        return (vec![check, invoke(&dir, &["check", "b.fsl"])], None);
+        return (vec![check, invoke(&dir, &["check", "b.fsl"])], None, None);
     }
+    let direct = if let aggregate::Owner::Component(file) = cell.source_owner() {
+        Some(invoke(&dir, &["check", file]))
+    } else {
+        None
+    };
     let explain = (with_explain && cell.explain())
         .then(|| invoke(&dir, &["explain", "s.fsl", "--depth", "4"]));
     (
@@ -190,6 +197,7 @@ fn observe(
             ),
         ],
         explain,
+        direct,
     )
 }
 
@@ -370,15 +378,43 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     let started = Instant::now();
     let mut reports = Vec::new();
     // Disjoint counts: defect-red / full green / invalid / BMC unsupported.
-    let mut families: BTreeMap<String, [usize; 5]> = BTreeMap::new();
+    let mut families: BTreeMap<String, [usize; 6]> = BTreeMap::new();
+    let mut owner_refused = Vec::new();
+    let mut refusal_failures = [0; 3];
     let mut bad_controls = 0;
     let mut unsupported_bmc = Vec::new();
     let mut unsupported = Vec::new();
     for cell in cells {
         let same_bundle = cell.render(false);
         let fresh_bundle = cell.render(true);
-        let (same, explain) = observe(&same_bundle, &cell, true);
-        let (fresh, _) = observe(&fresh_bundle, &cell, false);
+        let (same, explain, same_source) = observe(&same_bundle, &cell, true);
+        let (fresh, _, fresh_source) = observe(&fresh_bundle, &cell, false);
+        // Classification comes from actual standalone checks, even when a
+        // faulty compose accepts. No list of root names or messages decides it.
+        if fresh_source.as_ref().is_some_and(|(_, code)| *code == 2) {
+            let checks: Vec<_> = [(&same_source, &same), (&fresh_source, &fresh)]
+                .into_iter()
+                .map(|(direct, composed)| {
+                    owner_refusal::checks(
+                        direct.as_ref().expect("component owner"),
+                        &composed[0],
+                        cell.source_owner().name(),
+                        "b.Match",
+                        "s.fsl",
+                        (2, 3),
+                    )
+                })
+                .collect();
+            for check in &checks {
+                for (failure, passed) in refusal_failures.iter_mut().zip(check) {
+                    *failure += usize::from(!passed);
+                }
+            }
+            owner_refused.push(cell.id());
+            families.entry(cell.family().into()).or_default()[5] += 1;
+            reports.push(json!({"id":cell.id(),"family":cell.family(),"owner_refused":true,"source_checks":[same_source,fresh_source],"refusal_checks":checks,"same":same,"fresh":fresh,"explain":explain}));
+            continue;
+        }
         let control_ok = if let Cell::Added(c) = &cell {
             if c.rejection() {
                 valid_rejection(&same[1], c) && valid_rejection(&fresh[1], c)
@@ -462,7 +498,7 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     let elapsed = started.elapsed().as_secs_f64();
     let red: usize = families.values().map(|counts| counts[0]).sum();
     let green: usize = families.values().map(|counts| counts[1]).sum();
-    let report = json!({"cells": reports, "families": families, "red": red, "green": green, "invalid": bad_controls, "bad_controls": bad_controls, "unsupported_bmc": unsupported_bmc,"unsupported":unsupported, "elapsed_s": elapsed});
+    let report = json!({"cells": reports, "families": families, "red": red, "green": green, "invalid": bad_controls, "bad_controls": bad_controls, "unsupported_bmc": unsupported_bmc,"unsupported":unsupported, "owner_refused":owner_refused,"refusal_failures":refusal_failures, "elapsed_s": elapsed});
     std::fs::write(
         report_dir.join("report.json"),
         serde_json::to_vec(&report).expect("serialize complete observations"),
@@ -474,6 +510,16 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
         unsupported.len(),
         report_dir.display()
     );
+    eprintln!(
+        "MATRIX_OWNER_REFUSED old={} checks={refusal_failures:?}",
+        owner_refused.len()
+    );
+    assert_eq!(
+        owner_refused.len(),
+        16,
+        "standalone refusal inventory changed"
+    );
+    owner_refusal::assert_preserved(refusal_failures);
     assert_eq!(
         bad_controls, 0,
         "invalid fresh controls; see complete report"
@@ -589,6 +635,7 @@ struct SourceCheckCase {
     bundle: matrix::SourceBundle,
     owner: aggregate::Owner,
     aggregate_accepts: Option<bool>,
+    owner_refusal_candidate: bool,
 }
 
 #[test]
@@ -602,6 +649,7 @@ fn aggregate_pattern_and_owner_source_checks() {
                 bundle: cell.render(fresh),
                 owner: cell.source_owner(),
                 aggregate_accepts: None,
+                owner_refusal_candidate: !cell.rejection(),
             });
         }
     }
@@ -611,13 +659,17 @@ fn aggregate_pattern_and_owner_source_checks() {
             owner: cell.owner(),
             bundle: cell.render(),
             aggregate_accepts: Some(cell.accepts()),
+            owner_refusal_candidate: cell.accepts(),
         });
     }
     assert_eq!(cases.len(), 5960);
     let report_dir = compose_scratch::scratch("aggregate-pattern-report", &[]);
     let started = Instant::now();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    let mut aggregate_counts: BTreeMap<String, [usize; 3]> = BTreeMap::new();
+    let mut aggregate_counts: BTreeMap<String, [usize; 4]> = BTreeMap::new();
+    let mut owner_refused_old = BTreeSet::new();
+    let mut owner_refused_new = BTreeSet::new();
+    let mut refusal_failures = [0; 3];
     let mut reference_errors = 0;
     let mut forbidden = 0;
     let mut reports = Vec::new();
@@ -627,6 +679,7 @@ fn aggregate_pattern_and_owner_source_checks() {
         let composed = invoke(&dir, &["check", "s.fsl"]);
         let holder = source_owner::standalone(&case.bundle, case.owner);
         let mut error = None;
+        let mut refusal_checks = None;
         let (standalone, classification) = match holder {
             Err(reason) => {
                 writeln!(
@@ -649,32 +702,58 @@ fn aggregate_pattern_and_owner_source_checks() {
                     case.id, holder.description, holder.type_names
                 )
                 .expect("owner table");
-                let classification = match (direct.1, composed.1) {
-                    (0, 0) => "ok_ok",
-                    (0, _) => {
-                        forbidden += 1;
-                        error = Some("owner ok but composition rejected");
-                        "ok_error"
+                let classification = if case.owner_refusal_candidate && direct.1 == 2 {
+                    let check = owner_refusal::checks(
+                        &direct,
+                        &composed,
+                        case.owner.name(),
+                        "b.Match",
+                        "s.fsl",
+                        (2, 3),
+                    );
+                    for (failure, passed) in refusal_failures.iter_mut().zip(check) {
+                        *failure += usize::from(!passed);
                     }
-                    (2, 2) if direct.0["kind"] == composed.0["kind"] => {
-                        if direct.0["message"] == composed.0["message"] {
-                            "error_error_same_message"
-                        } else {
-                            "error_error_different_message"
+                    if case.aggregate_accepts.is_some() {
+                        owner_refused_new.insert(case.id.clone());
+                    } else {
+                        owner_refused_old
+                            .insert(case.id.rsplit_once('|').expect("old shape").0.to_owned());
+                    }
+                    if check != [true; 3] {
+                        error = Some("owner refusal diagnostic not preserved");
+                    }
+                    refusal_checks = Some(check);
+                    "owner_refused"
+                } else {
+                    match (direct.1, composed.1) {
+                        (0, 0) => "ok_ok",
+                        (0, _) => {
+                            forbidden += 1;
+                            error = Some("owner ok but composition rejected");
+                            "ok_error"
                         }
-                    }
-                    (2, _) => {
-                        forbidden += 1;
-                        error = Some("owner refusal or kind not preserved");
-                        "error_not_preserved"
-                    }
-                    _ => {
-                        reference_errors += 1;
-                        error = Some("unexpected standalone check exit");
-                        "invalid_reference"
+                        (2, 2) if direct.0["kind"] == composed.0["kind"] => {
+                            if direct.0["message"] == composed.0["message"] {
+                                "error_error_same_message"
+                            } else {
+                                "error_error_different_message"
+                            }
+                        }
+                        (2, _) => {
+                            forbidden += 1;
+                            error = Some("owner refusal or kind not preserved");
+                            "error_not_preserved"
+                        }
+                        _ => {
+                            reference_errors += 1;
+                            error = Some("unexpected standalone check exit");
+                            "invalid_reference"
+                        }
                     }
                 };
                 if let Some(expected) = case.aggregate_accepts
+                    && refusal_checks.is_none()
                     && ((direct.1 == 0) != expected || !matches!(direct.1, 0 | 2))
                 {
                     reference_errors += 1;
@@ -697,7 +776,9 @@ fn aggregate_pattern_and_owner_source_checks() {
             let valid = standalone
                 .as_ref()
                 .is_some_and(|(_, code)| (*code == 0) == expected && matches!(*code, 0 | 2));
-            entry[if valid {
+            entry[if refusal_checks.is_some() {
+                3
+            } else if valid {
                 usize::from(error.is_none())
             } else {
                 2
@@ -720,15 +801,21 @@ fn aggregate_pattern_and_owner_source_checks() {
                 json!({"exit":composed.1,"message":composed.0.get("message"),"result":composed.0["result"]})
             );
         }
-        reports.push(json!({"id":case.id,"owner":case.owner.name(),"aggregate_accepts":case.aggregate_accepts,"standalone":standalone,"composed":composed,"classification":classification,"error":error,"directory":dir}));
+        reports.push(json!({"id":case.id,"owner":case.owner.name(),"aggregate_accepts":case.aggregate_accepts,"standalone":standalone,"composed":composed,"classification":classification,"refusal_checks":refusal_checks,"error":error,"directory":dir}));
     }
     std::fs::write(report_dir.join("owners.tsv"), table).expect("owner map table");
     let elapsed = started.elapsed().as_secs_f64();
-    std::fs::write(report_dir.join("report.json"),serde_json::to_vec(&json!({"cases":reports,"counts":counts,"aggregate_counts":aggregate_counts,"forbidden":forbidden,"invalid":reference_errors,"inapplicable":aggregate::INAPPLICABLE_COUNT,"inapplicable_reason":aggregate::INAPPLICABLE_REASON,"elapsed_s":elapsed})).expect("report JSON")).expect("owner report");
+    std::fs::write(report_dir.join("report.json"),serde_json::to_vec(&json!({"cases":reports,"counts":counts,"aggregate_counts":aggregate_counts,"forbidden":forbidden,"invalid":reference_errors,"owner_refused_old":owner_refused_old,"owner_refused_new":owner_refused_new,"refusal_failures":refusal_failures,"inapplicable":aggregate::INAPPLICABLE_COUNT,"inapplicable_reason":aggregate::INAPPLICABLE_REASON,"elapsed_s":elapsed})).expect("report JSON")).expect("owner report");
     eprintln!(
         "AGG_PATTERN_N count={} reason={}",
         aggregate::INAPPLICABLE_COUNT,
         aggregate::INAPPLICABLE_REASON
+    );
+    eprintln!(
+        "OWNER_REFUSED total={} old={} new={} checks={refusal_failures:?}",
+        owner_refused_old.len() + owner_refused_new.len(),
+        owner_refused_old.len(),
+        owner_refused_new.len()
     );
     eprintln!(
         "AGG_PATTERN_RESULT counts={counts:?} aggregate={aggregate_counts:?} forbidden={forbidden} invalid={reference_errors} n={} elapsed_s={elapsed:.3} report={} owners={}",
@@ -745,5 +832,11 @@ fn aggregate_pattern_and_owner_source_checks() {
         Some(&394),
         "owner-scope coverage changed"
     );
+    assert_eq!(
+        (owner_refused_old.len(), owner_refused_new.len()),
+        (16, 64),
+        "standalone refusal inventory changed"
+    );
+    owner_refusal::assert_preserved(refusal_failures);
     assert_eq!(forbidden, 0, "standalone-to-compose admissibility drift");
 }
