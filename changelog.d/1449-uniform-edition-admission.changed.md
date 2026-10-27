@@ -3,6 +3,7 @@ edition before consumption. Verify-shaped results share migration-warning
 finalization after governance, including nested verification and report baselines,
 instead of repeating it in the CLI verify and test-generation failure paths.
 Edition-migration ledger rows now say 移行候補 with their code and message instead of vacuity or mutate advice.
+Migration-only rows use status 🟡 移行候補 and risk —; non-migration or mixed rows retain 🔴 要確認 and risk 要確認.
 Kernel, conformance, testplan and typestate consumers also admit their captured
 source before analysis; closed contracts and raw TypeScript deliver migration
 warnings on stderr without changing their output schemas.
