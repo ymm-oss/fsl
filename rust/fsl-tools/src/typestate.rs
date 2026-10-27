@@ -105,7 +105,7 @@ enum Statement {
 
 struct Action {
     name: String,
-    params: Vec<String>,
+    params: Vec<(String, TypeRef)>,
     requires: Vec<Expr>,
     statements: Vec<Statement>,
     requirement: Option<Value>,
@@ -496,12 +496,16 @@ fn adapt_public_kernel(kernel: &Value) -> Result<PublicKernelView, String> {
                     .enumerate()
                     .map(|(parameter_index, parameter)| {
                         let parameter_context = format!("{context}.parameters[{parameter_index}]");
-                        required_str(
-                            required_object(parameter, &parameter_context)?,
-                            "name",
-                            &parameter_context,
-                        )
-                        .map(str::to_owned)
+                        let parameter = required_object(parameter, &parameter_context)?;
+                        Ok((
+                            required_str(parameter, "name", &parameter_context)?.to_owned(),
+                            parse_type(
+                                parameter.get("type").ok_or_else(|| {
+                                    format!("public Kernel {parameter_context}.type is required")
+                                })?,
+                                &format!("{parameter_context}.type"),
+                            )?,
+                        ))
                     })
                     .collect::<Result<Vec<_>, String>>()?,
                 requires: required_array(object, "requires", &context)?
@@ -1007,7 +1011,16 @@ fn classify_action(
         json!(fsl_core::unmapped_public_spelling(&action.name)),
     );
     output.insert("verdict".to_owned(), json!(verdict));
-    output.insert("params".to_owned(), json!(action.params));
+    output.insert(
+        "params".to_owned(),
+        json!(
+            action
+                .params
+                .iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+        ),
+    );
     output.insert("transitions".to_owned(), Value::Array(transitions));
     if state_preserving {
         output.insert("state_preserving".to_owned(), Value::Bool(true));
@@ -1046,6 +1059,63 @@ fn ts_type(model: &PublicKernelView, ty: &TypeRef) -> String {
         TypeRef::Option(inner) => format!("{} | null", ts_type(model, inner)),
         TypeRef::Set(inner) => format!("Set<{}>", ts_type(model, inner)),
         _ => "unknown".to_owned(),
+    }
+}
+
+fn ts_identifier(name: &str) -> String {
+    if matches!(
+        name,
+        "break"
+            | "case"
+            | "catch"
+            | "class"
+            | "const"
+            | "continue"
+            | "debugger"
+            | "default"
+            | "delete"
+            | "do"
+            | "else"
+            | "enum"
+            | "export"
+            | "extends"
+            | "false"
+            | "finally"
+            | "for"
+            | "function"
+            | "if"
+            | "import"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "null"
+            | "return"
+            | "super"
+            | "switch"
+            | "this"
+            | "throw"
+            | "true"
+            | "try"
+            | "typeof"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+            | "implements"
+            | "interface"
+            | "let"
+            | "package"
+            | "private"
+            | "protected"
+            | "public"
+            | "static"
+            | "await"
+            | "type"
+    ) {
+        format!("{name}_")
+    } else {
+        name.to_owned()
     }
 }
 
@@ -1145,30 +1215,16 @@ fn emit_typescript(
                     .to_owned(),
             );
         }
-        let mut function_name = action["action"].as_str().unwrap_or_default().to_owned();
-        if matches!(
-            function_name.as_str(),
-            "void"
-                | "delete"
-                | "new"
-                | "default"
-                | "function"
-                | "return"
-                | "switch"
-                | "case"
-                | "class"
-                | "enum"
-                | "interface"
-                | "type"
-        ) {
-            function_name.push('_');
-        }
-        let params = action["params"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(|param| format!("{param}: number"))
+        let action_name = action["action"].as_str().unwrap_or_default();
+        let function_name = ts_identifier(action_name);
+        let params = model
+            .actions
+            .iter()
+            .find(|candidate| fsl_core::unmapped_public_spelling(&candidate.name) == action_name)
+            .expect("typestate report action comes from the model")
+            .params
+            .iter()
+            .map(|(param, ty)| format!("{}: {}", ts_identifier(param), ts_type(model, ty)))
             .collect::<Vec<_>>();
         let extra = if params.is_empty() {
             String::new()
