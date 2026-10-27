@@ -10,7 +10,10 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import "./build-browser.mjs";
+import { exitStatusFor } from "./browser-probe-outcome.mjs";
+import { runBrowserProbe } from "./browser-probe-run.mjs";
 
+async function main() {
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 let resolveBrowserResult;
 const browserResult = new Promise((resolve) => { resolveBrowserResult = resolve; });
@@ -48,9 +51,6 @@ const server = createServer((request, response) => {
   response.setHeader("Content-Type", mime[extname(path)] ?? "application/octet-stream");
   createReadStream(path).pipe(response);
 });
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const { port } = server.address();
-
 const candidates = [
   process.env.CHROME_BIN,
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -60,54 +60,65 @@ const candidates = [
 ].filter(Boolean);
 const chrome = candidates.find(existsSync);
 if (!chrome) {
-  server.close();
   throw new Error("Chrome not found; set CHROME_BIN to run the browser Worker probe");
 }
 
-const profile = await mkdtemp(join(tmpdir(), "fsl-z3js-chrome-"));
-const child = spawn(
-  chrome,
-  [
-    "--headless=new",
-    "--disable-gpu",
-    "--disable-background-networking",
-    "--no-sandbox",
-    `--user-data-dir=${profile}`,
-    `http://127.0.0.1:${port}/`,
-  ],
-  { stdio: ["ignore", "ignore", "pipe"] },
-);
-let stderr = "";
-child.stderr.setEncoding("utf8");
-child.stderr.on("data", (chunk) => { stderr += chunk; });
-const closed = new Promise((resolve, reject) => {
-  child.once("error", reject);
-  child.once("close", resolve);
+const result = await runBrowserProbe({
+  startServer: async () => {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.removeListener("error", reject);
+        resolve();
+      });
+    });
+    return {
+      result: browserResult,
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  },
+  makeProfile: () => mkdtemp(join(tmpdir(), "fsl-z3js-chrome-")),
+  launchChrome: (profile) => {
+    const { port } = server.address();
+    const child = spawn(
+      chrome,
+      [
+        "--headless=new",
+        "--disable-gpu",
+        "--disable-background-networking",
+        "--no-sandbox",
+        `--user-data-dir=${profile}`,
+        `http://127.0.0.1:${port}/`,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    return {
+      closed: new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, signal) => resolve({ code, signal }));
+      }),
+      kill: () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      },
+      stderr: () => stderr,
+    };
+  },
+  removeProfile: (profile) => rm(profile, { recursive: true, force: true }),
+  timeoutMs: 75000,
 });
-let timeout;
-let result;
-try {
-  result = await Promise.race([
-    browserResult,
-    closed.then((code) => {
-      throw new Error(`Chrome exited before reporting a result (${code}): ${stderr}`);
-    }),
-    new Promise((_, reject) => {
-      timeout = setTimeout(() => {
-        child.kill("SIGKILL");
-        reject(new Error(`Chrome browser probe timed out after 75s: ${stderr}`));
-      }, 75_000);
-    }),
-  ]);
-} finally {
-  clearTimeout(timeout);
-  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-  await closed.catch(() => {});
-  await new Promise((resolve) => server.close(resolve));
-  await rm(profile, { recursive: true, force: true });
-}
 
 if (!result.ok) {
   throw new Error(`browser Worker round trip failed: ${JSON.stringify(result)}`);
 }
 console.log(JSON.stringify({ schema: "fsl-z3js-browser-spike.v1", ok: true, details: result.details }, null, 2));
+}
+
+try {
+  await main();
+} catch (error) {
+  console.error(error);
+  process.exitCode = exitStatusFor(error);
+}
