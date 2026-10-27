@@ -368,7 +368,11 @@ fn infer_type_inner(
             "rel_domain" | "rel_range" => {
                 let element = match resolve(model, &infer_type(expr, env, model, None)?)? {
                     TypeRef::Relation(source, target) => {
-                        if name == "rel_domain" { source } else { target }
+                        if name == "rel_domain" {
+                            source
+                        } else {
+                            target
+                        }
                     }
                     // Non-relation signature validation is separate (#1459).
                     _ => Box::new(TypeRef::Int),
