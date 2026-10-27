@@ -261,3 +261,113 @@ fn less_min_preserves_only_representable_reject() {
 fn greater_equal_min_preserves_only_representable_accept() {
     assert_extreme(">=", i64::MIN, "ok", "boundary_accept_q");
 }
+
+/// Detector on 12d196da: c is qualified to `boundary_accept_c_a`, which is
+/// reserved by d's plain name, so it becomes `boundary_accept_c_a_2`. The first
+/// plain-name occurrence keeps its name, including the analogous reject cases.
+#[test]
+fn future_plain_names_are_reserved_before_qualified_names() {
+    let plan = plan(
+        "spec Clash { type N = 0..4 state { done: Bool } init { done = false }
+         action b(a: N) { requires a <= 3 done = true }
+         action c(a: N) { requires a <= 3 done = true }
+         action d(c_a: N) { requires c_a <= 3 done = true } }",
+    );
+    assert_unique(&plan);
+    for prefix in ["boundary_accept", "boundary_reject"] {
+        for (action, name) in [
+            ("b", format!("{prefix}_a")),
+            ("c", format!("{prefix}_c_a_2")),
+            ("d", format!("{prefix}_c_a")),
+        ] {
+            assert!(
+                plan["cases"]
+                    .as_array()
+                    .expect("cases")
+                    .iter()
+                    .any(|case| case["name"] == name && case["target"]["action"] == action),
+                "expected {action} to keep {name}; produced plan={plan}"
+            );
+        }
+    }
+}
+
+/// Detector on 12d196da: allocation happens after the plain-name sort, so z
+/// precedes `beta_z` on HEAD. Re-sort the complete plan by final names afterwards.
+#[test]
+fn qualified_cases_are_sorted_by_final_name() {
+    let plan = plan(
+        "spec Sorted { type N = 0..4 state { done: Bool } init { done = false }
+         action alpha(z: N) { requires z <= 3 done = true }
+         action beta(z: N) { requires z <= 3 done = true } }",
+    );
+    let names: Vec<_> = plan["cases"]
+        .as_array()
+        .expect("cases")
+        .iter()
+        .map(|case| case["name"].as_str().expect("name"))
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "produced names={names:?}; plan={plan}");
+}
+
+/// Control on 12d196da: s1 and s2 have equal JSON values. The old `BTreeMap`
+/// order selects s1, so a failure at s1 retains the setup step from s0. An
+/// overwriting value-to-id index would select s2 and lose the failure's setup.
+#[test]
+fn equal_state_values_keep_first_id_and_failure_setup_path() {
+    let fixture = "rust/fslc/tests/fixtures/testplan_limit.fsl";
+    let kernel = cli(&["kernel", fixture]);
+    let mut conformance = cli(&["conformance", fixture, "--depth", "0"]);
+    // Keep the real kernel/guard and vector outcomes; adapt only the state IDs.
+    // The first ok vector uses q=0, not the q=1 accept boundary, so only the
+    // failure at s1 is selected and its setup isolates the BFS tie rule.
+    let before = conformance["states"][0]["state"].clone();
+    let vectors = conformance["vectors"].as_array().expect("vectors");
+    let mut ok = vectors
+        .iter()
+        .find(|v| v["outcome"]["kind"] == "ok")
+        .expect("ok vector")
+        .clone();
+    let mut failed = vectors
+        .iter()
+        .find(|v| v["outcome"]["kind"] == "requires_failed")
+        .expect("failure vector")
+        .clone();
+    let after = ok["outcome"]["state"].clone();
+    assert_ne!(before, after, "produced conformance={conformance}");
+    ok["state"] = json!("s0");
+    ok["outcome"]["state"] = after.clone();
+    failed["state"] = json!("s1");
+    failed["outcome"]["state"] = after.clone();
+    let expected_step = json!({"action":ok["action"]["name"],
+        "params":ok["action"]["params"], "expected":after});
+    conformance["states"] = json!([
+        {"id":"s0", "state":before},
+        {"id":"s1", "state":after},
+        {"id":"s2", "state":after}
+    ]);
+    conformance["vectors"] = json!([ok, failed]);
+    let result = fsl_tools::build_test_plan_v1(&kernel, &conformance);
+    assert!(
+        result.is_ok(),
+        "produced result={result:?}; conformance={conformance}"
+    );
+    let plan = result.expect("checked plan");
+    let cases = plan["cases"].as_array().expect("cases");
+    assert_eq!(cases.len(), 1, "produced plan={plan}");
+    assert_eq!(
+        cases[0]["source_vector"]["state"], "s1",
+        "produced plan={plan}"
+    );
+    assert_eq!(
+        cases[0]["setup"],
+        json!([expected_step]),
+        "produced plan={plan}"
+    );
+    assert_eq!(
+        cases[0]["expected"]["outcome_kind"], "requires_failed",
+        "produced plan={plan}"
+    );
+}
