@@ -1385,6 +1385,11 @@ output effects. Causal diff includes both operands; observation includes its
 explicit FSL mapping. Each slot is distinct, so repeating a file in two slots
 permits one warning per slot. Headers, existing edition options and read-error
 kinds keep their rules; no new dialect/header combination is accepted.
+The single-input analyze entry also preflights `.toml` text, without admitting
+the referenced FSL roots or completing project-mode intake. Envelope `fsl_edition`
+and `edition` describe only the primary root, while warnings retain each slot.
+Preparing all causal roots means a later operand/mapping read error intentionally
+precedes an earlier root's parse/model error.
 
 Implemented open envelopes use `warnings` once. Successful closed schemas
 (`kernel`, `conformance`, `testplan`) and implemented raw TypeScript/readable/graph

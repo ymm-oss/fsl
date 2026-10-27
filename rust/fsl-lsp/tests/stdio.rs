@@ -537,6 +537,15 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
                 .spawn(|| {
                     let mut z3 =
                         || fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string());
+                    let admission = fslc_rust::migration::admit_source(
+                        &text,
+                        file,
+                        None,
+                        &options,
+                        &serde_json::Map::new,
+                        false,
+                    )
+                    .unwrap();
                     let mut future = std::pin::pin!(fslc_rust::check_stages::run_check_stages(
                         &text,
                         file,
@@ -545,6 +554,7 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
                         &serde_json::Map::new,
                         &options,
                         &mut z3,
+                        &admission,
                     ));
                     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
                     match future.as_mut().poll(&mut context) {

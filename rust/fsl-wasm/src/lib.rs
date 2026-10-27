@@ -240,7 +240,7 @@ async fn check_with<S: fsl_solver::SmtSolver>(
         Ok(edition) => edition,
         Err(refusal) => return refusal,
     };
-    let output = check_kernel(request, solver_version, new_solver).await;
+    let output = check_kernel(request, solver_version, new_solver, &edition).await;
     edition.finish((output, 0)).0
 }
 
@@ -248,6 +248,7 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
     request: &Request,
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+    edition: &fslc_rust::migration::SourceEdition,
 ) -> Value {
     let resolver = MemoryResolver {
         files: request.files.clone(),
@@ -262,6 +263,7 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
         &|| envelope(solver_version),
         &request.parse_options(),
         new_solver,
+        edition,
     )
     .await
     {
@@ -1603,6 +1605,7 @@ mod tests {
                     &|| envelope(TEST_SOLVER_VERSION),
                     &check_request.parse_options(),
                     &mut native_z3,
+                    &admit_edition(&check_request, TEST_SOLVER_VERSION).unwrap(),
                 ))
             })
             .expect_err("native check rejects the fixture");

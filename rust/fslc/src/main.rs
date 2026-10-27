@@ -5949,7 +5949,12 @@ fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
 ///
 /// The displayed path intentionally remains independent of the path used to
 /// resolve imports, including for materialized literate sources.
-fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Value, i32) {
+fn run_check_from_source(
+    path: &Path,
+    display_path: &Path,
+    source: &str,
+    admission: &SourceEdition,
+) -> (Value, i32) {
     let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
     // The validity stages are shared with the Worker (issue #1163); only the
     // success envelope is composed here.
@@ -5961,6 +5966,7 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
         &envelope,
         crate::parse_options(),
         &mut spec_loading::z3_solver,
+        admission,
     )) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
             let mut output = envelope();
@@ -6048,7 +6054,7 @@ fn run_admitted_roots(
         editions.push(edition);
     }
     let result = run(&sources, &editions);
-    if stderr_on_success && result.1 == 0 {
+    if stderr_on_success && raw_delivery_allowed(&result) {
         for edition in editions {
             for warning in edition.warnings() {
                 eprintln!("warning: {warning}");
@@ -6063,12 +6069,13 @@ fn finish_admitted(
     editions: &[SourceEdition],
     stderr_on_success: bool,
 ) -> (Value, i32) {
-    if stderr_on_success && result.1 == 0 {
+    if stderr_on_success && raw_delivery_allowed(&result) {
         result
     } else {
-        editions
-            .iter()
-            .fold(result, |result, edition| edition.finish(result))
+        let result = editions[0].finish(result);
+        editions[1..].iter().fold(result, |result, edition| {
+            edition.warnings_only().finish(result)
+        })
     }
 }
 
@@ -6329,7 +6336,7 @@ fn run_check_with_tags_from_source(
         Ok(admission) => admission,
         Err(refusal) => return refusal,
     };
-    let (mut output, status) = run_check_from_source(path, display_path, source);
+    let (mut output, status) = run_check_from_source(path, display_path, source, &admission);
     if status == 0 && strict_tags {
         let model = match load_model_from_source(path, source) {
             Ok(model) => model,
@@ -6564,7 +6571,14 @@ fn run_db_import(
 /// that also carries `kernel_source`, so the invariant is one routing change
 /// away from breaking.
 fn raw_delivery_allowed(result: &(Value, i32)) -> bool {
-    outcome_class(&result.0).is_success()
+    (result.1 == 0 && result.0.get("$schema").is_some_and(Value::is_string))
+        || (outcome_class(&result.0).is_success()
+            && match result.0["result"].as_str() {
+                Some("explained") => result.0["readable"].is_string(),
+                Some("typestate") => result.0["entities"].is_array(),
+                Some("generated" | "analyzed") => result.0["content"].is_string(),
+                _ => true,
+            })
 }
 
 fn wrap_specialized(result: Value) -> (Value, i32) {
@@ -18327,7 +18341,14 @@ spec InitTraceability {
         let captured = read_spec_source(&fixture.path).expect("capture source A");
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
-        let (output, status) = run_check_from_source(&fixture.path, &fixture.path, &captured);
+        let (output, status) = run_check_with_tags_from_source(
+            &fixture.path,
+            &fixture.path,
+            &captured,
+            false,
+            None,
+            None,
+        );
         assert_eq!(status, 0, "{output:#}");
         assert_eq!(output["result"], "ok", "{output:#}");
         assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");

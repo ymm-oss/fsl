@@ -22,6 +22,7 @@
 use fsl_core::{FileResolver, KernelModel, KernelSpec};
 use serde_json::{Map, Value, json};
 
+use crate::source_diagnostic::diagnostics_admitted;
 use crate::spec_load::{SemanticDiagnostic, SpecLoadError, kernel_load_error};
 use crate::verification_output::{render_runtime_error, render_semantic_error, require_trace_gate};
 
@@ -51,6 +52,7 @@ pub struct CheckedSpec {
 ///
 /// Returns the rendered envelope and exit status of the first stage that ends
 /// the check.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_check_stages<S: fsl_solver::SmtSolver>(
     source: &str,
     source_path: &str,
@@ -59,6 +61,7 @@ pub async fn run_check_stages<S: fsl_solver::SmtSolver>(
     envelope: &dyn Fn() -> Map<String, Value>,
     options: &fsl_syntax::ParseOptions,
     new_solver: &mut crate::requirements_solver::NewSolver<'_, S>,
+    admission: &crate::migration::SourceEdition,
 ) -> Result<CheckedSpec, (Value, i32)> {
     let checked = match check_stages(
         source,
@@ -67,6 +70,7 @@ pub async fn run_check_stages<S: fsl_solver::SmtSolver>(
         resolver,
         envelope,
         *options,
+        admission,
     ) {
         Ok(checked) => {
             match crate::requirements_solver::refute(source, &checked.model, options, new_solver)
@@ -151,6 +155,7 @@ fn check_stages(
     resolver: &dyn FileResolver,
     envelope: &dyn Fn() -> Map<String, Value>,
     options: fsl_syntax::ParseOptions,
+    admission: &crate::migration::SourceEdition,
 ) -> Result<CheckedSpec, (Value, i32)> {
     let options = &options;
     // The fsl-ai project gate carries its own exit code: an unexecutable
@@ -182,7 +187,8 @@ fn check_stages(
         return Err((semantic_error(envelope(), &error), 2));
     }
     if let Some(diagnostic) =
-        crate::source_diagnostic::diagnostics(source, display_path, resolver, options)
+        diagnostics_admitted(source, display_path, resolver, *options, admission)
+            .0
             .into_iter()
             .find(|diagnostic| diagnostic.kind != "migration")
     {

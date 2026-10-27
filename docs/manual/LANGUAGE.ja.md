@@ -1310,6 +1310,10 @@ causal diff は両方の引数、observation は明示的な FSL mapping も対�
 各 slot は独立し、同じファイルを2つの slot に渡した場合は slot ごとに1回の警告を
 許します。ヘッダー・既存の edition オプション・read error の kind の規則を維持し、
 新しい dialect とヘッダーの組み合わせを受理するものではありません。
+単一入力の analyze は `.toml` の本文も preflight しますが、参照先 FSL root の受け入れや
+project-mode intake の完了を意味しません。envelope の `fsl_edition` と `edition` は
+主の root だけを表し、警告は各 slot のものを保持します。全 causal root を先に準備するため、
+後の引数や mapping の read error が、先の root の parse/model error より優先されます。
 
 対応済みの拡張可能な envelope では `warnings` を一度だけ仕上げます。成功時の閉じた
 schema (`kernel`、`conformance`、`testplan`) と対応済みの raw TypeScript/readable/

@@ -630,6 +630,16 @@ impl SourceEdition {
         &self.additions
     }
 
+    /// Retain this slot's warnings without projecting secondary-root metadata.
+    #[must_use]
+    pub fn warnings_only(&self) -> Self {
+        Self {
+            declared: None,
+            next: false,
+            additions: self.additions.clone(),
+        }
+    }
+
     /// Finish an admitted root's open envelope without changing its verdict.
     ///
     /// # Panics

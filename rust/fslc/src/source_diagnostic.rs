@@ -92,7 +92,7 @@ pub fn diagnostics_with_model(
         }
     };
     let (mut diagnostics, model) =
-        diagnostics_without_edition(source, source_file, resolver, *options);
+        diagnostics_admitted(source, source_file, resolver, *options, &edition);
     diagnostics.extend(
         edition
             .warnings()
@@ -102,11 +102,12 @@ pub fn diagnostics_with_model(
     (diagnostics, model)
 }
 
-fn diagnostics_without_edition(
+pub(crate) fn diagnostics_admitted(
     source: &str,
     source_file: &str,
     resolver: &dyn fsl_core::FileResolver,
     options: fsl_syntax::ParseOptions,
+    _edition: &crate::migration::SourceEdition,
 ) -> (Vec<SourceDiagnostic>, Option<fsl_core::KernelModel>) {
     if crate::frontend_output::is_ai_project(source) {
         return (migration_diagnostics(source, options), None);

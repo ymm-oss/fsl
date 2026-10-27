@@ -173,6 +173,8 @@ trace replay, and all six causal commands. These consumers classify a captured
 root before model/solver work or output effects and consume those same bytes.
 Existing header/gate/conflict rules and command-specific read-error kinds are
 retained; this adds no CLI flags or accepted dialect/header combinations.
+The single-input analyze entry also applies edition preflight to `.toml` text;
+this does not admit the referenced FSL roots or complete project-mode intake.
 
 `run_admitted_roots` accepts caller-owned read results and classifies each input
 slot once. A single-slot adapter only reshapes that call. Causal diff admits both
@@ -180,6 +182,11 @@ operands; observation admits its explicit FSL mapping too. Expectation parsing
 and model construction share the captured causal root rather than rereading it.
 Slot identity is retained: the same file in two explicit slots may contribute
 one warning per slot, two in total; completing live diff/refine intake is deferred.
+Envelope `fsl_edition` and `edition` come only from the primary root (first slot);
+secondary slots contribute warnings without overwriting that root's metadata.
+Preparing all direct causal roots also intentionally changes error precedence:
+a later unreadable operand or observation mapping is reported before an earlier
+root's parse/model error, because consumption starts only after preparation.
 JSON traces, evidence, plans, records and trust keys are not FSL roots. Recursive
 compose `use`, `implements from`, causal `uses` and governance dependencies are
 outside this root-admission change. Git-revision roots are tracked by #1513.
@@ -193,6 +200,8 @@ This fixes domain check's duplicate migration warning in both definitive and
 non-definitive verification results. Worker check/verify admit before model or
 solver use, preserving option-error priority. Editor refusals retain UTF-16
 ranges and prevent model construction and follow-on analysis.
+Native and Worker check pass the admitted token through `run_check_stages` to
+`diagnostics_admitted`; that inner diagnostic preflight does not classify again.
 
 Implemented open JSON outputs receive findings in `warnings`. Closed successful
 Kernel/conformance/testplan output and implemented raw TypeScript/readable/graph

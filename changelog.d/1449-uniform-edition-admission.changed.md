@@ -20,6 +20,10 @@ non-definitive verification errors; requested editions and read-error kinds are 
 Causal consumers admit captured roots and explicit observation mappings before
 analysis or output, preserve specialized warnings, and reuse the same source for
 expectation parsing and model construction instead of rereading the root.
+Causal root preparation intentionally reports a later operand/mapping read error
+before an earlier root's parse/model error. Envelope edition metadata now comes
+only from the primary root; every slot's warnings are retained once. Native and
+Worker check reuse the admitted token for their inner diagnostic preflight.
 This is a partial delivery: AI and non-check domain intake, document/approval
 intake, live comparison/refinement/log mappings, batch/project/chain preparation,
 counterexample ordering, mutate success warnings, sweep capture and raw-success

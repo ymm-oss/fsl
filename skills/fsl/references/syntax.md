@@ -301,6 +301,9 @@ kernel/conformance/testplan, typestate, explain, single-FSL-source analyze, trac
 replay and all six causal commands (#1449). Causal diff admits both operands and
 observation its explicit mapping. Classification and consumption share captured
 bytes; each input slot is distinct, including two slots naming the same file.
+Envelope edition metadata belongs only to the first slot; other slots add warnings.
+All-root preparation makes a later causal root/mapping read error precede an
+earlier root's parse/model error. Project-mode intake remains deferred.
 Existing header/gate/conflict rules and read-error kinds are retained. Next-edition
 migration findings refuse before consumption (exit 2); this can reject previously
 ungated next-edition inputs, not current-edition syntax.
