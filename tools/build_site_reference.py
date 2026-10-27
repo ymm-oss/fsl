@@ -187,9 +187,20 @@ def _rewrite_relative_md_links(html_text: str) -> str:
 
 
 class _SpacedHashHeaderProcessor(HashHeaderProcessor):
-    # Keep Python-Markdown's captures and trailing-hash handling, but require a
-    # space/tab or end of line after 1-6 hashes so wrapped #1234 stays prose.
-    RE = re.compile(r"(?:^|\n)(?P<level>#{1,6})(?=[ \t\n]|$)(?P<header>.*?)#*(?:\n|$)")
+    # Only add the separator requirement to the installed upstream regex, keeping
+    # its header/closing-hash behavior and flags. Wrapped #1234 stays prose; so
+    # do seven-plus hashes (upstream accepts them as h6), matching CommonMark/GitHub.
+    _upstream_re = HashHeaderProcessor.RE
+    _level_pattern = r"(?P<level>#{1,6})"
+    if _upstream_re.pattern.count(_level_pattern) != 1:
+        raise SystemExit(
+            f"build_site_reference: unsupported markdown {markdown.__version__}: "
+            f"expected exactly one {_level_pattern!r} in HashHeaderProcessor.RE.pattern"
+        )
+    RE = re.compile(
+        _upstream_re.pattern.replace(_level_pattern, _level_pattern + r"(?=[ \t\n]|$)"),
+        _upstream_re.flags,
+    )
 
 
 class _SpacedHashHeaderExtension(Extension):
