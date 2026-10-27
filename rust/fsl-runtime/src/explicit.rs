@@ -846,9 +846,9 @@ fn walk_init(
                     ));
                 }
                 if let LValue::Index(_, key_expr) = target {
-                    check_init_expr(key_expr, &definitely_assigned, model)?;
+                    check_init_expr(key_expr, &definitely_assigned, bound_names, model)?;
                 }
-                check_init_expr(value, &definitely_assigned, model)?;
+                check_init_expr(value, &definitely_assigned, bound_names, model)?;
                 if let Some(contribution) = contribution {
                     let previous = definitely_assigned.remove(logical);
                     definitely_assigned
@@ -864,8 +864,13 @@ fn walk_init(
                 }
                 match binder {
                     Binder::Range { lo, hi, .. } => {
-                        let mut references = state_references(lo, model);
-                        references.extend(state_references(hi, model));
+                        let mut references =
+                            state_references(lo, model, bound_names.keys().map(String::as_str));
+                        references.extend(state_references(
+                            hi,
+                            model,
+                            bound_names.keys().map(String::as_str),
+                        ));
                         if let Some(name) = references.first() {
                             return Err(runtime_error(format!(
                                 "init forall range bounds must be compile-time constants; state variable '{name}' is not allowed"
@@ -873,8 +878,12 @@ fn walk_init(
                         }
                     }
                     Binder::Collection { .. } => {
-                        fsl_core::check_init_collection_binder(model, binder)
-                            .map_err(|error| runtime_error(error.message))?;
+                        fsl_core::check_init_collection_binder(
+                            model,
+                            binder,
+                            bound_names.keys().map(String::as_str),
+                        )
+                        .map_err(|error| runtime_error(error.message))?;
                     }
                     Binder::Typed { .. } => {}
                 }
@@ -883,12 +892,12 @@ fn walk_init(
                     | Binder::Range { where_expr, .. }
                     | Binder::Collection { where_expr, .. } => where_expr,
                 };
-                if let Some(where_expr) = where_expr {
-                    check_init_expr(where_expr, &definitely_assigned, model)?;
-                }
                 let binder_values = compute_binder_values(binder, model)?;
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
+                if let Some(where_expr) = where_expr {
+                    check_init_expr(where_expr, &definitely_assigned, &nested_bound, model)?;
+                }
                 (definitely_assigned, possibly_assigned) = walk_init(
                     statements,
                     definitely_assigned,
@@ -904,7 +913,7 @@ fn walk_init(
                 else_statements,
                 ..
             } => {
-                check_init_expr(condition, &definitely_assigned, model)?;
+                check_init_expr(condition, &definitely_assigned, bound_names, model)?;
                 let (then_definite, then_possible) = walk_init(
                     then_statements,
                     definitely_assigned.clone(),
@@ -932,9 +941,10 @@ fn walk_init(
 fn check_init_expr(
     expr: &Expr,
     definitely_assigned: &BTreeMap<String, Coverage>,
+    bound_names: &BTreeMap<String, Option<Vec<Value>>>,
     model: &KernelModel,
 ) -> Result<(), RuntimeError> {
-    let references = state_references(expr, model);
+    let references = state_references(expr, model, bound_names.keys().map(String::as_str));
     if let Some(name) = references.iter().find(|name| {
         let ty = model.state_type(name.as_str());
         !ty.is_some_and(|ty| coverage_is_full(definitely_assigned.get(name.as_str()), ty, model))

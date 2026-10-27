@@ -151,6 +151,8 @@ pub fn parse_kernel_source_with_file_with_options(
 #[derive(Clone)]
 struct Component {
     alias: String,
+    path: String,
+    use_span: fsl_syntax::Span,
     names: ComponentNames,
     spec: SurfaceSpec,
 }
@@ -210,7 +212,7 @@ impl ComponentNames {
 /// comment. The position now belongs to the `use` declaration, which really is
 /// in the parent and really is the line to look at, and the component's own
 /// path and position move into the message so nothing is lost.
-fn component_error(
+pub(crate) fn component_error(
     path: &str,
     use_span: fsl_syntax::Span,
     error: &CoreError,
@@ -241,22 +243,147 @@ fn component_error(
         // parent, so `with_source_file` stamps the parent path onto a position
         // that exists there. Carrying the component's span here is what let the
         // rendered message pair the parent's path with the component's line.
-        origin: Some(Box::new(crate::OriginChain {
-            id: crate::OriginId(format!(
-                "compose:use:{}:{}",
-                use_span.start.offset, use_span.end.offset
-            )),
+        origin: Some(Box::new(component_use_origin(path, use_span))),
+    }
+}
+
+fn component_use_origin(path: &str, use_span: fsl_syntax::Span) -> crate::OriginChain {
+    crate::OriginChain {
+        id: crate::OriginId(format!(
+            "compose:use:{}:{}",
+            use_span.start.offset, use_span.end.offset
+        )),
+        dialect: "compose".to_owned(),
+        primary: Some(crate::OriginSite {
+            source_file: None,
+            span: Some(use_span),
             dialect: "compose".to_owned(),
-            primary: Some(crate::OriginSite {
-                source_file: None,
-                span: Some(use_span),
-                dialect: "compose".to_owned(),
-                declaration_path: vec!["use".to_owned(), path.to_owned()],
-            }),
-            secondary: Vec::new(),
-            lowering_steps: Vec::new(),
-            generated: false,
-        })),
+            declaration_path: vec!["use".to_owned(), path.to_owned()],
+        }),
+        secondary: Vec::new(),
+        lowering_steps: Vec::new(),
+        generated: false,
+    }
+}
+
+fn component_origin(component: &Component, declaration: &str) -> crate::OriginChain {
+    let mut origin = component_use_origin(&component.path, component.use_span);
+    origin
+        .primary
+        .as_mut()
+        .expect("use site")
+        .declaration_path
+        .push(format!("{}.{}", component.alias, declaration));
+    origin
+}
+
+fn component_item_origin(
+    component: &Component,
+    action: &str,
+    item: &ActionItem,
+) -> crate::OriginChain {
+    let span = match item {
+        ActionItem::Requires(_, span)
+        | ActionItem::Ensures(_, span)
+        | ActionItem::Let(_, _, span)
+        | ActionItem::Statement(
+            Statement::Assign { span, .. }
+            | Statement::If { span, .. }
+            | Statement::ForAll { span, .. },
+        ) => *span,
+    };
+    let mut origin = component_origin(component, action);
+    origin.secondary.push(crate::OriginSite {
+        source_file: Some(component.path.clone()),
+        span: Some(span),
+        dialect: "kernel".to_owned(),
+        declaration_path: vec![action.to_owned()],
+    });
+    origin
+}
+
+fn record_sync_item_origins(
+    origins: &mut BTreeMap<String, crate::OriginChain>,
+    name: &str,
+    items: &[ActionItem],
+    item_origins: Vec<crate::OriginChain>,
+) {
+    let (mut guards, mut statements, mut ensures) = (0, 0, 0);
+    for (item, origin) in items.iter().zip(item_origins) {
+        let target = match item {
+            ActionItem::Requires(..) | ActionItem::Let(..) => {
+                let target = crate::action_guard_target(name, guards);
+                guards += 1;
+                target
+            }
+            ActionItem::Statement(..) => {
+                let target = crate::action_statement_target(name, statements);
+                statements += 1;
+                target
+            }
+            ActionItem::Ensures(..) => {
+                let target = crate::origin::action_ensure_target(name, ensures);
+                ensures += 1;
+                target
+            }
+        };
+        origins.insert(target, origin);
+    }
+}
+
+fn record_component_origins(
+    origins: &mut BTreeMap<String, crate::OriginChain>,
+    component: &Component,
+    item: &SpecItem,
+) {
+    let (name, targets) = match item {
+        SpecItem::Action { name, .. } => (
+            name.as_str(),
+            vec![crate::action_target(&prefix(&component.alias, name))],
+        ),
+        SpecItem::Invariant { name, .. } => (
+            name.as_str(),
+            vec![crate::property_target(
+                "invariant",
+                &prefix(&component.alias, name),
+            )],
+        ),
+        SpecItem::Trans { name, .. } | SpecItem::Unless { name, .. } => (
+            name.as_str(),
+            vec![crate::property_target(
+                "trans",
+                &prefix(&component.alias, name),
+            )],
+        ),
+        SpecItem::Reachable { name, .. } => (
+            name.as_str(),
+            vec![crate::property_target(
+                "reachable",
+                &prefix(&component.alias, name),
+            )],
+        ),
+        SpecItem::LeadsTo { name, .. } => (
+            name.as_str(),
+            vec![crate::property_target(
+                "leadsTo",
+                &prefix(&component.alias, name),
+            )],
+        ),
+        SpecItem::Until { name, .. } => (
+            name.as_str(),
+            vec![
+                crate::property_target("leadsTo", &prefix(&component.alias, name)),
+                crate::property_target(
+                    "trans",
+                    &format!("{}_until_safety", prefix(&component.alias, name)),
+                ),
+            ],
+        ),
+        SpecItem::Terminal { .. } => ("terminal", vec![crate::TERMINAL_TARGET.to_owned()]),
+        _ => return,
+    };
+    for target in targets {
+        origins.insert(target, component_origin(component, name));
     }
 }
 
@@ -354,6 +481,8 @@ pub fn lower_compose_with_options(
             alias.clone(),
             Component {
                 alias: alias.clone(),
+                path: path.clone(),
+                use_span: *span,
                 names: ComponentNames::collect(&spec),
                 spec,
             },
@@ -375,6 +504,8 @@ pub fn lower_compose_with_options(
     let mut init_annotations = Annotations::default();
     let mut actions = Vec::new();
     let mut names = NameMap::default();
+    let mut origins = BTreeMap::new();
+    let mut init_origins = Vec::new();
     for alias in &order {
         let component = &components[alias];
         for state in &component.names.state {
@@ -384,12 +515,17 @@ pub fn lower_compose_with_options(
             names.insert_property(alias, property);
         }
         for item in &component.spec.items {
+            record_component_origins(&mut origins, component, item);
             match item {
                 SpecItem::Init {
                     statements,
                     meta,
                     annotations,
                 } => {
+                    init_origins.extend(std::iter::repeat_n(
+                        Some(component_origin(component, "init")),
+                        statements.len(),
+                    ));
                     init.extend(rewrite_statements(
                         statements.clone(),
                         component,
@@ -421,6 +557,7 @@ pub fn lower_compose_with_options(
                 meta,
                 annotations,
             }) => {
+                init_origins.extend(std::iter::repeat_n(None, statements.len()));
                 init.extend(rewrite_compose_statements(statements.clone(), &components)?);
                 if init_meta.is_none() {
                     init_meta.clone_from(meta);
@@ -428,12 +565,37 @@ pub fn lower_compose_with_options(
                 init_annotations.extend(annotations.source_order().iter().cloned());
             }
             ComposeItem::Common(item) => {
+                if matches!(item, SpecItem::Terminal { .. }) {
+                    origins.remove(crate::TERMINAL_TARGET);
+                }
                 static_items.push(rewrite_compose_item(item.clone(), &components)?);
             }
             ComposeItem::SyncAction(action) => {
-                actions.push(sync_action(action, &components, &mut warnings)?);
+                actions.push(sync_action(
+                    action,
+                    &components,
+                    &mut warnings,
+                    &mut origins,
+                )?);
             }
             ComposeItem::Use { .. } | ComposeItem::Internal { .. } => {}
+        }
+    }
+    let inline_count = static_items
+        .iter()
+        .filter_map(|item| match item {
+            SpecItem::State(fields) => Some(
+                fields
+                    .iter()
+                    .filter(|field| field.initializer.is_some())
+                    .count(),
+            ),
+            _ => None,
+        })
+        .sum::<usize>();
+    for (index, origin) in init_origins.into_iter().enumerate() {
+        if let Some(origin) = origin {
+            origins.insert(crate::init_statement_target(inline_count + index), origin);
         }
     }
     static_items.push(SpecItem::Init {
@@ -444,6 +606,11 @@ pub fn lower_compose_with_options(
     static_items.extend(actions);
     let mut kernel = composed_kernel(compose.name, static_items, component_annotations, warnings);
     kernel.names = names;
+    for (target, origin) in origins {
+        kernel
+            .origins
+            .bind(crate::origin::component_check_target(&target), origin);
+    }
     Ok(kernel)
 }
 
@@ -1216,6 +1383,7 @@ fn sync_action(
     action: &SyncAction,
     components: &BTreeMap<String, Component>,
     warnings: &mut Vec<Value>,
+    origins: &mut BTreeMap<String, crate::OriginChain>,
 ) -> Result<SpecItem, CoreError> {
     let params = action
         .params
@@ -1224,6 +1392,7 @@ fn sync_action(
         .map(|param| resolve_alias_param(param, components, action.span))
         .collect::<Result<Vec<_>, _>>()?;
     let mut items = Vec::new();
+    let mut item_origins = Vec::new();
     let mut fair_constituents = Vec::new();
     let mut avoid = sync_avoid_names(action, &params, components)?;
     for reference in &action.refs {
@@ -1283,12 +1452,15 @@ fn sync_action(
                 ))
             })
             .collect::<Result<HashMap<_, _>, CoreError>>()?;
-        items.extend(substitute_action_items(
-            source_items,
-            &replacements,
-            &mut avoid,
-        ));
+        let source_items = substitute_action_items(source_items, &replacements, &mut avoid);
+        item_origins.extend(
+            source_items
+                .iter()
+                .map(|item| component_item_origin(component, &reference.action, item)),
+        );
+        items.extend(source_items);
     }
+    record_sync_item_origins(origins, &action.name, &items, item_origins);
     items.extend(
         action
             .items

@@ -763,6 +763,9 @@ pub fn internal_error(message: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    include!("issue_1463_tests.rs");
+    include!("issue_1463_aggregate_and_component_locations_tests.rs");
+
     use std::collections::BTreeSet;
     use std::future::Future;
     use std::task::{Context, Poll, Waker};

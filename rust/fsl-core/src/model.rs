@@ -12,7 +12,7 @@ use fsl_syntax::{
 use crate::{
     INIT_TARGET, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
     ProjectionDef, SPEC_TARGET, TERMINAL_TARGET, TraceabilityRegistry, action_target, expr_text,
-    property_target, state_target, type_target,
+    init_statement_target, property_target, state_target, type_target,
 };
 
 /// Stable semantic diagnostic code for a conservative write-alias rejection where
@@ -57,6 +57,17 @@ pub enum TypeRef {
     Set(Box<Self>),
     Seq(Box<Self>, usize),
     Option(Box<Self>),
+}
+
+impl TypeRef {
+    /// Index key/value types. Sequence writes retain their existing rejection.
+    pub(crate) fn index_types(&self, allow_sequence: bool) -> Option<(Self, Self)> {
+        match self {
+            Self::Map(key, value) => Some((key.as_ref().clone(), value.as_ref().clone())),
+            Self::Seq(item, _) if allow_sequence => Some((Self::Int, item.as_ref().clone())),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -166,6 +177,21 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    pub(crate) fn component_item_span(&self, target: &str) -> Option<Span> {
+        self.origins
+            .primary_for(&crate::origin::component_check_target(target))?
+            .secondary
+            .first()?
+            .span
+    }
+
+    pub(crate) fn error_at_target(&self, message: String, span: Span, target: &str) -> ModelError {
+        model_error(message).at(span).with_origin(
+            self.origins
+                .diagnostic_origin(&crate::origin::component_check_target(target))
+                .or_else(|| self.origins.diagnostic_origin(target)),
+        )
+    }
     pub(crate) fn resolve_surface_type(&self, ty: &TypeExpr) -> Result<TypeRef, ModelError> {
         resolve_type(ty, &self.types, &self.consts)
     }
@@ -299,13 +325,13 @@ impl KernelModel {
     /// Return the resolved type of a state update target.
     ///
     /// The target's index expression is checked separately. This helper owns
-    /// only the state-root/Map-or-relation/struct-field lookup shared by the
+    /// only the state-root/Map/struct-field lookup shared by the
     /// typechecker and symbolic transition evaluator.
     ///
     /// # Errors
     ///
     /// Returns a [`ModelError`] when the target does not name a state location
-    /// with a resolvable Map, relation, or struct-field type.
+    /// with a resolvable Map or struct-field type.
     pub fn state_lvalue_type(&self, target: &LValue) -> Result<TypeRef, ModelError> {
         match target {
             LValue::Var(name) => self
@@ -313,12 +339,10 @@ impl KernelModel {
                 .cloned()
                 .ok_or_else(|| model_error(format!("unknown update target '{}'", shown(name)))),
             LValue::Index(name, _) => match self.state_type(name) {
-                Some(TypeRef::Map(_, value) | TypeRef::Relation(_, value)) => {
-                    Ok(value.as_ref().clone())
-                }
-                Some(_) => Err(model_error(
-                    "indexed update target requires Map or Relation",
-                )),
+                Some(ty) => ty
+                    .index_types(false)
+                    .map(|(_, value)| value)
+                    .ok_or_else(|| model_error("indexed update target requires Map")),
                 None => Err(model_error(format!(
                     "unknown update target '{}'",
                     shown(name)
@@ -520,15 +544,7 @@ pub fn static_leadsto_bindings(
 ) -> Result<Vec<BTreeMap<String, Value>>, ModelError> {
     let mut expanded = vec![BTreeMap::new()];
     for binder in &property.binders {
-        if match binder {
-            Binder::Typed { where_expr, .. }
-            | Binder::Range { where_expr, .. }
-            | Binder::Collection { where_expr, .. } => where_expr.is_some(),
-        } {
-            return Err(model_error(
-                "where filters are not implemented in bounded leadsTo",
-            ));
-        }
+        check_leadsto_binder(binder)?;
         let (name, values) = match binder {
             Binder::Typed {
                 name, type_name, ..
@@ -541,11 +557,7 @@ pub fn static_leadsto_bindings(
                 let hi = static_leadsto_int(hi, model)?;
                 (name, (lo..=hi).map(Value::Int).collect())
             }
-            Binder::Collection { .. } => {
-                return Err(model_error(
-                    "collection binders are not implemented in bounded leadsTo",
-                ));
-            }
+            Binder::Collection { .. } => unreachable!("leadsTo binder was checked"),
         };
         let mut next = Vec::new();
         for binding in expanded {
@@ -558,6 +570,20 @@ pub fn static_leadsto_bindings(
         expanded = next;
     }
     Ok(expanded)
+}
+
+fn check_leadsto_binder(binder: &Binder) -> Result<(), ModelError> {
+    if binder_scope(binder).1.is_some() {
+        return Err(model_error(
+            "leadsTo wrapper binders do not support where filters",
+        ));
+    }
+    if matches!(binder, Binder::Collection { .. }) {
+        return Err(model_error(
+            "leadsTo wrapper binders do not support collection domains",
+        ));
+    }
+    Ok(())
 }
 
 fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelError> {
@@ -611,6 +637,32 @@ impl ModelError {
     }
 
     fn with_origin(mut self, origin: Option<crate::OriginChain>) -> Self {
+        if let (Some(origin), Some(cause_span)) = (&origin, self.span)
+            && origin.dialect == "compose"
+            && let Some(site) = &origin.primary
+            && let (Some(use_span), [kind, path, declaration]) =
+                (site.span, site.declaration_path.as_slice())
+            && kind == "use"
+        {
+            let cause = crate::CoreError {
+                message: format!("{declaration}: {}", self.message),
+                line: cause_span.start.line,
+                column: cause_span.start.column,
+                origin: None,
+                kind: crate::CoreErrorKind::Semantics,
+                diagnostic_code: self.diagnostic_code,
+            };
+            let mut anchored =
+                crate::compose::component_error(path, use_span, &cause, "failed to check");
+            if let (Some(file), Some(anchor_origin)) = (&site.source_file, &mut anchored.origin) {
+                anchor_origin.set_source_file(file);
+            }
+            self.message = anchored.message;
+            self.span = Some(use_span);
+            self.origin = anchored.origin;
+            self.name_resolution = false;
+            return self;
+        }
         self.origin = origin.map(Box::new);
         self
     }
@@ -1079,7 +1131,7 @@ impl ModelBuilder {
         }
         inline_init.extend(init);
         let init = inline_init;
-        let model = KernelModel {
+        let mut model = KernelModel {
             name: self.spec.name,
             consts: self.consts,
             types: self.types,
@@ -1108,7 +1160,7 @@ impl ModelBuilder {
         for (index, statement) in model.init.iter().enumerate() {
             crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
-                if let Some((name, _)) = inline_initializers.get(&index) {
+                let mut failure = if let Some((name, _)) = inline_initializers.get(&index) {
                     model_error(format!(
                         "invalid inline initializer for '{}': {}",
                         shown(name),
@@ -1118,13 +1170,49 @@ impl ModelBuilder {
                 } else {
                     model_error(format!("invalid init statement: {}", error.message))
                         .with_origin(origin)
+                };
+                if let Some(span) = error.span {
+                    failure = failure.at(span);
                 }
+                if let Some(component) =
+                    model
+                        .origins
+                        .diagnostic_origin(&crate::origin::component_check_target(
+                            &init_statement_target(index),
+                        ))
+                {
+                    failure = failure.with_origin(Some(component));
+                }
+                failure
             })?;
         }
         crate::typecheck::validate_model_expression_types(&model).map_err(|error| {
             let origin = error.span.map(type_diagnostic_origin);
             model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
         })?;
+        for (index, statement) in model.init.iter().enumerate() {
+            check_init_collection_binders(
+                std::slice::from_ref(statement),
+                &model,
+                &BTreeSet::new(),
+            )
+            .map_err(|error| {
+                error.with_origin(model.origins.diagnostic_origin(
+                    &crate::origin::component_check_target(&init_statement_target(index)),
+                ))
+            })?;
+        }
+        for property in &model.leadstos {
+            for binder in &property.binders {
+                check_leadsto_binder(binder).map_err(|error| {
+                    model.error_at_target(
+                        error.message,
+                        property.span,
+                        &property_target("leadsTo", &property.name),
+                    )
+                })?;
+            }
+        }
         for projection in &model.projections {
             crate::typecheck::validate_expression_type(
                 &projection.expr,
@@ -1140,6 +1228,7 @@ impl ModelBuilder {
                 .with_origin(Some(type_diagnostic_origin(projection.span)))
             })?;
         }
+        model.origins.discard_component_check_targets();
         Ok(model)
     }
 
@@ -2129,15 +2218,47 @@ fn collect_state_references(
     {
         references.push(name.clone());
     }
-    for child in expr_children(expr) {
-        collect_state_references(child, state_names, references);
+    let scoped = match expr {
+        Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
+        Expr::Aggregate { binder, value, .. } => Some((binder, value.as_deref())),
+        _ => None,
+    };
+    if let Some((binder, body)) = scoped {
+        let (name, filter) = binder_scope(binder);
+        let mut sources = binder_exprs(binder);
+        if filter.is_some() {
+            sources.pop();
+        }
+        for source in sources {
+            collect_state_references(source, state_names, references);
+        }
+        let mut local = state_names.clone();
+        local.remove(name);
+        for child in filter.into_iter().chain(body) {
+            collect_state_references(child, &local, references);
+        }
+    } else {
+        for child in expr_children(expr) {
+            collect_state_references(child, state_names, references);
+        }
     }
 }
 
-/// State names referenced anywhere in an expression, in lexicographic name order.
+/// Free state references, excluding enclosing locals, in lexicographic name order.
 #[must_use]
-pub fn state_references(expr: &Expr, model: &KernelModel) -> BTreeSet<String> {
-    let state_names = model.state.iter().map(|(name, _)| name.clone()).collect();
+pub fn state_references<'a>(
+    expr: &Expr,
+    model: &KernelModel,
+    bound_names: impl IntoIterator<Item = &'a str>,
+) -> BTreeSet<String> {
+    let mut state_names = model
+        .state
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    for name in bound_names {
+        state_names.remove(name);
+    }
     let mut references = Vec::new();
     collect_state_references(expr, &state_names, &mut references);
     references.into_iter().collect()
@@ -2145,21 +2266,55 @@ pub fn state_references(expr: &Expr, model: &KernelModel) -> BTreeSet<String> {
 
 /// Reject state-dependent collection domains in an init statement's `forall`.
 ///
-/// This is a verification-time restriction, not a type-checking restriction.
+/// Model construction and unchecked-model verifier/runtime entries share this rule.
 ///
 /// # Errors
 /// Returns the shared diagnostic for the first state name in lexicographic order.
-pub fn check_init_collection_binder(
+pub fn check_init_collection_binder<'a>(
     model: &KernelModel,
     binder: &Binder,
+    bound_names: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), ModelError> {
     let Binder::Collection { collection, .. } = binder else {
         return Ok(());
     };
-    if let Some(name) = state_references(collection, model).first() {
+    if let Some(name) = state_references(collection, model, bound_names).first() {
         return Err(model_error(format!(
-            "init forall over a state collection is not supported; state variable '{name}' is not allowed"
+            "init forall over a state collection is not supported; state variable '{}' is not allowed",
+            shown(name)
         )));
+    }
+    Ok(())
+}
+
+fn check_init_collection_binders(
+    statements: &[Statement],
+    model: &KernelModel,
+    bound_names: &BTreeSet<String>,
+) -> Result<(), ModelError> {
+    for statement in statements {
+        match statement {
+            Statement::ForAll {
+                binder,
+                statements,
+                span,
+            } => {
+                check_init_collection_binder(model, binder, bound_names.iter().map(String::as_str))
+                    .map_err(|error| error.at(*span))?;
+                let mut local = bound_names.clone();
+                local.insert(binder_scope(binder).0.to_owned());
+                check_init_collection_binders(statements, model, &local)?;
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                check_init_collection_binders(then_statements, model, bound_names)?;
+                check_init_collection_binders(else_statements, model, bound_names)?;
+            }
+            Statement::Assign { .. } => {}
+        }
     }
     Ok(())
 }
@@ -2245,6 +2400,20 @@ fn binder_exprs(binder: &Binder) -> Vec<&Expr> {
         } => std::iter::once(collection.as_ref())
             .chain(where_expr.iter().map(AsRef::as_ref))
             .collect(),
+    }
+}
+
+fn binder_scope(binder: &Binder) -> (&str, Option<&Expr>) {
+    match binder {
+        Binder::Typed {
+            name, where_expr, ..
+        }
+        | Binder::Range {
+            name, where_expr, ..
+        }
+        | Binder::Collection {
+            name, where_expr, ..
+        } => (name, where_expr.as_deref()),
     }
 }
 
@@ -2755,6 +2924,370 @@ mod compose_name_tests {
         assert_eq!(
             error,
             "action 'left.go' is ambiguous: it matches 'left.go' (internal 'left__go'), 'left.go' (internal 'right__go')"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fsl_syntax::{AggregateKind, ConditionalSpans, Pattern, QualifiedName};
+
+    #[test]
+    fn diagnostic_only_component_targets_do_not_change_public_provenance() {
+        let mut kernel = crate::parse_direct_kernel_spec(
+            "spec P { state { done: Bool } init { done = false } action go() {} }",
+        )
+        .expect("parse");
+        let model = build_model(kernel.clone()).expect("model");
+        let before = crate::public_kernel_contract_for_version(
+            &kernel,
+            &model,
+            "root.fsl",
+            "kernel",
+            crate::PublicKernelVersion::V2,
+        )
+        .expect("v2");
+        for target in [
+            "property:invariant:part__Capture".to_owned(),
+            crate::action_guard_target("go", 0),
+            crate::action_statement_target("go", 0),
+            crate::origin::action_ensure_target("go", 0),
+        ] {
+            kernel.origins.bind(
+                crate::origin::component_check_target(&target),
+                OriginChain::generated_only("diagnostic-context", "compose"),
+            );
+        }
+        let model = build_model(kernel.clone()).expect("checked model");
+        assert!(
+            model
+                .origins
+                .targets()
+                .all(|(target, _)| !crate::origin::is_component_check_target(target))
+        );
+        let after = crate::public_kernel_contract_for_version(
+            &kernel,
+            &model,
+            "root.fsl",
+            "kernel",
+            crate::PublicKernelVersion::V2,
+        )
+        .expect("v2");
+        assert_eq!(
+            before, after,
+            "diagnostic ownership must not promote public provenance assurance"
+        );
+    }
+
+    fn var(name: &str) -> Expr {
+        Expr::Var(name.to_owned())
+    }
+
+    fn collection(name: &str, source: Expr, filter: Option<Expr>) -> Binder {
+        Binder::Collection {
+            name: name.to_owned(),
+            collection: Box::new(source),
+            where_expr: filter.map(Box::new),
+        }
+    }
+
+    fn references(expr: &Expr) -> Vec<String> {
+        let mut found = Vec::new();
+        collect_state_references(expr, &BTreeSet::from(["a".into(), "z".into()]), &mut found);
+        found
+    }
+
+    fn model() -> KernelModel {
+        let resolver = crate::FsResolver::new(".");
+        build_model(crate::parse_kernel_source(
+            "spec References { type K = 0..1 state { z: K, a: K } init { z = 0 a = 0 } action go() {} }",
+            &resolver,
+        ).expect("parse")).expect("model")
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Explicit inventory of all 24 AST variants and their edges.
+    fn state_reference_edges_cover_every_expression_variant() {
+        // These are AST traversal probes, not necessarily well-typed evaluation inputs.
+        let z = || Box::new(var("z"));
+        let a = || Box::new(var("a"));
+        let span = synthetic_span();
+        let cases = [
+            (Expr::Num(1), vec![]),
+            (Expr::Bool(true), vec![]),
+            (Expr::None, vec![]),
+            (Expr::Some(z()), vec!["z"]),
+            (Expr::Set(vec![var("z"), var("a")]), vec!["z", "a"]),
+            (Expr::Seq(vec![var("z"), var("a")]), vec!["z", "a"]),
+            (
+                Expr::Struct {
+                    name: "R".into(),
+                    fields: vec![("x".into(), var("z")), ("y".into(), var("a"))],
+                },
+                vec!["z", "a"],
+            ),
+            (var("z"), vec!["z"]),
+            (
+                Expr::EnumMember {
+                    type_name: "E".into(),
+                    member: "One".into(),
+                },
+                vec![],
+            ),
+            (
+                Expr::Call {
+                    name: "p".into(),
+                    args: vec![var("z"), var("a")],
+                    span,
+                },
+                vec!["z", "a"],
+            ),
+            (Expr::Index(z(), a()), vec!["z", "a"]),
+            (Expr::Field(z(), "x".into()), vec!["z"]),
+            (
+                Expr::Method {
+                    receiver: z(),
+                    name: "contains".into(),
+                    args: vec![var("a")],
+                },
+                vec!["z", "a"],
+            ),
+            (
+                Expr::Binary {
+                    op: "and".into(),
+                    left: z(),
+                    right: a(),
+                },
+                vec!["z", "a"],
+            ),
+            (Expr::Neg(z()), vec!["z"]),
+            (Expr::Not(z()), vec!["z"]),
+            (
+                Expr::Conditional {
+                    condition: z(),
+                    then_expr: a(),
+                    else_expr: z(),
+                    spans: Box::new(ConditionalSpans {
+                        condition: span,
+                        then_expr: span,
+                        else_expr: span,
+                    }),
+                },
+                vec!["z", "a", "z"],
+            ),
+            (
+                Expr::Is {
+                    expr: z(),
+                    pattern: Pattern::Some("fresh".into()),
+                },
+                vec!["z"],
+            ),
+            (
+                Expr::Quantified {
+                    quantifier: "forall".into(),
+                    binder: collection("z", Expr::Seq(vec![var("z"), var("a")]), Some(var("z"))),
+                    body: z(),
+                },
+                vec!["z", "a"],
+            ),
+            (
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: collection("z", Expr::Seq(vec![var("z"), var("a")]), Some(var("z"))),
+                    value: Some(a()),
+                },
+                vec!["z", "a", "a"],
+            ),
+            (
+                Expr::Stage {
+                    process: None,
+                    entity: z(),
+                    entity_span: span,
+                    span,
+                },
+                vec!["z"],
+            ),
+            (
+                Expr::UnaryNamed {
+                    name: "old".into(),
+                    expr: z(),
+                    span,
+                },
+                vec!["z"],
+            ),
+            (
+                Expr::BinaryNamed {
+                    name: "min".into(),
+                    left: z(),
+                    right: a(),
+                },
+                vec!["z", "a"],
+            ),
+            (
+                Expr::TernaryNamed {
+                    name: "rel_reachable".into(),
+                    first: z(),
+                    second: a(),
+                    third: z(),
+                },
+                vec!["z", "a", "z"],
+            ),
+        ];
+        assert_eq!(cases.len(), 24);
+        for (expr, expected) in cases {
+            assert_eq!(references(&expr), expected, "{expr:?}");
+            assert_eq!(
+                first_state_reference(&expr, &BTreeSet::from(["a".into(), "z".into()])).as_deref(),
+                expected.first().copied()
+            );
+        }
+    }
+
+    #[test]
+    fn state_reference_scope_covers_typed_range_and_all_aggregates() {
+        let binders = [
+            Binder::Typed {
+                name: "z".into(),
+                type_name: QualifiedName {
+                    namespace: None,
+                    name: "K".into(),
+                },
+                where_expr: Some(Box::new(var("z"))),
+            },
+            Binder::Range {
+                name: "z".into(),
+                lo: Box::new(var("z")),
+                hi: Box::new(var("a")),
+                where_expr: Some(Box::new(var("z"))),
+            },
+            collection("z", Expr::Seq(vec![var("z"), var("a")]), Some(var("z"))),
+        ];
+        for (index, binder) in binders.into_iter().enumerate() {
+            for kind in [
+                AggregateKind::Count,
+                AggregateKind::Sum,
+                AggregateKind::Unique,
+                AggregateKind::ExactlyOne,
+            ] {
+                let expr = Expr::Aggregate {
+                    kind,
+                    binder: binder.clone(),
+                    value: (kind == AggregateKind::Sum).then(|| Box::new(var("z"))),
+                };
+                assert_eq!(
+                    references(&expr),
+                    if index == 0 { vec![] } else { vec!["z", "a"] }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn state_reference_scope_restores_names_after_nested_shadowing() {
+        let inner = Expr::Quantified {
+            quantifier: "exists".into(),
+            binder: collection("z", Expr::Seq(vec![var("z")]), Some(var("z"))),
+            body: Box::new(var("z")),
+        };
+        let outer = Expr::Quantified {
+            quantifier: "forall".into(),
+            binder: collection("z", Expr::Seq(vec![var("z")]), Some(var("z"))),
+            body: Box::new(Expr::Binary {
+                op: "and".into(),
+                left: Box::new(inner),
+                right: Box::new(var("a")),
+            }),
+        };
+        let expr = Expr::Seq(vec![outer, var("z"), var("a")]);
+        assert_eq!(references(&expr), ["z", "a", "z", "a"]);
+        let model = model();
+        assert_eq!(
+            state_references(&expr, &model, [])
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["a", "z"]
+        );
+        assert_eq!(
+            state_references(&expr, &model, ["z"])
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["a"]
+        );
+        assert!(state_references(&expr, &model, ["a", "z"]).is_empty());
+    }
+
+    #[test]
+    fn init_collection_guard_distinguishes_local_and_free_state_names() {
+        let model = model();
+        let binder = collection("item", Expr::Seq(vec![var("z"), var("a")]), None);
+        assert!(
+            check_init_collection_binder(&model, &binder, [])
+                .unwrap_err()
+                .message
+                .contains("'a'")
+        );
+        assert!(
+            check_init_collection_binder(&model, &binder, ["a"])
+                .unwrap_err()
+                .message
+                .contains("'z'")
+        );
+        assert!(check_init_collection_binder(&model, &binder, ["a", "z"]).is_ok());
+    }
+
+    #[test]
+    fn unchecked_leadsto_models_share_the_source_support_rule() {
+        let model = model();
+        let binders = [
+            collection("item", Expr::Seq(vec![Expr::Num(1)]), None),
+            Binder::Range {
+                name: "item".into(),
+                lo: Box::new(Expr::Num(0)),
+                hi: Box::new(Expr::Num(1)),
+                where_expr: Some(Box::new(Expr::Bool(false))),
+            },
+        ];
+        for binder in binders {
+            let property = LeadsToDef {
+                name: "Capture".into(),
+                span: synthetic_span(),
+                binders: vec![binder.clone()],
+                before: Expr::Bool(true),
+                after: Expr::Bool(true),
+                meta: None,
+                annotations: Annotations::default(),
+                decreases: None,
+                within: Some(1),
+                helpful: vec![],
+            };
+            assert_eq!(
+                static_leadsto_bindings(&model, &property).unwrap_err(),
+                check_leadsto_binder(&binder).unwrap_err()
+            );
+        }
+    }
+
+    #[test]
+    fn shared_index_types_preserve_map_and_sequence_capabilities() {
+        let map = TypeRef::Map(Box::new(TypeRef::Bool), Box::new(TypeRef::Int));
+        let relation = TypeRef::Relation(Box::new(TypeRef::Bool), Box::new(TypeRef::Int));
+        let seq = TypeRef::Seq(Box::new(TypeRef::Bool), 2);
+        for allow_sequence in [false, true] {
+            assert_eq!(
+                map.index_types(allow_sequence),
+                Some((TypeRef::Bool, TypeRef::Int))
+            );
+            assert!(relation.index_types(allow_sequence).is_none());
+        }
+        assert_eq!(seq.index_types(true), Some((TypeRef::Int, TypeRef::Bool)));
+        assert!(seq.index_types(false).is_none());
+        let mut model = model();
+        model.state.push(("h".into(), relation));
+        assert!(
+            model
+                .state_lvalue_type(&LValue::Index("h".into(), Expr::Bool(false)))
+                .is_err()
         );
     }
 }
