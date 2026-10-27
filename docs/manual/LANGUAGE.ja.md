@@ -296,7 +296,9 @@ domain 宣言では、有限のバリアントに `enum Name { Member, ... }` �
 2.x エディションでは引き続き受理され、宣言全体に対して安定した
 `deprecated_domain_enum_union` 警告(正準の置き換えを含む)を生成します。
 `fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next` を
-受け付けます。`next` はレガシーの union 記法を拒否します。`fslc lint` は変更を
+受け付けます。`next` はレガシーの union 記法を拒否します。他の対応済み consumer は
+source のヘッダーのエディションを使います。それらに `--edition` を追加するものではありません。
+`fslc lint` は変更を
 加えずにエディション finding を報告し、`fslc migrate --edition next` は検査済みの
 正準編集を提供します。空の enum と重複メンバーはエラーで、それぞれ宣言と重複
 メンバーの位置で報告されます。
@@ -1299,6 +1301,36 @@ range 型の端点(内部の括弧付き部分式も含む)では、この不正
 のままです。
 domain の検査は量化式を拒否し、コロン量化子の警告にはしません。旧文字列メタデータと
 requirements の action 対応も、domain で受理される構文ではありません。
+
+捕捉済み root の admission は `db check`/`compat check`、`scenarios`、汎用 `testgen`、
+`kernel`、`conformance`、`testplan`、`typestate`、`explain`、単一 FSL source の
+`analyze`、trace replay、causal の6コマンドにも対応します(#1449)。モデル構築・
+solver 使用・出力の副作用より前に判定し、捕捉した同じバイト列を消費します。
+causal diff は両方の引数、observation は明示的な FSL mapping も対象です。
+各 slot は独立し、同じファイルを2つの slot に渡した場合は slot ごとに1回の警告を
+許します。ヘッダー・既存の edition オプション・read error の kind の規則を維持し、
+新しい dialect とヘッダーの組み合わせを受理するものではありません。
+
+対応済みの拡張可能な envelope では `warnings` を一度だけ仕上げます。成功時の閉じた
+schema (`kernel`、`conformance`、`testplan`) と対応済みの raw TypeScript/readable/
+graph 出力は、stdout を変えずに stderr へ `warning: <finding-json>` を出します。
+受け入れ済みの verification は governance の後に仕上げ、domain/database check、
+scenarios、汎用 testgen は外側の結果だけを仕上げます。domain check の移行警告は、
+non-definitive なエラーを含め重複しなくなりました。Worker はモデル構築・solver 使用前に
+判定し、editor の拒否ではモデル構築や解析を行わず UTF-16 範囲を維持します。
+現行の警告は verdict・assurance・終了コードを変えません。次のエディションの移行
+finding は消費前に既存の edition error/exit 2 で拒否します。従来は判定を通らなかった
+consumer が、以前受理した次エディションの入力を拒否する場合があります。
+
+これは部分的な提供であり、すべての reader の対応を保証しません。AI intake、check
+以外の domain コマンド、document/approval intake、live な比較/refinement と log mapping、
+batch/project/chain intake、counterexample の処理順、mutate 成功時の警告、sweep の
+capture、成功時の raw HTML/ledger の stderr は #1449 の残作業です。report baseline と
+ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
+🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
+依存先を再帰的に admission せず、履歴 Git root は #1513 の範囲です。修復の投影と
+終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
+警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの

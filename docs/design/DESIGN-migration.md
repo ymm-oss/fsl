@@ -129,8 +129,8 @@ check/verify, formatter, lint and migrate. Type-bound range endpoints leave
 structural relation arrows to their enclosing grammar. The diagnostic exception
 covers the whole bound, including grouped subexpressions:
 these remain generic `FSL-PARSE` failures, not accepted legacy operators.
-LSP retains the exact span and publishes its UTF-16 range. All Worker check/verify exits pass
-through the same edition finalization, including parser/semantic/implements
+LSP retains the exact span and publishes its UTF-16 range. Worker check/verify
+source results share edition handling, including parser/semantic/implements
 errors and headerless documents. Governance is not part of that shared exit:
 check folds it only on the model path, preserving early successful AI-project
 gate envelopes; verify keeps its native outer governance fold before edition.
@@ -145,7 +145,7 @@ verify, and Worker JSON warnings, including headerless documents. Domain check
 shares the adapter, but none of these three legacy forms occurs in an accepted
 domain document: string slots/maps are not domain forms and quantified domain
 expressions fail closed. Its existing enum-union warning remains unchanged.
-All Worker check/verify success, validation-error, and implements-error paths
+All admitted Worker check/verify success, validation-error, and implements-error paths
 pass once through the same outer edition finalization step. Check folds
 governance only on its model/implements path, never on successful early
 AI-project/agent gate results; verify retains its native outer governance fold
@@ -163,3 +163,61 @@ migration; displaying their warning must not make them machine-applicable.
 Canonical annotations, braced quantifiers, and explicit action correspondences
 do not produce these legacy findings. No accepted syntax or semantic model is
 changed by warning exposure.
+
+## Amendment: captured-root admission, partial delivery (#1449)
+
+Source-edition classification is shared by native `check`, `verify`, `db check`
+and `compat check`, `domain check`, `scenarios`, generic `testgen`, `kernel`,
+`conformance`, `testplan`, `typestate`, `explain`, single-FSL-source `analyze`,
+trace replay, and all six causal commands. These consumers classify a captured
+root before model/solver work or output effects and consume those same bytes.
+Existing header/gate/conflict rules and command-specific read-error kinds are
+retained; this adds no CLI flags or accepted dialect/header combinations.
+
+`run_admitted_roots` accepts caller-owned read results and classifies each input
+slot once. A single-slot adapter only reshapes that call. Causal diff admits both
+operands; observation admits its explicit FSL mapping too. Expectation parsing
+and model construction share the captured causal root rather than rereading it.
+Slot identity is retained: the same file in two explicit slots may contribute
+one warning per slot, two in total; completing live diff/refine intake is deferred.
+JSON traces, evidence, plans, records and trust keys are not FSL roots. Recursive
+compose `use`, `implements from`, causal `uses` and governance dependencies are
+outside this root-admission change. Git-revision roots are tracked by #1513.
+
+The planner still owns complete finding identity and migration safety. Each
+result is moved to one warning-finalization site; a borrowed `SourceEdition` can
+finish distinct results without classifying the source again. Admitted
+verification folds governance before finalization. Domain/database checks,
+scenarios and generic testgen own their outer finish and suppress an inner one.
+This fixes domain check's duplicate migration warning in both definitive and
+non-definitive verification results. Worker check/verify admit before model or
+solver use, preserving option-error priority. Editor refusals retain UTF-16
+ranges and prevent model construction and follow-on analysis.
+
+Implemented open JSON outputs receive findings in `warnings`. Closed successful
+Kernel/conformance/testplan output and implemented raw TypeScript/readable/graph
+output instead use stderr `warning: <finding-json>`, retaining stdout schemas and
+formats. Their error envelopes remain open. Existing non-migration warnings,
+verdicts, assurance and exits are preserved on admitted current-edition input;
+next-edition migration findings refuse with the existing edition error and exit 2.
+Ordinary parser/type errors keep their command-specific diagnostics. Repair tools
+`lint`, `migrate` and `fmt` retain their planner/formatter projections, validation,
+safety and exit contracts rather than treating migration targets as consumer errors.
+
+This is not all-reader completion. `DEFERRED_TO_SECOND_PR` in the shared edition
+test support names 29 unfinished modes across 28 leaves, including AI intake,
+non-check domain commands, document/approval intake, live comparison/refinement
+and log mappings, batch/project/chain roots, counterexample ordering, mutate
+success warnings, sweep capture, and raw-success HTML/ledger stderr. Existing
+report baselines, ledger migration rendering and per-layer warning behavior are
+retained. Deferred cells still execute, and each named mode must retain a rejecting
+observation; an unclassified leaf or a fully green mode left deferred fails the
+inventory. `OUT_OF_SCOPE_1513` separately identifies historical revision cells.
+The remaining modes must be completed and the deferred set emptied to close #1449.
+
+Earlier refusal can remove next-edition inputs accepted by an ungated consumer;
+it does not remove current-edition syntax. The final-base corpus and consumer
+comparison, with exact revisions, form counts and per-command transitions, remains
+required before merge; no empty transition set is asserted here. Public-example
+warning cleanup (#608), AI/causal lint-planner support (#609) and unrelated ledger
+warning classification (#1497) are not part of this delivery.

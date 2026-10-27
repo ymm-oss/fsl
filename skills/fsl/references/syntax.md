@@ -280,6 +280,7 @@ Pass `--edition next` to `check`, `verify`, or `domain check` to reject legacy
 enum unions. Use `fslc lint <path>... --edition next` for stable non-mutating
 edition diagnostics and `fslc migrate <path>... --edition next` to review
 machine edits; add `--write` only after reviewing the complete validated set.
+Other covered consumers use the source header's edition; no new options are added.
 
 Already-invalid expression `||` / `->` in spec, requirements, compose, business
 policy, and refinement maps get `diagnostic_code: unsupported_in_edition` when
@@ -294,6 +295,31 @@ braced quantifiers, and action correspondences in `implements`. Warnings retain
 the planner's exact spans and safety flags; refused edits are not safe fixes.
 Domain checking rejects quantified domain expressions rather than producing this
 quantifier warning; legacy metadata slots and requirement mappings are not domain forms.
+
+Captured-root admission also covers db/compat check, scenarios, generic testgen,
+kernel/conformance/testplan, typestate, explain, single-FSL-source analyze, trace
+replay and all six causal commands (#1449). Causal diff admits both operands and
+observation its explicit mapping. Classification and consumption share captured
+bytes; each input slot is distinct, including two slots naming the same file.
+Existing header/gate/conflict rules and read-error kinds are retained. Next-edition
+migration findings refuse before consumption (exit 2); this can reject previously
+ungated next-edition inputs, not current-edition syntax.
+
+Open results finish warnings once; successful closed schemas and implemented raw
+TypeScript/readable/graph outputs use stderr `warning: <finding-json>` instead of
+changing stdout. Verification finalizes after governance; domain/database checks,
+scenarios and generic testgen own the outer finish. Worker refusal precedes model/
+solver use; editor refusal precedes model/analysis and retains UTF-16 ranges.
+Repair projections, safety and exits are unchanged.
+
+Coverage is partial: AI intake, other domain commands, document/approval intake,
+live comparison/refinement/log mappings, batch/project/chain intake, counterexample
+ordering, mutate success warnings, sweep capture and raw-success HTML/ledger stderr
+remain #1449 work. Existing baselines and ledger migration rows are retained;
+migration-only rows use 🟡 移行候補 / risk —, mixed/non-migration rows 🔴 要確認 / 要確認.
+Dependencies are not recursively admitted. Git-revision roots (#1513), example
+warning cleanup (#608), lint dialect support (#609) and other ledger warning
+classifications (#1497) are separate; do not infer full reader coverage.
 
 ```fsl
 domain <Name> {

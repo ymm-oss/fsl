@@ -303,7 +303,9 @@ Domain declarations use `enum Name { Member, ... }` for finite variants and
 stable `deprecated_domain_enum_union` warning over the complete declaration,
 including a canonical replacement. `fslc check`, `fslc verify`, and
 `fslc domain check` accept `--edition current|next`; `next` rejects the legacy
-union spelling. `fslc lint` reports the edition finding without mutation, and
+union spelling. Other covered consumers use the source header's edition; this
+does not add an `--edition` option to those commands. `fslc lint` reports the
+edition finding without mutation, and
 `fslc migrate --edition next` supplies the checked canonical edit. Empty enums
 and duplicate members are errors, reported at the declaration and duplicate
 member respectively.
@@ -1374,6 +1376,37 @@ exit 0 for no findings, 1 for findings, and 2 for parse/check failure.
 Domain checking rejects quantified domain expressions instead of emitting a
 colon-quantifier warning; legacy string metadata and requirement action mappings
 are not accepted domain forms.
+
+Captured-root admission also covers `db check`/`compat check`, `scenarios`,
+generic `testgen`, `kernel`, `conformance`, `testplan`, `typestate`, `explain`,
+single-FSL-source `analyze`, trace replay and the six causal commands (#1449).
+They classify the same captured bytes they consume, before model/solver work or
+output effects. Causal diff includes both operands; observation includes its
+explicit FSL mapping. Each slot is distinct, so repeating a file in two slots
+permits one warning per slot. Headers, existing edition options and read-error
+kinds keep their rules; no new dialect/header combination is accepted.
+
+Implemented open envelopes use `warnings` once. Successful closed schemas
+(`kernel`, `conformance`, `testplan`) and implemented raw TypeScript/readable/graph
+outputs use stderr `warning: <finding-json>` without changing stdout. Admitted
+verification finalizes after governance; domain/database checks, scenarios and
+generic testgen finish only their outer result. Domain check no longer duplicates
+migration warnings, including non-definitive errors. Worker admission precedes
+model/solver use; editor refusals retain UTF-16 ranges without model/analysis work.
+Current-edition warnings preserve verdicts, assurance and exits; next-edition
+migration findings refuse before consumption with the existing edition error/exit 2.
+Previously ungated consumers can therefore reject next-edition input they accepted.
+
+This is a partial delivery, not a guarantee for every reader. AI intake, non-check
+domain commands, document/approval intake, live comparison/refinement and log
+mappings, batch/project/chain intake, counterexample ordering, mutate success
+warnings, sweep capture and raw-success HTML/ledger stderr remain tracked by #1449.
+Report baselines and ledger migration rendering are retained; migration-only rows
+use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
+🔴 要確認 / 要確認. Dependencies are not recursively admitted; historical Git roots
+remain #1513. Repair projections/exits stay unchanged, including lint's existing
+dialect limits (#609); this does not remove public-example warnings (#608) or fix
+other ledger warning classifications (#1497).
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while

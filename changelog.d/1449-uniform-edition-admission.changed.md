@@ -20,3 +20,9 @@ non-definitive verification errors; requested editions and read-error kinds are 
 Causal consumers admit captured roots and explicit observation mappings before
 analysis or output, preserve specialized warnings, and reuse the same source for
 expectation parsing and model construction instead of rereading the root.
+This is a partial delivery: AI and non-check domain intake, document/approval
+intake, live comparison/refinement/log mappings, batch/project/chain preparation,
+counterexample ordering, mutate success warnings, sweep capture and raw-success
+HTML/ledger stderr remain tracked by #1449 with executed deferred-mode controls.
+Git-revision roots (#1513), public-example warning cleanup (#608), lint dialect
+support (#609) and other ledger warning classifications (#1497) are separate.

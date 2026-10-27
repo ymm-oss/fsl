@@ -128,9 +128,11 @@ the relevant role skill directs it.
   runtime violation nor an argument outside the `entity` / `number` verify scope
   counts) — otherwise `kind: "forbidden"`.
   Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
-  required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
-  `branches`, and explicit `maps` only for hard cases such as multi-entity
+  required). Use kernel-wrapper `struct` / `state` / `init` and explicit fair
+  actions only for hard cases such as multi-entity
   behavior, conservation rules, SLA/time, or history that needs kernel state.
+  Legacy branch-local `maps` are current-edition only; for next, split fair actions
+  by condition and put their correspondences in `implements`.
   An independent channel for catching under-constraint (missing guards) that a
   safety invariant stays silent about (a receptacle for cross-validation where a
   separate agent writes positive/negative traces from NL)
@@ -468,8 +470,11 @@ verify {
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use
-  kernel `struct` / `state` / `init`, `fair action`, `branches`, and explicit
-  `maps` where needed. The display of a branches split action is
+  kernel `struct` / `state` / `init` and explicit `fair action`. Legacy `branches`
+  with inline `maps` remain accepted in current, not next. For next, split the
+  conditions into fair actions and map each inside `implements`, preserving guards,
+  effects and fairness; see `submit_small` / `submit_large` in
+  `examples/layers/return_system.fsl`. The display of a branches split action is
   `submit[a <= AUTO_LIMIT]`; diagnostics keep the internal name (`submit__b1`)
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.
