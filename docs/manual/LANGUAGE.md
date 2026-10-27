@@ -771,15 +771,25 @@ variable capture instead of inventing internal binder names. See
   `not (exists x in domain(r): reachable(r, x, x))`; this does not change their
   runtime meaning or guarantee that their invariants hold. Numeric projections
   retain integer compatibility. The restacked boundary sweep used BASE
-  `8e54e862cb809121bcd33de53645795bf94a1df5` and HEAD
-  `870d03e7aa0be837a43c4c5c15f10d32853941bb`: all 597 corpus forms have a
+  `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and HEAD
+  `3a8a6019a5bed3ae62f960afedf2bdcf6d129341`: all 597 corpus forms have a
   **measured empty** `ok` → `error` transition set. All 134 inline fixture
   occurrences were also checked; #1458 removes 24 occurrences (22 distinct
   sources) in both modes, 48 mode-form transitions. The previous 46-transition
   subset is unchanged; the expanded inventory counts numeric Set assignment
   below. Three counted forms (`count`, enum set-literal equality and matching
   enum Set assignment) add six `error` → `ok` pairs. Both modes ran twice in
-  each tree: 5,848 checks, full outputs and no exclusions. See
+  each tree: 5,848 checks, full outputs and no exclusions. On this base, the
+  source-only revert calibration produces 28 intended failures and 24 preservation
+  passes, followed by exact restoration and 52 passing fixed tests; workspace
+  Clippy is warning-free. The workspace suite passed 3,468 tests on
+  `fc77124b31744f1c1728295db6f09508265b8285`, carried across only the
+  whitespace-only commit to the measured HEAD, with whole-file equality after
+  removing whitespace. Builds, CLI conformance, fixed tests twice and formatting
+  pass on that HEAD. Compared with the earlier `8e54e862` measurement, main's
+  #1463 now rejects `explicit_init_state_collection.fsl` on both BASE and HEAD
+  and adds the authored location to the BASE count diagnostic; neither changes
+  the #1458 removal/addition sets. See
   [the design note](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
   for commands, identities and measurements. The endpoint breaking removals are:
   for numeric `N -> N`, `not reachable(r, Red, Blue)`,

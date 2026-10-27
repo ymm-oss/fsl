@@ -878,15 +878,23 @@ never a state variable named `true`), so the declaration is rejected. No other w
   `not (exists x in domain(r): reachable(r, x, x))` are accepted; their runtime
   meaning is unchanged and false invariants still violate. Numeric projections
   remain integer-compatible. The restacked boundary sweep used BASE
-  `8e54e862cb809121bcd33de53645795bf94a1df5` and HEAD
-  `870d03e7aa0be837a43c4c5c15f10d32853941bb`: **zero corpus `ok` → `error`
+  `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and HEAD
+  `3a8a6019a5bed3ae62f960afedf2bdcf6d129341`: **zero corpus `ok` → `error`
   transitions** across all 597 forms. All 134 inline occurrences were checked;
   #1458 removes 24 occurrences (22 distinct sources) in both modes, 48 mode-form
   transitions. The former 46-transition subset is unchanged; the expanded
   inventory additionally counts numeric Set assignment below. Three counted
   forms (`count`, enum set-literal equality and matching enum Set assignment)
   add six `error` → `ok` pairs. Each mode/tree ran twice: 5,848 checks, full
-  outputs without exclusions.
+  outputs without exclusions. On this base, the source-only revert calibration
+  produces 28 intended failures / 24 preservation passes; exact restoration is
+  followed by 52 passing fixed tests. Workspace Clippy is warning-free. The
+  workspace suite passed 3,468 tests on `fc77124b31744f1c1728295db6f09508265b8285`;
+  only a proved whitespace-only commit follows it to the measured HEAD (the whole
+  source file is equal after removing whitespace). Builds, CLI, fixed tests twice
+  and fmt pass on that HEAD. Since the earlier `8e54e862` measurement, main's
+  #1463 rejects `explicit_init_state_collection.fsl` on both trees and locates
+  the BASE count diagnostic; #1458 removal/addition membership is unchanged.
   Commands and identities are in
   `docs/design/DESIGN-nested-option-support.md`, section #1458.
   The endpoint removals for numeric `N -> N` are

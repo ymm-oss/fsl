@@ -344,7 +344,7 @@ origin 7:3 and the endpoint repair hint. Projection removals are listed above.
 
 #### Restacked endpoint and projection boundary measurement
 
-This is the final #1458 measurement on the frozen integration base:
+This is the historical #1458 measurement on the frozen `8e54e862` integration base:
 
 - BASE: `8e54e862cb809121bcd33de53645795bf94a1df5`, materialized by
   `git archive` and built in that archive's own fresh, unpopulated target.
@@ -445,6 +445,86 @@ only for authorized #1444 (`claims_next_edition`, requirement_trace_large_domain
 Neither is relabeled or rerun on `8e54e862`: COMMON rev 4/4.1 carries them
 across 26 changed main files, with zero production/golden/CLI-contract/lock
 overlap and only the two corpus additions, both `A` in `git diff --name-status`.
+
+#### Remeasurement after main's typecheck changes (`9af1fa5f`)
+
+The current measurement uses BASE `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db`
+and measured HEAD `3a8a6019a5bed3ae62f960afedf2bdcf6d129341`. The six prior
+commits were rebased from `8e54e862cb809121bcd33de53645795bf94a1df5`:
+production is now `66727f6ead1da285f7c026de2dc20605cb2c2ae2`, with the five
+later patches unchanged. Two conflicts in `typecheck.rs` retain main's
+phase-aware recursive validation and the relation endpoint expectations; the
+endpoint helper passes the current validation phase through rather than
+resetting aggregate normalization or substituted pattern scopes. Main's #1442,
+#1463 and #1448 checks remain intact. The only subsequent source change is the
+whitespace-only `rel_domain`/`rel_range` arm formatting in the measured HEAD.
+The complete file before and after that commit is equal after removing all
+whitespace; the exact diff changes only that arm. No test was adapted. The
+three fixed files remain byte-identical to `764a00c37750ef271a8407ca9785a5d27251406e`.
+
+BASE was materialized with `git archive` into its own tree and compiled into a
+fresh target with `cargo build -v --manifest-path rust/Cargo.toml --locked --offline -p fslc-rust --bin fslc`
+(exit 0). Verbose output witnesses `fsl-syntax`, `fsl-core` and `fslc-rust`
+compiling from that base tree. Each binary runs `fslc check FORM` in its own
+materialized tree, enumerating every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/`, plus the inline inventory above. The corpus remains
+**597 forms**, with ten modified sources since `8e54e862`: the seven injected
+`return_system__*` fixtures, `examples/layers/return_impl_refines.fsl`,
+`examples/layers/return_system.fsl`, and `examples/pm/cancel_system.fsl` (main's
+canonical action-correspondence updates). BASE and HEAD corpus bytes match.
+The same **134 inline forms** yield **731 forms per tree / 5,848 checks**, both
+modes twice, with **no excluded fields or forms** and exact repeat agreement.
+Binary-identity controls again pass all 16 expected accepting/rejecting checks.
+
+The measured **597-form corpus `ok` → `error` transition set is empty** between
+these named BASE and HEAD binaries, with no other corpus output drift. The
+inline result remains **48 removals** (24 occurrences / 22 distinct sources)
+and **six additions** (the three counted accepting forms, in both modes), with
+**1,408 unchanged mode-form pairs** out of 1,462. Every removal/addition has
+the same membership as the `8e54e862` measurement above, including the original
+46-transition subset. No new #1458 breaking family is introduced by the rebase.
+
+Full comparison with the old measurement observes exactly two changed forms
+(12 observations, both modes and repetitions), all attributable to main's
+#1463 in `28c4eab710f8d83e766bb0e7c7e006d09d7777d8`, not #1458:
+
+| Form / file | Old to current observation | Scope / attribution |
+|---|---|---|
+| `forall i in s { m[i] = true }`, `rust/fslc/tests/fixtures/explicit_init_state_collection.fsl` | `ok` / 0 → `error` / `semantics` / 2, location 12:5, `init forall over a state collection is not supported; state variable 's' is not allowed` | Both BASE and HEAD; main moves the existing init collection restriction to model construction (8 observations). |
+| `count(x in domain(s)) <= 1`, the `COUNT` model in `rust/fslc/tests/issue_1458_projection_acceptance.rs` | BASE remains `error` / `semantics` / 2; `invalid model expression: type is not a finite scalar` gains ` at 8:3` and `loc: {line: 8, column: 3}` | BASE only; main preserves the authored aggregate location (4 observations). HEAD remains accepted. |
+
+No other complete stdout, parsed JSON, stderr or exit changes were observed
+across the old and new measurements. In particular, the ten changed corpus
+sources do not create output differences. The shared main rejection is not
+counted as a #1458 corpus removal, and the located BASE count diagnostic does
+not change its error-to-ok addition classification.
+
+On BASE `9af1fa5f`, the production-source-only reverse calibration was freshly
+measured at `3a8a6019`: the nonempty reverse patch names exactly
+`rust/fsl-core/src/typecheck.rs` and `rust/fsl-wasm/src/lib.rs`, and **both files
+equal their BASE blobs** before testing. The three fixed targets with
+`--no-fail-fast` produce **28 intended failures / 24 preservation passes**:
+endpoint 15/14, domain/range 6/10, acceptance 7/0, identical failing test
+membership to the old `6e99702c` calibration. Exact file bytes, full diff and
+clean status prove restoration; all 52 tests pass afterward. These are fresh
+`9af1fa5f` measurements, unlike the explicitly carried historical calibration.
+
+`cargo test --manifest-path rust/Cargo.toml --locked --offline --workspace --no-fail-fast`
+passes **3,468 tests, zero failed or ignored**, measured on
+`fc77124b31744f1c1728295db6f09508265b8285`. This result is carried across only
+the proved whitespace-only commit to `3a8a6019`; it is not claimed as a rerun
+there. On the latter HEAD, workspace build, CLI conformance (11), the three
+fixed targets twice (52 each), formatting and
+`cargo clippy --manifest-path rust/Cargo.toml --locked --offline --workspace --all-targets -- -D warnings`
+all exit 0. Clippy is **warning-free on BASE `9af1fa5f`**: no #1444 exception
+is carried forward. Main's changed #1448 tests (10), core tests (55), and
+compose/quantifier parent targets (230, including support modules) also pass
+on `fc77124b`. All checks use toolchain 1.98.0, four jobs/threads, offline
+locked dependencies and worktree-local TMPDIR. Heavy jobs release their locks
+between commands; after the scheduling amendment, subsequent heavy jobs yield
+to other waiting lanes before reacquisition. One
+whole-script acquisition encloses the sweep. These are bounded check/test
+observations, not independent triangulation or unbounded verification.
 
 #### Projection categories and final-review regression controls
 

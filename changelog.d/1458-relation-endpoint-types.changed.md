@@ -13,15 +13,24 @@ The change rejects enum/Int confusion. Enum nominality, numeric/range
 compatibility, public Kernel schemas
 and runtime semantics are unchanged; LSP/Worker inherit the shared checker.
 The restacked boundary sweep used BASE
-`8e54e862cb809121bcd33de53645795bf94a1df5` and HEAD
-`870d03e7aa0be837a43c4c5c15f10d32853941bb`: zero `ok` to `error` transitions
+`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and HEAD
+`3a8a6019a5bed3ae62f960afedf2bdcf6d129341`: zero `ok` to `error` transitions
 among all 597 corpus forms. All 134 inline fixture occurrences were checked;
 #1458 removes 24 occurrences (22 distinct sources) in both modes, 48 mode-form
 transitions. The former 46-transition subset is unchanged; the expanded
 inventory additionally counts numeric Set assignment below. Three counted forms
 (count, enum set-literal equality and matching enum Set assignment) add six
 error-to-ok pairs. Each mode/tree ran twice: 5,848 checks, full outputs without
-exclusions. See
+exclusions. On this base, source-only revert calibration produces 28 intended
+failures and 24 preservation passes, with exact restoration and 52 fixed tests
+passing afterward; workspace Clippy is warning-free. The workspace suite passed
+3,468 tests on `fc77124b31744f1c1728295db6f09508265b8285`; only a proved
+whitespace-only commit follows it to the measured HEAD (whole-file equality after
+removing whitespace). Builds, CLI conformance, fixed tests twice and fmt pass on
+that HEAD. Since the earlier `8e54e862` measurement, main's #1463 rejects
+`explicit_init_state_collection.fsl` on both BASE and HEAD and adds the authored
+location to the BASE count diagnostic; #1458 removal/addition sets are unchanged.
+See
 `docs/design/DESIGN-nested-option-support.md`, section #1458, for commands,
 identities and measurements. Removed numeric `N -> N` invariants are
 `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,
