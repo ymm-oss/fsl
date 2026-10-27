@@ -615,8 +615,8 @@ pub fn apply_edition(
     }
 }
 
-/// One root's edition diagnostics, classified before its consumer runs.
-/// Ownership of this value makes finishing the resulting envelope a single step.
+/// One input slot's diagnostics, classified before consumption and shared by its
+/// distinct results. Each result is moved into its finalization site once.
 pub struct SourceEdition {
     declared: Option<Edition>,
     next: bool,
@@ -635,7 +635,7 @@ impl SourceEdition {
     /// # Panics
     /// Panics if an existing `warnings` member is not an array.
     #[must_use]
-    pub fn finish(self, (mut output, status): (Value, i32)) -> (Value, i32) {
+    pub fn finish(&self, (mut output, status): (Value, i32)) -> (Value, i32) {
         if !self.additions.is_empty()
             && let Value::Object(envelope) = &mut output
         {
@@ -644,7 +644,7 @@ impl SourceEdition {
                 .or_insert_with(|| Value::Array(Vec::new()))
                 .as_array_mut()
                 .expect("warnings is an array")
-                .extend(self.additions);
+                .extend(self.additions.iter().cloned());
         }
         if self.next
             && let Value::Object(envelope) = &mut output

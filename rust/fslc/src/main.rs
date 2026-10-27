@@ -50,6 +50,7 @@ use cli_output::{
     analysis_display_path, display_binding, envelope, error_output, located_error_output,
     semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
 };
+use fslc_rust::migration::SourceEdition;
 use log_replay::{
     json_mismatches, log_action_matches, mapping_json_expr, parse_param_value, parse_params,
     read_jsonl_records, untyped_replay_enum_mapping_span,
@@ -4588,9 +4589,18 @@ fn format_chain_table(result: &Value) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
-    run_admitted_source(path, read_spec_source(path), false, |source| {
-        run_replay_from_source(path, source, trace_path)
-    })
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_replay_from_source(path, &sources[0], trace_path),
+                editions,
+                false,
+            )
+        },
+    )
 }
 
 /// Replay one trace against one caller-owned root-source snapshot.
@@ -5993,43 +6003,73 @@ fn portable_cli_source_path(path: &Path) -> Result<String, String> {
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-/// Admit captured bytes before consumption. Closed/raw successes keep their
-/// output contract and deliver warnings on stderr; error envelopes remain open.
-fn run_admitted_source(
-    path: &Path,
-    source: Result<String, SpecLoadError>,
-    stderr_warnings: bool,
-    run: impl FnOnce(&str) -> (Value, i32),
+/// Admit each direct input slot once and pass captured bytes and diagnostics
+/// inward. The callback owns envelope finalization, including nested results.
+fn run_admitted_roots(
+    roots: Vec<(&Path, Result<String, SpecLoadError>)>,
+    requested: Option<fsl_syntax::Edition>,
+    stderr_on_success: bool,
+    run: impl FnOnce(&[String], &[SourceEdition]) -> (Value, i32),
 ) -> (Value, i32) {
-    let source = match source {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    fslc_rust::migration::admit_source(
-        &source,
-        &path.to_string_lossy(),
-        None,
-        crate::parse_options(),
-        &envelope,
-        true,
-    )
-    .map_or_else(std::convert::identity, |edition| {
-        let result = run(&source);
-        if stderr_warnings && result.1 == 0 {
+    let mut sources = Vec::new();
+    let mut editions = Vec::new();
+    for (path, source) in roots {
+        let source = match source {
+            Ok(source) => source,
+            Err(error) => return (spec_load_error_output(&error), 2),
+        };
+        let edition = match fslc_rust::migration::admit_source(
+            &source,
+            &path.to_string_lossy(),
+            requested,
+            crate::parse_options(),
+            &envelope,
+            true,
+        ) {
+            Ok(edition) => edition,
+            Err(error) => return error,
+        };
+        sources.push(source);
+        editions.push(edition);
+    }
+    let result = run(&sources, &editions);
+    if stderr_on_success && result.1 == 0 {
+        for edition in editions {
             for warning in edition.warnings() {
                 eprintln!("warning: {warning}");
             }
-            result
-        } else {
-            edition.finish(result)
         }
-    })
+    }
+    result
+}
+
+fn finish_admitted(
+    result: (Value, i32),
+    editions: &[SourceEdition],
+    stderr_on_success: bool,
+) -> (Value, i32) {
+    if stderr_on_success && result.1 == 0 {
+        result
+    } else {
+        editions
+            .iter()
+            .fold(result, |result, edition| edition.finish(result))
+    }
 }
 
 fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
-    run_admitted_source(path, read_spec_source(path), true, |source| {
-        run_kernel_contract_from_source(path, source, version)
-    })
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        true,
+        |sources, editions| {
+            finish_admitted(
+                run_kernel_contract_from_source(path, &sources[0], version),
+                editions,
+                true,
+            )
+        },
+    )
 }
 
 fn run_kernel_contract_from_source(
@@ -6113,9 +6153,18 @@ fn run_conformance(
     depth: usize,
     version: fsl_core::PublicKernelVersion,
 ) -> (Value, i32) {
-    run_admitted_source(path, read_spec_source(path), true, |source| {
-        run_conformance_from_source(path, source, depth, version)
-    })
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        true,
+        |sources, editions| {
+            finish_admitted(
+                run_conformance_from_source(path, &sources[0], depth, version),
+                editions,
+                true,
+            )
+        },
+    )
 }
 
 fn run_conformance_from_source(
@@ -6141,9 +6190,18 @@ fn run_conformance_from_source(
 }
 
 fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
-    run_admitted_source(path, read_spec_source(path), true, |source| {
-        run_testplan_from_source(path, source, depth)
-    })
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        true,
+        |sources, editions| {
+            finish_admitted(
+                run_testplan_from_source(path, &sources[0], depth),
+                editions,
+                true,
+            )
+        },
+    )
 }
 
 fn run_testplan_from_source(path: &Path, source: &str, depth: usize) -> (Value, i32) {
@@ -10063,9 +10121,25 @@ fn run_explain(
     names: Option<name_display::NameSpelling>,
     lowering: bool,
 ) -> (Value, i32) {
-    run_admitted_source(path, read_spec_source(path), readable, |source| {
-        run_explain_from_source_with_names(path, source, depth, readable, names, lowering)
-    })
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        readable,
+        |sources, editions| {
+            finish_admitted(
+                run_explain_from_source_with_names(
+                    path,
+                    &sources[0],
+                    depth,
+                    readable,
+                    names,
+                    lowering,
+                ),
+                editions,
+                readable,
+            )
+        },
+    )
 }
 
 /// `explain --lowering`: only where each lowered `requires` and property
@@ -12240,9 +12314,18 @@ fn run_mutate_with(
 }
 
 fn run_typestate(path: &Path, typescript_only: bool) -> (Value, i32) {
-    run_admitted_source(path, read_spec_source(path), typescript_only, |source| {
-        run_typestate_from_source(path, source)
-    })
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        typescript_only,
+        |sources, editions| {
+            finish_admitted(
+                run_typestate_from_source(path, &sources[0]),
+                editions,
+                typescript_only,
+            )
+        },
+    )
 }
 
 fn run_typestate_from_source(path: &Path, source: &str) -> (Value, i32) {
@@ -15300,20 +15383,24 @@ fn run_analyze(
     export_kind: Option<&str>,
     code_path: Option<&Path>,
 ) -> (Value, i32) {
-    run_admitted_source(
-        path,
-        read_spec_source(path),
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
         output_format != "json",
-        |source| {
-            run_analyze_from_source(
-                path,
-                source,
-                projection,
-                focus,
-                output_format,
-                profile,
-                export_kind,
-                code_path,
+        |sources, editions| {
+            finish_admitted(
+                run_analyze_from_source(
+                    path,
+                    &sources[0],
+                    projection,
+                    focus,
+                    output_format,
+                    profile,
+                    export_kind,
+                    code_path,
+                ),
+                editions,
+                output_format != "json",
             )
         },
     )
