@@ -10,7 +10,7 @@ use fsl_syntax::{
 };
 
 use crate::recursion;
-use crate::{ActionGuard, KernelModel, ParamDef, TypeDef, TypeRef};
+use crate::{ActionGuard, KernelModel, TypeDef, TypeRef};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TypecheckError {
@@ -19,7 +19,7 @@ pub(crate) struct TypecheckError {
 }
 
 impl TypecheckError {
-    fn with_span(mut self, span: Span) -> Self {
+    pub(crate) fn with_span(mut self, span: Span) -> Self {
         self.span.get_or_insert(span);
         self
     }
@@ -60,6 +60,20 @@ fn error(message: impl Into<String>) -> TypecheckError {
 /// uses (`acct.bal` for the compose component state `acct__bal`).
 fn shown(name: &str) -> String {
     crate::unmapped_public_spelling(name)
+}
+
+pub(crate) fn unresolved_identifier(name: &str, owners: &[String]) -> TypecheckError {
+    if owners.len() > 1 {
+        error(format!(
+            "ambiguous enum member '{name}' belongs to [{}]; use enum conversion/convert for a bijection or enum abstraction/abstract for a many-to-one mapping",
+            owners.join(", ")
+        ))
+    } else {
+        error(format!(
+            "public Kernel cannot type identifier '{}'",
+            shown(name)
+        ))
+    }
 }
 
 /// `ty` with every named type respelled by [`shown`], for a message that
@@ -275,30 +289,20 @@ fn infer_type_inner(
             ))
         }
         Expr::Struct { name, .. } => Ok(TypeRef::Named(name.clone())),
-        Expr::Var(name) => env.get(name).cloned().ok_or_else(|| {
-            let owners = enum_member_owners(model, name);
-            if owners.len() > 1 {
-                error(format!(
-                    "ambiguous enum member '{name}' belongs to [{}]; use enum conversion/convert for a bijection or enum abstraction/abstract for a many-to-one mapping",
-                    owners.join(", ")
-                ))
-            } else {
-                error(format!(
-                    "public Kernel cannot type identifier '{}'",
-                    shown(name)
-                ))
-            }
-        }),
-        Expr::EnumMember { type_name, member } => match model.types.get(type_name) {
+        Expr::Var(name) => env
+            .get(name)
+            .cloned()
+            .ok_or_else(|| unresolved_identifier(name, &enum_member_owners(model, name))),
+        Expr::EnumMember {
+            type_name, member, ..
+        } => match model.types.get(type_name) {
             Some(TypeDef::Enum { members, .. }) if members.contains(member) => {
                 Ok(TypeRef::Named(type_name.clone()))
             }
-            Some(TypeDef::Enum { .. }) => {
-                Err(error(format!(
-                    "unknown enum member '{}.{member}'",
-                    shown(type_name)
-                )))
-            }
+            Some(TypeDef::Enum { .. }) => Err(error(format!(
+                "unknown enum member '{}.{member}'",
+                shown(type_name)
+            ))),
             Some(_) => Err(error(format!("'{}' is not an enum", shown(type_name)))),
             None => Err(error(format!("unknown enum type '{}'", shown(type_name)))),
         },
@@ -605,23 +609,61 @@ fn reject_colliding_pattern_binding(
     env: &TypeEnv,
     model: &KernelModel,
     span: Span,
+    phase: &ValidationPhase,
 ) -> Result<(), TypecheckError> {
-    let collides_with = if model.state.iter().any(|(name, _)| name == binding) {
+    reject_pattern_binding_name(
+        phase,
+        model.names().pattern_scopes.get(binding),
+        binding,
+        model.state.iter().map(|(name, _)| name.as_str()),
+        model.consts.keys().map(String::as_str),
+        model.enum_members.keys().map(String::as_str),
+        env.keys().map(String::as_str),
+    )
+    .map(|_| ())
+    .map_err(|error| error.with_span(span))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PatternBinding {
+    Fresh,
+    Substituted,
+}
+
+pub(crate) type PatternScopes = BTreeMap<String, Result<PatternBinding, TypecheckError>>;
+
+/// The same collision rule applies before compose prefixes global names.
+pub(crate) fn reject_pattern_binding_name<'a>(
+    phase: &ValidationPhase,
+    source_scope: Option<&Result<PatternBinding, TypecheckError>>,
+    binding: &str,
+    state: impl IntoIterator<Item = &'a str>,
+    constants: impl IntoIterator<Item = &'a str>,
+    enum_members: impl IntoIterator<Item = &'a str>,
+    local: impl IntoIterator<Item = &'a str>,
+) -> Result<PatternBinding, TypecheckError> {
+    if phase.substitutes(binding) {
+        return Ok(PatternBinding::Substituted);
+    }
+    if let Some(decision) = source_scope {
+        return decision.clone();
+    }
+    let is_binding = |name: &str| name == binding;
+    let collides_with = if state.into_iter().any(is_binding) {
         "a state variable"
-    } else if model.consts.contains_key(binding) {
+    } else if constants.into_iter().any(is_binding) {
         "a constant"
-    } else if model.enum_members.contains_key(binding) {
+    } else if enum_members.into_iter().any(is_binding) {
         "an enum member"
-    } else if env.contains_key(binding) {
+    } else if local.into_iter().any(is_binding) {
         "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)"
     } else {
-        return Ok(());
+        return Ok(PatternBinding::Fresh);
     };
     Err(error(format!(
         "pattern binding '{binding}' in 'is some({binding})' shadows {collides_with} of the same name; \
          rename the pattern variable"
-    ))
-    .with_span(span))
+    )))
 }
 
 pub(crate) fn lvalue_type(
@@ -816,7 +858,11 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
     Ok(match value {
         crate::FslValue::Int(value) => Expr::Num(value),
         crate::FslValue::Bool(value) => Expr::Bool(value),
-        crate::FslValue::Enum { type_name, member } => Expr::EnumMember { type_name, member },
+        crate::FslValue::Enum { type_name, member } => Expr::EnumMember {
+            type_name,
+            member,
+            source_bare: false,
+        },
         crate::FslValue::None => Expr::None,
         crate::FslValue::Some(value) => Expr::Some(Box::new(value_expression(*value)?)),
         crate::FslValue::Struct { type_name, fields } => Expr::Struct {
@@ -846,20 +892,30 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
     })
 }
 
-struct ValidationPhase {
+#[derive(Clone)]
+pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
     substituted: BTreeSet<String>,
 }
 
 impl ValidationPhase {
-    fn normalized() -> Self {
+    pub(crate) fn substitutes(&self, name: &str) -> bool {
+        self.substituted.contains(name)
+    }
+    pub(crate) fn normalized() -> Self {
         Self {
             normalize_aggregates: true,
             substituted: BTreeSet::new(),
         }
     }
 
-    fn under_binder(&self, binder: &Binder, expands: bool) -> Self {
+    fn expands_aggregate(kind: AggregateKind, binder: &Binder) -> bool {
+        matches!(kind, AggregateKind::Count | AggregateKind::Sum)
+            && !matches!(binder, Binder::Typed { .. })
+    }
+
+    pub(crate) fn under_binder(&self, binder: &Binder, aggregate: Option<AggregateKind>) -> Self {
+        let expands = aggregate.is_some_and(|kind| Self::expands_aggregate(kind, binder));
         let mut substituted = self.substituted.clone();
         substituted.remove(binder_name(binder));
         if expands {
@@ -1055,10 +1111,8 @@ fn validate_expression_inner(
             validate(else_expr, env, spans.else_expr, Some(&ty))?;
         }
         Expr::Is { expr, pattern } => {
-            if let Pattern::Some(binding) = pattern
-                && !phase.substituted.contains(binding)
-            {
-                reject_colliding_pattern_binding(binding, env, model, span)?;
+            if let Pattern::Some(binding) = pattern {
+                reject_colliding_pattern_binding(binding, env, model, span, phase)?;
             }
             validate(expr, env, span, None)?;
         }
@@ -1066,7 +1120,7 @@ fn validate_expression_inner(
             validate(expr, env, span, None)?;
         }
         Expr::Quantified { binder, body, .. } => {
-            let child_phase = phase.under_binder(binder, false);
+            let child_phase = phase.under_binder(binder, None);
             let binder_ty = validate_binder(binder, env, model, span, phase, &child_phase)?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), binder_ty);
@@ -1084,11 +1138,10 @@ fn validate_expression_inner(
             binder,
             value,
         } => {
-            let expands = matches!(kind, AggregateKind::Count | AggregateKind::Sum)
-                && !matches!(binder, Binder::Typed { .. });
+            let expands = ValidationPhase::expands_aggregate(*kind, binder);
             // Raw descendants share all typing rules, but must not enumerate
             // ranges containing locals before the outer substitution happens.
-            let child_phase = phase.under_binder(binder, expands);
+            let child_phase = phase.under_binder(binder, Some(*kind));
             let binder_ty = validate_binder(binder, env, model, span, phase, &child_phase)?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), binder_ty);
@@ -1407,6 +1460,9 @@ fn validate_leadsto_expression_types(
             ))
             .with_span(helper.span));
         }
+        for (argument, param) in helper.args.iter().zip(&action.params) {
+            validate_expression(argument, &local, model, helper.span, Some(&param.ty()))?;
+        }
     }
     Ok(())
 }
@@ -1417,14 +1473,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
         let checked = (|| {
             let mut local = env.clone();
             for param in &action.params {
-                match param {
-                    ParamDef::Typed { name, ty } => {
-                        local.insert(name.clone(), ty.clone());
-                    }
-                    ParamDef::Range { name, lo, hi } => {
-                        local.insert(name.clone(), TypeRef::Range(*lo, *hi));
-                    }
-                }
+                local.insert(param.name().to_owned(), param.ty());
             }
             for (index, guard) in action.guards.iter().enumerate() {
                 let target = crate::action_guard_target(&action.name, index);

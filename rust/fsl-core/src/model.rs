@@ -19,6 +19,28 @@ use crate::{
 /// index distinctness across `forall` iterations could not be proved (issue #698).
 pub const WRITE_DISTINCTNESS_UNPROVED_CODE: &str = "FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED";
 
+/// Context shared by ordinary model validation and pre-prefix compose errors.
+pub(crate) enum ExpressionErrorContext<'a> {
+    Model,
+    Init,
+    InlineInitializer(&'a str),
+}
+
+impl ExpressionErrorContext<'_> {
+    pub(crate) fn message(self, mut message: String) -> String {
+        let prefix = match self {
+            Self::Model => "invalid model expression".to_owned(),
+            Self::Init => "invalid init statement".to_owned(),
+            Self::InlineInitializer(name) => {
+                format!("invalid inline initializer for '{}'", shown(name))
+            }
+        };
+        message.insert_str(0, ": ");
+        message.insert_str(0, &prefix);
+        message
+    }
+}
+
 /// A machine-applicable source edit carried by a typed model diagnostic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiagnosticEdit {
@@ -93,6 +115,13 @@ pub enum ParamDef {
 }
 
 impl ParamDef {
+    pub(crate) fn ty(&self) -> TypeRef {
+        match self {
+            Self::Typed { ty, .. } => ty.clone(),
+            Self::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+        }
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
@@ -337,16 +366,13 @@ impl KernelModel {
             LValue::Var(name) => self
                 .state_type(name)
                 .cloned()
-                .ok_or_else(|| model_error(format!("unknown update target '{}'", shown(name)))),
+                .ok_or_else(|| unknown_update_target(name)),
             LValue::Index(name, _) => match self.state_type(name) {
                 Some(ty) => ty
                     .index_types(false)
                     .map(|(_, value)| value)
                     .ok_or_else(|| model_error("indexed update target requires Map")),
-                None => Err(model_error(format!(
-                    "unknown update target '{}'",
-                    shown(name)
-                ))),
+                None => Err(unknown_update_target(name)),
             },
             LValue::Field(base, field) => {
                 let TypeRef::Named(name) = self.state_lvalue_type(base)? else {
@@ -1160,17 +1186,12 @@ impl ModelBuilder {
         for (index, statement) in model.init.iter().enumerate() {
             crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
-                let mut failure = if let Some((name, _)) = inline_initializers.get(&index) {
-                    model_error(format!(
-                        "invalid inline initializer for '{}': {}",
-                        shown(name),
-                        error.message
-                    ))
-                    .with_origin(origin)
+                let context = if let Some((name, _)) = inline_initializers.get(&index) {
+                    ExpressionErrorContext::InlineInitializer(name)
                 } else {
-                    model_error(format!("invalid init statement: {}", error.message))
-                        .with_origin(origin)
+                    ExpressionErrorContext::Init
                 };
+                let mut failure = model_error(context.message(error.message)).with_origin(origin);
                 if let Some(span) = error.span {
                     failure = failure.at(span);
                 }
@@ -1188,7 +1209,7 @@ impl ModelBuilder {
         }
         crate::typecheck::validate_model_expression_types(&model).map_err(|error| {
             let origin = error.span.map(type_diagnostic_origin);
-            model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
+            model_error(ExpressionErrorContext::Model.message(error.message)).with_origin(origin)
         })?;
         for (index, statement) in model.init.iter().enumerate() {
             check_init_collection_binders(
@@ -1229,6 +1250,7 @@ impl ModelBuilder {
             })?;
         }
         model.origins.discard_component_check_targets();
+        model.names.pattern_scopes.clear();
         Ok(model)
     }
 
@@ -2066,7 +2088,9 @@ fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
 /// deadlines).
 fn static_index_identity(expr: &Expr, constants: &BTreeMap<String, Value>) -> Option<Value> {
     match expr {
-        Expr::EnumMember { type_name, member } => Some(Value::Enum {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => Some(Value::Enum {
             type_name: type_name.clone(),
             member: member.clone(),
         }),
@@ -2213,10 +2237,27 @@ fn collect_state_references(
     state_names: &BTreeSet<String>,
     references: &mut Vec<String>,
 ) {
+    visit_free_names(expr, &BTreeSet::new(), &mut |name| {
+        if state_names.contains(name) {
+            references.push(name.to_owned());
+        }
+    });
+}
+
+/// Visit free variable occurrences in source order, including duplicates.
+pub(crate) fn visit_free_names(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    visit: &mut impl FnMut(&str),
+) {
+    crate::recursion::guard(|| visit_free_names_inner(expr, bound, visit));
+}
+
+fn visit_free_names_inner(expr: &Expr, bound: &BTreeSet<String>, visit: &mut impl FnMut(&str)) {
     if let Expr::Var(name) = expr
-        && state_names.contains(name)
+        && !bound.contains(name)
     {
-        references.push(name.clone());
+        visit(name);
     }
     let scoped = match expr {
         Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
@@ -2224,24 +2265,36 @@ fn collect_state_references(
         _ => None,
     };
     if let Some((binder, body)) = scoped {
-        let (name, filter) = binder_scope(binder);
-        let mut sources = binder_exprs(binder);
-        if filter.is_some() {
-            sources.pop();
-        }
-        for source in sources {
-            collect_state_references(source, state_names, references);
-        }
-        let mut local = state_names.clone();
-        local.remove(name);
-        for child in filter.into_iter().chain(body) {
-            collect_state_references(child, &local, references);
+        let local = visit_free_binder_names(binder, bound, visit);
+        if let Some(body) = body {
+            visit_free_names(body, &local, visit);
         }
     } else {
         for child in expr_children(expr) {
-            collect_state_references(child, state_names, references);
+            visit_free_names(child, bound, visit);
         }
     }
+}
+
+pub(crate) fn visit_free_binder_names(
+    binder: &Binder,
+    bound: &BTreeSet<String>,
+    visit: &mut impl FnMut(&str),
+) -> BTreeSet<String> {
+    let (name, filter) = binder_scope(binder);
+    let mut sources = binder_exprs(binder);
+    if filter.is_some() {
+        sources.pop();
+    }
+    for source in sources {
+        visit_free_names(source, bound, visit);
+    }
+    let mut local = bound.clone();
+    local.insert(name.to_owned());
+    if let Some(filter) = filter {
+        visit_free_names(filter, &local, visit);
+    }
+    local
 }
 
 /// Free state references, excluding enclosing locals, in lexicographic name order.
@@ -2319,7 +2372,7 @@ fn check_init_collection_binders(
     Ok(())
 }
 
-fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
+pub(crate) fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     let unsupported = match expr {
         Expr::Quantified { .. } => Some("a quantified expression"),
         Expr::Aggregate { .. } => Some("a binder or aggregate expression"),
@@ -2403,7 +2456,7 @@ fn binder_exprs(binder: &Binder) -> Vec<&Expr> {
     }
 }
 
-fn binder_scope(binder: &Binder) -> (&str, Option<&Expr>) {
+pub(crate) fn binder_scope(binder: &Binder) -> (&str, Option<&Expr>) {
     match binder {
         Binder::Typed {
             name, where_expr, ..
@@ -2747,6 +2800,10 @@ fn shown(name: &str) -> String {
     crate::unmapped_public_spelling(name)
 }
 
+pub(crate) fn unknown_update_target(name: &str) -> ModelError {
+    model_error(format!("unknown update target '{}'", shown(name)))
+}
+
 fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
@@ -3032,6 +3089,7 @@ mod tests {
                 Expr::EnumMember {
                     type_name: "E".into(),
                     member: "One".into(),
+                    source_bare: false,
                 },
                 vec![],
             ),

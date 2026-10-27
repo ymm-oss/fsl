@@ -1854,68 +1854,16 @@ pub(crate) fn free_vars(expr: &Expr) -> HashSet<String> {
     free_vars_bound(expr, &HashSet::new())
 }
 
+#[cfg(test)]
+#[path = "../tests/internal/pattern_scope_projection.rs"]
+mod pattern_scope_projection;
+
 fn free_vars_bound(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
-    if let Expr::Var(name) = expr {
-        return if bound.contains(name) {
-            HashSet::new()
-        } else {
-            HashSet::from([name.clone()])
-        };
-    }
-    if let Expr::Quantified { binder, body, .. } = expr {
-        let (mut out, nested_bound) = free_vars_binder(binder, bound);
-        out.extend(free_vars_bound(body, &nested_bound));
-        return out;
-    }
-    if let Expr::Aggregate { binder, value, .. } = expr {
-        let (mut out, nested_bound) = free_vars_binder(binder, bound);
-        if let Some(value) = value {
-            out.extend(free_vars_bound(value, &nested_bound));
-        }
-        return out;
-    }
     let mut out = HashSet::new();
-    let _ = visit_expr_children(expr, &mut |child| {
-        out.extend(free_vars_bound(child, bound));
-        Ok(())
+    model::visit_free_names(expr, &bound.iter().cloned().collect(), &mut |name| {
+        out.insert(name.to_owned());
     });
     out
-}
-
-fn free_vars_binder(
-    binder: &Binder,
-    bound: &HashSet<String>,
-) -> (HashSet<String>, HashSet<String>) {
-    let mut nested_bound = bound.clone();
-    nested_bound.insert(binder_name(binder).to_owned());
-    let mut out = HashSet::new();
-    match binder {
-        Binder::Typed { where_expr, .. } => {
-            if let Some(filter) = where_expr {
-                out.extend(free_vars_bound(filter, &nested_bound));
-            }
-        }
-        Binder::Range {
-            lo, hi, where_expr, ..
-        } => {
-            out.extend(free_vars_bound(lo, bound));
-            out.extend(free_vars_bound(hi, bound));
-            if let Some(filter) = where_expr {
-                out.extend(free_vars_bound(filter, &nested_bound));
-            }
-        }
-        Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => {
-            out.extend(free_vars_bound(collection, bound));
-            if let Some(filter) = where_expr {
-                out.extend(free_vars_bound(filter, &nested_bound));
-            }
-        }
-    }
-    (out, nested_bound)
 }
 
 fn binder_name(binder: &Binder) -> &str {
@@ -2273,15 +2221,60 @@ pub(crate) fn collect_binder_names(binder: &Binder, names: &mut HashSet<String>)
 }
 
 pub(crate) fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
-    if let Expr::Var(name) = expr {
-        names.insert(name.clone());
-    }
-    if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr {
-        collect_binder_names(binder, names);
-    }
-    let _ = visit_expr_children(expr, &mut |child| {
-        collect_names(child, names);
+    visit_names(expr, &mut |name, _| {
+        names.insert(name.to_owned());
+    });
+}
+
+pub(crate) fn collect_pattern_names(expr: &Expr, names: &mut HashSet<String>) {
+    visit_names(expr, &mut |name, pattern| {
+        if pattern {
+            names.insert(name.to_owned());
+        }
+    });
+}
+
+pub(crate) fn capture_names(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
+    let mut names = free_vars_bound(expr, bound);
+    collect_pattern_names(expr, &mut names);
+    names
+}
+
+pub(crate) fn capture_binder_names(
+    binder: &Binder,
+    bound: &HashSet<String>,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut names = HashSet::new();
+    let nested =
+        model::visit_free_binder_names(binder, &bound.iter().cloned().collect(), &mut |name| {
+            names.insert(name.to_owned());
+        });
+    let _ = visit_binder_exprs(binder, &mut |expr| {
+        collect_pattern_names(expr, &mut names);
         Ok(())
+    });
+    (names, nested.into_iter().collect())
+}
+
+fn visit_names(expr: &Expr, visit: &mut impl FnMut(&str, bool)) {
+    recursion::guard(|| {
+        if let Expr::Var(name) = expr {
+            visit(name, false);
+        }
+        if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr {
+            visit(binder_name(binder), false);
+        }
+        if let Expr::Is {
+            pattern: fsl_syntax::Pattern::Some(name),
+            ..
+        } = expr
+        {
+            visit(name, true);
+        }
+        let _ = visit_expr_children(expr, &mut |child| {
+            visit_names(child, visit);
+            Ok(())
+        });
     });
 }
 

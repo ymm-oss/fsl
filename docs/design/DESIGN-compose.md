@@ -49,6 +49,146 @@ compose OrderSystem {
     assignment; since the write targets are disjoint across components and additional
     statements can only write composition-side state, there is no conflict —
     synchronizing two actions of the same component is not allowed)
+  - Breaking removal (#1334): additional statements also reject component-state
+    assignments written with physical names such as `alias__x`, at the assignment's
+    location; those spellings previously passed `check`. This removal changes
+    acceptance only for physical-name component-state assignments in sync additions.
+    Before/after binaries, each in its own materialized tree, ran `fslc check`
+    on all 579 `.fsl` files under `specs/`, `examples/`, and
+    `rust/fslc/tests/fixtures/`. Recorded exit codes, results, and the first
+    160 characters of each message agree for every file. There were
+    **zero ok-to-error transitions** (this write form does not occur in that
+    corpus). No pre-existing required tests were
+    rewritten, renamed, deleted, or stopped; only new regression tests were added.
+  - Breaking removal (#1442): reference arguments read only header parameters,
+    consts, and state, never bindings from the additional items' `let`s.
+
+    **Migration contract (#702, limited to sync reference argument scope):**
+
+    1. **Versions/editions:** reproduced with native 4.12.0 and the default/current
+       edition at base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` (accepted) and
+       the scoped compose implementation (rejected, also reporting 4.12.0).
+       This is the v5.0.0 contract; no edition bypass is provided. The earliest
+       affected release has not been established.
+    2. **New rejection:** `action s() = b.go(t) { let t = true }` no longer
+       checks when the additional `let` is the only declaration of `t`.
+       For the measured five-line component with
+       `action go(v: Bool) { flag = v }`, the exact diagnostic is exit 2,
+       `result: "error"`, `kind: "semantics"`, message
+       `invalid model expression: public Kernel cannot type identifier 't' at 4:24`,
+       and `loc: {"line": 4, "column": 24}`. The location depends on the input;
+       it is not a fixed location for every rejected reference.
+    3. **Rewrite:** declare a header parameter, for example
+       `action s(t: Bool) = b.go(t) { }`, and supply the intended value at its
+       call sites, or represent the intended value in composition-side state
+       and pass that state expression. Header parameters, consts, and state
+       remain valid argument sources. Review the action interface and state
+       semantics: these rewrites are not automatically equivalent to an
+       additional local binding. There is no automatic migration.
+    4. **Commands:** run unscoped `fslc check composed.fsl`, correct each
+       out-of-scope reference, repeat `check`, then run
+       `fslc verify composed.fsl --depth 8 --no-cache` on the corrected source.
+       There is no dedicated lint/migrate auto-fix for this scope change;
+       a selected-property verification run is not a migration detector.
+    5. **Verdicts/evidence:** a previous `ok` now becomes the type error above;
+       do not reuse verification evidence for the removed source form after
+       rewriting it. Existing JSON envelopes and assurance classes are unchanged.
+       The recorded `fslc check` sweep of all 579 `.fsl` files under `specs/`,
+       `examples/`, and `rust/fslc/tests/fixtures/`, from the base above to
+       `acd81719248dd7740b942e4ee3fff0c56892e6be`, has zero ok-to-error
+       transitions; this inline form is not in that corpus. Its base acceptance
+       and new rejection were each reproduced twice, and the regression also
+       checks accepting header-parameter and composition-state rewrites.
+    6. **Consumers/artifacts:** native CLI, Worker/shared compose loading,
+       hooks, CI, and downstream callers must handle the rejection rather than
+       treating an old `ok` as current acceptance. Do not use editor silence
+       instead of `check`. Reverify corrected sources, regenerate affected
+       scenario/testgen/replay/ledger/document/HTML artifacts, and recheck
+       approval records and implementation conformance against the new inputs.
+    7. **Rollback:** v5.0.0 has no compatibility bypass or grace period for this
+       form. Returning to an older accepting binary is a version rollback,
+       not evidence that the input satisfies the v5 contract; revalidate its
+       artifacts with that binary. No support duration is promised. This note
+       does not implement #702's general release gate.
+  - Breaking removal (#1442, original component names): a composition cannot
+    make an originally undeclared component value read or update root valid.
+    Resolution uses the component's own declarations and lexical bindings
+    before prefixing and merging, for actions, properties, and initialization.
+    A bare enum member retains its owning enum identity when an unrenamed
+    public value could capture it; otherwise its existing representation is
+    retained. Its printer uses the source member spelling. Public header names
+    remain legal; private capturers use the shared hygiene rules instead.
+    Display-only provenance on the reified node distinguishes these bare reads
+    from conversion, abstraction, and user-qualified enum literals, whose owner
+    qualification is preserved; semantic Kernel AST/JSON output is unchanged.
+    Pattern collisions follow the ordinary type checker's aggregate phase:
+    a pattern sharing a normalized non-typed `count` or `sum` binder is accepted
+    exactly as in the standalone component, while non-expanding `forall` and
+    `unique` retain their refusal. Source rewriting and hygienic renaming use
+    that same phase decision, including independent header-argument scopes.
+    The ordered free-reference walk is shared with model checking; set-valued
+    capture inventories do not change preorder diagnostic selection. Late
+    component errors use the checked model's use-site wrapper and retain the
+    inner cause and the component's file, line and column.
+    Helpful-action arguments also use the existing expression checker with
+    the action parameter's expected type and the property's binder scope.
+    This is a breaking closure of a previously unchecked position, not a new
+    normalization rule. Original-source aggregate pattern decisions survive
+    normalization as check-only data: a surviving pattern retains its original
+    refusal, while an erased empty-domain pattern does not invent one.
+    The helpful argument type gate addresses part of #1483: its base diagnostic
+    location is the `helpful` clause, not a separately recorded span for every
+    argument. Per-argument source spans and the placement of state-independence
+    checks remain #1483 follow-ups. Operand validation for `abs` remains #1459;
+    this routing change does not close that separate typing gap.
+
+    **Migration contract (#702, limited to original component name resolution):**
+
+    1. **Versions/editions:** reproduced with native 4.12.0, default/current
+       edition, at base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`: a component
+       with an undeclared read can fail alone yet check inside a composition
+       whose header or state supplies that spelling. This is removed for
+       v5.0.0. The earliest affected release has not been established.
+    2. **New rejection:** an undeclared `u` in a component is no longer supplied
+       implicitly by a sync header parameter, composition state, foreign enum
+       member, or an own/foreign generated state or const spelling. The paired
+       composition retains the standalone component's full error, not a new
+       capture diagnostic. The aligned regression's read reports exit 2,
+       `kind: "semantics"`, message
+       `invalid model expression: public Kernel cannot type identifier 'u' at 12:3`,
+       and `loc: {"line": 12, "column": 3}`. Update roots retain the original
+       `invalid model expression: unknown update target ...` diagnostic with
+       their own source position. Locations depend on the input layout.
+    3. **Rewrite:** correct or declare the intended name in the component's
+       original scope. A local must precede a guard that reads it; bodies and
+       ensures still use the complete normalized guard environment. If data
+       comes from the composition, declare a component action parameter and
+       pass the header/state value explicitly. Properties and initialization
+       must reference their own declared inputs. Review the intended state and
+       interface semantics; there is no automatic migration.
+    4. **Commands:** run `fslc check component.fsl` and
+       `fslc check composed.fsl`, fix the source-owned declaration/reference,
+       repeat both checks, then run
+       `fslc verify composed.fsl --depth 8 --no-cache` on the corrected input.
+       No lint/migrate auto-fix or selected-property verification bypass is
+       provided for missing component declarations.
+    5. **Verdicts/evidence:** a formerly accepted composition can become the
+       same exit-2 error as its standalone component; old verification evidence
+       does not justify the removed source form. JSON envelopes and assurance
+       classes are unchanged. The base-to-fixed `fslc check` sweep of all 579
+       `.fsl` forms under `specs/`, `examples/`, and
+       `rust/fslc/tests/fixtures/` has zero ok-to-error transitions; the invalid
+       forms are covered separately by 182 paired standalone-refusal cells.
+       Corrected sources require fresh verification evidence.
+    6. **Consumers/artifacts:** native CLI, Worker/shared loading, hooks, CI,
+       and downstream consumers must handle the preserved component error;
+       editor silence is not an acceptance gate. Reverify corrected inputs,
+       regenerate affected scenario/testgen/replay/ledger/document/HTML
+       artifacts, and recheck approval bindings and implementation conformance.
+    7. **Rollback:** there is no compatibility bypass or grace period. An
+       older accepting binary is a version rollback, not v5 conformance; its
+       artifacts must be revalidated against that binary. No support duration
+       is promised. This is not #702's general release gate.
   - ensures are also inherited from each action
   - argument expressions may use composition-side parameters, consts, and state
     expressions
@@ -61,6 +201,10 @@ compose OrderSystem {
   interleaving (it is executed only via a synchronized action).
 - An ordinary `action` (without `=`) may also be written (a glue action; reads and writes
   composition-side state and component state directly via `alias.var`).
+- Compose `init` may assign initial values to composition-side state and component
+  state, using `alias.var` or its physical `alias__var` spelling. If it overlaps a
+  component's own `init` assignment to the same location, the existing duplicate
+  initialization error rejects it; neither assignment takes precedence.
 
 ## 2. Semantics (= definition of the transformation)
 

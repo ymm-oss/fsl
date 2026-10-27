@@ -11,12 +11,15 @@ use fsl_syntax::{
 };
 use serde_json::{Value, json};
 
+use crate::model::ExpressionErrorContext;
 use crate::naming::NameMap;
+use crate::typecheck::TypecheckError;
 use crate::{
-    CoreError, CoreErrorKind, IndexedReplacements, KernelSpec, PredicateExpander,
-    capture_avoiding_binding_with_names, collect_binder_names, collect_names, expand_spec_domains,
-    free_vars, fresh_binding_name, substitute, substitute_binder,
+    CoreError, CoreErrorKind, KernelSpec, PredicateExpander, collect_binder_names, collect_names,
+    expand_spec_domains,
 };
+
+mod hygiene;
 
 pub trait FileResolver {
     /// Read one source-relative FSL dependency.
@@ -155,11 +158,15 @@ struct Component {
     use_span: fsl_syntax::Span,
     names: ComponentNames,
     spec: SurfaceSpec,
+    ambient: HashSet<String>,
+    public_bindings: HashSet<String>,
 }
 
 #[derive(Clone, Default)]
 struct ComponentNames {
+    pattern_scopes: std::rc::Rc<std::cell::RefCell<crate::typecheck::PatternScopes>>,
     consts: HashSet<String>,
+    enum_members: HashMap<String, Vec<String>>,
     types: HashSet<String>,
     state: HashSet<String>,
     actions: HashSet<String>,
@@ -174,10 +181,18 @@ impl ComponentNames {
                 SpecItem::Const { name, .. } => {
                     names.consts.insert(name.clone());
                 }
-                SpecItem::Type { name, .. }
-                | SpecItem::Enum { name, .. }
-                | SpecItem::Struct { name, .. } => {
+                SpecItem::Type { name, .. } | SpecItem::Struct { name, .. } => {
                     names.types.insert(name.clone());
+                }
+                SpecItem::Enum { name, members, .. } => {
+                    names.types.insert(name.clone());
+                    for member in members {
+                        names
+                            .enum_members
+                            .entry(member.clone())
+                            .or_default()
+                            .push(name.clone());
+                    }
                 }
                 SpecItem::State(fields) => {
                     names
@@ -197,6 +212,9 @@ impl ComponentNames {
                 }
                 _ => {}
             }
+        }
+        for owners in names.enum_members.values_mut() {
+            owners.sort();
         }
         names
     }
@@ -455,6 +473,7 @@ pub fn lower_compose_with_options(
     resolver: &dyn FileResolver,
     options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
+    let compose = expand_compose_predicates(compose)?;
     let mut components = BTreeMap::new();
     let mut component_annotations = Annotations::default();
     let mut order = Vec::new();
@@ -485,6 +504,8 @@ pub fn lower_compose_with_options(
                 use_span: *span,
                 names: ComponentNames::collect(&spec),
                 spec,
+                ambient: HashSet::new(),
+                public_bindings: HashSet::new(),
             },
         );
     }
@@ -496,6 +517,59 @@ pub fn lower_compose_with_options(
             _ => None,
         })
         .collect::<HashSet<_>>();
+
+    let mut composition_names = ComponentNames::default();
+    for item in &compose.items {
+        if let ComposeItem::Common(SpecItem::Const { name, .. }) = item {
+            composition_names.consts.insert(name.clone());
+        }
+        if let ComposeItem::Common(SpecItem::State(fields)) = item {
+            composition_names
+                .state
+                .extend(fields.iter().map(|field| field.name.clone()));
+        }
+    }
+    for component in components.values() {
+        for (member, owners) in &component.names.enum_members {
+            composition_names
+                .enum_members
+                .entry(member.clone())
+                .or_default()
+                .extend(owners.iter().map(|owner| prefix(&component.alias, owner)));
+        }
+    }
+    let mut ambient = composition_names
+        .state
+        .iter()
+        .chain(composition_names.consts.iter())
+        .chain(composition_names.enum_members.keys())
+        .cloned()
+        .collect::<HashSet<_>>();
+    ambient.extend(components.values().flat_map(|component| {
+        component
+            .names
+            .state
+            .iter()
+            .chain(&component.names.consts)
+            .map(|name| prefix(&component.alias, name))
+    }));
+    for component in components.values_mut() {
+        component.names.pattern_scopes = composition_names.pattern_scopes.clone();
+        component.ambient.clone_from(&ambient);
+        component
+            .public_bindings
+            .clone_from(&composition_names.state);
+        component.public_bindings.extend(
+            component
+                .names
+                .enum_members
+                .iter()
+                .filter(|(member, owners)| {
+                    composition_names.enum_members[*member].len() > owners.len()
+                })
+                .map(|(member, _)| member.clone()),
+        );
+    }
 
     let mut warnings = Vec::new();
     let mut static_items = Vec::new();
@@ -526,11 +600,15 @@ pub fn lower_compose_with_options(
                         Some(component_origin(component, "init")),
                         statements.len(),
                     ));
-                    init.extend(rewrite_statements(
-                        statements.clone(),
-                        component,
-                        &HashSet::new(),
-                    ));
+                    init.extend(
+                        rewrite_statements(statements.clone(), component, &HashSet::new())
+                            .and_then(|statements| {
+                                hygiene::root_statements(statements, &component.names, &ambient)
+                            })
+                            .map_err(|error| {
+                                component_rewrite_error(error, ExpressionErrorContext::Init)
+                            })?,
+                    );
                     if init_meta.is_none() {
                         init_meta.clone_from(meta);
                     }
@@ -539,26 +617,32 @@ pub fn lower_compose_with_options(
                 SpecItem::Action { name, .. } => {
                     if !internal.contains(&(alias.clone(), name.clone())) {
                         names.insert_action(alias, name);
-                        actions.push(rewrite_component_item(item.clone(), component));
+                        actions.push(hygienic_component_action(
+                            rewrite_component_item(item.clone(), component)?,
+                            &component.names,
+                            &ambient,
+                        )?);
                     }
                 }
-                _ => static_items.push(rewrite_component_item(item.clone(), component)),
+                _ => static_items.push(rewrite_component_item(item.clone(), component)?),
             }
         }
     }
 
     for item in &compose.items {
         match item {
-            ComposeItem::Common(SpecItem::State(fields)) => {
-                static_items.push(SpecItem::State(fields.clone()));
-            }
             ComposeItem::Common(SpecItem::Init {
                 statements,
                 meta,
                 annotations,
             }) => {
                 init_origins.extend(std::iter::repeat_n(None, statements.len()));
-                init.extend(rewrite_compose_statements(statements.clone(), &components)?);
+                init.extend(rewrite_compose_statements(
+                    statements.clone(),
+                    &components,
+                    &HashSet::new(),
+                    ComposeWriteContext::Init,
+                )?);
                 if init_meta.is_none() {
                     init_meta.clone_from(meta);
                 }
@@ -574,6 +658,8 @@ pub fn lower_compose_with_options(
                 actions.push(sync_action(
                     action,
                     &components,
+                    &composition_names,
+                    &ambient,
                     &mut warnings,
                     &mut origins,
                 )?);
@@ -606,12 +692,59 @@ pub fn lower_compose_with_options(
     static_items.extend(actions);
     let mut kernel = composed_kernel(compose.name, static_items, component_annotations, warnings);
     kernel.names = names;
+    kernel.names.pattern_scopes = composition_names.pattern_scopes.borrow().clone();
     for (target, origin) in origins {
         kernel
             .origins
             .bind(crate::origin::component_check_target(&target), origin);
     }
     Ok(kernel)
+}
+
+/// Expand source-local defs before aliases or sync substitution can change scope.
+fn expand_compose_predicates(mut compose: SurfaceCompose) -> Result<SurfaceCompose, CoreError> {
+    let definitions = SurfaceSpec {
+        name: compose.name.clone(),
+        meta: None,
+        items: compose
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                ComposeItem::Common(item @ SpecItem::Def { .. }) => Some(item.clone()),
+                _ => None,
+            })
+            .collect(),
+    };
+    let expander = PredicateExpander::new(&definitions)?;
+    let mut items = Vec::new();
+    for item in compose.items {
+        items.push(match item {
+            ComposeItem::Common(SpecItem::Def { .. }) => continue,
+            ComposeItem::Common(item) => ComposeItem::Common(expander.expand_item(item)?),
+            ComposeItem::SyncAction(mut action) => {
+                action.params = action
+                    .params
+                    .into_iter()
+                    .map(|param| expander.expand_param(param))
+                    .collect::<Result<_, _>>()?;
+                for reference in &mut action.refs {
+                    reference.args = std::mem::take(&mut reference.args)
+                        .into_iter()
+                        .map(|arg| expander.expand_expr(arg, &mut Vec::new()))
+                        .collect::<Result<_, _>>()?;
+                }
+                action.items = action
+                    .items
+                    .into_iter()
+                    .map(|item| expander.expand_action_item(item))
+                    .collect::<Result<_, _>>()?;
+                ComposeItem::SyncAction(action)
+            }
+            item @ (ComposeItem::Use { .. } | ComposeItem::Internal { .. }) => item,
+        });
+    }
+    compose.items = items;
+    Ok(compose)
 }
 
 fn prefix(alias: &str, name: &str) -> String {
@@ -644,13 +777,80 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
     }
 }
 
+fn component_rewrite_error(
+    error: TypecheckError,
+    context: ExpressionErrorContext<'_>,
+) -> CoreError {
+    let TypecheckError { message, span } = error;
+    let message = context.message(message);
+    if let Some(span) = span {
+        return error_at(message, span);
+    }
+    CoreError {
+        message,
+        line: 0,
+        column: 0,
+        kind: CoreErrorKind::Semantics,
+        origin: None,
+        diagnostic_code: None,
+    }
+}
+
+fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecItem, CoreError> {
+    let span = match &item {
+        SpecItem::Action { span, .. }
+        | SpecItem::Invariant { span, .. }
+        | SpecItem::Trans { span, .. }
+        | SpecItem::Reachable { span, .. }
+        | SpecItem::Terminal { span, .. }
+        | SpecItem::Until { span, .. }
+        | SpecItem::Unless { span, .. }
+        | SpecItem::LeadsTo { span, .. }
+        | SpecItem::Struct { span, .. }
+        | SpecItem::VerifyBounds { span, .. } => Some(*span),
+        _ => None,
+    };
+    let initializers = match &item {
+        SpecItem::State(fields) => fields
+            .iter()
+            .filter_map(|field| {
+                field
+                    .initializer_span
+                    .map(|span| (span, field.name.clone()))
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    rewrite_component_item_inner(item, component).map_err(|error| {
+        let error = match span {
+            Some(span) => error.with_span(span),
+            None => error,
+        };
+        let owner = initializers.iter().find(|(initializer, _)| {
+            error.span.is_some_and(|span| {
+                span.start.offset >= initializer.start.offset
+                    && span.end.offset <= initializer.end.offset
+            })
+        });
+        match owner {
+            Some((_, name)) => {
+                component_rewrite_error(error, ExpressionErrorContext::InlineInitializer(name))
+            }
+            None => component_rewrite_error(error, ExpressionErrorContext::Model),
+        }
+    })
+}
+
 #[allow(clippy::too_many_lines)]
-fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
+fn rewrite_component_item_inner(
+    item: SpecItem,
+    component: &Component,
+) -> Result<SpecItem, TypecheckError> {
     let alias = &component.alias;
-    match item {
+    Ok(match item {
         SpecItem::Const { name, value } => SpecItem::Const {
             name: prefix(alias, &name),
-            value: Box::new(rewrite_expr(*value, component, &HashSet::new())),
+            value: Box::new(rewrite_expr(*value, component, &HashSet::new())?),
         },
         SpecItem::Type {
             name,
@@ -659,8 +859,8 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             symmetric,
         } => SpecItem::Type {
             name: prefix(alias, &name),
-            lo: Box::new(rewrite_expr(*lo, component, &HashSet::new())),
-            hi: Box::new(rewrite_expr(*hi, component, &HashSet::new())),
+            lo: Box::new(rewrite_expr(*lo, component, &HashSet::new())?),
+            hi: Box::new(rewrite_expr(*hi, component, &HashSet::new())?),
             symmetric,
         },
         SpecItem::Enum {
@@ -679,29 +879,52 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             span,
             fields: fields
                 .into_iter()
-                .map(|(name, ty)| (name, rewrite_type(ty, component)))
-                .collect(),
+                .map(|(name, ty)| {
+                    Ok((
+                        name,
+                        rewrite_type(ty, component).map_err(|error| error.with_span(span))?,
+                    ))
+                })
+                .collect::<Result<_, TypecheckError>>()?,
         },
         SpecItem::State(fields) => SpecItem::State(
             fields
                 .into_iter()
-                .map(|field| fsl_syntax::StateField {
-                    name: prefix(alias, &field.name),
-                    ty: rewrite_type(field.ty, component),
-                    initializer: field
-                        .initializer
-                        .map(|expr| rewrite_expr(expr, component, &HashSet::new())),
-                    span: field.span,
-                    initializer_span: field.initializer_span,
+                .map(|field| {
+                    Ok(fsl_syntax::StateField {
+                        name: prefix(alias, &field.name),
+                        ty: rewrite_type(field.ty, component)
+                            .map_err(|error| error.with_span(field.span))?,
+                        initializer: field
+                            .initializer
+                            .map(|expr| {
+                                if crate::model::unsupported_inline_form(&expr).is_some() {
+                                    return Ok(expr);
+                                }
+                                rewrite_root_expr_at(
+                                    expr,
+                                    component,
+                                    &HashSet::new(),
+                                    field.initializer_span.unwrap_or(field.span),
+                                )
+                            })
+                            .transpose()?,
+                        span: field.span,
+                        initializer_span: field.initializer_span,
+                    })
                 })
-                .collect(),
+                .collect::<Result<_, TypecheckError>>()?,
         ),
         SpecItem::Init {
             statements,
             meta,
             annotations,
         } => SpecItem::Init {
-            statements: rewrite_statements(statements, component, &HashSet::new()),
+            statements: hygiene::root_statements(
+                rewrite_statements(statements, component, &HashSet::new())?,
+                &component.names,
+                &component.ambient,
+            )?,
             meta,
             annotations,
         },
@@ -718,17 +941,13 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             let params = params
                 .into_iter()
                 .map(|param| rewrite_param(param, component))
-                .collect::<Vec<_>>();
-            let bound = params
-                .iter()
-                .map(|param| match param {
-                    Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
-                })
-                .collect();
+                .collect::<Result<Vec<_>, TypecheckError>>()
+                .map_err(|error| error.with_span(span))?;
+            let bound = param_names(&params);
             SpecItem::Action {
                 name: prefix(alias, &name),
                 params,
-                items: rewrite_action_items(items, component, &bound),
+                items: rewrite_action_items(items, component, &bound, span)?,
                 span,
                 fair,
                 meta,
@@ -744,7 +963,12 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Invariant {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -757,7 +981,12 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Trans {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -770,13 +999,23 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Reachable {
             name: prefix(alias, &name),
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
         },
         SpecItem::Terminal { expr, span } => SpecItem::Terminal {
-            expr: Box::new(rewrite_expr(*expr, component, &HashSet::new())),
+            expr: Box::new(rewrite_root_expr_at(
+                *expr,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
         },
         SpecItem::LeadsTo {
@@ -795,21 +1034,38 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             let binders = binders
                 .into_iter()
                 .map(|binder| {
-                    let binder = rewrite_binder(binder, component, &bound);
+                    let binder = rewrite_binder(binder, component, &bound)?;
+                    let binder =
+                        hygiene::root_binder(binder, &component.names, &bound, &component.ambient)?;
                     bound.insert(binder_name(&binder).to_owned());
-                    binder
+                    Ok(binder)
                 })
-                .collect();
+                .collect::<Result<_, TypecheckError>>()?;
             SpecItem::LeadsTo {
                 name: prefix(alias, &name),
                 binders,
-                before: Box::new(rewrite_expr(*before, component, &bound)),
-                after: Box::new(rewrite_expr(*after, component, &bound)),
+                before: Box::new(rewrite_root_expr_at(*before, component, &bound, span)?),
+                after: Box::new(rewrite_root_expr_at(*after, component, &bound, span)?),
                 span,
                 meta,
-                decreases: decreases.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
-                within: within.map(|expr| Box::new(rewrite_expr(*expr, component, &bound))),
-                helpful,
+                decreases: decreases
+                    .map(|expr| rewrite_root_expr_at(*expr, component, &bound, span).map(Box::new))
+                    .transpose()?,
+                within: within
+                    .map(|expr| rewrite_root_expr_at(*expr, component, &bound, span).map(Box::new))
+                    .transpose()?,
+                helpful: helpful
+                    .into_iter()
+                    .map(|mut helper| {
+                        helper.action = prefix(alias, &helper.action);
+                        helper.args = helper
+                            .args
+                            .into_iter()
+                            .map(|arg| rewrite_root_expr_at(arg, component, &bound, helper.span))
+                            .collect::<Result<_, TypecheckError>>()?;
+                        Ok(helper)
+                    })
+                    .collect::<Result<_, TypecheckError>>()?,
                 annotations,
             }
         }
@@ -827,8 +1083,18 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Until {
             name: prefix(alias, &name),
-            before: Box::new(rewrite_expr(*before, component, &HashSet::new())),
-            after: Box::new(rewrite_expr(*after, component, &HashSet::new())),
+            before: Box::new(rewrite_root_expr_at(
+                *before,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
+            after: Box::new(rewrite_root_expr_at(
+                *after,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -842,8 +1108,18 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
             annotations,
         } => SpecItem::Unless {
             name: prefix(alias, &name),
-            before: Box::new(rewrite_expr(*before, component, &HashSet::new())),
-            after: Box::new(rewrite_expr(*after, component, &HashSet::new())),
+            before: Box::new(rewrite_root_expr_at(
+                *before,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
+            after: Box::new(rewrite_root_expr_at(
+                *after,
+                component,
+                &HashSet::new(),
+                span,
+            )?),
             span,
             meta,
             annotations,
@@ -852,38 +1128,38 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> SpecItem {
         | SpecItem::Entity(..)
         | SpecItem::Number(..)
         | SpecItem::Def { .. }) => item,
-    }
+    })
 }
 
-fn rewrite_type(ty: TypeExpr, component: &Component) -> TypeExpr {
-    match ty {
+fn rewrite_type(ty: TypeExpr, component: &Component) -> Result<TypeExpr, TypecheckError> {
+    Ok(match ty {
         TypeExpr::Name(name) if component.names.types.contains(&name) => {
             TypeExpr::Name(prefix(&component.alias, &name))
         }
         TypeExpr::Range(lo, hi) => TypeExpr::Range(
-            rewrite_expr(lo, component, &HashSet::new()),
-            rewrite_expr(hi, component, &HashSet::new()),
+            rewrite_expr(lo, component, &HashSet::new())?,
+            rewrite_expr(hi, component, &HashSet::new())?,
         ),
         TypeExpr::Map(key, value) => TypeExpr::Map(
-            Box::new(rewrite_type(*key, component)),
-            Box::new(rewrite_type(*value, component)),
+            Box::new(rewrite_type(*key, component)?),
+            Box::new(rewrite_type(*value, component)?),
         ),
         TypeExpr::Relation(source, target) => TypeExpr::Relation(
-            Box::new(rewrite_type(*source, component)),
-            Box::new(rewrite_type(*target, component)),
+            Box::new(rewrite_type(*source, component)?),
+            Box::new(rewrite_type(*target, component)?),
         ),
-        TypeExpr::Set(inner) => TypeExpr::Set(Box::new(rewrite_type(*inner, component))),
+        TypeExpr::Set(inner) => TypeExpr::Set(Box::new(rewrite_type(*inner, component)?)),
         TypeExpr::Seq(inner, cap) => TypeExpr::Seq(
-            Box::new(rewrite_type(*inner, component)),
-            rewrite_expr(cap, component, &HashSet::new()),
+            Box::new(rewrite_type(*inner, component)?),
+            rewrite_expr(cap, component, &HashSet::new())?,
         ),
-        TypeExpr::Option(inner) => TypeExpr::Option(Box::new(rewrite_type(*inner, component))),
+        TypeExpr::Option(inner) => TypeExpr::Option(Box::new(rewrite_type(*inner, component)?)),
         other => other,
-    }
+    })
 }
 
-fn rewrite_param(param: Param, component: &Component) -> Param {
-    match param {
+fn rewrite_param(param: Param, component: &Component) -> Result<Param, TypecheckError> {
+    Ok(match param {
         Param::Typed(name, mut qualified) => {
             if qualified.namespace.is_none() && component.names.types.contains(&qualified.name) {
                 qualified.name = prefix(&component.alias, &qualified.name);
@@ -892,41 +1168,108 @@ fn rewrite_param(param: Param, component: &Component) -> Param {
         }
         Param::Range(name, lo, hi) => Param::Range(
             name,
-            rewrite_expr(lo, component, &HashSet::new()),
-            rewrite_expr(hi, component, &HashSet::new()),
+            rewrite_expr(lo, component, &HashSet::new())?,
+            rewrite_expr(hi, component, &HashSet::new())?,
         ),
+    })
+}
+
+fn param_names(params: &[Param]) -> HashSet<String> {
+    params
+        .iter()
+        .map(|param| match param {
+            Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
+        })
+        .collect()
+}
+
+fn hygienic_component_action(
+    mut item: SpecItem,
+    globals: &ComponentNames,
+    ambient: &HashSet<String>,
+) -> Result<SpecItem, CoreError> {
+    let SpecItem::Action {
+        items,
+        params,
+        span,
+        ..
+    } = &mut item
+    else {
+        unreachable!("only component actions enter source hygiene")
+    };
+    let bound = param_names(params);
+    let mut used = ambient.clone();
+    used.extend(bound.iter().cloned());
+    for item in items.iter() {
+        collect_action_item_names(item, &mut used, None);
     }
+    *items = hygiene::rewrite(
+        std::mem::take(items),
+        hygiene::Source {
+            globals,
+            params: &bound,
+            span: *span,
+            arguments: None,
+        },
+        &HashSet::new(),
+        &HashSet::new(),
+        ambient,
+        &mut used,
+    )?;
+    Ok(item)
+}
+
+/// Match model normalization without changing surface item order: guards see
+/// preceding guards; every statement and ensures sees the final guard scope.
+fn map_normalized_action_items<S, E>(
+    mut items: Vec<ActionItem>,
+    scope: &mut S,
+    mut rewrite: impl FnMut(ActionItem, &mut S) -> Result<ActionItem, E>,
+) -> Result<Vec<ActionItem>, E> {
+    for guards in [true, false] {
+        for item in &mut items {
+            if matches!(item, ActionItem::Requires(..) | ActionItem::Let(..)) == guards {
+                *item = rewrite(item.clone(), scope)?;
+            }
+        }
+    }
+    Ok(items)
 }
 
 fn rewrite_action_items(
     items: Vec<ActionItem>,
     component: &Component,
     bound: &HashSet<String>,
-) -> Vec<ActionItem> {
-    items
-        .into_iter()
-        .map(|item| match item {
+    action_span: fsl_syntax::Span,
+) -> Result<Vec<ActionItem>, TypecheckError> {
+    let mut bound = bound.clone();
+    map_normalized_action_items(items, &mut bound, |item, bound| {
+        Ok(match item {
             ActionItem::Requires(expr, span) => {
-                ActionItem::Requires(rewrite_expr(expr, component, bound), span)
+                let expr = rewrite_expr_at(expr, component, bound, action_span)?;
+                extend_pattern_names(&expr, bound);
+                ActionItem::Requires(expr, span)
             }
             ActionItem::Ensures(expr, span) => {
-                ActionItem::Ensures(rewrite_expr(expr, component, bound), span)
+                ActionItem::Ensures(rewrite_expr_at(expr, component, bound, action_span)?, span)
             }
             ActionItem::Let(name, expr, span) => {
-                ActionItem::Let(name, rewrite_expr(expr, component, bound), span)
+                let expr = rewrite_expr_at(expr, component, bound, action_span)?;
+                bound.insert(name.clone());
+                ActionItem::Let(name, expr, span)
             }
             ActionItem::Statement(statement) => {
-                ActionItem::Statement(rewrite_statement(statement, component, bound))
+                ActionItem::Statement(rewrite_statement(statement, component, bound)?)
             }
         })
-        .collect()
+    })
 }
 
 fn rewrite_statements(
     statements: Vec<Statement>,
     component: &Component,
     bound: &HashSet<String>,
-) -> Vec<Statement> {
+) -> Result<Vec<Statement>, TypecheckError> {
     statements
         .into_iter()
         .map(|statement| rewrite_statement(statement, component, bound))
@@ -937,15 +1280,16 @@ fn rewrite_statement(
     statement: Statement,
     component: &Component,
     bound: &HashSet<String>,
-) -> Statement {
-    match statement {
+) -> Result<Statement, TypecheckError> {
+    Ok(match statement {
         Statement::Assign {
             target,
             value,
             span,
         } => Statement::Assign {
-            target: rewrite_lvalue(target, component, bound),
-            value: rewrite_expr(value, component, bound),
+            target: rewrite_lvalue(target, component, bound)
+                .map_err(|error| error.with_span(span))?,
+            value: rewrite_expr_at(value, component, bound, span)?,
             span,
         },
         Statement::If {
@@ -953,188 +1297,246 @@ fn rewrite_statement(
             then_statements,
             else_statements,
             span,
-        } => Statement::If {
-            condition: rewrite_expr(condition, component, bound),
-            then_statements: rewrite_statements(then_statements, component, bound),
-            else_statements: rewrite_statements(else_statements, component, bound),
-            span,
-        },
+        } => {
+            let condition = rewrite_expr_at(condition, component, bound, span)?;
+            Statement::If {
+                condition,
+                then_statements: rewrite_statements(then_statements, component, bound)?,
+                else_statements: rewrite_statements(else_statements, component, bound)?,
+                span,
+            }
+        }
         Statement::ForAll {
             binder,
             statements,
             span,
         } => {
-            let binder = rewrite_binder(binder, component, bound);
+            let binder =
+                rewrite_binder(binder, component, bound).map_err(|error| error.with_span(span))?;
             let mut nested = bound.clone();
             nested.insert(binder_name(&binder).to_owned());
             Statement::ForAll {
                 binder,
-                statements: rewrite_statements(statements, component, &nested),
+                statements: rewrite_statements(statements, component, &nested)?,
                 span,
             }
         }
-    }
+    })
 }
 
-fn rewrite_lvalue(lvalue: LValue, component: &Component, bound: &HashSet<String>) -> LValue {
-    match lvalue {
-        LValue::Var(name) => LValue::Var(rewrite_state_name(name, component)),
+fn rewrite_lvalue(
+    lvalue: LValue,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> Result<LValue, TypecheckError> {
+    Ok(match lvalue {
+        LValue::Var(name) => LValue::Var(rewrite_state_name(&name, component)?),
         LValue::Index(name, expr) => LValue::Index(
-            rewrite_state_name(name, component),
-            rewrite_expr(expr, component, bound),
+            rewrite_state_name(&name, component)?,
+            rewrite_expr(expr, component, bound)?,
         ),
         LValue::Field(base, field) => {
-            LValue::Field(Box::new(rewrite_lvalue(*base, component, bound)), field)
+            LValue::Field(Box::new(rewrite_lvalue(*base, component, bound)?), field)
         }
-    }
+    })
 }
 
-fn rewrite_state_name(name: String, component: &Component) -> String {
-    if component.names.state.contains(&name) {
-        prefix(&component.alias, &name)
+fn rewrite_state_name(name: &str, component: &Component) -> Result<String, TypecheckError> {
+    if component.names.state.contains(name) {
+        Ok(prefix(&component.alias, name))
     } else {
-        name
+        Err(TypecheckError {
+            message: crate::model::unknown_update_target(name).message,
+            span: None,
+        })
     }
 }
 
-#[allow(clippy::too_many_lines)]
-fn rewrite_expr(expr: Expr, component: &Component, bound: &HashSet<String>) -> Expr {
-    match expr {
-        Expr::Var(name)
-            if !bound.contains(&name)
-                && (component.names.state.contains(&name)
-                    || component.names.consts.contains(&name)) =>
-        {
-            Expr::Var(prefix(&component.alias, &name))
-        }
-        Expr::Some(expr) => Expr::Some(Box::new(rewrite_expr(*expr, component, bound))),
-        Expr::Set(items) => Expr::Set(
-            items
-                .into_iter()
-                .map(|item| rewrite_expr(item, component, bound))
-                .collect(),
-        ),
-        Expr::Seq(items) => Expr::Seq(
-            items
-                .into_iter()
-                .map(|item| rewrite_expr(item, component, bound))
-                .collect(),
-        ),
-        Expr::Struct { name, fields } => Expr::Struct {
-            name: if component.names.types.contains(&name) {
-                prefix(&component.alias, &name)
-            } else {
-                name
-            },
-            fields: fields
-                .into_iter()
-                .map(|(name, expr)| (name, rewrite_expr(expr, component, bound)))
-                .collect(),
-        },
-        Expr::Call { name, args, span } => Expr::Call {
-            name,
-            args: args
-                .into_iter()
-                .map(|arg| rewrite_expr(arg, component, bound))
-                .collect(),
-            span,
-        },
-        Expr::Index(base, index) => Expr::Index(
-            Box::new(rewrite_expr(*base, component, bound)),
-            Box::new(rewrite_expr(*index, component, bound)),
-        ),
-        Expr::Field(base, name) => {
-            Expr::Field(Box::new(rewrite_expr(*base, component, bound)), name)
-        }
-        Expr::Method {
-            receiver,
-            name,
-            args,
-        } => Expr::Method {
-            receiver: Box::new(rewrite_expr(*receiver, component, bound)),
-            name,
-            args: args
-                .into_iter()
-                .map(|arg| rewrite_expr(arg, component, bound))
-                .collect(),
-        },
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: Box::new(rewrite_expr(*left, component, bound)),
-            right: Box::new(rewrite_expr(*right, component, bound)),
-        },
-        Expr::Neg(expr) => Expr::Neg(Box::new(rewrite_expr(*expr, component, bound))),
-        Expr::Not(expr) => Expr::Not(Box::new(rewrite_expr(*expr, component, bound))),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            spans,
-        } => Expr::Conditional {
-            spans,
-            condition: Box::new(rewrite_expr(*condition, component, bound)),
-            then_expr: Box::new(rewrite_expr(*then_expr, component, bound)),
-            else_expr: Box::new(rewrite_expr(*else_expr, component, bound)),
-        },
-        Expr::Is { expr, pattern } => Expr::Is {
-            expr: Box::new(rewrite_expr(*expr, component, bound)),
-            pattern,
-        },
-        Expr::Quantified {
-            quantifier,
-            binder,
-            body,
-        } => {
-            let binder = rewrite_binder(binder, component, bound);
-            let mut nested = bound.clone();
-            nested.insert(binder_name(&binder).to_owned());
+fn rewrite_root_expr_at(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+    span: fsl_syntax::Span,
+) -> Result<Expr, TypecheckError> {
+    let expr = rewrite_expr_at(expr, component, bound, span)?;
+    hygiene::root_expression(expr, &component.names, bound, &component.ambient)
+        .map_err(|error| error.with_span(span))
+}
+
+fn rewrite_expr_at(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+    span: fsl_syntax::Span,
+) -> Result<Expr, TypecheckError> {
+    rewrite_expr(expr, component, bound).map_err(|error| error.with_span(span))
+}
+
+fn rewrite_expr(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> Result<Expr, TypecheckError> {
+    rewrite_expr_in_phase(
+        expr,
+        component,
+        bound,
+        &crate::typecheck::ValidationPhase::normalized(),
+    )
+}
+
+fn rewrite_expr_in_phase(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+    phase: &crate::typecheck::ValidationPhase,
+) -> Result<Expr, TypecheckError> {
+    crate::recursion::guard(|| {
+        let rewrite = |expr| rewrite_expr_in_phase(expr, component, bound, phase);
+        Ok(match expr {
+            Expr::Var(name) => rewrite_component_read(name, component, bound)?,
+            Expr::Struct { name, fields } => hygiene::map_children(
+                Expr::Struct {
+                    name: if component.names.types.contains(&name) {
+                        prefix(&component.alias, &name)
+                    } else {
+                        name
+                    },
+                    fields,
+                },
+                |child, _| rewrite(child),
+            )?,
+            Expr::Binary { op, left, right } => {
+                let left = rewrite(*left)?;
+                let nested = pattern_scope(&left, bound);
+                Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(rewrite_expr_in_phase(*right, component, &nested, phase)?),
+                }
+            }
+            Expr::Is { expr, pattern } => {
+                if let fsl_syntax::Pattern::Some(name) = &pattern {
+                    crate::typecheck::reject_pattern_binding_name(
+                        phase,
+                        None,
+                        name,
+                        component.names.state.iter().map(String::as_str),
+                        component.names.consts.iter().map(String::as_str),
+                        component.names.enum_members.keys().map(String::as_str),
+                        bound.iter().map(String::as_str),
+                    )?;
+                }
+                Expr::Is {
+                    expr: Box::new(rewrite(*expr)?),
+                    pattern,
+                }
+            }
             Expr::Quantified {
                 quantifier,
                 binder,
-                body: Box::new(rewrite_expr(*body, component, &nested)),
+                body,
+            } => {
+                let child_phase = phase.under_binder(&binder, None);
+                let binder =
+                    rewrite_binder_in_phase(binder, component, bound, phase, &child_phase)?;
+                let mut nested = bound.clone();
+                nested.insert(binder_name(&binder).to_owned());
+                Expr::Quantified {
+                    quantifier,
+                    binder,
+                    body: Box::new(rewrite_expr_in_phase(
+                        *body,
+                        component,
+                        &nested,
+                        &child_phase,
+                    )?),
+                }
             }
-        }
-        Expr::Aggregate {
-            kind,
-            binder,
-            value,
-        } => {
-            let binder = rewrite_binder(binder, component, bound);
-            let mut nested = bound.clone();
-            nested.insert(binder_name(&binder).to_owned());
             Expr::Aggregate {
                 kind,
                 binder,
-                value: value.map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+                value,
+            } => {
+                let child_phase = phase.under_binder(&binder, Some(kind));
+                let binder =
+                    rewrite_binder_in_phase(binder, component, bound, phase, &child_phase)?;
+                let mut nested = bound.clone();
+                nested.insert(binder_name(&binder).to_owned());
+                Expr::Aggregate {
+                    kind,
+                    binder,
+                    value: value
+                        .map(|expr| {
+                            rewrite_expr_in_phase(*expr, component, &nested, &child_phase)
+                                .map(Box::new)
+                        })
+                        .transpose()?,
+                }
             }
-        }
-        Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
-            name,
-            expr: Box::new(rewrite_expr(*expr, component, bound)),
-            span,
-        },
-        Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
-            name,
-            left: Box::new(rewrite_expr(*left, component, bound)),
-            right: Box::new(rewrite_expr(*right, component, bound)),
-        },
-        Expr::TernaryNamed {
-            name,
-            first,
-            second,
-            third,
-        } => Expr::TernaryNamed {
-            name,
-            first: Box::new(rewrite_expr(*first, component, bound)),
-            second: Box::new(rewrite_expr(*second, component, bound)),
-            third: Box::new(rewrite_expr(*third, component, bound)),
-        },
-        other => other,
-    }
+            expr @ Expr::Stage { .. } => expr,
+            expr => hygiene::map_children(expr, |child, span| match span {
+                Some(span) => rewrite(child).map_err(|error| error.with_span(span)),
+                None => rewrite(child),
+            })?,
+        })
+    })
 }
 
-fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>) -> Binder {
-    match binder {
+fn rewrite_component_read(
+    name: String,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> Result<Expr, TypecheckError> {
+    if bound.contains(&name) {
+        return Ok(Expr::Var(name));
+    }
+    if component.names.state.contains(&name) || component.names.consts.contains(&name) {
+        return Ok(Expr::Var(prefix(&component.alias, &name)));
+    }
+    let owners = component
+        .names
+        .enum_members
+        .get(&name)
+        .map_or(&[][..], Vec::as_slice);
+    let [owner] = owners else {
+        return Err(crate::typecheck::unresolved_identifier(&name, owners));
+    };
+    // Only an unrenamed public value requires reifying the original bare read.
+    if component.public_bindings.contains(&name) {
+        return Ok(Expr::EnumMember {
+            type_name: prefix(&component.alias, owner),
+            member: name,
+            source_bare: true,
+        });
+    }
+    Ok(Expr::Var(name))
+}
+
+fn rewrite_binder(
+    binder: Binder,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> Result<Binder, TypecheckError> {
+    let phase = crate::typecheck::ValidationPhase::normalized();
+    let child_phase = phase.under_binder(&binder, None);
+    rewrite_binder_in_phase(binder, component, bound, &phase, &child_phase)
+}
+
+fn rewrite_binder_in_phase(
+    binder: Binder,
+    component: &Component,
+    bound: &HashSet<String>,
+    phase: &crate::typecheck::ValidationPhase,
+    child_phase: &crate::typecheck::ValidationPhase,
+) -> Result<Binder, TypecheckError> {
+    let mut nested = bound.clone();
+    nested.insert(binder_name(&binder).to_owned());
+    let filter = |expr: Option<Box<Expr>>| {
+        expr.map(|expr| rewrite_expr_in_phase(*expr, component, &nested, child_phase).map(Box::new))
+            .transpose()
+    };
+    Ok(match binder {
         Binder::Typed {
             name,
             mut type_name,
@@ -1143,13 +1545,10 @@ fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>
             if type_name.namespace.is_none() && component.names.types.contains(&type_name.name) {
                 type_name.name = prefix(&component.alias, &type_name.name);
             }
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
             Binder::Typed {
                 name,
                 type_name,
-                where_expr: where_expr
-                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
+                where_expr: filter(where_expr)?,
             }
         }
         Binder::Range {
@@ -1157,32 +1556,22 @@ fn rewrite_binder(binder: Binder, component: &Component, bound: &HashSet<String>
             lo,
             hi,
             where_expr,
-        } => {
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
-            Binder::Range {
-                name,
-                lo: Box::new(rewrite_expr(*lo, component, bound)),
-                hi: Box::new(rewrite_expr(*hi, component, bound)),
-                where_expr: where_expr
-                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
-            }
-        }
+        } => Binder::Range {
+            name,
+            lo: Box::new(rewrite_expr_in_phase(*lo, component, bound, phase)?),
+            hi: Box::new(rewrite_expr_in_phase(*hi, component, bound, phase)?),
+            where_expr: filter(where_expr)?,
+        },
         Binder::Collection {
             name,
             collection,
             where_expr,
-        } => {
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
-            Binder::Collection {
-                name,
-                collection: Box::new(rewrite_expr(*collection, component, bound)),
-                where_expr: where_expr
-                    .map(|expr| Box::new(rewrite_expr(*expr, component, &nested))),
-            }
-        }
-    }
+        } => Binder::Collection {
+            name,
+            collection: Box::new(rewrite_expr_in_phase(*collection, component, bound, phase)?),
+            where_expr: filter(where_expr)?,
+        },
+    })
 }
 
 fn binder_name(binder: &Binder) -> &str {
@@ -1198,6 +1587,25 @@ fn rewrite_compose_item(
     components: &BTreeMap<String, Component>,
 ) -> Result<SpecItem, CoreError> {
     Ok(match item {
+        SpecItem::State(fields) => SpecItem::State(
+            fields
+                .into_iter()
+                .map(|mut field| {
+                    field.ty = resolve_alias_type(field.ty, components, field.span)?;
+                    field.initializer = field
+                        .initializer
+                        .map(|expr| {
+                            resolve_alias_expr(
+                                expr,
+                                components,
+                                field.initializer_span.unwrap_or(field.span),
+                            )
+                        })
+                        .transpose()?;
+                    Ok(field)
+                })
+                .collect::<Result<_, CoreError>>()?,
+        ),
         SpecItem::Invariant {
             name,
             expr,
@@ -1271,7 +1679,28 @@ fn rewrite_compose_item(
             annotations,
         },
         item @ SpecItem::LeadsTo { .. } => resolve_alias_leads_to(item, components)?,
+        item @ SpecItem::Action { .. } => resolve_alias_action(item, components)?,
         other => other,
+    })
+}
+
+fn resolve_alias_type(
+    ty: TypeExpr,
+    components: &BTreeMap<String, Component>,
+    span: fsl_syntax::Span,
+) -> Result<TypeExpr, CoreError> {
+    let resolve_type = |ty| resolve_alias_type(ty, components, span).map(Box::new);
+    let resolve_expr = |expr| resolve_alias_expr(expr, components, span);
+    Ok(match ty {
+        TypeExpr::Range(lo, hi) => TypeExpr::Range(resolve_expr(lo)?, resolve_expr(hi)?),
+        TypeExpr::Map(key, value) => TypeExpr::Map(resolve_type(*key)?, resolve_type(*value)?),
+        TypeExpr::Relation(source, target) => {
+            TypeExpr::Relation(resolve_type(*source)?, resolve_type(*target)?)
+        }
+        TypeExpr::Set(inner) => TypeExpr::Set(resolve_type(*inner)?),
+        TypeExpr::Seq(inner, cap) => TypeExpr::Seq(resolve_type(*inner)?, resolve_expr(cap)?),
+        TypeExpr::Option(inner) => TypeExpr::Option(resolve_type(*inner)?),
+        TypeExpr::Int | TypeExpr::Bool | TypeExpr::Name(_) => ty,
     })
 }
 
@@ -1295,13 +1724,20 @@ fn resolve_alias_leads_to(
     else {
         return Ok(item);
     };
-    let resolve = |expr: Box<Expr>| resolve_alias_expr(*expr, components, span).map(Box::new);
+    let mut bound = HashSet::new();
+    let binders = binders
+        .into_iter()
+        .map(|binder| {
+            let (binder, nested) = resolve_alias_binder(binder, components, span, &bound)?;
+            bound = nested;
+            Ok(binder)
+        })
+        .collect::<Result<_, CoreError>>()?;
+    let resolve =
+        |expr: Box<Expr>| resolve_alias_expr_scoped(*expr, components, span, &bound).map(Box::new);
     Ok(SpecItem::LeadsTo {
         name,
-        binders: binders
-            .into_iter()
-            .map(|binder| resolve_alias_binder(binder, components, span))
-            .collect::<Result<_, _>>()?,
+        binders,
         before: resolve(before)?,
         after: resolve(after)?,
         span,
@@ -1314,7 +1750,7 @@ fn resolve_alias_leads_to(
                 helper.args = helper
                     .args
                     .into_iter()
-                    .map(|arg| resolve_alias_expr(arg, components, span))
+                    .map(|arg| resolve_alias_expr_scoped(arg, components, span, &bound))
                     .collect::<Result<_, _>>()?;
                 Ok(helper)
             })
@@ -1323,19 +1759,69 @@ fn resolve_alias_leads_to(
     })
 }
 
+fn resolve_alias_action(
+    item: SpecItem,
+    components: &BTreeMap<String, Component>,
+) -> Result<SpecItem, CoreError> {
+    let SpecItem::Action {
+        name,
+        params,
+        items,
+        span,
+        fair,
+        meta,
+        sync,
+        annotations,
+    } = item
+    else {
+        unreachable!("only glue actions are routed here")
+    };
+    let (params, bound) = resolve_alias_params(params, components, span)?;
+    Ok(SpecItem::Action {
+        name,
+        params,
+        items: resolve_alias_action_items(items, components, &bound, ComposeWriteContext::Glue)?,
+        span,
+        fair,
+        meta,
+        sync,
+        annotations,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum ComposeWriteContext {
+    Glue,
+    Sync,
+    Init,
+}
+
+impl ComposeWriteContext {
+    fn permits_component_write(self) -> bool {
+        match self {
+            Self::Glue | Self::Init => true,
+            Self::Sync => false,
+        }
+    }
+}
+
 fn rewrite_compose_statements(
     statements: Vec<Statement>,
     components: &BTreeMap<String, Component>,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
 ) -> Result<Vec<Statement>, CoreError> {
     statements
         .into_iter()
-        .map(|statement| resolve_alias_statement(statement, components))
+        .map(|statement| resolve_alias_statement(statement, components, bound, context))
         .collect()
 }
 
 fn resolve_alias_statement(
     statement: Statement,
     components: &BTreeMap<String, Component>,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
 ) -> Result<Statement, CoreError> {
     Ok(match statement {
         Statement::Assign {
@@ -1343,8 +1829,8 @@ fn resolve_alias_statement(
             value,
             span,
         } => Statement::Assign {
-            target,
-            value: resolve_alias_expr(value, components, span)?,
+            target: resolve_alias_lvalue(target, components, span, bound, context)?,
+            value: resolve_alias_expr_scoped(value, components, span, bound)?,
             span,
         },
         Statement::If {
@@ -1352,53 +1838,156 @@ fn resolve_alias_statement(
             then_statements,
             else_statements,
             span,
-        } => Statement::If {
-            condition: resolve_alias_expr(condition, components, span)?,
-            then_statements: then_statements
-                .into_iter()
-                .map(|statement| resolve_alias_statement(statement, components))
-                .collect::<Result<_, _>>()?,
-            else_statements: else_statements
-                .into_iter()
-                .map(|statement| resolve_alias_statement(statement, components))
-                .collect::<Result<_, _>>()?,
-            span,
-        },
+        } => {
+            let condition = resolve_alias_expr_scoped(condition, components, span, bound)?;
+            Statement::If {
+                condition,
+                then_statements: rewrite_compose_statements(
+                    then_statements,
+                    components,
+                    bound,
+                    context,
+                )?,
+                else_statements: rewrite_compose_statements(
+                    else_statements,
+                    components,
+                    bound,
+                    context,
+                )?,
+                span,
+            }
+        }
         Statement::ForAll {
             binder,
             statements,
             span,
-        } => Statement::ForAll {
-            binder: resolve_alias_binder(binder, components, span)?,
-            statements: statements
-                .into_iter()
-                .map(|statement| resolve_alias_statement(statement, components))
-                .collect::<Result<_, _>>()?,
-            span,
-        },
+        } => {
+            let (binder, nested) = resolve_alias_binder(binder, components, span, bound)?;
+            Statement::ForAll {
+                binder,
+                statements: rewrite_compose_statements(statements, components, &nested, context)?,
+                span,
+            }
+        }
     })
 }
 
-fn sync_action(
+/// All compose-side assignment paths share alias/index normalization and write policy.
+fn resolve_alias_lvalue(
+    target: LValue,
+    components: &BTreeMap<String, Component>,
+    span: fsl_syntax::Span,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
+) -> Result<LValue, CoreError> {
+    let via_alias = matches!(&target, LValue::Field(base, _)
+        if matches!(base.as_ref(), LValue::Var(alias)
+            if !bound.contains(alias) && components.contains_key(alias)));
+    let target = match target {
+        LValue::Var(name) => LValue::Var(name),
+        LValue::Index(name, index) => LValue::Index(
+            name,
+            resolve_alias_expr_scoped(index, components, span, bound)?,
+        ),
+        LValue::Field(base, name) => match *base {
+            LValue::Var(alias) if via_alias => LValue::Var(prefix(&alias, &name)),
+            base => LValue::Field(
+                Box::new(resolve_alias_lvalue(
+                    base, components, span, bound, context,
+                )?),
+                name,
+            ),
+        },
+    };
+    let mut base = &target;
+    while let LValue::Field(parent, _) = base {
+        base = parent;
+    }
+    let (LValue::Var(name) | LValue::Index(name, _)) = base else {
+        unreachable!("field bases were unwrapped")
+    };
+    if !context.permits_component_write()
+        && components.values().any(|component| {
+            component
+                .names
+                .state
+                .iter()
+                .any(|state| prefix(&component.alias, state) == *name)
+        })
+    {
+        return Err(error_at(
+            "sync additional statements may only write composition-side state",
+            span,
+        ));
+    }
+    Ok(target)
+}
+
+struct SyncSource {
+    items: Vec<ActionItem>,
+    item_origins: Vec<crate::OriginChain>,
+    params: HashSet<String>,
+    replacements: HashMap<String, Expr>,
+    globals: ComponentNames,
+    span: fsl_syntax::Span,
+}
+
+struct SourceNames {
+    all: HashSet<String>,
+    capture: HashSet<String>,
+    guards: HashSet<String>,
+    arguments: HashSet<String>,
+}
+
+fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
+    let mut names = SourceNames {
+        all: source.params.clone(),
+        capture: HashSet::new(),
+        guards: HashSet::new(),
+        arguments: source
+            .replacements
+            .values()
+            .flat_map(|value| crate::capture_names(value, &HashSet::new()))
+            .collect(),
+    };
+    for item in &source.items {
+        collect_action_item_names(item, &mut names.all, None);
+    }
+    // Formals disappear, while public header params read by additions remain
+    // foreign values. Only this source's replaced formals start bound here.
+    let mut bound = source.replacements.keys().cloned().collect::<HashSet<_>>();
+    map_normalized_action_items(source.items.clone(), &mut bound, |item, bound| {
+        collect_action_item_names(&item, &mut names.capture, Some(bound));
+        match &item {
+            ActionItem::Let(name, ..) => {
+                names.capture.insert(name.clone());
+                names.guards.insert(name.clone());
+                bound.insert(name.clone());
+            }
+            ActionItem::Requires(expr, _) => {
+                extend_pattern_names(expr, bound);
+                extend_pattern_names(expr, &mut names.guards);
+            }
+            ActionItem::Statement(_) | ActionItem::Ensures(..) => {}
+        }
+        Ok::<_, CoreError>(item)
+    })?;
+    Ok(names)
+}
+
+fn sync_component_sources(
     action: &SyncAction,
     components: &BTreeMap<String, Component>,
-    warnings: &mut Vec<Value>,
-    origins: &mut BTreeMap<String, crate::OriginChain>,
-) -> Result<SpecItem, CoreError> {
-    let params = action
-        .params
-        .iter()
-        .cloned()
-        .map(|param| resolve_alias_param(param, components, action.span))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut items = Vec::new();
-    let mut item_origins = Vec::new();
+    bound: &HashSet<String>,
+) -> Result<(Vec<SyncSource>, Vec<String>), CoreError> {
+    let mut sources = Vec::new();
     let mut fair_constituents = Vec::new();
-    let mut avoid = sync_avoid_names(action, &params, components)?;
     for reference in &action.refs {
-        let component = components
+        let mut component = components
             .get(&reference.alias)
-            .ok_or_else(|| error_at(format!("unknown alias '{}'", reference.alias), action.span))?;
+            .ok_or_else(|| error_at(format!("unknown alias '{}'", reference.alias), action.span))?
+            .clone();
+        component.public_bindings.extend(bound.iter().cloned());
         let source = component
             .spec
             .items
@@ -1422,8 +2011,9 @@ fn sync_action(
         let SpecItem::Action {
             params: source_params,
             items: source_items,
+            span: source_span,
             ..
-        } = rewrite_component_item(source, component)
+        } = rewrite_component_item(source, &component)?
         else {
             unreachable!()
         };
@@ -1448,27 +2038,107 @@ fn sync_action(
                 };
                 Ok((
                     name,
-                    resolve_alias_expr(arg.clone(), components, action.span)?,
+                    resolve_alias_expr_scoped(arg.clone(), components, action.span, bound)?,
                 ))
             })
             .collect::<Result<HashMap<_, _>, CoreError>>()?;
-        let source_items = substitute_action_items(source_items, &replacements, &mut avoid);
-        item_origins.extend(
-            source_items
-                .iter()
-                .map(|item| component_item_origin(component, &reference.action, item)),
-        );
-        items.extend(source_items);
+        let item_origins = source_items
+            .iter()
+            .map(|item| component_item_origin(&component, &reference.action, item))
+            .collect();
+        sources.push(SyncSource {
+            items: source_items,
+            item_origins,
+            params: param_names(&source_params),
+            replacements,
+            globals: component.names.clone(),
+            span: source_span,
+        });
+    }
+    Ok((sources, fair_constituents))
+}
+
+fn sync_action(
+    action: &SyncAction,
+    components: &BTreeMap<String, Component>,
+    composition_names: &ComponentNames,
+    ambient: &HashSet<String>,
+    warnings: &mut Vec<Value>,
+    origins: &mut BTreeMap<String, crate::OriginChain>,
+) -> Result<SpecItem, CoreError> {
+    let (params, bound) = resolve_alias_params(action.params.clone(), components, action.span)?;
+    let additional_source = SyncSource {
+        items: resolve_alias_action_items(
+            action.items.clone(),
+            components,
+            &bound,
+            ComposeWriteContext::Sync,
+        )?,
+        item_origins: Vec::new(),
+        params: bound.clone(),
+        replacements: HashMap::new(),
+        globals: composition_names.clone(),
+        span: action.span,
+    };
+    let (mut sources, fair_constituents) = sync_component_sources(action, components, &bound)?;
+    sources.push(additional_source);
+    let inventories = sources
+        .iter()
+        .map(source_names)
+        .collect::<Result<Vec<_>, _>>()?;
+    let protected: HashSet<_> = inventories
+        .iter()
+        .flat_map(|names| names.arguments.iter().cloned())
+        .collect();
+    let mut used = ambient.clone();
+    used.extend(bound.iter().cloned());
+    for actual in sources
+        .iter()
+        .flat_map(|source| source.replacements.values())
+    {
+        collect_names(actual, &mut used);
+    }
+    for names in &inventories {
+        used.extend(names.all.iter().cloned());
+    }
+    let mut pattern_ambient = ambient.clone();
+    pattern_ambient.extend(bound.iter().cloned());
+    let mut items = Vec::new();
+    let mut item_origins = Vec::new();
+    for (index, source) in sources.into_iter().enumerate() {
+        let mut avoid = protected.clone();
+        let mut pattern_avoid = HashSet::new();
+        let mut argument_avoid = HashSet::new();
+        for (other, names) in inventories.iter().enumerate() {
+            argument_avoid.extend(names.guards.iter().cloned());
+            if other != index {
+                avoid.extend(names.capture.iter().cloned());
+                pattern_avoid.extend(names.guards.iter().cloned());
+                argument_avoid.extend(names.arguments.iter().cloned());
+            }
+        }
+        item_origins.extend(source.item_origins);
+        items.extend(hygiene::rewrite(
+            source.items,
+            hygiene::Source {
+                globals: &source.globals,
+                params: &source.params,
+                span: source.span,
+                arguments: Some(hygiene::Arguments {
+                    values: &source.replacements,
+                    globals: composition_names,
+                    params: &bound,
+                    span: action.span,
+                    avoid: &argument_avoid,
+                }),
+            },
+            &avoid,
+            &pattern_avoid,
+            &pattern_ambient,
+            &mut used,
+        )?);
     }
     record_sync_item_origins(origins, &action.name, &items, item_origins);
-    items.extend(
-        action
-            .items
-            .iter()
-            .cloned()
-            .map(|item| resolve_alias_action_item(item, components))
-            .collect::<Result<Vec<_>, _>>()?,
-    );
     if !action.fair && !fair_constituents.is_empty() {
         let refs = fair_constituents.join(", ");
         warnings.push(json!({
@@ -1492,48 +2162,32 @@ fn sync_action(
     })
 }
 
-/// Names a component `let` must not take over in a sync action (see
-/// `substitute_action_items`): the sync action's parameters and every
-/// argument's free names, across all references (#1254).
-fn sync_avoid_names(
-    action: &SyncAction,
-    params: &[Param],
-    components: &BTreeMap<String, Component>,
-) -> Result<HashSet<String>, CoreError> {
-    let mut avoid = params
-        .iter()
-        .map(|param| match param {
-            Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
-        })
-        .collect::<HashSet<_>>();
-    for reference in &action.refs {
-        for arg in &reference.args {
-            avoid.extend(free_vars(&resolve_alias_expr(
-                arg.clone(),
-                components,
-                action.span,
-            )?));
-        }
-    }
-    Ok(avoid)
-}
-
-fn resolve_alias_param(
-    param: Param,
+fn resolve_alias_params(
+    params: Vec<Param>,
     components: &BTreeMap<String, Component>,
     span: fsl_syntax::Span,
-) -> Result<Param, CoreError> {
-    Ok(match param {
-        Param::Typed(name, qualified) => Param::Typed(
-            name,
-            resolve_alias_qualified_name(qualified, components, span)?,
-        ),
-        Param::Range(name, lo, hi) => Param::Range(
-            name,
-            resolve_alias_expr(lo, components, span)?,
-            resolve_alias_expr(hi, components, span)?,
-        ),
-    })
+) -> Result<(Vec<Param>, HashSet<String>), CoreError> {
+    let mut bound = HashSet::new();
+    let params = params
+        .into_iter()
+        .map(|param| {
+            let param = match param {
+                Param::Typed(name, qualified) => Param::Typed(
+                    name,
+                    resolve_alias_qualified_name(qualified, components, span)?,
+                ),
+                Param::Range(name, lo, hi) => Param::Range(
+                    name,
+                    resolve_alias_expr_scoped(lo, components, span, &bound)?,
+                    resolve_alias_expr_scoped(hi, components, span, &bound)?,
+                ),
+            };
+            let (Param::Typed(name, _) | Param::Range(name, _, _)) = &param;
+            bound.insert(name.clone());
+            Ok(param)
+        })
+        .collect::<Result<_, CoreError>>()?;
+    Ok((params, bound))
 }
 
 fn resolve_alias_qualified_name(
@@ -1562,8 +2216,11 @@ fn resolve_alias_binder(
     binder: Binder,
     components: &BTreeMap<String, Component>,
     span: fsl_syntax::Span,
-) -> Result<Binder, CoreError> {
-    Ok(match binder {
+    bound: &HashSet<String>,
+) -> Result<(Binder, HashSet<String>), CoreError> {
+    let mut nested = bound.clone();
+    nested.insert(binder_name(&binder).to_owned());
+    let binder = match binder {
         Binder::Typed {
             name,
             type_name,
@@ -1572,7 +2229,9 @@ fn resolve_alias_binder(
             name,
             type_name: resolve_alias_qualified_name(type_name, components, span)?,
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .map(|expr| {
+                    resolve_alias_expr_scoped(*expr, components, span, &nested).map(Box::new)
+                })
                 .transpose()?,
         },
         Binder::Range {
@@ -1582,10 +2241,12 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Range {
             name,
-            lo: Box::new(resolve_alias_expr(*lo, components, span)?),
-            hi: Box::new(resolve_alias_expr(*hi, components, span)?),
+            lo: Box::new(resolve_alias_expr_scoped(*lo, components, span, bound)?),
+            hi: Box::new(resolve_alias_expr_scoped(*hi, components, span, bound)?),
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .map(|expr| {
+                    resolve_alias_expr_scoped(*expr, components, span, &nested).map(Box::new)
+                })
                 .transpose()?,
         },
         Binder::Collection {
@@ -1594,259 +2255,201 @@ fn resolve_alias_binder(
             where_expr,
         } => Binder::Collection {
             name,
-            collection: Box::new(resolve_alias_expr(*collection, components, span)?),
+            collection: Box::new(resolve_alias_expr_scoped(
+                *collection,
+                components,
+                span,
+                bound,
+            )?),
             where_expr: where_expr
-                .map(|expr| resolve_alias_expr(*expr, components, span).map(Box::new))
+                .map(|expr| {
+                    resolve_alias_expr_scoped(*expr, components, span, &nested).map(Box::new)
+                })
                 .transpose()?,
         },
-    })
+    };
+    Ok((binder, nested))
 }
 
-#[allow(clippy::too_many_lines)]
 fn resolve_alias_expr(
     expr: Expr,
     components: &BTreeMap<String, Component>,
     diagnostic_span: fsl_syntax::Span,
 ) -> Result<Expr, CoreError> {
-    Ok(match expr {
-        Expr::Field(base, name) => {
-            if let Expr::Var(alias) = base.as_ref() {
-                if components.contains_key(alias) {
+    resolve_alias_expr_scoped(expr, components, diagnostic_span, &HashSet::new())
+}
+
+fn resolve_alias_expr_scoped(
+    expr: Expr,
+    components: &BTreeMap<String, Component>,
+    diagnostic_span: fsl_syntax::Span,
+    bound: &HashSet<String>,
+) -> Result<Expr, CoreError> {
+    crate::recursion::guard(|| {
+        let resolve = |expr| resolve_alias_expr_scoped(expr, components, diagnostic_span, bound);
+        Ok(match expr {
+            Expr::Field(base, name) => {
+                if let Expr::Var(alias) = base.as_ref()
+                    && !bound.contains(alias)
+                    && components.contains_key(alias)
+                {
                     Expr::Var(prefix(alias, &name))
                 } else {
-                    Expr::Field(
-                        Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
-                        name,
-                    )
+                    Expr::Field(Box::new(resolve(*base)?), name)
                 }
-            } else {
-                Expr::Field(
-                    Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
-                    name,
-                )
             }
-        }
-        Expr::Some(expr) => Expr::Some(Box::new(resolve_alias_expr(
-            *expr,
-            components,
-            diagnostic_span,
-        )?)),
-        Expr::Set(items) => Expr::Set(
-            items
-                .into_iter()
-                .map(|item| resolve_alias_expr(item, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
-        ),
-        Expr::Seq(items) => Expr::Seq(
-            items
-                .into_iter()
-                .map(|item| resolve_alias_expr(item, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
-        ),
-        Expr::Struct { name, fields } => Expr::Struct {
-            name,
-            fields: fields
-                .into_iter()
-                .map(|(name, expr)| {
-                    Ok((name, resolve_alias_expr(expr, components, diagnostic_span)?))
-                })
-                .collect::<Result<_, CoreError>>()?,
-        },
-        Expr::Call { name, args, span } => Expr::Call {
-            name,
-            args: args
-                .into_iter()
-                .map(|arg| resolve_alias_expr(arg, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
-            span,
-        },
-        Expr::Index(base, index) => Expr::Index(
-            Box::new(resolve_alias_expr(*base, components, diagnostic_span)?),
-            Box::new(resolve_alias_expr(*index, components, diagnostic_span)?),
-        ),
-        Expr::Method {
-            receiver,
-            name,
-            args,
-        } => Expr::Method {
-            receiver: Box::new(resolve_alias_expr(*receiver, components, diagnostic_span)?),
-            name,
-            args: args
-                .into_iter()
-                .map(|arg| resolve_alias_expr(arg, components, diagnostic_span))
-                .collect::<Result<_, _>>()?,
-        },
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: Box::new(resolve_alias_expr(*left, components, diagnostic_span)?),
-            right: Box::new(resolve_alias_expr(*right, components, diagnostic_span)?),
-        },
-        Expr::Neg(expr) => Expr::Neg(Box::new(resolve_alias_expr(
-            *expr,
-            components,
-            diagnostic_span,
-        )?)),
-        Expr::Not(expr) => Expr::Not(Box::new(resolve_alias_expr(
-            *expr,
-            components,
-            diagnostic_span,
-        )?)),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            spans,
-        } => Expr::Conditional {
-            spans,
-            condition: Box::new(resolve_alias_expr(*condition, components, diagnostic_span)?),
-            then_expr: Box::new(resolve_alias_expr(*then_expr, components, diagnostic_span)?),
-            else_expr: Box::new(resolve_alias_expr(*else_expr, components, diagnostic_span)?),
-        },
-        Expr::Is { expr, pattern } => Expr::Is {
-            expr: Box::new(resolve_alias_expr(*expr, components, diagnostic_span)?),
-            pattern,
-        },
-        Expr::Quantified {
-            quantifier,
-            binder,
-            body,
-        } => Expr::Quantified {
-            quantifier,
-            binder: resolve_alias_binder(binder, components, diagnostic_span)?,
-            body: Box::new(resolve_alias_expr(*body, components, diagnostic_span)?),
-        },
-        Expr::Aggregate {
-            kind,
-            binder,
-            value,
-        } => Expr::Aggregate {
-            kind,
-            binder: resolve_alias_binder(binder, components, diagnostic_span)?,
-            value: value
-                .map(|expr| resolve_alias_expr(*expr, components, diagnostic_span).map(Box::new))
-                .transpose()?,
-        },
-        Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
-            name,
-            expr: Box::new(resolve_alias_expr(*expr, components, diagnostic_span)?),
-            span,
-        },
-        Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
-            name,
-            left: Box::new(resolve_alias_expr(*left, components, diagnostic_span)?),
-            right: Box::new(resolve_alias_expr(*right, components, diagnostic_span)?),
-        },
-        Expr::TernaryNamed {
-            name,
-            first,
-            second,
-            third,
-        } => Expr::TernaryNamed {
-            name,
-            first: Box::new(resolve_alias_expr(*first, components, diagnostic_span)?),
-            second: Box::new(resolve_alias_expr(*second, components, diagnostic_span)?),
-            third: Box::new(resolve_alias_expr(*third, components, diagnostic_span)?),
-        },
-        other => other,
-    })
-}
-
-fn resolve_alias_action_item(
-    item: ActionItem,
-    components: &BTreeMap<String, Component>,
-) -> Result<ActionItem, CoreError> {
-    Ok(match item {
-        ActionItem::Requires(expr, span) => {
-            ActionItem::Requires(resolve_alias_expr(expr, components, span)?, span)
-        }
-        ActionItem::Ensures(expr, span) => {
-            ActionItem::Ensures(resolve_alias_expr(expr, components, span)?, span)
-        }
-        ActionItem::Let(name, expr, span) => {
-            ActionItem::Let(name, resolve_alias_expr(expr, components, span)?, span)
-        }
-        ActionItem::Statement(statement) => {
-            ActionItem::Statement(resolve_alias_statement(statement, components)?)
-        }
-    })
-}
-
-/// Substitute a component action's parameters by a sync reference's arguments
-/// throughout the action's items, respecting every binder in scope (#1254).
-///
-/// `let` bindings scope over the items after them, so they are processed in
-/// order: a `let` shadows a parameter of the same name for the rest of the
-/// action, and a `let` whose name occurs free in an argument (`go(y) =
-/// c.poke(y)` against `let y = 0`) or in `avoid` is renamed to a fresh name,
-/// so neither the argument nor a later sync part reading that name is
-/// captured by it. `avoid` collects the names the composed action's other
-/// parts read: the sync action's own parameters, every argument's free
-/// names, and the `let`s already emitted by earlier references.
-fn substitute_action_items(
-    items: Vec<ActionItem>,
-    replacements: &HashMap<String, Expr>,
-    avoid: &mut HashSet<String>,
-) -> Vec<ActionItem> {
-    let indexed = IndexedReplacements::new();
-    let mut names = avoid.clone();
-    names.extend(replacements.keys().cloned());
-    for replacement in replacements.values() {
-        collect_names(replacement, &mut names);
-    }
-    for item in &items {
-        collect_action_item_names(item, &mut names);
-    }
-    let mut current = replacements.clone();
-    items
-        .into_iter()
-        .map(|item| match item {
-            ActionItem::Requires(expr, span) => {
-                ActionItem::Requires(substitute(expr, &current, &indexed), span)
+            Expr::Binary { op, left, right } => {
+                let left = resolve(*left)?;
+                let nested = pattern_scope(&left, bound);
+                Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(resolve_alias_expr_scoped(
+                        *right,
+                        components,
+                        diagnostic_span,
+                        &nested,
+                    )?),
+                }
             }
-            ActionItem::Ensures(expr, span) => {
-                ActionItem::Ensures(substitute(expr, &current, &indexed), span)
+            Expr::Is { expr, pattern } => Expr::Is {
+                expr: Box::new(resolve(*expr)?),
+                pattern,
+            },
+            Expr::Quantified {
+                quantifier,
+                binder,
+                body,
+            } => {
+                let (binder, nested) =
+                    resolve_alias_binder(binder, components, diagnostic_span, bound)?;
+                Expr::Quantified {
+                    quantifier,
+                    binder,
+                    body: Box::new(resolve_alias_expr_scoped(
+                        *body,
+                        components,
+                        diagnostic_span,
+                        &nested,
+                    )?),
+                }
             }
-            ActionItem::Let(name, expr, span) => {
-                let value = substitute(expr, &current, &indexed);
-                current.remove(&name);
-                let captures = avoid.contains(&name)
-                    || current
-                        .values()
-                        .any(|replacement| free_vars(replacement).contains(&name));
-                let name = if captures {
-                    let fresh = fresh_binding_name(&name, &names);
-                    names.insert(fresh.clone());
-                    current.insert(name, Expr::Var(fresh.clone()));
-                    fresh
-                } else {
-                    name
-                };
-                avoid.insert(name.clone());
-                ActionItem::Let(name, value, span)
+            Expr::Aggregate {
+                kind,
+                binder,
+                value,
+            } => {
+                let (binder, nested) =
+                    resolve_alias_binder(binder, components, diagnostic_span, bound)?;
+                Expr::Aggregate {
+                    kind,
+                    binder,
+                    value: value
+                        .map(|expr| {
+                            resolve_alias_expr_scoped(*expr, components, diagnostic_span, &nested)
+                                .map(Box::new)
+                        })
+                        .transpose()?,
+                }
             }
-            ActionItem::Statement(statement) => {
-                ActionItem::Statement(substitute_statement(statement, &current))
-            }
+            expr @ (Expr::Var(_) | Expr::Stage { .. }) => expr,
+            expr => hygiene::map_children(expr, |child, _| resolve(child))?,
         })
-        .collect()
+    })
 }
 
-fn collect_action_item_names(item: &ActionItem, names: &mut HashSet<String>) {
-    match item {
-        ActionItem::Requires(expr, _) | ActionItem::Ensures(expr, _) => collect_names(expr, names),
-        ActionItem::Let(name, expr, _) => {
-            names.insert(name.clone());
-            collect_names(expr, names);
+/// Match the public Kernel's Is/Binary pattern continuation scope.
+fn pattern_scope(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
+    let mut nested = bound.clone();
+    extend_pattern_names(expr, &mut nested);
+    nested
+}
+
+fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
+    match expr {
+        Expr::Is {
+            pattern: fsl_syntax::Pattern::Some(name),
+            ..
+        } => {
+            bound.insert(name.clone());
         }
-        ActionItem::Statement(statement) => collect_statement_names(statement, names),
+        Expr::Binary { left, right, .. } => {
+            extend_pattern_names(left, bound);
+            extend_pattern_names(right, bound);
+        }
+        _ => {}
     }
 }
 
-fn collect_statement_names(statement: &Statement, names: &mut HashSet<String>) {
+fn resolve_alias_action_items(
+    items: Vec<ActionItem>,
+    components: &BTreeMap<String, Component>,
+    bound: &HashSet<String>,
+    context: ComposeWriteContext,
+) -> Result<Vec<ActionItem>, CoreError> {
+    let mut bound = bound.clone();
+    map_normalized_action_items(items, &mut bound, |item, bound| {
+        Ok(match item {
+            ActionItem::Requires(expr, span) => {
+                let expr = resolve_alias_expr_scoped(expr, components, span, bound)?;
+                extend_pattern_names(&expr, bound);
+                ActionItem::Requires(expr, span)
+            }
+            ActionItem::Ensures(expr, span) => ActionItem::Ensures(
+                resolve_alias_expr_scoped(expr, components, span, bound)?,
+                span,
+            ),
+            ActionItem::Let(name, expr, span) => {
+                let expr = resolve_alias_expr_scoped(expr, components, span, bound)?;
+                bound.insert(name.clone());
+                ActionItem::Let(name, expr, span)
+            }
+            ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
+                statement, components, bound, context,
+            )?),
+        })
+    })
+}
+
+fn collect_expression_names(
+    expr: &Expr,
+    names: &mut HashSet<String>,
+    bound: Option<&HashSet<String>>,
+) {
+    match bound {
+        Some(bound) => names.extend(crate::capture_names(expr, bound)),
+        None => collect_names(expr, names),
+    }
+}
+
+fn collect_action_item_names(
+    item: &ActionItem,
+    names: &mut HashSet<String>,
+    bound: Option<&HashSet<String>>,
+) {
+    match item {
+        ActionItem::Requires(expr, _) | ActionItem::Ensures(expr, _) => {
+            collect_expression_names(expr, names, bound);
+        }
+        ActionItem::Let(name, expr, _) => {
+            if bound.is_none() {
+                names.insert(name.clone());
+            }
+            collect_expression_names(expr, names, bound);
+        }
+        ActionItem::Statement(statement) => collect_statement_names(statement, names, bound),
+    }
+}
+
+fn collect_statement_names(
+    statement: &Statement,
+    names: &mut HashSet<String>,
+    bound: Option<&HashSet<String>>,
+) {
     match statement {
         Statement::Assign { target, value, .. } => {
-            collect_lvalue_names(target, names);
-            collect_names(value, names);
+            collect_lvalue_reads(target, names, bound);
+            collect_expression_names(value, names, bound);
         }
         Statement::If {
             condition,
@@ -1854,111 +2457,39 @@ fn collect_statement_names(statement: &Statement, names: &mut HashSet<String>) {
             else_statements,
             ..
         } => {
-            collect_names(condition, names);
+            collect_expression_names(condition, names, bound);
             for statement in then_statements.iter().chain(else_statements) {
-                collect_statement_names(statement, names);
+                collect_statement_names(statement, names, bound);
             }
         }
         Statement::ForAll {
             binder, statements, ..
         } => {
-            collect_binder_names(binder, names);
+            let nested = bound.map(|bound| {
+                let (free, nested) = crate::capture_binder_names(binder, bound);
+                names.extend(free);
+                nested
+            });
+            if bound.is_none() {
+                collect_binder_names(binder, names);
+            }
             for statement in statements {
-                collect_statement_names(statement, names);
+                collect_statement_names(statement, names, nested.as_ref());
             }
         }
     }
 }
 
-fn collect_lvalue_names(lvalue: &LValue, names: &mut HashSet<String>) {
+fn collect_lvalue_reads(
+    lvalue: &LValue,
+    names: &mut HashSet<String>,
+    bound: Option<&HashSet<String>>,
+) {
     match lvalue {
-        LValue::Var(name) => {
-            names.insert(name.clone());
+        LValue::Var(_) => {}
+        LValue::Index(_, expr) => {
+            collect_expression_names(expr, names, bound);
         }
-        LValue::Index(name, expr) => {
-            names.insert(name.clone());
-            collect_names(expr, names);
-        }
-        LValue::Field(base, _) => collect_lvalue_names(base, names),
-    }
-}
-
-fn substitute_statement(statement: Statement, replacements: &HashMap<String, Expr>) -> Statement {
-    let indexed = IndexedReplacements::new();
-    match statement {
-        Statement::Assign {
-            target,
-            value,
-            span,
-        } => Statement::Assign {
-            target: substitute_lvalue(target, replacements),
-            value: substitute(value, replacements, &indexed),
-            span,
-        },
-        Statement::If {
-            condition,
-            then_statements,
-            else_statements,
-            span,
-        } => Statement::If {
-            condition: substitute(condition, replacements, &indexed),
-            then_statements: then_statements
-                .into_iter()
-                .map(|statement| substitute_statement(statement, replacements))
-                .collect(),
-            else_statements: else_statements
-                .into_iter()
-                .map(|statement| substitute_statement(statement, replacements))
-                .collect(),
-            span,
-        },
-        // The statement `forall` follows the expression quantifier's rule
-        // (`substitute` in lib.rs): the binder's where / range / collection
-        // are substituted, the binding shadows a same-named parameter in its
-        // body, and a binding that an argument mentions free is renamed
-        // first so the argument is not captured (#1254).
-        Statement::ForAll {
-            binder,
-            statements,
-            span,
-        } => {
-            let original = binder_name(&binder).to_owned();
-            let mut body_names = HashSet::new();
-            for statement in &statements {
-                collect_statement_names(statement, &mut body_names);
-            }
-            let (binder, _, mut scoped, _) = capture_avoiding_binding_with_names(
-                binder,
-                Vec::new(),
-                replacements,
-                &indexed,
-                &body_names,
-            );
-            let renamed = binder_name(&binder).to_owned();
-            if renamed != original {
-                scoped.insert(original, Expr::Var(renamed));
-            }
-            Statement::ForAll {
-                binder: substitute_binder(binder, replacements, &indexed),
-                statements: statements
-                    .into_iter()
-                    .map(|statement| substitute_statement(statement, &scoped))
-                    .collect(),
-                span,
-            }
-        }
-    }
-}
-
-fn substitute_lvalue(lvalue: LValue, replacements: &HashMap<String, Expr>) -> LValue {
-    match lvalue {
-        LValue::Index(name, expr) => LValue::Index(
-            name,
-            substitute(expr, replacements, &IndexedReplacements::new()),
-        ),
-        LValue::Field(base, field) => {
-            LValue::Field(Box::new(substitute_lvalue(*base, replacements)), field)
-        }
-        lvalue @ LValue::Var(_) => lvalue,
+        LValue::Field(base, _) => collect_lvalue_reads(base, names, bound),
     }
 }

@@ -493,6 +493,12 @@ leadsTo <Name> {
 ```
 
 `~>` is **exclusive to leadsTo blocks** — it cannot be used in general expressions.
+Each `helpful action(args...)` argument is checked against its action parameter
+type in the property's binder scope. This closes a previously unchecked position:
+ill-typed arguments, unknown names and forbidden pattern shadowing now fail `check`.
+Normalized `count`/`sum` patterns retain their standalone acceptance, including
+valid empty aggregates; composition cannot hide an original global-name refusal
+by prefixing, nor introduce one from a foreign declaration.
 `within K` is a bounded deadline on a response; `K` must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under
@@ -2175,6 +2181,9 @@ compose OrderSystem {
   merges the requires / body / ensures of each component action, and the
   additional statements may only assign to the composition-side state
   (synchronizing two actions of the same component is not allowed).
+  Breaking removal (#1334): additional statements assigning component state via physical names such as `alias__x`, which previously passed `check`, now produce a located error too.
+  Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
+  Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write
@@ -2195,6 +2204,8 @@ compose OrderSystem {
   component.
 - `internal <alias>.<action>` — excludes that action from interleaving.
 - An ordinary `action` (without `=`) can also be written (a glue action).
+  A glue action reads and writes composition-side state and component state directly via `alias.var`.
+  Compose `init` can also initialize component state via `alias.var`; overlapping a component's own `init` assignment is rejected as duplicate initialization.
 - Names and `__`: a name you declare in a `spec`, `requirements`, `business`, or
   `compose` document (a spec, action, parameter, `let`, state variable, property,
   type, const, enum member, struct field, process, stage, actor, or `use` alias)

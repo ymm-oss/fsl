@@ -1240,7 +1240,9 @@ fn eval_state_independent_inner(
     match expr {
         KernelExpr::Num(value) => Ok(FslValue::Int(*value)),
         KernelExpr::Bool(value) => Ok(FslValue::Bool(*value)),
-        KernelExpr::EnumMember { type_name, member } => Ok(FslValue::Enum {
+        KernelExpr::EnumMember {
+            type_name, member, ..
+        } => Ok(FslValue::Enum {
             type_name: type_name.clone(),
             member: member.clone(),
         }),

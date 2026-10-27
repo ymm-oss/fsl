@@ -472,6 +472,12 @@ leadsTo <Name> {
 ```
 
 `~>` は **leadsTo ブロック専用**です — 一般の式では使えません。
+`helpful action(args...)` の各引数は、プロパティの束縛の scope で、対応する
+action パラメータの型として検査します。従来は未検査だった位置であり、型の誤り、
+未定義の名前、禁止された pattern の shadow は `check` で拒みます。正規化される
+`count`/`sum` は、有効な空の集約も含めて単体と同じ受理を保ちます。compose の
+接頭辞付けで元の global 名との衝突の拒否を隠したり、別の宣言により拒否を増やしたり
+することはありません。
 `within K` は応答に対する有界の締め切りで、`K` は非負の定数式でなければなりません。
 これは BMC によって検査され、ランク付き induction 証明では検査されません。
 `decreases` は省略可能で、整数値の式でなければなりません。
@@ -2065,6 +2071,9 @@ compose OrderSystem {
   各コンポーネント action の requires / 本体 / ensures をマージします。追加の文は
   合成側の状態にのみ代入できます
   (同じコンポーネントの 2 つの action を同期させることはできません)。
+  破壊的な削除 (#1334): 以前は `check` を通った `alias__x` のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
+  同期参照の引数が読めるのはヘッダのパラメータ・const・状態だけで、追加項目の `let` 束縛は読めません (破壊的な削除、#1442)。
+  部品の自由な値の読みと更新先の根はマージ前の部品自身の宣言に対して解決するため、未宣言の参照を合成によって有効にはできません (破壊的な削除、#1442)；公開名は引き続き使用でき、所有する enum の保護が必要な読みも表示には元の member 名を使います。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき
@@ -2085,6 +2094,8 @@ compose OrderSystem {
   コンポーネントで変換をモデル化してください。
 - `internal <alias>.<action>` — その action をインターリービングから除外します。
 - (`=` のない)通常の `action` も書けます(グルー action)。
+  グルー action は compose 側の状態と部品の状態を `alias.var` で直接読み書きできます。
+  compose の `init` も `alias.var` で部品の状態に初期値を与えられますが、部品自身の `init` の代入と重なる場合は二重の初期化として拒否します。
 - 名前と `__`: `spec`・`requirements`・`business`・`compose` の文書で宣言する名前
   (spec、action、パラメータ、`let`、状態変数、property、型、const、enum の
   メンバー、struct のフィールド、process、stage、actor、`use` の alias)には

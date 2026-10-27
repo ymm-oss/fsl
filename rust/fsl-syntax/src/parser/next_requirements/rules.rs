@@ -474,11 +474,9 @@ fn field_names(expression: Expr, entity: &Entity, entity_name: &str) -> Expr {
     let dotted = |field: &str| Expr::Var(format!("{entity_name}.{field}"));
     match expression {
         Expr::Var(name) if entity.fields.contains_key(&name) => dotted(&name),
-        Expr::EnumMember { type_name, member }
-            if type_name == entity_name && entity.fields.contains_key(&member) =>
-        {
-            dotted(&member)
-        }
+        Expr::EnumMember {
+            type_name, member, ..
+        } if type_name == entity_name && entity.fields.contains_key(&member) => dotted(&member),
         Expr::Field(receiver, field)
             if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name)
                 && entity.fields.contains_key(&field) =>

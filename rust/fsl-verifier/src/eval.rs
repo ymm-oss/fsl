@@ -91,7 +91,9 @@ fn eval_inner<S: SmtSolver>(
             eval_struct_literal(solver, model, name, fields, state, bindings, old_state)
         }
         Expr::Var(name) => lookup(solver, model, name, state, bindings),
-        Expr::EnumMember { type_name, member } => concrete_value(
+        Expr::EnumMember {
+            type_name, member, ..
+        } => concrete_value(
             solver,
             model,
             &TypeRef::Named(type_name.clone()),

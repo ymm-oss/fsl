@@ -365,9 +365,9 @@ impl Scope<'_> {
             {
                 self.concept(&Word { text: name, span })?
             }
-            Expr::EnumMember { type_name, member }
-                if type_name == self.entity_name && self.entity.fields.contains_key(&member) =>
-            {
+            Expr::EnumMember {
+                type_name, member, ..
+            } if type_name == self.entity_name && self.entity.fields.contains_key(&member) => {
                 dotted(&member)
             }
             Expr::Field(receiver, field)

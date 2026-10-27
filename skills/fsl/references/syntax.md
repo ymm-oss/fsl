@@ -633,7 +633,7 @@ Composite spec (a separate top-level form):
 ```fsl
 compose <Name> {
   use <SpecName> as <alias> from "<relative path>"   // multiple allowed. nested compose not allowed
-  state { ... }  init { ... }                    // additional state on the composite side (optional)
+  state { ... }  init { ... }                    // optional local state; init may also initialize component state
   action <n>(<p>: <alias>.<Type>, ...) =
       <a>.<act>(<expr>...) [ || <b>.<act2>(<expr>...) ] {  // synchronize (run atomically together)
     [requires <expr>]... [<stmt>...]             // extra guards / assignments to composite-side state
@@ -642,6 +642,18 @@ compose <Name> {
   invariant/trans/reachable/leadsTo ...          // cross-reference via alias.var
 }
 ```
+
+Sync additional statements may assign only composition-side state: component
+targets are rejected with a located error, including physical `alias__x` names
+that previously passed `check` (breaking removal, #1334).
+
+Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
+
+Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.
+
+A glue action reads and writes local and component state directly via `alias.var`.
+Compose `init` may also initialize component state (including physical names), but
+overlap with a component's own init is rejected as duplicate initialization.
 
 Compose synchronization does **not** inherit `fair` from component actions. If a
 fair constituent action is synchronized into a non-fair composite action, the
@@ -1199,6 +1211,11 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    does **not** create fairness: the matching action must still be declared
    `fair action` and be enabled whenever the obligation is pending. Without
    `decreases`, leadsTo remains bounded to `--depth`.
+   Helpful argument expressions are checked against action parameter types in
+   the property's binder scope; previously unchecked type/name/pattern errors
+   now reject at `check`. Normalized Count/Sum retain standalone acceptance
+   (including valid empty domains), and compose preserves original-global
+   refusals without adding foreign-name refusals.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
      Nesting it inside the forall body is a **parse error** — `fslc`
