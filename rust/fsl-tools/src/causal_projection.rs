@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
+use crate::analysis_export::{dot_escape, mermaid_label};
 use crate::causal::{
     CausalError, CausalModel, Claim, ClaimStatus, Lag, Persistence, Polarity, VariableRole,
     active_adjacency, reachable_from,
@@ -425,7 +426,8 @@ pub fn causal_mermaid(projection: &Value) -> String {
             suffix += 1;
         }
         ids.insert(label, id.clone());
-        let role = node["role"].as_str().unwrap_or("");
+        let label = mermaid_label(label);
+        let role = mermaid_label(node["role"].as_str().unwrap_or(""));
         if role.is_empty() {
             lines.push(format!("  {id}[\"{label}\"]"));
         } else {
@@ -447,6 +449,7 @@ pub fn causal_mermaid(projection: &Value) -> String {
         } else {
             kind.to_owned()
         };
+        let label = mermaid_label(&label);
         lines.push(format!("  {source} -->|\"{label}\"| {target}"));
     }
     lines.join("\n") + "\n"
@@ -481,10 +484,6 @@ pub fn causal_dot(projection: &Value) -> String {
     }
     lines.push("}".to_owned());
     lines.join("\n") + "\n"
-}
-
-fn dot_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn sanitize(id: &str) -> String {

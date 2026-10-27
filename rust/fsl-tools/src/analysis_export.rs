@@ -41,7 +41,7 @@ fn sorted_graph(analysis: &Value) -> (Vec<&Value>, Vec<&Value>) {
     (nodes, edges)
 }
 
-fn dot_escape(value: &str) -> String {
+pub(crate) fn dot_escape(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -90,7 +90,7 @@ fn to_dot(analysis: &Value) -> String {
     output
 }
 
-fn mermaid_label(value: &str) -> String {
+pub(crate) fn mermaid_label(value: &str) -> String {
     value
         .replace('\n', " ")
         .replace('&', "&amp;")
