@@ -190,6 +190,15 @@ impl Cell {
 }
 
 pub fn cells() -> Vec<Cell> {
+    product(false)
+}
+
+/// Include even intrinsic-refusal and metadata-only roots for namespace checks.
+pub fn namespace_templates() -> Vec<Cell> {
+    product(true).into_iter().filter(|c| !c.negative).collect()
+}
+
+fn product(all_roots: bool) -> Vec<Cell> {
     let mut places = Vec::new();
     for (slot, name) in SLOTS {
         for sync in [false, true] {
@@ -209,10 +218,10 @@ pub fn cells() -> Vec<Cell> {
         c.family() == "ambient-root"
             && c.columns[1] == "compose-state"
             && c.columns[2] == "use-only"
-            && c.columns[3] != "leads-helpful-argument"
+            && (all_roots || c.columns[3] != "leads-helpful-argument")
             // All24 combinations, including8 refusal controls, hit the
             // intrinsic initializer restriction rather than filter scope.
-            && c.columns[3] != "state-initializer"
+            && (all_roots || c.columns[3] != "state-initializer")
     }) {
         places.push((
             format!("component-root/{}", root.columns[3]),
@@ -247,7 +256,7 @@ pub fn cells() -> Vec<Cell> {
             }
         }
     }
-    assert_eq!(places.len(), 51);
-    assert_eq!(cells.len(), 1224);
+    assert_eq!(places.len(), if all_roots { 53 } else { 51 });
+    assert_eq!(cells.len(), if all_roots { 1272 } else { 1224 });
     cells
 }

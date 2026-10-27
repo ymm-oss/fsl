@@ -9,12 +9,188 @@ use std::collections::BTreeMap;
 
 use fsl_syntax::{ComposeItem, Expr, Param, SourceFile, SpecItem, SurfaceDocument, TypeExpr};
 
-use super::{aggregate::Owner, matrix::SourceBundle};
+use super::{aggregate::Owner, matrix::SourceBundle, owner_refusal};
 
 pub struct Standalone {
     pub source: String,
     pub description: String,
     pub type_names: BTreeMap<String, String>,
+}
+
+impl Standalone {
+    /// Compare the complete refusal envelope. Only an authored component-use
+    /// wrapper or the independent holder's action-coordinate translation is
+    /// applied; no native output field is excluded from equality.
+    #[allow(clippy::too_many_lines)] // One full-envelope policy for all source owners.
+    pub fn refusal_preserved(
+        &self,
+        bundle: &SourceBundle,
+        owner: Owner,
+        direct: &(serde_json::Value, i32),
+        composed: &(serde_json::Value, i32),
+    ) -> bool {
+        if direct == composed {
+            return true;
+        }
+        let SurfaceDocument::Compose(compose) = parsed(source(bundle, "s.fsl")) else {
+            unreachable!()
+        };
+        let SurfaceDocument::Spec(spec) = parsed(&self.source) else {
+            unreachable!()
+        };
+        if let Owner::Component(file) = owner {
+            let (alias, use_span) = compose
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    ComposeItem::Use {
+                        alias, path, span, ..
+                    } if path == file => Some((alias, span)),
+                    _ => None,
+                })
+                .expect("authored use");
+            let mut names = Vec::new();
+            for item in spec.items {
+                match item {
+                    SpecItem::State(fields) => {
+                        for field in fields {
+                            // Existing inline-initializer diagnostics publish
+                            // the qualified field name rather than a use wrapper.
+                            let marker = format!("inline initializer for '{}'", field.name);
+                            let message = direct.0["message"].as_str().expect("source message");
+                            if message.starts_with(&marker) {
+                                let mut expected = direct.0.clone();
+                                expected["message"] = serde_json::json!(message.replacen(
+                                    &marker,
+                                    &format!("inline initializer for '{alias}.{}'", field.name),
+                                    1
+                                ));
+                                if composed.1 == 2 && composed.0 == expected {
+                                    return true;
+                                }
+                            }
+                            names.push(field.name);
+                        }
+                    }
+                    SpecItem::Action { name, .. }
+                    | SpecItem::Invariant { name, .. }
+                    | SpecItem::Trans { name, .. }
+                    | SpecItem::Reachable { name, .. }
+                    | SpecItem::Until { name, .. }
+                    | SpecItem::Unless { name, .. }
+                    | SpecItem::LeadsTo { name, .. } => names.push(name),
+                    SpecItem::Terminal { .. } => names.push("terminal".into()),
+                    SpecItem::Init { .. } => names.push("init".into()),
+                    _ => {}
+                }
+            }
+            return composed.1 == 2
+                && names.iter().any(|name| {
+                    composed.0
+                        == owner_refusal::expected(
+                            direct,
+                            file,
+                            &format!("{alias}.{name}"),
+                            "s.fsl",
+                            (use_span.start.line, use_span.start.column),
+                        )
+                });
+        }
+        if matches!(owner, Owner::Arguments) {
+            // A synchronized actual is checked in its owner's scope but its
+            // diagnostic is attached to the authored referenced action (#1463).
+            for item in &compose.items {
+                if let ComposeItem::SyncAction(action) = item {
+                    for reference in &action.refs {
+                        let (file, span) = compose
+                            .items
+                            .iter()
+                            .find_map(|item| match item {
+                                ComposeItem::Use {
+                                    alias, path, span, ..
+                                } if alias == &reference.alias => Some((path, span)),
+                                _ => None,
+                            })
+                            .expect("referenced component use");
+                        if composed.1 == 2
+                            && composed.0
+                                == owner_refusal::expected(
+                                    direct,
+                                    file,
+                                    &format!("{}.{}", reference.alias, reference.action),
+                                    "s.fsl",
+                                    (span.start.line, span.start.column),
+                                )
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        let holder_span = spec
+            .items
+            .iter()
+            .find_map(|item| match item {
+                SpecItem::Action { span, .. } => Some(*span),
+                _ => None,
+            })
+            .expect("holder action");
+        let original_span = compose
+            .items
+            .iter()
+            .find_map(|item| match (owner, item) {
+                (Owner::Arguments | Owner::Additional, ComposeItem::SyncAction(a)) => Some(a.span),
+                (Owner::Glue, ComposeItem::Common(SpecItem::Action { span, .. })) => Some(*span),
+                _ => None,
+            })
+            .expect("source action");
+        let line = direct.0["loc"]["line"].as_u64().expect("source line");
+        let column = direct.0["loc"]["column"].as_u64().expect("source column");
+        // Match the diagnosed authored token by its occurrence within the
+        // action. The holder puts the copied body on a new line, so a constant
+        // line/column delta would be wrong for single-line source bodies.
+        if (line, column) == (1, 1) {
+            return false;
+        }
+        let holder_tokens = fsl_syntax::lex(&self.source).expect("holder tokens");
+        let Some(token) = holder_tokens.iter().find(|token| {
+            u64::from(token.span.start.line) == line && u64::from(token.span.start.column) == column
+        }) else {
+            return false;
+        };
+        let word = &self.source[token.span.start.offset..token.span.end.offset];
+        let occurrence = holder_tokens
+            .iter()
+            .filter(|t| {
+                t.span.start.offset >= holder_span.start.offset
+                    && t.span.start.offset <= token.span.start.offset
+                    && &self.source[t.span.start.offset..t.span.end.offset] == word
+            })
+            .count();
+        let original = source(bundle, "s.fsl");
+        let original_tokens = fsl_syntax::lex(original).expect("source tokens");
+        let Some(target) = original_tokens
+            .iter()
+            .filter(|t| {
+                t.span.start.offset >= original_span.start.offset
+                    && &original[t.span.start.offset..t.span.end.offset] == word
+            })
+            .nth(occurrence - 1)
+        else {
+            return false;
+        };
+        let (mapped_line, mapped_column) = (target.span.start.line, target.span.start.column);
+        let mut expected = direct.0.clone();
+        expected["loc"] = serde_json::json!({"line":mapped_line,"column":mapped_column});
+        let message = direct.0["message"].as_str().expect("source diagnostic");
+        let suffix = format!(" at {line}:{column}");
+        if let Some(body) = message.strip_suffix(&suffix) {
+            expected["message"] =
+                serde_json::json!(format!("{body} at {mapped_line}:{mapped_column}"));
+        }
+        composed.1 == 2 && composed.0 == expected
+    }
 }
 
 fn parsed(source: &str) -> SurfaceDocument {

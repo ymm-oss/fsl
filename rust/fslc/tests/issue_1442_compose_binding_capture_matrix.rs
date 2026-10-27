@@ -16,6 +16,8 @@ mod extra;
 mod matrix;
 #[path = "support/compose_owner_refusal.rs"]
 mod owner_refusal;
+#[path = "support/compose_source_namespace.rs"]
+mod source_namespace;
 #[path = "support/compose_source_owner.rs"]
 mod source_owner;
 
@@ -663,6 +665,16 @@ fn aggregate_pattern_and_owner_source_checks() {
         });
     }
     assert_eq!(cases.len(), 5960);
+    for cell in source_namespace::cells() {
+        cases.push(SourceCheckCase {
+            id: cell.id,
+            owner: cell.owner,
+            bundle: cell.bundle,
+            aggregate_accepts: None,
+            owner_refusal_candidate: false,
+        });
+    }
+    assert_eq!(cases.len(), 7896);
     let report_dir = compose_scratch::scratch("aggregate-pattern-report", &[]);
     let started = Instant::now();
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -672,6 +684,10 @@ fn aggregate_pattern_and_owner_source_checks() {
     let mut refusal_failures = [0; 3];
     let mut reference_errors = 0;
     let mut forbidden = 0;
+    let mut false_accepts = 0;
+    let mut false_refusals = 0;
+    let mut diagnostic_failures = 0;
+    let mut namespace_counts: BTreeMap<String, [usize; 4]> = BTreeMap::new();
     let mut reports = Vec::new();
     let mut table = "case\towner\tstandalone\ttype-identities-or-reason\n".to_owned();
     for case in cases {
@@ -680,6 +696,7 @@ fn aggregate_pattern_and_owner_source_checks() {
         let holder = source_owner::standalone(&case.bundle, case.owner);
         let mut error = None;
         let mut refusal_checks = None;
+        let mut diagnostic_preserved = None;
         let (standalone, classification) = match holder {
             Err(reason) => {
                 writeln!(
@@ -696,6 +713,28 @@ fn aggregate_pattern_and_owner_source_checks() {
                 std::fs::write(dir.join("owner.fsl"), &holder.source)
                     .expect("standalone owner source");
                 let direct = invoke(&dir, &["check", "owner.fsl"]);
+                if direct.1 == 2 {
+                    let preserved =
+                        holder.refusal_preserved(&case.bundle, case.owner, &direct, &composed);
+                    diagnostic_preserved = Some(preserved);
+                    diagnostic_failures += usize::from(!preserved);
+                }
+                false_accepts += usize::from(direct.1 == 2 && composed.1 == 0);
+                false_refusals += usize::from(direct.1 == 0 && composed.1 != 0);
+                if case.id.starts_with("ambient-state/")
+                    || case.id.starts_with("ambient-const/")
+                    || case.id.starts_with("own-global/")
+                {
+                    let pieces: Vec<_> = case.id.split('/').collect();
+                    let key = format!("{}/{}/{}", pieces[0], pieces[1], pieces[5..].join("/"));
+                    let entry = namespace_counts.entry(key).or_default();
+                    entry[match (direct.1, composed.1) {
+                        (0, 0) => 0,
+                        (0, _) => 1,
+                        (2, 0) => 2,
+                        _ => 3,
+                    }] += 1;
+                }
                 writeln!(
                     table,
                     "{}\t{}\towner.fsl\t{:?}",
@@ -801,11 +840,20 @@ fn aggregate_pattern_and_owner_source_checks() {
                 json!({"exit":composed.1,"message":composed.0.get("message"),"result":composed.0["result"]})
             );
         }
-        reports.push(json!({"id":case.id,"owner":case.owner.name(),"aggregate_accepts":case.aggregate_accepts,"standalone":standalone,"composed":composed,"classification":classification,"refusal_checks":refusal_checks,"error":error,"directory":dir}));
+        reports.push(json!({"id":case.id,"owner":case.owner.name(),"aggregate_accepts":case.aggregate_accepts,"standalone":standalone,"composed":composed,"classification":classification,"refusal_checks":refusal_checks,"diagnostic_preserved":diagnostic_preserved,"error":error,"directory":dir}));
     }
     std::fs::write(report_dir.join("owners.tsv"), table).expect("owner map table");
     let elapsed = started.elapsed().as_secs_f64();
-    std::fs::write(report_dir.join("report.json"),serde_json::to_vec(&json!({"cases":reports,"counts":counts,"aggregate_counts":aggregate_counts,"forbidden":forbidden,"invalid":reference_errors,"owner_refused_old":owner_refused_old,"owner_refused_new":owner_refused_new,"refusal_failures":refusal_failures,"inapplicable":aggregate::INAPPLICABLE_COUNT,"inapplicable_reason":aggregate::INAPPLICABLE_REASON,"elapsed_s":elapsed})).expect("report JSON")).expect("owner report");
+    std::fs::write(report_dir.join("report.json"),serde_json::to_vec(&json!({"cases":reports,"counts":counts,"aggregate_counts":aggregate_counts,"forbidden":forbidden,"false_accepts":false_accepts,"false_refusals":false_refusals,"diagnostic_failures":diagnostic_failures,"namespace_counts":namespace_counts,"namespace_inapplicable":source_namespace::INAPPLICABLE_COUNT,"namespace_inapplicable_reason":source_namespace::INAPPLICABLE_REASON,"invalid":reference_errors,"owner_refused_old":owner_refused_old,"owner_refused_new":owner_refused_new,"refusal_failures":refusal_failures,"inapplicable":aggregate::INAPPLICABLE_COUNT,"inapplicable_reason":aggregate::INAPPLICABLE_REASON,"elapsed_s":elapsed})).expect("report JSON")).expect("owner report");
+    eprintln!(
+        "SOURCE_NAMESPACE_N count={} reason={}",
+        source_namespace::INAPPLICABLE_COUNT,
+        source_namespace::INAPPLICABLE_REASON
+    );
+    eprintln!(
+        "SOURCE_NAMESPACE_RESULT false_refusals={false_refusals} false_accepts={false_accepts} diagnostic_failures={diagnostic_failures} groups={}",
+        namespace_counts.len()
+    );
     eprintln!(
         "AGG_PATTERN_N count={} reason={}",
         aggregate::INAPPLICABLE_COUNT,
@@ -836,6 +884,12 @@ fn aggregate_pattern_and_owner_source_checks() {
         (owner_refused_old.len(), owner_refused_new.len()),
         (16, 64),
         "standalone refusal inventory changed"
+    );
+    assert_eq!(false_refusals, 0, "owner accepted but compose refused");
+    assert_eq!(false_accepts, 0, "owner refused but compose accepted");
+    assert_eq!(
+        diagnostic_failures, 0,
+        "source diagnostic or component location changed"
     );
     owner_refusal::assert_preserved(refusal_failures);
     assert_eq!(forbidden, 0, "standalone-to-compose admissibility drift");
