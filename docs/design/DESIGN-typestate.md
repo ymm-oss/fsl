@@ -29,7 +29,8 @@ TypeScript for derivable entities. The output uses the same JSON envelope as the
   state-preserving self-loop. For one allowed state it reports `B → B`; for
   multiple allowed states it reports one self-loop per state. The TypeScript
   skeleton preserves the caller's exact phantom state with `S extends A | B`
-  and returns `S`, rather than widening `A` to `A | B`. Actions that neither
+  and returns `S` (freshening that generic name as described in §5), rather than
+  widening `A` to `A | B`. Actions that neither
   guard nor assign the entity are not operations of that entity's state machine.
 - **`branching`** — the to-state is assigned only inside an `if` (data-dependent). It is exposed
   in the type, but the implementation bears a proof obligation of exhaustiveness (flagged).
@@ -69,10 +70,28 @@ that happens to preserve state** (it errs on the sound side). If only some,
   retired from the CLI path. Rust callers should export public Kernel JSON and
   call the JSON adapter; private AST/model shapes are not a generator contract.
 - Public Kernel actions are normalized by name. Typestate restores declaration
-  order from public source spans so the report and `--ts` output remain byte
-  compatible with the established CLI contract.
-- The verification engine and solver are unmodified. Reserved-word collisions
-  for TypeScript identifiers remain escaped by the existing emitter.
+  order from public source spans. The JSON report retains the established CLI
+  contract; native TypeScript output follows the frozen reference except for
+  the identifier escaping and model-derived parameter types introduced by #1431.
+- TypeScript action and parameter bindings append `_` for ECMAScript reserved
+  words (including literals), strict-mode reserved words, `await`, the existing
+  `type` entry, and strict-mode binding restrictions `eval` and `arguments`.
+  In each emitted signature, `self` is fixed first and the phantom generic (if
+  present) is reserved before parameters. Parameters are allocated in declaration
+  order, appending further `_` until distinct. Distinct actions receive distinct
+  function names in emission order by the same escaping/suffix rule; overloads
+  of one action retain its assigned function name.
+- The phantom generic is `S` unless a model type has that public name, then
+  `S_`, `S__`, and so on until no model type name is captured. The chosen name
+  is used throughout the interface, brand field and state-preserving signatures.
+- Parameter types use the same model-derived mapping as state data fields:
+  integers, ranges and domains become `number`, booleans become `boolean`, enums
+  and structs retain their public names, options add `| null`, sets use `Set<T>`,
+  and unsupported types become `unknown`. The host supplies the named model types
+  these declarations reference, as it already does for state fields, and any
+  required collection library types. This is an ambient declaration skeleton,
+  not a standalone implementation module.
+- The verification engine and solver are unmodified.
 
 ## 6. Tests / related
 

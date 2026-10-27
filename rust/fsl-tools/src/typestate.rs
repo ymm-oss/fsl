@@ -1112,11 +1112,21 @@ fn ts_identifier(name: &str) -> String {
             | "static"
             | "await"
             | "type"
+            | "eval"
+            | "arguments"
     ) {
         format!("{name}_")
     } else {
         name.to_owned()
     }
+}
+
+fn unique_ts_identifier(name: &str, used: &mut BTreeSet<String>) -> String {
+    let mut name = ts_identifier(name);
+    while !used.insert(name.clone()) {
+        name.push('_');
+    }
+    name
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1127,6 +1137,15 @@ fn emit_typescript(
     note: &str,
 ) -> String {
     let state_type = format!("{}State", entity.type_name);
+    let model_type_names: BTreeSet<_> = model
+        .types
+        .keys()
+        .map(|name| fsl_core::unmapped_public_spelling(name))
+        .collect();
+    let mut generic = "S".to_owned();
+    while model_type_names.contains(&generic) {
+        generic.push('_');
+    }
     let mut lines = vec![
         format!(
             "// Typestate skeleton for `{}` from spec `{}`.",
@@ -1149,7 +1168,7 @@ fn emit_typescript(
         String::new(),
         "declare const __state: unique symbol;".to_owned(),
         format!(
-            "export interface {}<S extends {state_type}> {{",
+            "export interface {}<{generic} extends {state_type}> {{",
             entity.type_name
         ),
     ];
@@ -1157,11 +1176,13 @@ fn emit_typescript(
         lines.push(format!("  {name}: {};", ts_type(model, ty)));
     }
     lines.extend([
-        "  readonly [__state]: S;".to_owned(),
+        format!("  readonly [__state]: {generic};"),
         "}".to_owned(),
         String::new(),
     ]);
 
+    let mut function_names = BTreeMap::new();
+    let mut used_function_names = BTreeSet::new();
     for action in actions {
         let verdict = action["verdict"].as_str().unwrap_or_default();
         if verdict != "derivable" && verdict != "branching" {
@@ -1216,7 +1237,14 @@ fn emit_typescript(
             );
         }
         let action_name = action["action"].as_str().unwrap_or_default();
-        let function_name = ts_identifier(action_name);
+        let function_name = function_names
+            .entry(action_name)
+            .or_insert_with(|| unique_ts_identifier(action_name, &mut used_function_names));
+        let state_preserving = action["state_preserving"] == true;
+        let mut used_params = BTreeSet::from(["self".to_owned()]);
+        if state_preserving {
+            used_params.insert(generic.clone());
+        }
         let params = model
             .actions
             .iter()
@@ -1224,16 +1252,22 @@ fn emit_typescript(
             .expect("typestate report action comes from the model")
             .params
             .iter()
-            .map(|(param, ty)| format!("{}: {}", ts_identifier(param), ts_type(model, ty)))
+            .map(|(param, ty)| {
+                format!(
+                    "{}: {}",
+                    unique_ts_identifier(param, &mut used_params),
+                    ts_type(model, ty)
+                )
+            })
             .collect::<Vec<_>>();
         let extra = if params.is_empty() {
             String::new()
         } else {
             format!(", {}", params.join(", "))
         };
-        if action["state_preserving"] == true {
+        if state_preserving {
             lines.push(format!(
-                "export function {function_name}<S extends {from_type}>(self: {}<S>{extra}): {}<S>;",
+                "export function {function_name}<{generic} extends {from_type}>(self: {}<{generic}>{extra}): {}<{generic}>;",
                 entity.type_name, entity.type_name
             ));
         } else {

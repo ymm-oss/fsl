@@ -4069,8 +4069,10 @@ in the type and remains as a runtime/verification obligation). An entity's
 With `--ts`, it outputs a TypeScript scaffold for the derivable portion.
 The native Rust command performs this judgment from the versioned public Kernel
 JSON v1 contract, not private parser/model structures, and fails closed on an
-unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
-compatible with the frozen reference output.
+unsupported Kernel schema version. Its JSON report remains compatible with the
+frozen reference output. Native TypeScript output follows the frozen reference
+except for the reserved-word escaping (including collision-free identifier
+allocation) and model-derived parameter types introduced by #1431.
 → [`DESIGN-typestate.md`](../design/DESIGN-typestate.md)
 
 ## 17. The causal profile (review-only causal hypothesis graphs)
