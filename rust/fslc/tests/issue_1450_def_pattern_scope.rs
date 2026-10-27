@@ -66,14 +66,21 @@ fn definition_own_pattern_keeps_state_collision_message_and_location() {
 }
 
 #[test]
-fn repeated_definition_local_patterns_do_not_leak_into_the_caller() {
+fn repeated_definition_local_patterns_keep_the_existing_collision() {
     let source = spec(
         "o: Option<K>, seen: Bool",
         "o = some(1) seen = false",
         "p() = (o is some(v)) and v == 1",
         "action g(w: K) { seen = p() and p() }",
     );
-    let (output, status) = check(&source);
+    assert_pattern(
+        &source,
+        "v",
+        "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)",
+        20,
+    );
+    let single = source.replace("p() and p()", "p()");
+    let (output, status) = check(&single);
     assert_eq!(status, 0, "{output}");
 }
 

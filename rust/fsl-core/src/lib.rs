@@ -1385,17 +1385,13 @@ impl PredicateExpander {
     fn expand_action_item(&self, item: ActionItem) -> Result<ActionItem, CoreError> {
         Ok(match item {
             ActionItem::Requires(expr, span) => {
-                let expr = self.expand_expr(expr, &mut Vec::new())?;
-                self.extend_patterns(&expr);
-                ActionItem::Requires(expr, span)
+                ActionItem::Requires(self.expand_expr(expr, &mut Vec::new())?, span)
             }
             ActionItem::Ensures(expr, span) => {
                 ActionItem::Ensures(self.expand_expr(expr, &mut Vec::new())?, span)
             }
             ActionItem::Let(name, expr, span) => {
-                let expr = self.expand_expr(expr, &mut Vec::new())?;
-                self.locals.borrow_mut().insert(name.clone());
-                ActionItem::Let(name, expr, span)
+                ActionItem::Let(name, self.expand_expr(expr, &mut Vec::new())?, span)
             }
             ActionItem::Statement(statement) => {
                 ActionItem::Statement(self.expand_statement(statement, &mut Vec::new())?)
@@ -1420,23 +1416,14 @@ impl PredicateExpander {
         bound
     }
 
-    fn extend_patterns(&self, expr: &Expr) {
-        let mut patterns = HashSet::new();
-        compose::extend_pattern_names(expr, &mut patterns);
-        self.locals
-            .borrow_mut()
-            .extend(patterns.difference(&self.globals).cloned());
-    }
-
     fn expand_action_items(
         &self,
         items: Vec<ActionItem>,
         params: &[Param],
     ) -> Result<Vec<ActionItem>, CoreError> {
-        self.scoped(compose::param_names(params), || {
-            compose::map_normalized_action_items(items, &mut (), |item, ()| {
-                self.expand_action_item(item)
-            })
+        let mut bound = compose::param_names(params);
+        compose::map_scoped_action_items(items, &mut bound, &self.globals, |item, bound| {
+            self.scoped(bound.clone(), || self.expand_action_item(item))
         })
     }
 
@@ -1647,10 +1634,12 @@ impl PredicateExpander {
                 ));
             }
             stack.push(name.clone());
-            let params = definition.params.iter().cloned().collect();
-            let body = self.scoped(params, || self.expand_expr(definition.body.clone(), stack))?;
+            let params: HashSet<_> = definition.params.iter().cloned().collect();
+            let body = self.scoped(params.clone(), || {
+                self.expand_expr(definition.body.clone(), stack)
+            })?;
             stack.pop();
-            let free = free_vars_bound(&body, &definition.params.iter().cloned().collect());
+            let free = free_vars_bound(&body, &params);
             if let Some(captured) = free.intersection(&self.locals.borrow()).min() {
                 return Err(core_error(
                     format!(
@@ -1712,10 +1701,9 @@ impl PredicateExpander {
                     .collect::<Result<_, _>>()?,
             },
             Expr::Binary { op, left, right } => {
-                let bound = self.locals.borrow().clone();
                 let left = self.expand_expr(*left, stack)?;
+                let bound = compose::pattern_scope(&left, &self.locals.borrow(), &self.globals);
                 self.scoped(bound, || {
-                    self.extend_patterns(&left);
                     Ok(Expr::Binary {
                         op,
                         left: Box::new(left),

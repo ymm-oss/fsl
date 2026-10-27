@@ -702,6 +702,7 @@ pub fn lower_compose_with_options(
 }
 
 /// Expand source-local defs before aliases or sync substitution can change scope.
+/// Loaded component enum members supplement the source's own global inventory.
 fn expand_compose_predicates(
     mut compose: SurfaceCompose,
     components: &BTreeMap<String, Component>,
@@ -1244,6 +1245,25 @@ pub(super) fn map_normalized_action_items<S, E>(
     Ok(items)
 }
 
+pub(super) fn map_scoped_action_items<E>(
+    items: Vec<ActionItem>,
+    bound: &mut HashSet<String>,
+    globals: &HashSet<String>,
+    mut rewrite: impl FnMut(ActionItem, &HashSet<String>) -> Result<ActionItem, E>,
+) -> Result<Vec<ActionItem>, E> {
+    map_normalized_action_items(items, bound, |item, bound| {
+        let item = rewrite(item, bound)?;
+        match &item {
+            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals),
+            ActionItem::Let(name, ..) => {
+                bound.insert(name.clone());
+            }
+            ActionItem::Ensures(..) | ActionItem::Statement(_) => {}
+        }
+        Ok(item)
+    })
+}
+
 fn rewrite_action_items(
     items: Vec<ActionItem>,
     component: &Component,
@@ -1251,11 +1271,10 @@ fn rewrite_action_items(
     action_span: fsl_syntax::Span,
 ) -> Result<Vec<ActionItem>, TypecheckError> {
     let mut bound = bound.clone();
-    map_normalized_action_items(items, &mut bound, |item, bound| {
+    map_scoped_action_items(items, &mut bound, &HashSet::new(), |item, bound| {
         Ok(match item {
             ActionItem::Requires(expr, span) => {
                 let expr = rewrite_expr_at(expr, component, bound, action_span)?;
-                extend_pattern_names(&expr, bound);
                 ActionItem::Requires(expr, span)
             }
             ActionItem::Ensures(expr, span) => {
@@ -1263,7 +1282,6 @@ fn rewrite_action_items(
             }
             ActionItem::Let(name, expr, span) => {
                 let expr = rewrite_expr_at(expr, component, bound, action_span)?;
-                bound.insert(name.clone());
                 ActionItem::Let(name, expr, span)
             }
             ActionItem::Statement(statement) => {
@@ -1416,7 +1434,7 @@ fn rewrite_expr_in_phase(
             )?,
             Expr::Binary { op, left, right } => {
                 let left = rewrite(*left)?;
-                let nested = pattern_scope(&left, bound);
+                let nested = pattern_scope(&left, bound, &HashSet::new());
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -1964,16 +1982,15 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
     // Formals disappear, while public header params read by additions remain
     // foreign values. Only this source's replaced formals start bound here.
     let mut bound = source.replacements.keys().cloned().collect::<HashSet<_>>();
-    map_normalized_action_items(source.items.clone(), &mut bound, |item, bound| {
+    let items = source.items.clone();
+    map_scoped_action_items(items, &mut bound, &HashSet::new(), |item, bound| {
         collect_action_item_names(&item, &mut names.capture, Some(bound));
         match &item {
             ActionItem::Let(name, ..) => {
                 names.capture.insert(name.clone());
                 names.guards.insert(name.clone());
-                bound.insert(name.clone());
             }
             ActionItem::Requires(expr, _) => {
-                extend_pattern_names(expr, bound);
                 extend_pattern_names(expr, &mut names.guards);
             }
             ActionItem::Statement(_) | ActionItem::Ensures(..) => {}
@@ -2308,7 +2325,7 @@ fn resolve_alias_expr_scoped(
             }
             Expr::Binary { op, left, right } => {
                 let left = resolve(*left)?;
-                let nested = pattern_scope(&left, bound);
+                let nested = pattern_scope(&left, bound, &HashSet::new());
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -2367,9 +2384,15 @@ fn resolve_alias_expr_scoped(
 }
 
 /// Match the public Kernel's Is/Binary pattern continuation scope.
-fn pattern_scope(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
+pub(super) fn pattern_scope(
+    expr: &Expr,
+    bound: &HashSet<String>,
+    globals: &HashSet<String>,
+) -> HashSet<String> {
+    let mut patterns = HashSet::new();
+    extend_pattern_names(expr, &mut patterns);
     let mut nested = bound.clone();
-    extend_pattern_names(expr, &mut nested);
+    nested.extend(patterns.difference(globals).cloned());
     nested
 }
 
@@ -2396,11 +2419,10 @@ fn resolve_alias_action_items(
     context: ComposeWriteContext,
 ) -> Result<Vec<ActionItem>, CoreError> {
     let mut bound = bound.clone();
-    map_normalized_action_items(items, &mut bound, |item, bound| {
+    map_scoped_action_items(items, &mut bound, &HashSet::new(), |item, bound| {
         Ok(match item {
             ActionItem::Requires(expr, span) => {
                 let expr = resolve_alias_expr_scoped(expr, components, span, bound)?;
-                extend_pattern_names(&expr, bound);
                 ActionItem::Requires(expr, span)
             }
             ActionItem::Ensures(expr, span) => ActionItem::Ensures(
@@ -2409,7 +2431,6 @@ fn resolve_alias_action_items(
             ),
             ActionItem::Let(name, expr, span) => {
                 let expr = resolve_alias_expr_scoped(expr, components, span, bound)?;
-                bound.insert(name.clone());
                 ActionItem::Let(name, expr, span)
             }
             ActionItem::Statement(statement) => ActionItem::Statement(resolve_alias_statement(
