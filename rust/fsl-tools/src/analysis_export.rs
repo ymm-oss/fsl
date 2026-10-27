@@ -133,8 +133,15 @@ fn to_mermaid(analysis: &Value) -> String {
             id = format!("n_{id}");
         }
         if !seen.insert(id.clone()) {
-            id = format!("{id}_{index}");
-            seen.insert(id.clone());
+            let plain = id;
+            let mut suffix = index;
+            loop {
+                id = format!("{plain}_{suffix}");
+                if seen.insert(id.clone()) {
+                    break;
+                }
+                suffix += 1;
+            }
         }
         ids.insert(source.to_owned(), id);
     }

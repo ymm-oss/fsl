@@ -6,7 +6,7 @@
 //! and a `do_not_assume` array; representative path listings are capped with
 //! explicit truncation metadata and never drive any judgment.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
@@ -379,9 +379,18 @@ const MODEL_REVIEW_DO_NOT_ASSUME: [&str; 4] = [
 #[must_use]
 pub fn causal_mermaid(projection: &Value) -> String {
     let mut lines = vec!["graph LR".to_owned()];
+    let mut ids = BTreeMap::new();
+    let mut used = BTreeSet::new();
     for node in projection["nodes"].as_array().into_iter().flatten() {
-        let id = sanitize(node["id"].as_str().unwrap_or_default());
         let label = node["id"].as_str().unwrap_or_default();
+        let plain = sanitize(label);
+        let mut id = plain.clone();
+        let mut suffix = 2;
+        while !used.insert(id.clone()) {
+            id = format!("{plain}_{suffix}");
+            suffix += 1;
+        }
+        ids.insert(label, id.clone());
         let role = node["role"].as_str().unwrap_or("");
         if role.is_empty() {
             lines.push(format!("  {id}[\"{label}\"]"));
@@ -390,8 +399,10 @@ pub fn causal_mermaid(projection: &Value) -> String {
         }
     }
     for edge in projection["edges"].as_array().into_iter().flatten() {
-        let source = sanitize(edge["source"].as_str().unwrap_or_default());
-        let target = sanitize(edge["target"].as_str().unwrap_or_default());
+        let source = edge["source"].as_str().unwrap_or_default();
+        let target = edge["target"].as_str().unwrap_or_default();
+        let source = ids.get(source).cloned().unwrap_or_else(|| sanitize(source));
+        let target = ids.get(target).cloned().unwrap_or_else(|| sanitize(target));
         let kind = edge["kind"].as_str().unwrap_or_default();
         let label = if kind == "claim" {
             format!(
@@ -412,8 +423,8 @@ pub fn causal_mermaid(projection: &Value) -> String {
 pub fn causal_dot(projection: &Value) -> String {
     let mut lines = vec!["digraph causal {".to_owned()];
     for node in projection["nodes"].as_array().into_iter().flatten() {
-        let id = node["id"].as_str().unwrap_or_default();
-        let role = node["role"].as_str().unwrap_or("");
+        let id = dot_escape(node["id"].as_str().unwrap_or_default());
+        let role = dot_escape(node["role"].as_str().unwrap_or(""));
         if role.is_empty() {
             lines.push(format!("  \"{id}\";"));
         } else {
@@ -421,20 +432,25 @@ pub fn causal_dot(projection: &Value) -> String {
         }
     }
     for edge in projection["edges"].as_array().into_iter().flatten() {
-        let source = edge["source"].as_str().unwrap_or_default();
-        let target = edge["target"].as_str().unwrap_or_default();
+        let source = dot_escape(edge["source"].as_str().unwrap_or_default());
+        let target = dot_escape(edge["target"].as_str().unwrap_or_default());
         let kind = edge["kind"].as_str().unwrap_or_default();
         let label = if kind == "claim" {
             edge["id"].as_str().unwrap_or_default().to_owned()
         } else {
             kind.to_owned()
         };
+        let label = dot_escape(&label);
         lines.push(format!(
             "  \"{source}\" -> \"{target}\" [label=\"{label}\"];"
         ));
     }
     lines.push("}".to_owned());
     lines.join("\n") + "\n"
+}
+
+fn dot_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn sanitize(id: &str) -> String {
