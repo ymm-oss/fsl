@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
 """Acceptance controls for the Windows native-Z3 shard split (#1532)."""
 import re
 import subprocess
