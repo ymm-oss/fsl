@@ -30,6 +30,7 @@ impl TypecheckError {
         Self {
             message: located.message,
             span: located.span,
+            ..self
         }
     }
 
@@ -50,7 +51,7 @@ impl fmt::Display for TypecheckError {
 
 impl std::error::Error for TypecheckError {}
 
-fn error(message: impl Into<String>) -> TypecheckError {
+pub(crate) fn error(message: impl Into<String>) -> TypecheckError {
     TypecheckError {
         message: message.into(),
         span: None,
