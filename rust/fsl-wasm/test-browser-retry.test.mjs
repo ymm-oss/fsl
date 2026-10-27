@@ -22,6 +22,7 @@ const setupCommands = [
   ["npm", "--prefix", "rust/fsl-wasm", "run", "test:outcome"],
   ["npm", "--prefix", "rust/fsl-wasm", "run", "test:imports"],
 ];
+const spikeCommand = setupCommands[2];
 
 function cleanEnvironment() {
   const env = { ...process.env };
@@ -124,7 +125,9 @@ process.exitCode = status;
 
 // Queues are keyed by complete argv, so another phase can get its own queue
 // without replacing the actual integration entry point or retry logic.
-function runIntegration(t, { browserStatuses, summary = true, initialSummary = "", setupFailure = false }) {
+function runIntegration(t, {
+  browserStatuses, spikeStatuses = [0], summary = true, initialSummary = "", setupFailure = false,
+}) {
   const directory = temporaryDirectory(t);
   const bin = join(directory, "bin");
   mkdirSync(bin);
@@ -132,8 +135,13 @@ function runIntegration(t, { browserStatuses, summary = true, initialSummary = "
     writeFileSync(join(bin, command), stubSource, { mode: 0o755 });
   }
   const browserQueue = join(directory, "browser.queue");
+  const spikeQueue = join(directory, "spike.queue");
   writeFileSync(browserQueue, browserStatuses.join("\n") + "\n");
-  const queues = { [JSON.stringify(browserCommand)]: browserQueue };
+  writeFileSync(spikeQueue, spikeStatuses.join("\n") + "\n");
+  const queues = {
+    [JSON.stringify(browserCommand)]: browserQueue,
+    [JSON.stringify(spikeCommand)]: spikeQueue,
+  };
   if (setupFailure) {
     const setupQueue = join(directory, "setup.queue");
     writeFileSync(setupQueue, "1\n");
@@ -159,6 +167,7 @@ function runIntegration(t, { browserStatuses, summary = true, initialSummary = "
   return {
     ...result, invocations, summary: readFileSync(summaryPath, "utf8"),
     remaining: readFileSync(browserQueue, "utf8").trim().split("\n").filter(Boolean),
+    spikeRemaining: readFileSync(spikeQueue, "utf8").trim().split("\n").filter(Boolean),
   };
 }
 
@@ -259,4 +268,78 @@ test("real parity violation is never retried or masked by a queued success", { s
   const result = runIntegration(t, { browserStatuses: statuses });
   assertRealParity(result);
   assertBrowserRun(result, { statuses, calls: 1, status: 65 });
+});
+
+const spikeMatrix = [
+  { spike: [0], spikeCalls: 1, browser: [0], browserCalls: 1, status: 0 },
+  { spike: [124, 0], spikeCalls: 2, browser: [0], browserCalls: 1, status: 0 },
+  { spike: [124, 124, 0], spikeCalls: 2, browser: [0], browserCalls: 0, status: 124 },
+  { spike: [1, 0], spikeCalls: 1, browser: [0], browserCalls: 0, status: 1 },
+  { spike: [124, 1, 0], spikeCalls: 2, browser: [0], browserCalls: 0, status: 1 },
+  { spike: [65, 0], spikeCalls: 1, browser: [0], browserCalls: 0, status: 65 },
+  { spike: [2, 0], spikeCalls: 1, browser: [0], browserCalls: 0, status: 2 },
+  { spike: [137, 0], spikeCalls: 1, browser: [0], browserCalls: 0, status: 137 },
+  { spike: [124, 65, 0], spikeCalls: 2, browser: [0], browserCalls: 0, status: 65 },
+  { spike: [124, 0], spikeCalls: 2, browser: [124, 0], browserCalls: 2, status: 0 },
+];
+
+function assertSpikeRun(result, entry, { summary = true, prefix = "" } = {}) {
+  const { spike, spikeCalls, browser, browserCalls, status } = entry;
+  assert.equal(result.status, status, result.stderr);
+  assert.deepEqual(result.invocations.map(({ argv }) => argv), [
+    ...setupCommands.slice(0, 2),
+    ...Array.from({ length: spikeCalls }, () => spikeCommand),
+    ...(browserCalls ? setupCommands.slice(3) : []),
+    ...Array.from({ length: browserCalls }, () => browserCommand),
+  ], "only each browser phase may retry; failed spike prevents all later setup");
+  assert.ok(result.invocations.every(({ pastQueue }) => !pastQueue));
+  assert.deepEqual(result.spikeRemaining, spike.slice(spikeCalls).map(String));
+  assert.deepEqual(result.remaining, browser.slice(browserCalls).map(String));
+  assert.deepEqual(result.invocations.filter(({ argv }) => JSON.stringify(argv) === JSON.stringify(spikeCommand))
+    .map((run) => run.status), spike.slice(0, spikeCalls));
+  assert.deepEqual(result.invocations.filter(({ argv }) => JSON.stringify(argv) === JSON.stringify(browserCommand))
+    .map((run) => run.status), browser.slice(0, browserCalls));
+  assert.ok(result.summary.startsWith(prefix));
+  if (!summary) {
+    assert.equal(result.summary, prefix);
+    return;
+  }
+  const appended = result.summary.slice(prefix.length);
+  const lines = appended.split("\n");
+  if (spikeCalls === 2) {
+    const retryIndex = lines.findIndex((line) => /spike|z3js|probe:browser/i.test(line)
+      && /probe_timeout/.test(line) && /attempt\D*1\b/i.test(line) && /retry/i.test(line));
+    assert.notEqual(retryIndex, -1, "spike attempt 1 timeout and retry must be visible");
+    const finalSpikeOutcome = outcomeFor(spike[spikeCalls - 1]);
+    assert.ok(lines.slice(retryIndex + 1).some((line) => /spike|z3js|probe:browser/i.test(line)
+      && line.includes(finalSpikeOutcome)), "final spike outcome follows its retry history");
+  } else {
+    assert.doesNotMatch(appended, /retry/i);
+  }
+  if (browserCalls === 2) {
+    const retryLines = lines.filter((line) => /probe_timeout/.test(line)
+      && /attempt\D*1\b/i.test(line) && /retry/i.test(line));
+    assert.equal(retryLines.length, 2, "combined run records one retry for each independent browser phase");
+    assert.ok(retryLines.some((line) => !/spike|z3js|probe:browser/i.test(line)), "FSL retry has its own history");
+  }
+  assert.ok(appended.includes(outcomeFor(status)), "summary retains the final outcome");
+}
+
+for (const entry of spikeMatrix) {
+  test(`spike statuses ${entry.spike}, browser ${entry.browser}: exit ${entry.status}`, { skip: bash.skip }, (t) => {
+    assertSpikeRun(runIntegration(t, { spikeStatuses: entry.spike, browserStatuses: entry.browser }), entry);
+  });
+}
+
+test("spike timeout retry works without a step summary", { skip: bash.skip }, (t) => {
+  const entry = spikeMatrix[1];
+  const result = runIntegration(t, { spikeStatuses: entry.spike, browserStatuses: entry.browser, summary: false });
+  assertSpikeRun(result, entry, { summary: false });
+});
+
+test("spike retry appends to an existing step summary", { skip: bash.skip }, (t) => {
+  const entry = spikeMatrix[1];
+  const prefix = "# Earlier spike evidence\npreserve this section\n";
+  const result = runIntegration(t, { spikeStatuses: entry.spike, browserStatuses: entry.browser, initialSummary: prefix });
+  assertSpikeRun(result, entry, { prefix });
 });
