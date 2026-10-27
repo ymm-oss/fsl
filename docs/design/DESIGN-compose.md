@@ -136,6 +136,11 @@ compose OrderSystem {
     normalization rule. Original-source aggregate pattern decisions survive
     normalization as check-only data: a surviving pattern retains its original
     refusal, while an erased empty-domain pattern does not invent one.
+    The helpful argument type gate addresses part of #1483: its base diagnostic
+    location is the `helpful` clause, not a separately recorded span for every
+    argument. Per-argument source spans and the placement of state-independence
+    checks remain #1483 follow-ups. Operand validation for `abs` remains #1459;
+    this routing change does not close that separate typing gap.
 
     **Migration contract (#702, limited to original component name resolution):**
 
