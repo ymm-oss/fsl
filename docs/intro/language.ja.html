@@ -1132,9 +1132,9 @@ Public Kernel v2 はオプトインで、
 <code>auxiliary_invariant_recommendation</code> がソースに永続化すべき宣言を出力します。この
 コマンドがファイルを書き換えることは決してありません。未検証の仮定モードは
 ありません。BMC エンジンでの <code>--lemma</code> は使用法エラーです。lemma を使う run は
-永続検証キャッシュの参照も保存も行いません。</p>
-<h1 id="1448-579-fsl-basehead-check-sweep">1448 では、579 個の <code>.fsl</code> を両モードで base/head 比較した <code>check</code> sweep において、</h1>
-<p>受理されていた形式の削除はありませんでした。コマンドとリビジョンの識別情報は
+永続検証キャッシュの参照も保存も行いません。
+#1448 では、579 個の <code>.fsl</code> を両モードで base/head 比較した <code>check</code> sweep において、
+受理されていた形式の削除はありませんでした。コマンドとリビジョンの識別情報は
 <code>docs/design/DESIGN-induction-lemmas.md</code> の "Type-validation compatibility evidence" に記録しています。</p>
 <p>sweep の envelope は、実行メタデータの <code>cache</code> と timing を除けば入力の関数です。
 安定した比較では approval の <code>stable_json</code> と同じく、各 verification envelope
@@ -2139,9 +2139,9 @@ enabled な action が無くなればそこで止まります。<code>--depth</c
 結線するまで、すべてのターゲットのすべての生成テストは <code>adapter not wired</code> で
 始まるメッセージで<strong>失敗</strong>します。実装を一度も呼ばないテストは実装が仕様に合って
 いる証拠ではないので、ランナーを緑にしてはいけません。以前の「結線するまで skip」
-のスキャフォールドが要るときは <code>--allow-unwired</code> を付けて生成します。出力は</p>
-<h1 id="1200-pytest-pytestskipvitest">1200 以前のスキャフォールドとバイト単位で同一です(pytest <code>pytest.skip</code>、Vitest</h1>
-<p><code>test.skip</code>、Swift <code>.enabled(if:)</code>、Dart <code>skip:</code>、PHPUnit <code>markTestSkipped</code>)。
+のスキャフォールドが要るときは <code>--allow-unwired</code> を付けて生成します。出力は
+#1200 以前のスキャフォールドとバイト単位で同一です(pytest <code>pytest.skip</code>、Vitest
+<code>test.skip</code>、Swift <code>.enabled(if:)</code>、Dart <code>skip:</code>、PHPUnit <code>markTestSkipped</code>)。
 選択は生成時に行うので、生成されたファイルを見れば分かります。Kotlin は
 <code>--allow-unwired</code> を拒否します。<code>--allow-unwired</code> のスイートが全件 skip で緑に
 なっても何も証明しません。そのため <code>fslc chain</code> の <code>[impl]</code> テーブルは証拠を
