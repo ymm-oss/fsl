@@ -39,6 +39,36 @@ replacement edge identified yet, so retiring it needs a separate compatibility d
 the BFS/BMC/scenarios trio remains pending native semantic
 migration.
 
+### WASM browser outcomes and timeout retries
+
+The FSL browser harness preserves `fsl-wasm-browser-outcome.v1`: a typed probe
+timeout exits **124** (`probe_timeout`, with `poll` or `cdp` mode), a native/Worker
+parity violation exits **65** (`parity_violation`), and other harness failures exit
+**1** (`harness_failure`). The earlier z3js spike has no such outcome JSON: only
+expiry of its 75-second result timer exits **124**; early browser exit, Worker
+failure, build failure and every other error still exit **1**.
+
+`tools/check-native-integration.sh` retries each of the spike `probe:browser` and
+FSL `test:browser` commands **once, only on exact status 124**. A second timeout
+fails, and status 65 or any other nonzero status is never retried or replaced by
+success. The phases have independent retry budgets. Setup commands run once with
+`set -euo pipefail`; a terminal spike failure stops the lane before native/FSL
+setup. Every browser attempt records its outcome and status, including an explicit
+first-timeout retry announcement, appending to `GITHUB_STEP_SUMMARY` when set.
+Local runs without that variable preserve the same exit behavior. Individual CDP
+calls are not retried; their original diagnostics remain in the log.
+
+FSL client completion has a **360-second elapsed-time deadline**, not a fixed poll
+count. In-flight CDP evaluations retain their own 30-second timeout and consume
+the completion budget. Chrome executable/version (best effort), spawn, DevTools
+readiness and completion/timeout timestamps, plus the last observed client phase,
+distinguish progress from an unexplained pending page. These diagnostics do not
+change outcome JSON, parity envelopes, normalization, exclusions or corpus scope.
+Package-free FSL/spike outcome, completion and retry controls run through the
+FSL package's `test:outcome` entry point in the WASM lane before the FSL browser.
+A retry is a bounded mitigation, not evidence that the underlying latency cause
+is resolved or that parity has passed.
+
 ### Why the split falls here
 
 Measured on the batch that motivated this revision:
