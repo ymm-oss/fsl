@@ -14,6 +14,11 @@ import { assertNormalizerContract, differences, normalizeEnvelope } from "./pari
 import { workerMessageError } from "./web/worker-protocol.mjs";
 import { classifyOutcome, ParityViolationError, ProbeTimeoutError } from "./browser-outcome.mjs";
 import { specImports } from "./spec-imports.mjs";
+import { waitForCompletion } from "./completion-wait.mjs";
+
+function logPhase(phase, detail = "") {
+  console.error(`[${new Date().toISOString()}] fsl-wasm browser phase=${phase}${detail ? ` ${detail}` : ""}`);
+}
 
 async function main() {
   assertNormalizerContract();
@@ -374,6 +379,13 @@ const chrome = [
   "/usr/bin/chromium",
 ].filter(Boolean).find(existsSync);
 if (!chrome) throw new Error("Chrome not found; set CHROME_BIN");
+logPhase("chrome", `executable=${chrome}`);
+try {
+  const version = await command(chrome, ["--version"], 2_000);
+  logPhase("chrome-version", version.status === 0 ? version.stdout.trim() : "unavailable");
+} catch {
+  logPhase("chrome-version", "unavailable");
+}
 
 profile = await mkdtemp(join(tmpdir(), "fsl-wasm-chrome-"));
 child = spawn(chrome, [
@@ -382,6 +394,7 @@ child = spawn(chrome, [
   "--remote-debugging-port=0", `--user-data-dir=${profile}`,
   `http://127.0.0.1:${port}/`,
 ], { stdio: ["ignore", "pipe", "pipe"] });
+child.once("spawn", () => logPhase("spawn", `pid=${child.pid}`));
 childClosed = new Promise((resolve) => child.once("close", resolve));
 let stderr = "";
 child.stderr.setEncoding("utf8");
@@ -405,7 +418,7 @@ const cdpTimeoutMs = 30_000;
 // CDP connection used to leave the returned promise unsettled forever: the
 // message listener is the only thing that ever resolved or rejected a
 // pending entry, so a response that never arrives hung node indefinitely,
-// and the `for (attempt < 360)` probe loop below is not actually a bound
+// and even the completion deadline below is not actually a bound
 // once a single `await cdp(...)` inside it never returns (#584). Both the
 // per-call timeout here and rejectPending's socket close/error handlers
 // below turn that hang into a loud, named failure, which lets the
@@ -425,9 +438,9 @@ const cdpTimeoutMs = 30_000;
 //   - Chrome's stderr is already accumulated but is otherwise printed only on
 //     a startup failure. A crash or renderer message in it names the cause.
 //
-// Deliberately no retry: retrying an unexplained stall would hide the event
-// this diagnostic exists to capture, and a real hang would return as a slow
-// pass instead of a failure.
+// Deliberately no individual CDP-call retry: retain the diagnostic for the
+// failed invocation. check-native-integration.sh may retry the whole browser
+// command once on status 124, recording both attempts in the step summary.
 const READY_STATE = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
 function cdp(socket, method, params = {}) {
   const id = nextId;
@@ -479,21 +492,20 @@ let details;
     socket.addEventListener("error", reject, { once: true });
   });
   await cdp(socket, "Runtime.enable");
-  for (let attempt = 0; attempt < 360; attempt += 1) {
-    const evaluated = await cdp(socket, "Runtime.evaluate", {
-      expression: `(() => { const node = document.querySelector('#result'); return node ? { done: node.dataset.done, ok: node.dataset.ok, text: node.textContent } : null; })()`,
-      returnByValue: true,
+  logPhase("devtools-ready", `port=${debugPort}`);
+  try {
+    details = await waitForCompletion({
+      evaluate: async () => {
+        const evaluated = await cdp(socket, "Runtime.evaluate", {
+          expression: `(() => { const node = document.querySelector('#result'); return node ? { done: node.dataset.done, ok: node.dataset.ok, text: node.textContent, phase: node.dataset.phase } : null; })()`,
+          returnByValue: true,
+        });
+        return evaluated.result.value;
+      },
     });
-    details = evaluated.result.value;
-    if (details?.done === "true") break;
-    await delay(250);
-  }
-  socket.close();
-  if (details?.done !== "true") {
-    throw new ProbeTimeoutError(
-      "poll",
-      `browser probe timed out after 360 attempts; last observation: ${JSON.stringify(details)}`,
-    );
+    logPhase("client-completion", `client=${details.phase ?? "unknown"}`);
+  } finally {
+    socket.close();
   }
 }
 if (details.ok !== "true") {
@@ -622,7 +634,9 @@ console.log(JSON.stringify({
 
 try {
   await main();
+  logPhase("completion");
 } catch (error) {
+  if (error instanceof ProbeTimeoutError) logPhase("timeout", `mode=${error.mode}`);
   const classified = classifyOutcome(error);
   const status = classified.status;
   const diagnostic = { schema: "fsl-wasm-browser-outcome.v1", ...classified };
