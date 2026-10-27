@@ -14,10 +14,13 @@ examine_globs = [
 
 examine_re = [
   "(replace verify_bounded_config( ->| with)| in verify_bounded_config$)",
+  "(replace reject_unchecked_sequence_overflow( ->| with)| in reject_unchecked_sequence_overflow$)",
   "(replace check_state_properties( ->| with)| in check_state_properties$)",
   "(replace make_violation( ->| with)| in make_violation$)",
   "(replace probe( ->| with)| in probe$)",
   "(replace project_trace( ->| with)| in project_trace$)",
+  "(replace has_missing_sequence_slots( ->| with)| in has_missing_sequence_slots$)",
+  "(replace chosen_instance( ->| with)| in chosen_instance$)",
   "(replace project_action( ->| with)| in project_action$)",
   "(replace replay_bmc_witnesses( ->| with)| in replay_bmc_witnesses$)",
   "(replace render_violation( ->| with)| in render_violation$)",
