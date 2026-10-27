@@ -551,7 +551,12 @@ pub fn cases() -> Vec<Case> {
             [Ok, Violated, Violated, Error],
         ),
     ] {
-        cases.push(case(format!("X1/{name}"), text, outcomes, None));
+        cases.push(case(
+            format!("X1/{name}"),
+            text,
+            outcomes,
+            (name == "operand-method-types").then_some("invariant Capture"),
+        ));
     }
     for expr in [
         "Seq { 1 }[0] == 1",

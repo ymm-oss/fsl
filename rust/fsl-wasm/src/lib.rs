@@ -1658,6 +1658,11 @@ mod tests {
                 "spec RelEndpoint {\n  enum Color { Red, Blue }\n  type N = 0..2\n  state { r: relation N -> N }\n  init { r = Set {} }\n  action stay() { }\n  invariant P { not reachable(r, 1, Blue) }\n}\n",
                 "relation_endpoint_type.fsl",
             ),
+            (
+                "Option operand type",
+                "spec OptionOperand {\n  type N = 0..2\n  state { n: N }\n  init { n = 0 }\n  action stay() { }\n  invariant P { n is none }\n}\n",
+                "option_operand_type.fsl",
+            ),
         ] {
             let request = Request {
                 cmd: "check".to_owned(),
@@ -1668,6 +1673,15 @@ mod tests {
                 unstable: Vec::new(),
             };
             assert_worker_check_error_matches_native(&request, fixture);
+            if fixture == "Option operand type" {
+                let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+                assert_eq!(worker["result"], "error");
+                assert_eq!(worker["kind"], "semantics");
+                assert_eq!(worker["loc"], json!({"line": 6, "column": 3}));
+                assert!(worker["message"].as_str().is_some_and(|message| {
+                    message.contains("'is none/some' requires an Option expression")
+                }));
+            }
             if fixture == "relation endpoint type" {
                 let worker = block_on(check(&request, TEST_SOLVER_VERSION));
                 assert_eq!(worker["result"], "error");

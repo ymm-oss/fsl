@@ -124,7 +124,18 @@ fn cyclic_relation_acyclic_violation_is_reported() {
 
 #[test]
 fn acyclic_on_a_non_self_relation_is_rejected() {
-    let model = build(BAD_SELF_RELATION_SRC);
+    // #1459 rejects authored non-self acyclic operands at model build time.
+    let kernel = parse_kernel_source(BAD_SELF_RELATION_SRC, &FsResolver::new("."))
+        .expect("parse non-self relation");
+    let error = build_model(kernel).expect_err("non-self acyclic must fail model build");
+    assert!(error.to_string().contains("self-relation"), "{error}");
+
+    let mut model =
+        build(&BAD_SELF_RELATION_SRC.replace("acyclic(assignments)", "functional(assignments)"));
+    let fsl_core::KernelExpr::UnaryNamed { name, .. } = &mut model.invariants[0].expr else {
+        panic!("expected relation function");
+    };
+    *name = "rel_acyclic".to_owned();
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
     let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
         .expect_err("acyclic() on a non-self relation must be rejected, not silently accepted");

@@ -1758,20 +1758,94 @@ mod tests {
     }
 
     #[test]
-    fn missing_at_index_returns_a_public_kernel_error_without_changing_check() {
-        let (kernel, model) = at_method_model("");
+    fn check_rejects_at_without_an_index() {
+        let source = "spec EmptyAt { state { q: Seq<Int, 2>, n: Int } \
+                      init { q = Seq {} n = 0 } \
+                      action Touch() { n = q.at() } invariant Safe { true } }";
+        let kernel = crate::parse_direct_kernel_spec(source).expect("parse missing at index");
+        let error = crate::build_model(kernel).expect_err("check must reject a missing at index");
+        assert!(
+            error.message.contains("invalid Seq method")
+                && error.message.contains("at")
+                && error.message.contains("/0"),
+            "{error:?}"
+        );
+        let span = error
+            .origin
+            .expect("authored diagnostic origin")
+            .primary
+            .expect("primary authored origin")
+            .span
+            .expect("authored expression span");
+        assert_eq!((span.start.line, span.start.column), (1, 92));
+    }
+
+    fn remove_at_index(model: &mut KernelModel) -> (Expr, Span) {
+        let action = model
+            .actions
+            .iter_mut()
+            .find(|action| action.name == "Touch")
+            .expect("Touch action");
+        let [Statement::Assign { value, span, .. }] = action.statements.as_mut_slice() else {
+            panic!("Touch must assign the at call");
+        };
+        let Expr::Method {
+            receiver,
+            name,
+            args,
+        } = value
+        else {
+            panic!("Touch assignment must contain a method call");
+        };
+        assert!(matches!(receiver.as_ref(), Expr::Var(name) if name == "q"));
+        assert_eq!(name, "at");
+        assert_eq!(args.len(), 1);
+        args.clear();
+        (value.clone(), *span)
+    }
+
+    #[test]
+    fn walk_partial_rejects_an_at_call_without_an_index() {
+        let (_, model) = at_method_model("0");
+        let (expression, span) = remove_at_index(&mut model.clone());
+        // Touch has no parameters or local guards, so its projection env is base_env.
+        let error = walk_partial(
+            &expression,
+            &base_env(&model),
+            &model,
+            "empty-at.fsl",
+            span,
+            None,
+            &mut Vec::new(),
+        )
+        .expect_err("missing at index must return PublicKernelError, not panic");
+        assert!(
+            error.message.contains("at")
+                && (error.message.contains("index") || error.message.contains("argument")),
+            "{error}"
+        );
+        assert_eq!(error.span, Some(span));
+    }
+
+    #[test]
+    fn public_kernel_rejects_an_at_call_without_an_index_without_panicking() {
+        let (kernel, model) = at_method_model("0");
+        // Projection walks the checked model's expression AST, not kernel.items.
+        let mut edited_model = model.clone();
+        let _ = remove_at_index(&mut edited_model);
         for version in [PublicKernelVersion::V1, PublicKernelVersion::V2] {
             let error = public_kernel_contract_for_version(
                 &kernel,
-                &model,
+                &edited_model,
                 "empty-at.fsl",
                 "kernel",
                 version,
             )
             .expect_err("missing at index must return PublicKernelError, not panic");
             assert!(
-                error.message.contains("at")
-                    && (error.message.contains("index") || error.message.contains("argument")),
+                error.message.contains("invalid Seq method")
+                    && error.message.contains("at")
+                    && error.message.contains("/0"),
                 "{version:?}: {error}"
             );
         }

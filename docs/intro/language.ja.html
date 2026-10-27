@@ -859,8 +859,7 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   enum 射影要素を数値端点や整数との比較に使うことはできません。
   enum の序数ではなく、宣言された端点の型を使ってください。
   一般に、射影要素と射影集合全体は宣言された端点の型を持ちます。enum や Bool の
-  要素を <code>Int</code> が必要な場所で使うことはできません。ただし、<code>abs</code> のオペランド型検査の
-  不足は既存の例外で、#1459 で追跡しています。その集合を数値 Set が必要な場所で
+  要素を <code>Int</code> が必要な場所で使うことはできません。その集合を数値 Set が必要な場所で
   使うこともできません。この破壊的変更は比較、順序、算術、<code>min</code>/<code>max</code>、所属、
   集合リテラルとの等価比較、Option 比較とパターンのペイロード、数値 Set 状態への
   代入、refinement map に適用されます。列挙した測定例だけに限りません。
@@ -890,6 +889,87 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   Q の前に有界の締め切り <code>within K</code> を、応答本体の後に induction のランキング用の
   <code>decreases &lt;int expr&gt;</code> を置けます</li>
 </ul>
+<p>静的なオペランド・シグネチャ検査(#1459、<strong>破壊的変更</strong>)は、選択されない分岐、
+action の代入、<code>requires</code>/<code>ensures</code>、trace 内の式も検査します:</p>
+<ul>
+<li><code>is none</code> / <code>is some(x)</code> のオペランドには Option が必要です。新しいペイロード名の
+  束縛と後続式のスコープは変わりません。</li>
+<li><code>abs</code> のオペランドには整数互換の型が必要で、domain/range の要素も例外では
+  ありません。enum の序数や Bool を整数として扱うことはできません。</li>
+<li><code>acyclic</code>、<code>functional</code>、<code>injective</code>、<code>domain</code>、<code>range</code>、<code>reachable</code> には関係が
+  必要です。関係でない値の射影を仮の <code>Set&lt;Int&gt;</code> として扱うことはありません。
+  <code>reachable</code> と <code>acyclic</code> は宣言された端点型が同一の関係(<code>T -&gt; T</code>)を要求します。
+  enum と数値が混在する関係だけでなく、数値型 <code>N</code> と <code>M</code> の範囲が同じでも
+  <code>N -&gt; M</code> は拒否します。数値互換性だけでは自己関係になりません。
+  異種端点の <code>functional</code>/<code>injective</code>/<code>domain</code>/<code>range</code> は引き続き使えます。</li>
+<li>メソッドの receiver、名前、引数個数は実行時のシグネチャに一致する必要があります:
+  Set は <code>contains(x)</code>、<code>add(x)</code>、<code>remove(x)</code>、<code>size()</code>、
+  Seq は <code>contains(x)</code>、<code>push(x)</code>、<code>pop()</code>、<code>head()</code>、<code>at(i)</code>、<code>size()</code>、
+  関係は <code>contains(a,b)</code>、<code>add(a,b)</code>、<code>remove(a,b)</code> です。Map にメソッドはありません。
+  たとえば <code>n.contains(0)</code>、<code>s.push(0)</code>、<code>q.add(0)</code>、<code>r.size()</code>、<code>s.contains()</code>、
+  <code>q.pop(1)</code>、action 内の <code>n = q.at()</code> を拒否します。</li>
+<li><code>count</code>/<code>sum</code> は展開前の束縛子、Bool フィルター、整数の加算値を検査します。
+  空の範囲や容量ゼロの Seq でも同じです。<code>count(i in 1..0 where 1)</code> や
+  <code>sum(i in 1..0 of true)</code> はエラーになります。正しく型付けされた空の集約は
+  引き続き <code>0</code> を返します。</li>
+</ul>
+<p>これらは実行時や acceptance replay まで遅延させない、位置付きの loader エラー
+(<code>kind: "semantics"</code>、終了コード2)です。既存の端点型ヒント、正しいメソッドの動作、
+非反射的な到達可能性は不変です。
+<a href="../design/DESIGN-nested-option-support.md#static-operand-and-signature-boundary-1459">設計の追補</a>も参照してください。</p>
+<p>#1459 の型境界監査では BASE <code>e8cf78f0</code> と HEAD <code>33d7faa7</code> を比較しました。
+corpus 591件と inline 384件(計975形式)を、個別にビルドした基準・直前の親・head の
+3つの木で stable/fsl5 の各モード2回ずつ、計11,700回検査しています。
+<strong>検査に通らなくなる corpus は空集合で、その他の corpus 出力変化もありません。
+除外した形式やフィールドはありません。</strong> 直前の親との比較により、上記6カテゴリの
+#1459 固有の削除は <strong>248 mode-form(124出現、異なるソース123種)</strong>、診断の再分類は
+<strong>60 mode-form</strong> です。数値型 <code>N -&gt; M</code> の削除も含みます。後者の
+<code>error/semantics/2</code> は不変ですが、位置のない実行時エラーから作成元の静的位置を持つ
+エラーになります。拡張した対象集合では、継承した #1439 は削除86・再分類11、
+#1458 は削除56・追加6 mode-form です。これらを #1459 の新規変更とは数えません。
+全件の帰属と対照検査は設計の追補に記録しています。</p>
+<p>レビュー第1回では、自己関係を選択する式の追加の隙間を閉じます。条件式の両分岐は、
+選択されない場合や入れ子でも検査し、<code>old</code>、関係の add/remove receiver、action 内の
+let 別名を経由しても同じです。then 側の自己関係型の推論で <code>N -&gt; M</code> の分岐を
+隠すことはできません。射影の型推論エラーは作成元の外側の位置、または既存のより
+精密な内側の位置を保持し、空リテラルで本来の関係診断を置き換えません。
+範囲境界と terminal のエラーも、生成された1:1ではなく作成元の位置を使います。
+数値・Set の互換性と正しい動的な判定は不変です。対象は共有 validator が訪問する
+式の木です。第1回の基準では helpful action の存在・個数だけを検査していましたが、
+現在の main は #1483 により引数のパラメーター型も検査し、その動作を維持します。
+関係値を含む未対応の一時コレクションは別の上流課題であり、この修正で新たに
+対応するわけではありません。</p>
+<p>第1回の差分は BASE <code>33d7faa7</code> と HEAD <code>8caf5c2e</code> の比較です。非自己関係の選択に
+よる <strong>追加の削除42 mode-form(21出現)</strong> と、<strong>診断の再分類24 mode-form(12出現)</strong>
+を測定しました。後者は射影推論16・範囲境界の位置6・terminal の位置2で、
+<code>error/semantics/2</code> は不変です。corpus 591件と inline 447件(計1,038形式)を、
+直前の修正の基準木も含む4つの個別ビルドの木で両モード2回ずつ、計16,608回検査
+しました。8,304組の反復出力は全体で一致し、形式・フィールドの除外も corpus 出力の
+変化もありません。継承した変更と第1回の新規変更は設計の追補で区別しています。</p>
+<p>現在の統合監査の最終 BASE は <code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code>、
+測定した実装は <code>2b7d2e98349505af7dccb7843e41ab659066f021</code> です。
+測定は <code>b1557a31b77f549d2c48823c3435217f9df4fc53</code> 上で行い、生成された
+言語ページ2件だけが異なる <code>11f01225</code> へ引き継ぎます。cache を無効にした
+<code>fslc check FORM</code> を stable/fsl5 各2回実行し、<code>specs/</code>、<code>examples/</code>、
+<code>rust/fslc/tests/fixtures/</code> の <strong>597形式</strong>と <strong>inline 601入力</strong>、計 <strong>1,198入力</strong>を
+3状態で検査しました。計 <strong>14,376検査</strong>と24件のバイナリ識別対照です。
+3つ目の状態は #1458 の帰属を測るための過去の基準 <code>9af1fa5f</code> です。
+corpus の出力変化はなく、形式・出力フィールドの除外もありません。最終 BASE との
+比較で #1459 は <strong>294 mode-form(147出現、異なるソース142種)</strong> を削除し、診断を
+<strong>62 mode-form</strong> 再分類します。元の空 aggregate 24出現と範囲境界2出現は main の
+#1463 が既に拒否・位置付けするため、以前の削除48・再分類4は #1459 に帰属しません。
+let/Kernel/CLI/共有行の追加出現は削除26を加えます。過去の #1458 の帰属は134入力で
+削除48・追加6、拡張した今回の入力集合では削除56・追加8のままです。</p>
+<p>共有 #1463 inventory の <code>X1/operand-method-types</code>、すなわち Bool の <code>done</code> に
+対する <code>invariant Capture { acyclic(done) }</code> は、破壊的な削除として
+<code>[Ok, Error, Error, Error]</code> から <code>[Error, Error, Error, Error]</code> へ変わり、
+check が <strong>8:3</strong> で拒否します。変更された共有行はこれだけです。残る136行のソースと
+resolver 依存1件(<strong>137入力</strong>)は、上記 BASE/実装の <code>fslc check FORM</code> で、両モード・
+両反復とも遷移やその他の出力変化がありません。継承した出力との比較では、入力パスを
+含むメッセージ292観測の差と、以前の #1458 抽出が spec でなく scratch ラベルを
+選んだ2入力に由来する16観測の差をそのまま記録します。今回は実際のテストソースを
+使い、両基準バイナリで受理されるため帰属は不変です。任意の再実行は行わず、
+sweep の出力は正規化していません。</p>
 <p>トップレベルの時相シュガー:</p>
 <pre><code class="language-fsl">unless Name { P unless Q }   // while P holds and Q is false, the next state must keep P or make Q true
 until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress obligation

@@ -790,7 +790,7 @@ fn component_rewrite_error(
     error: TypecheckError,
     context: ExpressionErrorContext<'_>,
 ) -> CoreError {
-    let TypecheckError { message, span } = error;
+    let TypecheckError { message, span, .. } = error;
     let message = context.message(message);
     if let Some(span) = span {
         return error_at(message, span);
@@ -1371,10 +1371,9 @@ fn rewrite_state_name(name: &str, component: &Component) -> Result<String, Typec
     if component.names.state.contains(name) {
         Ok(prefix(&component.alias, name))
     } else {
-        Err(TypecheckError {
-            message: crate::model::unknown_update_target(name).message,
-            span: None,
-        })
+        Err(crate::typecheck::error(
+            crate::model::unknown_update_target(name).message,
+        ))
     }
 }
 
