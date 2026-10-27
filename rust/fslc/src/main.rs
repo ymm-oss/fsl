@@ -6000,6 +6000,14 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    run_kernel_contract_from_source(path, &source, version)
+}
+
+fn run_kernel_contract_from_source(
+    path: &Path,
+    source: &str,
+    version: fsl_core::PublicKernelVersion,
+) -> (Value, i32) {
     // This AI-only validation guard originated in #1015. Lowering now returns
     // a CoreError instead of panicking on an undeclared authority tool lookup
     // (#1464), but retain the guard to preserve the existing validator envelope.
@@ -6011,7 +6019,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
     // any other document kind falls through unchanged to
     // `parse_kernel_source` below, keeping its own `kind:"parse"` envelope.
     if let Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) =
-        parse_surface_document_from_source(path, &source)
+        parse_surface_document_from_source(path, source)
         && let Err(error) = fsl_core::validate_ai_component(&component)
     {
         return (unlocated_core_error_output(&error), 2);
@@ -6027,10 +6035,10 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         None
     };
     let parsed = portable_path.as_ref().map_or_else(
-        || fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options()),
+        || fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options()),
         |source_file| {
             fsl_core::parse_kernel_source_with_file_with_options(
-                &source,
+                source,
                 &resolver,
                 source_file,
                 crate::parse_options(),
@@ -6041,7 +6049,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         Ok(kernel) => kernel,
         Err(error) => {
             return (
-                spec_load_error_output(&kernel_load_error(&source, &error, crate::parse_options())),
+                spec_load_error_output(&kernel_load_error(source, &error, crate::parse_options())),
                 2,
             );
         }
@@ -6050,7 +6058,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
     };
-    if let Err(error) = spec_loading::reject_refuted_requirements(&source, &model) {
+    if let Err(error) = spec_loading::reject_refuted_requirements(source, &model) {
         return (spec_load_error_output(&error), 2);
     }
     let source_path = portable_path.unwrap_or_else(|| path.to_string_lossy().into_owned());
@@ -6058,7 +6066,7 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         &kernel,
         &model,
         &source_path,
-        source_dialect(&source),
+        source_dialect(source),
         version,
     ) {
         Ok(mut contract) => {
@@ -6076,7 +6084,20 @@ fn run_conformance(
     depth: usize,
     version: fsl_core::PublicKernelVersion,
 ) -> (Value, i32) {
-    let model = match load_model(path) {
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_conformance_from_source(path, &source, depth, version)
+}
+
+fn run_conformance_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    version: fsl_core::PublicKernelVersion,
+) -> (Value, i32) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -6097,7 +6118,11 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    if source_dialect(&source) == "compose" {
+    run_testplan_from_source(path, &source, depth)
+}
+
+fn run_testplan_from_source(path: &Path, source: &str, depth: usize) -> (Value, i32) {
+    if source_dialect(source) == "compose" {
         return (
             semantic_error_output(
                 "advanced test planning requires truthful Public Kernel export; compose unsupported",
@@ -6105,7 +6130,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
             2,
         );
     }
-    let (kernel, model) = match load_kernel_model_from_source(path, &source) {
+    let (kernel, model) = match load_kernel_model_from_source(path, source) {
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -6114,7 +6139,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
         &kernel,
         &model,
         &source_path,
-        source_dialect(&source),
+        source_dialect(source),
     ) {
         Ok(mut contract) => {
             let object = contract.as_object_mut().expect("public Kernel object");
@@ -12196,38 +12221,41 @@ fn run_typestate(path: &Path) -> (Value, i32) {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    run_typestate_from_source(path, &source)
+}
+
+fn run_typestate_from_source(path: &Path, source: &str) -> (Value, i32) {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source_with_options(
-        &source,
-        &resolver,
-        crate::parse_options(),
-    ) {
-        Ok(kernel) => kernel,
-        Err(error) => {
-            return (
-                spec_load_error_output(&kernel_load_error(&source, &error, crate::parse_options())),
-                2,
-            );
-        }
-    };
+    let kernel =
+        match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+        {
+            Ok(kernel) => kernel,
+            Err(error) => {
+                return (
+                    spec_load_error_output(&kernel_load_error(
+                        source,
+                        &error,
+                        crate::parse_options(),
+                    )),
+                    2,
+                );
+            }
+        };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
     };
-    if let Err(error) = spec_loading::reject_refuted_requirements(&source, &model) {
+    if let Err(error) = spec_loading::reject_refuted_requirements(source, &model) {
         return (spec_load_error_output(&error), 2);
     }
     let path_text = path.to_string_lossy();
-    let contract = match fsl_core::public_kernel_contract(
-        &kernel,
-        &model,
-        &path_text,
-        source_dialect(&source),
-    ) {
-        Ok(contract) => contract,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
+    let contract =
+        match fsl_core::public_kernel_contract(&kernel, &model, &path_text, source_dialect(source))
+        {
+            Ok(contract) => contract,
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        };
     let report = match fsl_tools::analyze_typestate(&contract) {
         Ok(report) => report,
         Err(error) => return (semantic_error_output(&error), 2),
