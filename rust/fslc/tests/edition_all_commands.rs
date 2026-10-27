@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[path = "support/edition_cases.rs"]
-mod cases;
+pub(crate) mod cases;
 
 use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
@@ -49,7 +49,7 @@ fn repair_accepts(verb: &str, actual: &Value, exit: Option<i32>, expected: &Valu
 }
 
 #[test]
-fn every_registered_root_has_the_same_admission_before_dialect_or_sidecars() {
+pub(crate) fn every_registered_root_has_the_same_admission_before_dialect_or_sidecars() {
     let mut results = Results::default();
     let mut executed = Vec::new();
     for row in cases::rows().into_iter().filter(|r| r.owner == "native") {
@@ -147,7 +147,7 @@ fn chain_expected(scratch: &Scratch, source: &std::path::Path, detail: &Value) -
 }
 
 #[test]
-fn four_warning_classes_and_refusals_finish_once_on_all_eight_verification_routes() {
+pub(crate) fn four_warning_classes_and_refusals_finish_once_on_all_eight_verification_routes() {
     let mut results = Results::default();
     for &(code, token, body) in cases::WARNING_CASES {
         let legacy = cases::legacy(code, body);
@@ -234,7 +234,7 @@ fn four_warning_classes_and_refusals_finish_once_on_all_eight_verification_route
 }
 
 #[test]
-fn argv_validation_remains_ahead_of_source_admission() {
+pub(crate) fn argv_validation_remains_ahead_of_source_admission() {
     let mut results = Results::default();
     for row in cases::rows()
         .into_iter()
@@ -261,7 +261,7 @@ fn argv_validation_remains_ahead_of_source_admission() {
 }
 
 #[test]
-fn report_baselines_receive_one_finished_warning_before_rendering() {
+pub(crate) fn report_baselines_receive_one_finished_warning_before_rendering() {
     let scratch = Scratch::new();
     let source = cases::WARNING_CASES[1].2;
     let path = scratch.write("source.fsl", source);

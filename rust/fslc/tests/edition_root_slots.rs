@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[path = "support/edition_cases.rs"]
-mod cases;
+pub(crate) mod cases;
 
 use cases::{Results, Scratch, value};
 use serde_json::Value;
@@ -11,7 +11,7 @@ fn run(scratch: &Scratch, args: &[String], gate: bool) -> std::process::Output {
 }
 
 #[test]
-fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individually() {
+pub(crate) fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individually() {
     let mut results = Results::default();
     for (template, slots) in [
         (
@@ -80,7 +80,7 @@ fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individually() {
 }
 
 #[test]
-fn manifest_layers_and_mapping_refuse_before_the_implementation_marker() {
+pub(crate) fn manifest_layers_and_mapping_refuse_before_the_implementation_marker() {
     let mut results = Results::default();
     for layer in ["business", "requirements", "design", "mapping"] {
         for (jobs, keep_going, checks_only) in [
@@ -161,7 +161,7 @@ fn manifest_layers_and_mapping_refuse_before_the_implementation_marker() {
 }
 
 #[test]
-fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal() {
+pub(crate) fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal() {
     let mut results = Results::default();
     let root = cases::root();
     let scratch = Scratch::new();
@@ -194,7 +194,7 @@ fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal() {
 }
 
 #[test]
-fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once() {
+pub(crate) fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once() {
     let mut results = Results::default();
     let testplan_source = include_str!("fixtures/testplan_limit.fsl").replace(
         "action submit(q: Qty) {",
@@ -254,7 +254,7 @@ fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once() {
 }
 
 #[test]
-fn header_flag_conflict_and_gate_off_modes_are_preserved() {
+pub(crate) fn header_flag_conflict_and_gate_off_modes_are_preserved() {
     let mut results = Results::default();
     for &(code, _, body) in cases::WARNING_CASES {
         let legacy = cases::legacy(code, body);
@@ -316,7 +316,7 @@ fn header_flag_conflict_and_gate_off_modes_are_preserved() {
 }
 
 #[test]
-fn checked_repairs_and_editionless_sources_are_preserved() {
+pub(crate) fn checked_repairs_and_editionless_sources_are_preserved() {
     let mut results = Results::default();
     for &(code, _, body) in cases::WARNING_CASES {
         let legacy = cases::legacy(code, body);

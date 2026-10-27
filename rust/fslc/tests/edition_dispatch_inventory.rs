@@ -1,7 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// Reuse standalone adapters verbatim, each with its own observation collector.
+#![allow(clippy::duplicate_mod)]
+
 #[path = "support/edition_cases.rs"]
 mod cases;
+
+#[path = "edition_all_commands.rs"]
+mod all_commands;
+#[path = "edition_dialect_controls.rs"]
+mod dialect_controls;
+#[path = "edition_ownership.rs"]
+mod ownership;
+#[path = "edition_root_slots.rs"]
+mod root_slots;
 
 use std::collections::BTreeSet;
 use syn::visit::Visit;
@@ -262,4 +274,58 @@ fn metadata_and_dispatch_population_is_exact() {
         "actual dispatch differs from edition table"
     );
     assert_eq!(rows.iter().filter(|r| r.role == "nonreader").count(), 3);
+    let deferred: BTreeSet<_> = cases::DEFERRED_TO_SECOND_PR
+        .iter()
+        .map(|(leaf, mode, reason)| {
+            assert!(!reason.is_empty());
+            assert!(
+                all.contains(*leaf),
+                "deferred leaf absent from edition table: {leaf}"
+            );
+            (*leaf, *mode)
+        })
+        .collect();
+    assert_eq!(
+        deferred.len(),
+        cases::DEFERRED_TO_SECOND_PR.len(),
+        "duplicate deferred mode"
+    );
+}
+
+#[test]
+fn deferred_modes_have_live_disagreements_across_the_complete_native_adapters() {
+    let mut cells = all_commands::cases::capture(|| {
+        all_commands::every_registered_root_has_the_same_admission_before_dialect_or_sidecars();
+        all_commands::four_warning_classes_and_refusals_finish_once_on_all_eight_verification_routes();
+        all_commands::argv_validation_remains_ahead_of_source_admission();
+        all_commands::report_baselines_receive_one_finished_warning_before_rendering();
+    });
+    cells.extend(root_slots::cases::capture(|| {
+        root_slots::explicit_refine_diff_replay_and_batch_slots_are_admitted_individually();
+        root_slots::manifest_layers_and_mapping_refuse_before_the_implementation_marker();
+        root_slots::causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal();
+        root_slots::closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once();
+        root_slots::header_flag_conflict_and_gate_off_modes_are_preserved();
+        root_slots::checked_repairs_and_editionless_sources_are_preserved();
+    }));
+    cells.extend(ownership::cases::capture(|| {
+        ownership::domain_check_finishes_once_for_definitive_and_non_definitive_verdicts();
+        ownership::repeated_file_slots_each_contribute_one_warning();
+        ownership::chain_owns_warnings_in_layer_detail_and_refuses_before_effects();
+        ownership::causal_root_keeps_one_owned_warning_and_refuses_before_output();
+        ownership::unreadable_roots_keep_the_command_specific_error_kind();
+        ownership::domain_check_forwards_requested_edition_without_changing_conflicts();
+        ownership::counterexample_refuses_before_model_and_source_preflight();
+        ownership::mutate_success_keeps_one_complete_legacy_warning();
+        #[cfg(unix)]
+        {
+            ownership::counterexample_refuses_before_digest_rereads_the_root();
+            ownership::sweep_reuses_one_captured_root_across_all_depth_cells();
+        }
+    }));
+    cells.extend(dialect_controls::cases::capture(|| {
+        dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice();
+        dialect_controls::approval_records_and_git_roots_refuse_before_output_writes();
+    }));
+    cases::assert_deferred_evidence(&cells);
 }

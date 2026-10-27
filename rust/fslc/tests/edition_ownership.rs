@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[path = "support/edition_cases.rs"]
-mod cases;
+pub(crate) mod cases;
 
 use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
@@ -51,7 +51,7 @@ fn finding(source: &str, code: &str, line: usize, column: usize, end_column: usi
 }
 
 #[test]
-fn domain_check_finishes_once_for_definitive_and_non_definitive_verdicts() {
+pub(crate) fn domain_check_finishes_once_for_definitive_and_non_definitive_verdicts() {
     let mut results = Results::default();
     let legacy = cases::legacy("deprecated_domain_enum_union", cases::DOMAIN);
     for (label, source, exit, result, kind) in [
@@ -89,7 +89,7 @@ fn domain_check_finishes_once_for_definitive_and_non_definitive_verdicts() {
 }
 
 #[test]
-fn repeated_file_slots_each_contribute_one_warning() {
+pub(crate) fn repeated_file_slots_each_contribute_one_warning() {
     let mut results = Results::default();
     let source = cases::WARNING_CASES[1].2;
     let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
@@ -111,7 +111,7 @@ fn repeated_file_slots_each_contribute_one_warning() {
 }
 
 #[test]
-fn chain_owns_warnings_in_layer_detail_and_refuses_before_effects() {
+pub(crate) fn chain_owns_warnings_in_layer_detail_and_refuses_before_effects() {
     let mut results = Results::default();
     for (mode, depth) in [("check", ""), ("verify", "depth = 2\n")] {
         let scratch = Scratch::new();
@@ -158,7 +158,7 @@ fn chain_owns_warnings_in_layer_detail_and_refuses_before_effects() {
 }
 
 #[test]
-fn causal_root_keeps_one_owned_warning_and_refuses_before_output() {
+pub(crate) fn causal_root_keeps_one_owned_warning_and_refuses_before_output() {
     let mut results = Results::default();
     let scratch = Scratch::new();
     // A genuine causal document keeps its specialized warning unchanged.
@@ -220,7 +220,7 @@ fn causal_root_keeps_one_owned_warning_and_refuses_before_output() {
 }
 
 #[test]
-fn unreadable_roots_keep_the_command_specific_error_kind() {
+pub(crate) fn unreadable_roots_keep_the_command_specific_error_kind() {
     let mut results = Results::default();
     let scratch = Scratch::new();
     assert!(!scratch.0.join("missing.fsl").exists());
@@ -248,7 +248,7 @@ fn unreadable_roots_keep_the_command_specific_error_kind() {
 }
 
 #[test]
-fn domain_check_forwards_requested_edition_without_changing_conflicts() {
+pub(crate) fn domain_check_forwards_requested_edition_without_changing_conflicts() {
     let mut results = Results::default();
     let legacy = cases::legacy("deprecated_domain_enum_union", cases::DOMAIN);
     for (header, flag, conflict) in [
@@ -286,6 +286,143 @@ fn domain_check_forwards_requested_edition_without_changing_conflicts() {
         let command = format!("domain check source.fsl --depth 2 --edition {flag}");
         let output = run(&scratch, &command);
         results.error_envelope(&format!("{header:?}/{flag}"), &output, &expected, true);
+    }
+    results.finish();
+}
+
+#[test]
+pub(crate) fn counterexample_refuses_before_model_and_source_preflight() {
+    let mut results = Results::default();
+    for (mode, source, engine) in [
+        (
+            "model",
+            cases::headed(&cases::model_error(cases::WARNING_CASES[1].2)),
+            "bmc",
+        ),
+        ("preflight", cases::rejected_metadata(), "induction"),
+    ] {
+        let scratch = Scratch::new();
+        let path = scratch.write("source.fsl", &source);
+        let expected = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &path);
+        let output = run(
+            &scratch,
+            &format!(
+                "counterexample export {} --depth 2 --engine {engine} -o out.json",
+                path.display()
+            ),
+        );
+        results.error_envelope(
+            &format!("control/counterexample export/{mode}"),
+            &output,
+            &expected,
+            !scratch.0.join("out.json").exists(),
+        );
+    }
+    results.finish();
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn counterexample_refuses_before_digest_rereads_the_root() {
+    let scratch = Scratch::new();
+    let source = cases::rejected_metadata();
+    let expected = cases::refusal_envelope(
+        &source,
+        "/dev/stdin",
+        serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
+    );
+    let output = cases::invoke_input(
+        env!("CARGO_BIN_EXE_fslc"),
+        &cases::split("counterexample export /dev/stdin --depth 2 -o out.json"),
+        &scratch.0,
+        &source,
+    );
+    let mut results = Results::default();
+    results.error_envelope(
+        "control/counterexample export/digest",
+        &output,
+        &expected,
+        !scratch.0.join("out.json").exists(),
+    );
+    results.finish();
+}
+
+#[test]
+pub(crate) fn mutate_success_keeps_one_complete_legacy_warning() {
+    let mut results = Results::default();
+    let scratch = Scratch::new();
+    let source = cases::WARNING_CASES[1].2;
+    scratch.write("source.fsl", source);
+    let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
+    let output = run(&scratch, "mutate source.fsl --depth 2 --max-mutants 0");
+    let actual = value(&output);
+    let produced = json!([summary(&output), actual["baseline"], actual["mutants"]]);
+    let wanted = json!([[0, "mutated", null, [expected]], "verified", []]);
+    results.check(
+        "control/mutate/success-warning",
+        &produced,
+        &wanted,
+        produced == wanted,
+    );
+    results.finish();
+}
+
+#[cfg(unix)]
+#[test]
+pub(crate) fn sweep_reuses_one_captured_root_across_all_depth_cells() {
+    let scratch = Scratch::new();
+    let source = cases::WARNING_CASES[1].2;
+    scratch.write("source.fsl", source);
+    let mut results = Results::default();
+    // The pipe is supplied exactly once and then closed. Each subsequent open
+    // sees EOF, not another copy of the source. No sleeps or file-change race.
+    for (label, command, path, depths) in [
+        (
+            "preserved/single-capture/verify",
+            "verify /dev/stdin --depth 2 --no-cache",
+            "/dev/stdin",
+            vec![],
+        ),
+        (
+            "preserved/single-capture/regular-sweep",
+            "sweep source.fsl --depth 2..3",
+            "source.fsl",
+            vec![2, 3],
+        ),
+        (
+            "control/sweep/capture",
+            "sweep /dev/stdin --depth 2..3",
+            "/dev/stdin",
+            vec![2, 3],
+        ),
+    ] {
+        let expected = cases::findings(source, path, fsl_syntax::Edition::Fsl4);
+        let output = cases::invoke_input(
+            env!("CARGO_BIN_EXE_fslc"),
+            &cases::split(command),
+            &scratch.0,
+            source,
+        );
+        let actual = value(&output);
+        let agrees = if depths.is_empty() {
+            actual["result"] == "verified" && actual["warnings"] == json!(expected)
+        } else {
+            actual["result"] == "sweep_passed"
+                && actual["sweep"]["results"].as_array().is_some_and(|cells| {
+                    cells.len() == depths.len()
+                        && cells.iter().zip(&depths).all(|(cell, depth)| {
+                            cell["scope"]["depth"] == *depth
+                                && cell["verification"]["result"] == "verified"
+                                && cell["verification"]["warnings"] == json!(expected)
+                        })
+                })
+        };
+        results.check(
+            label,
+            (output.status.code(), &actual),
+            (0, &depths, &expected),
+            output.status.code() == Some(0) && agrees,
+        );
     }
     results.finish();
 }

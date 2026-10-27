@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[path = "support/edition_cases.rs"]
-mod cases;
+pub(crate) mod cases;
 
 use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
@@ -67,7 +67,7 @@ causal observe-expectations {repo}/examples/causal/incident_response.fsl --from-
 }
 
 #[test]
-fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
+pub(crate) fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
     let mut results = Results::default();
     let scratch = Scratch::new();
     scratch.write("dep.fsl", "fsl 5\nspec Dep { state { ready: Bool = false } invariant Typed { forall i in 0..1: ready == true or ready == false } }\n");
@@ -128,7 +128,7 @@ fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
 }
 
 #[test]
-fn approval_records_and_git_roots_refuse_before_output_writes() {
+pub(crate) fn approval_records_and_git_roots_refuse_before_output_writes() {
     let mut results = Results::default();
     let scratch = Scratch::new();
     let rejected = cases::rejected_metadata();
