@@ -1150,7 +1150,7 @@ fn command() -> Result<(Value, i32), String> {
                         min_kill_rate: options.min_kill_rate,
                     },
                 ),
-                "typestate" => run_typestate(path),
+                "typestate" => run_typestate(path, options.typescript_only),
                 _ => unreachable!(),
             };
             if options.readable
@@ -5995,12 +5995,43 @@ fn portable_cli_source_path(path: &Path) -> Result<String, String> {
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
-    let source = match read_spec_source(path) {
+/// Admit captured bytes before consumption. Closed/raw successes keep their
+/// output contract and deliver warnings on stderr; error envelopes remain open.
+fn run_admitted_source(
+    path: &Path,
+    source: Result<String, SpecLoadError>,
+    stderr_warnings: bool,
+    run: impl FnOnce(&str) -> (Value, i32),
+) -> (Value, i32) {
+    let source = match source {
         Ok(source) => source,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_kernel_contract_from_source(path, &source, version)
+    fslc_rust::migration::admit_source(
+        &source,
+        &path.to_string_lossy(),
+        None,
+        crate::parse_options(),
+        &envelope,
+        true,
+    )
+    .map_or_else(std::convert::identity, |edition| {
+        let result = run(&source);
+        if stderr_warnings && result.1 == 0 {
+            for warning in edition.warnings() {
+                eprintln!("warning: {warning}");
+            }
+            result
+        } else {
+            edition.finish(result)
+        }
+    })
+}
+
+fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
+    run_admitted_source(path, read_spec_source(path), true, |source| {
+        run_kernel_contract_from_source(path, source, version)
+    })
 }
 
 fn run_kernel_contract_from_source(
@@ -6084,11 +6115,9 @@ fn run_conformance(
     depth: usize,
     version: fsl_core::PublicKernelVersion,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_conformance_from_source(path, &source, depth, version)
+    run_admitted_source(path, read_spec_source(path), true, |source| {
+        run_conformance_from_source(path, source, depth, version)
+    })
 }
 
 fn run_conformance_from_source(
@@ -6114,11 +6143,9 @@ fn run_conformance_from_source(
 }
 
 fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_testplan_from_source(path, &source, depth)
+    run_admitted_source(path, read_spec_source(path), true, |source| {
+        run_testplan_from_source(path, source, depth)
+    })
 }
 
 fn run_testplan_from_source(path: &Path, source: &str, depth: usize) -> (Value, i32) {
@@ -12216,12 +12243,10 @@ fn run_mutate_with(
     (output, status)
 }
 
-fn run_typestate(path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_typestate_from_source(path, &source)
+fn run_typestate(path: &Path, typescript_only: bool) -> (Value, i32) {
+    run_admitted_source(path, read_spec_source(path), typescript_only, |source| {
+        run_typestate_from_source(path, source)
+    })
 }
 
 fn run_typestate_from_source(path: &Path, source: &str) -> (Value, i32) {
