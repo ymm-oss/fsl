@@ -355,6 +355,7 @@
         },
         "paths_truncated_exact": {
           "type": "boolean",
+          "const": false,
           "description": "When false, the expansion budget stopped the walk and paths_truncated is a lower bound. Absence means an exact count."
         }
       },
