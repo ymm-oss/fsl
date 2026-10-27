@@ -10,10 +10,13 @@
   "pilot": "p2.symbolic_concrete_witness",
   "generic_functions": [
     "verify_bounded_config",
+    "reject_unchecked_sequence_overflow",
     "check_state_properties",
     "make_violation",
     "probe",
     "project_trace",
+    "has_missing_sequence_slots",
+    "chosen_instance",
     "project_action",
     "replay_bmc_witnesses",
     "render_violation"
@@ -70,6 +73,13 @@
       "fault_classes": ["sat_unsat_unknown_substitution"]
     },
     {
+      "id": "p2.bmc.unchecked-sequence-overflow",
+      "path": "rust/fsl-verifier/src/bmc.rs",
+      "function": "reject_unchecked_sequence_overflow",
+      "anchor": "let overflow = solver.gt(len, &solver.int_value(i64_index(*capacity)?))?;",
+      "fault_classes": ["unchecked_sequence_overflow_as_success", "sat_unsat_unknown_substitution", "backend_failure_as_success"]
+    },
+    {
       "id": "p2.bmc.state-property-evaluation",
       "path": "rust/fsl-verifier/src/bmc.rs",
       "function": "check_state_properties",
@@ -87,14 +97,28 @@
       "id": "p2.trace.state-action-projection",
       "path": "rust/fsl-verifier/src/trace.rs",
       "function": "project_trace",
-      "anchor": "let state = project_state(solver, model, &states[step])?;",
+      "anchor": "let state = if let Some(instance) = instance",
       "fault_classes": ["witness_state_omission", "witness_action_omission"]
+    },
+    {
+      "id": "p2.trace.missing-sequence-slots",
+      "path": "rust/fsl-verifier/src/trace.rs",
+      "function": "has_missing_sequence_slots",
+      "anchor": "&& len > i64_index(slots.len())?",
+      "fault_classes": ["witness_sequence_suffix_omission", "witness_state_projection_substitution"]
+    },
+    {
+      "id": "p2.trace.action-choice-decoding",
+      "path": "rust/fsl-verifier/src/trace.rs",
+      "function": "chosen_instance",
+      "anchor": "let index = match solver.model_eval(choice)? {",
+      "fault_classes": ["witness_action_omission", "violation_action_substitution"]
     },
     {
       "id": "p2.trace.action-identity-projection",
       "path": "rust/fsl-verifier/src/trace.rs",
       "function": "project_action",
-      "anchor": "let index = match solver.model_eval(choice)? {",
+      "anchor": "name: instance.action.clone(),",
       "fault_classes": ["witness_action_omission", "violation_action_substitution"]
     },
     {

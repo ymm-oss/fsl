@@ -119,11 +119,16 @@ the measure up by more than the helpful action brings it down each time it
 fires, so `Q` would never be reached even though the helpful action keeps
 firing under fairness.
 
-Failure of any of these is `unknown_cti` / `rank_failure`:
+A failed obligation with a representable witness is `unknown_cti` /
+`rank_failure`:
 `progress_action_not_fair`, `helpful_action_not_enabled`,
 `helpful_action_enabledness_not_sticky`, `non_decreasing_helpful_action`, or
 `non_helpful_action_increases_measure` (§2.6 of `DESIGN-temporal.md`, §10 of
 `LANGUAGE.md`).
+An unrepresentable rank model with missing sequence slots is instead a ranking
+error: after induction it becomes a `semantics` error, while an optional rank
+diagnosis of a BMC `leadsTo` violation leaves that original violation intact.
+See the [Kernel contract's projection and fallback policy](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget).
 
 ### 2.4 Soundness notes (for implementers)
 
@@ -221,9 +226,10 @@ only the properties proved before it are discharged, and every other
 are now rejected at the shared source check boundary (#1463), before ranking;
 the earlier general finite-binder language-reference wording did not state
 this restriction. This breaking removal does not implement filtered liveness.
-A ranking error (unsupported measure, solver `unknown`, or a fail-closed
-`where` filter injected into an unchecked model) discharges nothing and is not
-reported — the BMC run then produces whatever it produced before, including
+A ranking error (unsupported measure, solver `unknown`, a missing-slot sequence
+rank model, or a fail-closed `where` filter injected into an unchecked model)
+discharges nothing and is not reported — the BMC run then produces whatever it
+produced before, including
 its own error. The same holds when the pre-pass cannot run at all (no
 thread, no solver) and when it panics: the run proceeds without it (the
 panic message still reaches stderr). The pre-pass never reports a verdict or
@@ -544,11 +550,16 @@ If a ranked `leadsTo` is proved, the ordinary `leads_to` entry is upgraded:
 - `proved` is the only induction result with `completeness:"unbounded"`.
   `unknown_cti` and base-case failures remain `completeness:"bounded"` and carry
   `checked_to_depth` for the base BMC depth.
-- Failed ranked `leadsTo` obligations return `unknown_cti` with
-  `violation_kind:"leadsTo_rank"` and `rank_failure` naming the failed
+- Failed ranked `leadsTo` obligations with a representable witness return
+  `unknown_cti` with `violation_kind:"leadsTo_rank"` and `rank_failure` naming the failed
   obligation (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`). Transition-progress failures include `last_action`,
   `measure_before`, `measure_after`, and a two-state CTI.
+- Missing-slot sequence rank models are not reported as CTIs: the native
+  post-induction path returns an error of kind `semantics` (exit 2), and the
+  optional rank-diagnosis path retains the original BMC `leadsTo` violation.
+  See the [Kernel contract](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget)
+  for the one-state and two-state projection policy.
 - Consistency with the existing schema: the `violated` shape is completely
   identical to BMC (it is so automatically because the base case returns it).
 
@@ -564,7 +575,10 @@ New function `prove(spec, k_ind, base_depth, deadlock_mode)`:
    and T onto a shared solver.
 3. Per invariant: push / ¬inv_i(σ_k) / check / pop.
 4. All invariant checks unsat → check ranked `leadsTo` obligations, if any.
-   Failed ranking obligations return `unknown_cti`.
+   A failed ranking obligation with a representable witness returns `unknown_cti`;
+   an unrepresentable missing-slot rank model returns a `semantics` error instead.
+   In the native CLI's separate rank diagnosis of a BMC `leadsTo` violation,
+   a ranking error keeps that original BMC violation rather than replacing it.
 5. All unsat → reshape the verify result dict to `result: "proved"` and return.
    Any sat → extract the CTI and `unknown_cti`.
 6. When incrementing k, you can reuse by **only adding** σ_{k+1} and Inv(σ_k)·
