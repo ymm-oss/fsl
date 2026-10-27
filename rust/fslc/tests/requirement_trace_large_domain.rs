@@ -62,6 +62,7 @@ fn claims(hi: u32, traces: &str) -> String {
 }
 
 /// The same shape in the next-edition requirements surface.
+#[cfg(target_os = "linux")]
 fn claims_next_edition(hi: u32) -> String {
     format!(
         "fsl 5\nrequirements R {{\n  number Amount\n  actor Employee, Manager\n  \
