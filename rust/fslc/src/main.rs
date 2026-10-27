@@ -4588,11 +4588,9 @@ fn format_chain_table(result: &Value) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_replay_from_source(path, &source, trace_path)
+    run_admitted_source(path, read_spec_source(path), false, |source| {
+        run_replay_from_source(path, source, trace_path)
+    })
 }
 
 /// Replay one trace against one caller-owned root-source snapshot.
@@ -10065,11 +10063,9 @@ fn run_explain(
     names: Option<name_display::NameSpelling>,
     lowering: bool,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_explain_from_source_with_names(path, &source, depth, readable, names, lowering)
+    run_admitted_source(path, read_spec_source(path), readable, |source| {
+        run_explain_from_source_with_names(path, source, depth, readable, names, lowering)
+    })
 }
 
 /// `explain --lowering`: only where each lowered `requires` and property
@@ -15304,19 +15300,22 @@ fn run_analyze(
     export_kind: Option<&str>,
     code_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_analyze_from_source(
+    run_admitted_source(
         path,
-        &source,
-        projection,
-        focus,
-        output_format,
-        profile,
-        export_kind,
-        code_path,
+        read_spec_source(path),
+        output_format != "json",
+        |source| {
+            run_analyze_from_source(
+                path,
+                source,
+                projection,
+                focus,
+                output_format,
+                profile,
+                export_kind,
+                code_path,
+            )
+        },
     )
 }
 

@@ -11,3 +11,5 @@ consumption, retain verification-option error priority, and deliver admitted
 warnings once after governance.
 Editor diagnostics reject unsupported editions before model or analysis work and
 retain migration finding ranges for UTF-16 publication.
+Replay, explain and single-source analysis also apply admission before consuming
+the captured source, with readable and graph output warnings kept on stderr.
