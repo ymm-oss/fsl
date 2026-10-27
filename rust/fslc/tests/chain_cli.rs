@@ -146,6 +146,42 @@ fn issue_1475_project(design: &str) -> PathBuf {
     dir
 }
 
+fn issue_1475_check_detail(dir: &Path) -> Value {
+    let expected = serde_json::json!({
+        "fsl":"1.0", "result":"ok", "spec":"ApprovalReview",
+        "warnings":[
+            {
+                "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+                "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+                "message":"legacy string metadata is deprecated; use a typed annotation",
+                "loc":{"file":"./spec.fsl", "line":12, "column":20, "end_line":12, "end_column":63},
+                "canonical_replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")",
+                "machine_applicable":true,
+                "edits":[
+                    {"start":228, "end":228, "replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "},
+                    {"start":245, "end":288, "replacement":""}
+                ]
+            },
+            {
+                "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+                "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+                "message":"legacy string metadata is deprecated; use a typed annotation",
+                "loc":{"file":"./spec.fsl", "line":18, "column":30, "end_line":18, "end_column":76},
+                "canonical_replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")",
+                "machine_applicable":true,
+                "edits":[
+                    {"start":369, "end":369, "replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "},
+                    {"start":396, "end":442, "replacement":""}
+                ]
+            }
+        ]
+    });
+    let checked = run(dir, &["check", "./spec.fsl"]);
+    assert_eq!(checked.status.code(), Some(0));
+    assert_eq!(json(&checked)["warnings"], expected["warnings"]);
+    expected
+}
+
 fn issue_1475_missing_file(jobs: &str) {
     let dir = issue_1475_project("refine_against = \"requirements\"\nmapping = \"identity.fsl\"");
     let output = run(
@@ -174,7 +210,7 @@ fn issue_1475_missing_file(jobs: &str) {
     assert_eq!(layer(&value, "requirements")["status"], "passed");
     assert_eq!(
         layer(&value, "requirements")["detail"],
-        serde_json::json!({"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]})
+        issue_1475_check_detail(&dir)
     );
     for (name, kind) in [("design", "check"), ("design->requirements", "refine")] {
         let entry = layer(&value, name);
@@ -277,6 +313,7 @@ fn issue_1475_valid_chain_full_output_is_preserved() {
     let dir = issue_1475_project(
         "file = \"spec.fsl\"\nrefine_against = \"requirements\"\nmapping = \"identity.fsl\"",
     );
+    let check_detail = issue_1475_check_detail(&dir);
     let output = run(
         &dir,
         &["chain", "project.toml", "--keep-going", "--jobs", "1"],
@@ -297,9 +334,9 @@ fn issue_1475_valid_chain_full_output_is_preserved() {
             "fsl":"1.0", "result":"verified", "manifest":"project.toml", "keep_going":true,
             "layers":[
                 {"layer":"requirements", "kind":"check", "file":spec, "status":"passed", "result":"ok", "exit_code":0,
-                 "detail":{"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]}},
+                 "detail":check_detail},
                 {"layer":"design", "kind":"check", "file":spec, "status":"passed", "result":"ok", "exit_code":0,
-                 "detail":{"fsl":"1.0", "result":"ok", "spec":"ApprovalReview", "warnings":[]}},
+                 "detail":check_detail},
                 {"layer":"design->requirements", "kind":"refine", "file":spec, "against":"requirements", "abs_file":spec, "mapping":mapping, "depth":8,
                  "status":"passed", "result":"refines", "exit_code":0,
                  "detail":{"fsl":"1.0", "impl":"ApprovalReview", "abs":"ApprovalReview", "result":"refines", "checked_to_depth":8, "action_map":{"approve":"approve"}}}
