@@ -1838,6 +1838,7 @@ fn validate_leadsto_expression_types(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(), TypecheckError> {
     let env = base_env(model);
     let self_relations = SelfRelations::new();
