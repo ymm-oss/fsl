@@ -15,6 +15,7 @@ mod causal_expectation;
 mod causal_ledger_projection;
 mod causal_plan;
 mod causal_projection;
+mod causal_time;
 mod coverage;
 mod db;
 mod db_import;

@@ -11,13 +11,14 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value, json};
 
 use crate::causal::{
-    CausalModel, Claim, ClaimStatus, Lag, Persistence, Polarity, VariableRole, active_adjacency,
-    reachable_from,
+    CausalError, CausalModel, Claim, ClaimStatus, Lag, Persistence, Polarity, VariableRole,
+    active_adjacency, reachable_from,
 };
 use crate::causal_analysis::{
     REPRESENTATIVE_PATH_CAP, earliest_from, feedback_loop_classes, indicator_classes,
     latest_bound_from,
 };
+use crate::causal_time::add_claim_time;
 
 const PROJECTION_DO_NOT_ASSUME: [&str; 3] = [
     "The causal claims are true",
@@ -57,9 +58,9 @@ fn projection_envelope(model: &CausalModel, projection: &str) -> Map<String, Val
     envelope
 }
 
-fn variable_nodes(model: &CausalModel) -> Vec<Value> {
-    let indicators = indicator_classes(model);
-    model
+fn variable_nodes(model: &CausalModel) -> Result<Vec<Value>, CausalError> {
+    let indicators = indicator_classes(model)?;
+    Ok(model
         .variables
         .values()
         .map(|variable| {
@@ -75,7 +76,7 @@ fn variable_nodes(model: &CausalModel) -> Vec<Value> {
             }
             Value::Object(node)
         })
-        .collect()
+        .collect())
 }
 
 fn claim_edges(model: &CausalModel) -> Vec<Value> {
@@ -105,7 +106,7 @@ fn claim_edges(model: &CausalModel) -> Vec<Value> {
 /// Representative simple paths from each intervention to each outcome over
 /// active claims, capped at [`REPRESENTATIVE_PATH_CAP`] with truncation
 /// metadata. Deterministic: claims are explored in sorted order.
-fn representative_paths(model: &CausalModel) -> (Vec<Value>, usize) {
+fn representative_paths(model: &CausalModel) -> Result<(Vec<Value>, usize), CausalError> {
     let adjacency = active_adjacency(model);
     let interventions: Vec<&str> = model
         .variables
@@ -130,7 +131,7 @@ fn representative_paths(model: &CausalModel) -> (Vec<Value>, usize) {
         while let Some((node, path, visited)) = stack.pop() {
             if outcomes.contains(node.as_str()) && !path.is_empty() {
                 if paths.len() < REPRESENTATIVE_PATH_CAP {
-                    paths.push(path_json(model, start, &node, &path));
+                    paths.push(path_json(model, start, &node, &path)?);
                 } else {
                     truncated += 1;
                 }
@@ -151,35 +152,42 @@ fn representative_paths(model: &CausalModel) -> (Vec<Value>, usize) {
             }
         }
     }
-    (paths, truncated)
+    Ok((paths, truncated))
 }
 
-fn path_json(model: &CausalModel, start: &str, end: &str, path: &[&Claim]) -> Value {
+fn path_json(
+    model: &CausalModel,
+    start: &str,
+    end: &str,
+    path: &[&Claim],
+) -> Result<Value, CausalError> {
     let polarity = path
         .iter()
         .map(|claim| claim.polarity)
         .fold(Polarity::Positive, Polarity::product);
-    let first_response = path.iter().try_fold((0u64, 0u64), |(min, max), claim| {
-        if let Lag::Known(interval) = claim.lag {
-            Some((min + interval.min, max.saturating_add(interval.max)))
-        } else {
-            None
+    let first_response = path.iter().try_fold(Some((0u64, 0u64)), |total, claim| {
+        match (total, claim.lag) {
+            (Some((min, max)), Lag::Known(interval)) => Ok::<_, CausalError>(Some((
+                add_claim_time(min, interval.min, claim)?,
+                max.saturating_add(interval.max),
+            ))),
+            _ => Ok(None),
         }
-    });
+    })?;
     let _ = model;
-    json!({
+    Ok(json!({
         "source": format!("variable:{start}"),
         "target": format!("variable:{end}"),
         "claims": path.iter().map(|claim| format!("claim:{}", claim.id)).collect::<Vec<_>>(),
         "polarity": polarity.as_str(),
         "first_response": first_response
             .map_or(json!("unknown"), |(min, max)| interval_json(min, max)),
-    })
+    }))
 }
 
-fn feedback_json(model: &CausalModel) -> Vec<Value> {
-    let classes = feedback_loop_classes(model);
-    model
+fn feedback_json(model: &CausalModel) -> Result<Vec<Value>, CausalError> {
+    let classes = feedback_loop_classes(model)?;
+    Ok(model
         .feedbacks
         .values()
         .map(|feedback| {
@@ -196,30 +204,34 @@ fn feedback_json(model: &CausalModel) -> Vec<Value> {
                 "recurrent": true,
             })
         })
-        .collect()
+        .collect())
 }
 
 /// `--projection causal_graph`.
-#[must_use]
-pub fn causal_graph_projection(model: &CausalModel) -> Value {
+///
+/// # Errors
+/// Returns a located causal error if a consumed time sum exceeds u64.
+pub fn causal_graph_projection(model: &CausalModel) -> Result<Value, CausalError> {
     let mut envelope = projection_envelope(model, "causal_graph");
-    envelope.insert("nodes".to_owned(), Value::Array(variable_nodes(model)));
+    envelope.insert("nodes".to_owned(), Value::Array(variable_nodes(model)?));
     envelope.insert("edges".to_owned(), Value::Array(claim_edges(model)));
-    let (paths, truncated) = representative_paths(model);
+    let (paths, truncated) = representative_paths(model)?;
     envelope.insert("paths".to_owned(), Value::Array(paths));
-    envelope.insert("feedbacks".to_owned(), Value::Array(feedback_json(model)));
+    envelope.insert("feedbacks".to_owned(), Value::Array(feedback_json(model)?));
     envelope.insert(
         "truncation".to_owned(),
         json!({"paths_cap": REPRESENTATIVE_PATH_CAP, "paths_truncated": truncated}),
     );
-    Value::Object(envelope)
+    Ok(Value::Object(envelope))
 }
 
 /// `--projection causal_timeline`: first-pass windows per intervention →
 /// outcome. `min` is exact (shortest known-lag path); `max` is an upper
 /// bound when the pair is connected through a feedback SCC.
-#[must_use]
-pub fn causal_timeline_projection(model: &CausalModel) -> Value {
+///
+/// # Errors
+/// Returns a located causal error if a consumed time sum exceeds u64.
+pub fn causal_timeline_projection(model: &CausalModel) -> Result<Value, CausalError> {
     let mut envelope = projection_envelope(model, "causal_timeline");
     let mut timelines = Vec::new();
     let adjacency = active_adjacency(model);
@@ -228,7 +240,7 @@ pub fn causal_timeline_projection(model: &CausalModel) -> Value {
         .values()
         .filter(|variable| variable.role == VariableRole::Intervention)
     {
-        let earliest = earliest_from(model, &intervention.id);
+        let earliest = earliest_from(model, &intervention.id)?;
         let latest = latest_bound_from(model, &intervention.id);
         let reachable = reachable_from(&adjacency, &intervention.id);
         for outcome in model
@@ -254,18 +266,20 @@ pub fn causal_timeline_projection(model: &CausalModel) -> Value {
             }));
         }
     }
-    envelope.insert("nodes".to_owned(), Value::Array(variable_nodes(model)));
+    envelope.insert("nodes".to_owned(), Value::Array(variable_nodes(model)?));
     envelope.insert("edges".to_owned(), Value::Array(claim_edges(model)));
     envelope.insert("timelines".to_owned(), Value::Array(timelines));
-    Value::Object(envelope)
+    Ok(Value::Object(envelope))
 }
 
 /// `--projection causal_traceability_graph`: bridge to actions, KPIs,
 /// states, properties, and requirement IDs.
-#[must_use]
-pub fn causal_traceability_projection(model: &CausalModel) -> Value {
+///
+/// # Errors
+/// Returns a located causal error if a consumed earliest time exceeds u64.
+pub fn causal_traceability_projection(model: &CausalModel) -> Result<Value, CausalError> {
     let mut envelope = projection_envelope(model, "causal_traceability_graph");
-    let mut nodes = variable_nodes(model);
+    let mut nodes = variable_nodes(model)?;
     let mut edges = claim_edges(model);
     let mut bridge_nodes: BTreeSet<(String, String)> = BTreeSet::new();
     let push_edge = |edges: &mut Vec<Value>, kind: &str, source: String, target: String| {
@@ -333,14 +347,16 @@ pub fn causal_traceability_projection(model: &CausalModel) -> Value {
     }
     envelope.insert("nodes".to_owned(), Value::Array(nodes));
     envelope.insert("edges".to_owned(), Value::Array(edges));
-    Value::Object(envelope)
+    Ok(Value::Object(envelope))
 }
 
 /// `--profile causal-review` envelope (`causal-findings.v0`).
-#[must_use]
-pub fn causal_review_json(model: &CausalModel) -> Value {
-    let (findings, not_evaluable) = crate::causal_analysis::causal_review_findings(model);
-    json!({
+///
+/// # Errors
+/// Returns a located causal error if a consumed time sum exceeds u64.
+pub fn causal_review_json(model: &CausalModel) -> Result<Value, CausalError> {
+    let (findings, not_evaluable) = crate::causal_analysis::causal_review_findings(model)?;
+    Ok(json!({
         "result": "causal_analyzed",
         "schema_version": "causal-findings.v0",
         "formal_result": "not_run",
@@ -349,7 +365,7 @@ pub fn causal_review_json(model: &CausalModel) -> Value {
         "findings": findings,
         "not_evaluable": not_evaluable,
         "do_not_assume": MODEL_REVIEW_DO_NOT_ASSUME,
-    })
+    }))
 }
 
 const MODEL_REVIEW_DO_NOT_ASSUME: [&str; 4] = [

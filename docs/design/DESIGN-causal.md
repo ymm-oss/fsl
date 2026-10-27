@@ -354,6 +354,17 @@ finding. Retirement itself is not a formal proof of falsity.
   its claims' lag intervals (e.g. `0..7` + `14..90` + `60..180` = `74..277`).
 - A path containing `lag unknown` has time reach `unknown`. No convenient
   default is substituted.
+- **Analysis numeric range (#1475):** accumulated minimum path, earliest-response,
+  and feedback-cycle times use checked `u64` addition. If any candidate time sum
+  evaluated during exploration cannot be represented as `u64`, analysis immediately
+  returns a causal semantics error at the contributing claim's source position
+  (exit 2), even if the true minimum fits in `u64` or a later `lag unknown` would
+  make the answer `unknown`. `check` acceptance is unchanged. Overflow is
+  not replaced with saturation or `unknown`. Constant-factor threshold
+  comparisons are evaluated exactly by widening operands before multiplication,
+  without exposing a wider integer in output. Existing maximum-bound saturation
+  is unchanged by this minimum-time fix; the acyclic maximum exactness limitation
+  is recorded in `DESIGN-panic-audit.md`.
 - Clock mappings connecting to the kernel's generated `tick` are fixed as
   named `clock` declarations directly under the `causal` block. A declaration
   binds an imported kernel spec, a positive-integer number of kernel ticks,
@@ -620,7 +631,9 @@ never contradict, the sections above.
   (missing/duplicate timebase, horizon, or required claim field; invalid
   enum values; clock unit ≠ timebase) and `causal_scope_invalid` (undeclared
   dimension/token, contradictory or cyclic relations, duplicate dimension in a
-  selection). Both are errors; analysis never starts on them.
+  selection). These well-formedness failures prevent analysis from starting.
+  `causal_invalid_model` also reports minimum-time sum overflow during analysis,
+  without changing `check` acceptance (see §5, **Analysis numeric range**).
 - **Unacknowledged-cycle rule** (warning `causal_unacknowledged_feedback` and
   finding `unacknowledged_feedback_loop`): computed at edge granularity on the
   SCC condensation — any active claim inside a nontrivial SCC that is not part
