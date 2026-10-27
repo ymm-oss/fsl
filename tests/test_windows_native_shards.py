@@ -95,7 +95,7 @@ def test_workflow_structure():
         guard = re.search(r"^    if: (.*(?:\n      \S.*)*)", job, re.M)[1].removeprefix(">-")
         assert " ".join(guard.split()) == expected
     assert "    timeout-minutes: 10\n" in gate
-    aggregate = re.search(r"^      - name: .+\n(.*?)(?=^      - |\Z)", gate, re.M | re.S)[1]
+    aggregate = re.search(r"^      - name: [^\n]+\n(.*?)(?=^      - |\Z)", gate, re.M | re.S)[1]
     assert '        run: bash tools/require-shard-success.sh "$SHARDS_RESULT"\n' in aggregate
     assert "        env:\n          SHARDS_RESULT: ${{ needs.rust-native-z3-windows-shards.result }}\n" in aggregate
     assert "    runs-on: ubuntu-latest\n" in gate
