@@ -207,6 +207,7 @@ pub fn build_test_plan_v1(kernel: &Value, conformance: &Value) -> Result<Value, 
             .unwrap_or_default()
             .cmp(right["name"].as_str().unwrap_or_default())
     });
+    unique_boundary_names(&mut cases);
 
     let plan = json!({
         "$schema": TEST_PLAN_V1_SCHEMA_ID,
@@ -235,6 +236,46 @@ pub fn build_test_plan_v1(kernel: &Value, conformance: &Value) -> Result<Value, 
     });
     validate_test_plan_v1(&plan)?;
     Ok(plan)
+}
+
+fn unique_boundary_names(cases: &mut [Value]) {
+    let mut used_names = BTreeSet::new();
+    for case in cases {
+        let name = case["name"].as_str().unwrap_or_default();
+        if used_names.insert(name.to_owned()) {
+            continue;
+        }
+        let Some((prefix, param)) = name
+            .strip_prefix("boundary_accept_")
+            .map(|param| ("boundary_accept", param))
+            .or_else(|| {
+                name.strip_prefix("boundary_reject_")
+                    .map(|param| ("boundary_reject", param))
+            })
+        else {
+            continue;
+        };
+        let action: String = case["target"]["action"]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let qualified = format!("{prefix}_{action}_{param}");
+        let mut unique = qualified.clone();
+        let mut suffix = 2;
+        while !used_names.insert(unique.clone()) {
+            unique = format!("{qualified}_{suffix}");
+            suffix += 1;
+        }
+        case["name"] = Value::String(unique);
+    }
 }
 
 /// Select every non-`ok` vector the boundary pass did not already claim as a
@@ -333,10 +374,10 @@ fn boundary_cases(
                 continue;
             };
             let (accept_value, reject_value) = match operator.as_str() {
-                "<=" => (threshold, threshold + 1),
-                "<" => (threshold.saturating_sub(1), threshold),
-                ">=" => (threshold, threshold.saturating_sub(1)),
-                ">" => (threshold + 1, threshold),
+                "<=" => (Some(threshold), threshold.checked_add(1)),
+                "<" => (threshold.checked_sub(1), Some(threshold)),
+                ">=" => (Some(threshold), threshold.checked_sub(1)),
+                ">" => (threshold.checked_add(1), Some(threshold)),
                 _ => continue,
             };
             if !vector_checked {
@@ -348,8 +389,8 @@ fn boundary_cases(
                     ));
                 }
             }
-            if let Some((index, vector)) =
-                find_vector(vectors, "s0", action_name, &param, accept_value, "ok")
+            if let Some((index, vector)) = accept_value
+                .and_then(|value| find_vector(vectors, "s0", action_name, &param, value, "ok"))
             {
                 let object = required_object(vector, "accept vector")?;
                 let outcome = required_object(
@@ -367,14 +408,9 @@ fn boundary_cases(
                     )?,
                 });
             }
-            if let Some((index, vector)) = find_vector(
-                vectors,
-                "s0",
-                action_name,
-                &param,
-                reject_value,
-                "requires_failed",
-            ) {
+            if let Some((index, vector)) = reject_value.and_then(|value| {
+                find_vector(vectors, "s0", action_name, &param, value, "requires_failed")
+            }) {
                 let object = required_object(vector, "reject vector")?;
                 let outcome = required_object(
                     object.get("outcome").expect("outcome"),
@@ -588,6 +624,11 @@ fn shortest_ok_paths(
     vectors: &[Value],
     state_values: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Vec<Value>>, String> {
+    // Preserve the first id in BTreeMap order when several ids have equal values.
+    let mut state_ids = HashMap::new();
+    for (id, value) in state_values {
+        state_ids.entry(value).or_insert(id);
+    }
     let mut adjacency: HashMap<String, Vec<(String, Value)>> = HashMap::new();
     for vector in vectors {
         let object = required_object(vector, "vector")?;
@@ -612,11 +653,7 @@ fn shortest_ok_paths(
         // `--depth 0`, `states[]` is the initial state alone). Such an edge can
         // never lie on a shortest path *to* an enumerated state, so skipping it
         // loses no path; treating it as an error rejected valid input instead.
-        let Some(to) = state_values
-            .iter()
-            .find(|(_, value)| *value == &after)
-            .map(|(id, _)| id.clone())
-        else {
+        let Some(to) = state_ids.get(&after).map(|id| (*id).clone()) else {
             continue;
         };
         let step = json!({
