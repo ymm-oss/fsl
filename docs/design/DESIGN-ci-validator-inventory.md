@@ -48,7 +48,11 @@ from required-gate resolution.
 references being rendered as headings in either language and the two real
 Japanese-manual occurrences, with preservation controls for ordinary headings,
 fenced code, and escaped hashes. Like the snapshot module, it needs the workflow's
-`markdown` dependency; it does not belong in the stdlib-only automation lane.
+`markdown` dependency. Its placement follows site-reference ownership: this
+standalone workflow owns generated-reference freshness and its required
+`site reference freshness` context. The automation lane now installs `.[dev]`
+and runs pytest; dependency restrictions are not the placement rationale (see
+`DESIGN-docs-site.md:229-236`).
 Regenerate the inventory after wiring the module with
 `python3 tools/check_ci_validator_inventory.py generate`, then audit it with
 `python3 tools/check_ci_validator_inventory.py check`.

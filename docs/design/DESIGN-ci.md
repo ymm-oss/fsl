@@ -1475,9 +1475,11 @@ branch added to one of its `audit_*` functions extends what a required context
 enforces, so an unlisted branch makes this paragraph under-describe the gate.
 
 The workflow invokes `tests/test_site_reference_snapshot.py`,
-`tests/test_site_manual_integrity.py`, and
+`tests/test_site_heading_hash.py`, `tests/test_site_manual_integrity.py`, and
 `tests/test_site_refresh_contract.py` explicitly. The snapshot module remains
-generated-reference-only; the manual test checks ordered static routes, unique labels,
+generated-reference-only; the heading module checks wrapped issue references and
+preserves ordinary headings, escaped hashes, and fenced code; the manual test
+checks ordered static routes, unique labels,
 local fragments, and pinned blob objects in checked-out Git history without fetching URLs;
 the refresh-contract test reads checked-out static files only, with no live server, no URL
 fetching, and no browser-automation or subprocess dependency, and carries rejecting mutant
