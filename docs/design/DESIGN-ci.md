@@ -1133,7 +1133,7 @@ and the subsequent warm run completed. They do not attribute that save to `cache
 or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
 cache provides the recovery path.
 
-Both native Z3 jobs (`rust-native-z3-windows`, `rust-native-z3-macos`) were raised from 60 to 90
+Both native Z3 jobs (now `rust-native-z3-windows-shards`, `rust-native-z3-macos`) were raised from 60 to 90
 minutes (#1322). By 4.11.0 the warm Windows job spent about 4–5 minutes on setup and 45–57 minutes in
 `cargo test` (sum of per-binary `finished in`: 2693 s on a 4.10.0-candidate success, 2885 s on a
 4.11.0-candidate success, 3250–3370 s on runs cancelled at 60 minutes), against 34m39s for the
@@ -1150,6 +1150,7 @@ Both shards retain 90 minutes and the existing cache settings. Projections, not 
 long-poles about 35–60 minutes, rest about 28–50 minutes. The #1532 follow-up must record both
 shard durations from two consecutive post-merge main runs here and in `ci.yml`; PR checks do
 not run Windows and cannot establish the budget improvement.
+The `rust-native-z3-windows` aggregator runs on Ubuntu with a 10-minute limit.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
@@ -1210,7 +1211,7 @@ under any key generation. The critical-path check counts only entries under the 
 generation (`CURRENT_KEY_PREFIX`); see "Cache key generation".
 
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
-shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
+shared key on `rust-native-z3-macos` and `rust-native-z3-windows-shards` in `ci.yml`: a key-only set lets either
 platform's presence on `main` hide the other's absence. That was a live blind spot, not a
 hypothetical one -- the predecessor `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
 `runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
@@ -1374,9 +1375,10 @@ jobs share one cache; no other job builds this cache (confirmed: grepped every w
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
 
-Setting `shared-key: rust-native-z3` on the split `rust-native-z3-macos` / `rust-native-z3-windows`
+Setting `shared-key: rust-native-z3` on `rust-native-z3-macos` / `rust-native-z3-windows-shards`
 jobs preserves the existing cache key identity after the matrix was split into two job ids; that is a
 different purpose from consolidating cache between unrelated jobs, which this paragraph rejects.
+Both Windows shards share this cache key; on a miss, the first saver wins.
 
 **An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
 first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
@@ -1717,6 +1719,8 @@ records which:
   above): these never report on an ordinary pull request, so requiring them would deadlock every
   one; an audit finding that one of them is present in the live required set gets a sharper message
   saying exactly that, rather than being reported as an ordinary unexpected context.
+  The two Windows shard contexts are deliberately absent from `ruleset-contract.json`: the aggregator
+  carries the requirement, the drift audit is clean, and recording shards would require a re-captured fixture.
 - **constituent** — the sharded lane names (`rust checks`, `rust tests (K/3)`, `mutation operators
   (K/3)`, `mutation mutants`, "Sharded pre-merge Linux evidence" above): only their `if: always()`
   aggregator carries the required-context name, so the contract records these explicitly to stop a

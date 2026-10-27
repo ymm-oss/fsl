@@ -576,11 +576,7 @@ jobs:
         shell: bash
         working-directory: rust
         run: |
-          skips=()
-          while IFS= read -r name; do
-            [[ -z "$name" || "$name" == \#* ]] && continue
-            skips+=(--skip "$name")
-          done < ../tools/windows-native-long-poles.txt
+          mapfile -t skips < <(python ../tools/check_windows_long_poles.py --names ../tools/windows-native-long-poles.txt --emit-skip-args)
           cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -- --exact "${skips[@]}"
 
   rust-native-z3-windows:
@@ -591,9 +587,13 @@ jobs:
       github.base_ref == 'production' ||
       vars.FSL_OPTIMISTIC_CI != 'enabled')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: bash tools/require-shard-success.sh "${{ needs.rust-native-z3-windows-shards.result }}"
+      - name: Require all Windows shards to succeed
+        env:
+          SHARDS_RESULT: ${{ needs.rust-native-z3-windows-shards.result }}
+        run: bash tools/require-shard-success.sh "$SHARDS_RESULT"
 
   production-native-z3-linux:
     name: native Z3 4.16 (ubuntu-latest)
