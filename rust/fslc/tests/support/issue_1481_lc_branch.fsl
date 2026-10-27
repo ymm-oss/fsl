@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+spec MapFieldInit {
+  struct Full { value: Bool }
+  struct Pair { a: Bool, b: Bool }
+  state { full: Full, s: Pair, g: Bool }
+  init { full.value = true g = false if g { s.a = false } else { s.b = true } }
+  action idle() { }
+  invariant Initialized { full.value and ((g and not s.a) or (not g and s.b)) }
+}

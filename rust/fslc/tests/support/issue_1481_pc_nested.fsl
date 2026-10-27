@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+spec MapFieldInit {
+  const flag = true
+  struct T { a: Bool, b: Bool, c: Bool }
+  state { s: T, free: Bool }
+  init {
+    s.a = true
+    s.b = true
+    forall outer in 0..0 {
+      forall inner in 0..0 where flag { s.c = false }
+    }
+  }
+  action idle() { }
+  invariant Initialized { s.a and s.b and not s.c }
+}

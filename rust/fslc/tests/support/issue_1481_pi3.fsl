@@ -1,0 +1,8 @@
+spec PartialKeys { // SPDX-License-Identifier: Apache-2.0
+  type K = 0..1
+  struct Pair { a: Bool, b: Bool }
+  state { m: Map<K, Pair>, free: Bool }
+  init { m[0].a = true m[1].b = true }
+  action idle() { }
+  invariant Initialized { not m[1].a }
+}
