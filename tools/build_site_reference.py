@@ -34,6 +34,8 @@ import re
 from pathlib import Path
 
 import markdown
+from markdown.blockprocessors import HashHeaderProcessor
+from markdown.extensions import Extension
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LANGUAGE_MD = REPO_ROOT / "docs" / "manual" / "LANGUAGE.md"
@@ -184,6 +186,32 @@ def _rewrite_relative_md_links(html_text: str) -> str:
     return _RELATIVE_MD_LINK.sub(blob, html_text)
 
 
+class _SpacedHashHeaderProcessor(HashHeaderProcessor):
+    # Only add the separator requirement to the installed upstream regex, keeping
+    # its header/closing-hash behavior and flags. Wrapped #1234 stays prose; so
+    # do seven-plus hashes (upstream accepts them as h6), matching CommonMark/GitHub.
+    _upstream_re = HashHeaderProcessor.RE
+    _level_pattern = r"(?P<level>#{1,6})"
+    if _upstream_re.pattern.count(_level_pattern) != 1:
+        raise SystemExit(
+            f"build_site_reference: unsupported markdown {markdown.__version__}: "
+            f"expected exactly one {_level_pattern!r} in HashHeaderProcessor.RE.pattern"
+        )
+    RE = re.compile(
+        _upstream_re.pattern.replace(_level_pattern, _level_pattern + r"(?=[ \t\n]|$)"),
+        _upstream_re.flags,
+    )
+
+
+class _SpacedHashHeaderExtension(Extension):
+    def extendMarkdown(self, md):
+        # Replace the built-in processor at its original priority. Fenced code
+        # is already stashed by its preprocessor before block parsing begins.
+        md.parser.blockprocessors.register(
+            _SpacedHashHeaderProcessor(md.parser), "hashheader", 70
+        )
+
+
 def render_language_tree(lang: str) -> str:
     en_text = LANGUAGE_MD.read_text(encoding="utf-8")
     en_sections = split_language_md(en_text)
@@ -249,7 +277,9 @@ def render_language_tree(lang: str) -> str:
     else:
         render_sections = en_sections
 
-    md = markdown.Markdown(extensions=["tables", "fenced_code", "toc"])
+    md = markdown.Markdown(
+        extensions=["tables", "fenced_code", "toc", _SpacedHashHeaderExtension()]
+    )
     nodes = []
     for (en_heading, _), (heading, body) in zip(en_sections, render_sections):
         md.reset()

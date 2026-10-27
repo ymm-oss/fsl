@@ -13,13 +13,11 @@ name: site reference freshness
 #   - ci.yml ("product gate") is Rust-native by contract (AGENTS.md: "The complete required
 #     product gate has one Rust-native entrypoint and does not execute Python"). This check
 #     needs the third-party `markdown` package and pytest; it must not join that `needs:` list.
-#   - merge-readiness.yml's `automation-contracts` job deliberately stays stdlib-only with no
-#     pytest and no third-party dependency (see its own comment in
-#     tools/check-merge-readiness.sh). That is a dependency-contract objection, not a latency
-#     one: measured, `automation-contracts` runs in ~5s against `core-contracts`'s ~45s critical
-#     path, so adding this ~10s pip-install-plus-pytest step there would cost zero wall-clock on
-#     merge-readiness.yml as a whole. The lane's purity, not its speed, is what this placement
-#     protects.
+#   - merge-readiness.yml's `automation-contracts` job now installs `.[dev]` and runs pytest;
+#     the original stdlib-only premise no longer applies. This standalone workflow remains
+#     the owner of generated-reference freshness and its required `site reference freshness`
+#     context, not because automation forbids dependencies or because of a latency claim
+#     (see docs/design/DESIGN-docs-site.md:229-236).
 #   - This workflow's own context, `site reference freshness`, IS a required status check in the
 #     `main safety and CI` ruleset (.github/ruleset-contract.json), so a stale page does block the
 #     merge. That is safe specifically because this workflow runs on every pull request with no
@@ -77,4 +75,4 @@ jobs:
         run: python3 tools/check-example-deadlock-ignore.py
 
       - name: Check site reference, manual-route, and refresh contracts
-        run: python3 -m pytest tests/test_site_reference_snapshot.py tests/test_site_manual_integrity.py tests/test_site_refresh_contract.py -v
+        run: python3 -m pytest tests/test_site_reference_snapshot.py tests/test_site_heading_hash.py tests/test_site_manual_integrity.py tests/test_site_refresh_contract.py -v
