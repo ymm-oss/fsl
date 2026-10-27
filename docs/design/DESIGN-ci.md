@@ -256,7 +256,12 @@ parallel:
   below). After that workspace build, `rust-checks` also runs the native CLI's
   Python-driven expectation checks described below;
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
-- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`);
+- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`); Windows uses
+  `rust-native-z3-windows-shards` (`long-poles`, `rest`) and retains `rust-native-z3-windows`
+  as the `always() && <condition>` aggregator (original event condition). When that condition holds,
+  any shard failure, cancellation or skip fails it; only `success` passes, preserving the product-gate dependency.
+  The long-poles shard checks its live test names against the rest shard's skip manifest;
+  projected timings and the two-main-run measurement follow-up are recorded below (#1532);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
   curated fault-operator controls three ways via `tools/run-semantic-mutation-gate.sh <mode> --lane
   operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half, complete
@@ -1128,14 +1133,24 @@ and the subsequent warm run completed. They do not attribute that save to `cache
 or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
 cache provides the recovery path.
 
-Both native Z3 jobs (`rust-native-z3-windows`, `rust-native-z3-macos`) were raised from 60 to 90
+Both native Z3 jobs (now `rust-native-z3-windows-shards`, `rust-native-z3-macos`) were raised from 60 to 90
 minutes (#1322). By 4.11.0 the warm Windows job spent about 4–5 minutes on setup and 45–57 minutes in
 `cargo test` (sum of per-binary `finished in`: 2693 s on a 4.10.0-candidate success, 2885 s on a
 4.11.0-candidate success, 3250–3370 s on runs cancelled at 60 minutes), against 34m39s for the
 whole warm job in August. On the 4.11.0 candidate `a9f49e7a`, four of five Windows attempts were
 cancelled with every finished binary passing (runs `38710766880` attempts 1–3 and `38720126150`
 attempts 1 and 3; attempt 2 succeeded in 54 minutes); macOS ran 37–57 minutes. The raise restores
-headroom only; bringing the test volume back below the budget is tracked in #1322.
+headroom only. By #1532, Windows jobs measured 54–79 minutes, then hit 90 minutes twice at
+`11f01225`. Windows now splits into `long-poles` (the complete `fsl5_glossary` and
+`issue_1442_compose_binding_capture_matrix` binaries) and `rest` (the same three packages,
+with exact skips read from `tools/windows-native-long-poles.txt`). Before running the two
+binaries, the long-poles shard checks their live libtest `--list` output against that manifest;
+missing, extra or duplicate manifest names fail the job. No test is removed or narrowed.
+Both shards retain 90 minutes and the existing cache settings. Projections, not measurements:
+long-poles about 35–60 minutes, rest about 28–50 minutes. The #1532 follow-up must record both
+shard durations from two consecutive post-merge main runs here and in `ci.yml`; PR checks do
+not run Windows and cannot establish the budget improvement.
+The `rust-native-z3-windows` aggregator runs on Ubuntu with a 10-minute limit.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
@@ -1196,7 +1211,7 @@ under any key generation. The critical-path check counts only entries under the 
 generation (`CURRENT_KEY_PREFIX`); see "Cache key generation".
 
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
-shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
+shared key on `rust-native-z3-macos` and `rust-native-z3-windows-shards` in `ci.yml`: a key-only set lets either
 platform's presence on `main` hide the other's absence. That was a live blind spot, not a
 hypothetical one -- the predecessor `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
 `runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
@@ -1355,14 +1370,15 @@ failure mode for a worse one. A check whose easiest passing implementation is th
 to prevent is not added.
 
 **Not fixed by `shared-key`.** A `shared-key` on the `rust-native-z3` job would let two *different*
-jobs share one cache; no other job builds this cache (confirmed: grepped every workflow for
-`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there is nothing for it to
+jobs share one cache; at the time, no other job built this cache (confirmed: grepped workflows for
+`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there was nothing for it to
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
 
-Setting `shared-key: rust-native-z3` on the split `rust-native-z3-macos` / `rust-native-z3-windows`
+Setting `shared-key: rust-native-z3` on `rust-native-z3-macos` / `rust-native-z3-windows-shards`
 jobs preserves the existing cache key identity after the matrix was split into two job ids; that is a
 different purpose from consolidating cache between unrelated jobs, which this paragraph rejects.
+Both Windows shards share this cache key; on a miss, the first saver wins.
 
 **An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
 first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
@@ -1703,6 +1719,8 @@ records which:
   above): these never report on an ordinary pull request, so requiring them would deadlock every
   one; an audit finding that one of them is present in the live required set gets a sharper message
   saying exactly that, rather than being reported as an ordinary unexpected context.
+  The Windows aggregator is deferred here; `product-gate` enforces it through `needs`.
+  Its two shard contexts are deliberately not recorded in `ruleset-contract.json`.
 - **constituent** — the sharded lane names (`rust checks`, `rust tests (K/3)`, `mutation operators
   (K/3)`, `mutation mutants`, "Sharded pre-merge Linux evidence" above): only their `if: always()`
   aggregator carries the required-context name, so the contract records these explicitly to stop a
