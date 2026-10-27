@@ -264,8 +264,21 @@ check_automation() {
   step --needs-module pytest python3 -m pytest tests/test_ci_validator_inventory.py -v
 }
 
+check_native_python() {
+  # These Python drivers measure the already-built native CLI, not the frozen
+  # Python product. Keep them outside the bounded compile/core/automation lanes.
+  step --needs cargo --needs-module pytest --needs-module fslc \
+    env FSLC_BENCH_CLI=native python3 -m pytest \
+    tests/test_injection_bench.py \
+    tests/test_bounded_liveness_oracle.py \
+    tests/test_rust_cli_semantics.py -v
+  # The benchmark regenerates this artifact even on failure. Compare it whole:
+  # a stale committed matrix must not be silently refreshed by a green test.
+  step git diff --exit-code -- examples/gallery/injected/MATRIX.json
+}
+
 usage() {
-  echo "usage: $0 [--fail-fast] [all|compile|core|automation]" >&2
+  echo "usage: $0 [--fail-fast] [all|compile|core|automation|native-python]" >&2
   exit 2
 }
 
@@ -275,7 +288,7 @@ for argument in "$@"; do
     --fail-fast)
       fail_fast=1
       ;;
-    compile | core | automation | all)
+    compile | core | automation | native-python | all)
       if [ -n "$lane" ]; then
         usage
       fi
@@ -297,6 +310,9 @@ case "$lane" in
     ;;
   automation)
     check_automation
+    ;;
+  native-python)
+    check_native_python
     ;;
   all)
     check_core_contracts

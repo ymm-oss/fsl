@@ -96,9 +96,11 @@
       "tier": "exempt"
     },
     {
-      "exempt_reason": "frozen-python-compatibility",
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
       "path": "tests/test_bounded_liveness_oracle.py",
-      "tier": "exempt"
+      "tier": "required"
     },
     {
       "exempt_reason": "frozen-python-compatibility",
@@ -283,9 +285,11 @@
       "tier": "exempt"
     },
     {
-      "exempt_reason": "frozen-python-compatibility",
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
       "path": "tests/test_injection_bench.py",
-      "tier": "exempt"
+      "tier": "required"
     },
     {
       "exempt_reason": "frozen-python-compatibility",
@@ -442,9 +446,11 @@
       "tier": "required"
     },
     {
-      "exempt_reason": "frozen-python-compatibility",
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
       "path": "tests/test_rust_cli_semantics.py",
-      "tier": "exempt"
+      "tier": "required"
     },
     {
       "exempt_reason": "frozen-python-compatibility",

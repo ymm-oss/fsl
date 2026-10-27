@@ -15,6 +15,11 @@ focused evidence for changes explicitly scoped to compatibility; they are not an
 specification and are not part of required CI. The native `fsl-lsp` crate and `fslc-lsp` binary are
 part of the Rust product gate.
 
+Separately, `ci.yml`'s required `rust-checks` job runs the three Python drivers
+that measure the native CLI through `tools/check-merge-readiness.sh native-python`
+(issue #1466; inventory and rationale in `DESIGN-ci.md`). This does not add Python
+to `check-native-integration.sh` or make the frozen-reference suite required.
+
 ## Contract inventory
 
 | Contract | Required native evidence |

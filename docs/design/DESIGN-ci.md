@@ -253,7 +253,8 @@ parallel:
   workspace's non-doctest tests three ways with `cargo-nextest` via
   `tools/check-native-integration.sh rust-tests K/3`; the `rust-workspace` aggregator requires both
   and enforces shard-union completeness (`rust workspace`; see "Sharded pre-merge Linux evidence"
-  below);
+  below). After that workspace build, `rust-checks` also runs the native CLI's
+  Python-driven expectation checks described below;
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
 - focused native-Z3 tests on macOS and Windows (`native Z3 4.16`);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
@@ -278,6 +279,58 @@ and rejected, so `merge_group` never fires. The same is true of
 `FSL_MERGE_QUEUE_CI` variable that does not exist. Every pull request therefore runs the complete
 Linux evidence in full, and that is the live contract — see "Required pre-merge contexts, and why
 the merge queue was rejected" below before assuming otherwise.
+
+### Native CLI Python expectation checks
+
+Issue #1466 found native expectations silently aging outside CI: #486 fixed
+quantified vacuity detection, but the Python injection benchmark still expected
+the old gap. These are native-binary tests, not changes to frozen Python product
+behavior. The required `rust workspace` context now owns them through its
+`rust-checks` constituent job, after the existing workspace build:
+
+```bash
+./tools/check-merge-readiness.sh native-python
+```
+
+This explicit lane is separate from `compile`, `core`, `automation`, and their
+bounded `all` shorthand. It does not add a native build to merge readiness.
+`ci.yml` uses `actions/setup-python@v5`, Python 3.12, and the existing `.[dev]`
+dependency contract, matching `merge-readiness.yml`. Setup, dependency preparation,
+and execution share the existing evidence-scope guard; the job's 30-minute timeout,
+required-context names, and aggregator dependencies are unchanged.
+
+| Native-driving module | Required evidence | Prerequisites beyond pytest |
+|---|---|---|
+| `tests/test_injection_bench.py` | All 21 injected cases' primary/blind detectors; regenerated `MATRIX.json` | Built debug CLI and injected corpus |
+| `tests/test_bounded_liveness_oracle.py` | Native replay agrees with both bounded-response oracle fixtures | Cargo, debug CLI, frozen oracle imports |
+| `tests/test_rust_cli_semantics.py` | All 20 native CLI behavior/parity tests, including nonzero ledger verdicts | Debug CLI, Git, frozen dialect/codegen reference |
+
+No native-driving `tests/*.py` module in this inventory is excluded. The frozen
+imports require the already-declared Lark/Z3 dependencies; they do not make the
+rest of the frozen-Python suite required. `FSLC_BENCH_CLI=native` is explicit in
+the lane. After pytest, a full `git diff --exit-code` of the regenerated
+`examples/gallery/injected/MATRIX.json` rejects a stale committed artifact;
+there is no field exclusion. Generated evidence is never hand-edited.
+
+Enumeration is reproducible: search `tests/*.py` for
+`FSLC_BENCH_CLI|rust.*target|target.*debug|native_cli|native_binary|native_fslc|cargo|shutil.which|FSLC_`,
+then independently audit subprocess argv and reverse-import their helpers. The
+native calls resolve to the three modules above (23 collected pytest cases).
+`tests/oracle.py` invokes `sys.executable -m fslc`, not native; its importers,
+the gallery/self/e2e subprocess drivers, and in-process reference tests remain
+frozen-Python checks. `test_rust_port_ast.py` passes a Python fake parser to its
+parity helper, and hook/toolchain/cache-key tests inspect synthetic processes or
+configuration rather than running native `fslc`.
+
+Measured on macOS with the native binary built from `13859b41`, two complete
+runs passed all 23 cases in 30.89s and 29.34s, including the warm build
+fixture. Allowing a 2–4× hosted-Linux slowdown gives 60–120s of tests, plus an
+estimated 15–60s of Python setup/dependency preparation: approximately 1.25–3
+minutes added to `rust-checks`, not a measured CI duration or guaranteed critical
+path increase. Existing Z3 compilation is reused. Linux CI timing must be reported
+separately once available. Calibration changes each newly required case's stable
+expectation independently, and also runs the whole lane with one stale expectation
+per module: assertion failures must propagate through the lane's nonzero exit.
 
 ### Agent-configuration exemption
 
