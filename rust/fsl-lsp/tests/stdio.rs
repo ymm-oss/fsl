@@ -435,7 +435,12 @@ fn published_diagnostics_each(
     unstable: Option<&str>,
     environment: &[(&str, &str)],
 ) -> Vec<Vec<Value>> {
-    published_diagnostics_each_at(texts, unstable, environment, "file:///tmp/fsl-lsp-astral.fsl")
+    published_diagnostics_each_at(
+        texts,
+        unstable,
+        environment,
+        "file:///tmp/fsl-lsp-astral.fsl",
+    )
 }
 
 fn published_diagnostics_each_at(

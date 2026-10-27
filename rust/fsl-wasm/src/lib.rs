@@ -1242,6 +1242,17 @@ mod tests {
     // which admission/classification path the Worker takes.
     fn fixture_findings(request: &Request) -> Vec<Value> {
         let file = request.source_file.as_str();
+        if request.source.contains("invariant Prefix \"日本😀\"") {
+            return vec![
+                json!({"code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+                "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+                "message":"legacy string metadata is deprecated; use a typed annotation",
+                "loc":{"file":file,"line":8,"column":20,"end_line":8,"end_column":25},
+                "canonical_replacement":"@requirement(\"日本😀\")", "machine_applicable":true,
+                "edits":[{"start":116,"end":116,"replacement":"@requirement(\"日本😀\")\n  "},
+                    {"start":133,"end":145,"replacement":""}]}),
+            ];
+        }
         if request.source
             == include_str!(
                 "../../fslc/tests/fixtures/domain_characterization/invalid_unknown_name.fsl"
