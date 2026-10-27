@@ -314,6 +314,8 @@ impl PanicAuditApproval {
     }
 }
 
+// Windows cannot create newline-containing filenames (OS code 123).
+#[cfg(unix)]
 #[test]
 fn issue_1475_newline_filename_approval_uses_shared_document_refusal() {
     let fixture = PanicAuditApproval::new();
