@@ -317,3 +317,179 @@ fn nonreserved_all_int_typescript_keeps_exact_bytes() {
     );
     assert_eq!(ts, expected, "produced TS={ts}");
 }
+
+/// Detector on 12d196da: escaping type and delete aliases their already-suffixed
+/// parameter names. Allocate in declaration order, appending _ until distinct.
+/// FSL rejects the extra type__ chain name (reserved __); explicitly check that
+/// rejection, then adapt an accepted real public Kernel for that case only.
+#[test]
+fn escaped_parameter_pairs_remain_distinct_in_declaration_order() {
+    let mut mismatches = Vec::new();
+    for (params, expected_params) in [
+        ("type: N, type_: N", "type_: number, type__: number"),
+        ("delete: N, delete_: N", "delete_: number, delete__: number"),
+    ] {
+        let ts = typescript(&source("advance", params, ""));
+        let expected = format!(
+            "export function advance(self: Item<\"Open\">, {expected_params}): Item<\"Closed\">;"
+        );
+        if !ts.lines().any(|line| line == expected) {
+            mismatches.push(format!("expected signature={expected}; produced TS={ts}"));
+        }
+    }
+    let rejected = source("advance", "type: N, type_: N, type__: N", "");
+    let (status, checked) = cli("check", &rejected);
+    assert_eq!(status, 2, "produced check={checked}");
+    assert_eq!(checked["kind"], "name", "produced check={checked}");
+    assert!(
+        checked["message"]
+            .as_str()
+            .expect("diagnostic")
+            .contains("'type__' contains '__'"),
+        "produced check={checked}"
+    );
+    let (status, mut kernel) = cli("kernel", &source("advance", "type: N, type_: N", ""));
+    assert_eq!(status, 0, "produced kernel={kernel}");
+    let ty = kernel["actions"][0]["parameters"][0]["type"].clone();
+    kernel["actions"][0]["parameters"]
+        .as_array_mut()
+        .expect("parameters")
+        .push(json!({"name":"type__", "type":ty}));
+    let result = fsl_tools::analyze_typestate(&kernel);
+    assert!(
+        result.is_ok(),
+        "produced result={result:?}; kernel={kernel}"
+    );
+    let report = result.expect("checked report");
+    let ts = report["entities"][0]["typescript"]
+        .as_str()
+        .expect("typescript");
+    let expected = "export function advance(self: Item<\"Open\">, type_: number, type__: number, type___: number): Item<\"Closed\">;";
+    if !ts.lines().any(|line| line == expected) {
+        mismatches.push(format!(
+            "public Kernel expected signature={expected}; produced TS={ts}"
+        ));
+    }
+    assert!(mismatches.is_empty(), "produced mismatches={mismatches:#?}");
+}
+
+/// Control on 12d196da: check self, eval and arguments explicitly in both roles.
+/// All are CLI-accepted; none needs the public-Kernel fallback used in round 0.
+#[test]
+fn generated_and_strict_mode_names_are_accepted_by_fsl_check() {
+    for name in ["self", "eval", "arguments"] {
+        for source in [
+            source(name, "", ""),
+            source("advance", &format!("{name}: N"), ""),
+        ] {
+            let (status, checked) = cli("check", &source);
+            assert_eq!(status, 0, "source={source}; produced check={checked}");
+        }
+    }
+}
+
+/// Detector on 12d196da: the fixed self handle must not alias a model parameter;
+/// subsequent parameters are allocated in declaration order against that handle.
+#[test]
+fn self_handle_is_reserved_before_model_parameters() {
+    let ts = typescript(&source("advance", "self: N, self_: N", ""));
+    let expected = "export function advance(self: Item<\"Open\">, self_: number, self__: number): Item<\"Closed\">;";
+    assert!(
+        ts.lines().any(|line| line == expected),
+        "expected signature={expected}; produced TS={ts}"
+    );
+}
+
+/// Detector on 12d196da: strict-mode modules forbid eval/arguments bindings even
+/// though they are not keywords. Both parameters and action names get one _.
+#[test]
+fn strict_mode_bindings_are_escaped_in_parameters_and_actions() {
+    let mut mismatches = Vec::new();
+    for (action, params, expected) in [
+        (
+            "advance",
+            "eval: N, arguments: N",
+            "export function advance(self: Item<\"Open\">, eval_: number, arguments_: number): Item<\"Closed\">;",
+        ),
+        (
+            "eval",
+            "",
+            "export function eval_(self: Item<\"Open\">): Item<\"Closed\">;",
+        ),
+        (
+            "arguments",
+            "",
+            "export function arguments_(self: Item<\"Open\">): Item<\"Closed\">;",
+        ),
+    ] {
+        let ts = typescript(&source(action, params, ""));
+        if !ts.lines().any(|line| line == expected) {
+            mismatches.push(format!("expected={expected}; produced TS={ts}"));
+        }
+    }
+    assert!(mismatches.is_empty(), "produced mismatches={mismatches:#?}");
+}
+
+/// Detector on 12d196da: distinct actions delete and delete_ currently both emit
+/// delete_. Keep the first action's escaped name, then allocate delete__.
+#[test]
+fn distinct_actions_do_not_alias_after_escaping() {
+    let ts = typescript(
+        "spec Keyword { enum St { Open, Closed } struct Item { status: St }
+         state { item: Item } init { item = Item { status: Open } }
+         action delete() { requires item.status == Open item.status = Closed }
+         action delete_() { requires item.status == Open item.status = Closed } }",
+    );
+    let signatures: Vec<_> = ts
+        .lines()
+        .filter(|line| line.starts_with("export function"))
+        .collect();
+    assert_eq!(
+        signatures,
+        [
+            "export function delete_(self: Item<\"Open\">): Item<\"Closed\">;",
+            "export function delete__(self: Item<\"Open\">): Item<\"Closed\">;",
+        ],
+        "produced signatures={signatures:?}; TS={ts}"
+    );
+}
+
+/// Detector on 12d196da: the phantom S generic captures enum S in mode: S.
+/// Skip all declared model type names, not merely the first occupied candidate.
+#[test]
+fn phantom_generic_does_not_capture_model_type_names() {
+    let mut mismatches = Vec::new();
+    for (extra_types, generic) in [("", "S_"), ("enum S_ { Low, High }", "S__")] {
+        let ts = typescript(&format!(
+            "spec Capture {{ enum St {{ Open, Closed }} enum S {{ Fast, Slow }}
+             {extra_types} struct Item {{ status: St }} state {{ item: Item }}
+             init {{ item = Item {{ status: Open }} }}
+             action inspect(mode: S) {{ requires item.status == Open }} }}"
+        ));
+        let expected = format!(
+            "export function inspect<{generic} extends \"Open\">(self: Item<{generic}>, mode: S): Item<{generic}>;"
+        );
+        if !ts.lines().any(|line| line == expected) {
+            mismatches.push(format!("expected signature={expected}; produced TS={ts}"));
+        }
+    }
+    assert!(mismatches.is_empty(), "produced mismatches={mismatches:#?}");
+}
+
+/// Detector on 12d196da: parameter S must not alias the fixed phantom generic S.
+/// Without a model type S the generic stays S and the parameter becomes S_.
+#[test]
+fn phantom_generic_and_parameter_bindings_are_distinct() {
+    let ts = typescript(
+        "spec Capture { type N = 0..3 enum St { Open, Closed }
+         struct Item { status: St } state { item: Item }
+         init { item = Item { status: Open } }
+         action inspect(S: N) { requires item.status == Open } }",
+    );
+    let expected =
+        "export function inspect<S extends \"Open\">(self: Item<S>, S_: number): Item<S>;";
+    assert!(
+        ts.lines().any(|line| line == expected),
+        "expected signature={expected}; produced TS={ts}"
+    );
+}
