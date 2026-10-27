@@ -73,7 +73,7 @@ spec <Name> {                             // the older `spec <Name> "<kind>: <in
 
   state { <var>: <type> [= <deterministic expr>], ... }
   [@undecided("<reason>")]                 // optional, line before init/action: an owner-accepted open choice
-  init  { <stmt>... }                     // assign exactly once per variable/Map-key (deterministic)
+  init  { <stmt>... }                     // assign exactly once per root/key/field (deterministic)
 
   [fair] action <name>(<p>: <type name>, ...) {
     requires <expr>                        // 0 or more. conjunction. enabled condition
@@ -1041,6 +1041,53 @@ attribution is unchanged. Optional replay not run; sweep outputs not normalized.
 ## 4. Statements (init / action body)
 
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`
+- In `init`, disjoint struct-root or map-entry fields may be assigned separately
+  (also in finite binder-keyed `forall`); overlapping writes by different
+  statements on a path are rejected, including whole-root/entry versus field.
+  Field types remain scalar or nested `Option<scalar>`. One `forall` statement
+  may write the same location across iterations with agreeing values; conflicting
+  values make init unsatisfiable, not an ownership error. Unresolved keys
+  (dynamic, `where`-filtered, collection, or non-constant range binder) own the
+  whole root and conflict with any other statement writing it.
+  Shapes requiring the new field granularity need complete definite coverage
+  of every root init may assign on all paths, including whole-value writes and
+  all Map keys/fields; never-assigned roots remain free. Incomplete assigned
+  roots retain the legacy ownership error. All legacy-probe-accepted partial
+  forms keep symbolic free components, including single-field/branch-split
+  writes, key subsets and one-path whole-root writes. Refine's legacy free-root
+  default-fill limitation is tracked in #1521; partial admission is not expanded
+  until that is fixed. Explicit/Monitor require all fields of every entry
+  to be covered before reading the root or completing init. Resolved entry-field
+  writes now count toward concrete coverage even in legacy-accepted shapes:
+  complete single-field-entry maps become constructible; retained incomplete
+  coverage adds the partial-component suffix to missing-assignment errors.
+  Deterministic refine on either side, auto selection, conformance, testgen and
+  requirement-trace gates inherit these construction changes. Auto can switch
+  bounded BMC fallback to unbounded explicit closure; requirement trace execution
+  can change check/proof/testgen results. Kernel replay/conformance alone does not
+  validate declared acceptance traces. Full coverage may expose existing
+  out-of-domain or repeated-write vacuity errors rather than missing assignment;
+  the relational repeated-write constraint itself is unchanged.
+  New admission proofs treat outer-binder-dependent sources/filters/key bounds
+  as unproved, never as same-named global consts; no outer valuation product is
+  enumerated and #1515's symbolic shadow-resolution behavior is not repaired.
+  For shapes newly admitted by per-field ownership, `check` also requires the
+  entire may-assigned root (all Map keys/fields) to be covered before a read,
+  including roots written only as whole values; early reads of non-field-written
+  roots retain the legacy ownership error/location unless the field-read gate
+  refuses first. When field-written roots are complete at the end, that gate
+  runs before nonfield reads, even if the field read appears later in init;
+  incomplete field-written roots instead retain the saved ownership refusal.
+  The field-read gate also
+  covers an already-written field or a whole-entry/root read of a field-written root
+  (diagnostic markers `<whole entry>` / `<whole root>`).
+  `s.a = 1; s.b = (s.a == 1)` is rejected, as is a
+  current-key field read before sibling fields are written in a `forall`.
+  Reads of written fields at the current binder key after all binder-keyed fields
+  are written are allowed; a whole-entry copy in that body still fails #1518's
+  read-order rule. A whole-entry copy outside the loop after full-root init is
+  allowed. The semantics error names root/field and locates the containing statement; legacy
+  root-granularity-accepted init shapes retain their ownership-check admission.
 - Set/Seq/relation are re-assigned: `s = s.add(x)`, `q = q.pop().push(y)`,
   `r = r.add(a,b)` (chaining allowed)
 - A relation-typed field's **literal** initializer must be the empty `Set {}` — a non-empty

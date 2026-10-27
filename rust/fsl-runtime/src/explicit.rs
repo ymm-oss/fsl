@@ -66,6 +66,8 @@ pub struct ExplicitResult {
 enum InitWriteKey {
     Root(String),
     ConcreteIndex(String, Value),
+    ConcreteIndexField(String, Value, String),
+    RootField(String, String),
 }
 
 /// Verify a finite kernel model using level-synchronous concrete BFS.
@@ -410,15 +412,23 @@ fn edge_trace_step(
 /// Per-root definite-assignment coverage tracked at component granularity.
 ///
 /// A `Map` root is fully assigned only once every concrete key in its
-/// key-type domain has been written; a `Named` struct root is fully assigned
+/// key-type domain has been fully assigned, including every struct field in
+/// each entry; a `Named` struct root is fully assigned
 /// only once every declared field has been (recursively) fully assigned.
 /// Anything else stays binary (`Full` or unassigned) because there is no
 /// finer component structure to track.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Coverage {
     Full,
-    Keys(BTreeSet<Value>),
+    Keys(BTreeMap<Value, Coverage>),
     Fields(BTreeMap<String, Coverage>),
+}
+
+#[derive(Clone, Copy)]
+enum InitWalkMode<'a> {
+    Concrete,
+    LegacyConcrete,
+    ScopedFields(&'a BTreeSet<String>),
 }
 
 /// Names and declared types of state roots that `model`'s init never
@@ -477,7 +487,26 @@ fn collect_assigned_init_roots(statements: &[Statement], assigned: &mut BTreeSet
 }
 
 pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), RuntimeError> {
-    walk_init_forall_reads(&model.init, &mut [], &[], model)?;
+    if let Err(error) = check_init_write_ownership(model) {
+        // Main's concrete walk may encounter an earlier read/domain failure
+        // before a legacy ownership collision. Preserve that error on already
+        // refused inputs, without replacing the new read gate's diagnostics.
+        if error.message.starts_with("state variable '")
+            && let Err(earlier) = walk_init(
+                &model.init,
+                BTreeMap::new(),
+                BTreeSet::new(),
+                false,
+                &BTreeMap::new(),
+                model,
+                InitWalkMode::LegacyConcrete,
+            )
+            && !earlier.message.starts_with("state variable '")
+        {
+            return Err(earlier);
+        }
+        return Err(error);
+    }
     let (assigned, _) = walk_init(
         &model.init,
         BTreeMap::new(),
@@ -485,6 +514,7 @@ pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), Runtim
         false,
         &BTreeMap::new(),
         model,
+        InitWalkMode::Concrete,
     )?;
     let mut missing_is_partial = false;
     let mut missing = model
@@ -522,9 +552,11 @@ fn coverage_is_full(coverage: Option<&Coverage>, ty: &TypeRef, model: &KernelMod
     match coverage {
         Some(Coverage::Full) => true,
         Some(Coverage::Keys(keys)) => match ty {
-            TypeRef::Map(key_ty, _) => model
-                .map_key_values(key_ty)
-                .is_ok_and(|domain| domain.iter().all(|value| keys.contains(value))),
+            TypeRef::Map(key_ty, value_ty) => model.map_key_values(key_ty).is_ok_and(|domain| {
+                domain
+                    .iter()
+                    .all(|value| coverage_is_full(keys.get(value), value_ty, model))
+            }),
             _ => false,
         },
         Some(Coverage::Fields(fields)) => match ty {
@@ -546,7 +578,7 @@ fn coverage_is_full(coverage: Option<&Coverage>, ty: &TypeRef, model: &KernelMod
 
 /// Join the coverage contributed by one more assignment into what a root
 /// already had within the same straight-line branch. `Full` absorbs
-/// anything; same-kind coverage unions (`Keys`) or merges per-field
+/// anything; same-kind coverage merges per-key (`Keys`) or per-field
 /// (`Fields`); a kind mismatch keeps whatever was already recorded rather
 /// than erroring (component tracking degrades to "no worse than before").
 fn join_coverage(existing: Option<Coverage>, addition: Coverage) -> Coverage {
@@ -556,7 +588,10 @@ fn join_coverage(existing: Option<Coverage>, addition: Coverage) -> Coverage {
     match (existing, addition) {
         (Coverage::Full, _) | (_, Coverage::Full) => Coverage::Full,
         (Coverage::Keys(mut a), Coverage::Keys(b)) => {
-            a.extend(b);
+            for (key, addition) in b {
+                let merged = join_coverage(a.remove(&key), addition);
+                a.insert(key, merged);
+            }
             Coverage::Keys(a)
         }
         (Coverage::Fields(mut a), Coverage::Fields(b)) => {
@@ -576,7 +611,7 @@ fn join_coverage(existing: Option<Coverage>, addition: Coverage) -> Coverage {
 }
 
 /// Intersect the coverage two `if` branches leave behind. `Full` yields the
-/// other side; same-kind coverage intersects (`Keys`) or meets per-field
+/// other side; same-kind coverage meets per-key (`Keys`) or meets per-field
 /// (`Fields`, dropping fields missing on either side); a kind mismatch drops
 /// the root entirely, matching the old set-intersection behavior for roots
 /// only assigned on one side.
@@ -584,7 +619,15 @@ fn meet_coverage(a: &Coverage, b: &Coverage) -> Option<Coverage> {
     match (a, b) {
         (Coverage::Full, other) | (other, Coverage::Full) => Some(other.clone()),
         (Coverage::Keys(a), Coverage::Keys(b)) => {
-            Some(Coverage::Keys(a.intersection(b).cloned().collect()))
+            let mut merged = BTreeMap::new();
+            for (key, coverage_a) in a {
+                if let Some(coverage_b) = b.get(key)
+                    && let Some(meet) = meet_coverage(coverage_a, coverage_b)
+                {
+                    merged.insert(key.clone(), meet);
+                }
+            }
+            Some(Coverage::Keys(merged))
         }
         (Coverage::Fields(a), Coverage::Fields(b)) => {
             let mut merged = BTreeMap::new();
@@ -625,6 +668,7 @@ fn meet_branches(
 fn compute_binder_values(
     binder: &Binder,
     model: &KernelModel,
+    outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
 ) -> Result<Option<Vec<Value>>, RuntimeError> {
     match binder {
         Binder::Typed {
@@ -640,7 +684,10 @@ fn compute_binder_values(
             hi,
             where_expr: None,
             ..
-        } => match (const_int_bound(lo, model), const_int_bound(hi, model)) {
+        } => match (
+            const_int_bound(lo, model, outer),
+            const_int_bound(hi, model, outer),
+        ) {
             (Some(lo), Some(hi)) => Ok(Some((lo..=hi).map(Value::Int).collect())),
             _ => Ok(None),
         },
@@ -651,7 +698,16 @@ fn compute_binder_values(
 /// Fixed targets only gain coverage if at least one iteration is guaranteed.
 /// This does not change ownership or the conservative binder-key coverage of
 /// `compute_binder_values`: a state-dependent filter can still skip every write.
-fn init_binder_is_nonempty(binder: &Binder, model: &KernelModel) -> bool {
+fn init_binder_is_nonempty(
+    binder: &Binder,
+    model: &KernelModel,
+    outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
+) -> bool {
+    // This scoped policy is used only behind the failed legacy probe. Do not
+    // repair #1515's symbolic/global-const behavior or narrow legacy acceptance.
+    if outer.is_some_and(|names| init_binder_depends_on_outer(binder, names)) {
+        return false;
+    }
     let (sources, filter) = init_binder_exprs(binder);
     if sources
         .iter()
@@ -686,9 +742,71 @@ fn init_binder_exprs(binder: &Binder) -> (Vec<&Expr>, Option<&Expr>) {
     }
 }
 
-fn const_int_bound(expr: &Expr, model: &KernelModel) -> Option<i64> {
+fn init_binder_depends_on_outer(
+    binder: &Binder,
+    outer: &BTreeMap<String, Option<Vec<Value>>>,
+) -> bool {
+    if outer.is_empty() {
+        return false;
+    }
+    let (sources, filter) = init_binder_exprs(binder);
+    let mut local = BTreeSet::new();
+    if sources
+        .iter()
+        .any(|expr| init_expr_depends_on_outer(expr, outer, &local))
+    {
+        return true;
+    }
+    local.insert(binder_name(binder).to_owned());
+    filter.is_some_and(|expr| init_expr_depends_on_outer(expr, outer, &local))
+}
+
+fn init_expr_depends_on_outer(
+    expr: &Expr,
+    outer: &BTreeMap<String, Option<Vec<Value>>>,
+    local: &BTreeSet<String>,
+) -> bool {
+    fsl_core::recursion::guard(|| {
+        if let Expr::Var(name) = expr {
+            return outer.contains_key(name) && !local.contains(name);
+        }
+        let scoped = match expr {
+            Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
+            Expr::Aggregate { binder, value, .. } => Some((binder, value.as_deref())),
+            _ => None,
+        };
+        if let Some((binder, body)) = scoped {
+            let (sources, filter) = init_binder_exprs(binder);
+            if sources
+                .iter()
+                .any(|expr| init_expr_depends_on_outer(expr, outer, local))
+            {
+                return true;
+            }
+            let mut nested = local.clone();
+            nested.insert(binder_name(binder).to_owned());
+            return filter
+                .into_iter()
+                .chain(body)
+                .any(|expr| init_expr_depends_on_outer(expr, outer, &nested));
+        }
+        init_expr_children(expr)
+            .iter()
+            .any(|child| init_expr_depends_on_outer(child, outer, local))
+    })
+}
+
+fn const_int_bound(
+    expr: &Expr,
+    model: &KernelModel,
+    outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
+) -> Option<i64> {
     match expr {
         Expr::Num(value) => Some(*value),
+        // Nonempty rollback is the decisive coverage refusal for an outer-
+        // dependent range. Also leave its keys unresolved here; this guard
+        // alone does not change admission while that rollback is in place.
+        Expr::Var(name) if outer.is_some_and(|names| names.contains_key(name)) => None,
         Expr::Var(name) => match model.consts.get(name) {
             Some(Value::Int(value)) => Some(*value),
             _ => None,
@@ -738,7 +856,7 @@ fn resolve_integer_const_key(model: &KernelModel, key_type: &TypeRef, name: &str
 /// The coverage a single assignment statement contributes to its logical
 /// root, independent of whatever the root already had. Returns `None` when
 /// the target's key/field shape carries no provable component information
-/// (an unresolved dynamic map key, or a nested lvalue).
+/// (an unresolved dynamic map key, or an unsupported nested field lvalue).
 fn assignment_coverage(
     target: &LValue,
     bound_names: &BTreeMap<String, Option<Vec<Value>>>,
@@ -747,16 +865,24 @@ fn assignment_coverage(
     match target {
         LValue::Var(_) => Some(Coverage::Full),
         LValue::Index(name, key_expr) => match key_expr {
-            Expr::Num(value) => Some(Coverage::Keys(BTreeSet::from([Value::Int(*value)]))),
+            Expr::Num(value) => Some(Coverage::Keys(BTreeMap::from([(
+                Value::Int(*value),
+                Coverage::Full,
+            )]))),
             Expr::Var(key) => {
                 if let Some(binder_values) = bound_names.get(key) {
-                    binder_values
-                        .clone()
-                        .map(|values| Coverage::Keys(values.into_iter().collect()))
+                    binder_values.clone().map(|values| {
+                        Coverage::Keys(
+                            values
+                                .into_iter()
+                                .map(|key| (key, Coverage::Full))
+                                .collect(),
+                        )
+                    })
                 } else if let Some(TypeRef::Map(key_ty, _)) = model.state_type(name) {
                     resolve_enum_key(model, key_ty, key)
                         .or_else(|| resolve_integer_const_key(model, key_ty, key))
-                        .map(|value| Coverage::Keys(BTreeSet::from([value])))
+                        .map(|value| Coverage::Keys(BTreeMap::from([(value, Coverage::Full)])))
                 } else {
                     None
                 }
@@ -768,23 +894,125 @@ fn assignment_coverage(
                 field.clone(),
                 Coverage::Full,
             )]))),
-            LValue::Index(_, _) | LValue::Field(_, _) => None,
+            LValue::Index(_, _) => {
+                let Coverage::Keys(keys) = assignment_coverage(base, bound_names, model)? else {
+                    return None;
+                };
+                Some(Coverage::Keys(
+                    keys.into_keys()
+                        .map(|key| {
+                            (
+                                key,
+                                Coverage::Fields(BTreeMap::from([(field.clone(), Coverage::Full)])),
+                            )
+                        })
+                        .collect(),
+                ))
+            }
+            LValue::Field(_, _) => None,
         },
     }
 }
 
 /// Enforce init's assign-once ownership rule without requiring a concrete
-/// initial state. Symbolic verification may admit partially assigned init,
-/// but it must reject two writes that can own the same state location and
+/// initial state. Legacy-accepted partial init retains symbolic free values;
+/// newly split field writes require complete coverage of every assigned root. Reject
+/// two writes that can own the same state location and
 /// reads of a root written by the same forall outside its already-written entry.
 ///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when two writes may overlap on one logical root,
-/// or an init forall read can depend on iteration order.
+/// a root in newly admitted init is not definitely complete, or an init read
+/// violates its coverage or forall iteration-order boundary.
 pub fn check_init_write_ownership(model: &KernelModel) -> Result<(), RuntimeError> {
     walk_init_forall_reads(&model.init, &mut [], &[], model)?;
-    walk_init_write_ownership(&model.init, BTreeSet::new(), false, &BTreeMap::new(), model)?;
+    let field_ownership = walk_init_write_ownership(
+        &model.init,
+        BTreeSet::new(),
+        false,
+        &BTreeMap::new(),
+        model,
+        true,
+    );
+    // Preserve every init accepted by the pre-#1481 root-granularity gate.
+    // Newly admitted per-field forms must completely cover every may-assigned
+    // root, including non-field roots on refinement's free-root path.
+    let legacy_error = walk_init_write_ownership(
+        &model.init,
+        BTreeSet::new(),
+        false,
+        &BTreeMap::new(),
+        model,
+        false,
+    )
+    .err();
+    if let Err(error) = field_ownership {
+        // Keep the first collision's legacy location for already rejected init.
+        return Err(legacy_error.unwrap_or(error));
+    }
+    if let Some(legacy_error) = legacy_error {
+        let mut field_roots = BTreeSet::new();
+        collect_field_init_roots(&model.init, &mut field_roots);
+        let mut assigned_roots = BTreeSet::new();
+        collect_assigned_init_roots(&model.init, &mut assigned_roots);
+        // Summarize coverage without read refusals or concrete-only restrictions.
+        // Partial field-written roots keep the legacy error. When those roots
+        // are complete, an early field read wins over partial other roots.
+        let Ok((assigned, _)) = walk_init(
+            &model.init,
+            BTreeMap::new(),
+            BTreeSet::new(),
+            false,
+            &BTreeMap::new(),
+            model,
+            InitWalkMode::ScopedFields(&BTreeSet::new()),
+        ) else {
+            // Conservative key resolution may itself encounter an unresolved
+            // overlap. Keep the original main refusal, not an analysis error.
+            return Err(legacy_error);
+        };
+        if field_roots.iter().all(|root| {
+            model
+                .state_type(root)
+                .is_some_and(|ty| coverage_is_full(assigned.get(root), ty, model))
+        }) {
+            walk_init(
+                &model.init,
+                BTreeMap::new(),
+                BTreeSet::new(),
+                false,
+                &BTreeMap::new(),
+                model,
+                InitWalkMode::ScopedFields(&field_roots),
+            )?;
+        }
+        // Refinement's free-root path executes init from defaults in program
+        // order. A later whole-value assignment must not make an earlier read
+        // safe. Keep field gate(a)'s diagnostic priority, but use the saved
+        // legacy refusal for reads of other may-assigned roots.
+        let other_roots = assigned_roots.difference(&field_roots).cloned().collect();
+        if walk_init(
+            &model.init,
+            BTreeMap::new(),
+            BTreeSet::new(),
+            false,
+            &BTreeMap::new(),
+            model,
+            InitWalkMode::ScopedFields(&other_roots),
+        )
+        .is_err()
+        {
+            return Err(legacy_error);
+        }
+        if assigned_roots.iter().any(|root| {
+            !model
+                .state_type(root)
+                .is_some_and(|ty| coverage_is_full(assigned.get(root), ty, model))
+        }) {
+            return Err(legacy_error);
+        }
+    }
     Ok(())
 }
 
@@ -794,6 +1022,35 @@ struct InitForallReads {
     written_roots: BTreeSet<String>,
     // The key is implicitly this scope's binder; an empty path owns the entry.
     assigned: BTreeSet<(String, Vec<String>)>,
+}
+
+struct InitFieldReadCoverage<'a> {
+    assigned: &'a BTreeMap<String, Coverage>,
+    model: &'a KernelModel,
+    roots: &'a BTreeSet<String>,
+}
+
+fn collect_field_init_roots(statements: &[Statement], roots: &mut BTreeSet<String>) {
+    for statement in statements {
+        match statement {
+            Statement::Assign { target, .. } => {
+                if matches!(target, LValue::Field(_, _))
+                    && let Some(root) = logical_var(target)
+                {
+                    roots.insert(root.to_owned());
+                }
+            }
+            Statement::ForAll { statements, .. } => collect_field_init_roots(statements, roots),
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                collect_field_init_roots(then_statements, roots);
+                collect_field_init_roots(else_statements, roots);
+            }
+        }
+    }
 }
 
 /// Return a root, optional map key, and field path, without treating a field
@@ -930,7 +1187,19 @@ fn check_init_forall_read_expr(
     locals: &[String],
     span: fsl_core::Span,
 ) -> Result<(), RuntimeError> {
-    fsl_core::recursion::guard(|| check_init_forall_read_expr_inner(expr, scopes, locals, span))
+    check_init_read_expr(expr, scopes, locals, span, None)
+}
+
+fn check_init_read_expr(
+    expr: &Expr,
+    scopes: &[InitForallReads],
+    locals: &[String],
+    span: fsl_core::Span,
+    field_coverage: Option<&InitFieldReadCoverage<'_>>,
+) -> Result<(), RuntimeError> {
+    fsl_core::recursion::guard(|| {
+        check_init_forall_read_expr_inner(expr, scopes, locals, span, field_coverage)
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -939,9 +1208,31 @@ fn check_init_forall_read_expr_inner(
     scopes: &[InitForallReads],
     locals: &[String],
     span: fsl_core::Span,
+    field_coverage: Option<&InitFieldReadCoverage<'_>>,
 ) -> Result<(), RuntimeError> {
     if let Some((root, key, fields)) = init_read_place(expr) {
         if !locals.iter().any(|local| local == root) {
+            if let Some(coverage) = field_coverage
+                && coverage.roots.contains(root)
+                && let Some(ty) = coverage.model.state_type(root)
+                && !coverage_is_full(coverage.assigned.get(root), ty, coverage.model)
+            {
+                return Err(runtime_error_at(
+                    format!(
+                        "init cannot read '{root}.{}' before state variable '{root}' is fully assigned",
+                        if fields.is_empty() {
+                            if key.is_some() {
+                                "<whole entry>".to_owned()
+                            } else {
+                                "<whole root>".to_owned()
+                            }
+                        } else {
+                            fields.join(".")
+                        }
+                    ),
+                    span,
+                ));
+            }
             for scope in scopes {
                 if scope.written_roots.contains(root)
                     && !(is_current_init_key(key, scope.binder_depth, locals)
@@ -960,11 +1251,43 @@ fn check_init_forall_read_expr_inner(
             }
         }
         if let Some(key) = key {
-            check_init_forall_read_expr(key, scopes, locals, span)?;
+            check_init_read_expr(key, scopes, locals, span, field_coverage)?;
         }
         return Ok(());
     }
-    let children: Vec<&Expr> = match expr {
+    match expr {
+        Expr::Quantified { binder, body, .. } => {
+            return check_init_forall_read_binder(
+                binder,
+                Some(body),
+                scopes,
+                locals,
+                span,
+                field_coverage,
+            );
+        }
+        Expr::Aggregate { binder, value, .. } => {
+            return check_init_forall_read_binder(
+                binder,
+                value.as_deref(),
+                scopes,
+                locals,
+                span,
+                field_coverage,
+            );
+        }
+        _ => {}
+    }
+    for child in init_expr_children(expr) {
+        check_init_read_expr(child, scopes, locals, span, field_coverage)?;
+    }
+    Ok(())
+}
+
+/// Ordinary children shared by the read and outer-dependency visitors. Each
+/// caller handles quantified/aggregate binder scopes before using this list.
+fn init_expr_children(expr: &Expr) -> Vec<&Expr> {
+    match expr {
         Expr::Some(expr)
         | Expr::Neg(expr)
         | Expr::Not(expr)
@@ -987,28 +1310,22 @@ fn check_init_forall_read_expr_inner(
             else_expr,
             ..
         } => vec![condition, then_expr, else_expr],
-        Expr::Quantified { binder, body, .. } => {
-            check_init_forall_read_binder(binder, Some(body), scopes, locals, span)?;
-            vec![]
-        }
-        Expr::Aggregate { binder, value, .. } => {
-            check_init_forall_read_binder(binder, value.as_deref(), scopes, locals, span)?;
-            vec![]
-        }
         Expr::TernaryNamed {
             first,
             second,
             third,
             ..
         } => vec![first, second, third],
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
+        Expr::Num(_)
+        | Expr::Bool(_)
+        | Expr::None
+        | Expr::Var(_)
+        | Expr::EnumMember { .. }
+        | Expr::Quantified { .. }
+        | Expr::Aggregate { .. } => {
             vec![]
         }
-    };
-    for child in children {
-        check_init_forall_read_expr(child, scopes, locals, span)?;
     }
-    Ok(())
 }
 
 fn check_init_forall_read_binder(
@@ -1017,15 +1334,16 @@ fn check_init_forall_read_binder(
     scopes: &[InitForallReads],
     locals: &[String],
     span: fsl_core::Span,
+    field_coverage: Option<&InitFieldReadCoverage<'_>>,
 ) -> Result<(), RuntimeError> {
     let (sources, filter) = init_binder_exprs(binder);
     for source in sources {
-        check_init_forall_read_expr(source, scopes, locals, span)?;
+        check_init_read_expr(source, scopes, locals, span, field_coverage)?;
     }
     let mut nested_locals = locals.to_vec();
     nested_locals.push(binder_name(binder).to_owned());
     for child in filter.into_iter().chain(body) {
-        check_init_forall_read_expr(child, scopes, &nested_locals, span)?;
+        check_init_read_expr(child, scopes, &nested_locals, span, field_coverage)?;
     }
     Ok(())
 }
@@ -1036,6 +1354,7 @@ fn walk_init_write_ownership(
     in_forall: bool,
     bound_names: &BTreeMap<String, Option<Vec<Value>>>,
     model: &KernelModel,
+    field_ownership: bool,
 ) -> Result<BTreeSet<InitWriteKey>, RuntimeError> {
     for statement in statements {
         match statement {
@@ -1043,7 +1362,11 @@ fn walk_init_write_ownership(
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
                 let contribution = assignment_coverage(target, bound_names, model);
-                let keys = init_write_keys(target, contribution.as_ref());
+                let keys = if !field_ownership && matches!(target, LValue::Field(_, _)) {
+                    BTreeSet::from([InitWriteKey::Root(logical.to_owned())])
+                } else {
+                    init_write_keys(target, contribution.as_ref())
+                };
                 if keys.iter().any(|key| {
                     possibly_assigned
                         .iter()
@@ -1060,7 +1383,9 @@ fn walk_init_write_ownership(
             Statement::ForAll {
                 binder, statements, ..
             } => {
-                let binder_values = compute_binder_values(binder, model)?;
+                // Preserve main's ownership resolution, including #1515. Only
+                // the failed-legacy admission analysis uses the scoped policy.
+                let binder_values = compute_binder_values(binder, model, None)?;
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
                 possibly_assigned = walk_init_write_ownership(
@@ -1069,6 +1394,7 @@ fn walk_init_write_ownership(
                     true,
                     &nested_bound,
                     model,
+                    field_ownership,
                 )?;
             }
             Statement::If {
@@ -1082,6 +1408,7 @@ fn walk_init_write_ownership(
                     in_forall,
                     bound_names,
                     model,
+                    field_ownership,
                 )?;
                 let else_possible = walk_init_write_ownership(
                     else_statements,
@@ -1089,6 +1416,7 @@ fn walk_init_write_ownership(
                     in_forall,
                     bound_names,
                     model,
+                    field_ownership,
                 )?;
                 possibly_assigned = then_possible.union(&else_possible).cloned().collect();
             }
@@ -1105,7 +1433,15 @@ fn walk_init(
     in_forall: bool,
     bound_names: &BTreeMap<String, Option<Vec<Value>>>,
     model: &KernelModel,
+    mode: InitWalkMode<'_>,
 ) -> Result<(BTreeMap<String, Coverage>, BTreeSet<InitWriteKey>), RuntimeError> {
+    let field_read_roots = match mode {
+        InitWalkMode::ScopedFields(roots) => Some(roots),
+        InitWalkMode::Concrete | InitWalkMode::LegacyConcrete => None,
+    };
+    let field_reads_only = field_read_roots.is_some();
+    let legacy = matches!(mode, InitWalkMode::LegacyConcrete);
+    let proof_scope = field_reads_only.then_some(bound_names);
     for statement in statements {
         match statement {
             Statement::Assign {
@@ -1116,8 +1452,18 @@ fn walk_init(
             } => {
                 let logical = logical_var(target)
                     .ok_or_else(|| runtime_error("invalid init assignment target"))?;
-                let contribution = assignment_coverage(target, bound_names, model);
-                let keys = init_write_keys(target, contribution.as_ref());
+                let contribution = if legacy
+                    && matches!(target, LValue::Field(base, _) if matches!(base.as_ref(), LValue::Index(_, _)))
+                {
+                    None
+                } else {
+                    assignment_coverage(target, bound_names, model)
+                };
+                let keys = if legacy && matches!(target, LValue::Field(_, _)) {
+                    BTreeSet::from([InitWriteKey::Root(logical.to_owned())])
+                } else {
+                    init_write_keys(target, contribution.as_ref())
+                };
                 if keys.iter().any(|key| {
                     possibly_assigned
                         .iter()
@@ -1129,10 +1475,35 @@ fn walk_init(
                         *span,
                     ));
                 }
-                if let LValue::Index(_, key_expr) = target {
-                    check_init_expr(key_expr, &definitely_assigned, bound_names, model)?;
+                if let Some(roots) = field_read_roots {
+                    let target_expr = init_target_expr(target);
+                    if let Some((_, Some(key), _)) = init_read_place(&target_expr) {
+                        check_init_field_expr(
+                            key,
+                            &definitely_assigned,
+                            bound_names,
+                            model,
+                            *span,
+                            roots,
+                        )?;
+                    }
+                    check_init_field_expr(
+                        value,
+                        &definitely_assigned,
+                        bound_names,
+                        model,
+                        *span,
+                        roots,
+                    )?;
+                } else {
+                    // Concrete mode checks Index keys, not Field(Index) keys.
+                    // An unresolved Field(Index) cannot establish full-root
+                    // coverage, so the final deterministic-init gate refuses it.
+                    if let LValue::Index(_, key_expr) = target {
+                        check_init_expr(key_expr, &definitely_assigned, bound_names, model)?;
+                    }
+                    check_init_expr(value, &definitely_assigned, bound_names, model)?;
                 }
-                check_init_expr(value, &definitely_assigned, bound_names, model)?;
                 if let Some(contribution) = contribution {
                     let previous = definitely_assigned.remove(logical);
                     definitely_assigned
@@ -1141,13 +1512,28 @@ fn walk_init(
                 possibly_assigned.extend(keys);
             }
             Statement::ForAll {
-                binder, statements, ..
+                binder,
+                statements,
+                span,
             } => {
-                if in_forall {
+                if in_forall && !field_reads_only {
                     return Err(runtime_error("nested forall in init is not supported"));
                 }
+                if let Some(roots) = field_read_roots {
+                    let (sources, _) = init_binder_exprs(binder);
+                    for source in sources {
+                        check_init_field_expr(
+                            source,
+                            &definitely_assigned,
+                            bound_names,
+                            model,
+                            *span,
+                            roots,
+                        )?;
+                    }
+                }
                 match binder {
-                    Binder::Range { lo, hi, .. } => {
+                    Binder::Range { lo, hi, .. } if !field_reads_only => {
                         let mut references =
                             state_references(lo, model, bound_names.keys().map(String::as_str));
                         references.extend(state_references(
@@ -1161,7 +1547,7 @@ fn walk_init(
                             )));
                         }
                     }
-                    Binder::Collection { .. } => {
+                    Binder::Collection { .. } if !field_reads_only => {
                         fsl_core::check_init_collection_binder(
                             model,
                             binder,
@@ -1169,18 +1555,29 @@ fn walk_init(
                         )
                         .map_err(|error| runtime_error(error.message))?;
                     }
-                    Binder::Typed { .. } => {}
+                    Binder::Typed { .. } | Binder::Range { .. } | Binder::Collection { .. } => {}
                 }
                 let where_expr = match binder {
                     Binder::Typed { where_expr, .. }
                     | Binder::Range { where_expr, .. }
                     | Binder::Collection { where_expr, .. } => where_expr,
                 };
-                let binder_values = compute_binder_values(binder, model)?;
+                let binder_values = compute_binder_values(binder, model, proof_scope)?;
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
                 if let Some(where_expr) = where_expr {
-                    check_init_expr(where_expr, &definitely_assigned, &nested_bound, model)?;
+                    if let Some(roots) = field_read_roots {
+                        check_init_field_expr(
+                            where_expr,
+                            &definitely_assigned,
+                            &nested_bound,
+                            model,
+                            *span,
+                            roots,
+                        )?;
+                    } else {
+                        check_init_expr(where_expr, &definitely_assigned, &nested_bound, model)?;
+                    }
                 }
                 let before_forall = definitely_assigned.clone();
                 (definitely_assigned, possibly_assigned) = walk_init(
@@ -1190,8 +1587,9 @@ fn walk_init(
                     true,
                     &nested_bound,
                     model,
+                    mode,
                 )?;
-                if !init_binder_is_nonempty(binder, model) {
+                if !init_binder_is_nonempty(binder, model, proof_scope) {
                     definitely_assigned = before_forall;
                 }
             }
@@ -1199,9 +1597,20 @@ fn walk_init(
                 condition,
                 then_statements,
                 else_statements,
-                ..
+                span,
             } => {
-                check_init_expr(condition, &definitely_assigned, bound_names, model)?;
+                if let Some(roots) = field_read_roots {
+                    check_init_field_expr(
+                        condition,
+                        &definitely_assigned,
+                        bound_names,
+                        model,
+                        *span,
+                        roots,
+                    )?;
+                } else {
+                    check_init_expr(condition, &definitely_assigned, bound_names, model)?;
+                }
                 let (then_definite, then_possible) = walk_init(
                     then_statements,
                     definitely_assigned.clone(),
@@ -1209,6 +1618,7 @@ fn walk_init(
                     in_forall,
                     bound_names,
                     model,
+                    mode,
                 )?;
                 let (else_definite, else_possible) = walk_init(
                     else_statements,
@@ -1217,6 +1627,7 @@ fn walk_init(
                     in_forall,
                     bound_names,
                     model,
+                    mode,
                 )?;
                 definitely_assigned = meet_branches(then_definite, &else_definite);
                 possibly_assigned = then_possible.union(&else_possible).cloned().collect();
@@ -1224,6 +1635,28 @@ fn walk_init(
         }
     }
     Ok((definitely_assigned, possibly_assigned))
+}
+
+fn check_init_field_expr(
+    expr: &Expr,
+    assigned: &BTreeMap<String, Coverage>,
+    bound_names: &BTreeMap<String, Option<Vec<Value>>>,
+    model: &KernelModel,
+    span: fsl_core::Span,
+    roots: &BTreeSet<String>,
+) -> Result<(), RuntimeError> {
+    let locals = bound_names.keys().cloned().collect::<Vec<_>>();
+    check_init_read_expr(
+        expr,
+        &[],
+        &locals,
+        span,
+        Some(&InitFieldReadCoverage {
+            assigned,
+            model,
+            roots,
+        }),
+    )
 }
 
 fn check_init_expr(
@@ -1254,9 +1687,9 @@ fn logical_var(target: &LValue) -> Option<&str> {
     }
 }
 
-/// Concrete per-key write identities a single init assignment touches, for
+/// Concrete per-key/per-field identities a single init assignment touches, for
 /// duplicate-write detection at the granularity `docs/manual/LANGUAGE.md` §12
-/// requires: "assign exactly once" is per concrete key, not per variable.
+/// requires: "assign exactly once" is per concrete key and field, not per variable.
 ///
 /// This reuses `assignment_coverage`'s resolution rather than computing a
 /// second, independent classification (issue #821): a `forall i { m[i] =
@@ -1265,19 +1698,34 @@ fn logical_var(target: &LValue) -> Option<&str> {
 /// write to any of those same keys, and an enum-member key resolves to the
 /// same `Value` a numeric literal denoting it would.
 ///
-/// Falls back to `InitWriteKey::Root` (whole-variable) whenever `coverage`
-/// is not `Coverage::Keys` for an `Index` target — including `Full`,
-/// `Fields`, and unresolved (`None`, e.g. a dynamic key or a nested lvalue).
+/// Root struct fields and concrete map-entry fields retain their field identity.
+/// Falls back to `InitWriteKey::Root` (whole-variable) for unresolved coverage
+/// (`None`, e.g. a dynamic key or an unsupported nested field lvalue).
 /// `init_write_keys_overlap` treats that root as touching every concrete key
 /// on the same logical variable, so unresolved indexed writes fail closed
 /// against both concrete writes and other unresolved writes (issue #826).
 fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<InitWriteKey> {
     if let (LValue::Index(name, _), Some(Coverage::Keys(keys))) = (target, coverage) {
         return keys
-            .iter()
+            .keys()
             .cloned()
             .map(|key| InitWriteKey::ConcreteIndex(name.clone(), key))
             .collect();
+    }
+    if let LValue::Field(base, field) = target {
+        match (base.as_ref(), coverage) {
+            (LValue::Var(name), Some(Coverage::Fields(_))) => {
+                return BTreeSet::from([InitWriteKey::RootField(name.clone(), field.clone())]);
+            }
+            (LValue::Index(name, _), Some(Coverage::Keys(keys))) => {
+                return keys
+                    .keys()
+                    .cloned()
+                    .map(|key| InitWriteKey::ConcreteIndexField(name.clone(), key, field.clone()))
+                    .collect();
+            }
+            _ => {}
+        }
     }
     BTreeSet::from([InitWriteKey::Root(
         logical_var(target)
@@ -1290,13 +1738,42 @@ fn init_write_keys_overlap(left: &InitWriteKey, right: &InitWriteKey) -> bool {
     match (left, right) {
         (
             InitWriteKey::Root(left),
-            InitWriteKey::Root(right) | InitWriteKey::ConcreteIndex(right, _),
+            InitWriteKey::Root(right)
+            | InitWriteKey::ConcreteIndex(right, _)
+            | InitWriteKey::ConcreteIndexField(right, _, _)
+            | InitWriteKey::RootField(right, _),
         )
-        | (InitWriteKey::ConcreteIndex(left, _), InitWriteKey::Root(right)) => left == right,
+        | (
+            InitWriteKey::ConcreteIndex(left, _)
+            | InitWriteKey::ConcreteIndexField(left, _, _)
+            | InitWriteKey::RootField(left, _),
+            InitWriteKey::Root(right),
+        )
+        | (
+            InitWriteKey::RootField(left, _),
+            InitWriteKey::ConcreteIndex(right, _) | InitWriteKey::ConcreteIndexField(right, _, _),
+        )
+        | (
+            InitWriteKey::ConcreteIndex(left, _) | InitWriteKey::ConcreteIndexField(left, _, _),
+            InitWriteKey::RootField(right, _),
+        ) => left == right,
         (
-            InitWriteKey::ConcreteIndex(left_root, left_key),
+            InitWriteKey::ConcreteIndex(left_root, left_key)
+            | InitWriteKey::ConcreteIndexField(left_root, left_key, _),
             InitWriteKey::ConcreteIndex(right_root, right_key),
+        )
+        | (
+            InitWriteKey::ConcreteIndex(left_root, left_key),
+            InitWriteKey::ConcreteIndexField(right_root, right_key, _),
         ) => left_root == right_root && left_key == right_key,
+        (
+            InitWriteKey::ConcreteIndexField(left_root, left_key, left_field),
+            InitWriteKey::ConcreteIndexField(right_root, right_key, right_field),
+        ) => left_root == right_root && left_key == right_key && left_field == right_field,
+        (
+            InitWriteKey::RootField(left_root, left_field),
+            InitWriteKey::RootField(right_root, right_field),
+        ) => left_root == right_root && left_field == right_field,
     }
 }
 
