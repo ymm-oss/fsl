@@ -26,6 +26,9 @@ const PROJECTION_DO_NOT_ASSUME: [&str; 3] = [
     "Timeline bounds are guarantees about the real world",
 ];
 
+/// Maximum DFS stack pops across all interventions in one path projection.
+const REPRESENTATIVE_PATH_EXPANSION_BUDGET: usize = 100_000;
+
 fn interval_json(min: u64, max: u64) -> Value {
     json!({"min": min, "max": max})
 }
@@ -106,7 +109,7 @@ fn claim_edges(model: &CausalModel) -> Vec<Value> {
 /// Representative simple paths from each intervention to each outcome over
 /// active claims, capped at [`REPRESENTATIVE_PATH_CAP`] with truncation
 /// metadata. Deterministic: claims are explored in sorted order.
-fn representative_paths(model: &CausalModel) -> Result<(Vec<Value>, usize), CausalError> {
+fn representative_paths(model: &CausalModel) -> Result<(Vec<Value>, usize, bool), CausalError> {
     let adjacency = active_adjacency(model);
     let interventions: Vec<&str> = model
         .variables
@@ -120,15 +123,42 @@ fn representative_paths(model: &CausalModel) -> Result<(Vec<Value>, usize), Caus
         .filter(|variable| variable.role == VariableRole::Outcome)
         .map(|variable| variable.id.as_str())
         .collect();
+    // Reverse reachability is independent of the current simple path: dropping
+    // these dead ends cannot remove an outcome path or change its DFS order.
+    let mut predecessors: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for claim in model.active_claims() {
+        predecessors
+            .entry(&claim.target)
+            .or_default()
+            .push(&claim.source);
+    }
+    let mut reaches_outcome = outcomes.clone();
+    let mut pending: Vec<&str> = outcomes.iter().copied().collect();
+    while let Some(node) = pending.pop() {
+        for &previous in predecessors.get(node).into_iter().flatten() {
+            if reaches_outcome.insert(previous) {
+                pending.push(previous);
+            }
+        }
+    }
     let mut paths = Vec::new();
     let mut truncated = 0usize;
+    let mut expansions = 0usize;
     for start in interventions {
+        if !reaches_outcome.contains(start) {
+            continue;
+        }
         let mut stack: Vec<(String, Vec<&Claim>, BTreeSet<String>)> = vec![(
             start.to_owned(),
             Vec::new(),
             BTreeSet::from([start.to_owned()]),
         )];
-        while let Some((node, path, visited)) = stack.pop() {
+        while !stack.is_empty() {
+            if expansions == REPRESENTATIVE_PATH_EXPANSION_BUDGET {
+                return Ok((paths, truncated, false));
+            }
+            let (node, path, visited) = stack.pop().expect("nonempty DFS stack");
+            expansions += 1;
             if outcomes.contains(node.as_str()) && !path.is_empty() {
                 if paths.len() < REPRESENTATIVE_PATH_CAP {
                     paths.push(path_json(model, start, &node, &path)?);
@@ -142,7 +172,9 @@ fn representative_paths(model: &CausalModel) -> Result<(Vec<Value>, usize), Caus
                 adjacency.get(node.as_str()).cloned().unwrap_or_default();
             successors.sort_by(|left, right| right.id.cmp(&left.id));
             for claim in successors {
-                if !visited.contains(&claim.target) {
+                if reaches_outcome.contains(claim.target.as_str())
+                    && !visited.contains(&claim.target)
+                {
                     let mut next_path = path.clone();
                     next_path.push(claim);
                     let mut next_visited = visited.clone();
@@ -152,7 +184,7 @@ fn representative_paths(model: &CausalModel) -> Result<(Vec<Value>, usize), Caus
             }
         }
     }
-    Ok((paths, truncated))
+    Ok((paths, truncated, true))
 }
 
 fn path_json(
@@ -215,13 +247,15 @@ pub fn causal_graph_projection(model: &CausalModel) -> Result<Value, CausalError
     let mut envelope = projection_envelope(model, "causal_graph");
     envelope.insert("nodes".to_owned(), Value::Array(variable_nodes(model)?));
     envelope.insert("edges".to_owned(), Value::Array(claim_edges(model)));
-    let (paths, truncated) = representative_paths(model)?;
+    let (paths, truncated, exact) = representative_paths(model)?;
     envelope.insert("paths".to_owned(), Value::Array(paths));
     envelope.insert("feedbacks".to_owned(), Value::Array(feedback_json(model)?));
-    envelope.insert(
-        "truncation".to_owned(),
-        json!({"paths_cap": REPRESENTATIVE_PATH_CAP, "paths_truncated": truncated}),
-    );
+    let mut truncation =
+        json!({"paths_cap": REPRESENTATIVE_PATH_CAP, "paths_truncated": truncated});
+    if !exact {
+        truncation["paths_truncated_exact"] = json!(false);
+    }
+    envelope.insert("truncation".to_owned(), truncation);
     Ok(Value::Object(envelope))
 }
 

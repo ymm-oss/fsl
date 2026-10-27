@@ -577,6 +577,18 @@ Never changed by this profile: `rust/fsl-runtime`, `rust/fsl-solver*`,
 - Representative path output has an explicit cap and truncation metadata;
   reachability, earliest time, and dominators come from graph algorithms, not
   enumeration, so the cap can never change a judgment.
+  The native `representative_paths` walk uses
+  `REPRESENTATIVE_PATH_EXPANSION_BUDGET = 100_000`: each DFS stack pop counts
+  once, across all intervention starts in one projection. Reverse reachability
+  from all outcomes is computed once to prune successors that cannot reach an
+  outcome. The budget leaves the committed examples and exact-count goldens
+  unchanged while bounding the exponential simple-path enumeration on dense
+  graphs. `truncation.paths_cap` remains 16. If the walk finishes within the
+  budget, `paths_truncated` is the exact number of omitted paths and
+  `paths_truncated_exact` is absent, preserving the existing output. If work
+  remains after the budget, the walk stops, keeps the paths already found, and
+  adds `paths_truncated_exact: false`; `paths_truncated` then counts only omitted
+  paths already encountered and is a lower bound (possibly zero), not a total.
 
 ## 10. Resolved open decisions
 
