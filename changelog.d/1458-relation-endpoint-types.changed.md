@@ -50,8 +50,7 @@ Projection typing additionally removes, for `s: relation Color -> Color` and
 The expanded inventory also rejects `xs = domain(s)` for
 `s: relation Color -> Color`, `xs: Set<N>` (assignment origin 8:19).
 General breaking rule: projection elements and sets take the endpoint type.
-Enum or Bool elements are rejected anywhere Int is expected, except for the
-pre-existing abs operand-check gap tracked in #1459; their sets are rejected
+Enum or Bool elements are rejected anywhere Int is expected; their sets are rejected
 where numeric Sets are expected: comparison, ordering, arithmetic, min/max,
 membership, set-literal equality, Option and pattern payloads, numeric Set state
 assignment and refinement maps. The measured fixture list is not exhaustive.

@@ -937,8 +937,7 @@ never a state variable named `true`), so the declaration is rejected. No other w
   `xs = domain(s)` for `s: relation Color -> Color`, `xs: Set<N>`, at assignment
   origin 8:19. Do not coerce enum elements to numeric ordinals.
   General breaking rule: projection elements/sets take their endpoint type, so
-  enum or Bool elements reject anywhere `Int` is expected, except for the
-  pre-existing `abs` operand-check gap tracked in #1459; their whole sets reject
+  enum or Bool elements reject anywhere `Int` is expected; their whole sets reject
   where a numeric Set is expected. This includes comparison, ordering,
   arithmetic, `min`/`max`, membership, set-literal equality, Option and pattern
   payloads, numeric Set state assignments and refinement maps. The measured
@@ -965,6 +964,79 @@ never a state variable named `true`), so the declaration is rejected. No other w
   while only the selected branch is evaluated
 - ensures/trans only: `old(expr)` / leadsTo only: `P ~> Q`,
   `P ~> within K Q`, plus optional `decreases <int expr>` for induction ranking
+
+Static operand/signature boundary (#1459, breaking): check both conditional
+branches and all action/trace expression positions. `is none`/`is some(x)` need
+Option; `abs` needs an integer-compatible operand, including projection elements
+(no enum ordinal or Bool coercion). All six relation functions require a relation;
+non-relation domain/range no longer infer `Set<Int>`. `reachable`/`acyclic` require
+identical declared endpoint types (`T -> T`): mixed enum/numeric relations and
+`N -> M` reject, even when numeric N and M have identical bounds. Numeric
+compatibility is not self-relation identity. Heterogeneous functional/injective/domain/range and
+relation endpoint methods remain valid. Supported method signatures are exactly
+Set contains/add/remove with one item and size with none; Seq contains/push/at
+with one argument and pop/head/size with none; relation contains/add/remove with
+two endpoints. Map has no methods. Thus `n.contains(0)`, `s.push(0)`, `q.add(0)`,
+`r.size()`, `s.contains()`, `q.pop(1)` and action assignment `n = q.at()` reject.
+Validate original count/sum binders, Bool filters and integer values even if the
+domain is empty: `count(i in 1..0 where 1)` and `sum(i in 1..0 of true)` reject;
+well-typed empty values remain zero. Failures are located semantics errors,
+exit 2, before execution/replay. Preserve Option binding scope, endpoint hints
+and non-reflexive reachability. See the #1459 design amendment for sweep evidence.
+
+#1459 audit: BASE `e8cf78f0`, HEAD `33d7faa7`; 591 corpus + 384 inline occurrences
+= 975 forms, stable/fsl5 twice in three independently built trees (baseline,
+immediate parent, head), 11,700 checks. Corpus ok→error set is empty and no other
+corpus output drifts; no field/form exclusions. Parent→head attributes 248
+mode-form removals (124 occurrences/123 distinct sources) and 60 diagnostic
+reclassifications to the six categories above, including numeric N→M. All 60
+remain error/semantics/2, now authored static errors rather than unlocated
+runtime errors. The expanded inventory separately retains inherited #1439
+(86 removals/11 reclassifications) and #1458 (56 removals/6 additions); do not
+attribute these to #1459. Full accounting and calibrated controls are in the
+design amendment.
+
+Review round 1: self-relation identity follows both conditional branches
+(nested/unselected included), `old`, relation add/remove receivers and action
+let aliases. A self-typed then branch cannot hide a selectable N→M branch.
+Projection equality retains the real relation error over context-needed empty
+literals and keeps the authored/precise inner origin; range bounds and terminal
+also avoid generated 1:1 origins. Numeric/Set compatibility and valid verdicts
+are unchanged. This describes visited expression trees. Helpful argument typing
+was outside the historical round-1 baseline; main's #1483 now checks parameter
+types and is preserved. Relation-valued temporary collections remain unsupported
+separate upstream work.
+
+R1 delta BASE `33d7faa7` → HEAD `8caf5c2e`: 42 additional mode-form removals
+(21 source occurrences) and 24 diagnostic reclassifications (12 occurrences:
+projection inference 16, range origins 6, terminal origins 2), all latter still
+error/semantics/2. Expanded inventory: 591 corpus + 447 inline = 1,038 forms;
+both modes twice in four own-built trees, 16,608 checks including the separate
+R0 baseline. All 8,304 full repeat pairs agree, no field/form exclusions or
+corpus drift. Keep inherited/R0 changes distinct from this R1 delta.
+
+Current audit: final BASE `11f01225e244dabde0f8dfd9aaa665bc47dccfd4`, measured
+implementation `2b7d2e98349505af7dccb7843e41ab659066f021`, measured on
+`b1557a31b77f549d2c48823c3435217f9df4fc53` and carried to `11f01225`, whose
+tree differs only by the two generated language pages. `fslc check FORM`, cache
+off, stable/fsl5 twice: all 597 corpus + 601 inline inputs = 1,198 inputs in three
+states (historical `9af1fa5f`, final base, implementation), 14,376 checks + 24
+identity controls. No corpus output drift or excluded forms/fields.
+Final-base→head: **294 removals** (147 occurrences/142 distinct
+sources), **62 diagnostic reclassifications**, no additions. Main #1463 already
+owns 48 former removal mode-forms and four former reclassifications; the added
+let/Kernel/CLI/shared-row occurrences contribute 26 removals. Historical #1458
+remains 48 removals/six additions on its 134-entry subset, 56/eight when expanded.
+
+Breaking removal: shared row `X1/operand-method-types`, Bool `done` with
+`invariant Capture { acyclic(done) }`, now rejects check at 8:3. Its outcomes
+change `[Ok, Error, Error, Error]`→`[Error, Error, Error, Error]`; baseline stays
+recorded. The remaining 136 shared-row sources + one resolver dependency
+(137 inputs) have **zero further changes** under the same command at the named
+base/head, both modes twice. Keep 292 inherited embedded-path differences and 16
+observations from two mis-extracted scratch-label inputs explicit: current
+sources are the real #1458 test specs, accepted on both baseline binaries, so
+attribution is unchanged. Optional replay not run; sweep outputs not normalized.
 
 ## 4. Statements (init / action body)
 

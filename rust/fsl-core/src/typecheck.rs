@@ -16,6 +16,7 @@ use crate::{ActionGuard, KernelModel, TypeDef, TypeRef};
 pub(crate) struct TypecheckError {
     pub(crate) message: String,
     pub(crate) span: Option<Span>,
+    needs_context: bool,
 }
 
 impl TypecheckError {
@@ -29,6 +30,7 @@ impl TypecheckError {
         Self {
             message: located.message,
             span: located.span,
+            ..self
         }
     }
 
@@ -49,10 +51,25 @@ impl fmt::Display for TypecheckError {
 
 impl std::error::Error for TypecheckError {}
 
-fn error(message: impl Into<String>) -> TypecheckError {
+pub(crate) fn error(message: impl Into<String>) -> TypecheckError {
     TypecheckError {
         message: message.into(),
         span: None,
+        needs_context: false,
+    }
+}
+
+fn context_error(message: impl Into<String>) -> TypecheckError {
+    TypecheckError {
+        needs_context: true,
+        ..error(message)
+    }
+}
+
+fn with_optional_span(error: TypecheckError, span: Option<Span>) -> TypecheckError {
+    match span {
+        Some(span) => error.with_span(span),
+        None => error,
     }
 }
 
@@ -104,6 +121,9 @@ pub(crate) fn unknown_span() -> Span {
 }
 
 pub(crate) type TypeEnv = BTreeMap<String, TypeRef>;
+// A let's inferred type alone can lose a non-self conditional branch. Keep the
+// identity guarantee separately, captured before installing each new binding.
+type SelfRelations = BTreeMap<String, bool>;
 pub(crate) type FiniteBinderCandidates = (String, Vec<(Expr, Expr)>, Option<Expr>);
 
 pub(crate) fn base_env(model: &KernelModel) -> TypeEnv {
@@ -187,8 +207,8 @@ pub(crate) fn binder_type(
             }
         }
         Binder::Range { lo, hi, .. } => {
-            ensure_assignable(lo, &TypeRef::Int, env, model, unknown_span())?;
-            ensure_assignable(hi, &TypeRef::Int, env, model, unknown_span())?;
+            ensure_assignable_inner(lo, &TypeRef::Int, env, model, None)?;
+            ensure_assignable_inner(hi, &TypeRef::Int, env, model, None)?;
             match (lo.as_ref(), hi.as_ref()) {
                 (Expr::Num(lo), Expr::Num(hi)) => Ok(TypeRef::Range(*lo, *hi)),
                 _ => Ok(TypeRef::Int),
@@ -242,7 +262,9 @@ fn infer_type_inner(
         }
         Expr::None => match expected.map(|ty| resolve(model, ty)).transpose()? {
             Some(ty @ TypeRef::Option(_)) => Ok(ty),
-            _ => Err(error("public Kernel cannot infer uncontextualized none")),
+            _ => Err(context_error(
+                "public Kernel cannot infer uncontextualized none",
+            )),
         },
         Expr::Some(item) => {
             if let Some(expected) = expected
@@ -271,7 +293,7 @@ fn infer_type_inner(
             }
             let first = items
                 .first()
-                .ok_or_else(|| error("public Kernel cannot infer empty Set"))?;
+                .ok_or_else(|| context_error("public Kernel cannot infer empty Set"))?;
             Ok(TypeRef::Set(Box::new(infer_type(first, env, model, None)?)))
         }
         Expr::Seq(items) => {
@@ -282,7 +304,7 @@ fn infer_type_inner(
             }
             let first = items
                 .first()
-                .ok_or_else(|| error("public Kernel cannot infer empty Seq"))?;
+                .ok_or_else(|| context_error("public Kernel cannot infer empty Seq"))?;
             Ok(TypeRef::Seq(
                 Box::new(infer_type(first, env, model, None)?),
                 items.len(),
@@ -366,18 +388,12 @@ fn infer_type_inner(
             "abs" => Ok(TypeRef::Int),
             "rel_acyclic" | "rel_functional" | "rel_injective" => Ok(TypeRef::Bool),
             "rel_domain" | "rel_range" => {
-                let element = match resolve(model, &infer_type(expr, env, model, None)?)? {
-                    TypeRef::Relation(source, target) => {
-                        if name == "rel_domain" {
-                            source
-                        } else {
-                            target
-                        }
-                    }
-                    // Non-relation signature validation is separate (#1459).
-                    _ => Box::new(TypeRef::Int),
-                };
-                Ok(TypeRef::Set(element))
+                let (source, target) = relation_operand_types(name, expr, env, model)?;
+                Ok(TypeRef::Set(Box::new(if name == "rel_domain" {
+                    source
+                } else {
+                    target
+                })))
             }
             _ => Err(error(format!("unsupported unary expression '{name}'"))),
         },
@@ -479,10 +495,17 @@ pub(crate) fn binary_operand_types(
     } else if matches!(op, "+" | "-" | "*" | "/" | "%" | "<" | "<=" | ">" | ">=") {
         Ok((TypeRef::Int, TypeRef::Int))
     } else {
-        infer_type(left, env, model, None).map_or_else(
-            |_| infer_type(right, env, model, None).map(|ty| (ty.clone(), ty)),
-            |ty| Ok((ty.clone(), ty)),
-        )
+        let ty = match infer_type(left, env, model, None) {
+            Ok(ty) => ty,
+            Err(left_error) => infer_type(right, env, model, None).map_err(|right_error| {
+                if right_error.needs_context && !left_error.needs_context {
+                    left_error
+                } else {
+                    right_error
+                }
+            })?,
+        };
+        Ok((ty.clone(), ty))
     }
 }
 
@@ -507,16 +530,26 @@ pub(crate) fn ensure_assignable(
     model: &KernelModel,
     span: Span,
 ) -> Result<(), TypecheckError> {
-    let resolved = resolve(model, expected).map_err(|error| error.with_span(span))?;
+    ensure_assignable_inner(expr, expected, env, model, Some(span))
+}
+
+fn ensure_assignable_inner(
+    expr: &Expr,
+    expected: &TypeRef,
+    env: &TypeEnv,
+    model: &KernelModel,
+    span: Option<Span>,
+) -> Result<(), TypecheckError> {
+    let resolved = resolve(model, expected).map_err(|error| with_optional_span(error, span))?;
     match (expr, &resolved) {
         (Expr::None, TypeRef::Option(_)) => return Ok(()),
         (Expr::Some(item), TypeRef::Option(expected_item)) => {
-            return ensure_assignable(item, expected_item, env, model, span);
+            return ensure_assignable_inner(item, expected_item, env, model, span);
         }
         (Expr::Set(items), TypeRef::Set(expected_item))
         | (Expr::Seq(items), TypeRef::Seq(expected_item, _)) => {
             for item in items {
-                ensure_assignable(item, expected_item, env, model, span)?;
+                ensure_assignable_inner(item, expected_item, env, model, span)?;
             }
             return Ok(());
         }
@@ -524,10 +557,12 @@ pub(crate) fn ensure_assignable(
             return if items.is_empty() {
                 Ok(())
             } else {
-                Err(error(
-                    "relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs",
-                )
-                .with_span(span))
+                Err(with_optional_span(
+                    error(
+                        "relation literals only support the empty initializer Set {}; use r = r.add(a, b) to add pairs",
+                    ),
+                    span,
+                ))
             };
         }
         (
@@ -546,16 +581,21 @@ pub(crate) fn ensure_assignable(
         }
         _ => {}
     }
-    let actual = infer_type(expr, env, model, None).map_err(|error| error.with_span(span))?;
-    if types_compatible(&actual, expected, model).map_err(|error| error.with_span(span))? {
+    let actual =
+        infer_type(expr, env, model, None).map_err(|error| with_optional_span(error, span))?;
+    if types_compatible(&actual, expected, model)
+        .map_err(|error| with_optional_span(error, span))?
+    {
         Ok(())
     } else {
-        Err(error(format!(
-            "expression of type {:?} is not assignable to {:?}",
-            shown_type(&actual),
-            shown_type(expected)
+        Err(with_optional_span(
+            error(format!(
+                "expression of type {:?} is not assignable to {:?}",
+                shown_type(&actual),
+                shown_type(expected)
+            )),
+            span,
         ))
-        .with_span(span))
     }
 }
 
@@ -948,6 +988,7 @@ fn validate_binder(
     span: Span,
     source_phase: &ValidationPhase,
     child_phase: &ValidationPhase,
+    self_relations: &SelfRelations,
 ) -> Result<TypeRef, TypecheckError> {
     // Check authored bounds before the location-free binder type projection.
     if let Binder::Range { lo, hi, .. } = binder {
@@ -959,6 +1000,7 @@ fn validate_binder(
                 span,
                 Some(&TypeRef::Int),
                 source_phase,
+                self_relations,
             )?;
         }
     }
@@ -975,13 +1017,23 @@ fn validate_binder(
             collection,
             where_expr,
         } => {
-            validate_expression_in_phase(collection, env, model, span, None, source_phase)?;
+            validate_expression_in_phase(
+                collection,
+                env,
+                model,
+                span,
+                None,
+                source_phase,
+                self_relations,
+            )?;
             (name, where_expr.as_deref())
         }
     };
     if let Some(where_expr) = where_expr {
         let mut local = env.clone();
         local.insert(name.clone(), ty.clone());
+        let mut local_relations = self_relations.clone();
+        local_relations.remove(name);
         validate_expression_in_phase(
             where_expr,
             &local,
@@ -989,6 +1041,7 @@ fn validate_binder(
             span,
             Some(&TypeRef::Bool),
             child_phase,
+            &local_relations,
         )?;
     }
     Ok(ty)
@@ -1015,6 +1068,7 @@ fn validate_expression(
     model: &KernelModel,
     span: Span,
     expected: Option<&TypeRef>,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     validate_expression_in_phase(
         expr,
@@ -1023,6 +1077,7 @@ fn validate_expression(
         span,
         expected,
         &ValidationPhase::normalized(),
+        self_relations,
     )
 }
 
@@ -1033,8 +1088,12 @@ fn validate_expression_in_phase(
     span: Span,
     expected: Option<&TypeRef>,
     phase: &ValidationPhase,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
-    recursion::guard(|| validate_expression_inner(expr, env, model, span, expected, phase))
+    recursion::guard(|| {
+        validate_expression_inner(expr, env, model, span, expected, phase, self_relations)
+    })
+    .map_err(|error| error.with_span(span))
 }
 
 fn validate_relation_endpoint(
@@ -1044,6 +1103,7 @@ fn validate_relation_endpoint(
     span: Span,
     expected: &TypeRef,
     phase: &ValidationPhase,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     expression_type(expr, env, model, span, Some(expected)).map_err(|mut error| {
         error.message.push_str(
@@ -1051,10 +1111,115 @@ fn validate_relation_endpoint(
         );
         error
     })?;
-    validate_expression_in_phase(expr, env, model, span, Some(expected), phase)
+    validate_expression_in_phase(
+        expr,
+        env,
+        model,
+        span,
+        Some(expected),
+        phase,
+        self_relations,
+    )
 }
 
-#[allow(clippy::too_many_lines)]
+fn relation_operand_types(
+    name: &str,
+    operand: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<(TypeRef, TypeRef), TypecheckError> {
+    let public_name = name.strip_prefix("rel_").unwrap_or(name);
+    match resolve(model, &infer_type(operand, env, model, None)?)? {
+        TypeRef::Relation(source, target) => Ok((*source, *target)),
+        _ => Err(error(format!(
+            "{public_name}() requires a relation; hint: use a relation A -> B operand"
+        ))),
+    }
+}
+
+fn validate_self_relation(
+    name: &str,
+    source: &TypeRef,
+    target: &TypeRef,
+    operand: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    self_relations: &SelfRelations,
+) -> Result<(), TypecheckError> {
+    let ty = TypeRef::Relation(Box::new(source.clone()), Box::new(target.clone()));
+    if !relation_is_always_self(operand, env, model, &ty, self_relations)? {
+        let public_name = name.strip_prefix("rel_").unwrap_or(name);
+        return Err(error(format!(
+            "{public_name}() requires a self-relation (relation T -> T); hint: use a relation with the same declared source and target type"
+        )));
+    }
+    Ok(())
+}
+
+fn relation_is_always_self(
+    expr: &Expr,
+    env: &TypeEnv,
+    model: &KernelModel,
+    ty: &TypeRef,
+    self_relations: &SelfRelations,
+) -> Result<bool, TypecheckError> {
+    recursion::guard(|| match expr {
+        Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let then_ty = infer_type(then_expr, env, model, Some(ty))?;
+            let else_ty = infer_type(else_expr, env, model, Some(ty))?;
+            Ok(
+                relation_is_always_self(then_expr, env, model, &then_ty, self_relations)?
+                    && relation_is_always_self(else_expr, env, model, &else_ty, self_relations)?,
+            )
+        }
+        Expr::UnaryNamed { name, expr, .. } if name == "old" => {
+            relation_is_always_self(expr, env, model, ty, self_relations)
+        }
+        Expr::Method { receiver, name, .. } if matches!(name.as_str(), "add" | "remove") => {
+            let receiver_ty = infer_type(receiver, env, model, None)?;
+            relation_is_always_self(receiver, env, model, &receiver_ty, self_relations)
+        }
+        Expr::Var(name) if self_relations.contains_key(name) => Ok(self_relations[name]),
+        _ => match resolve(model, ty)? {
+            TypeRef::Relation(source, target) => Ok(source == target),
+            _ => Err(error("self-relation operand requires a relation")),
+        },
+    })
+}
+
+fn validate_method_signature(
+    receiver: &TypeRef,
+    name: &str,
+    arity: usize,
+) -> Result<(), TypecheckError> {
+    match (receiver, name, arity) {
+        (TypeRef::Set(_) | TypeRef::Seq(_, _), "contains", 1)
+        | (TypeRef::Set(_), "add" | "remove", 1)
+        | (TypeRef::Set(_) | TypeRef::Seq(_, _), "size", 0)
+        | (TypeRef::Seq(_, _), "push" | "at", 1)
+        | (TypeRef::Seq(_, _), "pop" | "head", 0)
+        | (TypeRef::Relation(_, _), "contains" | "add" | "remove", 2) => Ok(()),
+        (TypeRef::Set(_), _, _) => Err(error(format!("invalid Set method '{name}'/{arity}"))),
+        (TypeRef::Seq(_, _), _, _) => Err(error(format!("invalid Seq method '{name}'/{arity}"))),
+        (TypeRef::Relation(_, _), _, _) => {
+            let hint = if matches!(name, "contains" | "add" | "remove") {
+                format!("; hint: use r.{name}(source, target)")
+            } else {
+                String::new()
+            };
+            Err(error(format!(
+                "invalid relation method '{name}'/{arity}{hint}"
+            )))
+        }
+        _ => Err(error("method receiver has no supported collection methods")),
+    }
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn validate_expression_inner(
     expr: &Expr,
     env: &TypeEnv,
@@ -1062,9 +1227,10 @@ fn validate_expression_inner(
     span: Span,
     expected: Option<&TypeRef>,
     phase: &ValidationPhase,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     let validate = |expr: &Expr, env: &TypeEnv, span: Span, expected: Option<&TypeRef>| {
-        validate_expression_in_phase(expr, env, model, span, expected, phase)
+        validate_expression_in_phase(expr, env, model, span, expected, phase, self_relations)
     };
     let ty = expression_type(expr, env, model, span, expected)?;
     match expr {
@@ -1113,6 +1279,8 @@ fn validate_expression_inner(
             let receiver_ty = resolve(model, &infer_type(receiver, env, model, None)?)?;
             let argument_type = method_argument_type(name, &receiver_ty);
             validate(receiver, env, span, None)?;
+            validate_method_signature(&receiver_ty, name, args.len())
+                .map_err(|error| error.with_span(span))?;
             for (index, argument) in args.iter().enumerate() {
                 let endpoint_type = match (name.as_str(), &receiver_ty, index) {
                     ("contains" | "add" | "remove", TypeRef::Relation(source, _), 0) => {
@@ -1124,7 +1292,15 @@ fn validate_expression_inner(
                     _ => None,
                 };
                 if let Some(endpoint_type) = endpoint_type {
-                    validate_relation_endpoint(argument, env, model, span, endpoint_type, phase)?;
+                    validate_relation_endpoint(
+                        argument,
+                        env,
+                        model,
+                        span,
+                        endpoint_type,
+                        phase,
+                        self_relations,
+                    )?;
                 } else {
                     validate(argument, env, span, argument_type.as_ref())?;
                 }
@@ -1158,15 +1334,51 @@ fn validate_expression_inner(
                 reject_colliding_pattern_binding(binding, env, model, span, phase)?;
             }
             validate(expr, env, span, None)?;
+            if !matches!(
+                resolve(model, &infer_type(expr, env, model, None)?)?,
+                TypeRef::Option(_)
+            ) {
+                return Err(error("'is none/some' requires an Option expression").with_span(span));
+            }
         }
-        Expr::UnaryNamed { expr, .. } => {
-            validate(expr, env, span, None)?;
+        Expr::UnaryNamed { name, expr, .. } => {
+            let expected = (name == "abs").then_some(TypeRef::Int);
+            validate(expr, env, span, expected.as_ref())?;
+            if matches!(
+                name.as_str(),
+                "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range"
+            ) {
+                let (source, target) = relation_operand_types(name, expr, env, model)
+                    .map_err(|error| error.with_span(span))?;
+                if name == "rel_acyclic" {
+                    validate_self_relation(
+                        name,
+                        &source,
+                        &target,
+                        expr,
+                        env,
+                        model,
+                        self_relations,
+                    )
+                    .map_err(|error| error.with_span(span))?;
+                }
+            }
         }
         Expr::Quantified { binder, body, .. } => {
             let child_phase = phase.under_binder(binder, None);
-            let binder_ty = validate_binder(binder, env, model, span, phase, &child_phase)?;
+            let binder_ty = validate_binder(
+                binder,
+                env,
+                model,
+                span,
+                phase,
+                &child_phase,
+                self_relations,
+            )?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), binder_ty);
+            let mut local_relations = self_relations.clone();
+            local_relations.remove(binder_name(binder));
             validate_expression_in_phase(
                 body,
                 &local,
@@ -1174,6 +1386,7 @@ fn validate_expression_inner(
                 span,
                 Some(&TypeRef::Bool),
                 &child_phase,
+                &local_relations,
             )?;
         }
         Expr::Aggregate {
@@ -1185,9 +1398,19 @@ fn validate_expression_inner(
             // Raw descendants share all typing rules, but must not enumerate
             // ranges containing locals before the outer substitution happens.
             let child_phase = phase.under_binder(binder, Some(*kind));
-            let binder_ty = validate_binder(binder, env, model, span, phase, &child_phase)?;
+            let binder_ty = validate_binder(
+                binder,
+                env,
+                model,
+                span,
+                phase,
+                &child_phase,
+                self_relations,
+            )?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), binder_ty);
+            let mut local_relations = self_relations.clone();
+            local_relations.remove(binder_name(binder));
             if let Some(value) = value {
                 validate_expression_in_phase(
                     value,
@@ -1196,6 +1419,7 @@ fn validate_expression_inner(
                     span,
                     Some(&TypeRef::Int),
                     &child_phase,
+                    &local_relations,
                 )?;
             }
             if phase.normalize_aggregates && expands {
@@ -1215,12 +1439,29 @@ fn validate_expression_inner(
             third,
         } => {
             validate(first, env, span, None)?;
-            if name == "rel_reachable"
-                && let TypeRef::Relation(source, target) =
-                    resolve(model, &infer_type(first, env, model, None)?)?
-            {
-                validate_relation_endpoint(second, env, model, span, &source, phase)?;
-                validate_relation_endpoint(third, env, model, span, &target, phase)?;
+            if name == "rel_reachable" {
+                let (source, target) = relation_operand_types(name, first, env, model)
+                    .map_err(|error| error.with_span(span))?;
+                validate_self_relation(name, &source, &target, first, env, model, self_relations)
+                    .map_err(|error| error.with_span(span))?;
+                validate_relation_endpoint(
+                    second,
+                    env,
+                    model,
+                    span,
+                    &source,
+                    phase,
+                    self_relations,
+                )?;
+                validate_relation_endpoint(
+                    third,
+                    env,
+                    model,
+                    span,
+                    &target,
+                    phase,
+                    self_relations,
+                )?;
             } else {
                 validate(second, env, span, None)?;
                 validate(third, env, span, None)?;
@@ -1234,6 +1475,7 @@ fn validate_statement(
     statement: &Statement,
     env: &TypeEnv,
     model: &KernelModel,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     match statement {
         Statement::Assign {
@@ -1243,8 +1485,8 @@ fn validate_statement(
         } => {
             let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
-            validate_lvalue(target, env, model, *span)?;
-            validate_expression(value, env, model, *span, Some(&ty))
+            validate_lvalue(target, env, model, *span, self_relations)?;
+            validate_expression(value, env, model, *span, Some(&ty), self_relations)
         }
         Statement::If {
             condition,
@@ -1252,11 +1494,18 @@ fn validate_statement(
             else_statements,
             span,
         } => {
-            validate_expression(condition, env, model, *span, Some(&TypeRef::Bool))?;
+            validate_expression(
+                condition,
+                env,
+                model,
+                *span,
+                Some(&TypeRef::Bool),
+                self_relations,
+            )?;
             then_statements
                 .iter()
                 .chain(else_statements)
-                .try_for_each(|item| validate_statement(item, env, model))
+                .try_for_each(|item| validate_statement(item, env, model, self_relations))
         }
         Statement::ForAll {
             binder,
@@ -1264,12 +1513,14 @@ fn validate_statement(
             span,
         } => {
             let phase = ValidationPhase::normalized();
-            let ty = validate_binder(binder, env, model, *span, &phase, &phase)?;
+            let ty = validate_binder(binder, env, model, *span, &phase, &phase, self_relations)?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), ty);
+            let mut local_relations = self_relations.clone();
+            local_relations.remove(binder_name(binder));
             statements
                 .iter()
-                .try_for_each(|item| validate_statement(item, &local, model))
+                .try_for_each(|item| validate_statement(item, &local, model, &local_relations))
         }
     }
 }
@@ -1279,6 +1530,7 @@ fn validate_lvalue(
     env: &TypeEnv,
     model: &KernelModel,
     span: Span,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     match target {
         LValue::Var(_) => Ok(()),
@@ -1291,9 +1543,9 @@ fn validate_lvalue(
             .index_types(false) else {
                 return Err(error("indexed update target requires Map"));
             };
-            validate_expression(index, env, model, span, Some(&key))
+            validate_expression(index, env, model, span, Some(&key), self_relations)
         }
-        LValue::Field(base, _) => validate_lvalue(base, env, model, span),
+        LValue::Field(base, _) => validate_lvalue(base, env, model, span, self_relations),
     }
 }
 
@@ -1348,6 +1600,7 @@ fn validate_statement_assignments(
     env: &TypeEnv,
     model: &KernelModel,
     visible_consts: &BTreeSet<String>,
+    self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     match statement {
         Statement::Assign {
@@ -1358,8 +1611,8 @@ fn validate_statement_assignments(
             let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
             validate_map_key_const_shadowing(target, env, model, visible_consts, *span)?;
-            validate_lvalue(target, env, model, *span)?;
-            validate_expression(value, env, model, *span, Some(&ty))
+            validate_lvalue(target, env, model, *span, self_relations)?;
+            validate_expression(value, env, model, *span, Some(&ty), self_relations)
         }
         Statement::If {
             condition,
@@ -1367,12 +1620,19 @@ fn validate_statement_assignments(
             else_statements,
             span,
         } => {
-            validate_expression(condition, env, model, *span, Some(&TypeRef::Bool))?;
+            validate_expression(
+                condition,
+                env,
+                model,
+                *span,
+                Some(&TypeRef::Bool),
+                self_relations,
+            )?;
             then_statements
                 .iter()
                 .chain(else_statements)
                 .try_for_each(|item| {
-                    validate_statement_assignments(item, env, model, visible_consts)
+                    validate_statement_assignments(item, env, model, visible_consts, self_relations)
                 })
         }
         Statement::ForAll {
@@ -1382,13 +1642,21 @@ fn validate_statement_assignments(
         } => {
             let name = binder_name(binder);
             let phase = ValidationPhase::normalized();
-            let ty = validate_binder(binder, env, model, *span, &phase, &phase)?;
+            let ty = validate_binder(binder, env, model, *span, &phase, &phase, self_relations)?;
             let mut local = env.clone();
             local.insert(name.to_owned(), ty);
+            let mut local_relations = self_relations.clone();
+            local_relations.remove(name);
             let mut local_visible_consts = visible_consts.clone();
             local_visible_consts.remove(name);
             statements.iter().try_for_each(|item| {
-                validate_statement_assignments(item, &local, model, &local_visible_consts)
+                validate_statement_assignments(
+                    item,
+                    &local,
+                    model,
+                    &local_visible_consts,
+                    &local_relations,
+                )
             })
         }
     }
@@ -1403,8 +1671,15 @@ pub(crate) fn validate_expression_type(
     let mut env = base_env(model);
     env.extend(bindings.iter().cloned());
     let span = unknown_span();
-    validate_expression(expr, &env, model, span, Some(expected))
-        .map_err(|error| error.with_span(span))
+    validate_expression(
+        expr,
+        &env,
+        model,
+        span,
+        Some(expected),
+        &SelfRelations::new(),
+    )
+    .map_err(|error| error.with_span(span))
 }
 
 /// Recursively type-check a standalone predicate against a built model, using
@@ -1425,7 +1700,14 @@ pub(crate) fn validate_public_expression(
     span: Span,
     expected: Option<&TypeRef>,
 ) -> Result<(), TypecheckError> {
-    validate_expression(expr, &base_env(model), model, span, expected)
+    validate_expression(
+        expr,
+        &base_env(model),
+        model,
+        span,
+        expected,
+        &SelfRelations::new(),
+    )
 }
 
 pub(crate) fn expression_binder_type(
@@ -1450,13 +1732,20 @@ pub(crate) fn validate_statement_types(
         })
         .cloned()
         .collect();
-    validate_statement_assignments(statement, &base_env(model), model, &visible_consts)
+    validate_statement_assignments(
+        statement,
+        &base_env(model),
+        model,
+        &visible_consts,
+        &SelfRelations::new(),
+    )
 }
 
 pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), TypecheckError> {
     let env = base_env(model);
+    let self_relations = SelfRelations::new();
     for statement in &model.init {
-        validate_statement(statement, &env, model)?;
+        validate_statement(statement, &env, model, &self_relations)?;
     }
     validate_model_expression_types(model)?;
     for projection in &model.projections {
@@ -1466,6 +1755,7 @@ pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), Ty
             model,
             projection.span,
             Some(&TypeRef::Int),
+            &self_relations,
         )?;
     }
     Ok(())
@@ -1477,16 +1767,39 @@ fn validate_leadsto_expression_types(
     model: &KernelModel,
 ) -> Result<(), TypecheckError> {
     let mut local = env.clone();
+    let self_relations = SelfRelations::new();
     for binder in &leadsto.binders {
         let phase = ValidationPhase::normalized();
-        let ty = validate_binder(binder, &local, model, leadsto.span, &phase, &phase)?;
+        let ty = validate_binder(
+            binder,
+            &local,
+            model,
+            leadsto.span,
+            &phase,
+            &phase,
+            &self_relations,
+        )?;
         local.insert(binder_name(binder).to_owned(), ty);
     }
     for expr in [&leadsto.before, &leadsto.after] {
-        validate_expression(expr, &local, model, leadsto.span, Some(&TypeRef::Bool))?;
+        validate_expression(
+            expr,
+            &local,
+            model,
+            leadsto.span,
+            Some(&TypeRef::Bool),
+            &self_relations,
+        )?;
     }
     if let Some(expr) = &leadsto.decreases {
-        validate_expression(expr, &local, model, leadsto.span, Some(&TypeRef::Int))?;
+        validate_expression(
+            expr,
+            &local,
+            model,
+            leadsto.span,
+            Some(&TypeRef::Int),
+            &self_relations,
+        )?;
     }
     for helper in &leadsto.helpful {
         let Some(action) = model
@@ -1512,17 +1825,27 @@ fn validate_leadsto_expression_types(
             .with_span(helper.span));
         }
         for (argument, param) in helper.args.iter().zip(&action.params) {
-            validate_expression(argument, &local, model, helper.span, Some(&param.ty()))?;
+            validate_expression(
+                argument,
+                &local,
+                model,
+                helper.span,
+                Some(&param.ty()),
+                &self_relations,
+            )?;
         }
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(), TypecheckError> {
     let env = base_env(model);
+    let self_relations = SelfRelations::new();
     for action in &model.actions {
         let checked = (|| {
             let mut local = env.clone();
+            let mut local_relations = SelfRelations::new();
             for param in &action.params {
                 local.insert(param.name().to_owned(), param.ty());
             }
@@ -1532,12 +1855,36 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                 let checked = (|| {
                     match guard {
                         ActionGuard::Requires(expr) => {
-                            validate_expression(expr, &local, model, span, Some(&TypeRef::Bool))?;
+                            validate_expression(
+                                expr,
+                                &local,
+                                model,
+                                span,
+                                Some(&TypeRef::Bool),
+                                &local_relations,
+                            )?;
                             extend_pattern_binding(expr, &mut local, model)?;
                         }
                         ActionGuard::Let(name, expr) => {
-                            validate_expression(expr, &local, model, span, None)?;
-                            local.insert(name.clone(), infer_type(expr, &local, model, None)?);
+                            validate_expression(expr, &local, model, span, None, &local_relations)?;
+                            let ty = expression_type(expr, &local, model, span, None)?;
+                            if matches!(
+                                resolve(model, &ty).map_err(|error| error.with_span(span))?,
+                                TypeRef::Relation(_, _)
+                            ) {
+                                let is_self = relation_is_always_self(
+                                    expr,
+                                    &local,
+                                    model,
+                                    &ty,
+                                    &local_relations,
+                                )
+                                .map_err(|error| error.with_span(span))?;
+                                local_relations.insert(name.clone(), is_self);
+                            } else {
+                                local_relations.remove(name);
+                            }
+                            local.insert(name.clone(), ty);
                         }
                     }
                     Ok(())
@@ -1545,18 +1892,27 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                 checked.map_err(|error: TypecheckError| error.in_component_item(model, &target))?;
             }
             for (index, statement) in action.statements.iter().enumerate() {
-                validate_statement(statement, &local, model).map_err(|error| {
-                    error.in_component_item(
-                        model,
-                        &crate::action_statement_target(&action.name, index),
-                    )
-                })?;
+                validate_statement(statement, &local, model, &local_relations).map_err(
+                    |error| {
+                        error.in_component_item(
+                            model,
+                            &crate::action_statement_target(&action.name, index),
+                        )
+                    },
+                )?;
             }
             for (index, expr) in action.ensures.iter().enumerate() {
                 let target = crate::origin::action_ensure_target(&action.name, index);
                 let span = model.component_item_span(&target).unwrap_or(action.span);
-                validate_expression(expr, &local, model, span, Some(&TypeRef::Bool))
-                    .map_err(|error| error.in_component_item(model, &target))?;
+                validate_expression(
+                    expr,
+                    &local,
+                    model,
+                    span,
+                    Some(&TypeRef::Bool),
+                    &local_relations,
+                )
+                .map_err(|error| error.in_component_item(model, &target))?;
             }
             Ok(())
         })();
@@ -1576,6 +1932,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                 model,
                 property.span,
                 Some(&TypeRef::Bool),
+                &self_relations,
             )
             .map_err(|error| {
                 error.in_target(
@@ -1597,8 +1954,15 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
     }
     if let Some(expr) = &model.terminal {
         let span = model.terminal_span.unwrap_or_else(unknown_span);
-        validate_expression(expr, &env, model, span, Some(&TypeRef::Bool))
-            .map_err(|error| error.in_target(model, crate::TERMINAL_TARGET, span))?;
+        validate_expression(
+            expr,
+            &env,
+            model,
+            span,
+            Some(&TypeRef::Bool),
+            &self_relations,
+        )
+        .map_err(|error| error.in_target(model, crate::TERMINAL_TARGET, span))?;
     }
     Ok(())
 }

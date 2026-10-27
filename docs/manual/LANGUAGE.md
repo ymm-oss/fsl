@@ -845,9 +845,8 @@ forms and the still-open #1528 path are not negated by that corpus result.
   Enum projection elements cannot be used as numeric endpoints or compared with
   integer values; use the declared endpoint type, not an enum ordinal.
   More generally, projection elements and whole projection sets take the declared
-  endpoint type: enum or Bool elements cannot be used wherever `Int` is expected,
-  except for the pre-existing `abs` operand-check gap tracked in #1459; their sets
-  cannot be used wherever a numeric Set is expected. This breaking rule applies
+  endpoint type: enum or Bool elements cannot be used wherever `Int` is expected;
+  their sets cannot be used wherever a numeric Set is expected. This breaking rule applies
   to comparison, ordering, arithmetic, `min`/`max`, membership, set-literal
   equality, Option comparisons and pattern payloads, assignment to numeric Set
   state, and refinement maps; the listed measured removals are not exhaustive.
@@ -876,6 +875,102 @@ forms and the still-open #1528 path are not negated by that corpus result.
 - Inside a leadsTo block only: `P ~> Q` (response property. not part of the operator hierarchy of general expressions);
   optional `within K` before Q for a bounded deadline, and optional
   `decreases <int expr>` after the response body for induction ranking
+
+Static operand/signature checking (#1459, **breaking**) also visits unselected
+branches, action assignments, `requires`/`ensures`, and trace expressions:
+
+- `is none` / `is some(x)` require an Option operand; fresh payload binding and
+  continuation scope are unchanged.
+- `abs` requires an integer-compatible operand, including when its argument is
+  a domain/range element. Enum ordinals and Bool values are not integers.
+- `acyclic`, `functional`, `injective`, `domain`, `range`, and `reachable` require
+  a relation. Non-relations no longer acquire an invented `Set<Int>` projection.
+  `reachable` and `acyclic` require identical declared endpoint types (`T -> T`):
+  mixed enum/numeric relations and `N -> M` are rejected, even if numeric `N`
+  and `M` have identical bounds. Numeric compatibility does not establish a self-relation;
+  heterogeneous `functional`/`injective`/`domain`/`range` remain supported.
+- Method receivers, names and argument counts must match the runtime signatures:
+  Set `contains(x)`, `add(x)`, `remove(x)`, `size()`;
+  Seq `contains(x)`, `push(x)`, `pop()`, `head()`, `at(i)`, `size()`;
+  relation `contains(a,b)`, `add(a,b)`, `remove(a,b)`. Map has no methods.
+  This rejects, for example, `n.contains(0)`, `s.push(0)`, `q.add(0)`,
+  `r.size()`, `s.contains()`, `q.pop(1)`, and `n = q.at()` in an action body.
+- `count`/`sum` validate the original binder, Bool filter and integer sum value
+  before expansion, including empty ranges and zero-capacity sequences.
+  `count(i in 1..0 where 1)` and `sum(i in 1..0 of true)` are now errors;
+  well-typed empty aggregates still return `0`.
+
+These are located loader errors (`kind: "semantics"`, exit 2), not deferred
+runtime or acceptance-replay errors. Existing endpoint-type hints, valid method
+behavior and non-reflexive reachability are preserved. See the
+[design amendment](../design/DESIGN-nested-option-support.md#static-operand-and-signature-boundary-1459).
+
+The #1459 boundary audit compares BASE `e8cf78f0` with HEAD `33d7faa7` using
+591 corpus files and 384 inline occurrences (975 forms), in stable and fsl5 modes
+twice in each of three independently built trees: baseline, immediate parent
+and head, for 11,700 checks. **No corpus form stops checking, and no other corpus
+output changes; no fields or forms are excluded.** The immediate-parent
+comparison attributes **248 mode-form removals (124 occurrences, 123 distinct
+sources)** and **60 diagnostic reclassifications** to the six #1459 categories
+above, including numeric `N -> M`. The latter remain `error/semantics/2` but now
+have authored static locations rather than unlocated runtime errors. Inherited
+#1439 contributes 86 removals and 11 reclassifications; inherited #1458 contributes
+56 removals and six additions in this expanded inventory. These are not new
+#1459 changes; the design amendment records the full attribution and controls.
+
+Review round 1 closes a further self-relation selection gap: both branches of a
+conditional relation operand are checked, even when unselected, including nested
+conditionals, `old`, relation add/remove receivers and action-local let aliases.
+Inference cannot hide an `N -> M` branch behind a self-relation then branch.
+Projection-inference errors retain the authored enclosing or more precise inner
+origin; empty literals do not replace the substantive relation diagnostic.
+Range-bound errors and terminal errors also use their authored origins, not a
+generated 1:1 location. Numeric/Set compatibility and valid dynamic verdicts
+are unchanged. These claims concern the expression trees visited by the shared
+validator. The historical round-1 baseline checked helpful action existence and
+arity only; main's #1483 now also checks parameter types, and that behavior is
+preserved. Unsupported relation-valued temporary collections remain separate
+upstream work, not newly supported by this fix.
+
+The round-1 delta compares BASE `33d7faa7` with HEAD `8caf5c2e`: **42 additional
+mode-form removals (21 source occurrences)** for non-self selections, and **24
+diagnostic reclassifications (12 occurrences)**—projection inference 16,
+range-bound origins six, terminal origins two. The latter stay
+`error/semantics/2`. The expanded audit retains 591 corpus files and 447 inline
+occurrences (1,038 forms); both modes twice across four own-built trees give
+16,608 checks, including the separate previous-fix baseline. All 8,304 repeat
+pairs agree in full; no fields/forms are excluded and no corpus output changes.
+Inherited/R0 changes are separated from R1 in the design amendment.
+
+The current integration audit uses final base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and measured implementation
+`2b7d2e98349505af7dccb7843e41ab659066f021`. Checks were measured on
+`b1557a31b77f549d2c48823c3435217f9df4fc53` and carried to `11f01225`, whose
+tree differs only by the two generated language pages. `fslc check FORM`, with
+cache off and stable/fsl5 each repeated twice, covers all **597 corpus forms**
+under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, plus **601 inline
+inputs**: **1,198 inputs**, **14,376 checks** across the three measured states,
+and 24 binary-identity controls. The third state is historical pre-#1458 baseline
+`9af1fa5f`, used for inherited attribution. No corpus output changes; no form or
+output field is excluded. Relative to final base, #1459 removes **294 mode-forms
+(147 occurrences, 142 distinct sources)** and reclassifies **62 diagnostics**.
+Main #1463 already rejects 24 original empty-aggregate occurrences and locates
+two range-bound occurrences, so their former 48 removals/four reclassifications
+are no longer attributed to #1459. New let/Kernel/CLI/shared-row occurrences add
+26 removals. Historical #1458 attribution remains 48 removals/six additions on
+its 134-entry inventory, or 56/eight in this expanded inventory.
+
+This includes the breaking removal `X1/operand-method-types` from the shared
+#1463 inventory: `done: Bool; invariant Capture { acyclic(done) }` changes from
+`[Ok, Error, Error, Error]` to `[Error, Error, Error, Error]`, with a located
+check rejection at **8:3**. It is the only changed shared row. For the remaining
+136 row sources and their one resolver dependency (**137 inputs**), the same
+`fslc check FORM` command at the named base and head produces no transition or
+other output change in either mode/repetition. The inherited-output comparison
+retains 292 embedded-input-path differences and 16 observations from two prior
+#1458 entries mis-extracted as scratch labels rather than specs; this audit uses
+their real test sources, accepted on both baseline binaries, without changing
+attribution. The optional replay was not run; no sweep output was normalized.
 
 Top-level temporal sugar:
 

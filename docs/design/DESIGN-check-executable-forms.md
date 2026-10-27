@@ -199,3 +199,7 @@ enumeration; #1481 owns Map Struct per-field init coverage and zero-capacity
 head; #1459 owns operand/method/relation-builtin typing gaps. Literal shape
 relatives remain #1467. Their current acceptance/verdicts are preservation
 controls, not additional restrictions or implementation claims in #1463.
+
+#1459 closes the `X1/operand-method-types` row (`acyclic(done)` for Bool `done`),
+which now expects a located check rejection at 8:3 and outcomes
+`[Error, Error, Error, Error]` instead of `[Ok, Error, Error, Error]`.
