@@ -427,7 +427,7 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    # 90, not 60: macOS jobs measured 37-57 minutes (#1322).
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -479,13 +479,17 @@ jobs:
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
 
-  rust-native-z3-windows:
-    name: native Z3 4.16 (windows-latest)
+  rust-native-z3-windows-shards:
+    name: native Z3 4.16 (windows-latest, ${{ matrix.part }})
     if: >-
       (github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
       github.base_ref == 'production' ||
       vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [long-poles, rest]
     # ubuntu-latest is covered by the full rust-workspace test gate above.
     # Raised rather than narrowed, for the same reason `production-native-z3-linux`
     # below gives: a gate that runs out of wall clock reports a failure it did not
@@ -508,7 +512,9 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    # #1532: unsplit jobs measured 54-79 min, then hit 90 min twice at 11f01225.
+    # Projections: long-poles about 35-60 min, rest about 28-50 min (90 per shard).
+    # Follow-up: record measured shard times here after two main runs (#1532).
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -556,9 +562,38 @@ jobs:
           # flag with timeout increases; see docs/design/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
-      - name: Test pinned native solver and BMC crates
+      - name: Check live long-pole names and run both binaries
+        if: matrix.part == 'long-poles'
+        shell: bash
         working-directory: rust
-        run: cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+        run: |
+          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix -- --list > "$RUNNER_TEMP/windows-long-poles.txt"
+          python3 ../tools/check_windows_long_poles.py --list-output "$RUNNER_TEMP/windows-long-poles.txt" --names ../tools/windows-native-long-poles.txt
+          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix
+
+      - name: Test pinned native solver and BMC crates except long poles
+        if: matrix.part == 'rest'
+        shell: bash
+        working-directory: rust
+        run: |
+          skips=()
+          while IFS= read -r name; do
+            [[ -z "$name" || "$name" == \#* ]] && continue
+            skips+=(--skip "$name")
+          done < ../tools/windows-native-long-poles.txt
+          cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -- --exact "${skips[@]}"
+
+  rust-native-z3-windows:
+    name: native Z3 4.16 (windows-latest)
+    needs: rust-native-z3-windows-shards
+    if: >-
+      always() && ((github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
+      github.base_ref == 'production' ||
+      vars.FSL_OPTIMISTIC_CI != 'enabled')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/require-shard-success.sh "${{ needs.rust-native-z3-windows-shards.result }}"
 
   production-native-z3-linux:
     name: native Z3 4.16 (ubuntu-latest)

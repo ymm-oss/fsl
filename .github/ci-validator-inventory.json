@@ -607,6 +607,13 @@
       "tier": "required"
     },
     {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_windows_native_shards.py",
+      "tier": "required"
+    },
+    {
       "exempt_reason": "manual-developer-run",
       "path": "tools/check_rust_ast_parity.py",
       "tier": "exempt"

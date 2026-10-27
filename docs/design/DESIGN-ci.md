@@ -256,7 +256,12 @@ parallel:
   below). After that workspace build, `rust-checks` also runs the native CLI's
   Python-driven expectation checks described below;
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
-- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`);
+- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`); Windows uses
+  `rust-native-z3-windows-shards` (`long-poles`, `rest`) and retains `rust-native-z3-windows`
+  as the `always()` aggregator under the original event condition. Any shard failure,
+  cancellation or skip fails it; only `success` passes, preserving the product-gate dependency.
+  The long-poles shard checks its live test names against the rest shard's skip manifest;
+  projected timings and the two-main-run measurement follow-up are recorded below (#1532);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
   curated fault-operator controls three ways via `tools/run-semantic-mutation-gate.sh <mode> --lane
   operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half, complete
@@ -1135,7 +1140,16 @@ minutes (#1322). By 4.11.0 the warm Windows job spent about 4–5 minutes on set
 whole warm job in August. On the 4.11.0 candidate `a9f49e7a`, four of five Windows attempts were
 cancelled with every finished binary passing (runs `38710766880` attempts 1–3 and `38720126150`
 attempts 1 and 3; attempt 2 succeeded in 54 minutes); macOS ran 37–57 minutes. The raise restores
-headroom only; bringing the test volume back below the budget is tracked in #1322.
+headroom only. By #1532, Windows jobs measured 54–79 minutes, then hit 90 minutes twice at
+`11f01225`. Windows now splits into `long-poles` (the complete `fsl5_glossary` and
+`issue_1442_compose_binding_capture_matrix` binaries) and `rest` (the same three packages,
+with exact skips read from `tools/windows-native-long-poles.txt`). Before running the two
+binaries, the long-poles shard checks their live libtest `--list` output against that manifest;
+missing, extra or duplicate manifest names fail the job. No test is removed or narrowed.
+Both shards retain 90 minutes and the existing cache settings. Projections, not measurements:
+long-poles about 35–60 minutes, rest about 28–50 minutes. The #1532 follow-up must record both
+shard durations from two consecutive post-merge main runs here and in `ci.yml`; PR checks do
+not run Windows and cannot establish the budget improvement.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,

@@ -57,6 +57,15 @@ Regenerate the inventory after wiring the module with
 `python3 tools/check_ci_validator_inventory.py generate`, then audit it with
 `python3 tools/check_ci_validator_inventory.py check`.
 
+### Windows native-Z3 shard controls (#1532)
+
+`tests/test_windows_native_shards.py` is `required` through the automation lane in
+`tools/check-merge-readiness.sh`. It covers live-name comparison, rejecting name
+drift/duplicates, shard-result rejection, workflow wiring and the 12 source names.
+After `generate` and `check`: 131 validator modules, 19 required and 112 exempt.
+The generator scans the two entrypoints above, not `ci.yml`; the new test wiring,
+not the workflow edit alone, adds this inventory row.
+
 ## Tiers
 
 | Tier | Meaning | Required-gate wiring |
