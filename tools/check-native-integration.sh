@@ -310,31 +310,56 @@ returning: the CLI is back on whatever stack the OS picked." >&2
   echo "stack parity: refine survives a 1 MiB (Windows-sized) stack"
 }
 
+# Only browser commands belong here: setup must retain errexit and run once.
+check_wasm_browser() {
+  local phase="$1"
+  shift
+  local attempt status outcome retry_note line
+  for attempt in 1 2; do
+    if "$@"; then
+      status=0
+    else
+      status=$?
+    fi
+    case "$status" in
+      0) outcome=pass ;;
+      124) outcome=probe_timeout ;;
+      65) outcome=parity_violation ;;
+      *) outcome=harness_failure ;;
+    esac
+    retry_note=""
+    if [ "$status" -eq 124 ] && [ "$attempt" -eq 1 ]; then
+      retry_note="; retrying once"
+    fi
+    line="check-native-integration: $phase outcome=$outcome status=$status attempt $attempt$retry_note"
+    if [ "$status" -eq 0 ]; then
+      printf '%s\n' "$line"
+    else
+      printf '%s\n' "$line" >&2
+    fi
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      printf '%s\n' "$line" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    if [ -z "$retry_note" ]; then
+      return "$status"
+    fi
+  done
+}
+
 check_wasm() {
   npm --prefix rust/spikes/z3js-worker ci
   npm --prefix rust/spikes/z3js-worker run probe
-  npm --prefix rust/spikes/z3js-worker run probe:browser
+  check_wasm_browser "wasm spike browser" npm --prefix rust/spikes/z3js-worker run probe:browser
   cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked
   npm --prefix rust/fsl-wasm ci
-  # The exit-code classifier below is only meaningful while 124/65/1 stay
-  # distinct; pin it before the browser run can report through it.
+  # Browser outcomes are only meaningful while 124/65/1 stay distinct; pin both
+  # classifiers, the completion deadline and retry boundaries before the FSL
+  # browser run. Retry tests stub npm, including this entry point.
   npm --prefix rust/fsl-wasm run test:outcome
   # The browser run reads each spec's imports through this scanner; pin its
   # comment and unterminated-string handling first (#1056).
   npm --prefix rust/fsl-wasm run test:imports
-  local status
-  if npm --prefix rust/fsl-wasm run test:browser; then
-    status=0
-  else
-    status=$?
-  fi
-  case "$status" in
-    0) echo "check-native-integration: wasm browser outcome=pass status=0" ;;
-    124) echo "check-native-integration: wasm browser outcome=probe_timeout status=124" >&2 ;;
-    65) echo "check-native-integration: wasm browser outcome=parity_violation status=65" >&2 ;;
-    *) echo "check-native-integration: wasm browser outcome=harness_failure status=$status" >&2 ;;
-  esac
-  return "$status"
+  check_wasm_browser "wasm browser" npm --prefix rust/fsl-wasm run test:browser
 }
 
 case "${1:-all}" in
