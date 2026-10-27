@@ -5,6 +5,7 @@
 //! Dense cases always run in killable child processes, including the public
 //! function case; a base calibration cannot strand an exponential DFS forever.
 
+use std::fmt::Write as _;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -89,9 +90,9 @@ fn dense_source() -> String {
         } else {
             "mediator"
         };
-        source.push_str(&format!("variable v{index:02} {{ role {role} }}\n"));
+        writeln!(source, "variable v{index:02} {{ role {role} }}").expect("write variable");
     }
-    for from in 0..INNER + 1 {
+    for from in 0..=INNER {
         for to in from + 1..INNER + 2 {
             source.push_str(&claim(
                 &format!("C{from:02}_{to:02}"),
@@ -134,7 +135,7 @@ fn assert_lower_bound(graph: &Value) {
 /// Detector (fails on 9ad07c7a by a 60 s timeout): complete DAG with k=30 inner
 /// vertices has one path for each ordered subset, hence 2^k total and exactly
 /// T=2^30-16 omitted paths. A budgeted walk returns a non-exact lower bound in
-/// [1,T] and at most 16 paths. Primary detector: paths_truncated_exact=false.
+/// [1,T] and at most 16 paths. Primary detector: `paths_truncated_exact=false`.
 #[test]
 fn dense_cli_walk_returns_a_lower_bound_within_sixty_seconds() {
     let directory = scratch("dense-model");
@@ -157,7 +158,7 @@ fn dense_cli_walk_returns_a_lower_bound_within_sixty_seconds() {
 }
 
 /// Detector (fails on 9ad07c7a by a 60 s timeout): same 2^30-16 lower-bound
-/// contract through causal_graph_projection on a parsed typed model. Re-exec
+/// contract through `causal_graph_projection` on a parsed typed model. Re-exec
 /// this test in a child so the unbounded base function remains killable.
 #[test]
 fn dense_public_model_walk_has_the_same_lower_bound_contract() {
@@ -205,14 +206,14 @@ fn cli_source(source: &str, label: &str) -> Value {
 
 /// Control (passes before/after): three stages of three parallel two-step
 /// routes yield 3^3=27 paths, so exactly 27-16=11 are omitted. The truncation
-/// object has ONLY paths_cap and paths_truncated, with no non-exact marker.
+/// object has ONLY `paths_cap` and `paths_truncated`, with no non-exact marker.
 #[test]
 fn small_twenty_seven_path_graph_keeps_exact_count_and_path_order() {
     let mut source = "causal Small { timebase day horizon 100\nvariable s0 { role intervention }\nvariable s1 { role mediator }\nvariable s2 { role mediator }\nvariable s3 { role outcome }\n".to_owned();
     for stage in 0..3 {
         for route in 0..3 {
             let mid = format!("m{stage}{route}");
-            source.push_str(&format!("variable {mid} {{ role mediator }}\n"));
+            writeln!(source, "variable {mid} {{ role mediator }}").expect("write variable");
             source.push_str(&claim(
                 &format!("A{stage}{route}"),
                 &format!("s{stage}"),
@@ -311,7 +312,7 @@ fn golden_source(name: &str) -> String {
     }
     if name == "max-response-window" {
         source.push_str("  variable a { role intervention binds action biz.enable }\n  variable d { role outcome observes state biz.x window 0..1 }\n");
-        source.push_str(&format!("  claim AD a -> d {{\n    version 1\n    status active\n    polarity positive\n    lag {M}..{M}\n    persists 0..{M}\n    basis hypothesis\n  }}\n}}\n"));
+        write!(source, "  claim AD a -> d {{\n    version 1\n    status active\n    polarity positive\n    lag {M}..{M}\n    persists 0..{M}\n    basis hypothesis\n  }}\n}}\n").expect("write claim");
         return source;
     }
     source.push_str("  variable a { role intervention binds action biz.enable }\n  variable b { role mediator }\n  variable c { role mediator }\n  variable d { role outcome observes state biz.x }\n");
@@ -347,7 +348,7 @@ fn golden_source(name: &str) -> String {
 }
 
 /// Control (passes before/after): reproduce every committed #1475/#1506 golden
-/// carrying truncation through its original causal_graph CLI command and compare
+/// carrying truncation through its original `causal_graph` CLI command and compare
 /// every byte of the serialized full graph envelope, not a selected field list.
 /// The stored files wrap outputs with provenance; compare their graph payloads,
 /// not wrapper indentation or unrelated check/timeline/review commands.
