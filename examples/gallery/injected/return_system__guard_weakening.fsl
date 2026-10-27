@@ -1,4 +1,4 @@
-// base: examples/layers/return_system.fsl
+// base: rust/fslc/tests/fixtures/legacy_return_branches.fsl
 // inject: guard-weakening
 // expect-detector: forbidden
 // expect-signal: forbidden:RET-FB-UNAPPROVED-PAY

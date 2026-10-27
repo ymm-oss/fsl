@@ -37,15 +37,6 @@ EXPECTED_TYPES = {
     "over-strengthened-guard",
 }
 
-BASELINE_FOR = {
-    "specs/bank.fsl": ROOT / "specs" / "bank.fsl",
-    "specs/order_workflow.fsl": ROOT / "specs" / "order_workflow.fsl",
-    # Injected headers name the public example; use the legacy copy retained in C1.
-    "examples/layers/return_system.fsl": (
-        ROOT / "rust/fslc/tests/fixtures/legacy_return_branches.fsl"
-    ),
-}
-
 PRIMARY_DETECTOR = {
     "omission": "strict_tags_requirements",
     "boundary-flip": "forbidden_acceptance",
@@ -54,18 +45,6 @@ PRIMARY_DETECTOR = {
     "unreachable-antecedent": "vacuity",
     "fabricated-constraint": "strict_tags",
     "over-strengthened-guard": "verify",
-}
-
-# Native-only, filed gap: `vacuous_implication` (rust/fsl-runtime/src/lib.rs)
-# only matches an invariant whose top-level expression is a direct `=>`; it
-# does not unwrap a `forall`-quantified implication, the shape
-# docs/design/DESIGN-vacuity.md:22-24 documents as the primary case. See issue #486
-# (distinct from #465, which covers the four vacuity kinds with no native
-# implementation at all). Only applies when CLI == native; against the
-# frozen Python reference these two files' primary detector already catches.
-KNOWN_NATIVE_VACUITY_FORALL_GAP = {
-    "order_workflow__unreachable_antecedent.fsl",
-    "return_system__unreachable_antecedent.fsl",
 }
 
 BLIND_DETECTOR = {
@@ -220,7 +199,7 @@ def _measure_case(path: Path, case: dict[str, str], tmp_path: Path) -> dict[str,
     if case["inject"] == "invariant-weakening":
         baseline = _run([
             "mutate",
-            str(BASELINE_FOR[case["base"]]),
+            str(ROOT / case["base"]),
             "--depth",
             DIFF_MUTATE_DEPTH,
             "--max-mutants",
@@ -318,18 +297,7 @@ def test_error_injection_benchmark_matrix(tmp_path):
 
             primary = PRIMARY_DETECTOR[headers["inject"]]
             primary_caught = measured["detectors"][primary]["status"] == "caught"
-            known_gap = CLI == [str(RUST_CLI)] and path.name in KNOWN_NATIVE_VACUITY_FORALL_GAP
-            if known_gap:
-                # Pin the current gap exactly: fail loudly (forcing this
-                # exclusion to be removed) once issue #486 is fixed, instead
-                # of silently staying green either way.
-                if primary_caught:
-                    failures.append(
-                        f"{path.name}: primary {primary} now catches (remove from "
-                        f"KNOWN_NATIVE_VACUITY_FORALL_GAP and close issue #486): "
-                        f"{measured['detectors'][primary]}"
-                    )
-            elif not primary_caught:
+            if not primary_caught:
                 failures.append(
                     f"{path.name}: primary {primary} did not catch "
                     f"{headers['inject']}: {measured['detectors'][primary]}"

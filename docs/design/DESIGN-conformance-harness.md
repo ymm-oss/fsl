@@ -131,10 +131,12 @@ of the Rust CI-equivalent gate (`tools/check-native-integration.sh`, which does
 not execute Python — AGENTS.md). `tests/test_injection_bench.py` measures the
 same native binary by default too (`FSLC_BENCH_CLI=python` switches back to the
 frozen reference); it regenerates the committed `examples/gallery/injected/MATRIX.json`
-evidence artifact. A detector gap that is native-only and already filed (the
-`unreachable-antecedent` lane's `vacuity` primary detector against a
-`forall`-quantified implication, issue #486) is an explicit, documented
-exclusion in both — never a silent pass.
+evidence artifact. Issue #486 fixed vacuity detection through a `forall` binder;
+both matrices now require those primary detectors to catch, with no known-gap
+exclusion. The Python benchmark also runs in the required `rust-checks` job via
+`tools/check-merge-readiness.sh native-python` (issue #1466). That lane compares
+the regenerated MATRIX in full against the committed artifact, so stale
+expectations and stale generated evidence both fail CI.
 
 ## Pipeline stages and failure semantics — `tests/test_dialect_conformance.py`
 

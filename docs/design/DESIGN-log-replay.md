@@ -115,6 +115,8 @@ diagnostics; sharing a generic mapper must not erase domain evidence.
 The native implementation and CLI dispatch are in
 `rust/fslc/src/main.rs::run_log_replay`. `tests/test_rust_cli_semantics.py`
 provides focused native-CLI behavior checks, and `tests/test_log_replay.py`
-retains broader frozen-reference cases. Neither Python-driven suite is part of
-the required Rust-native product gate. Add equivalent Rust regression cases
-before changing mapped-log semantics; current native coverage is incomplete.
+retains broader frozen-reference cases. The native-driving suite runs in the
+required `rust-checks` job via `tools/check-merge-readiness.sh native-python`
+(issue #1466); the frozen-reference suite remains optional. This does not make
+mapped-log coverage complete: add equivalent Rust regression cases before
+changing mapped-log semantics.

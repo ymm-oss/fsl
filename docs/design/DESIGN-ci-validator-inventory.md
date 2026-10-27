@@ -100,6 +100,21 @@ reachable from the scanned entrypoints.
 
 ## Controls
 
+### Native-driving Python tests
+
+Issue #1466 corrects the blanket `frozen-python-compatibility` classification of
+`tests/test_injection_bench.py`, `tests/test_bounded_liveness_oracle.py`, and
+`tests/test_rust_cli_semantics.py`: these three modules exercise the native CLI
+and are required, not excluded. Their actual pytest invocation lives in
+`tools/check-merge-readiness.sh`'s explicit `native-python` lane, called by
+`ci.yml`'s `rust-checks` job after the native workspace build. The existing
+entrypoint scanner therefore sees the invocation without adding another scan
+root. Regenerate the inventory with `generate`; do not hand-edit its tiers.
+The complete enumeration method, prerequisites, timing estimate, and calibration
+boundary are recorded in `DESIGN-ci.md` under Native CLI Python expectation checks.
+
+### Inventory controls
+
 1. **Inventory completeness** — every tracked `tests/test_*.py` and
    `tools/check_rust_*.py` module must appear in the committed inventory;
    new modules fail `check` until classified.
