@@ -895,9 +895,10 @@ origin; empty literals do not replace the substantive relation diagnostic.
 Range-bound errors and terminal errors also use their authored origins, not a
 generated 1:1 location. Numeric/Set compatibility and valid dynamic verdicts
 are unchanged. These claims concern the expression trees visited by the shared
-validator; helpful action arguments still have only existence/arity checking,
-not parameter-type checking. Unsupported relation-valued temporary collections
-are separate upstream work, not newly supported by this fix.
+validator. The historical round-1 baseline checked helpful action existence and
+arity only; main's #1483 now also checks parameter types, and that behavior is
+preserved. Unsupported relation-valued temporary collections remain separate
+upstream work, not newly supported by this fix.
 
 The round-1 delta compares BASE `33d7faa7` with HEAD `8caf5c2e`: **42 additional
 mode-form removals (21 source occurrences)** for non-self selections, and **24
@@ -908,6 +909,36 @@ occurrences (1,038 forms); both modes twice across four own-built trees give
 16,608 checks, including the separate previous-fix baseline. All 8,304 repeat
 pairs agree in full; no fields/forms are excluded and no corpus output changes.
 Inherited/R0 changes are separated from R1 in the design amendment.
+
+The current integration audit uses final base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and measured implementation
+`2b7d2e98349505af7dccb7843e41ab659066f021`. Checks were measured on
+`b1557a31b77f549d2c48823c3435217f9df4fc53` and carried to `11f01225`, whose
+tree differs only by the two generated language pages. `fslc check FORM`, with
+cache off and stable/fsl5 each repeated twice, covers all **597 corpus forms**
+under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, plus **601 inline
+inputs**: **1,198 inputs**, **14,376 checks** across the three measured states,
+and 24 binary-identity controls. The third state is historical pre-#1458 baseline
+`9af1fa5f`, used for inherited attribution. No corpus output changes; no form or
+output field is excluded. Relative to final base, #1459 removes **294 mode-forms
+(147 occurrences, 142 distinct sources)** and reclassifies **62 diagnostics**.
+Main #1463 already rejects 24 original empty-aggregate occurrences and locates
+two range-bound occurrences, so their former 48 removals/four reclassifications
+are no longer attributed to #1459. New let/Kernel/CLI/shared-row occurrences add
+26 removals. Historical #1458 attribution remains 48 removals/six additions on
+its 134-entry inventory, or 56/eight in this expanded inventory.
+
+This includes the breaking removal `X1/operand-method-types` from the shared
+#1463 inventory: `done: Bool; invariant Capture { acyclic(done) }` changes from
+`[Ok, Error, Error, Error]` to `[Error, Error, Error, Error]`, with a located
+check rejection at **8:3**. It is the only changed shared row. For the remaining
+136 row sources and their one resolver dependency (**137 inputs**), the same
+`fslc check FORM` command at the named base and head produces no transition or
+other output change in either mode/repetition. The inherited-output comparison
+retains 292 embedded-input-path differences and 16 observations from two prior
+#1458 entries mis-extracted as scratch labels rather than specs; this audit uses
+their real test sources, accepted on both baseline binaries, without changing
+attribution. The optional replay was not run; no sweep output was normalized.
 
 Top-level temporal sugar:
 

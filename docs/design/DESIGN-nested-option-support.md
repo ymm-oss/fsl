@@ -644,9 +644,9 @@ authored expression origin; generated aggregate terms must not replace that
 origin with 1:1. These checks cover expression trees visited by the shared
 validator: unselected conditional branches, initializers, action assignments,
 guard/let values and ensures, properties, leadsTo predicates/ranking, terminal
-predicates, and trace expression internals. This does not claim parameter-type
-checking of helpful action arguments: their current check is action existence
-and arity only. Outer trace argument kinds retain their existing replay contract.
+predicates, and trace expression internals. Parameter-type checking of helpful
+action arguments was outside the historical baseline; main's #1483 now provides
+it and is preserved. Outer trace argument kinds retain their existing replay contract.
 
 | Breaking removal category | Previously accepted examples now rejected |
 |---|---|
@@ -823,9 +823,9 @@ explicitly restores the projection declaration origin. A source-less programmati
 model without a terminal span retains the legacy fallback; an authored terminal
 does not use it.
 
-Two scope clarifications remain explicit. `helpful` actions currently check only
-existence and arity, not argument expression/parameter types; that pre-existing
-gap is routed upstream, not fixed here. Relation-valued temporary collection
+Two scope clarifications remain explicit. At the historical round-1 baseline,
+`helpful` actions checked existence/arity only; main's #1483 now checks parameter
+types and is preserved during integration. Relation-valued temporary collection
 literals are not generalized by the self-relation provenance fix: a mixed
 relation sequence can check while both engines reject it because such sequences
 are unsupported. That separate constructor-acceptance gap is likewise routed
@@ -904,6 +904,101 @@ errors; exact checker/diff and all four hashes are restored. Requested R1 scoped
 packages pass **2,414 tests**, formatting passes, and scoped Clippy retains only
 the separately authorized #1444. No new allowance or existing-test rewrite is
 used. These are bounded source/type and routing checks, not an assurance upgrade.
+
+#### Integration audit carried to main `11f01225` (#1459)
+
+Final base is **`11f01225e244dabde0f8dfd9aaa665bc47dccfd4`**. Implementation
+was measured at **`2b7d2e98349505af7dccb7843e41ab659066f021`**, on
+`b1557a31b77f549d2c48823c3435217f9df4fc53`, and carried to `11f01225`, whose
+tree differs only by `docs/intro/language.en.html` and `language.ja.html`.
+#1458 is already on main, not a separate integration parent. Its historical
+attribution is still measured by the `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db`
+→`b1557a31` split; the latter's code was built at
+`3a8a6019a5bed3ae62f960afedf2bdcf6d129341` and is identical to the final base.
+
+Every `.fsl` under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` is
+included: **597 corpus inputs**, plus **601 inline inputs**. The inline inventory
+retains the five #1459 fixed files, three #1458 fixed files and rewritten Kernel
+fixtures, and adds every source from the **137 shared #1463 rows**, including
+their one resolver dependency. Each invocation is `fslc check FORM`, cache off,
+with `FSLC_UNSTABLE` unset and set to `fsl5`, each repeated twice in independently
+materialized states. **1,198 inputs/state**, **14,376 primary checks**, **24
+identity calibrations**, and **7,188 full-output repeat pairs**. All repeat pairs
+agree literally. No corpus output changes and no form or output-field exclusions.
+
+| Full expanded comparison | Removals | Diagnostic reclassifications | Additions | Unchanged mode-forms |
+|---|---:|---:|---:|---:|
+| Historical pre-#1458 `9af1fa5f` → measured baseline carried to `11f01225` | 56 | 0 | 8 | 2,332 |
+| Final base `11f01225` → measured #1459 implementation | 294 | 62 | 0 | 2,040 |
+| Historical `9af1fa5f` → measured #1459 implementation | 350 | 62 | 8 | 1,976 |
+
+The #1459 removals are **147 source occurrences / 142 distinct source texts**;
+the 62 reclassifications are 31 occurrences. The historical #1458 134-entry
+subset remains **48 removals / six additions**. Expanded fixtures contribute
+eight additional inherited endpoint removals and two inherited projection-equality
+additions; do not attribute these to #1459.
+
+The historical 316/66 #1459 comparison above changes because main #1463
+(`28c4eab710f8d83e766bb0e7c7e006d09d7777d8`) already validates original
+aggregate operands and authored bounds. These 24 occurrences no longer contribute
+48 #1459 removals: `empty-count-{0,1}-{A,D,F,I}`,
+`empty-sum-{0,1}-{A,D,F,I}`, `empty-seq-count-{A,D,F,I}`, and
+`empty-seq-sum-{A,D,F,I}` in the operand fixture inventory. Here A/D/F/I denote
+acceptance/dead branch/forbidden/invariant positions. The two `range-bool` and
+`range-enum` path occurrences no longer contribute four reclassifications:
+base and head already agree on their located semantics errors. All other retained
+transition members are unchanged. Added occurrences contribute 16 let-shadowing,
+four public-Kernel, four CLI-Kernel, and two shared-row removal mode-forms:
+**316−48+26=294**, **66−4=62**. Historical measurements are not relabeled.
+
+The breaking shared-row removal is **`X1/operand-method-types`**:
+`invariant Capture { acyclic(done) }` with Bool `done`. Its recorded baseline
+stays `[Ok, Error, Error, Error]`; expected outcomes become
+`[Error, Error, Error, Error]` in check/BMC/induction/explicit order, with check
+semantics rejection at **8:3**. It is the only changed shared row. For the other
+136 primary sources and one resolver dependency (**137 inputs**), the same
+`fslc check FORM` command at the named base and implementation SHAs yields an
+empty transition set and no other output change, in both modes twice.
+
+The full inherited comparison preserves **5,848 raw observations**: **292**
+differences are solely the input path embedded in `message` (exit, location,
+other JSON fields and stderr unchanged). Another **16** observations concern
+two inherited entries, `1458-acceptance-kernel-N-Color` and
+`1458-acceptance-kernel-Color-N`. The previous extractor selected scratch labels
+`kernel-N-Color` / `kernel-Color-N`, not the spec template at
+`issue_1458_projection_acceptance.rs:270`; both sides therefore returned parse
+errors. This sweep uses the actual `spec ProjectionKernel` test sources, which
+check on both baseline binaries. There is no transition or attribution change.
+Raw differences remain recorded; no field is normalized/excluded in the sweep.
+The optional canonical-path replay was explicitly **not run**. The #1458-side
+extraction defect is reported upstream separately.
+
+Coverage adaptations preserve guards rather than bypass them. The existing
+relation_operations verifier test still reaches its low-level rejection through
+an edited checked model. The #1464 public-Kernel missing-at-index test is split
+into `check_rejects_at_without_an_index`,
+`walk_partial_rejects_an_at_call_without_an_index`, and
+`public_kernel_rejects_an_at_call_without_an_index_without_panicking`. The latter
+two start with accepted `at(0)`, remove the index in the model AST, and separately
+exercise the projection guard and public checked-model validation. The renamed
+CLI `empty_at_index_is_rejected_by_check_and_kernel` stops at check for both
+commands and pins their complete observed envelopes; it no longer claims to
+exercise the projection guard. Its unchanged valid-index control still exports
+the partial operation. The X1 expectation change follows upstream approval and
+the explicit #1459 ownership in DESIGN-check-executable-forms.
+
+All five immutable #1459 files pass 98 tests twice; #1458's three files pass 52;
+Kernel passes 24 twice and public Kernel 10 twice. Full workspace rerun passes
+**3,568 / 0 failed / 0 ignored**; workspace build, Clippy and fmt pass. Reverting
+only typecheck.rs and compose.rs to exact `b1557a31` gives **75 intended failures
+/ 60 preservation passes** across 135 tests, including X1 and renamed Kernel
+check-step detectors; three original aggregate tests now remain green because
+main already closes those holes, so they are preservation controls on this base.
+Direct `args[0]` calibration panics in the walk guard test; disabling public
+checked-model validation fails with the index-guard message instead of at/0.
+Each mutation is restored byte-for-byte with an empty full diff, then the head
+is rebuilt. These checks establish bounded typing/routing evidence, not an
+assurance upgrade or independent triangulation.
 
 ## 5. Lossless public observation and replay
 

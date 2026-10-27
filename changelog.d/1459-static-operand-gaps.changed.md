@@ -43,10 +43,11 @@ then-branch inference, through nesting, old, relation add/remove receivers and
 action let aliases. Projection equality preserves substantive relation errors
 over context-needed empty literals and retains authored locations; range bounds
 and terminal no longer report generated 1:1 origins for authored input. Existing
-numeric/Set compatibility and valid dynamic verdicts are unchanged. The checked
-positions do not include parameter-type validation of helpful arguments, and
-this does not add relation-valued temporary collection support; those gaps are
-separate upstream work.
+numeric/Set compatibility and valid dynamic verdicts are unchanged. At that
+historical baseline, checked positions did not include helpful parameter types;
+this does not add relation-valued temporary collection support. Helpful argument
+typing was separate upstream work at that historical baseline; main's #1483 now
+checks parameter types and is preserved.
 
 Round-1 delta BASE 33d7faa7 to HEAD 8caf5c2e: 42 additional mode-form removals
 (21 source occurrences) and 24 diagnostic reclassifications (12 occurrences:
@@ -56,3 +57,25 @@ inventory (1,038 forms) runs both modes twice in four own-built trees, 16,608
 checks including the separate previous-fix baseline. All 8,304 repeat pairs
 agree in full, with no exclusions or corpus output drift. Inherited/R0 changes
 are accounted separately, not attributed to round 1.
+
+Current integration: final base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4`,
+implementation measured at `2b7d2e98349505af7dccb7843e41ab659066f021` on
+`b1557a31b77f549d2c48823c3435217f9df4fc53`, carried to `11f01225` across only two
+generated language pages. All 597 corpus + 601 inline inputs (1,198 total), both
+modes twice in three states: 14,376 checks + 24 identity controls, no corpus output
+drift or exclusions. #1459 accounts for 294 mode-form removals (147 occurrences,
+142 distinct sources) and 62 diagnostic reclassifications. Main #1463 already
+owns 48 former removals/four reclassifications; added let/Kernel/CLI/shared-row
+occurrences contribute 26 removals. Historical #1458 attribution from `9af1fa5f`
+remains 48/six on its 134-entry subset, 56/eight on the expanded inventory.
+
+The shared #1463 row X1/operand-method-types is a breaking removal:
+`invariant Capture { acyclic(done) }` for Bool `done` now fails check at 8:3;
+outcomes become [Error, Error, Error, Error] rather than [Ok, Error, Error, Error].
+For the other 136 row sources plus one resolver dependency (137 inputs),
+`fslc check FORM` at the named base/head, stable/fsl5 twice, shows no further
+transition or output change. The inherited comparison retains 292 embedded-path
+differences and 16 observations from two prior scratch-label extraction errors;
+the real test sources now check on both baseline binaries, with no attribution
+change. Optional replay not run; no sweep output normalized. Full evidence and
+the retained Public Kernel projection-guard controls are in the design amendment.
