@@ -49,16 +49,22 @@ keeps the kernel and cross-file name-resolution surface unchanged.
   `kind: "semantics"`, and `would capture variable`. The def's own parameters
   are excluded; rename the caller binding. Existing pattern/global collision
   refusals remain unchanged.
+  Non-global pattern bindings exported from `requires` or a binary left operand
+  also count as caller bindings and now reject calls that capture def free names.
 
 The capture rules favor an explicit local repair over silently changing meaning
 or leaking compiler-generated names into counterexamples.
 
 **Exception / remaining soundness risk (Refs #1528):** the binders declared
-directly by a `leadsTo` property are not threaded into this def capture check.
+directly by a `leadsTo` property are not threaded into this def capture check for
+before/after expressions, `helpful` arguments, `decreases`, or `within`.
 They can still capture a def-body free name and produce a false green; rename
 the binder before relying on verification. Expression quantifiers and
 aggregates inside the property's expressions are covered. This change does
 not claim to close the declaration-level property-binder path.
+The binder's own `where` expression is checked, so capture may now reject before
+the existing unsupported-wrapper-where diagnostic. A capture in that `where`
+does not demonstrate that the wrapper's other positions are covered.
 
 ## Caller scope and compose source names (#1450)
 
@@ -71,6 +77,13 @@ exit are paired within the temporary expander; no extra state reaches the Kernel
 Action guards see preceding guards, while statements and ensures see the final
 guard scope. Binder domains use the outer scope; filters and bodies see their
 binder. Sync actuals use header scope only, not additional lets or component locals.
+The shared free-name walker uses the same ordered binary pattern continuation
+as source rewriting: a def body's own `is some(v)` binds later occurrences in
+that body rather than inventing a free name. Existing caller/global pattern
+collisions still reach the ordinary pattern checker with the original message
+and pattern position. A single mutable-set action walker grows guard scope for
+expansion, component rewriting, alias resolution and sync-source inventories;
+callers do not maintain separate Requires/Let growth rules.
 
 Compose passes all Common source items, not only defs, to the expander so it can
 inventory state, constants and enum members. Definition collection still selects
@@ -81,10 +94,15 @@ diagnostic instead of replacing it with a new capture error for an imported enum
 Expansion still precedes prefixing, alias rewriting and sync substitution; source
 definition tables remain separate. Loading components before validating compose
 defs can change which error is reported first when both sources are invalid.
+Action parameter ranges still expand after action items in this implementation;
+if both contain undefined predicate calls, the body error can precede the
+parameter-range error. Both reject with exit 2 and the same name-error kind;
+this validation-order change is not repaired here.
 
-## Boundary evidence (#1450)
+## Initial implementation boundary evidence (#1450)
 
-The command shapes `<base-binary> check <path>` and `<head-binary> check <path>`
+For the initial implementation, the command shapes `<base-binary> check <path>`
+and `<head-binary> check <path>`
 were run over all 597 `.fsl` files under `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/`, in materialized source trees for base
 `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation

@@ -738,14 +738,21 @@ fails with exit 2, <code>kind: "semantics"</code>, and a <code>would capture var
 the call. Rename the caller's binding and recheck; no synthetic rename or
 compatibility bypass is supplied. Existing <code>is some(x)</code> pattern-shadowing
 rejections are unchanged. This applies to direct specs and source-local defs
-in compose components and synchronized actions.</p>
+in compose components and synchronized actions.
+A non-global <code>is some(v)</code> binding exported by a <code>requires</code> guard or the left
+operand of a binary expression is also a caller binding for this check.</p>
 <p><strong>Remaining soundness risk (Refs #1528):</strong> a binder declared directly by a
-<code>leadsTo</code> property is not tracked by this capture check. Such a property binder
+<code>leadsTo</code> property is not propagated into the property's before/after expressions,
+<code>helpful</code> arguments, <code>decreases</code>, or <code>within</code> by this capture check. Such a binder
 can still capture a def-body free name and produce a false green. Rename that
 binder; do not treat a successful check or verification of the capturing form
 as evidence of the intended state reference. Expression quantifiers and
-aggregates inside the property's expressions are covered by #1450.</p>
-<p>The <code>check</code> sweep of all 597 <code>.fsl</code> files under <code>specs/</code>, <code>examples/</code>, and
+aggregates inside the property's expressions are covered by #1450.
+The declaration binder's own <code>where</code> expression is checked for capture; an
+earlier capture error can therefore precede the existing rejection of unsupported
+property-wrapper <code>where</code> filters.</p>
+<p>The initial implementation's <code>check</code> sweep of all 597 <code>.fsl</code> files under
+<code>specs/</code>, <code>examples/</code>, and
 <code>rust/fslc/tests/fixtures/</code>, using base
 <code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> and implementation
 <code>d806e6bc6677016dac3803ac5559d3f0b1e3da67</code> in their respective materialized

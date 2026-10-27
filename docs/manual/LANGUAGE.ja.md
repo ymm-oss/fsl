@@ -659,14 +659,20 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 してください。内部名への自動改名や互換の迂回路はありません。既存の
 `is some(x)` のパターン隠蔽の拒否は変わりません。通常の spec と、compose の
 部品・同期アクション内のソースローカルな def に適用します。
+`requires` のガード、または binary 式の左辺から後続へ出る、global でない
+`is some(v)` のパターン束縛も、この検査では呼び出し側の束縛に含めます。
 
 **残る健全性リスク (Refs #1528):** `leadsTo` のプロパティ宣言直下のバインダーは
-この捕獲検査に渡されません。そのバインダーが def 本体の自由な名前を捕まえ、
+この捕獲検査では before/after の式、`helpful` の引数、`decreases`、`within` へ
+渡されません。そのバインダーが def 本体の自由な名前を捕まえ、
 偽の green を返す経路は残っています。バインダーを改名し、捕獲する形の check や
 verify の成功を、意図した状態参照の証拠としないでください。プロパティの式内の
 量化子・集約は #1450 の検査対象です。
+宣言バインダー自身の `where` 式は捕獲を検査します。そのため、未対応の
+プロパティ外側バインダーの `where` を拒否する既存エラーより先に、捕獲エラーが
+出る場合があります。
 
-base `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` と実装
+初回の実装では、base `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` と実装
 `d806e6bc6677016dac3803ac5559d3f0b1e3da67` の各 materialized tree で、
 `specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597個の `.fsl` を
 `check` した結果、ok→error の遷移集合は空です。新たに拒否する inline の形や、

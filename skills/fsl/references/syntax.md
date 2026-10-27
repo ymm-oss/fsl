@@ -114,11 +114,16 @@ in the expanded def body (excluding the def's parameters). These calls now fail
 `check` with exit 2, `kind: "semantics"`, and `would capture variable` at the
 call; rename the caller binding. Existing global/pattern shadowing refusals
 remain unchanged. Direct and compose-source/component defs share the check.
+Non-global `is some(v)` bindings exported by `requires` or a binary expression's
+left operand also count as caller bindings, so those captures now reject.
 **Exception / remaining false-green risk (Refs #1528):** binders declared
-directly by a `leadsTo` property are not supplied to this check. Rename such a
+directly by a `leadsTo` property are not supplied to this check in before/after,
+`helpful` arguments, `decreases`, or `within`. Rename such a
 colliding binder before relying on verification; the fix covers expression
 quantifiers/aggregates inside `leadsTo`, not that declaration-level path.
-The full 597-form `check` sweep over `specs/`, `examples/`, and
+The binder's own `where` expression is checked; capture can reject before the
+existing unsupported-property-wrapper-where diagnostic.
+The initial implementation's full 597-form `check` sweep over `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/` in base
 `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
 `d806e6bc6677016dac3803ac5559d3f0b1e3da67` materialized trees has zero

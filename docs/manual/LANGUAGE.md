@@ -687,15 +687,22 @@ the call. Rename the caller's binding and recheck; no synthetic rename or
 compatibility bypass is supplied. Existing `is some(x)` pattern-shadowing
 rejections are unchanged. This applies to direct specs and source-local defs
 in compose components and synchronized actions.
+A non-global `is some(v)` binding exported by a `requires` guard or the left
+operand of a binary expression is also a caller binding for this check.
 
 **Remaining soundness risk (Refs #1528):** a binder declared directly by a
-`leadsTo` property is not tracked by this capture check. Such a property binder
+`leadsTo` property is not propagated into the property's before/after expressions,
+`helpful` arguments, `decreases`, or `within` by this capture check. Such a binder
 can still capture a def-body free name and produce a false green. Rename that
 binder; do not treat a successful check or verification of the capturing form
 as evidence of the intended state reference. Expression quantifiers and
 aggregates inside the property's expressions are covered by #1450.
+The declaration binder's own `where` expression is checked for capture; an
+earlier capture error can therefore precede the existing rejection of unsupported
+property-wrapper `where` filters.
 
-The `check` sweep of all 597 `.fsl` files under `specs/`, `examples/`, and
+The initial implementation's `check` sweep of all 597 `.fsl` files under
+`specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/`, using base
 `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
 `d806e6bc6677016dac3803ac5559d3f0b1e3da67` in their respective materialized

@@ -711,13 +711,19 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 (exit 2、<code>kind: "semantics"</code>) になります。呼び出し側の束縛を改名して再チェック
 してください。内部名への自動改名や互換の迂回路はありません。既存の
 <code>is some(x)</code> のパターン隠蔽の拒否は変わりません。通常の spec と、compose の
-部品・同期アクション内のソースローカルな def に適用します。</p>
+部品・同期アクション内のソースローカルな def に適用します。
+<code>requires</code> のガード、または binary 式の左辺から後続へ出る、global でない
+<code>is some(v)</code> のパターン束縛も、この検査では呼び出し側の束縛に含めます。</p>
 <p><strong>残る健全性リスク (Refs #1528):</strong> <code>leadsTo</code> のプロパティ宣言直下のバインダーは
-この捕獲検査に渡されません。そのバインダーが def 本体の自由な名前を捕まえ、
+この捕獲検査では before/after の式、<code>helpful</code> の引数、<code>decreases</code>、<code>within</code> へ
+渡されません。そのバインダーが def 本体の自由な名前を捕まえ、
 偽の green を返す経路は残っています。バインダーを改名し、捕獲する形の check や
 verify の成功を、意図した状態参照の証拠としないでください。プロパティの式内の
-量化子・集約は #1450 の検査対象です。</p>
-<p>base <code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> と実装
+量化子・集約は #1450 の検査対象です。
+宣言バインダー自身の <code>where</code> 式は捕獲を検査します。そのため、未対応の
+プロパティ外側バインダーの <code>where</code> を拒否する既存エラーより先に、捕獲エラーが
+出る場合があります。</p>
+<p>初回の実装では、base <code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> と実装
 <code>d806e6bc6677016dac3803ac5559d3f0b1e3da67</code> の各 materialized tree で、
 <code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全597個の <code>.fsl</code> を
 <code>check</code> した結果、ok→error の遷移集合は空です。新たに拒否する inline の形や、
