@@ -492,6 +492,13 @@
       "entrypoints": [
         ".github/workflows/site-reference-freshness.yml"
       ],
+      "path": "tests/test_site_heading_hash.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        ".github/workflows/site-reference-freshness.yml"
+      ],
       "path": "tests/test_site_manual_integrity.py",
       "tier": "required"
     },

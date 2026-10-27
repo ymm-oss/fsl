@@ -40,6 +40,19 @@ Non-required workflows (for example
 `.github/workflows/cache-budget-audit-wiring.yml`) are intentionally excluded
 from required-gate resolution.
 
+### Site heading regression coverage (#1501)
+
+`tests/test_site_heading_hash.py` is classified as `required` through
+`.github/workflows/site-reference-freshness.yml`, alongside
+`tests/test_site_reference_snapshot.py`. It detects wrapped line-start issue
+references being rendered as headings in either language and the two real
+Japanese-manual occurrences, with preservation controls for ordinary headings,
+fenced code, and escaped hashes. Like the snapshot module, it needs the workflow's
+`markdown` dependency; it does not belong in the stdlib-only automation lane.
+Regenerate the inventory after wiring the module with
+`python3 tools/check_ci_validator_inventory.py generate`, then audit it with
+`python3 tools/check_ci_validator_inventory.py check`.
+
 ## Tiers
 
 | Tier | Meaning | Required-gate wiring |
