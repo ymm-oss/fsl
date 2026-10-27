@@ -880,14 +880,64 @@ never a state variable named `true`), so the declaration is rejected. No other w
 An init statement's collection `forall` source cannot contain free state
 references, even after that state was assigned, for empty domains/bodies, or
 in unreachable branches. Rejecting these previously check-ok forms is a
-breaking removal (#1463). State-independent literals and ordinary assigned-state
-reads in init expressions/filters/bodies remain allowed. Binder source/bounds
+breaking removal (#1463). State-independent literals remain allowed; ordinary
+assigned-state reads in init expressions/filters/bodies must also satisfy the
+same-forall root-read boundary below (#1518). Binder source/bounds
 use the outer scope; its filter/body/value uses the local scope. A local that
 shadows a state name is not a state read; fixing that distinction removes the
 old symbolic/explicit false refusal without narrowing check acceptance.
 
-A nested statement `forall` in `init` is accepted by check and the symbolic
-engines, but the explicit engine rejects nested init forall. Use `--engine auto`
+An init statement forall cannot read a root that the same forall writes,
+including in its filter, assignment keys/RHS, or if conditions (#1518).
+Exception: the current binder-key location already written in this iteration.
+After `m[k] = value`, read `m[k]` or `m[k].flag`; after `m[k].flag = true`,
+read only that field, not the entry or another field. Existing ownership rules
+still apply. `forall k: K { m[k] = true seen[k] = m[k] }` is allowed;
+substituting `m[1]` or reading before writing is rejected. Earlier-initialized
+different roots remain readable. This is a **breaking removal** of previously
+check-ok scalar-map and whole-entry forms. The semantics message identifies
+the root, not the individual read expression; check/verify locate the containing
+statement, legacy replay need not.
+
+The removal deliberately includes conservative cases, without a per-key
+dependency proof: `forall k in 0..0 { m[k] = true }` followed by
+`forall k in 1..1 { m[k] = m[0] }` is rejected even though the preceding
+forall initialized the other key, because the second forall writes the same
+root. Likewise,
+`forall outer in 0..0 { forall k: K { m[k] = true seen[k] = m[k] } }`
+is rejected even after the inner write: the outer forall also writes `m`,
+and the read is not at its binder key. Explicit and Monitor already refused
+these forms on the base with `before it is assigned` and
+`nested forall in init is not supported`, respectively. #1518 rejects them
+at check too; the rule is not refined to admit them.
+
+This root-based rule also removes correct forms whose base-engine results
+agreed: with `m` indexed by `0..1`,
+`m[0] = true forall k in 1..1 { m[k] = true x = m[0] }` reads an already
+initialized other key, but is rejected because the loop writes the same root.
+
+For concrete deterministic init, empty or not statically provable nonempty
+forall domains add no definite coverage for fixed targets; ownership is still
+checked. Static binder/constant filters can prove nonemptiness (for example
+`where k == 0` over `0..1`), state-dependent filters cannot. Explicit/Monitor
+reject missing assignments with exit 2 rather than using defaults. Symbolic
+init leaves components free: type-bound/invariant violations exit 1, but all
+admissible values satisfying a property can verify. Auto falls back to BMC for
+this explicit limitation. Breaking-removal sweep (#1518), base
+`28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head
+`9d94c5cb5447834f329002200afa0f3404d9a9a0` plus the production runtime change
+(`explicit.rs` SHA-256
+`b20b92e9945fd7a05eb8462c4a7ad3816fcd06cd2c34a871910b7b652090c17b`):
+the coordinator built each binary in its own git-archive materialized tree and
+ran `fslc check <form>` over all 597 `.fsl` forms under `specs/`, `examples/`,
+and `rust/fslc/tests/fixtures/`. Both trees had 397 `ok`, **0 `ok`→`error`,
+0 `error`→`ok`, 0 other changes**. The corpus removal set is empty; A1–A5 pin
+five regression forms within this removal, which also includes the
+conservative examples above.
+
+A nested statement `forall` in `init` is supported by check and the symbolic
+engines subject to the read-order and ownership rules above, but the explicit
+engine rejects nested init forall. Use `--engine auto`
 to route this documented explicit limitation to symbolic BMC; explicit support
 is not extended and forbidden state-dependent collection sources stay rejected.
 

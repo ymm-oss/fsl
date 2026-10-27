@@ -2083,12 +2083,14 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// #493). This does not touch [`Monitor::new`] itself or any other caller —
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
+/// Init ownership and forall read-order checks also apply to free-root enumeration.
 ///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when a free variable's type is not a finite
 /// scalar domain, or a combination cannot be evaluated concretely.
 fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
+    check_init_write_ownership(model)?;
     let free = explicit::unassigned_init_state_vars(model);
     if free.is_empty() {
         return Ok(vec![Monitor::new(model.clone())?.state]);

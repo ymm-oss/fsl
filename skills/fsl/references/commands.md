@@ -288,6 +288,10 @@ non-indexed location across binder values, e.g. `forall k: K { x = k }` with
 never `proved`. `--from-state`, `--lemma`, and `--k` do not apply to this
 engine.
 
+Init reads also obey #1518's same-forall root-read rule and its already-written
+current-key exception (see [syntax.md](syntax.md)); switching to BMC does not
+bypass these input errors.
+
 An explicit-decided envelope also carries `action_profile` separately from
 `cost`: each action has non-negative `enabled`, `fired`, and `no_op` counts.
 `enabled` counts unique explored states in which the action has an enabled
