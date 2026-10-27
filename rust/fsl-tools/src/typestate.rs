@@ -1045,19 +1045,34 @@ fn classify_action(
     Some(Value::Object(output))
 }
 
-fn ts_type(model: &PublicKernelView, ty: &TypeRef) -> String {
+fn ts_type(
+    model: &PublicKernelView,
+    ty: &TypeRef,
+    generated_type_names: &BTreeSet<String>,
+) -> String {
     match ty {
         TypeRef::Int | TypeRef::Range => "number".to_owned(),
         TypeRef::Bool => "boolean".to_owned(),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain) => "number".to_owned(),
+            Some(TypeDef::Enum { members })
+                if generated_type_names.contains(&fsl_core::unmapped_public_spelling(name)) =>
+            {
+                members
+                    .iter()
+                    .map(|member| format!("\"{member}\""))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            }
             Some(TypeDef::Enum { .. } | TypeDef::Struct { .. }) => {
                 fsl_core::unmapped_public_spelling(name)
             }
             None => "unknown".to_owned(),
         },
-        TypeRef::Option(inner) => format!("{} | null", ts_type(model, inner)),
-        TypeRef::Set(inner) => format!("Set<{}>", ts_type(model, inner)),
+        TypeRef::Option(inner) => {
+            format!("{} | null", ts_type(model, inner, generated_type_names))
+        }
+        TypeRef::Set(inner) => format!("Set<{}>", ts_type(model, inner, generated_type_names)),
         _ => "unknown".to_owned(),
     }
 }
@@ -1137,6 +1152,7 @@ fn emit_typescript(
     note: &str,
     generic: &str,
     function_names: &BTreeMap<String, String>,
+    generated_type_names: &BTreeSet<String>,
 ) -> String {
     let state_type = format!("{}State", entity.type_name);
     let mut lines = vec![
@@ -1166,7 +1182,10 @@ fn emit_typescript(
         ),
     ];
     for (name, ty) in &entity.data_fields {
-        lines.push(format!("  {name}: {};", ts_type(model, ty)));
+        lines.push(format!(
+            "  {name}: {};",
+            ts_type(model, ty, generated_type_names)
+        ));
     }
     lines.extend([
         format!("  readonly [__state]: {generic};"),
@@ -1245,7 +1264,7 @@ fn emit_typescript(
                 format!(
                     "{}: {}",
                     unique_ts_identifier(param, &mut used_params),
-                    ts_type(model, ty)
+                    ts_type(model, ty, generated_type_names)
                 )
             })
             .collect::<Vec<_>>();
@@ -1463,15 +1482,17 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
 
     // Reserve every type declared across the emitted skeletons, not just the
     // current entity's interface, before choosing their shared phantom generic.
+    let mut generated_type_names = BTreeSet::new();
+    for (entity, _, _, _) in &classified_entities {
+        generated_type_names.insert(entity.type_name.clone());
+        generated_type_names.insert(format!("{}State", entity.type_name));
+    }
     let mut type_names: BTreeSet<_> = model
         .types
         .keys()
         .map(|name| fsl_core::unmapped_public_spelling(name))
         .collect();
-    for (entity, _, _, _) in &classified_entities {
-        type_names.insert(entity.type_name.clone());
-        type_names.insert(format!("{}State", entity.type_name));
-    }
+    type_names.extend(generated_type_names.iter().cloned());
     let mut generic = "S".to_owned();
     while type_names.contains(&generic) {
         generic.push('_');
@@ -1498,8 +1519,15 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
         } else {
             "partial"
         };
-        let typescript =
-            emit_typescript(&model, &entity, &actions, &note, &generic, &function_names);
+        let typescript = emit_typescript(
+            &model,
+            &entity,
+            &actions,
+            &note,
+            &generic,
+            &function_names,
+            &generated_type_names,
+        );
         report_entities.push(json!({
             "entity": key,
             "kind": entity.kind,

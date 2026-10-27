@@ -80,8 +80,9 @@ that happens to preserve state** (it errs on the sound side). If only some,
   `typescript` fields carry all these TypeScript differences. The command
   envelope and existing report field shapes remain compatible (including
   source-name `params`); report values, entity inclusion, applicability and
-  summary counts can differ under the earlier judgment rules. Neither JSON nor
-  TypeScript is claimed byte-identical to the frozen reference.
+  summary counts can differ under the earlier judgment rules. Native entity
+  order is alphabetical (the frozen reference uses declaration order). Neither
+  JSON nor TypeScript is claimed byte-identical to the frozen reference.
 - TypeScript action and parameter bindings append `_` for ECMAScript reserved
   words (including literals), strict-mode reserved words, `await`, the existing
   `type` entry, and strict-mode binding restrictions `eval` and `arguments`.
@@ -100,11 +101,14 @@ that happens to preserve state** (it errs on the sound side). If only some,
   signatures. Collision-free output keeps its existing spelling and bytes.
 - Parameter types use the same model-derived mapping as state data fields:
   integers, ranges and domains become `number`, booleans become `boolean`, enums
-  and structs retain their public names, options add `| null`, sets use `Set<T>`,
-  and unsupported types become `unknown`. The host supplies the named model types
-  these declarations reference, as it already does for state fields, and any
-  required collection library types. This is an ambient declaration skeleton,
-  not a standalone implementation module.
+  and structs retain their public names, except that an enum whose public name
+  equals any emitted entity interface or `<Name>State` alias is written as an
+  inline union of its member string literals in declaration order. This exception
+  also applies inside options and sets, in both parameters and data fields.
+  Options add `| null`, sets use `Set<T>`, and unsupported types become `unknown`.
+  The host supplies the remaining named model types these declarations reference
+  and any required collection library types. This is an ambient declaration
+  skeleton, not a standalone implementation module.
 - The verification engine and solver are unmodified.
 
 ## 6. Tests / related

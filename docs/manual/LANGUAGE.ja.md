@@ -3913,7 +3913,9 @@ DESIGN-*.md があります)。
 JSON の `typescript` フィールドにも、これらすべての TypeScript の違いが含まれます。
 コマンドのエンベロープと既存レポートフィールドの形(ソース名の `params` を含む)は
 互換のままですが、以前からの判定規則により、レポートの値、含まれるエンティティ、
-applicability、summary の件数は異なり得ます。JSON も TypeScript も、凍結された参照実装との
+applicability、summary の件数は異なり得ます。
+ネイティブのエンティティ順はアルファベット順です(凍結された参照実装は宣言順です)。
+JSON も TypeScript も、凍結された参照実装との
 バイト単位の一致は主張しません。
 → [`DESIGN-typestate.md`](../design/DESIGN-typestate.md)
 

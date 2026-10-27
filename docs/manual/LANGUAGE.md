@@ -4080,6 +4080,7 @@ parameter types. The JSON `typescript` fields carry all these TypeScript
 differences. The command envelope and existing report field shapes remain
 compatible (including source-name `params`); report values, entity inclusion,
 applicability and summary counts can differ under the earlier judgment rules.
+Native entity order is alphabetical (the frozen reference uses declaration order).
 Neither JSON nor TypeScript is claimed byte-identical to the frozen reference.
 → [`DESIGN-typestate.md`](../design/DESIGN-typestate.md)
 
