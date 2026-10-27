@@ -842,6 +842,11 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     ),
     unresolved_ordinary!(
         "rust/fslc/src/verification.rs",
+        2210,
+        "run_verify_cli_admitted"
+    ),
+    unresolved_ordinary!(
+        "rust/fslc/src/verification.rs",
         2114,
         "run_verify_cli_kernel_from_source"
     ),

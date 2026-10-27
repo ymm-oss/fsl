@@ -350,10 +350,11 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
         .expect("approval section end")
         .0;
     let snapshot = format!("## リスク一覧（要件ID別）{risk}## 承認照合{approval}");
-    assert_eq!(
-        normalize_digests(&snapshot).trim(),
-        include_str!("../../../tests/snapshots/approval_ledger.md").trim()
+    let expected = include_str!("../../../tests/snapshots/approval_ledger.md").replace(
+        "\n\n## 承認照合",
+        "\n| （仕様全体） | 要件ID未付与の検出 | 🟡 移行候補 | — unapproved | bounded(BMC depth 2) | migration | — | ____ | 下記詳細 |\n\n## 承認照合",
     );
+    assert_eq!(normalize_digests(&snapshot).trim(), expected.trim());
 
     let original = std::fs::read_to_string(root.join("spec.fsl")).expect("read fixture");
     std::fs::write(

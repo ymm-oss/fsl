@@ -68,7 +68,7 @@ fn check_cli_cell(case: &cases::Case, key: &str, composed: bool, annotated: bool
     }
     let (body, status) = cli::run("ledger", path.to_str().unwrap(), case.depth, &extra);
     assert_eq!(status, 1, "ledger {key}: {body}");
-    cases::assert_ledger(&body, case, &name, annotated);
+    cases::assert_ledger_with_migration(&body, case, &name, annotated, path.to_str().unwrap());
 }
 
 #[test]
