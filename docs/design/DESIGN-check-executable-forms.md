@@ -46,8 +46,8 @@ the component file/position and public declaration spelling in the cause.
 Root declarations are not rebound to a use, except that a root-authored sync
 argument substituted into a component item currently reports errors at that
 component's root use with the consuming item's component cause location (a known
-limitation). A second component is not mistaken for the first. These diagnostic-only
-targets neither replace action trace origins nor appear in Public Kernel provenance
+limitation, tracked in #1517). A second component is not mistaken for the first.
+These diagnostic-only targets neither replace action trace origins nor appear in Public Kernel provenance
 or assurance counts.
 Ownership follows individual guards, lets, statements and ensures expanded into
 a sync action; the action as a whole is not assigned to the first component.

@@ -28,6 +28,7 @@
 | [`DESIGN-dialects.md`](design/DESIGN-dialects.md) | Implementation spec for the dialects (declaration tags, fsl-req, fsl-biz) |
 | [`DESIGN-requirements-stage.md`](design/DESIGN-requirements-stage.md) | Shared typed `stage()` resolution and lowering for business and requirements expressions |
 | [`DESIGN-collection-aggregates.md`](design/DESIGN-collection-aggregates.md) | Shared finite Binder/Aggregate IR, Set/Seq/range semantics, KPI metadata projections, and Public Kernel normalization |
+| [`DESIGN-check-executable-forms.md`](design/DESIGN-check-executable-forms.md) | Accepted #1463 check boundaries: located rejection of quantifier and relation-index forms no verify engine runs, the lexically scoped free-state-reference walker, pre-normalization aggregate validation, and component location ownership |
 | [`DESIGN-dialect-dispatch.md`](design/DESIGN-dialect-dispatch.md) | Shared-lexer dialect registry, significant-token rules, document annotations, diagnostics, and frontend contract |
 | [`DESIGN-formatter.md`](design/DESIGN-formatter.md) | Lossless token/trivia boundary, canonical formatting policy, non-mutating CLI contract, and safe refusal range |
 | [`DESIGN-migration.md`](design/DESIGN-migration.md) | Edition lint taxonomy, checked rewrite rules, explicit refusal boundaries, atomic write contract, and bulk-update procedure |
