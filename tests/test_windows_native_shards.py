@@ -22,7 +22,7 @@ CONDITION = ("(github.event_name != 'pull_request' && github.event_name != 'merg
 def _check(names, code, diagnostic=""):
     tool = "tools/check_windows_long_poles.py"
     assert (ROOT / tool).is_file(), f"missing {tool}"
-    with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+    with tempfile.TemporaryDirectory() as directory:
         listing, manifest = Path(directory) / "list.txt", Path(directory) / "names.txt"
         listing.write_text(LIST, encoding="utf-8")
         manifest.write_text(names, encoding="utf-8")
@@ -35,6 +35,18 @@ def _check(names, code, diagnostic=""):
 
 def test_checker_exact_match():
     _check(f"# long-pole names\n\n{A}\n{B}\n", 0)
+    _check(f"  # long-pole names\n\n  {A}  \n\n{B}", 0)
+
+
+def test_checker_emit_skip_args():
+    names = [line for line in (ROOT / NAMES).read_text(encoding="utf-8").splitlines() if line and not line.startswith("#")]
+    with tempfile.TemporaryDirectory() as directory:
+        manifest = Path(directory) / "names.txt"
+        manifest.write_text("  # names\n\n" + "\n\n".join(f"  {name}  " for name in names).rstrip(), encoding="utf-8")
+        result = subprocess.run([sys.executable, "tools/check_windows_long_poles.py", "--names", str(manifest),
+                                 "--emit-skip-args"], cwd=ROOT, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "".join(f"--skip\n{name}\n" for name in names), result.stdout
 
 
 def test_checker_stale_name():
@@ -69,6 +81,10 @@ def _job(text, name):
     return match[1]
 
 
+def _step(job, name):
+    return re.search(rf"^      - name: {re.escape(name)}\n(.*?)(?=^      - |\Z)", job, re.M | re.S)[1]
+
+
 def test_workflow_structure():
     text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     shards = _job(text, "rust-native-z3-windows-shards")
@@ -78,7 +94,10 @@ def test_workflow_structure():
     for job, expected in ((shards, CONDITION), (gate, f"always() && ({CONDITION})")):
         guard = re.search(r"^    if: (.*(?:\n      \S.*)*)", job, re.M)[1].removeprefix(">-")
         assert " ".join(guard.split()) == expected
-    assert 'bash tools/require-shard-success.sh "${{ needs.rust-native-z3-windows-shards.result }}"' in gate
+    assert "    timeout-minutes: 10\n" in gate
+    aggregate = re.search(r"^      - name: .+\n(.*?)(?=^      - |\Z)", gate, re.M | re.S)[1]
+    assert '        run: bash tools/require-shard-success.sh "$SHARDS_RESULT"\n' in aggregate
+    assert "        env:\n          SHARDS_RESULT: ${{ needs.rust-native-z3-windows-shards.result }}\n" in aggregate
     assert "    runs-on: ubuntu-latest\n" in gate
     for required in ("fail-fast: false", "part: [long-poles, rest]", "timeout-minutes: 90",
                      "name: native Z3 4.16 (windows-latest, ${{ matrix.part }})",
@@ -87,8 +106,13 @@ def test_workflow_structure():
     assert shards.index(f"{TESTS} -- --list") < shards.index("tools/check_windows_long_poles.py")
     assert TESTS in shards[shards.index("tools/check_windows_long_poles.py"):]
     assert "--list-output" in shards and "--names" in shards
-    assert "-- --exact" in shards and "--skip" in shards
-    assert re.search(r"\bread\b", shards) and NAMES in shards
+    poles = _step(shards, "Check live long-pole names and run both binaries")
+    rest = _step(shards, "Test pinned native solver and BMC crates except long poles")
+    for step, part in ((poles, "long-poles"), (rest, "rest")):
+        assert f"        if: matrix.part == '{part}'\n" in step
+        assert "        shell: bash\n        working-directory: rust\n" in step
+    assert 'cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -- --exact "${skips[@]}"\n' in rest
+    assert f"mapfile -t skips < <(python ../tools/check_windows_long_poles.py --names ../{NAMES} --emit-skip-args)\n" in rest
     assert "      - rust-native-z3-windows\n" in _job(text, "product-gate")
     try:
         import yaml
@@ -106,6 +130,11 @@ def test_real_names():
     source = "\n".join((ROOT / f"rust/fslc/tests/{binary}.rs").read_text(encoding="utf-8")
                        for binary in ("fsl5_glossary", "issue_1442_compose_binding_capture_matrix"))
     assert set(names) <= set(re.findall(r"^fn (\w+)\(", source, re.M)), names
+    long_poles = {ROOT / f"rust/fslc/tests/{binary}.rs" for binary in ("fsl5_glossary", "issue_1442_compose_binding_capture_matrix")}
+    for crate in ("fsl-solver-z3", "fsl-verifier", "fslc"):
+        for path in (ROOT / "rust" / crate).rglob("*.rs"):
+            if path not in long_poles:
+                assert not re.search(r"\bfn\s+(?:" + "|".join(map(re.escape, names)) + r")\s*\(", path.read_text(encoding="utf-8")), path
 
 
 if __name__ == "__main__":
