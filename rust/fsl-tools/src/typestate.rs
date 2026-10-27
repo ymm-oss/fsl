@@ -1135,17 +1135,10 @@ fn emit_typescript(
     entity: &Entity,
     actions: &[Value],
     note: &str,
+    generic: &str,
+    function_names: &BTreeMap<String, String>,
 ) -> String {
     let state_type = format!("{}State", entity.type_name);
-    let model_type_names: BTreeSet<_> = model
-        .types
-        .keys()
-        .map(|name| fsl_core::unmapped_public_spelling(name))
-        .collect();
-    let mut generic = "S".to_owned();
-    while model_type_names.contains(&generic) {
-        generic.push('_');
-    }
     let mut lines = vec![
         format!(
             "// Typestate skeleton for `{}` from spec `{}`.",
@@ -1181,8 +1174,6 @@ fn emit_typescript(
         String::new(),
     ]);
 
-    let mut function_names = BTreeMap::new();
-    let mut used_function_names = BTreeSet::new();
     for action in actions {
         let verdict = action["verdict"].as_str().unwrap_or_default();
         if verdict != "derivable" && verdict != "branching" {
@@ -1237,13 +1228,11 @@ fn emit_typescript(
             );
         }
         let action_name = action["action"].as_str().unwrap_or_default();
-        let function_name = function_names
-            .entry(action_name)
-            .or_insert_with(|| unique_ts_identifier(action_name, &mut used_function_names));
+        let function_name = &function_names[action_name];
         let state_preserving = action["state_preserving"] == true;
         let mut used_params = BTreeSet::from(["self".to_owned()]);
         if state_preserving {
-            used_params.insert(generic.clone());
+            used_params.insert(generic.to_owned());
         }
         let params = model
             .actions
@@ -1391,7 +1380,17 @@ fn discover_entities(model: &PublicKernelView) -> Vec<Entity> {
 #[allow(clippy::too_many_lines)]
 pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
     let model = adapt_public_kernel(kernel)?;
-    let mut report_entities = Vec::new();
+    let mut used_function_names = BTreeSet::new();
+    let function_names: BTreeMap<_, _> = model
+        .actions
+        .iter()
+        .map(|action| {
+            let name = fsl_core::unmapped_public_spelling(&action.name);
+            let function_name = unique_ts_identifier(&name, &mut used_function_names);
+            (name, function_name)
+        })
+        .collect();
+    let mut classified_entities = Vec::new();
     for entity in discover_entities(&model) {
         let (actions, key, note) = if entity.kind == "enum" {
             let location = entity.field.as_deref().map_or_else(
@@ -1459,6 +1458,27 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
         if actions.is_empty() {
             continue;
         }
+        classified_entities.push((entity, actions, key, note));
+    }
+
+    // Reserve every type declared across the emitted skeletons, not just the
+    // current entity's interface, before choosing their shared phantom generic.
+    let mut type_names: BTreeSet<_> = model
+        .types
+        .keys()
+        .map(|name| fsl_core::unmapped_public_spelling(name))
+        .collect();
+    for (entity, _, _, _) in &classified_entities {
+        type_names.insert(entity.type_name.clone());
+        type_names.insert(format!("{}State", entity.type_name));
+    }
+    let mut generic = "S".to_owned();
+    while type_names.contains(&generic) {
+        generic.push('_');
+    }
+
+    let mut report_entities = Vec::new();
+    for (entity, actions, key, note) in classified_entities {
         let derivable = actions
             .iter()
             .filter(|action| action["verdict"] == "derivable")
@@ -1478,7 +1498,8 @@ pub fn analyze_typestate(kernel: &Value) -> Result<Value, String> {
         } else {
             "partial"
         };
-        let typescript = emit_typescript(&model, &entity, &actions, &note);
+        let typescript =
+            emit_typescript(&model, &entity, &actions, &note, &generic, &function_names);
         report_entities.push(json!({
             "entity": key,
             "kind": entity.kind,
