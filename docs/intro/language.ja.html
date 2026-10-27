@@ -487,6 +487,12 @@ step は、上書きなしと同じ <code>kind:"forbidden"</code> エラーで�
 }
 </code></pre>
 <p><code>~&gt;</code> は <strong>leadsTo ブロック専用</strong>です — 一般の式では使えません。
+<code>helpful action(args...)</code> の各引数は、プロパティの束縛の scope で、対応する
+action パラメータの型として検査します。従来は未検査だった位置であり、型の誤り、
+未定義の名前、禁止された pattern の shadow は <code>check</code> で拒みます。正規化される
+<code>count</code>/<code>sum</code> は、有効な空の集約も含めて単体と同じ受理を保ちます。compose の
+接頭辞付けで元の global 名との衝突の拒否を隠したり、別の宣言により拒否を増やしたり
+することはありません。
 <code>within K</code> は応答に対する有界の締め切りで、<code>K</code> は非負の定数式でなければなりません。
 これは BMC によって検査され、ランク付き induction 証明では検査されません。
 <code>decreases</code> は省略可能で、整数値の式でなければなりません。

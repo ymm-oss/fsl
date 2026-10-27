@@ -506,6 +506,12 @@ models, not quantified as algebraic axioms.</p>
 }
 </code></pre>
 <p><code>~&gt;</code> is <strong>exclusive to leadsTo blocks</strong> — it cannot be used in general expressions.
+Each <code>helpful action(args...)</code> argument is checked against its action parameter
+type in the property's binder scope. This closes a previously unchecked position:
+ill-typed arguments, unknown names and forbidden pattern shadowing now fail <code>check</code>.
+Normalized <code>count</code>/<code>sum</code> patterns retain their standalone acceptance, including
+valid empty aggregates; composition cannot hide an original global-name refusal
+by prefixing, nor introduce one from a foreign declaration.
 <code>within K</code> is a bounded deadline on a response; <code>K</code> must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 <code>decreases</code> is optional and must be an integer-valued expression. Under
