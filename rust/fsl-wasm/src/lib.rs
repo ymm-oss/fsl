@@ -236,8 +236,12 @@ async fn check_with<S: fsl_solver::SmtSolver>(
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
+    let edition = match admit_edition(request, solver_version) {
+        Ok(edition) => edition,
+        Err(refusal) => return refusal,
+    };
     let output = check_kernel(request, solver_version, new_solver).await;
-    apply_edition(request, solver_version, output)
+    edition.finish((output, 0)).0
 }
 
 async fn check_kernel<S: fsl_solver::SmtSolver>(
@@ -291,12 +295,14 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
     fold_governance(request, solver_version, output).await
 }
 
-/// The native edition step also reads headerless documents as current. It owns
-/// implicit-initial-value warnings, so they are appended exactly once here.
-fn apply_edition(request: &Request, solver_version: &str, output: Value) -> Value {
+/// Classify the root before consumption and retain its warning delivery until
+/// the model and governance result has been produced.
+fn admit_edition(
+    request: &Request,
+    solver_version: &str,
+) -> Result<fslc_rust::migration::SourceEdition, Value> {
     let options = request.parse_options();
-    fslc_rust::migration::apply_edition(
-        (output, 0),
+    fslc_rust::migration::admit_source(
         &request.source,
         &request.source_file,
         None,
@@ -304,7 +310,7 @@ fn apply_edition(request: &Request, solver_version: &str, output: Value) -> Valu
         &|| envelope(solver_version),
         true,
     )
-    .0
+    .map_err(|(refusal, _)| refusal)
 }
 
 /// Evaluate a governance document's preservations and fold them into a
@@ -486,9 +492,18 @@ async fn verify_with<S: fsl_solver::SmtSolver>(
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
 ) -> Value {
-    let output = verify_kernel(request, solver_version, new_solver).await;
+    let deadlock =
+        match fslc_rust::verification_output::DeadlockMode::parse(&request.options.deadlock) {
+            Ok(deadlock) => deadlock,
+            Err(message) => return error(solver_version, "usage", message),
+        };
+    let edition = match admit_edition(request, solver_version) {
+        Ok(edition) => edition,
+        Err(refusal) => return refusal,
+    };
+    let output = verify_kernel(request, solver_version, new_solver, deadlock).await;
     let output = fold_governance(request, solver_version, output).await;
-    apply_edition(request, solver_version, output)
+    edition.finish((output, 0)).0
 }
 
 #[allow(clippy::too_many_lines)]
@@ -496,12 +511,13 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     request: &Request,
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
+    deadlock: fslc_rust::verification_output::DeadlockMode,
 ) -> Value {
     let started = performance_now();
-    // This async pipeline retains the pre-solver order established in #1163:
-    // surface parse and Agent rejection, specialized validation, then a
-    // deferred Kernel load whose traces and `implements` precede request
-    // options. Native baselines now delegate to `run_verify_cli_from_source`
+    // Request options and edition admission are checked at entry. Preserve the
+    // remaining frontend order: surface parse and Agent rejection, specialized
+    // validation, then a deferred Kernel load whose traces and `implements`
+    // precede model errors. Native baselines delegate to `run_verify_cli_from_source`
     // (#1417); the Worker does not share that native orchestration.
     match fsl_syntax::parse_document_with(
         fsl_syntax::SourceFile::new(&request.source),
@@ -573,11 +589,6 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
         }
         Err(_) => None,
     };
-    let deadlock =
-        match fslc_rust::verification_output::DeadlockMode::parse(&request.options.deadlock) {
-            Ok(deadlock) => deadlock,
-            Err(message) => return error(solver_version, "usage", message),
-        };
     let (model, compose_warnings) = match loaded {
         Ok(built) => built,
         Err(error) => return error,
