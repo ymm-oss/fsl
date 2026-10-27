@@ -130,6 +130,12 @@ compose OrderSystem {
     capture inventories do not change preorder diagnostic selection. Late
     component errors use the checked model's use-site wrapper and retain the
     inner cause and the component's file, line and column.
+    Helpful-action arguments also use the existing expression checker with
+    the action parameter's expected type and the property's binder scope.
+    This is a breaking closure of a previously unchecked position, not a new
+    normalization rule. Original-source aggregate pattern decisions survive
+    normalization as check-only data: a surviving pattern retains its original
+    refusal, while an erased empty-domain pattern does not invent one.
 
     **Migration contract (#702, limited to original component name resolution):**
 

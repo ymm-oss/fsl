@@ -493,6 +493,12 @@ leadsTo <Name> {
 ```
 
 `~>` is **exclusive to leadsTo blocks** — it cannot be used in general expressions.
+Each `helpful action(args...)` argument is checked against its action parameter
+type in the property's binder scope. This closes a previously unchecked position:
+ill-typed arguments, unknown names and forbidden pattern shadowing now fail `check`.
+Normalized `count`/`sum` patterns retain their standalone acceptance, including
+valid empty aggregates; composition cannot hide an original global-name refusal
+by prefixing, nor introduce one from a foreign declaration.
 `within K` is a bounded deadline on a response; `K` must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under

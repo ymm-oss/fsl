@@ -1211,6 +1211,11 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    does **not** create fairness: the matching action must still be declared
    `fair action` and be enabled whenever the obligation is pending. Without
    `decreases`, leadsTo remains bounded to `--depth`.
+   Helpful argument expressions are checked against action parameter types in
+   the property's binder scope; previously unchecked type/name/pattern errors
+   now reject at `check`. Normalized Count/Sum retain standalone acceptance
+   (including valid empty domains), and compose preserves original-global
+   refusals without adding foreign-name refusals.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
      Nesting it inside the forall body is a **parse error** — `fslc`

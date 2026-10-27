@@ -115,6 +115,13 @@ pub enum ParamDef {
 }
 
 impl ParamDef {
+    pub(crate) fn ty(&self) -> TypeRef {
+        match self {
+            Self::Typed { ty, .. } => ty.clone(),
+            Self::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+        }
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         match self {

@@ -10,7 +10,7 @@ use fsl_syntax::{
 };
 
 use crate::recursion;
-use crate::{ActionGuard, KernelModel, ParamDef, TypeDef, TypeRef};
+use crate::{ActionGuard, KernelModel, TypeDef, TypeRef};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TypecheckError {
@@ -1460,6 +1460,9 @@ fn validate_leadsto_expression_types(
             ))
             .with_span(helper.span));
         }
+        for (argument, param) in helper.args.iter().zip(&action.params) {
+            validate_expression(argument, &local, model, helper.span, Some(&param.ty()))?;
+        }
     }
     Ok(())
 }
@@ -1470,14 +1473,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
         let checked = (|| {
             let mut local = env.clone();
             for param in &action.params {
-                match param {
-                    ParamDef::Typed { name, ty } => {
-                        local.insert(name.clone(), ty.clone());
-                    }
-                    ParamDef::Range { name, lo, hi } => {
-                        local.insert(name.clone(), TypeRef::Range(*lo, *hi));
-                    }
-                }
+                local.insert(param.name().to_owned(), param.ty());
             }
             for (index, guard) in action.guards.iter().enumerate() {
                 let target = crate::action_guard_target(&action.name, index);
