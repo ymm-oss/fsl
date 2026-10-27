@@ -36,6 +36,9 @@ pub fn diagnostics(
 }
 
 /// Run frontend diagnostics and retain the checked model for analysis consumers.
+///
+/// # Panics
+/// Panics if the shared edition classifier violates its diagnostic contract.
 #[must_use]
 pub fn diagnostics_with_model(
     source: &str,
@@ -43,8 +46,70 @@ pub fn diagnostics_with_model(
     resolver: &dyn fsl_core::FileResolver,
     options: &fsl_syntax::ParseOptions,
 ) -> (Vec<SourceDiagnostic>, Option<fsl_core::KernelModel>) {
+    let edition = match crate::migration::admit_source(
+        source,
+        source_file,
+        None,
+        options,
+        &serde_json::Map::new,
+        false,
+    ) {
+        Ok(edition) => edition,
+        Err((refusal, _)) => {
+            let diagnostics = if refusal["kind"] == "parse" {
+                let span = match fsl_syntax::document_edition(
+                    source,
+                    None,
+                    fsl_syntax::Edition::Fsl4,
+                    options,
+                ) {
+                    Err(error) => error.span,
+                    Ok(edition) => {
+                        fsl_syntax::parse_surface_document_with(source, options)
+                            .expect_err("edition parse refusal")
+                            .for_edition(source, edition, options)
+                            .span
+                    }
+                };
+                vec![message_diagnostic(
+                    "parse",
+                    refusal["diagnostic_code"].as_str().expect("parse code"),
+                    refusal["message"]
+                        .as_str()
+                        .expect("parse message")
+                        .to_owned(),
+                    span,
+                )]
+            } else {
+                refusal["findings"]
+                    .as_array()
+                    .expect("edition findings")
+                    .iter()
+                    .map(|finding| edition_diagnostic(source, finding))
+                    .collect()
+            };
+            return (diagnostics, None);
+        }
+    };
+    let (mut diagnostics, model) =
+        diagnostics_without_edition(source, source_file, resolver, *options);
+    diagnostics.extend(
+        edition
+            .warnings()
+            .iter()
+            .map(|finding| edition_diagnostic(source, finding)),
+    );
+    (diagnostics, model)
+}
+
+fn diagnostics_without_edition(
+    source: &str,
+    source_file: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    options: fsl_syntax::ParseOptions,
+) -> (Vec<SourceDiagnostic>, Option<fsl_core::KernelModel>) {
     if crate::frontend_output::is_ai_project(source) {
-        return (migration_diagnostics(source, *options), None);
+        return (migration_diagnostics(source, options), None);
     }
     // Standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md):
     // surface their own parse errors, never FSL-DIALECT-UNKNOWN, and no kernel.
@@ -52,57 +117,49 @@ pub fn diagnostics_with_model(
         return match fsl_syntax::parse_causal(source) {
             Ok(_) => (Vec::new(), None),
             Err(error) => (
-                vec![SourceDiagnostic {
-                    kind: "parse",
-                    code: error.code().to_owned(),
-                    message: error.to_string(),
-                    span: error.span,
-                    located: true,
-                    hint: None,
-                    quick_fix: None,
-                    class: DiagnosticClass::Message,
-                }],
+                vec![message_diagnostic(
+                    "parse",
+                    error.code(),
+                    error.to_string(),
+                    error.span,
+                )],
                 None,
             ),
         };
     }
-    let parsed = match fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), options)
-    {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            return (
-                vec![SourceDiagnostic {
-                    kind: "parse",
-                    code: error.code().to_owned(),
-                    message: error.to_string(),
-                    span: error.span,
-                    located: true,
-                    hint: None,
-                    quick_fix: None,
-                    class: DiagnosticClass::Message,
-                }],
-                None,
-            );
-        }
-    };
+    let parsed =
+        match fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), &options) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                return (
+                    vec![message_diagnostic(
+                        "parse",
+                        error.code(),
+                        error.to_string(),
+                        error.span,
+                    )],
+                    None,
+                );
+            }
+        };
     if matches!(
         parsed.surface,
         SurfaceDocument::Agent(_) | SurfaceDocument::Refinement(_)
     ) {
-        return (migration_diagnostics(source, *options), None);
+        return (migration_diagnostics(source, options), None);
     }
     let kernel = match fsl_core::parse_kernel_source_with_file_with_options(
         source,
         resolver,
         source_file,
-        options,
+        &options,
     ) {
         Ok(kernel) => kernel,
         Err(error) => return (vec![core_diagnostic(source, &error)], None),
     };
     match fsl_core::build_model(kernel) {
-        Ok(model) => (migration_diagnostics(source, *options), Some(model)),
-        Err(error) => (vec![model_diagnostic(source, &error, *options)], None),
+        Ok(model) => (migration_diagnostics(source, options), Some(model)),
+        Err(error) => (vec![model_diagnostic(source, &error, options)], None),
     }
 }
 
@@ -301,37 +358,61 @@ fn diagnostic_span_from_message(
         })
 }
 
+fn message_diagnostic(
+    kind: &'static str,
+    code: &str,
+    message: String,
+    span: Span,
+) -> SourceDiagnostic {
+    SourceDiagnostic {
+        kind,
+        code: code.to_owned(),
+        message,
+        span,
+        located: true,
+        hint: None,
+        quick_fix: None,
+        class: DiagnosticClass::Message,
+    }
+}
+
+fn edition_diagnostic(source: &str, finding: &serde_json::Value) -> SourceDiagnostic {
+    let loc = &finding["loc"];
+    let position = |line: &str, column: &str| {
+        let number = |key: &str| {
+            u32::try_from(loc[key].as_u64().expect("edition location"))
+                .expect("source position fits u32")
+        };
+        point_span(source, number(line), number(column)).start
+    };
+    message_diagnostic(
+        "migration",
+        finding["code"].as_str().expect("edition code"),
+        finding["message"]
+            .as_str()
+            .expect("edition message")
+            .to_owned(),
+        Span {
+            start: position("line", "column"),
+            end: position("end_line", "end_column"),
+        },
+    )
+}
+
 fn migration_diagnostics(source: &str, options: fsl_syntax::ParseOptions) -> Vec<SourceDiagnostic> {
     fsl_syntax::canonical_rewrites_with(source, &options).map_or_else(
         |_| Vec::new(),
         |rewrites| {
             rewrites
                 .into_iter()
+                .filter(|rewrite| rewrite.kind == CanonicalRewriteKind::LogicalOperator)
                 .map(|rewrite| {
-                    let (code, message) = match rewrite.kind {
-                        CanonicalRewriteKind::DomainEnum => (
-                            "deprecated_domain_enum_union",
-                            "legacy domain enum union syntax is deprecated",
-                        ),
-                        CanonicalRewriteKind::LogicalOperator => (
-                            "legacy_logical_operator",
-                            "legacy logical operator spelling is non-canonical",
-                        ),
-                        CanonicalRewriteKind::Quantifier => (
-                            "legacy_quantifier_colon",
-                            "legacy colon quantifier syntax is deprecated",
-                        ),
-                    };
-                    SourceDiagnostic {
-                        kind: "migration",
-                        code: code.to_owned(),
-                        message: message.to_owned(),
-                        span: rewrite.span,
-                        located: true,
-                        hint: None,
-                        quick_fix: None,
-                        class: DiagnosticClass::Message,
-                    }
+                    message_diagnostic(
+                        "migration",
+                        "legacy_logical_operator",
+                        "legacy logical operator spelling is non-canonical".to_owned(),
+                        rewrite.span,
+                    )
                 })
                 .collect()
         },

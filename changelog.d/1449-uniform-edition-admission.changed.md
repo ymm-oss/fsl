@@ -9,3 +9,5 @@ warnings on stderr without changing their output schemas.
 Worker check and verify reject unsupported source editions before model or solver
 consumption, retain verification-option error priority, and deliver admitted
 warnings once after governance.
+Editor diagnostics reject unsupported editions before model or analysis work and
+retain migration finding ranges for UTF-16 publication.
