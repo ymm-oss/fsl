@@ -29,16 +29,17 @@ state {
 - Allowed positions: **the type of a state variable only**. It cannot be used in
   a struct field (added to BUG11 checking), a Map value, a Set element, or a Seq
   element — rejected at the `check` stage with `kind: "type"` + a hint.
-- Literals: `Seq {}` / `Seq { 1, 2 }` (number of elements ≤ N; exceeding it is a
-  type error at check time). As with Set, it can only be written on the
-  right-hand side of an assignment.
+- Literals: `Seq {}` / `Seq { 1, 2 }` retain all their elements in expression
+  temporaries, including comparisons. Capacity N constrains state assignments,
+  not literal size at check time; checked bounds and unrepresentable frames are
+  handled as described in §4.
 
 ## 2. Operations (all pure, the same "reassignment" idiom as Set)
 
 | Expression | Meaning | Partiality |
 |---|---|---|
 | `q.size()` | current length | none |
-| `q.push(e)` | a new sequence with e appended at the end | **type_bound** when full (§4) |
+| `q.push(e)` | a new sequence retaining e at the end, even when q is full | none for the temporary; **type_bound** if assigned beyond state capacity (§4) |
 | `q.pop()` | a new sequence with the head removed (FIFO dequeue) | **partial_op** when empty (§5) |
 | `q.head()` | the head element | **partial_op** when empty (§5) |
 | `q.at(i)` | the i-th element (0-based) | **partial_op** when out of range (§5) |
@@ -52,6 +53,11 @@ state {
 - `q = q.push(a).push(b)` within a single action is legal as a method chain.
 
 ## 3. Lowering
+
+**Historical lowering:** this section records the original v1.1 solver/Python
+representation, not the native verifier's current slot layout. Native expression
+temporaries retain all live elements even when their slot count exceeds N;
+state bounds use the declared N independently of that temporary storage.
 
 Physical variables (the existing `__` split scheme):
 
@@ -79,11 +85,25 @@ Tail values beyond len are **don't-care** (not constrained, not read, not displa
 ∧ ∀i ∈ [0, N-1]: i < q__len => (lo <= q__data[i] <= hi)   // when T is a bounded type
 ```
 
-- A `push` when full makes len = N+1 and violates `_bounds_q` → the usual
-  `violated` / `violation_kind: "type_bound"`. The repair hint is obvious from
-  the bindings and last_action (add a requires `q.size() < N`). This is identical
-  to the existing design "do not assume bounds, check them" (the design decision in §3).
+- A `push` when full retains the appended element in its temporary with len = N+1.
+  With state bounds checked, assigning that result violates `_bounds_q` → `violated` /
+  `violation_kind: "type_bound"`; the declared N, not the temporary's physical
+  slot count, determines the bound. The repair is to guard the assignment with
+  `q.size() < N`, following "do not assume bounds, check them" (§3).
+- If a Seq's state bound is not selected, symbolic verification fails closed
+  before evaluating a frame whose length exceeds N, rather than reading missing
+  elements. Action-based trace reconstruction does not cover init: symbolic
+  projection of an unrepresentable initial frame fails closed when that path is
+  used, while default bmc/induction can instead report `type_bound` from the
+  concrete pre-pass at depth at least 1. Explicit retains the concrete initial
+  elements and reports the initial bound violation at step 0; the pre-pass's
+  step-1 label is pre-existing. See the engine/path table in
+  [the Kernel contract](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget).
 - It also enters the step premise of induction like the other `_bounds_*` (to prevent ghost CTIs).
+  A ranked `leadsTo` query does not assume successor bounds merely because a
+  preceding k-induction proof succeeded; any missing slots in its projected
+  SAT model instead cause a fail-closed error, just as for non-bound invariant
+  and `trans` CTIs. Bound CTIs still retain their actual attempted values.
 
 ## 5. Implicit checking of partial operations (`partial_op` — a new violation_kind)
 
@@ -169,8 +189,10 @@ legal as a state variable:
    (isomorphic to the struct == regression).
 7. **contains**.
 8. **JSON display**: the state is an array, and internal names (`__data`/`__len`) do not appear.
-9. **check rejection**: a Seq in a struct field, `Map<K, Seq<...>>`, `Map<K, Set<K>>`,
-   and a literal with more than N elements.
+9. **type boundaries**: check rejects a Seq in a struct field,
+   `Map<K, Seq<...>>`, and `Map<K, Set<K>>`. A literal with more than N elements
+   still checks and retains every element as a temporary; a checked action
+   assignment reports `type_bound` rather than a check-time literal-size error.
 10. **induction**: the FIFO spec becomes proved (confirming that _bounds_q enters the premise).
 11. **scenarios**: cover_* and reach_* are generated for the FIFO spec.
 

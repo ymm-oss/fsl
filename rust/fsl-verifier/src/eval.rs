@@ -1412,7 +1412,7 @@ fn eval_method<S: SmtSolver>(
             match (name, values.as_slice()) {
                 ("push", [value]) => {
                     let value = coerce(solver, model, value.clone(), element_ty)?;
-                    let slots = slots
+                    let mut slots: Vec<_> = slots
                         .iter()
                         .enumerate()
                         .map(|(index, old)| {
@@ -1421,6 +1421,9 @@ fn eval_method<S: SmtSolver>(
                             ite_value(solver, model, &matches, &value, old)
                         })
                         .collect::<Result<_, VerifyError>>()?;
+                    // A temporary may grow beyond the declared state capacity.
+                    // When len < the old slot count, this extra slot is not live.
+                    slots.push(value);
                     Ok(SymbolicValue::Seq {
                         ty,
                         slots,

@@ -696,3 +696,272 @@ spec NoModel {
         assert!(error.is_solver_failure(), "read {read} of {reads}: {error}");
     }
 }
+
+/// #1519 mutation detectors for p2.bmc.unchecked-sequence-overflow,
+/// p2.trace.missing-sequence-slots and p2.trace.action-choice-decoding.
+/// Use the library, not the CLI's concrete pre-pass. Expected sequences follow
+/// append semantics independently: capacity bounds state storage, not the value
+/// of a failed assignment. Both rejecting and within-capacity controls matter.
+mod sequence_capacity {
+    use super::*;
+    use fsl_core::{TraceAction, TraceChange, TraceStep};
+
+    fn parse(source: &str) -> fsl_core::KernelModel {
+        build_model(parse_kernel_source(source, &FsResolver::new(".")).expect("parse Seq fixture"))
+            .expect("build Seq fixture")
+    }
+
+    fn assert_overflow_error(error: &fsl_verifier::VerifyError) {
+        assert_eq!(error.to_string(), "model sequence length exceeds capacity");
+        assert!(!error.is_solver_failure(), "{error}");
+    }
+
+    fn xs(values: &[i64]) -> BTreeMap<String, FslValue> {
+        BTreeMap::from([(
+            "xs".to_owned(),
+            FslValue::Seq(values.iter().copied().map(FslValue::Int).collect()),
+        )])
+    }
+
+    fn action(name: &str, params: BTreeMap<String, FslValue>) -> TraceAction {
+        TraceAction {
+            name: name.to_owned(),
+            params,
+        }
+    }
+
+    // Construct complete expected traces from literal states/actions, including
+    // changes and absence of an initial action. No observed fields are excluded.
+    fn trace(states: &[BTreeMap<String, FslValue>], actions: &[TraceAction]) -> Vec<TraceStep> {
+        assert_eq!(states.len(), actions.len() + 1);
+        states
+            .iter()
+            .enumerate()
+            .map(|(step, state)| TraceStep {
+                step,
+                state: state.clone(),
+                action: step.checked_sub(1).map(|index| actions[index].clone()),
+                changes: if step == 0 {
+                    BTreeMap::new()
+                } else {
+                    state
+                        .iter()
+                        .filter(|(name, value)| states[step - 1][*name] != **value)
+                        .map(|(name, value)| {
+                            (
+                                name.clone(),
+                                TraceChange {
+                                    from: states[step - 1][name].clone(),
+                                    to: value.clone(),
+                                },
+                            )
+                        })
+                        .collect()
+                },
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unchecked_overflow_is_a_semantic_error_for_both_property_polarities() {
+        // R0/R1/C1: neither a true invariant nor a false reachable may consume
+        // a fixed-capacity frame whose logical length exceeds its slots.
+        for (capacity, initial, property, depth) in [
+            (0, "", "invariant P { xs.size() <= 1 }", 1),
+            (1, "0", "invariant P { xs.size() == 1 or xs.at(1) == 1 }", 1),
+            (
+                1,
+                "0",
+                "reachable R { xs.size() == 2 and xs.at(1) == 0 }",
+                1,
+            ),
+            (1, "", "invariant P { xs.size() <= 1 or xs.at(1) == 1 }", 2),
+        ] {
+            let model = parse(&format!(
+                "spec UncheckedSeq {{ type K = 0..1
+                 state {{ xs: Seq<K, {capacity}> }}
+                 init {{ xs = Seq {{ {initial} }} }}
+                 action append() {{ xs = xs.push(1) }}
+                 {property} }}"
+            ));
+            let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+            let error = block_on(fsl_verifier::verify_bounded_selected(
+                &model,
+                &mut solver,
+                depth,
+                Some(&BTreeSet::new()),
+            ))
+            .expect_err("an unselected Seq bound must still reject a missing suffix");
+            assert_overflow_error(&error);
+        }
+    }
+
+    #[test]
+    fn guarded_unchecked_sequence_can_be_empty_partial_and_exactly_full() {
+        // R2/R3/R4: using ==, < or >= instead of > must not reject any of
+        // lengths 0, 1, 2 at capacity 2. The guard prevents a third append.
+        let model = parse(
+            "spec GuardedSeq { type K = 0..1
+             state { xs: Seq<K, 2> }
+             init { xs = Seq {} }
+             action append() { requires xs.size() < 2 xs = xs.push(1) }
+             invariant P { xs.size() <= 2 }
+             reachable Full { xs.size() == 2 }
+            }",
+        );
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+        let result = block_on(fsl_verifier::verify_bounded_selected(
+            &model,
+            &mut solver,
+            3,
+            Some(&BTreeSet::new()),
+        ))
+        .expect("all reachable lengths fit the unchecked Seq frame");
+        assert!(result.violation.is_none(), "{result:?}");
+        assert!(result.leadsto_violation.is_none(), "{result:?}");
+        let reached = result.reachables["Full"].as_ref().expect("reach capacity");
+        assert_eq!(reached.step, 2);
+        assert_eq!(
+            reached.trace,
+            trace(
+                &[xs(&[]), xs(&[1]), xs(&[1, 1])],
+                &[
+                    action("append", BTreeMap::new()),
+                    action("append", BTreeMap::new()),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn checked_overflow_projects_the_selected_actions_actual_attempted_sequence() {
+        // H0/H2/H3/T4/T5/A1: the second action and its parameter determine
+        // the lost suffix, not the first instance or a padded frame value.
+        for (capacity, initial, actions, depth, states, expected_actions) in [
+            (
+                0,
+                "",
+                "action append(v: K) { requires v == 1 xs = xs.push(v) }",
+                1,
+                vec![xs(&[]), xs(&[1])],
+                vec![action(
+                    "append",
+                    BTreeMap::from([("v".to_owned(), FslValue::Int(1))]),
+                )],
+            ),
+            (
+                1,
+                "",
+                "action seed() { requires xs.size() == 0 xs = xs.push(0) }
+                 action append(v: K) { requires xs.size() == 1 and v == 1 xs = xs.push(v) }",
+                2,
+                vec![xs(&[]), xs(&[0]), xs(&[0, 1])],
+                vec![
+                    action("seed", BTreeMap::new()),
+                    action(
+                        "append",
+                        BTreeMap::from([("v".to_owned(), FslValue::Int(1))]),
+                    ),
+                ],
+            ),
+        ] {
+            let model = parse(&format!(
+                "spec CheckedSeq {{ type K = 0..1
+                 state {{ xs: Seq<K, {capacity}> }}
+                 init {{ xs = Seq {{ {initial} }} }} {actions} }}"
+            ));
+            let expected = trace(&states, &expected_actions);
+            let selected = BTreeSet::from(["_bounds_xs".to_owned()]);
+            for bounds in [None, Some(&selected)] {
+                let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+                let result = block_on(fsl_verifier::verify_bounded_selected(
+                    &model,
+                    &mut solver,
+                    depth,
+                    bounds,
+                ))
+                .expect("a checked overflow is a type-bound witness, not a projection error");
+                let violation = result
+                    .violation
+                    .expect("reject the failed state assignment");
+                assert_eq!(
+                    violation,
+                    fsl_verifier::BmcViolation {
+                        kind: "type_bound".to_owned(),
+                        name: "_bounds_xs".to_owned(),
+                        step: depth,
+                        last_action: Some("append".to_owned()),
+                        trace: expected.clone(),
+                        leads_to: None,
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn induction_non_bound_cti_with_missing_suffix_fails_closed() {
+        // Plan A: depth-one BMC passes ([] -> [1]), but induction
+        // also considers [0] -> [0,1]. Its non-bound CTI must not read the
+        // missing at(1) slot as 0. Exercise invariant and transition SAT arms.
+        // This is not an H0 detector: H0 fails earlier while projecting the
+        // bound CTI. The checked-overflow test above detects that mutation.
+        for property in ["invariant", "trans"] {
+            let model = parse(&format!(
+                "spec InductionOverflow {{ type K = 0..1
+                 state {{ xs: Seq<K, 1> }} init {{ xs = Seq {{}} }}
+                 action append() {{ xs = xs.push(1) }}
+                 {property} P {{ xs.size() <= 1 or xs.at(1) == 1 }} }}"
+            ));
+            let mut base_solver = fsl_solver_z3::Z3Solver::new().expect("create base solver");
+            let base = block_on(fsl_verifier::verify_bounded(&model, &mut base_solver, 1))
+                .expect("the reachable depth-one base fits capacity");
+            assert!(base.violation.is_none(), "{base:?}");
+            let mut solver = fsl_solver_z3::Z3Solver::new().expect("create induction solver");
+            let error = block_on(fsl_verifier::prove_induction(&model, &mut solver, 1))
+                .expect_err("a non-bound CTI cannot use a missing Seq suffix");
+            assert_overflow_error(&error);
+        }
+    }
+
+    #[test]
+    fn induction_with_a_representable_full_sequence_keeps_the_real_cti() {
+        // H1/H4: true or >= must not classify a representable CTI as missing.
+        // The CTI is unreachable from init (go=false); it is a valid induction
+        // step with go=true, [] -> [1], violating P without exceeding capacity.
+        let model = parse(
+            "spec RepresentableCti { type K = 0..1
+             state { xs: Seq<K, 1>, go: Bool }
+             init { xs = Seq {} go = false }
+             action append() { requires go and xs.size() == 0 xs = xs.push(1) }
+             action idle() { requires not go }
+             invariant P { xs.size() == 0 }
+            }",
+        );
+        let mut base_solver = fsl_solver_z3::Z3Solver::new().expect("create base solver");
+        let base = block_on(fsl_verifier::verify_bounded(&model, &mut base_solver, 1))
+            .expect("the initialized system stutters");
+        assert!(base.violation.is_none(), "{base:?}");
+        let mut solver = fsl_solver_z3::Z3Solver::new().expect("create induction solver");
+        let result = block_on(fsl_verifier::prove_induction(&model, &mut solver, 1))
+            .expect("an in-capacity induction CTI must remain reportable");
+        let states = [xs(&[]), xs(&[1])]
+            .map(|mut state| {
+                state.insert("go".to_owned(), FslValue::Bool(true));
+                state
+            })
+            .to_vec();
+        assert_eq!(
+            result,
+            fsl_verifier::InductionResult {
+                k_used: BTreeMap::from([("_bounds_xs".to_owned(), 1)]),
+                cti: Some(fsl_verifier::InductionCti {
+                    kind: "invariant".to_owned(),
+                    name: "P".to_owned(),
+                    k: 1,
+                    trace: trace(&states, &[action("append", BTreeMap::new())]),
+                }),
+            }
+        );
+    }
+}

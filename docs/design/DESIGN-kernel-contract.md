@@ -159,17 +159,43 @@ value and so a minor schema version.
 Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free
 concrete BFS — `fsl_runtime::find_boundary_violation` — over exactly the
 `Monitor` semantics above, looking only for a `partial_op` or `type_bound`
-outcome. This exists because one such outcome cannot be represented by the
-bounded symbolic value at all: a `push` past a `Seq<T, N>`'s declared capacity
-increments the symbolic length without writing a slot
-(`rust/fsl-verifier/src/eval.rs`), so a state that reaches `len > slots.len()`
-fails closed the moment anything tries to render it —
-`rust/fsl-verifier/src/value.rs`'s `project_value` returns "model sequence
-length exceeds capacity" — rather than reporting the concrete, replayable
-`violated`/`type_bound` evidence the concrete Monitor can give directly. The
-pre-pass runs only when no `--property`/`--exclude-property _bounds_*`
-narrows the request (`selected_implicit_bounds` returns `None`); a narrowed
-request skips it and goes straight to the symbolic engine.
+outcome, supplying concrete, replayable `violated`/`type_bound` evidence for
+state assignments beyond a sequence's declared capacity. Symbolic `push`
+temporaries retain every live element even past `Seq<T, N>`'s capacity; the
+state type boundary checks `len <= N`, independently of temporary storage.
+Symbolic state frames remain bounded to N slots. When a sequence's implicit
+bound is not checked, any reachable frame with `len > N` makes the symbolic
+search fail closed with a `semantics` error, "model sequence length exceeds
+capacity", before evaluating properties or actions on its incomplete data.
+It does not silently assume that bound to discard the overflowing path, nor
+use a reconstructed trace to justify a verdict on missing elements.
+This guard is deliberately more conservative than the former render-time
+failure: it can reject a selected run even when its property does not read the
+Seq, or after a reachable target was already witnessed, if a later explored
+frame overflows.
+
+The pre-pass runs when `selected_implicit_bounds` returns `None`. The public
+CLI's `--property` can select a user property or an implicit bound and produce a
+narrowed set, skipping the pre-pass. Internally, `checked_bounds: Some(...)`
+can likewise omit bounds; the symbolic guard applies to each omitted Seq bound.
+This is not a public `--exclude-property _bounds_*` route: the current CLI
+rejects implicit-bound names in `--exclude-property` as `no such property`.
+
+The induction engine also refuses to display an invariant, `trans`, or ranked
+`leadsTo` CTI if any state in its SAT model has missing sequence slots, returning
+the same `semantics` error rather than reconstructing a trace for a predicate
+evaluated on incomplete data. Bound-property CTIs retain supported action-based
+reconstruction; sequence length-bound failures already follow from the frame's
+length, independently of its missing suffix. This changes neither the induction
+premises nor the proof meaning. This restriction also applies to ranking even
+when every state bound is checked: a bounded pre-state does not establish
+bounds on its one-step successor. The two-state rank SAT arms screen both
+projected states before metric extraction and projection. One-state rank
+obligations instead rely on the bounded pre-state (or independent deadlock
+state); their raw step-0 projection fails closed if an internal bounds subset
+leaves that state unrepresentable. A ranking error preserves
+an existing BMC `leadsTo` violation rather than replacing it with a phantom CTI;
+on the post-induction path it is reported as the semantics error.
 
 This pre-pass is an evidence detour, not a verdict authority: it only ever
 returns `partial_op`/`type_bound`, and `prepare_bmc` consumes only the
@@ -181,15 +207,37 @@ usize, budget: usize) -> Result<BoundaryProbe, RuntimeError>` stops after
 visiting `budget` distinct concrete states and reports
 `BoundaryProbe { finding, exhausted, states_explored }`. Every caller must
 treat `exhausted && finding.is_none()` exactly like today's empty result:
-fall through to the symbolic engine, which finds every symbolically
-representable violation on its own, and which still fails closed on the one
-class the pre-pass alone covers (confirmed directly: a `Seq<Int, 2>`-overflow
-fixture reports `violated`/`type_bound` with a full trace by the default
-path, and `error`/"model sequence length exceeds capacity" when isolated to
-a property that must render the overflowed value — both outcomes unaffected
-by the budget). Exhaustion can only ever downgrade a would-be concrete
-`violated` to whatever the symbolic engine reports for the same spec — never
-the reverse, and never past a fail-closed error into a false green.
+fall through to the symbolic engine. Checked action-assignment overflows can
+also produce a symbolic `type_bound` witness by reconstructing the actual
+attempted value, so this class is no longer representable only by the pre-pass.
+An unchecked over-capacity frame is instead refused by the guard before any
+property query, not by an attempt to render the selected property's result.
+An unrepresentable initial frame has no preceding action to reconstruct and
+still fails closed in symbolic projection; the default concrete pre-pass, when
+it finds that initial overflow, can supply `type_bound` evidence instead.
+The issue #697 default/isolated contrast pins these different paths, not an
+inability to render checked symbolic action overflows after budget exhaustion.
+Exhaustion must never turn an undecided or fail-closed result into a false green.
+
+For a concrete initial value `xs = Seq { 0, 1 }` with capacity 1 and an idle
+action, the engine and path matter (`E` below is exit 2 / `semantics` /
+`model sequence length exceeds capacity`; `TB@n` is exit 1 / `type_bound` /
+`_bounds_xs` at step n):
+
+| Path | bmc | induction | explicit |
+|---|---|---|---|
+| Default, depth 0 | E (symbolic initial projection) | E (symbolic initial projection) | TB@0 |
+| Default, depth at least 1 | TB@1 (concrete pre-pass) | TB@1 (concrete pre-pass) | TB@0 |
+| `--property _bounds_xs` (pre-pass skipped) | E (symbolic initial projection) | E (symbolic initial projection) | TB@0 |
+
+Selecting a supported user invariant instead leaves the Seq bound unchecked:
+the symbolic engines reject the initial frame via the guard, whereas explicit
+retains the concrete elements and evaluates the selected predicate. A
+reachable-only induction selection is still a usage error. Before #1519,
+explicit rejected the same overflowing literal earlier with `sequence literal
+exceeds capacity` at every depth; it now reaches the concrete initial bound
+check. The default pre-pass's step-1 label versus explicit's step 0 is a separate
+pre-existing discrepancy, not an init-labelling fix in #1519.
 
 Before the budget, this pre-pass cloned its `Monitor` (the whole `KernelModel`
 by value) and its trace per visited BFS node; a spec whose history-recording
