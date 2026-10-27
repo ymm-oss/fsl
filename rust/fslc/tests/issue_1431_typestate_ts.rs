@@ -247,7 +247,7 @@ fn parameter_signatures_use_model_types() {
 
 /// Detector (fails on 9ad07c7a): unbounded Int, struct, Option and Set parameters
 /// are not finite scalars accepted by CLI check. Adapt a real CLI kernel's
-/// parameters through public analyze_typestate, preserving its real entity and
+/// parameters through public `analyze_typestate`, preserving its real entity and
 /// transition. Public JSON uses the same type shapes as real state fields.
 #[test]
 fn public_kernel_parameter_types_cover_non_cli_scalar_shapes() {
