@@ -4,6 +4,7 @@ import { cases } from "./cases.mjs";
 import { workerMessageError } from "./worker-protocol.mjs";
 
 const output = document.querySelector("#result");
+output.dataset.phase = "initializing";
 const heartbeat = setInterval(() => {
   output.dataset.tick = String(Number(output.dataset.tick ?? 0) + 1);
 }, 100);
@@ -51,6 +52,7 @@ async function runBatches(testCases, width = 4) {
   const checks = testCases.filter((testCase) => testCase.cmd === "check");
   const byId = new Map();
   if (checks.length > 0) {
+    output.dataset.phase = "check-batch";
     const envelopes = await requestWorker({
       id: "check-batch",
       batch: checks.map(({ cmd, source, source_file, files, options }) => (
@@ -64,6 +66,7 @@ async function runBatches(testCases, width = 4) {
   }
   const verifies = testCases.filter((testCase) => testCase.cmd !== "check");
   for (let index = 0; index < verifies.length; index += width) {
+    output.dataset.phase = `verify-batches ${index}/${verifies.length}`;
     const batch = verifies.slice(index, index + width);
     const envelopes = await Promise.all(batch.map(runCase));
     batch.forEach((testCase, offset) => byId.set(testCase.id, envelopes[offset]));
@@ -116,9 +119,12 @@ function caseHolds(testCase, envelope) {
 }
 
 try {
+  output.dataset.phase = "cancel-and-recover";
   const cancelled = await cancelAndRecover();
+  output.dataset.phase = "smoke-cases";
   const envelopes = [];
   for (const testCase of cases) envelopes.push(await runCase(testCase));
+  output.dataset.phase = "fetch-parity-cases";
   const parityCases = await fetch("./parity-cases.json").then((response) => response.json());
   const parityEnvelopes = await runBatches(parityCases);
   const details = { crossOriginIsolated, cancelled, envelopes, parityEnvelopes };
@@ -130,7 +136,9 @@ try {
       && parityEnvelopes.length === parityCases.length,
   );
   output.textContent = JSON.stringify(details);
+  output.dataset.phase = "complete";
 } catch (error) {
+  output.dataset.phase = "failed";
   output.dataset.done = "true";
   output.dataset.ok = "false";
   output.textContent = JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
