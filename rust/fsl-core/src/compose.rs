@@ -473,7 +473,6 @@ pub fn lower_compose_with_options(
     resolver: &dyn FileResolver,
     options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
-    let compose = expand_compose_predicates(compose)?;
     let mut components = BTreeMap::new();
     let mut component_annotations = Annotations::default();
     let mut order = Vec::new();
@@ -509,6 +508,7 @@ pub fn lower_compose_with_options(
             },
         );
     }
+    let compose = expand_compose_predicates(compose, &components)?;
     let internal = compose
         .items
         .iter()
@@ -702,7 +702,10 @@ pub fn lower_compose_with_options(
 }
 
 /// Expand source-local defs before aliases or sync substitution can change scope.
-fn expand_compose_predicates(mut compose: SurfaceCompose) -> Result<SurfaceCompose, CoreError> {
+fn expand_compose_predicates(
+    mut compose: SurfaceCompose,
+    components: &BTreeMap<String, Component>,
+) -> Result<SurfaceCompose, CoreError> {
     let definitions = SurfaceSpec {
         name: compose.name.clone(),
         meta: None,
@@ -710,12 +713,17 @@ fn expand_compose_predicates(mut compose: SurfaceCompose) -> Result<SurfaceCompo
             .items
             .iter()
             .filter_map(|item| match item {
-                ComposeItem::Common(item @ SpecItem::Def { .. }) => Some(item.clone()),
+                ComposeItem::Common(item) => Some(item.clone()),
                 _ => None,
             })
             .collect(),
     };
-    let expander = PredicateExpander::new(&definitions)?;
+    let mut expander = PredicateExpander::new(&definitions)?;
+    expander.globals.extend(
+        components
+            .values()
+            .flat_map(|component| component.names.enum_members.keys().cloned()),
+    );
     let mut items = Vec::new();
     for item in compose.items {
         items.push(match item {
@@ -730,14 +738,14 @@ fn expand_compose_predicates(mut compose: SurfaceCompose) -> Result<SurfaceCompo
                 for reference in &mut action.refs {
                     reference.args = std::mem::take(&mut reference.args)
                         .into_iter()
-                        .map(|arg| expander.expand_expr(arg, &mut Vec::new()))
+                        .map(|arg| {
+                            expander.scoped(param_names(&action.params), || {
+                                expander.expand_expr(arg, &mut Vec::new())
+                            })
+                        })
                         .collect::<Result<_, _>>()?;
                 }
-                action.items = action
-                    .items
-                    .into_iter()
-                    .map(|item| expander.expand_action_item(item))
-                    .collect::<Result<_, _>>()?;
+                action.items = expander.expand_action_items(action.items, &action.params)?;
                 ComposeItem::SyncAction(action)
             }
             item @ (ComposeItem::Use { .. } | ComposeItem::Internal { .. }) => item,
@@ -1174,7 +1182,7 @@ fn rewrite_param(param: Param, component: &Component) -> Result<Param, Typecheck
     })
 }
 
-fn param_names(params: &[Param]) -> HashSet<String> {
+pub(super) fn param_names(params: &[Param]) -> HashSet<String> {
     params
         .iter()
         .map(|param| match param {
@@ -1221,7 +1229,7 @@ fn hygienic_component_action(
 
 /// Match model normalization without changing surface item order: guards see
 /// preceding guards; every statement and ensures sees the final guard scope.
-fn map_normalized_action_items<S, E>(
+pub(super) fn map_normalized_action_items<S, E>(
     mut items: Vec<ActionItem>,
     scope: &mut S,
     mut rewrite: impl FnMut(ActionItem, &mut S) -> Result<ActionItem, E>,
@@ -2365,7 +2373,7 @@ fn pattern_scope(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
     nested
 }
 
-fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
+pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
     match expr {
         Expr::Is {
             pattern: fsl_syntax::Pattern::Some(name),
