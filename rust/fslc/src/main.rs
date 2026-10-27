@@ -6066,6 +6066,21 @@ fn finish_admitted(
     }
 }
 
+fn run_admitted_root(
+    path: &Path,
+    source: Result<String, SpecLoadError>,
+    requested: Option<fsl_syntax::Edition>,
+    stderr_on_success: bool,
+    run: impl FnOnce(&str) -> (Value, i32),
+) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, source)],
+        requested,
+        stderr_on_success,
+        |sources, editions| finish_admitted(run(&sources[0]), editions, stderr_on_success),
+    )
+}
+
 fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
     run_admitted_roots(
         vec![(path, read_spec_source(path))],
@@ -6395,18 +6410,9 @@ fn load_surface_document_from_source(
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        false,
-        |sources, editions| {
-            finish_admitted(
-                run_db_check_from_source(path, &sources[0], depth, deadlock, engine),
-                editions,
-                false,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_db_check_from_source(path, source, depth, deadlock, engine)
+    })
 }
 
 /// Check one caller-owned database root-source snapshot.
@@ -7309,17 +7315,12 @@ fn run_domain_check(
     engine: &str,
     edition: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_domain_command_source(path))],
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
         edition,
         false,
-        |sources, editions| {
-            finish_admitted(
-                run_domain_check_from_source(path, &sources[0], depth, deadlock, engine),
-                editions,
-                false,
-            )
-        },
+        |source| run_domain_check_from_source(path, source, depth, deadlock, engine),
     )
 }
 
