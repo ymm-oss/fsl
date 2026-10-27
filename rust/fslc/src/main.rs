@@ -67,7 +67,7 @@ use spec_loading::{
     validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
-use verification::{run_verify_cli, run_verify_cli_from_source};
+use verification::{run_verify_cli, run_verify_cli_admitted, run_verify_cli_from_source};
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 
@@ -5320,22 +5320,30 @@ fn replay_failure_with_state(
 
 #[allow(clippy::too_many_lines)]
 fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let (output, status) =
-        run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false);
-    fold_scenarios_refinements(path, &source, depth, output, status)
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            let source = &sources[0];
+            let (output, status) =
+                run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
+            finish_admitted(
+                fold_scenarios_refinements(path, source, depth, output, status),
+                editions,
+                false,
+            )
+        },
+    )
 }
 
 /// Fold inline `implements` and governance preservations into a `scenarios`
 /// envelope exactly as `verify` does (issue #1314).
 ///
 /// `run_scenarios_mode_from_source` answers from its own bounded run and falls
-/// back to `run_verify_from_source` only when the document's kernel fails;
-/// that fallback already attaches and folds both. Without this the kernel
-/// path ignored them, so the same document exited 0 or 1 depending on an
+/// back to admitted verification only when the document's kernel fails;
+/// that fallback folds both before the outer consumer finalizes warnings. Without
+/// this the kernel path ignored them, so the same document exited 0 or 1 depending on an
 /// unrelated path. Only the kernel path's own `result:"scenarios"` envelope
 /// is folded here, in `run_verify_from_source`'s order (seam, then
 /// preservations) and through the same owners, so there is no second
@@ -5432,7 +5440,7 @@ fn scenarios_from_checked_traces(
         || (!allow_unreached && result.reachables.values().any(Option::is_none))
         || (deadlock_mode == "error" && result.deadlock_step.is_some())
     {
-        return run_verify_from_source(
+        return run_verify_admitted_from_source(
             path,
             source,
             depth,
@@ -5440,6 +5448,7 @@ fn scenarios_from_checked_traces(
             "bmc",
             DEFAULT_EXPLICIT_BUDGET,
             1,
+            None,
         );
     }
     if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(model, &result, None) {
@@ -6314,6 +6323,7 @@ fn run_check_with_tags_from_source(
     admission.finish((output, status))
 }
 
+#[cfg(test)]
 fn apply_domain_edition_from_source(
     result: (Value, i32),
     source: &str,
@@ -6385,11 +6395,18 @@ fn load_surface_document_from_source(
 }
 
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_db_check_from_source(path, &source, depth, deadlock, engine)
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_db_check_from_source(path, &sources[0], depth, deadlock, engine),
+                editions,
+                false,
+            )
+        },
+    )
 }
 
 /// Check one caller-owned database root-source snapshot.
@@ -6413,7 +6430,7 @@ fn run_db_check_from_source(
     let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
         1
     } else {
-        let (kernel, kernel_status) = run_verify_from_source(
+        let (kernel, kernel_status) = run_verify_admitted_from_source(
             path,
             source,
             depth,
@@ -6421,6 +6438,7 @@ fn run_db_check_from_source(
             engine,
             DEFAULT_EXPLICIT_BUDGET,
             1,
+            None,
         );
         // Issue #600. The rule and its rationale live with the rest of the
         // outcome vocabulary; `run_domain_check` calls the same predicate.
@@ -7291,44 +7309,50 @@ fn run_domain_check(
     engine: &str,
     edition: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        // `apply_domain_edition` cannot enrich an unreadable root document;
-        // returning the established load error directly also keeps this
-        // command to its single attempted root-path read.
+    run_admitted_roots(
+        vec![(path, read_domain_command_source(path))],
+        edition,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_domain_check_from_source(path, &sources[0], depth, deadlock, engine),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+fn run_domain_check_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock: &str,
+    engine: &str,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
+        Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let domain = match parse_domain_document_from_source(path, &source) {
-        Ok(domain) => domain,
-        Err(error) => {
-            return apply_domain_edition_from_source(
-                (spec_load_error_output(&error), 2),
-                &source,
-                path,
-                edition,
-            );
-        }
-    };
-    let (kernel, status) = run_verify_from_source(
+    let (kernel, status) = run_verify_admitted_from_source(
         path,
-        &source,
+        source,
         depth,
         deadlock,
         engine,
         DEFAULT_EXPLICIT_BUDGET,
         1,
+        None,
     );
     // Issue #515. The rule and its rationale live with the rest of the outcome
     // vocabulary; `run_db_check` calls the same predicate.
     if !fslc_rust::outcome::is_definitive_kernel_verdict(status) {
-        return apply_domain_edition_from_source((kernel, status), &source, path, edition);
+        return (kernel, status);
     }
-    let result = match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel))
-    {
+    match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel)) {
         Ok(result) => wrap_specialized(result),
         Err(error) => (core_error_output(&error), 2),
-    };
-    apply_domain_edition_from_source(result, &source, path, edition)
+    }
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
@@ -12678,18 +12702,25 @@ fn run_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_testgen_from_source(
-        path,
-        &source,
-        depth,
-        target,
-        deadlock_mode,
-        strict,
-        output_path,
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        output_path.is_none(),
+        |sources, editions| {
+            finish_admitted(
+                run_testgen_from_source(
+                    path,
+                    &sources[0],
+                    depth,
+                    target,
+                    deadlock_mode,
+                    strict,
+                    output_path,
+                ),
+                editions,
+                output_path.is_none(),
+            )
+        },
     )
 }
 
@@ -12726,7 +12757,7 @@ fn run_testgen_from_source(
     if status != 0 {
         // Use the same failure-envelope owner as the kernel-failure path,
         // not the scenarios-shaped fold result. Gate before walk or writes.
-        return run_verify_from_source(
+        return run_verify_admitted_from_source(
             path,
             source,
             depth,
@@ -12734,6 +12765,7 @@ fn run_testgen_from_source(
             "bmc",
             DEFAULT_EXPLICIT_BUDGET,
             1,
+            None,
         );
     }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
@@ -17306,6 +17338,36 @@ fn run_verify_from_source(
     explicit_budget: usize,
     k_ind: usize,
 ) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, Ok(source.to_owned()))],
+        None,
+        false,
+        |sources, editions| {
+            run_verify_admitted_from_source(
+                path,
+                &sources[0],
+                depth,
+                deadlock_mode,
+                engine,
+                explicit_budget,
+                k_ind,
+                Some(&editions[0]),
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_verify_admitted_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    explicit_budget: usize,
+    k_ind: usize,
+    finish: Option<&SourceEdition>,
+) -> (Value, i32) {
     let options = CliVerifyOptions {
         depth,
         deadlock: deadlock_mode.to_owned(),
@@ -17315,7 +17377,7 @@ fn run_verify_from_source(
         use_cache: false,
         ..CliVerifyOptions::default()
     };
-    run_verify_cli_from_source(path, path, source, &options)
+    run_verify_cli_admitted(path, path, source, &options, finish)
 }
 
 fn bindings_json(bindings: &[std::collections::BTreeMap<String, FslValue>]) -> Value {

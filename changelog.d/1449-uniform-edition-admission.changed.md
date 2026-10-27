@@ -14,3 +14,6 @@ Editor diagnostics reject unsupported editions before model or analysis work and
 retain migration finding ranges for UTF-16 publication.
 Replay, explain and single-source analysis also apply admission before consuming
 the captured source, with readable and graph output warnings kept on stderr.
+Domain check now finalizes each result once instead of duplicating migration
+warnings across its specialized result and nested verification result, including
+non-definitive verification errors; requested editions and read-error kinds are retained.

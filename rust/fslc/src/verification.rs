@@ -2202,6 +2202,18 @@ pub(super) fn run_verify_cli_from_source(
         Ok(edition) => edition,
         Err(refusal) => return refusal,
     };
+    run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition))
+}
+
+/// Consume a captured, admitted root. Specialized outer owners pass `None`;
+/// nested verification owners finish each distinct result here with its token.
+pub(super) fn run_verify_cli_admitted(
+    path: &Path,
+    cache_identity_path: &Path,
+    source: &str,
+    options: &CliVerifyOptions,
+    finish: Option<&fslc_rust::migration::SourceEdition>,
+) -> CommandResult {
     let (mut output, status) =
         run_verify_cli_kernel_from_source(path, cache_identity_path, source, options);
     // A governance document's preservations fold into the verdict here,
@@ -2215,7 +2227,10 @@ pub(super) fn run_verify_cli_from_source(
         Ok(folded) => (output, folded.unwrap_or(status)),
         Err(error) => error,
     };
-    edition.finish(result)
+    match finish {
+        Some(edition) => edition.finish(result),
+        None => result,
+    }
 }
 
 #[allow(clippy::too_many_lines)]
