@@ -238,6 +238,12 @@ fn tight_sum_overflow_timeline() {
     chain([Some(Q), Some(Q), Some(Q + 1)], false).overflow("causal_timeline", "CD", None);
 }
 
+/// `first_pass.max` follows the longest path 3M; #1506 rejects rather than saturates it.
+#[test]
+fn shortcut_longest_path_max_overflow_timeline() {
+    chain([Some(M); 3], true).overflow("causal_timeline", "CD", None);
+}
+
 #[test]
 fn checks_still_accept_overflow_and_masked_models() {
     chain([Some(M); 3], false).check();
@@ -248,15 +254,8 @@ fn checks_still_accept_overflow_and_masked_models() {
 #[test]
 fn nonconsumers_do_not_reject_unused_sums() {
     let shortcut = chain([Some(M); 3], true);
-    for consumer in [
-        "causal_timeline",
-        "causal_traceability_graph",
-        "causal-review",
-    ] {
-        let value = shortcut.success(consumer);
-        if consumer == "causal_timeline" {
-            assert_eq!(value["timelines"][0]["first_pass"]["min"], 1);
-        }
+    for consumer in ["causal_traceability_graph", "causal-review"] {
+        shortcut.success(consumer);
     }
     let feedback = cycle(M);
     for consumer in ["causal_timeline", "causal_traceability_graph"] {

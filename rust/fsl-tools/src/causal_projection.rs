@@ -169,7 +169,7 @@ fn path_json(
         match (total, claim.lag) {
             (Some((min, max)), Lag::Known(interval)) => Ok::<_, CausalError>(Some((
                 add_claim_time(min, interval.min, claim)?,
-                max.saturating_add(interval.max),
+                add_claim_time(max, interval.max, claim)?,
             ))),
             _ => Ok(None),
         }
@@ -241,7 +241,7 @@ pub fn causal_timeline_projection(model: &CausalModel) -> Result<Value, CausalEr
         .filter(|variable| variable.role == VariableRole::Intervention)
     {
         let earliest = earliest_from(model, &intervention.id)?;
-        let latest = latest_bound_from(model, &intervention.id);
+        let latest = latest_bound_from(model, &intervention.id)?;
         let reachable = reachable_from(&adjacency, &intervention.id);
         for outcome in model
             .variables

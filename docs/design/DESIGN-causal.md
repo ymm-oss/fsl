@@ -362,9 +362,21 @@ finding. Retirement itself is not a formal proof of falsity.
   make the answer `unknown`. `check` acceptance is unchanged. Overflow is
   not replaced with saturation or `unknown`. Constant-factor threshold
   comparisons are evaluated exactly by widening operands before multiplication,
-  without exposing a wider integer in output. Existing maximum-bound saturation
-  is unchanged by this minimum-time fix; the acyclic maximum exactness limitation
-  is recorded in `DESIGN-panic-audit.md`.
+  without exposing a wider integer in output. Maximum path, SCC-internal,
+  condensation-path, and feedback-cycle sums follow the same rule (#1506):
+  any explored candidate sum that overflows returns the located
+  `causal_invalid_model`, not saturation or `unknown`. Timeline internal sums
+  are evaluated only for components reachable over known-lag condensation edges
+  from the intervention currently being evaluated; SCCs unreachable from that
+  intervention do not enter those sums. Any evaluated overflow rejects the entire
+  `causal_timeline` projection, including pairs for other interventions. This
+  reachability restriction does not apply to declared feedback cycle sums in
+  `causal_graph` or `causal-review`, which reject an overflowing `cycle_lag` even
+  in a feedback component unreachable from interventions. Reachable SCC internal
+  sums are evaluated before the DP edge additions, and overflow when adding a
+  target SCC's internal bound names the entering edge's claim.
+  `response_end = lag.max + persists.max` cannot overflow: both values are at
+  most the horizon (at most `i64::MAX`), so their sum is at most `2^64 - 2`.
 - Clock mappings connecting to the kernel's generated `tick` are fixed as
   named `clock` declarations directly under the `causal` block. A declaration
   binds an imported kernel spec, a positive-integer number of kernel ticks,
@@ -632,8 +644,8 @@ never contradict, the sections above.
   enum values; clock unit ≠ timebase) and `causal_scope_invalid` (undeclared
   dimension/token, contradictory or cyclic relations, duplicate dimension in a
   selection). These well-formedness failures prevent analysis from starting.
-  `causal_invalid_model` also reports minimum-time sum overflow during analysis,
-  without changing `check` acceptance (see §5, **Analysis numeric range**).
+  `causal_invalid_model` also reports minimum- or maximum-time sum overflow during
+  analysis, without changing `check` acceptance (see §5, **Analysis numeric range**).
 - **Unacknowledged-cycle rule** (warning `causal_unacknowledged_feedback` and
   finding `unacknowledged_feedback_loop`): computed at edge granularity on the
   SCC condensation — any active claim inside a nontrivial SCC that is not part
