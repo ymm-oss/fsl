@@ -401,3 +401,238 @@ fn all_existing_truncation_goldens_keep_exact_graph_bytes() {
         "produced compared goldens={compared:?}"
     );
 }
+
+// A complete ordered DAG with k inner mediators has 2^k outcome paths.
+// Pop counts by non-start vertex are 2^0,2^1,...,2^k; including the start gives
+// 1 + sum(j=0..k, 2^j) = 2^(k+1). An optional prefix adds exactly one pop.
+fn append_complete_component(source: &mut String, component: usize, inner: usize, prefix: bool) {
+    for index in 0..inner + 2 {
+        let role = if index == 0 && !prefix {
+            "intervention"
+        } else if index == inner + 1 {
+            "outcome"
+        } else {
+            "mediator"
+        };
+        writeln!(source, "variable p{component}_{index:02} {{ role {role} }}").expect("variable");
+    }
+    if prefix {
+        writeln!(
+            source,
+            "variable p{component}_start {{ role intervention }}"
+        )
+        .expect("prefix");
+        source.push_str(&claim(
+            &format!("P{component}"),
+            &format!("p{component}_start"),
+            &format!("p{component}_00"),
+            0,
+            0,
+        ));
+    }
+    for from in 0..=inner {
+        for to in from + 1..inner + 2 {
+            source.push_str(&claim(
+                &format!("C{component}_{from:02}_{to:02}"),
+                &format!("p{component}_{from:02}"),
+                &format!("p{component}_{to:02}"),
+                0,
+                0,
+            ));
+        }
+    }
+}
+
+fn complete_components(inner_counts: &[usize], prefix_last: bool) -> String {
+    let mut source = "causal Budget { timebase day horizon 100\n".to_owned();
+    for (component, &inner) in inner_counts.iter().enumerate() {
+        append_complete_component(
+            &mut source,
+            component,
+            inner,
+            prefix_last && component + 1 == inner_counts.len(),
+        );
+    }
+    source.push_str("}\n");
+    source
+}
+
+/// Control on 12d196da: each disjoint k=15 complete DAG takes 2^(15+1)=65,536
+/// pops and finds 2^15=32,768 paths. Jointly 131,072 pops exceed the GLOBAL
+/// 100,000-pop budget, although each start alone finishes below it. A per-start
+/// reset would wrongly omit the false exactness marker and report 65,520 omitted.
+#[test]
+fn dfs_pop_budget_is_shared_across_interventions() {
+    for (label, inner_counts) in [("one-start", vec![15]), ("two-starts", vec![15, 15])] {
+        let graph = cli_source(&complete_components(&inner_counts, false), label);
+        assert_eq!(
+            graph["paths"].as_array().expect("paths").len(),
+            16,
+            "produced graph={graph}"
+        );
+        if inner_counts.len() == 1 {
+            assert_eq!(
+                graph["truncation"],
+                json!({"paths_cap":16,"paths_truncated":32752}),
+                "produced truncation={}",
+                graph["truncation"]
+            );
+        } else {
+            assert_eq!(
+                graph["truncation"]["paths_truncated_exact"], false,
+                "produced truncation={}",
+                graph["truncation"]
+            );
+            let omitted = graph["truncation"]["paths_truncated"]
+                .as_u64()
+                .expect("count");
+            assert!(
+                (32752..65520).contains(&omitted),
+                "produced omitted={omitted}; truncation={}",
+                graph["truncation"]
+            );
+        }
+    }
+}
+
+/// Control on 12d196da: 18 reachable dead-end mediators form a complete DAG,
+/// ordered before `Z_Outcome`. Without pruning its ordered subsets consume
+/// 2^18=262,144 pops including the start before the outcome pop, exhausting the
+/// budget. Reverse-outcome pruning leaves just start+outcome (2 pops), one exact
+/// path and no exactness key. Calibrated with the successor prune removed.
+#[test]
+fn unreachable_outcome_branches_are_pruned_before_budgeted_walk() {
+    let mut source = "causal Pruned { timebase day horizon 100\nvariable start { role intervention }\nvariable out { role outcome }\n".to_owned();
+    for index in 0..18 {
+        writeln!(source, "variable dead{index:02} {{ role mediator }}").expect("dead variable");
+        source.push_str(&claim(
+            &format!("A{index:02}"),
+            "start",
+            &format!("dead{index:02}"),
+            0,
+            0,
+        ));
+        for to in index + 1..18 {
+            source.push_str(&claim(
+                &format!("D{index:02}_{to:02}"),
+                &format!("dead{index:02}"),
+                &format!("dead{to:02}"),
+                0,
+                0,
+            ));
+        }
+    }
+    source.push_str(&claim("Z_Outcome", "start", "out", 0, 0));
+    source.push_str("}\n");
+    let graph = cli_source(&source, "pruned-dead-ends");
+    assert_eq!(
+        graph["paths"],
+        json!([{
+            "source":"variable:start", "target":"variable:out", "claims":["claim:Z_Outcome"],
+            "polarity":"positive", "first_response":{"min":0,"max":0}
+        }]),
+        "produced paths={}; truncation={}",
+        graph["paths"],
+        graph["truncation"]
+    );
+    assert_eq!(
+        graph["truncation"],
+        json!({"paths_cap":16,"paths_truncated":0}),
+        "produced truncation={}",
+        graph["truncation"]
+    );
+}
+
+/// Control on 12d196da: six disjoint complete DAGs take
+/// 2^16+2^15+2^10+2^9+2^7+2^5 = 100,000 pops exactly. They find half as many
+/// paths (50,000), so the exact omitted count is 49,984. Counting found paths
+/// instead of pops or marking exhaustion on an empty stack violates this pair
+/// and its one-extra-pop companion; there is no approximate boundary shape.
+#[test]
+fn exactly_one_hundred_thousand_pops_remains_exact() {
+    let graph = cli_source(
+        &complete_components(&[15, 14, 9, 8, 6, 4], false),
+        "exact-budget",
+    );
+    assert_eq!(
+        graph["paths"].as_array().expect("paths").len(),
+        16,
+        "produced graph={graph}"
+    );
+    assert_eq!(
+        graph["truncation"],
+        json!({"paths_cap":16,"paths_truncated":49984}),
+        "produced truncation={}",
+        graph["truncation"]
+    );
+}
+
+/// Control on 12d196da: prefix the last component of the 100,000-pop shape with
+/// one new intervention->mediator edge. Exactly 100,001 pops are required, with
+/// the same 50,000 paths; sorted DFS's last pop is its direct outcome path. At
+/// pop 100,000 only 49,999 outcomes have been seen, so omitted=49,983 is inexact.
+#[test]
+fn one_hundred_thousand_and_one_pops_is_inexact() {
+    let graph = cli_source(
+        &complete_components(&[15, 14, 9, 8, 6, 4], true),
+        "one-over-budget",
+    );
+    assert_eq!(
+        graph["paths"].as_array().expect("paths").len(),
+        16,
+        "produced graph={graph}"
+    );
+    assert_eq!(
+        graph["truncation"],
+        json!({"paths_cap":16,"paths_truncated":49983,"paths_truncated_exact":false}),
+        "produced truncation={}",
+        graph["truncation"]
+    );
+}
+
+/// Control on 12d196da: a k=17 complete DAG already needs 2^18=262,144 pops.
+/// A declared feedback edge from mediator 17 to 1 creates a dense cyclic SCC
+/// with an outcome exit and only adds simple paths. The bounded CLI child must
+/// finish within 60 s, retain 16 paths and truthfully report an inexact count.
+#[test]
+fn dense_feedback_with_outcome_exit_finishes_with_inexact_count() {
+    let mut source = "causal CyclicBudget { timebase day horizon 100\n".to_owned();
+    append_complete_component(&mut source, 0, 17, false);
+    source.push_str(&claim("Z_Back", "p0_17", "p0_01", 1, 1));
+    source.push_str("feedback Cycle { claims C0_01_17, Z_Back }\n}\n");
+    let graph = cli_source(&source, "dense-feedback");
+    assert_eq!(
+        graph["paths"].as_array().expect("paths").len(),
+        16,
+        "produced graph={graph}"
+    );
+    assert_eq!(
+        graph["truncation"]["paths_truncated_exact"], false,
+        "produced truncation={}",
+        graph["truncation"]
+    );
+    let omitted = graph["truncation"]["paths_truncated"]
+        .as_u64()
+        .expect("omitted count");
+    assert!(
+        (1..=99984).contains(&omitted),
+        "produced omitted={omitted}; truncation={}",
+        graph["truncation"]
+    );
+}
+
+/// Detector on 12d196da: the optional exactness field is boolean but lacks
+/// const false. Absence denotes exact completion; true must not be permitted.
+#[test]
+fn causal_graph_schema_constrains_exactness_marker_to_false() {
+    let path = root().join("schemas/fslc/causal/causal-graph.v0.schema.json");
+    let schema: Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("schema bytes")).expect("schema JSON");
+    let marker = &schema["$defs"]["truncation"]["properties"]["paths_truncated_exact"];
+    assert_eq!(marker["type"], "boolean", "produced marker={marker}");
+    assert_eq!(
+        marker.get("const"),
+        Some(&json!(false)),
+        "produced marker={marker}"
+    );
+}
