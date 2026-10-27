@@ -123,10 +123,10 @@ colliding binder before relying on verification; the fix covers expression
 quantifiers/aggregates inside `leadsTo`, not that declaration-level path.
 The binder's own `where` expression is checked; capture can reject before the
 existing unsupported-property-wrapper-where diagnostic.
-The initial implementation's full 597-form `check` sweep over `specs/`, `examples/`, and
+The final implementation's full 597-form `check` sweep over `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/` in base
-`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
-`d806e6bc6677016dac3803ac5559d3f0b1e3da67` materialized trees has zero
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` materialized trees has zero
 ok-to-error transitions; inline captures still constitute a breaking removal.
 
 Business/requirements dialects also have type-kinds whose finite bounds live in

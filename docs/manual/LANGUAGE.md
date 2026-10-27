@@ -701,11 +701,10 @@ The declaration binder's own `where` expression is checked for capture; an
 earlier capture error can therefore precede the existing rejection of unsupported
 property-wrapper `where` filters.
 
-The initial implementation's `check` sweep of all 597 `.fsl` files under
-`specs/`, `examples/`, and
-`rust/fslc/tests/fixtures/`, using base
-`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
-`d806e6bc6677016dac3803ac5559d3f0b1e3da67` in their respective materialized
+The final implementation's `check` sweep of all 597 `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, using base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` in their respective materialized
 trees, has an empty ok-to-error transition set. The newly rejected inline
 forms and the still-open #1528 path are not negated by that corpus result.
 

@@ -751,11 +751,10 @@ aggregates inside the property's expressions are covered by #1450.
 The declaration binder's own <code>where</code> expression is checked for capture; an
 earlier capture error can therefore precede the existing rejection of unsupported
 property-wrapper <code>where</code> filters.</p>
-<p>The initial implementation's <code>check</code> sweep of all 597 <code>.fsl</code> files under
-<code>specs/</code>, <code>examples/</code>, and
-<code>rust/fslc/tests/fixtures/</code>, using base
-<code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> and implementation
-<code>d806e6bc6677016dac3803ac5559d3f0b1e3da67</code> in their respective materialized
+<p>The final implementation's <code>check</code> sweep of all 597 <code>.fsl</code> files under
+<code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code>, using base
+<code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code> and built implementation
+<code>dd7b47885680076412ab2f0b46ebe8854ff6758b</code> in their respective materialized
 trees, has an empty ok-to-error transition set. The newly rejected inline
 forms and the still-open #1528 path are not negated by that corpus result.</p>
 <ul>

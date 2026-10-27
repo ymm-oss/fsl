@@ -723,8 +723,8 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
 宣言バインダー自身の <code>where</code> 式は捕獲を検査します。そのため、未対応の
 プロパティ外側バインダーの <code>where</code> を拒否する既存エラーより先に、捕獲エラーが
 出る場合があります。</p>
-<p>初回の実装では、base <code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> と実装
-<code>d806e6bc6677016dac3803ac5559d3f0b1e3da67</code> の各 materialized tree で、
+<p>最終の実装では、base <code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code> と build 済みの実装
+<code>dd7b47885680076412ab2f0b46ebe8854ff6758b</code> の各 materialized tree で、
 <code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全597個の <code>.fsl</code> を
 <code>check</code> した結果、ok→error の遷移集合は空です。新たに拒否する inline の形や、
 未修正の #1528 経路が、この corpus の結果で解消されたことにはなりません。</p>

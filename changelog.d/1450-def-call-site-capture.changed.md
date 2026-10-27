@@ -28,17 +28,10 @@ exit 2/kind `semantics`, but can report pattern shadowing instead of the earlier
 `would capture` message at a different first location. Restoring those two
 legacy diagnostics is deferred; neither change introduces a successful verdict.
 
-The initial implementation's `check` sweep of all 597 repository forms in
-materialized trees for base
-`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
-`d806e6bc6677016dac3803ac5559d3f0b1e3da67` has zero ok-to-error transitions.
-Kernel v1/v2 export parity is not lowering evidence: valid compose inputs are
-rejected by both exporters because component source filenames cannot be preserved.
-It is replaced by check/analyze/BMC depth-4 comparison of all 20 compose corpus
-files and two refactor controls, using built implementation
-`dd7b47885680076412ab2f0b46ebe8854ff6758b` and base
-`11f01225e244dabde0f8dfd9aaa665bc47dccfd4`. Check/analyze bytes, stderr and exits
-agree; BMC agrees outside 253 observed live elapsed-duration values, calibrated
-with two same-base repeats. No semantic field is excluded. The new rejection is
-demonstrated separately by inline capture controls; the new-base 597-form check
-sweep also has zero ok-to-error transitions.
+The final `check` sweep of all 597 repository forms, in the respective
+materialized trees for base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built
+implementation `dd7b47885680076412ab2f0b46ebe8854ff6758b`, has zero ok-to-error
+transitions. Check/analyze outputs agree for all 20 compose corpus files and two
+refactor controls; BMC at depth 4 agrees outside observed elapsed-duration values,
+calibrated with two same-base repeats. No semantic field is excluded. Inline
+capture controls separately demonstrate the breaking removal.

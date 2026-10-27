@@ -672,8 +672,8 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
 プロパティ外側バインダーの `where` を拒否する既存エラーより先に、捕獲エラーが
 出る場合があります。
 
-初回の実装では、base `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` と実装
-`d806e6bc6677016dac3803ac5559d3f0b1e3da67` の各 materialized tree で、
+最終の実装では、base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4` と build 済みの実装
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` の各 materialized tree で、
 `specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597個の `.fsl` を
 `check` した結果、ok→error の遷移集合は空です。新たに拒否する inline の形や、
 未修正の #1528 経路が、この corpus の結果で解消されたことにはなりません。

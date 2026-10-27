@@ -101,14 +101,14 @@ if both contain undefined predicate calls, the body error can precede the
 parameter-range error. Both reject with exit 2 and the same name-error kind;
 this validation-order change is not repaired here.
 
-## Initial implementation boundary evidence (#1450)
+## Final implementation boundary evidence (#1450)
 
-For the initial implementation, the command shapes `<base-binary> check <path>`
+For the final implementation, the command shapes `<base-binary> check <path>`
 and `<head-binary> check <path>`
 were run over all 597 `.fsl` files under `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/`, in materialized source trees for base
-`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
-`d806e6bc6677016dac3803ac5559d3f0b1e3da67`. The ok-to-error transition set is
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b`. The ok-to-error transition set is
 empty; all check stdout/stderr bytes and exits agree. No existing required inline
 fixtures were rewritten, removed, renamed or stopped. Independent inline capture
 controls establish the breaking removal even though the repository corpus has
