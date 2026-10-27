@@ -10,7 +10,9 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import "./build-browser.mjs";
+import { exitStatusFor, ProbeTimerExpiredError } from "./browser-probe-outcome.mjs";
 
+async function main() {
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 let resolveBrowserResult;
 const browserResult = new Promise((resolve) => { resolveBrowserResult = resolve; });
@@ -95,7 +97,7 @@ try {
     new Promise((_, reject) => {
       timeout = setTimeout(() => {
         child.kill("SIGKILL");
-        reject(new Error(`Chrome browser probe timed out after 75s: ${stderr}`));
+        reject(new ProbeTimerExpiredError(`Chrome browser probe timed out after 75s: ${stderr}`));
       }, 75_000);
     }),
   ]);
@@ -111,3 +113,11 @@ if (!result.ok) {
   throw new Error(`browser Worker round trip failed: ${JSON.stringify(result)}`);
 }
 console.log(JSON.stringify({ schema: "fsl-z3js-browser-spike.v1", ok: true, details: result.details }, null, 2));
+}
+
+try {
+  await main();
+} catch (error) {
+  console.error(error);
+  process.exitCode = exitStatusFor(error);
+}
