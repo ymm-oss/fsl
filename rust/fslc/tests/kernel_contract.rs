@@ -68,29 +68,34 @@ fn at_method_output(command: &str, index: &str) -> std::process::Output {
 }
 
 #[test]
-fn empty_at_index_is_a_kernel_error_but_check_remains_ok() {
+fn empty_at_index_is_rejected_by_check_and_kernel() {
     let checked = at_method_output("check", "");
-    assert!(checked.status.success(), "{checked:?}");
+    assert_eq!(checked.status.code(), Some(2), "{checked:?}");
+    assert!(checked.stderr.is_empty(), "{checked:?}");
     let checked: Value = serde_json::from_slice(&checked.stdout).expect("check JSON");
-    assert_eq!(checked["result"], "ok");
+    let diagnostic = json!({
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "invalid model expression: invalid Seq method 'at'/0 at 1:92",
+        "loc": {"line": 1, "column": 92}
+    });
+    let mut checked_diagnostic = diagnostic.clone();
+    checked_diagnostic["versions"] = fsl_core::version_metadata(
+        "fslc-rust",
+        env!("CARGO_PKG_VERSION"),
+        "native-z3",
+        fsl_solver_z3::version(),
+    );
+    assert_eq!(checked, checked_diagnostic, "check-time semantics envelope");
 
     let output = at_method_output("kernel", "");
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     assert!(output.stderr.is_empty(), "{output:?}");
     let output: Value = serde_json::from_slice(&output.stdout).expect("kernel error JSON");
-    assert_eq!(output["fsl"], "1.0");
-    assert_eq!(output["result"], "error");
-    assert_eq!(output["kind"], "semantics");
-    assert!(
-        output["message"].as_str().is_some_and(|message| {
-            message.contains("at") && (message.contains("index") || message.contains("argument"))
-        }),
-        "{output}"
-    );
     assert_eq!(
-        output,
-        json!({"fsl":"1.0", "result":"error", "kind":"semantics", "message":output["message"]}),
-        "keep the existing kernel projection error envelope"
+        output, diagnostic,
+        "kernel runs the checker first and returns its diagnostic without check version metadata"
     );
 }
 
