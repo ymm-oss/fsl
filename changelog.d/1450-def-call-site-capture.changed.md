@@ -5,9 +5,10 @@ parameters. The error is exit 2, `kind: "semantics"`, and `would capture variabl
 at the call. Rename the caller binding; no automatic rename or bypass is added.
 Non-global `is some(v)` bindings exported by `requires` and by a binary left
 operand also count as caller bindings and reject these previously accepted calls.
-Direct specs and source-local compose/component defs share the check. Existing
-pattern-shadowing refusals and locations are preserved, including imported enum
-members. Compose-source expansion now receives Common declarations for its
+Direct specs and source-local compose/component defs share the check. Pattern
+collision rules remain in force, including imported enum members; the explicit
+diagnostic-order exceptions below still reject with the same exit and kind.
+Compose-source expansion now receives Common declarations for its
 global-name inventory and runs after component loading, still before rewriting.
 
 Exception / remaining soundness risk (Refs #1528): binders declared directly by
@@ -20,12 +21,24 @@ The declaration binder's own `where` expression is checked for capture; this can
 precede the existing rejection of unsupported wrapper `where` filters. First
 error ordering can also change when both a component load and a compose def are
 invalid, or when both an action body and its parameter range contain invalid calls.
-These validation-order cases still reject; no successful verdict is introduced.
+In particular, **v01** (invalid parameter range and action body) remains
+exit 2/kind `name`, but can report the body error before the parameter error.
+**a01** (a pattern-bound argument colliding with a def-body binder) remains
+exit 2/kind `semantics`, but can report pattern shadowing instead of the earlier
+`would capture` message at a different first location. Restoring those two
+legacy diagnostics is deferred; neither change introduces a successful verdict.
 
 The initial implementation's `check` sweep of all 597 repository forms in
 materialized trees for base
 `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
 `d806e6bc6677016dac3803ac5559d3f0b1e3da67` has zero ok-to-error transitions.
-All 20 corpus compose files have byte-identical check and Kernel v1/v2 outputs
-and exits with per-tree repository roots; no output fields are excluded. The
-new rejection is demonstrated separately by inline capture controls.
+Kernel v1/v2 export parity is not lowering evidence: valid compose inputs are
+rejected by both exporters because component source filenames cannot be preserved.
+It is replaced by check/analyze/BMC depth-4 comparison of all 20 compose corpus
+files and two refactor controls, using built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` and base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4`. Check/analyze bytes, stderr and exits
+agree; BMC agrees outside 253 observed live elapsed-duration values, calibrated
+with two same-base repeats. No semantic field is excluded. The new rejection is
+demonstrated separately by inline capture controls; the new-base 597-form check
+sweep also has zero ok-to-error transitions.
