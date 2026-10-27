@@ -643,3 +643,173 @@ fn action_name_allocation_is_shared_across_entity_declarations() {
         "produced declarations={declarations:?}; report={report}"
     );
 }
+
+/// M1 detector on 382477a9: state variable status generates interface Status,
+/// so a parameter of model enum Status must not resolve to that generic handle.
+/// State aliases quote members in declaration order and join them with ` | `;
+/// the exact inline parameter type is therefore `"Draft" | "Live"`. HEAD instead
+/// emits `from: Status`, which refers to the generated interface without its
+/// required type argument. Pin the full skeleton, including the state alias.
+#[test]
+fn enum_parameter_colliding_with_enum_state_interface_is_inlined() {
+    let report = round_two_typestate_report(
+        "spec EnumCollision { enum Status { Draft, Live }
+         state { status: Status } init { status = Draft }
+         action publish(from: Status) { requires status == Draft status = Live } }",
+    );
+    let ts = round_two_entity_typescript(&report, "status (Status)");
+    let expected = concat!(
+        "// Typestate skeleton for `Status` from spec `EnumCollision`.\n",
+        "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+        "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+        "export type StatusState = \"Draft\" | \"Live\";\n\n",
+        "declare const __state: unique symbol;\n",
+        "export interface Status<S extends StatusState> {\n",
+        "  readonly [__state]: S;\n}\n\n",
+        "export function publish(self: Status<\"Draft\">, from: \"Draft\" | \"Live\"): Status<\"Live\">;"
+    );
+    assert_eq!(ts, expected, "produced TS={ts}; report={report}");
+}
+
+/// M1 detector on 382477a9: Option variable s_ uppercases its first character to
+/// interface S_ (alias `S_State`), colliding with model enum S_. Its parameter must
+/// use `"Fast" | "Slow"`, the same declaration-order quoted-member union form as
+/// enum states, not HEAD's `mode: S_`. Neither model nor generated names occupy
+/// S, so the phantom generic remains S throughout this complete skeleton.
+#[test]
+fn enum_parameter_colliding_with_option_interface_is_inlined() {
+    let report = round_two_typestate_report(
+        "spec OptionEnumCollision { type N = 0..3 enum S_ { Fast, Slow }
+         state { s_: Option<N> } init { s_ = none }
+         action inspect(mode: S_) { requires s_ == none } }",
+    );
+    let ts = round_two_entity_typescript(&report, "s_ (Option)");
+    let expected = concat!(
+        "// Typestate skeleton for `S_` from spec `OptionEnumCollision`.\n",
+        "// `s_` is an Option slot; states are Empty (none) / Filled (some).\n",
+        "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+        "export type S_State = \"Empty\" | \"Filled\";\n\n",
+        "declare const __state: unique symbol;\n",
+        "export interface S_<S extends S_State> {\n",
+        "  value: number | null;\n",
+        "  readonly [__state]: S;\n}\n\n",
+        "export function inspect<S extends \"Empty\">(self: S_<S>, mode: \"Fast\" | \"Slow\"): S_<S>;"
+    );
+    assert_eq!(ts, expected, "produced TS={ts}; report={report}");
+}
+
+/// M1 preservation control on 382477a9: Phase equals neither generated Status
+/// nor `StatusState`, so its enum parameter must retain the public model name
+/// rather than being unconditionally expanded to a member union.
+#[test]
+fn noncolliding_enum_parameter_keeps_its_model_name() {
+    let report = round_two_typestate_report(
+        "spec EnumControl { enum Phase { Draft, Live }
+         state { status: Phase } init { status = Draft }
+         action publish(from: Phase) { requires status == Draft status = Live } }",
+    );
+    let ts = round_two_entity_typescript(&report, "status (Phase)");
+    let expected = concat!(
+        "// Typestate skeleton for `Status` from spec `EnumControl`.\n",
+        "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+        "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+        "export type StatusState = \"Draft\" | \"Live\";\n\n",
+        "declare const __state: unique symbol;\n",
+        "export interface Status<S extends StatusState> {\n",
+        "  readonly [__state]: S;\n}\n\n",
+        "export function publish(self: Status<\"Draft\">, from: Phase): Status<\"Live\">;"
+    );
+    assert_eq!(ts, expected, "produced TS={ts}; report={report}");
+}
+
+/// TG-a preservation control on 382477a9: state s: St generates interface S,
+/// occupying the first phantom candidate. The generic is chosen once per output,
+/// so unrelated entity Other also uses S_ even though Other/OtherState alone
+/// would leave S free. Pin both complete skeletons and every generic position.
+#[test]
+fn generated_entity_name_shifts_the_generic_for_unrelated_entities() {
+    let report = round_two_typestate_report(
+        "spec SharedGeneric { enum St { Open, Closed }
+         state { s: St, other: St } init { s = Open other = Open }
+         action peek() { requires s == Open }
+         action inspect(flag: Bool) { requires other == Open } }",
+    );
+    for (entity, expected) in [
+        (
+            "s (St)",
+            concat!(
+                "// Typestate skeleton for `S` from spec `SharedGeneric`.\n",
+                "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+                "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+                "export type SState = \"Open\" | \"Closed\";\n\n",
+                "declare const __state: unique symbol;\n",
+                "export interface S<S_ extends SState> {\n",
+                "  readonly [__state]: S_;\n}\n\n",
+                "export function peek<S_ extends \"Open\">(self: S<S_>): S<S_>;"
+            ),
+        ),
+        (
+            "other (St)",
+            concat!(
+                "// Typestate skeleton for `Other` from spec `SharedGeneric`.\n",
+                "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+                "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+                "export type OtherState = \"Open\" | \"Closed\";\n\n",
+                "declare const __state: unique symbol;\n",
+                "export interface Other<S_ extends OtherState> {\n",
+                "  readonly [__state]: S_;\n}\n\n",
+                "export function inspect<S_ extends \"Open\">(self: Other<S_>, flag: boolean): Other<S_>;"
+            ),
+        ),
+    ] {
+        let ts = round_two_entity_typescript(&report, entity);
+        assert_eq!(
+            ts, expected,
+            "entity={entity}; produced TS={ts}; report={report}"
+        );
+    }
+}
+
+/// TG-b preservation control on 382477a9: delete only updates a numeric variable,
+/// so no entity emits it. It still consumes delete_ in declaration-order global
+/// allocation; the emitted FSL action delete_ must therefore become delete__.
+/// Pin the only entity/action list as well as its complete emitted skeleton.
+#[test]
+fn action_emitted_by_no_entity_still_reserves_its_typescript_name() {
+    let report = round_two_typestate_report(
+        "spec UnemittedName { type N = 0..3 enum St { Open, Closed }
+         struct Item { status: St } state { item: Item, count: N }
+         init { item = Item { status: Open } count = 0 }
+         action delete() { count = 1 }
+         action delete_() { requires item.status == Open item.status = Closed } }",
+    );
+    let entities = report["entities"]
+        .as_array()
+        .unwrap_or_else(|| panic!("produced report={report}"));
+    assert_eq!(entities.len(), 1, "produced report={report}");
+    assert_eq!(
+        entities[0]["entity"], "Item.status",
+        "produced report={report}"
+    );
+    let actions = entities[0]["actions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("produced report={report}"));
+    let action_names: Vec<_> = actions.iter().map(|action| &action["action"]).collect();
+    assert_eq!(
+        action_names,
+        vec![&json!("delete_")],
+        "produced report={report}"
+    );
+    let ts = round_two_entity_typescript(&report, "Item.status");
+    let expected = concat!(
+        "// Typestate skeleton for `Item` from spec `UnemittedName`.\n",
+        "// FSL holds these in a collection; phantom types track one entity, so each becomes an independently-typed handle.\n",
+        "// Only transitions with a LOCAL from-state guard are typed; the rest stay dynamic.\n\n",
+        "export type ItemState = \"Open\" | \"Closed\";\n\n",
+        "declare const __state: unique symbol;\n",
+        "export interface Item<S extends ItemState> {\n",
+        "  readonly [__state]: S;\n}\n\n",
+        "export function delete__(self: Item<\"Open\">): Item<\"Closed\">;"
+    );
+    assert_eq!(ts, expected, "produced TS={ts}; report={report}");
+}
