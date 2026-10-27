@@ -43,9 +43,64 @@ keeps the kernel and cross-file name-resolution surface unchanged.
 - If substituting a call argument would capture one of its free variables, the
   call is rejected with a source-level diagnostic asking the author to rename
   the binder. The implementation never creates a synthetic binder name.
+- Breaking removal (#1450): a caller action parameter, let, expression
+  quantifier/aggregate binder, or statement `forall` that would capture a free
+  name in the expanded def body now rejects at the call site with exit 2,
+  `kind: "semantics"`, and `would capture variable`. The def's own parameters
+  are excluded; rename the caller binding. Existing pattern/global collision
+  refusals remain unchanged.
 
-The last rule favors an explicit local repair over silently changing meaning
+The capture rules favor an explicit local repair over silently changing meaning
 or leaking compiler-generated names into counterexamples.
+
+**Exception / remaining soundness risk (Refs #1528):** the binders declared
+directly by a `leadsTo` property are not threaded into this def capture check.
+They can still capture a def-body free name and produce a false green; rename
+the binder before relying on verification. Expression quantifiers and
+aggregates inside the property's expressions are covered. This change does
+not claim to close the declaration-level property-binder path.
+
+## Caller scope and compose source names (#1450)
+
+The existing argument-free-name versus body-binder check remains in place.
+The converse check expands the body in its own parameter scope, walks its free
+names with the shared ordered native walker, then checks caller-local collisions
+before parameter substitution. Nested def calls therefore expose transitive
+free names without mistaking caller arguments for def globals. Scope entry and
+exit are paired within the temporary expander; no extra state reaches the Kernel.
+Action guards see preceding guards, while statements and ensures see the final
+guard scope. Binder domains use the outer scope; filters and bodies see their
+binder. Sync actuals use header scope only, not additional lets or component locals.
+
+Compose passes all Common source items, not only defs, to the expander so it can
+inventory state, constants and enum members. Definition collection still selects
+only Def items; this does not eagerly expand the other Common items. Components
+are loaded first, and their bare enum member names supplement that inventory,
+before compose-source expansion. This preserves the existing pattern-shadowing
+diagnostic instead of replacing it with a new capture error for an imported enum.
+Expansion still precedes prefixing, alias rewriting and sync substitution; source
+definition tables remain separate. Loading components before validating compose
+defs can change which error is reported first when both sources are invalid.
+
+## Boundary evidence (#1450)
+
+The command shapes `<base-binary> check <path>` and `<head-binary> check <path>`
+were run over all 597 `.fsl` files under `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/`, in materialized source trees for base
+`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
+`d806e6bc6677016dac3803ac5559d3f0b1e3da67`. The ok-to-error transition set is
+empty; all check stdout/stderr bytes and exits agree. No existing required inline
+fixtures were rewritten, removed, renamed or stopped. Independent inline capture
+controls establish the breaking removal even though the repository corpus has
+none of those newly rejected calls.
+
+All 20 corpus files declaring compose were also compared with `check` and
+`kernel --kernel-version 1` / `2`: zero differing files, no excluded fields,
+with each materialized tree established as its own repository root. An initial
+v2 error comparison exposed different ambient archive-root prefixes for
+`semantics_compose_component_parse_failure.fsl`; two same-base controls and the
+base/head comparison agree byte-for-byte after setting those repository roots,
+without rewriting any output. This corpus evidence does not close #1528.
 
 ## Diagnostics and display
 

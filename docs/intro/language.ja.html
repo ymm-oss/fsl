@@ -700,8 +700,28 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 <p>呼び出しは、同一ソースファイル内の <code>def</code> を名指しし、そのアリティに一致しなければ
 なりません。定義は前後の定義を呼べますが、直接・相互の再帰はできません。定義は意味
 検査の前に展開され、検証器とランタイムは手で展開したのと同じカーネル式を見ます。
-展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。
+展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。ただし、以下の
+<code>leadsTo</code> のプロパティ宣言直下のバインダーには既知の例外があります。
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a> を参照。</p>
+<p><strong>破壊的な受理の削除 (#1450):</strong> 呼び出し側の action 引数、<code>let</code>、式内の量化子・
+集約のバインダー、statement <code>forall</code> が、展開した def 本体の自由な名前を捕まえる
+呼び出しを拒否します。def 自身の引数は自由な名前から除きます。例えば状態変数
+<code>on</code> を読む <code>def p(z: Bool) = (not on) or z</code> を <code>let on = ...</code> の下で
+<code>p(false)</code> と呼ぶ形は、呼び出し位置の <code>would capture variable</code> エラー
+(exit 2、<code>kind: "semantics"</code>) になります。呼び出し側の束縛を改名して再チェック
+してください。内部名への自動改名や互換の迂回路はありません。既存の
+<code>is some(x)</code> のパターン隠蔽の拒否は変わりません。通常の spec と、compose の
+部品・同期アクション内のソースローカルな def に適用します。</p>
+<p><strong>残る健全性リスク (Refs #1528):</strong> <code>leadsTo</code> のプロパティ宣言直下のバインダーは
+この捕獲検査に渡されません。そのバインダーが def 本体の自由な名前を捕まえ、
+偽の green を返す経路は残っています。バインダーを改名し、捕獲する形の check や
+verify の成功を、意図した状態参照の証拠としないでください。プロパティの式内の
+量化子・集約は #1450 の検査対象です。</p>
+<p>base <code>9af1fa5f36f91e415b7ba249888f4ada4cf7a0db</code> と実装
+<code>d806e6bc6677016dac3803ac5559d3f0b1e3da67</code> の各 materialized tree で、
+<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全597個の <code>.fsl</code> を
+<code>check</code> した結果、ok→error の遷移集合は空です。新たに拒否する inline の形や、
+未修正の #1528 経路が、この corpus の結果で解消されたことにはなりません。</p>
 <ul>
 <li>算術: <code>+ - * / %</code>、単項 <code>-</code>、<code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (<code>a//b</code> は <code>//</code> 以降がすべてコメントになってしまうので、除算は空白を入れて

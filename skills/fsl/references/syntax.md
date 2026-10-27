@@ -102,10 +102,27 @@ no named domain type required).
 
 Use `def` to give a business name to a repeated guard/property expression.
 Calls are file-local and arity-checked; direct/mutual recursion and
-capture-changing substitution are errors. `def` is frontend sugar only, so
+capture-changing substitution are errors, subject to the remaining property-binder
+exception below. `def` is frontend sugar only, so
 verify/prove/scenarios/Monitor behave exactly as for the hand-expanded
 expression. Put the human-facing requirement tag on the surrounding invariant
 or action; no compiler-generated predicate name appears in diagnostics.
+
+Breaking removal (#1450): caller action parameters, lets, expression
+quantifier/aggregate binders and statement `forall` may not capture a free name
+in the expanded def body (excluding the def's parameters). These calls now fail
+`check` with exit 2, `kind: "semantics"`, and `would capture variable` at the
+call; rename the caller binding. Existing global/pattern shadowing refusals
+remain unchanged. Direct and compose-source/component defs share the check.
+**Exception / remaining false-green risk (Refs #1528):** binders declared
+directly by a `leadsTo` property are not supplied to this check. Rename such a
+colliding binder before relying on verification; the fix covers expression
+quantifiers/aggregates inside `leadsTo`, not that declaration-level path.
+The full 597-form `check` sweep over `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` in base
+`9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and implementation
+`d806e6bc6677016dac3803ac5559d3f0b1e3da67` materialized trees has zero
+ok-to-error transitions; inline captures still constitute a breaking removal.
 
 Business/requirements dialects also have type-kinds whose finite bounds live in
 a sibling top-level `verify` block instead of inline ranges:
