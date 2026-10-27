@@ -11,7 +11,7 @@ use fsl_tools::{causal_dot, causal_mermaid, export_analysis_graph};
 use serde_json::json;
 
 /// Detector (fails on 9ad07c7a): sorted ids a!, a!_2, a? give indices 0,1,2;
-/// the last node's fallback a__2 is already the second node's sanitized id.
+/// the last node's fallback `a__2` is already the second node's sanitized id.
 /// Every edge is checked against the id assigned to its own labeled node.
 #[test]
 fn analysis_suffix_collision_keeps_nodes_and_edges_distinct() {
@@ -70,7 +70,7 @@ fn analysis_unique_ids_keep_exact_bytes() {
 }
 
 /// Detector (fails on 9ad07c7a): non-injective sanitization must retain first
-/// occurrence a_b and allocate later suffixes, skipping already-used a_b_2.
+/// occurrence `a_b` and allocate later suffixes, skipping already-used `a_b_2`.
 /// The exact full string also pins every source/target remapping.
 #[test]
 fn causal_collisions_skip_used_suffixes_and_remap_edges() {

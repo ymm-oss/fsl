@@ -60,7 +60,7 @@ fn non_ascii_variable_collision_is_not_reachable_from_causal_cli() {
 }
 
 /// Control (passes before/after): pin the full collision-free Mermaid content
-/// of MarketingFunnel, the existing example in causal_cli.rs, on 9ad07c7a.
+/// of `MarketingFunnel`, the existing example in `causal_cli.rs`, on 9ad07c7a.
 #[test]
 fn marketing_funnel_mermaid_keeps_exact_bytes() {
     let value = cli(
