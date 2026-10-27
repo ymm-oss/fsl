@@ -258,8 +258,8 @@ parallel:
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
 - focused native-Z3 tests on macOS and Windows (`native Z3 4.16`); Windows uses
   `rust-native-z3-windows-shards` (`long-poles`, `rest`) and retains `rust-native-z3-windows`
-  as the `always()` aggregator under the original event condition. Any shard failure,
-  cancellation or skip fails it; only `success` passes, preserving the product-gate dependency.
+  as the `always() && <condition>` aggregator (original event condition). When that condition holds,
+  any shard failure, cancellation or skip fails it; only `success` passes, preserving the product-gate dependency.
   The long-poles shard checks its live test names against the rest shard's skip manifest;
   projected timings and the two-main-run measurement follow-up are recorded below (#1532);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
@@ -1370,8 +1370,8 @@ failure mode for a worse one. A check whose easiest passing implementation is th
 to prevent is not added.
 
 **Not fixed by `shared-key`.** A `shared-key` on the `rust-native-z3` job would let two *different*
-jobs share one cache; no other job builds this cache (confirmed: grepped every workflow for
-`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there is nothing for it to
+jobs share one cache; at the time, no other job built this cache (confirmed: grepped workflows for
+`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there was nothing for it to
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
 
@@ -1719,8 +1719,8 @@ records which:
   above): these never report on an ordinary pull request, so requiring them would deadlock every
   one; an audit finding that one of them is present in the live required set gets a sharper message
   saying exactly that, rather than being reported as an ordinary unexpected context.
-  The two Windows shard contexts are deliberately absent from `ruleset-contract.json`: the aggregator
-  carries the requirement, the drift audit is clean, and recording shards would require a re-captured fixture.
+  The Windows aggregator is deferred here; `product-gate` enforces it through `needs`.
+  Its two shard contexts are deliberately not recorded in `ruleset-contract.json`.
 - **constituent** — the sharded lane names (`rust checks`, `rust tests (K/3)`, `mutation operators
   (K/3)`, `mutation mutants`, "Sharded pre-merge Linux evidence" above): only their `if: always()`
   aggregator carries the required-context name, so the contract records these explicitly to stop a

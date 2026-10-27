@@ -4,6 +4,7 @@
 """Require the Windows skip manifest to equal the live long-pole test list."""
 
 import argparse
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -19,6 +20,7 @@ def main():
         if line.strip() and not line.lstrip().startswith("#")
     )
     if args.emit_skip_args:
+        sys.stdout.reconfigure(newline="\n")
         print("".join(f"--skip\n{name}\n" for name in names), end="")
         return 0
     if args.list_output is None:

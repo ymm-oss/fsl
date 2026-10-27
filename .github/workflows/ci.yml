@@ -576,7 +576,9 @@ jobs:
         shell: bash
         working-directory: rust
         run: |
-          mapfile -t skips < <(python ../tools/check_windows_long_poles.py --names ../tools/windows-native-long-poles.txt --emit-skip-args)
+          python ../tools/check_windows_long_poles.py --names ../tools/windows-native-long-poles.txt --emit-skip-args > "$RUNNER_TEMP/windows-skip-args.txt"
+          mapfile -t skips < "$RUNNER_TEMP/windows-skip-args.txt"
+          skips=("${skips[@]%$'\r'}")
           cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -- --exact "${skips[@]}"
 
   rust-native-z3-windows:
