@@ -118,15 +118,37 @@ pub fn earliest_from(
 /// computed on the SCC condensation DAG. Traversing a nontrivial SCC
 /// contributes at most the sum of its internal known `lag.max` values (an
 /// upper bound for any simple traversal). Returns `(bound, via_feedback)`.
-#[must_use]
-pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (u64, bool)> {
+///
+/// # Errors
+/// Returns a located causal error if an explored upper-bound sum exceeds u64.
+pub fn latest_bound_from(
+    model: &CausalModel,
+    start: &str,
+) -> Result<BTreeMap<String, (u64, bool)>, CausalError> {
     let components = strongly_connected_components(model);
     let component_of: BTreeMap<&str, usize> = components
         .iter()
         .enumerate()
         .flat_map(|(index, members)| members.iter().map(move |member| (member.as_str(), index)))
         .collect();
-    // Internal upper bound per SCC: sum of known lag.max of intra-SCC edges.
+    let Some(&start_component) = component_of.get(start) else {
+        return Ok(BTreeMap::new());
+    };
+    // Only components reached by the known-lag condensation traversal
+    // contribute internal sums; a disconnected SCC must not refuse this start.
+    let mut reachable = BTreeSet::new();
+    let mut frontier = vec![start_component];
+    while let Some(component) = frontier.pop() {
+        if !reachable.insert(component) {
+            continue;
+        }
+        for claim in model.active_claims().filter(|claim| {
+            component_of[claim.source.as_str()] == component && matches!(claim.lag, Lag::Known(_))
+        }) {
+            frontier.push(component_of[claim.target.as_str()]);
+        }
+    }
+    // Internal upper bound per reachable SCC, in active claim (ID) order.
     let mut internal: Vec<u64> = vec![0; components.len()];
     let mut nontrivial: Vec<bool> = vec![false; components.len()];
     for claim in model.active_claims() {
@@ -134,18 +156,15 @@ pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (
             component_of[claim.source.as_str()],
             component_of[claim.target.as_str()],
         );
-        if source == target {
+        if source == target && reachable.contains(&source) {
             nontrivial[source] = true;
             if let Lag::Known(interval) = claim.lag {
-                internal[source] = internal[source].saturating_add(interval.max);
+                internal[source] = add_claim_time(internal[source], interval.max, claim)?;
             }
         }
     }
     // Longest path over the condensation DAG (components from Tarjan are in
     // reverse topological order, so iterate reversed for a forward order).
-    let Some(&start_component) = component_of.get(start) else {
-        return BTreeMap::new();
-    };
     let mut bound: BTreeMap<usize, (u64, bool)> = BTreeMap::new();
     bound.insert(
         start_component,
@@ -168,9 +187,9 @@ pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (
                 if target_component == component {
                     continue;
                 }
-                let candidate = component_bound
-                    .saturating_add(edge_lag.max)
-                    .saturating_add(internal[target_component]);
+                let candidate = add_claim_time(component_bound, edge_lag.max, claim)?;
+                // Internal sums precede this DP; target-bound overflow names the entering edge's claim.
+                let candidate = add_claim_time(candidate, internal[target_component], claim)?;
                 let candidate_feedback = component_feedback || nontrivial[target_component];
                 let entry = bound.entry(target_component).or_insert((0, false));
                 if candidate > entry.0 {
@@ -186,7 +205,7 @@ pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (
             result.insert(member.clone(), (value, feedback));
         }
     }
-    result
+    Ok(result)
 }
 
 /// Reachability over every active claim including unknown-lag edges.
@@ -830,7 +849,7 @@ pub fn causal_review_findings(
                 continue;
             };
             let response_start = lag.min;
-            let response_end = lag.max.saturating_add(persists.max);
+            let response_end = add_claim_time(lag.max, persists.max, claim)?;
             if window.max < response_start || window.min > response_end {
                 builder.push(&Finding {
                     kind: "observation_window_misses_effect",
@@ -971,7 +990,7 @@ pub fn causal_review_findings(
 /// `loop_class` and cycle lag range per declared feedback.
 ///
 /// # Errors
-/// Returns a located causal error if a known cycle's minimum time exceeds u64.
+/// Returns a located causal error if a known cycle's time sum exceeds u64.
 pub fn feedback_loop_classes(
     model: &CausalModel,
 ) -> Result<BTreeMap<String, (String, Option<Interval>)>, CausalError> {
@@ -996,7 +1015,7 @@ pub fn feedback_loop_classes(
             lag = match (lag, claim.lag) {
                 (Some(total), Lag::Known(interval)) => Some(Interval {
                     min: add_claim_time(total.min, interval.min, claim)?,
-                    max: total.max.saturating_add(interval.max),
+                    max: add_claim_time(total.max, interval.max, claim)?,
                 }),
                 _ => None,
             };

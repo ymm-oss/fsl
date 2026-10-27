@@ -196,7 +196,7 @@ producer, collection-shape or caller change requires re-review of its reason.
 
 | Family | Boundary | Required behavior and detectors |
 |---|---|---|
-| P-D1 sum | causal_projection path min; causal_analysis Dijkstra and feedback min | Shared checked addition returns `causal_invalid_model` with message `causal time range overflow while adding claim '<id>'` at the contributing claim's actual ID span. Fallible consumers include graph/timeline/traceability/review. `causal_numeric_cli` tests 3-edge overflow, a shortcut that bypasses Dijkstra to reach path rendering, feedback without interventions, U-1/U/U+1 and check acceptance. |
+| P-D1 sum | causal_projection path min/max; causal_analysis Dijkstra min, reachable SCC internal max, both cross-component max additions, feedback cycle min/max, and response_end | Shared checked addition returns `causal_invalid_model` with message `causal time range overflow while adding claim '<id>'` at the contributing claim's actual ID span. Fallible consumers include graph/timeline/traceability/review. `causal_numeric_cli` tests 3-edge overflow, a shortcut that bypasses Dijkstra to reach path rendering, feedback without interventions, U-1/U/U+1 and check acceptance. `causal_max_cli` covers maximum-sum overflow, exact boundaries, SCC reachability, claim order, and the exact response_end upper boundary. |
 | P-D1 comparison | review factors2/4; indicator factors3 and3:2 | All four sites use one shared exact scaled comparison, widening before multiplication; no u128 output. Tests fix mathematical threshold sides and product-overflow classifications; fault-injection checks include the otherwise masked second factor3 occurrence. |
 | P-A1/P-A2 | document renderer output and checker fresh parsing | Validate frontmatter/body with the existing parser before returning rendering. Fresh checker failures become CheckError::Marker. Preserve MarkerIssue Display and normal bytes/digests; artifact-only body malformation remains drift/exit1. Shared and CLI document/approval tests cover evidence marker injection and newline labels. No label-encoding redesign. |
 | P-A3 | chain step-input resolution | Spec and refine share fallible own-file resolution and the same missing-file IO detail. Keep target/mapping precedence, layer status failed, top-level result error/exit2, cutoff and result ordering. chain_cli covers jobs1/2, cutoff, precedence and normal full output. |
@@ -221,10 +221,11 @@ unchanged. This ledger is not a live exclusion/allowlist and does not automatica
 detect new sites or stale proofs. OS spawn failures remain E under #1494.
 
 Minimum sums and scaled comparisons must not wrap or silently become unknown.
-The existing `saturating_add` maximum-bound convention remains unchanged: for
-acyclic totals exceeding u64, it does not implement the unrestricted exact
-maximum described by DESIGN-causal. Changing that output policy requires a
-separate follow-up (#1506); #1475 neither fixes it nor treats saturated maxima
-as independent exactness evidence. Stack/allocator exhaustion, all assertions,
+The former `saturating_add` maximum-bound limitation is fixed by #1506:
+maximum-time sums now use the same checked addition and located
+`causal_invalid_model` as minimum sums, without changing source-check acceptance.
+Timeline SCC-internal sums are evaluated only in components reachable from the
+intervention over known-lag condensation edges (see DESIGN-causal §5).
+Stack/allocator exhaustion, all assertions,
 arithmetic outside the audited families and dependency behavior are not certified
 by this six-lint inventory.
