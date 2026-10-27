@@ -866,9 +866,8 @@ variable capture instead of inventing internal binder names. See
   Enum projection elements cannot be used as numeric endpoints or compared with
   integer values; use the declared endpoint type, not an enum ordinal.
   More generally, projection elements and whole projection sets take the declared
-  endpoint type: enum or Bool elements cannot be used wherever <code>Int</code> is expected,
-  except for the pre-existing <code>abs</code> operand-check gap tracked in #1459; their sets
-  cannot be used wherever a numeric Set is expected. This breaking rule applies
+  endpoint type: enum or Bool elements cannot be used wherever <code>Int</code> is expected;
+  their sets cannot be used wherever a numeric Set is expected. This breaking rule applies
   to comparison, ordering, arithmetic, <code>min</code>/<code>max</code>, membership, set-literal
   equality, Option comparisons and pattern payloads, assignment to numeric Set
   state, and refinement maps; the listed measured removals are not exhaustive.
@@ -898,6 +897,96 @@ variable capture instead of inventing internal binder names. See
   optional <code>within K</code> before Q for a bounded deadline, and optional
   <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</li>
 </ul>
+<p>Static operand/signature checking (#1459, <strong>breaking</strong>) also visits unselected
+branches, action assignments, <code>requires</code>/<code>ensures</code>, and trace expressions:</p>
+<ul>
+<li><code>is none</code> / <code>is some(x)</code> require an Option operand; fresh payload binding and
+  continuation scope are unchanged.</li>
+<li><code>abs</code> requires an integer-compatible operand, including when its argument is
+  a domain/range element. Enum ordinals and Bool values are not integers.</li>
+<li><code>acyclic</code>, <code>functional</code>, <code>injective</code>, <code>domain</code>, <code>range</code>, and <code>reachable</code> require
+  a relation. Non-relations no longer acquire an invented <code>Set&lt;Int&gt;</code> projection.
+  <code>reachable</code> and <code>acyclic</code> require identical declared endpoint types (<code>T -&gt; T</code>):
+  mixed enum/numeric relations and <code>N -&gt; M</code> are rejected, even if numeric <code>N</code>
+  and <code>M</code> have identical bounds. Numeric compatibility does not establish a self-relation;
+  heterogeneous <code>functional</code>/<code>injective</code>/<code>domain</code>/<code>range</code> remain supported.</li>
+<li>Method receivers, names and argument counts must match the runtime signatures:
+  Set <code>contains(x)</code>, <code>add(x)</code>, <code>remove(x)</code>, <code>size()</code>;
+  Seq <code>contains(x)</code>, <code>push(x)</code>, <code>pop()</code>, <code>head()</code>, <code>at(i)</code>, <code>size()</code>;
+  relation <code>contains(a,b)</code>, <code>add(a,b)</code>, <code>remove(a,b)</code>. Map has no methods.
+  This rejects, for example, <code>n.contains(0)</code>, <code>s.push(0)</code>, <code>q.add(0)</code>,
+  <code>r.size()</code>, <code>s.contains()</code>, <code>q.pop(1)</code>, and <code>n = q.at()</code> in an action body.</li>
+<li><code>count</code>/<code>sum</code> validate the original binder, Bool filter and integer sum value
+  before expansion, including empty ranges and zero-capacity sequences.
+  <code>count(i in 1..0 where 1)</code> and <code>sum(i in 1..0 of true)</code> are now errors;
+  well-typed empty aggregates still return <code>0</code>.</li>
+</ul>
+<p>These are located loader errors (<code>kind: "semantics"</code>, exit 2), not deferred
+runtime or acceptance-replay errors. Existing endpoint-type hints, valid method
+behavior and non-reflexive reachability are preserved. See the
+<a href="../design/DESIGN-nested-option-support.md#static-operand-and-signature-boundary-1459">design amendment</a>.</p>
+<p>The #1459 boundary audit compares BASE <code>e8cf78f0</code> with HEAD <code>33d7faa7</code> using
+591 corpus files and 384 inline occurrences (975 forms), in stable and fsl5 modes
+twice in each of three independently built trees: baseline, immediate parent
+and head, for 11,700 checks. <strong>No corpus form stops checking, and no other corpus
+output changes; no fields or forms are excluded.</strong> The immediate-parent
+comparison attributes <strong>248 mode-form removals (124 occurrences, 123 distinct
+sources)</strong> and <strong>60 diagnostic reclassifications</strong> to the six #1459 categories
+above, including numeric <code>N -&gt; M</code>. The latter remain <code>error/semantics/2</code> but now
+have authored static locations rather than unlocated runtime errors. Inherited
+#1439 contributes 86 removals and 11 reclassifications; inherited #1458 contributes
+56 removals and six additions in this expanded inventory. These are not new
+#1459 changes; the design amendment records the full attribution and controls.</p>
+<p>Review round 1 closes a further self-relation selection gap: both branches of a
+conditional relation operand are checked, even when unselected, including nested
+conditionals, <code>old</code>, relation add/remove receivers and action-local let aliases.
+Inference cannot hide an <code>N -&gt; M</code> branch behind a self-relation then branch.
+Projection-inference errors retain the authored enclosing or more precise inner
+origin; empty literals do not replace the substantive relation diagnostic.
+Range-bound errors and terminal errors also use their authored origins, not a
+generated 1:1 location. Numeric/Set compatibility and valid dynamic verdicts
+are unchanged. These claims concern the expression trees visited by the shared
+validator. The historical round-1 baseline checked helpful action existence and
+arity only; main's #1483 now also checks parameter types, and that behavior is
+preserved. Unsupported relation-valued temporary collections remain separate
+upstream work, not newly supported by this fix.</p>
+<p>The round-1 delta compares BASE <code>33d7faa7</code> with HEAD <code>8caf5c2e</code>: <strong>42 additional
+mode-form removals (21 source occurrences)</strong> for non-self selections, and <strong>24
+diagnostic reclassifications (12 occurrences)</strong>—projection inference 16,
+range-bound origins six, terminal origins two. The latter stay
+<code>error/semantics/2</code>. The expanded audit retains 591 corpus files and 447 inline
+occurrences (1,038 forms); both modes twice across four own-built trees give
+16,608 checks, including the separate previous-fix baseline. All 8,304 repeat
+pairs agree in full; no fields/forms are excluded and no corpus output changes.
+Inherited/R0 changes are separated from R1 in the design amendment.</p>
+<p>The current integration audit uses final base
+<code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code> and measured implementation
+<code>2b7d2e98349505af7dccb7843e41ab659066f021</code>. Checks were measured on
+<code>b1557a31b77f549d2c48823c3435217f9df4fc53</code> and carried to <code>11f01225</code>, whose
+tree differs only by the two generated language pages. <code>fslc check FORM</code>, with
+cache off and stable/fsl5 each repeated twice, covers all <strong>597 corpus forms</strong>
+under <code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code>, plus <strong>601 inline
+inputs</strong>: <strong>1,198 inputs</strong>, <strong>14,376 checks</strong> across the three measured states,
+and 24 binary-identity controls. The third state is historical pre-#1458 baseline
+<code>9af1fa5f</code>, used for inherited attribution. No corpus output changes; no form or
+output field is excluded. Relative to final base, #1459 removes <strong>294 mode-forms
+(147 occurrences, 142 distinct sources)</strong> and reclassifies <strong>62 diagnostics</strong>.
+Main #1463 already rejects 24 original empty-aggregate occurrences and locates
+two range-bound occurrences, so their former 48 removals/four reclassifications
+are no longer attributed to #1459. New let/Kernel/CLI/shared-row occurrences add
+26 removals. Historical #1458 attribution remains 48 removals/six additions on
+its 134-entry inventory, or 56/eight in this expanded inventory.</p>
+<p>This includes the breaking removal <code>X1/operand-method-types</code> from the shared
+#1463 inventory: <code>done: Bool; invariant Capture { acyclic(done) }</code> changes from
+<code>[Ok, Error, Error, Error]</code> to <code>[Error, Error, Error, Error]</code>, with a located
+check rejection at <strong>8:3</strong>. It is the only changed shared row. For the remaining
+136 row sources and their one resolver dependency (<strong>137 inputs</strong>), the same
+<code>fslc check FORM</code> command at the named base and head produces no transition or
+other output change in either mode/repetition. The inherited-output comparison
+retains 292 embedded-input-path differences and 16 observations from two prior
+#1458 entries mis-extracted as scratch labels rather than specs; this audit uses
+their real test sources, accepted on both baseline binaries, without changing
+attribution. The optional replay was not run; no sweep output was normalized.</p>
 <p>Top-level temporal sugar:</p>
 <pre><code class="language-fsl">unless Name { P unless Q }   // while P holds and Q is false, the next state must keep P or make Q true
 until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress obligation
