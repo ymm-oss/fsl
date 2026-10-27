@@ -314,7 +314,7 @@ pub(crate) fn concrete_value<S: SmtSolver>(
             let default = model.default_value(element_ty)?;
             Ok(SymbolicValue::Seq {
                 ty: ty.clone(),
-                slots: (0..*capacity)
+                slots: (0..(*capacity).max(values.len()))
                     .map(|index| {
                         concrete_value(
                             solver,
@@ -497,9 +497,9 @@ pub(crate) fn logical_equal<S: SmtSolver>(
                 ..
             },
         ) => {
-            if left_slots.len() != right_slots.len() {
-                return Err(VerifyError::new("sequence capacity mismatch"));
-            }
+            // Equal lengths make the common prefix cover every live element of
+            // represented temporaries. State-frame equalities also retain an
+            // overflow length so the type-bound check can report the failure.
             let mut parts = vec![solver.equal(left_len, right_len)?];
             for (index, (left_value, right_value)) in left_slots.iter().zip(right_slots).enumerate()
             {
@@ -654,17 +654,29 @@ pub(crate) fn ite_value<S: SmtSolver>(
                 len: else_len,
                 ..
             },
-        ) => Ok(SymbolicValue::Seq {
-            ty: ty.clone(),
-            slots: then_slots
-                .iter()
-                .zip(else_slots)
-                .map(|(then_slot, else_slot)| {
-                    ite_value(solver, model, condition, then_slot, else_slot)
+        ) => {
+            let TypeRef::Seq(element_ty, _) = ty else {
+                unreachable!();
+            };
+            let default =
+                concrete_value(solver, model, element_ty, &model.default_value(element_ty)?)?;
+            let slots = (0..then_slots.len().max(else_slots.len()))
+                .map(|index| {
+                    ite_value(
+                        solver,
+                        model,
+                        condition,
+                        then_slots.get(index).unwrap_or(&default),
+                        else_slots.get(index).unwrap_or(&default),
+                    )
                 })
-                .collect::<Result<_, VerifyError>>()?,
-            len: solver.ite(condition, then_len, else_len)?,
-        }),
+                .collect::<Result<_, VerifyError>>()?;
+            Ok(SymbolicValue::Seq {
+                ty: ty.clone(),
+                slots,
+                len: solver.ite(condition, then_len, else_len)?,
+            })
+        }
         _ => Err(VerifyError::new("if arms have different symbolic shapes")),
     }
 }
@@ -782,13 +794,11 @@ pub(crate) fn coerce<S: SmtSolver>(
             })
         }
         (SymbolicValue::SeqLiteral(items), TypeRef::Seq(element_ty, capacity)) => {
-            if items.len() > *capacity {
-                return Err(VerifyError::new("sequence literal exceeds capacity"));
-            }
             let default =
                 concrete_value(solver, model, element_ty, &model.default_value(element_ty)?)?;
-            let mut slots = Vec::with_capacity(*capacity);
-            for index in 0..*capacity {
+            let slot_count = (*capacity).max(items.len());
+            let mut slots = Vec::with_capacity(slot_count);
+            for index in 0..slot_count {
                 let item = items.get(index).cloned().unwrap_or_else(|| default.clone());
                 slots.push(coerce(solver, model, item, element_ty)?);
             }
@@ -892,9 +902,12 @@ pub(crate) fn bounds<S: SmtSolver>(
             Ok(solver.and(&parts)?)
         }
         SymbolicValue::Set { .. } | SymbolicValue::Relation { .. } => Ok(solver.bool_value(true)),
-        SymbolicValue::Seq { slots, len, .. } => {
+        SymbolicValue::Seq { ty, slots, len } => {
+            let TypeRef::Seq(_, capacity) = ty else {
+                unreachable!();
+            };
             let zero = solver.int_value(0);
-            let capacity = solver.int_value(i64_index(slots.len())?);
+            let capacity = solver.int_value(i64_index(*capacity)?);
             let mut parts = vec![solver.ge(len, &zero)?, solver.le(len, &capacity)?];
             for (index, value) in slots.iter().enumerate() {
                 let active = solver.lt(&solver.int_value(i64_index(index)?), len)?;

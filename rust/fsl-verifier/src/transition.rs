@@ -586,7 +586,7 @@ pub(crate) fn transition_constraint<S: SmtSolver>(
     Ok(solver.and(&clauses)?)
 }
 
-fn compute_updates<S: SmtSolver>(
+pub(crate) fn compute_updates<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     statements: &[Statement],

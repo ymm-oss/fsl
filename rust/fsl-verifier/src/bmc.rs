@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceAction, TraceStep};
+use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceAction, TraceStep, TypeRef};
 use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
@@ -817,6 +817,35 @@ struct StatePropertyChecks<'a> {
     pending_reachables: &'a BTreeSet<String>,
 }
 
+async fn reject_unchecked_sequence_overflow<S: SmtSolver>(
+    solver: &mut S,
+    state: &SymbolicState<S::Term>,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), VerifyError> {
+    let Some(selected) = checked_bounds else {
+        return Ok(());
+    };
+    for (name, value) in state {
+        let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
+        if !selected.contains(&property_name)
+            && let SymbolicValue::Seq {
+                ty: TypeRef::Seq(_, capacity),
+                len,
+                ..
+            } = value
+        {
+            // An unchecked bound must not let a fixed-capacity state frame
+            // expose a missing suffix. Reject the path, never assume it away.
+            let overflow = solver.gt(len, &solver.int_value(i64_index(*capacity)?))?;
+            solver.set_query_context("semantics", &property_name);
+            if probe(solver, &overflow).await? {
+                return Err(VerifyError::new("model sequence length exceeds capacity"));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 async fn check_state_properties<S: SmtSolver>(
     solver: &mut S,
@@ -827,6 +856,7 @@ async fn check_state_properties<S: SmtSolver>(
     step: usize,
     checks: StatePropertyChecks<'_>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
+    reject_unchecked_sequence_overflow(solver, &states[step], checks.checked_bounds).await?;
     for (name, _) in &model.state {
         let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
         if checks

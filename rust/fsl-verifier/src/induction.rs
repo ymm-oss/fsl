@@ -13,7 +13,7 @@ use crate::eval::{
     evaluation_status, property_evaluation_status,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition};
-use crate::trace::project_trace;
+use crate::trace::{has_missing_sequence_slots, project_trace};
 use crate::transition::{
     ActionInstance, action_guard_definedness, action_has_partial_operation_candidate,
     action_instances, action_statements_evaluation_status, classified_action_guard_definedness,
@@ -276,6 +276,16 @@ async fn prove_induction_scoped<S: SmtSolver>(
                     k_used.insert(property.name(model), k);
                 }
                 SatResult::Sat => {
+                    if !matches!(property, Property::Bound(_)) {
+                        for state in &states {
+                            if has_missing_sequence_slots(solver, state)? {
+                                solver.pop(1)?;
+                                return Err(VerifyError::new(
+                                    "model sequence length exceeds capacity",
+                                ));
+                            }
+                        }
+                    }
                     let trace = project_trace(solver, model, &states, &choices, &instances, k)?;
                     last_cti = Some(InductionCti {
                         kind: violation_kind::INVARIANT.to_owned(),
@@ -309,6 +319,14 @@ async fn prove_induction_scoped<S: SmtSolver>(
                 solver.assert(&solver.not(bool_term(&value)?)?)?;
                 match solver.check().await? {
                     SatResult::Sat => {
+                        for state in &states {
+                            if has_missing_sequence_slots(solver, state)? {
+                                solver.pop(1)?;
+                                return Err(VerifyError::new(
+                                    "model sequence length exceeds capacity",
+                                ));
+                            }
+                        }
                         let trace = project_trace(solver, model, &states, &choices, &instances, 1)?;
                         solver.pop(1)?;
                         return Ok(InductionResult {
@@ -1615,6 +1633,14 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     solver.assert(&flickers)?;
                     match solver.check().await? {
                         SatResult::Sat => {
+                            for state in [&state0, &state1] {
+                                if has_missing_sequence_slots(solver, state)? {
+                                    solver.pop(1)?;
+                                    return Err(VerifyError::new(
+                                        "model sequence length exceeds capacity",
+                                    ));
+                                }
+                            }
                             let trace = project_trace(
                                 solver,
                                 model,
@@ -1792,6 +1818,14 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     solver.assert(&failure)?;
                     match solver.check().await? {
                         SatResult::Sat => {
+                            for state in [&state0, &state1] {
+                                if has_missing_sequence_slots(solver, state)? {
+                                    solver.pop(1)?;
+                                    return Err(VerifyError::new(
+                                        "model sequence length exceeds capacity",
+                                    ));
+                                }
+                            }
                             let before = model_int(solver, &measure0)?;
                             let after = model_int(solver, &measure1)?;
                             let trace = project_trace(
@@ -1852,6 +1886,14 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                     solver.assert(&failure)?;
                     match solver.check().await? {
                         SatResult::Sat => {
+                            for state in [&state0, &state1] {
+                                if has_missing_sequence_slots(solver, state)? {
+                                    solver.pop(1)?;
+                                    return Err(VerifyError::new(
+                                        "model sequence length exceeds capacity",
+                                    ));
+                                }
+                            }
                             let before = model_int(solver, &measure0)?;
                             let after = model_int(solver, &measure1)?;
                             let q_next_holds = model_bool(solver, &q1)?;
