@@ -90,9 +90,20 @@ def test_wrapped_issue_reference_is_paragraph_text(
     )
 
 
-@pytest.mark.parametrize("issue", ["1448", "1200"])
-def test_real_japanese_issue_reference_is_not_h1(issue):
-    """Detector: 6b8b73bc turns each real wrapped issue reference into an h1."""
+@pytest.mark.parametrize(
+    ("issue", "wrapped_phrase"),
+    [
+        ("1448", "永続検証キャッシュの参照も保存も行いません。\n#1448 では、579 個の"),
+        ("1200", "出力は\n#1200 以前のスキャフォールドと"),
+    ],
+    ids=["1448", "1200"],
+)
+def test_real_japanese_issue_reference_is_not_h1(issue, wrapped_phrase):
+    """Detector: the h1 assertion detects the bug on base 6b8b73bc.
+
+    The phrase assertion pins the actual wrapped occurrence in one paragraph,
+    allowing inline code elsewhere rather than accepting another issue mention.
+    """
     tree = _load_tool().render_language_tree("ja")
     prefix = f'<h1 id="{issue}'
     headings = _element_contents(tree, "h1")
@@ -100,10 +111,13 @@ def test_real_japanese_issue_reference_is_not_h1(issue):
         f"Real #{issue} must not produce {prefix!r}; produced h1 contents {headings!r}"
     )
     paragraphs = [
-        text for text in _element_contents(tree, "p") if issue in text
+        re.sub(r"<[^>]+>", "", text)
+        for text in _element_contents(tree, "p")
+        if issue in text
     ]
-    assert any(f"#{issue}" in text for text in paragraphs), (
-        f"Real #{issue} must remain paragraph text with its hash; produced {paragraphs!r}"
+    assert any(wrapped_phrase in text for text in paragraphs), (
+        f"Real #{issue} must retain the wrapped phrase {wrapped_phrase!r} "
+        f"in one paragraph; produced {paragraphs!r}"
     )
 
 
@@ -138,4 +152,33 @@ def test_already_escaped_issue_reference_remains_text(tmp_path, monkeypatch):
     assert "#5678 was already escaped." in paragraphs, (
         "Expected escaped #5678 as paragraph text without a backslash; "
         f"produced {paragraphs!r}"
+    )
+
+
+def test_heading_escaped_final_hash_is_preserved(tmp_path, monkeypatch):
+    """Control: preserve an escaped final hash in heading text.
+
+    With markdown 3.1.1–3.11.0, passes on base 6b8b73bc, fails on 5138cab0
+    (its header capture uses the 3.0 pattern), and passes after correction.
+    """
+    tree = _render_fixture(tmp_path, monkeypatch, "en", r"#### Control \#")
+    headings = _element_contents(tree, "h4")
+    assert "Control #" in headings, (
+        "Expected h4 text 'Control #' without a backslash for an escaped final hash; "
+        f"produced {headings!r}"
+    )
+
+
+def test_heading_escaped_hash_before_closing_hashes_is_preserved(tmp_path, monkeypatch):
+    """Pure control: preserve an escaped hash before optional closing hashes.
+
+    With markdown 3.1.1–3.11.0, passes on base 6b8b73bc, on 5138cab0,
+    and after correction: even the 3.0-style capture retains the escaped hash
+    before the space preceding the closing hashes.
+    """
+    tree = _render_fixture(tmp_path, monkeypatch, "en", r"#### Control \# ##")
+    headings = _element_contents(tree, "h4")
+    assert "Control #" in headings, (
+        "Expected h4 text 'Control #' without a backslash before closing hashes; "
+        f"produced {headings!r}"
     )
