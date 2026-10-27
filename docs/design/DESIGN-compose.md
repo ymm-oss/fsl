@@ -121,6 +121,15 @@ compose OrderSystem {
     Display-only provenance on the reified node distinguishes these bare reads
     from conversion, abstraction, and user-qualified enum literals, whose owner
     qualification is preserved; semantic Kernel AST/JSON output is unchanged.
+    Pattern collisions follow the ordinary type checker's aggregate phase:
+    a pattern sharing a normalized non-typed `count` or `sum` binder is accepted
+    exactly as in the standalone component, while non-expanding `forall` and
+    `unique` retain their refusal. Source rewriting and hygienic renaming use
+    that same phase decision, including independent header-argument scopes.
+    The ordered free-reference walk is shared with model checking; set-valued
+    capture inventories do not change preorder diagnostic selection. Late
+    component errors use the checked model's use-site wrapper and retain the
+    inner cause and the component's file, line and column.
 
     **Migration contract (#702, limited to original component name resolution):**
 

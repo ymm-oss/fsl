@@ -5,11 +5,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use fsl_syntax::{ActionItem, Binder, Expr, LValue, Pattern, Span, Statement};
+use fsl_syntax::{ActionItem, AggregateKind, Binder, Expr, LValue, Pattern, Span, Statement};
 
 use super::{ComponentNames, component_rewrite_error, map_normalized_action_items};
 use crate::model::ExpressionErrorContext;
-use crate::typecheck::{TypecheckError, reject_pattern_binding_name};
+use crate::typecheck::{
+    PatternBinding, TypecheckError, ValidationPhase, reject_pattern_binding_name,
+};
 use crate::{CoreError, capture_names, fresh_binding_name};
 
 pub(super) struct Arguments<'a> {
@@ -31,6 +33,7 @@ pub(super) struct Source<'a> {
 struct Scope {
     renamed: HashMap<String, String>,
     exporting: bool,
+    phase: ValidationPhase,
 }
 
 impl Scope {
@@ -38,6 +41,7 @@ impl Scope {
         Self {
             renamed: HashMap::new(),
             exporting: true,
+            phase: ValidationPhase::normalized(),
         }
     }
 }
@@ -72,7 +76,7 @@ pub(super) fn root_binder(
     let mut used = HashSet::new();
     crate::collect_binder_names(&binder, &mut used);
     Renamer::root(globals, params, ambient, &mut used)
-        .binder(binder, &Scope::new())
+        .binder(binder, &Scope::new(), None)
         .map(|(binder, _)| binder)
 }
 
@@ -176,7 +180,8 @@ impl<'a> Renamer<'a> {
         binding: Binding,
     ) -> Result<String, TypecheckError> {
         if matches!(binding, Binding::Pattern) {
-            reject_pattern_binding_name(
+            let decision = reject_pattern_binding_name(
+                &scope.phase,
                 &name,
                 self.source.globals.state.iter().map(String::as_str),
                 self.source.globals.consts.iter().map(String::as_str),
@@ -187,6 +192,15 @@ impl<'a> Renamer<'a> {
                     .chain(scope.renamed.keys())
                     .map(String::as_str),
             )?;
+            if decision == PatternBinding::Substituted {
+                // Keep the aggregate binder's identity so normalization still
+                // substitutes its reads, rather than introducing a payload read.
+                return Ok(scope
+                    .renamed
+                    .get(&name)
+                    .expect("substituted aggregate binder is in scope")
+                    .clone());
+            }
         }
         let collides = match binding {
             Binding::Let => self.avoid.contains(&name),
@@ -298,7 +312,7 @@ impl<'a> Renamer<'a> {
                 binder,
                 body,
             } => {
-                let (binder, nested) = self.binder(binder, scope)?;
+                let (binder, nested) = self.binder(binder, scope, None)?;
                 Expr::Quantified {
                     quantifier,
                     binder,
@@ -310,7 +324,7 @@ impl<'a> Renamer<'a> {
                 binder,
                 value,
             } => {
-                let (binder, nested) = self.binder(binder, scope)?;
+                let (binder, nested) = self.binder(binder, scope, Some(kind))?;
                 Expr::Aggregate {
                     kind,
                     binder,
@@ -326,9 +340,15 @@ impl<'a> Renamer<'a> {
         })
     }
 
-    fn binder(&mut self, binder: Binder, scope: &Scope) -> Result<(Binder, Scope), TypecheckError> {
+    fn binder(
+        &mut self,
+        binder: Binder,
+        scope: &Scope,
+        aggregate: Option<AggregateKind>,
+    ) -> Result<(Binder, Scope), TypecheckError> {
         let mut nested = scope.clone();
         nested.exporting = false;
+        nested.phase = scope.phase.under_binder(&binder, aggregate);
         let name = self.bind(
             super::binder_name(&binder).to_owned(),
             &mut nested,
@@ -413,7 +433,7 @@ impl<'a> Renamer<'a> {
                 span,
             } => {
                 let (binder, nested) = self
-                    .binder(binder, scope)
+                    .binder(binder, scope, None)
                     .map_err(|error| error.with_span(span))?;
                 Statement::ForAll {
                     binder,

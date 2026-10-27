@@ -609,25 +609,38 @@ fn reject_colliding_pattern_binding(
     env: &TypeEnv,
     model: &KernelModel,
     span: Span,
+    phase: &ValidationPhase,
 ) -> Result<(), TypecheckError> {
     reject_pattern_binding_name(
+        phase,
         binding,
         model.state.iter().map(|(name, _)| name.as_str()),
         model.consts.keys().map(String::as_str),
         model.enum_members.keys().map(String::as_str),
         env.keys().map(String::as_str),
     )
+    .map(|_| ())
     .map_err(|error| error.with_span(span))
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum PatternBinding {
+    Fresh,
+    Substituted,
 }
 
 /// The same collision rule applies before compose prefixes global names.
 pub(crate) fn reject_pattern_binding_name<'a>(
+    phase: &ValidationPhase,
     binding: &str,
     state: impl IntoIterator<Item = &'a str>,
     constants: impl IntoIterator<Item = &'a str>,
     enum_members: impl IntoIterator<Item = &'a str>,
     local: impl IntoIterator<Item = &'a str>,
-) -> Result<(), TypecheckError> {
+) -> Result<PatternBinding, TypecheckError> {
+    if phase.substituted.contains(binding) {
+        return Ok(PatternBinding::Substituted);
+    }
     let is_binding = |name: &str| name == binding;
     let collides_with = if state.into_iter().any(is_binding) {
         "a state variable"
@@ -638,7 +651,7 @@ pub(crate) fn reject_pattern_binding_name<'a>(
     } else if local.into_iter().any(is_binding) {
         "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)"
     } else {
-        return Ok(());
+        return Ok(PatternBinding::Fresh);
     };
     Err(error(format!(
         "pattern binding '{binding}' in 'is some({binding})' shadows {collides_with} of the same name; \
@@ -872,20 +885,27 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
     })
 }
 
-struct ValidationPhase {
+#[derive(Clone)]
+pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
     substituted: BTreeSet<String>,
 }
 
 impl ValidationPhase {
-    fn normalized() -> Self {
+    pub(crate) fn normalized() -> Self {
         Self {
             normalize_aggregates: true,
             substituted: BTreeSet::new(),
         }
     }
 
-    fn under_binder(&self, binder: &Binder, expands: bool) -> Self {
+    fn expands_aggregate(kind: AggregateKind, binder: &Binder) -> bool {
+        matches!(kind, AggregateKind::Count | AggregateKind::Sum)
+            && !matches!(binder, Binder::Typed { .. })
+    }
+
+    pub(crate) fn under_binder(&self, binder: &Binder, aggregate: Option<AggregateKind>) -> Self {
+        let expands = aggregate.is_some_and(|kind| Self::expands_aggregate(kind, binder));
         let mut substituted = self.substituted.clone();
         substituted.remove(binder_name(binder));
         if expands {
@@ -1081,10 +1101,8 @@ fn validate_expression_inner(
             validate(else_expr, env, spans.else_expr, Some(&ty))?;
         }
         Expr::Is { expr, pattern } => {
-            if let Pattern::Some(binding) = pattern
-                && !phase.substituted.contains(binding)
-            {
-                reject_colliding_pattern_binding(binding, env, model, span)?;
+            if let Pattern::Some(binding) = pattern {
+                reject_colliding_pattern_binding(binding, env, model, span, phase)?;
             }
             validate(expr, env, span, None)?;
         }
@@ -1092,7 +1110,7 @@ fn validate_expression_inner(
             validate(expr, env, span, None)?;
         }
         Expr::Quantified { binder, body, .. } => {
-            let child_phase = phase.under_binder(binder, false);
+            let child_phase = phase.under_binder(binder, None);
             let binder_ty = validate_binder(binder, env, model, span, phase, &child_phase)?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), binder_ty);
@@ -1110,11 +1128,10 @@ fn validate_expression_inner(
             binder,
             value,
         } => {
-            let expands = matches!(kind, AggregateKind::Count | AggregateKind::Sum)
-                && !matches!(binder, Binder::Typed { .. });
+            let expands = ValidationPhase::expands_aggregate(*kind, binder);
             // Raw descendants share all typing rules, but must not enumerate
             // ranges containing locals before the outer substitution happens.
-            let child_phase = phase.under_binder(binder, expands);
+            let child_phase = phase.under_binder(binder, Some(*kind));
             let binder_ty = validate_binder(binder, env, model, span, phase, &child_phase)?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), binder_ty);

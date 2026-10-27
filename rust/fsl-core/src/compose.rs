@@ -1359,36 +1359,24 @@ fn rewrite_expr(
     component: &Component,
     bound: &HashSet<String>,
 ) -> Result<Expr, TypecheckError> {
+    rewrite_expr_in_phase(
+        expr,
+        component,
+        bound,
+        &crate::typecheck::ValidationPhase::normalized(),
+    )
+}
+
+fn rewrite_expr_in_phase(
+    expr: Expr,
+    component: &Component,
+    bound: &HashSet<String>,
+    phase: &crate::typecheck::ValidationPhase,
+) -> Result<Expr, TypecheckError> {
     crate::recursion::guard(|| {
-        let rewrite = |expr| rewrite_expr(expr, component, bound);
+        let rewrite = |expr| rewrite_expr_in_phase(expr, component, bound, phase);
         Ok(match expr {
-            Expr::Var(name) if bound.contains(&name) => Expr::Var(name),
-            Expr::Var(name)
-                if component.names.state.contains(&name)
-                    || component.names.consts.contains(&name) =>
-            {
-                Expr::Var(prefix(&component.alias, &name))
-            }
-            Expr::Var(name) => {
-                let owners = component
-                    .names
-                    .enum_members
-                    .get(&name)
-                    .map_or(&[][..], Vec::as_slice);
-                let [owner] = owners else {
-                    return Err(crate::typecheck::unresolved_identifier(&name, owners));
-                };
-                // Private capturers are renamed by hygiene; only a public
-                // value can require reifying an otherwise stable enum read.
-                if component.public_bindings.contains(&name) {
-                    return Ok(Expr::EnumMember {
-                        type_name: prefix(&component.alias, owner),
-                        member: name,
-                        source_bare: true,
-                    });
-                }
-                Expr::Var(name)
-            }
+            Expr::Var(name) => rewrite_component_read(name, component, bound)?,
             Expr::Struct { name, fields } => hygiene::map_children(
                 Expr::Struct {
                     name: if component.names.types.contains(&name) {
@@ -1406,12 +1394,13 @@ fn rewrite_expr(
                 Expr::Binary {
                     op,
                     left: Box::new(left),
-                    right: Box::new(rewrite_expr(*right, component, &nested)?),
+                    right: Box::new(rewrite_expr_in_phase(*right, component, &nested, phase)?),
                 }
             }
             Expr::Is { expr, pattern } => {
                 if let fsl_syntax::Pattern::Some(name) = &pattern {
                     crate::typecheck::reject_pattern_binding_name(
+                        phase,
                         name,
                         component.names.state.iter().map(String::as_str),
                         component.names.consts.iter().map(String::as_str),
@@ -1429,13 +1418,20 @@ fn rewrite_expr(
                 binder,
                 body,
             } => {
-                let binder = rewrite_binder(binder, component, bound)?;
+                let child_phase = phase.under_binder(&binder, None);
+                let binder =
+                    rewrite_binder_in_phase(binder, component, bound, phase, &child_phase)?;
                 let mut nested = bound.clone();
                 nested.insert(binder_name(&binder).to_owned());
                 Expr::Quantified {
                     quantifier,
                     binder,
-                    body: Box::new(rewrite_expr(*body, component, &nested)?),
+                    body: Box::new(rewrite_expr_in_phase(
+                        *body,
+                        component,
+                        &nested,
+                        &child_phase,
+                    )?),
                 }
             }
             Expr::Aggregate {
@@ -1443,24 +1439,59 @@ fn rewrite_expr(
                 binder,
                 value,
             } => {
-                let binder = rewrite_binder(binder, component, bound)?;
+                let child_phase = phase.under_binder(&binder, Some(kind));
+                let binder =
+                    rewrite_binder_in_phase(binder, component, bound, phase, &child_phase)?;
                 let mut nested = bound.clone();
                 nested.insert(binder_name(&binder).to_owned());
                 Expr::Aggregate {
                     kind,
                     binder,
                     value: value
-                        .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
+                        .map(|expr| {
+                            rewrite_expr_in_phase(*expr, component, &nested, &child_phase)
+                                .map(Box::new)
+                        })
                         .transpose()?,
                 }
             }
             expr @ Expr::Stage { .. } => expr,
             expr => hygiene::map_children(expr, |child, span| match span {
-                Some(span) => rewrite_expr_at(child, component, bound, span),
+                Some(span) => rewrite(child).map_err(|error| error.with_span(span)),
                 None => rewrite(child),
             })?,
         })
     })
+}
+
+fn rewrite_component_read(
+    name: String,
+    component: &Component,
+    bound: &HashSet<String>,
+) -> Result<Expr, TypecheckError> {
+    if bound.contains(&name) {
+        return Ok(Expr::Var(name));
+    }
+    if component.names.state.contains(&name) || component.names.consts.contains(&name) {
+        return Ok(Expr::Var(prefix(&component.alias, &name)));
+    }
+    let owners = component
+        .names
+        .enum_members
+        .get(&name)
+        .map_or(&[][..], Vec::as_slice);
+    let [owner] = owners else {
+        return Err(crate::typecheck::unresolved_identifier(&name, owners));
+    };
+    // Only an unrenamed public value requires reifying the original bare read.
+    if component.public_bindings.contains(&name) {
+        return Ok(Expr::EnumMember {
+            type_name: prefix(&component.alias, owner),
+            member: name,
+            source_bare: true,
+        });
+    }
+    Ok(Expr::Var(name))
 }
 
 fn rewrite_binder(
@@ -1468,6 +1499,24 @@ fn rewrite_binder(
     component: &Component,
     bound: &HashSet<String>,
 ) -> Result<Binder, TypecheckError> {
+    let phase = crate::typecheck::ValidationPhase::normalized();
+    let child_phase = phase.under_binder(&binder, None);
+    rewrite_binder_in_phase(binder, component, bound, &phase, &child_phase)
+}
+
+fn rewrite_binder_in_phase(
+    binder: Binder,
+    component: &Component,
+    bound: &HashSet<String>,
+    phase: &crate::typecheck::ValidationPhase,
+    child_phase: &crate::typecheck::ValidationPhase,
+) -> Result<Binder, TypecheckError> {
+    let mut nested = bound.clone();
+    nested.insert(binder_name(&binder).to_owned());
+    let filter = |expr: Option<Box<Expr>>| {
+        expr.map(|expr| rewrite_expr_in_phase(*expr, component, &nested, child_phase).map(Box::new))
+            .transpose()
+    };
     Ok(match binder {
         Binder::Typed {
             name,
@@ -1477,14 +1526,10 @@ fn rewrite_binder(
             if type_name.namespace.is_none() && component.names.types.contains(&type_name.name) {
                 type_name.name = prefix(&component.alias, &type_name.name);
             }
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
             Binder::Typed {
                 name,
                 type_name,
-                where_expr: where_expr
-                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
-                    .transpose()?,
+                where_expr: filter(where_expr)?,
             }
         }
         Binder::Range {
@@ -1492,33 +1537,21 @@ fn rewrite_binder(
             lo,
             hi,
             where_expr,
-        } => {
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
-            Binder::Range {
-                name,
-                lo: Box::new(rewrite_expr(*lo, component, bound)?),
-                hi: Box::new(rewrite_expr(*hi, component, bound)?),
-                where_expr: where_expr
-                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
-                    .transpose()?,
-            }
-        }
+        } => Binder::Range {
+            name,
+            lo: Box::new(rewrite_expr_in_phase(*lo, component, bound, phase)?),
+            hi: Box::new(rewrite_expr_in_phase(*hi, component, bound, phase)?),
+            where_expr: filter(where_expr)?,
+        },
         Binder::Collection {
             name,
             collection,
             where_expr,
-        } => {
-            let mut nested = bound.clone();
-            nested.insert(name.clone());
-            Binder::Collection {
-                name,
-                collection: Box::new(rewrite_expr(*collection, component, bound)?),
-                where_expr: where_expr
-                    .map(|expr| rewrite_expr(*expr, component, &nested).map(Box::new))
-                    .transpose()?,
-            }
-        }
+        } => Binder::Collection {
+            name,
+            collection: Box::new(rewrite_expr_in_phase(*collection, component, bound, phase)?),
+            where_expr: filter(where_expr)?,
+        },
     })
 }
 
@@ -1884,6 +1917,7 @@ struct SourceNames {
     all: HashSet<String>,
     capture: HashSet<String>,
     guards: HashSet<String>,
+    arguments: HashSet<String>,
 }
 
 fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
@@ -1891,6 +1925,11 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
         all: source.params.clone(),
         capture: HashSet::new(),
         guards: HashSet::new(),
+        arguments: source
+            .replacements
+            .values()
+            .flat_map(|value| crate::capture_names(value, &HashSet::new()))
+            .collect(),
     };
     for item in &source.items {
         collect_action_item_names(item, &mut names.all, None);
@@ -2009,47 +2048,40 @@ fn sync_action(
     origins: &mut BTreeMap<String, crate::OriginChain>,
 ) -> Result<SpecItem, CoreError> {
     let (params, bound) = resolve_alias_params(action.params.clone(), components, action.span)?;
-    let additional_items = resolve_alias_action_items(
-        action.items.clone(),
-        components,
-        &bound,
-        ComposeWriteContext::Sync,
-    )?;
-    let (mut sources, fair_constituents) = sync_component_sources(action, components, &bound)?;
-    sources.push(SyncSource {
-        items: additional_items,
+    let additional_source = SyncSource {
+        items: resolve_alias_action_items(
+            action.items.clone(),
+            components,
+            &bound,
+            ComposeWriteContext::Sync,
+        )?,
         item_origins: Vec::new(),
         params: bound.clone(),
         replacements: HashMap::new(),
         globals: composition_names.clone(),
         span: action.span,
-    });
+    };
+    let (mut sources, fair_constituents) = sync_component_sources(action, components, &bound)?;
+    sources.push(additional_source);
     let inventories = sources
         .iter()
         .map(source_names)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut protected = HashSet::new();
+    let protected: HashSet<_> = inventories
+        .iter()
+        .flat_map(|names| names.arguments.iter().cloned())
+        .collect();
     let mut used = ambient.clone();
     used.extend(bound.iter().cloned());
-    for source in &sources {
-        for actual in source.replacements.values() {
-            protected.extend(crate::capture_names(actual, &HashSet::new()));
-            collect_names(actual, &mut used);
-        }
+    for actual in sources
+        .iter()
+        .flat_map(|source| source.replacements.values())
+    {
+        collect_names(actual, &mut used);
     }
     for names in &inventories {
         used.extend(names.all.iter().cloned());
     }
-    let argument_names = sources
-        .iter()
-        .map(|source| {
-            source
-                .replacements
-                .values()
-                .flat_map(|value| crate::capture_names(value, &HashSet::new()))
-                .collect::<HashSet<_>>()
-        })
-        .collect::<Vec<_>>();
     let mut pattern_ambient = ambient.clone();
     pattern_ambient.extend(bound.iter().cloned());
     let mut items = Vec::new();
@@ -2063,7 +2095,7 @@ fn sync_action(
             if other != index {
                 avoid.extend(names.capture.iter().cloned());
                 pattern_avoid.extend(names.guards.iter().cloned());
-                argument_avoid.extend(argument_names[other].iter().cloned());
+                argument_avoid.extend(names.arguments.iter().cloned());
             }
         }
         item_origins.extend(source.item_origins);

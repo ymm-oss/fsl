@@ -8,10 +8,14 @@ or `requires`. A pattern
 payload is visible on the right of `and` or `=>`, and a `requires` also exposes
 it to later guards and the normalized body/ensures; neither statement nor
 expression `if` introduces it into a branch. A pattern
-binding that collides with an original component declaration is now rejected
-in compose with the same message, kind, and location as the standalone spec;
-these invalid compositions previously passed `check` after prefixing hid the
-collision. The pattern-collision rule is shared with the ordinary type checker.
+binding follows the same phase-aware collision rule as the standalone spec.
+Patterns sharing a normalized non-typed `count` or `sum` binder are accepted
+in compose just as they are alone; non-expanding `forall` and `unique` forms
+retain their collision refusal. Other original-source collisions remain
+rejected instead of being hidden by prefixing. The ordinary type checker owns
+this decision for both source rewriting and checked expressions. Component-owned
+late diagnostics retain the original cause and component position inside the
+existing use-site diagnostic wrapper.
 Private lets, patterns, quantifiers, aggregates, and statement-forall binders
 share one hygienic rewrite across synchronized sources. It inventories both
 reads and declarations, including non-exported pattern labels, and preserves
