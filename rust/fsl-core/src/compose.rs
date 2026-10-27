@@ -898,6 +898,9 @@ fn rewrite_component_item_inner(
                         initializer: field
                             .initializer
                             .map(|expr| {
+                                if crate::model::unsupported_inline_form(&expr).is_some() {
+                                    return Ok(expr);
+                                }
                                 rewrite_root_expr_at(
                                     expr,
                                     component,

@@ -2372,7 +2372,7 @@ fn check_init_collection_binders(
     Ok(())
 }
 
-fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
+pub(crate) fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     let unsupported = match expr {
         Expr::Quantified { .. } => Some("a quantified expression"),
         Expr::Aggregate { .. } => Some("a binder or aggregate expression"),
