@@ -61,6 +61,7 @@ use refinement::{
     abs_violation_json, fold_governance_from_source, implements_error_output,
     implements_result_from_source_with_bounds, mismatch_paths, run_refine,
 };
+use spec_loading::{finish_admitted, raw_delivery_allowed, run_admitted_root, run_admitted_roots};
 use spec_loading::{
     load_kernel_model_from_source, load_model, load_model_from_source, load_model_scoped,
     load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
@@ -6024,76 +6025,6 @@ fn portable_cli_source_path(path: &Path) -> Result<String, String> {
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-/// Admit each direct input slot once and pass captured bytes and diagnostics
-/// inward. The callback owns envelope finalization, including nested results.
-fn run_admitted_roots(
-    roots: Vec<(&Path, Result<String, SpecLoadError>)>,
-    requested: Option<fsl_syntax::Edition>,
-    stderr_on_success: bool,
-    run: impl FnOnce(&[String], &[SourceEdition]) -> (Value, i32),
-) -> (Value, i32) {
-    let mut sources = Vec::new();
-    let mut editions = Vec::new();
-    for (path, source) in roots {
-        let source = match source {
-            Ok(source) => source,
-            Err(error) => return (spec_load_error_output(&error), 2),
-        };
-        let edition = match fslc_rust::migration::admit_source(
-            &source,
-            &path.to_string_lossy(),
-            requested,
-            crate::parse_options(),
-            &envelope,
-            true,
-        ) {
-            Ok(edition) => edition,
-            Err(error) => return error,
-        };
-        sources.push(source);
-        editions.push(edition);
-    }
-    let result = run(&sources, &editions);
-    if stderr_on_success && raw_delivery_allowed(&result) {
-        for edition in editions {
-            for warning in edition.warnings() {
-                eprintln!("warning: {warning}");
-            }
-        }
-    }
-    result
-}
-
-fn finish_admitted(
-    result: (Value, i32),
-    editions: &[SourceEdition],
-    stderr_on_success: bool,
-) -> (Value, i32) {
-    if stderr_on_success && raw_delivery_allowed(&result) {
-        result
-    } else {
-        let result = editions[0].finish(result);
-        editions[1..].iter().fold(result, |result, edition| {
-            edition.warnings_only().finish(result)
-        })
-    }
-}
-
-fn run_admitted_root(
-    path: &Path,
-    source: Result<String, SpecLoadError>,
-    requested: Option<fsl_syntax::Edition>,
-    stderr_on_success: bool,
-    run: impl FnOnce(&str) -> (Value, i32),
-) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, source)],
-        requested,
-        stderr_on_success,
-        |sources, editions| finish_admitted(run(&sources[0]), editions, stderr_on_success),
-    )
-}
-
 fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
     run_admitted_roots(
         vec![(path, read_spec_source(path))],
@@ -6548,37 +6479,6 @@ fn run_db_import(
         output.insert("dbsystem_source".to_owned(), json!(imported.source));
     }
     (Value::Object(output), 0)
-}
-
-/// Whether a producer's output may be delivered as raw bytes instead of its
-/// JSON envelope (issue #537 C2, Verdict Conservation Law).
-///
-/// Raw delivery *replaces* the envelope that would otherwise carry a failure's
-/// `kind`/`message`/`loc`, so every raw-output path must first confirm the
-/// producer succeeded. This is an **additional** conjunct and never a
-/// replacement for the structural field guard a site already has: `db import`
-/// prints raw source only for `result:"imported"` and keeps the JSON envelope
-/// for `imported_with_warnings`, which is also success-class.
-///
-/// Three of the nine raw-output sites previously had no guard at all
-/// (`--readable`, `--ts`, `domain expand`). Measured rather than assumed: no
-/// failure path can currently reach any of those extractions, because the
-/// extracted field is inserted at exactly one place in each producer, after
-/// every error return -- `"readable"` in `run_explain`, `"entities"` in
-/// `fsl_tools::analyze_typestate`, `"kernel_source"` in `run_domain_expand`.
-/// The guard therefore records an invariant that was until now unstated. It is
-/// not idle: `fsl-tools/src/domain.rs` builds a `result:"violated"` envelope
-/// that also carries `kernel_source`, so the invariant is one routing change
-/// away from breaking.
-fn raw_delivery_allowed(result: &(Value, i32)) -> bool {
-    (result.1 == 0 && result.0.get("$schema").is_some_and(Value::is_string))
-        || (outcome_class(&result.0).is_success()
-            && match result.0["result"].as_str() {
-                Some("explained") => result.0["readable"].is_string(),
-                Some("typestate") => result.0["entities"].is_array(),
-                Some("generated" | "analyzed") => result.0["content"].is_string(),
-                _ => true,
-            })
 }
 
 fn wrap_specialized(result: Value) -> (Value, i32) {

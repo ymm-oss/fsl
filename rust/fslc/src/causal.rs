@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
 use fslc_rust::literate_access::literate_access;
+use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
 use crate::cli_options::{CommandArgs, required_option_value};
@@ -13,7 +14,9 @@ use crate::log_replay::{
     untyped_replay_enum_mapping_span,
 };
 use crate::process::{block_on_native, parse_options};
-use crate::spec_loading::load_snapshot_value_object;
+use crate::spec_loading::{
+    finish_admitted, load_snapshot_value_object, run_admitted_root, run_admitted_roots,
+};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn causal_command(
@@ -193,19 +196,19 @@ pub(super) fn causal_command(
                     2,
                 ));
             };
-            Ok(crate::run_admitted_roots(
+            Ok(run_admitted_roots(
                 vec![
                     (&path, read_causal_source(&path)),
                     (
                         &mapping,
                         std::fs::read_to_string(&mapping)
-                            .map_err(|error| crate::SpecLoadError::Io(error.to_string())),
+                            .map_err(|error| SpecLoadError::Io(error.to_string())),
                     ),
                 ],
                 None,
                 false,
                 |sources, editions| {
-                    crate::finish_admitted(
+                    finish_admitted(
                         run_causal_observe_expectations(
                             &path,
                             &sources[0],
@@ -251,7 +254,7 @@ pub(super) fn causal_command(
             if let Some(option) = positionals.next() {
                 return Err(unknown(&option.to_string_lossy()));
             }
-            Ok(crate::run_admitted_roots(
+            Ok(run_admitted_roots(
                 vec![
                     (&before, read_causal_source(&before)),
                     (&after, read_causal_source(&after)),
@@ -259,7 +262,7 @@ pub(super) fn causal_command(
                 None,
                 false,
                 |sources, editions| {
-                    crate::finish_admitted(
+                    finish_admitted(
                         run_causal_diff(&before, &sources[0], &after, &sources[1]),
                         editions,
                         false,
@@ -366,14 +369,13 @@ fn causal_error_output(error: &fsl_tools::CausalError, legacy_literate: bool) ->
     (output, 2)
 }
 
-fn read_causal_source(path: &Path) -> Result<String, crate::SpecLoadError> {
-    std::fs::read_to_string(path).map_err(|error| {
-        crate::SpecLoadError::Io(format!("cannot read {}: {error}", path.display()))
-    })
+fn read_causal_source(path: &Path) -> Result<String, SpecLoadError> {
+    std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::Io(format!("cannot read {}: {error}", path.display())))
 }
 
 fn run_causal_root(path: &Path, run: impl FnOnce(&str) -> (Value, i32)) -> (Value, i32) {
-    crate::run_admitted_root(path, read_causal_source(path), None, false, run)
+    run_admitted_root(path, read_causal_source(path), None, false, run)
 }
 
 fn load_causal_model_from_source(
