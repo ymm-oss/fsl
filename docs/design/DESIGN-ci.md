@@ -46,7 +46,10 @@ timeout exits **124** (`probe_timeout`, with `poll` or `cdp` mode), a native/Wor
 parity violation exits **65** (`parity_violation`), and other harness failures exit
 **1** (`harness_failure`). The earlier z3js spike has no such outcome JSON: only
 expiry of its 75-second result timer exits **124**; early browser exit, Worker
-failure, build failure and every other error still exit **1**.
+failure, build failure and every other error still exit **1**. The spike lifecycle
+clears its result timer, stops any live Chrome, closes the server and removes the
+profile on success or failure, including profile-creation and launch failures;
+cleanup releases only acquired resources in that order.
 
 `tools/check-native-integration.sh` retries each of the spike `probe:browser` and
 FSL `test:browser` commands **once, only on exact status 124**. A second timeout
