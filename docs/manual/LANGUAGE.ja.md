@@ -1085,7 +1085,15 @@ model-expression の型エラーは、base の check envelope にすでに loc �
 所有する宣言の位置を示します。既存のものを含む component の型エラーは原因を保って
 所有する root use に anchor します。
 inline ID は #1457、集約/component・入れ子/sync の実際の出力、固定受入、書き換えた guard/constructor
-入力に由来します。残る範囲・ドメインの制限は #1480、init/zero-capacity は #1481、
+入力に由来します。残る範囲・ドメインの制限は #1480 です。#1481 cell 1 は
+Map Struct のフィールド別 init を扱い、cell 2 は空の容量 0 の Seq の
+`head()`、`at(i)`、index 読み出しを修正します。通常の action/property 文脈では
+到達した読み出しは `partial_op` です。ranked decreases は、新しい slot の値が
+rank 評価に入る前に、到達した zero-slot 読み出しだけを base の意味論エラーで
+狭く拒否します。未到達の条件分岐や短絡で読まない measure は、base で意味論エラー
+だったものも ranking で proved になりました。physical slot を持つ measure の
+既存の挙動は維持し、一般の定義性の欠落は #1542 に残ります
+([Seq の部分操作](../design/DESIGN-seq-partial-operations.md)を参照)。
 他の型の穴は #1459、リテラルの形の同類は #1467 です。
 これらを #1463 の追加の削除へ混ぜていません。
 

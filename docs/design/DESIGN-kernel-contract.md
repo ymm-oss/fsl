@@ -452,9 +452,27 @@ Map lookup remains a fail-closed evaluation error instead of being relabeled by
 a later partial operation.
 This keeps action-context `partial_op` classification inside the public
 `verify_bounded*` boundary without adding a production dependency on
-`fsl-runtime`. Agreement-only fallback values still let zero-capacity sequence
-terms be constructed under the broader conformance predicates. Concrete
-conformance vectors remain authoritative for exact rollback evidence that a
+`fsl-runtime`. Reached reads of an empty zero-capacity sequence are classified
+as `partial_op`; when no physical slots exist, ordinary BMC and induction
+construct fresh, unobservable read terms, not the agreement-only fallback
+values used by broader conformance predicates. Ranked `leadsTo` decreases
+measures are the narrow exception: before initial, successor, or deadlock
+measure evaluation, a path-sensitive preflight refuses only reached zero-slot
+reads whose fresh values would otherwise enter the rank evaluation. It retains
+the base semantics error (`head() on zero-capacity sequence` or
+`cannot select from an empty finite domain`). Unreached conditional or
+short-circuited reads can now prove by ranking where the base reported a
+semantics error. Physical-slot measures retain their existing behavior, not a
+new definedness guarantee: capacity-zero push/pop and conditional-merge
+temporaries can still read stale/default physical slots and prove on both base
+and head (#1542). This narrow refusal does not close the capacity-zero case or
+add general measure-definedness semantics; see
+[Seq partial operations](DESIGN-seq-partial-operations.md#symbolic-contract).
+The BMC ranking fast path discharges nothing on the preflight error, as for
+other ranking errors.
+Nonempty expression temporaries retain their live elements and normal read
+semantics, independently of declared state capacity. Concrete conformance
+vectors remain authoritative for exact rollback evidence that a
 bounded symbolic representation cannot retain, such as an over-capacity
 sequence suffix. Property-context totalization is unchanged.
 The solver-free `fsl-runtime` dependency boundary remains intact.

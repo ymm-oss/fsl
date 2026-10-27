@@ -1150,8 +1150,17 @@ including pre-existing ones, anchor at the owning root use and retain their
 component cause.
 The inline IDs include actual #1457, aggregate/component and nested/sync emissions, fixed acceptance,
 and rewritten guard/constructor inputs. Remaining range/domain limitations
-are #1480; init/zero-capacity issues are #1481, other typing gaps #1459, literal
-shape relatives #1467. They are not additional removals in #1463.
+are #1480; #1481 cell 1 covers Map Struct per-field init and cell 2 fixes
+`head()`, `at(i)`, and index reads of empty zero-capacity Seqs. Reached reads
+report `partial_op` in ordinary action/property contexts. Ranked decreases
+narrowly refuses reached zero-slot reads with the base semantics error, before
+their fresh value can enter rank evaluation. Unreached conditional or
+short-circuited reads can now prove by ranking where the base reported a
+semantics error; physical-slot measures retain their existing behavior, with
+the general definedness gap still tracked by #1542 (see
+[Seq partial operations](../design/DESIGN-seq-partial-operations.md)).
+Other typing gaps are #1459, literal shape relatives #1467. They are not
+additional removals in #1463.
 
 ## 5. Semantics
 
