@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1413 / O4 real-executor watchdog.
-//! Phase I support API in tests/support/test_executor.rs:
+//! Phase I support API in `tests/support/test_executor.rs`:
 //! `pub(crate) fn block_on_until<F: std::future::Future>(future: F,
 //!     deadline: std::time::Instant) -> F::Output`.
 //! The stdio `block_on` must delegate to this same deadline-driven executor;
