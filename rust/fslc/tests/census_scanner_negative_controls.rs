@@ -40,11 +40,11 @@ impl Reader {
 
 #[test]
 fn outcome_census_keeps_public_types_after_a_test_module() {
-    let source = r#"
+    let source = r"
 #[cfg(test)]
 mod tests { pub struct TestResult; }
 pub struct MissedResult { pub outcome: bool }
-"#;
+";
     assert!(!legacy::outcome_product(source).contains("pub struct MissedResult"));
     assert_eq!(scan(source).public_structs, ["MissedResult"]);
 }
