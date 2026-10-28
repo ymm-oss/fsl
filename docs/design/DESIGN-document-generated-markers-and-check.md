@@ -168,9 +168,9 @@ label string `fslc document generate` was invoked with — `SpecInfo.source` and
 own command-line spelling of the spec path, a cosmetic difference (a relative path
 from a different working directory, for instance) would shift every source-ref line
 and manufacture false whole-document drift. `check` therefore re-projects under the
-label the artifact's frontmatter recorded (`load_document_claims_with_label`), not
-under its own argv spelling; the spec *content* still comes from the path check's
-own caller passed in.
+label the artifact's frontmatter recorded (`load_document_claims_from_source`), not
+under its own argv spelling. The spec content is the caller's captured, admitted
+source string; neither the label nor the original path is reread for projection.
 
 **Comparison algorithm.** After the frontmatter's `fsl_document_schema`/`view`/`lang`
 are confirmed supported (any of the three failing is a hard error, exit 2 — the

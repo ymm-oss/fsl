@@ -10,32 +10,6 @@ use serde_json::{Value, json};
 
 // leaf | mode | remaining consumer contract. These cells still execute.
 pub const DEFERRED_TO_SECOND_PR: &[(&str, &str, &str)] = &[
-    (
-        "ai check",
-        "all",
-        "Admit the root and own warnings before AI verification.",
-    ),
-    (
-        "ai compat",
-        "all",
-        "Admit and reuse the AI root before surface parsing.",
-    ),
-    (
-        "ai drift",
-        "all",
-        "Admit project roots before AI evaluation.",
-    ),
-    (
-        "ai eval",
-        "all",
-        "Admit project roots before AI evaluation.",
-    ),
-    (
-        "ai regress",
-        "all",
-        "Admit project roots before AI evaluation.",
-    ),
-    ("ai replay", "all", "Admit and reuse the AI replay root."),
     ("analyze", "batch", "Admit every explicit batch root."),
     (
         "analyze",
@@ -45,7 +19,7 @@ pub const DEFERRED_TO_SECOND_PR: &[(&str, &str, &str)] = &[
     (
         "approval check",
         "all",
-        "Admit the live root before consuming records or trust.",
+        "Admit the live root before consuming records or trust; stop rereading the root in the ledger --approval overlay.",
     ),
     (
         "approval create",
@@ -63,85 +37,14 @@ pub const DEFERRED_TO_SECOND_PR: &[(&str, &str, &str)] = &[
         "Prepare all roots before layer work and implementation effects.",
     ),
     (
-        "counterexample export",
-        "ordering",
-        "Reject the root before preflight, model and digest work.",
-    ),
-    (
-        "db observe",
-        "all",
-        "Admit the root before the surface parser.",
-    ),
-    (
         "diff",
         "all",
         "Admit both live roots and mapping with per-slot warning ownership.",
     ),
     (
-        "document check",
-        "all",
-        "Admit the root before claims and artifacts.",
-    ),
-    (
-        "document claims",
-        "all",
-        "Admit the root and deliver raw warnings on stderr.",
-    ),
-    (
-        "document generate",
-        "all",
-        "Admit the root before output and deliver raw warnings.",
-    ),
-    (
-        "domain analyze",
-        "all",
-        "Admit the domain root before projection.",
-    ),
-    (
-        "domain expand",
-        "all",
-        "Admit the root before projection and writes.",
-    ),
-    (
-        "domain generate",
-        "all",
-        "Admit the root before scaffold generation.",
-    ),
-    (
-        "domain replay",
-        "all",
-        "Admit the root before model and log consumption.",
-    ),
-    (
-        "domain testgen",
-        "all",
-        "Own domain root admission and warnings outside generation.",
-    ),
-    ("html", "raw", "Deliver the raw-success warning on stderr."),
-    (
-        "ledger",
-        "raw",
-        "Deliver the raw-success warning on stderr.",
-    ),
-    (
-        "mutate",
-        "success-warning",
-        "Forward the admitted legacy warning once on success.",
-    ),
-    (
         "refine",
         "all",
         "Admit all explicit root and mapping slots, including repeated paths.",
-    ),
-    (
-        "replay",
-        "from-log",
-        "Admit the log-replay root and explicit mapping.",
-    ),
-    (
-        "sweep",
-        "capture",
-        "Capture one root and reuse its bytes for every grid cell.",
     ),
 ];
 
@@ -199,13 +102,6 @@ pub fn deferred(label: &str) -> Option<(&'static str, &'static str)> {
                     && !label.ends_with("/warning")
                     && (!label.starts_with("route/") || label.ends_with("\"fsl 5\\n\""))
             }
-            ("html" | "ledger", "raw") => label.starts_with(&format!("stderr/{leaf} ")),
-            ("replay", "from-log") => belongs(label, "replay impl.fsl --from-log"),
-            ("counterexample export", "ordering") => {
-                label.starts_with("control/counterexample export/")
-            }
-            ("mutate", "success-warning") => label.starts_with("control/mutate/"),
-            ("sweep", "capture") => label.starts_with("control/sweep/"),
             _ => panic!("unregistered deferred mode {leaf}/{mode}"),
         };
         matches.then_some((leaf, mode))

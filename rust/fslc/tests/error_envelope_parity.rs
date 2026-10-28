@@ -3435,36 +3435,43 @@ fn empty_membership_expansion_checker_rejects_an_unexpanded_domain() {
     assert!(!expanded_empty_membership_invariant_is_false(source));
 }
 
+fn empty_membership_warning_stderr() -> String {
+    format!(
+        "warning: {}\n",
+        serde_json::json!({
+            "code": "deprecated_domain_enum_union",
+            "kind": "deprecated_domain_enum_union",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy domain enum union syntax is deprecated",
+            "loc": {
+                "file": EMPTY_MEMBERSHIP_FIXTURE,
+                "line": 2, "column": 3, "end_line": 2, "end_column": 33
+            },
+            "canonical_replacement": "enum Status { Draft, Approved }",
+            "machine_applicable": true,
+            "edits": [{
+                "start": 66, "end": 96,
+                "replacement": "enum Status { Draft, Approved }"
+            }],
+            "suggestion": {
+                "kind": "replace",
+                "replacement": "enum Status { Draft, Approved }",
+                "span": { "start": 66, "end": 96 },
+                "machine_applicable": true
+            }
+        })
+    )
+}
+
 #[allow(clippy::too_many_lines)]
 fn empty_membership_result_matches(command: &str, actual: &Actual) -> bool {
-    let expected_stderr = if matches!(command, "kernel" | "conformance" | "testplan") {
-        format!(
-            "warning: {}\n",
-            serde_json::json!({
-                "code": "deprecated_domain_enum_union",
-                "kind": "deprecated_domain_enum_union",
-                "taxonomy": "deprecated",
-                "severity": "warning",
-                "edition": "current",
-                "message": "legacy domain enum union syntax is deprecated",
-                "loc": {
-                    "file": EMPTY_MEMBERSHIP_FIXTURE,
-                    "line": 2, "column": 3, "end_line": 2, "end_column": 33
-                },
-                "canonical_replacement": "enum Status { Draft, Approved }",
-                "machine_applicable": true,
-                "edits": [{
-                    "start": 66, "end": 96,
-                    "replacement": "enum Status { Draft, Approved }"
-                }],
-                "suggestion": {
-                    "kind": "replace",
-                    "replacement": "enum Status { Draft, Approved }",
-                    "span": { "start": 66, "end": 96 },
-                    "machine_applicable": true
-                }
-            })
-        )
+    let expected_stderr = if matches!(
+        command,
+        "kernel" | "conformance" | "testplan" | "domain expand" | "html" | "ledger"
+    ) {
+        empty_membership_warning_stderr()
     } else {
         String::new()
     };
@@ -3704,7 +3711,7 @@ fn domain_expand_empty_membership_emits_a_checked_false_invariant() {
         "stdout={} stderr={}",
         actual.stdout, actual.stderr
     );
-    assert!(actual.stderr.is_empty(), "{}", actual.stderr);
+    assert_eq!(actual.stderr, empty_membership_warning_stderr());
     assert!(
         expanded_empty_membership_invariant_is_false(&actual.stdout),
         "{}",
@@ -3726,6 +3733,23 @@ fn domain_analyze_empty_membership_preserves_the_structural_projection() {
     assert_eq!(output["effects"], serde_json::json!([]));
     assert_eq!(output["sagas"], serde_json::json!([]));
     assert_eq!(output["findings"], serde_json::json!([]));
+}
+
+#[test]
+fn empty_membership_warning_is_rejected_for_an_unapproved_command() {
+    let output = serde_json::json!({
+        "fsl":"1.0", "result":"error", "kind":"semantics",
+        "message":"expected an ai_component or agent document"
+    });
+    let mut actual = Actual {
+        stdout: output.to_string(),
+        json: Some(output),
+        stderr: String::new(),
+        exit: 2,
+    };
+    assert!(empty_membership_result_matches("ai check", &actual));
+    actual.stderr = empty_membership_warning_stderr();
+    assert!(!empty_membership_result_matches("ai check", &actual));
 }
 
 #[test]
