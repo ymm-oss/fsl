@@ -1281,6 +1281,9 @@ fn offset_at_position(source: &str, position: Position) -> usize {
 
 #[cfg(test)]
 mod tests {
+    mod dependency_edition {
+        include!("../tests/support/edition_dependency_adapter.rs");
+    }
     use super::*;
     use lsp_server::RequestId;
 

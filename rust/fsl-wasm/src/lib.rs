@@ -775,6 +775,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     mod edition_acceptance {
         include!("../tests/support/edition_adapter.rs");
+        mod dependency_edition {
+            include!("../tests/support/edition_dependency_adapter.rs");
+        }
     }
 
     use std::collections::BTreeSet;

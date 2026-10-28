@@ -17771,6 +17771,9 @@ fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
 
 #[cfg(test)]
 mod chain_jobs_tests {
+    mod dependency_edition {
+        include!("../tests/support/edition_dependency_native.rs");
+    }
     use super::*;
 
     #[test]
