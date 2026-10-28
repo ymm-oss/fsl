@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #858 real-rule controls, including the comment-blanking false failure.
-//! Phase I API in tests/support/outcome_census_rule.rs:
+//! Phase I API in `tests/support/outcome_census_rule.rs`:
 //! `pub(crate) fn outcome_types(source: &str) -> BTreeMap<String, bool>`.
 //! Move the census's extraction, outcome selection and annotation look-back
 //! there; the existing census must aggregate this same rule's results.

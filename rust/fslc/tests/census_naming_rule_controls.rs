@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1284 real finding-pipeline controls.
-//! Phase I API in tests/support/naming_census_rule.rs:
+//! Phase I API in `tests/support/naming_census_rule.rs`:
 //! `pub(crate) fn findings(path: &str, source: &str) -> Vec<Finding>`;
 //! `pub(crate) enum Kind` retains the four existing variants;
 //! `pub(crate) struct Finding` retains its existing fields, each `pub(crate)`:

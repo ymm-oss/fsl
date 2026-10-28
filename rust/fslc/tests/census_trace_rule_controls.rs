@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1285 real-rule detector, not the fixture AST scanner.
-//! Phase I API in tests/support/trace_census_rule.rs:
+//! Phase I API in `tests/support/trace_census_rule.rs`:
 //! `pub(crate) fn calls_in_source(source: &str, name: &str) -> usize`.
 //! Move the real extraction + `calls` rule there and route the census through
 //! it; do not implement a second recognizer just for this test.
