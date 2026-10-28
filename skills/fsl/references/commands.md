@@ -254,6 +254,12 @@ means every dialect is source-complete. Requirement relations remain separate
 from origin targets. Use `fslc conformance` with the same Kernel major (conformance schema v1 or v2)
 to test an independent runtime.
 
+Public Kernel v1/v2 collection aggregate normalization retains actual add
+candidates through Set/relation-projection let aliases. Process every generated
+guard/let in order: existing scalar let captures preserve candidates across
+shadowing and state updates; they are not a new JSON node shape. Count/sum and
+binary min/max around sum must not re-enumerate only the nominal carrier.
+
 For an induction `unknown_cti`, first try `--engine explicit` — if exploration
 closes it returns `proved` with **no lemmas at all** (the invariant being
 non-inductive is irrelevant to exhaustive search). Only when explicit is
@@ -683,6 +689,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   properties, so `not_evaluated` is never a pass — gate the seam on an
   unfiltered `check`/`verify` or `fslc chain`. A spec without `implements` has
   no key.
+  `--property _bounds_<root>` can select implicit bounds, including relations;
+  checked inventories include them, and induction records proved bounds in
+  `k_used`. The existing CLI limitation remains: `--exclude-property _bounds_*`
+  is rejected as `no such property` (exit 2), not a supported bound-exclusion route.
+  When property selection omits a Set/relation root bound, optional closed-grid
+  ranking does not skip lasso search. Other unselected scalar bounds are not
+  assumed by ranking. In BMC, re-framing an unchecked Set/relation root requires
+  proof that no live key escapes the new frame's finite support; that re-framing
+  check does not assume the omitted bound. Outside values remain retained.
 - `verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
   override the matching `entity`/`number` bound from a `verify { ... }` block
   without editing the spec — the CLI equivalent of hand-shrinking the model

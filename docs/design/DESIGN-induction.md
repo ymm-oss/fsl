@@ -211,7 +211,15 @@ the induction engine's (§2.3, §4).
 pre-state, exactly the properties the same BMC run checks at every unrolled
 step: every user invariant, and each `_bounds_*` the run's property
 selection keeps (`checked_bounds`; a bound the run does not check is not
-assumed, because an unrolled state may then violate it). BMC reaches the
+assumed, because an unrolled state may then violate it). The ranking's fresh
+collection states use closed carrier grids. Consequently the optional discharge
+requires every Set/relation root bound to be selected; if any such bound is
+omitted, it withdraws no lasso probes. Other unselected bounds are not assumed:
+scalar terms remain unconstrained by their declared ranges, so the ranking must
+succeed without those premises. This guard does not refuse the model or change
+the lasso search, and prevents an outside member from disabling a helpful action
+in a state the ranking cannot represent.
+The ordinary induction ranking still assumes all bounds. BMC reaches the
 lasso search only after every one of those checks came back `unsat` at every
 step, so every unrolled state satisfies the ranking's premise. Take any
 candidate lasso: a pending step `p`, a loop `states[i..j]` with

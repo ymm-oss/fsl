@@ -764,6 +764,10 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   `sum(x in queue of x.amount where p)` と、それらの範囲の等価形。空のドメインは
   `0` を生みます。Seq の重複は live な位置ごとに 1 回ずつ寄与し、Set のメンバー
   シップは異なるメンバーごとに 1 回寄与します。
+  Public Kernel v1/v2 の export も、`add`、関係の射影、コレクションの `let` alias を
+  通じて実際の候補を保持します。宣言されたドメインだけを列挙するのではなく、既存の
+  スカラー値の capture を使うため、後続の shadowing や状態更新で束縛済みの候補は
+  変わりません。sum を包む `min`/`max` は二項算術のままで、集約 JSON の形は増やしません。
 - 濃度の述語: `unique(binder)` / `exactlyOne(binder)`。`unique` は一致する束縛が
   高々 1 つ、`exactlyOne` はちょうど 1 つという意味です。
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`。
@@ -779,6 +783,17 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
 - struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
   `==` はフィールドごとの等値
 - Set: `Set {}` / `Set { 1, 2 }`、`.add(e)` `.remove(e)` `.contains(e)` `.size()`
+  受理された `add` は、計算結果が宣言されたドメインの外でもメンバーを保持します。
+  一時値の `contains`、`size`、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
+  メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。静的な型検査と
+  受理範囲は変えず、非有界 Set や複合コレクションの型推論を追加するものではありません。
+  より広いドメインの Set/関係を丸ごと代入する操作は、base と同様に BMC/induction が
+  `cannot coerce symbolic value` (exit 2)で拒否します。
+  記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
+  保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
+  ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
+  ことの証明が必要です。この re-frame の検査は省いた境界を仮定せず、本当に増え続ける
+  support は保持します。
 - Seq: `Seq {}` / `Seq { 1, 2 }`、`.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`、`==` は長さとすべての要素の等値
 - Relation: `r.contains(a, b)`、`r.add(a, b)`、`r.remove(a, b)`、
@@ -786,6 +801,8 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   `domain(r)`、`range(r)`。`reachable` と `acyclic` は自己関係
   (`relation T -> T`)を要求します。端点の型/アリティのエラーは修復ヒントを
   含みます。
+  受理された関係の add も、どちらかの端点のドメイン外にあるペアを保持し、domain/range と
+  グラフ操作はそのペアを参照します。add の結果を元の有界の関係へ戻すと `_bounds_<var>` 違反になります。
   `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
   `a` を `A`、`b` を `B` に対して独立に型検査します。不適合な端点は
   check 時の `kind: "semantics"` エラー(終了コード 2)となり、代入可能性の
@@ -1231,7 +1248,7 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 
 | 検査 | 内容 | 違反時 |
 |---|---|---|
-| 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
+| 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素、Set のメンバー、関係の端点を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
 | Seq の部分演算(action および property 文脈) | `pop()`/`head()`/`at(i)`/index の時点で列が非空かつインデックスが範囲内である | `violated` / `partial_op` / `_partial_<action>`、`_partial_property_<property>`、または `_partial_property_terminal` |
 | 算術の部分演算(action 文脈限定: `requires`/本体/`ensures` のみ、§3 参照) | `/` `%` の除数が非ゼロである | `violated` / `partial_op` / `_partial_<action>` |
 | action カバレッジ | 各 action が深さ K 以内に少なくとも 1 回 enabled になる | `action_coverage` にブロックしている requires の診断 |
@@ -1533,6 +1550,10 @@ Public Kernel v2 はオプトインで、
 プロパティの出力(`invariants_checked`、`transitions_checked`、`leads_to`、
 `reachables`)から取り除きます。`--property` と `--exclude-property` が同じ
 プロパティを指名した場合は、除外が勝ちます。
+暗黙の型境界も `--property _bounds_<var>` で選択でき、関係の境界も含みます。
+これらは `invariants_checked` と、induction で証明された場合の `k_used` に現れます。
+既存の除外制限は変えません: `--exclude-property _bounds_<var>` は `no such property`
+(exit 2)で拒否されます。除外の対象は上記の宣言済みプロパティ種別であり、暗黙の境界ではありません。
 
 **選択した run が評価しない検査(#1008)。** 検査を実行しなかったことは、それが成り立つ
 証拠にはなりません。`verify` のオプションによって宣言済みの検査が飛ばされるとき、

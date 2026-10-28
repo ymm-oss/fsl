@@ -1037,11 +1037,26 @@ never a state variable named `true`), so the declaration is rejected. No other w
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`
+  An accepted add retains computed outside-carrier members in temporaries;
+  membership, size, removal and equality must not treat them as absent. Storing
+  the add result back to that bounded receiver reports `type_bound` /
+  `_bounds_<root>`, not a dropped transition. Existing static typing and
+  finite-scalar admission still apply.
+  BMC/induction still fail closed on whole-collection assignments from a wider
+  Set/relation carrier (`cannot coerce symbolic value`, exit 2), as on base.
+  Symbolic init copies preserve introduced support in checked dependency order;
+  repeated assignments remain relational equalities. In BMC, re-framing a root
+  whose bound is omitted requires proof that no live key escapes the new frame's
+  finite support. That re-framing check does not assume the omitted bound or
+  truncate genuinely growing collections.
 - Seq: `Seq {}` `Seq { 1, 2 }` (element count ≤ N), `.push(e) .pop() .head() .at(i)
   .contains(e) .size()`, `==` (length + all elements)
 - Relation: `.contains(a,b) .add(a,b) .remove(a,b)`,
   `reachable(r,a,b) acyclic(r) functional(r) injective(r) domain(r) range(r)`.
   `reachable`/`acyclic` require a self-relation (`relation T -> T`).
+  Accepted adds retain pairs outside either endpoint carrier, including through
+  domain/range and graph operations; storing the add result back exposes that
+  receiver's bound.
   For `r: relation A -> B`, `contains`/`add`/`remove`/`reachable` require
   source `a` assignable to `A` and target `b` assignable to `B` independently.
   A mismatch is `kind: "semantics"`, exit 2, with the existing assignability

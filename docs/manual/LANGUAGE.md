@@ -801,6 +801,11 @@ forms and the still-open #1528 path are not negated by that corpus result.
   `sum(x in queue of x.amount where p)`, and range equivalents. Empty domains
   produce `0`; Seq duplicates contribute once per live position, while Set
   membership contributes once per distinct member.
+  Public Kernel v1/v2 export preserves these actual candidates through `add`,
+  relation projections and collection `let` aliases, using existing scalar
+  captures rather than enumerating only the declared carrier. Later shadowing
+  or state updates do not change a let's captured candidates. `min`/`max` around
+  a sum remain binary arithmetic; no new aggregate JSON shape is introduced.
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
@@ -816,12 +821,28 @@ forms and the still-open #1528 path are not negated by that corpus result.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
+  An accepted `add` retains a computed member outside the declared carrier:
+  `contains`, `size`, removal and equality observe it in the temporary value.
+  Assigning the result back to that bounded receiver reports `type_bound` /
+  `_bounds_<var>` instead of dropping the member or transition. Static typing/admission is unchanged;
+  this does not enable unbounded Sets or composite-collection inference.
+  BMC/induction still reject whole-collection assignments from a wider Set or
+  relation carrier with `cannot coerce symbolic value` (exit 2), as on base.
+  Symbolic init preserves introduced members through copies, copy chains and
+  conditions in the checked dependency order, without replacing relational init
+  with sequential execution. In BMC, re-framing a root whose bound is omitted
+  requires proof that no live key escapes the new frame's finite support; the
+  re-framing check does not assume that omitted bound. Genuinely growing support
+  continues to be retained.
 - Seq: `Seq {}` / `Seq { 1, 2 }`, `.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`, `==` is equality of length and all elements
 - Relation: `r.contains(a, b)`, `r.add(a, b)`, `r.remove(a, b)`,
   `reachable(r, a, b)`, `acyclic(r)`, `functional(r)`, `injective(r)`,
   `domain(r)`, `range(r)`. `reachable` and `acyclic` require a self-relation
   (`relation T -> T`); endpoint type/arity errors include repair hints.
+  Accepted relation adds likewise retain pairs outside either endpoint carrier;
+  domain/range and graph operations see those pairs. Storing the add result back
+  to that bounded relation reports its `_bounds_<var>` violation.
   For `r: relation A -> B`, `contains`, `add`, `remove`, and `reachable`
   check `a` against `A` and `b` against `B` independently. Incompatible
   endpoints are check-time `kind: "semantics"` errors (exit 2), with the
@@ -1304,7 +1325,7 @@ additional removals in #1463.
 
 | Check | Content | On violation |
 |---|---|---|
-| Type bounds | Every bounded-type state variable (including Map values, struct fields, and Seq elements) is within range | `violated` / `type_bound` / `_bounds_<var>` |
+| Type bounds | Every bounded-type state variable (including Map values, struct fields, Seq elements, Set members and relation endpoints) is within range | `violated` / `type_bound` / `_bounds_<var>` |
 | Partial Seq operations (action and property contexts) | At the time of `pop()`/`head()`/`at(i)`/index, the sequence is non-empty and the index is in range | `violated` / `partial_op` / `_partial_<action>`, `_partial_property_<property>`, or `_partial_property_terminal` |
 | Partial arithmetic (action context: `requires`/body/`ensures` only, see §3) | The divisor of `/` `%` is non-zero | `violated` / `partial_op` / `_partial_<action>` |
 | action coverage | Each action is enabled at least once within depth K | diagnosis of the blocking requires in `action_coverage` |
@@ -1626,6 +1647,11 @@ it removes named invariants, `trans`, `leadsTo`, and `reachable` properties
 from the run and from checked-property outputs (`invariants_checked`,
 `transitions_checked`, `leads_to`, and `reachables`). When `--property` and
 `--exclude-property` name the same property, exclusion wins.
+Implicit bounds are also selectable with `--property _bounds_<var>`, including
+relation bounds. They appear in `invariants_checked` and, when proved by
+induction, `k_used`. The current exclusion limitation is unchanged:
+`--exclude-property _bounds_<var>` is rejected as `no such property` (exit 2);
+exclusion applies to the declared property kinds above, not implicit bounds.
 
 **Checks a selected run does not evaluate (#1008).** Not executing a check is
 never evidence that it holds. When a `verify` option makes the run skip a

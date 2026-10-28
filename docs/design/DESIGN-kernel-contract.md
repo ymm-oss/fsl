@@ -370,6 +370,59 @@ by depth or wall time; that budget still governs only
 `verify_explicit_selected` and is unrelated to this pre-pass beyond sharing
 the same idea of an explicit `usize` cutoff surfaced in the result.
 
+### Retained Set members and relation pairs (#1541)
+
+An accepted `add` retains its computed member or pair even when it lies outside
+the receiver's declared finite carrier. Symbolic values use the valid-state grid
+plus guarded, distinct scalar candidates; membership, cardinality, extensional
+equality, removal, domain/range and relation graph consumers see the actual live
+values. This does not relax static element/endpoint typing or admit unbounded or
+composite collection forms.
+
+Literal member values, including enumerated action parameters, update existing
+carrier slots without appending an entry; nominal bounded types alone are not
+proof when state bounds are unselected. Conditional merges align known literal
+keys by value. Symbolic search may equate a complete root with a fresh frame
+whose finite support contains every live member/pair. For selected, already
+asserted root bounds, the declared carrier supplies that proof without another
+query. For unchecked roots, the candidate support includes the carrier and known
+literal keys outside it; only an UNSAT query for a live key escaping that support
+licenses re-framing. The query does not assume the omitted bound. SAT preserves
+the complete open value, and solver unknown/backend errors are not treated as
+proof. Re-framing applies only to top-level Set/relation state roots; other roots
+remain unchanged. Invalid successors are checked/projected before re-framing.
+Finite reachable support can therefore be compacted even under property selection;
+genuinely growing support still grows rather than losing outside values.
+
+Retention is paired with successor construction and evidence: complete pending
+collection expressions enter successor frames instead of being equated to an
+incapable closed grid, and projection preserves outside members. Relational init
+still requires repeated assignments to agree. Its shared planner propagates only
+fresh collection shape through the checked dependency order, including copies,
+copy chains, conditions and relation pairs; it does not execute assignments or
+propagate scalar values. Existing grid keys need no additional initial slots,
+but computed/outside candidates and copied support must remain representable.
+Concrete snapshots likewise must not discard their members. Static `check` and
+concrete init's read-before-assignment policy are unchanged: a free scalar read
+can remain an explicit/Monitor init error while symbolic engines expose an
+initial bound violation. Bound checks retain their existing state order: restored
+collection support can expose its bound before the free scalar's own bound.
+For an accepted `add` on
+the bounded receiver, storing its result back exposes `_bounds_<root>` rather
+than removing the transition. Whole-collection assignment from a wider Set or
+relation carrier remains unsupported by BMC/induction (`cannot coerce symbolic
+value`, exit 2), as on base; this repair does not add cross-carrier coercion.
+Bounded BMC/explicit success before that transition is legitimate; induction must
+not promote it to an unbounded proof of a false bound or invariant.
+
+Relations contribute implicit bounds consistently to the core obligation catalog,
+induction, property selection and reports. Thus `--property _bounds_r` is available
+for relation state `r`, `invariants_checked` includes `_bounds_r`, and a successful
+induction proof records it in `k_used`. HTML's embedded verification inventory
+changes accordingly. The existing `--exclude-property _bounds_*` rejection above
+is unchanged. Regression and rejecting controls live in
+`rust/fslc/tests/issue_1541_out_of_domain_members.rs`.
+
 ## Conformance corpus
 
 `fslc conformance SPEC --depth N` enumerates every finite action instance at
@@ -458,6 +511,19 @@ aggregate JSON keeps its exact `{binding, domain, condition}` shape (`sum`
 without a filter retains `condition: null`). Adding `{binder: ...}` to the
 published `count`/`sum` kinds would be a representation change and therefore
 requires a future Public Kernel major version.
+
+For Set and relation-projection aggregates, normalization includes actual `add`
+candidates, not just declared carrier values. Public Kernel v1/v2 export uses
+existing scalar `let`/`var` nodes to capture candidates of collection let aliases,
+including chained aliases and the previous binding when a name is shadowed.
+Candidate scopes follow those captured values through guards, updates, ensures
+and partial-operation enumeration; later scalar shadowing or state updates must
+not recompute an earlier collection's candidates. Conditional candidates preserve
+branch evaluation, and membership/distinctness guards count each live value once.
+Consumers must process generated guards/lets in order. `min`/`max` around a sum
+use the same repaired sum candidates and remain binary arithmetic, not new
+collection aggregate kinds. No Public Kernel field or node shape is added.
+
 `coverage_matrix()` is itself the enforcement gate: if any feature row falls
 short of its required level, it returns `Err` naming every shortfall instead
 of producing a matrix that silently under-reports coverage. This is how
