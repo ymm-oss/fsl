@@ -15,9 +15,7 @@ use fslc_rust::outcome::{
     FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, is_error_exit,
     outcome_class, sweep_cell_class,
 };
-use fslc_rust::spec_load::{
-    SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
-};
+use fslc_rust::spec_load::{SpecLoadError, kernel_load_error, surface_parse_failure};
 use fslc_rust::verification_output::{
     CheckedTraceContract, DiagnosticClass, TraceGate, UnenabledStep,
 };
@@ -6139,7 +6137,7 @@ fn run_kernel_contract_from_source(
         parse_surface_document_from_source(path, source)
         && let Err(error) = fsl_core::validate_ai_component(&component)
     {
-        return (unlocated_core_error_output(&error), 2);
+        return (core_error_output(&error), 2);
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
@@ -17811,29 +17809,7 @@ fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
 /// Render a core frontend/lowering diagnostic without discarding its typed
 /// location or classification at a command boundary.
 fn core_error_output(error: &fsl_core::CoreError) -> Value {
-    let diagnostic = SemanticDiagnostic::from_core_error(error);
-    fslc_rust::verification_output::render_semantic_error(
-        envelope(),
-        &diagnostic.message,
-        diagnostic.loc,
-        &diagnostic.class,
-        diagnostic.diagnostic_code,
-        diagnostic.hint.as_deref(),
-    )
-}
-
-/// Render a core diagnostic's rendered message without a location, classified
-/// by its type: the envelope these command paths have always produced, with
-/// the classification no longer read back from the message (issue 1167).
-fn unlocated_core_error_output(error: &fsl_core::CoreError) -> Value {
-    fslc_rust::verification_output::render_semantic_error(
-        envelope(),
-        &error.to_string(),
-        None,
-        &DiagnosticClass::Core(error.kind.clone()),
-        error.diagnostic_code,
-        None,
-    )
+    fslc_rust::spec_load::render_core_error(envelope(), error)
 }
 
 /// Render a domain projection failure from the renderer path.
