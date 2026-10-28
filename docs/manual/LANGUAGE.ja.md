@@ -588,6 +588,34 @@ instances 数から独立です — `Case` のサイズが `verify { instances C
 匿名のドメイン型として受理され、`type X = lo..hi` を宣言して `x: X` と書くのと
 等価です。
 
+`symmetric enum` を含む spec/Kernel のすべての enum 宣言は、未使用の型でもメンバーを 1 つ以上
+持たなければなりません。`enum E { }` は検査済みモデルの構築時に、`kind: "type"`、
+message `enum 'E' has no members`、enum 宣言を指す `loc` で拒否されます(CLI exit 2)。
+`check` とモデルを使うすべてのコマンド(全検証エンジン、scenarios、testgen、refine
+を含む)が同じゲートを通り、Worker の check も同じ規則を使います。これは以前の
+受理に対する**破壊的な削除**(#1546)で、従来の refinement 入力 `EmptyImpl` /
+`EmptyAbs` も含みます。意図したメンバーを宣言するか、未使用の空宣言を削除して
+ください。空のドメインにより検証を空虚にしないでください。メンバー 1 つの enum は
+引き続き有効です。domain の dialect は従来の早期の `semantics` エラーを保ち、この
+変更では分類を変えません。compose の子の空 enum は #567 に従い、公開 loc は親の
+`use` を指し、message に子の宣言の path/位置と親の path を残します。
+この空 enum の wrapper は子の path を親ファイルの directory を基準に解決して
+表示し、古い #567 の wrapper のように `use` の path 文字列をそのまま残しません。
+`symmetric enum` の宣言の先頭は `symmetric` です。
+[境界の決定](../design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546)を参照。
+
+`dbsystem` の database は column を 1 つ以上宣言する必要があります。
+`database app { schema 0 }` と空の table だけを含む database の受理は、どちらも
+**破壊的な削除**(#1546)です。database の lowering は `Column` enum を生成する前に、
+そのままの `database 'app' declares no columns`、kind type、database 宣言を指す
+loc、CLI exit 2 を `check`、BMC、induction、explicit、scenarios、testgen、kernel
+で返します。`db check` が同じエラーを返すのは database の lowering に到達した
+場合だけで、静的な互換性の finding は引き続き先に報告されます。そのため、active な
+artifact が存在しない column を読む場合は base と同じく `violated` / exit 1 に
+なることがあります。DB の fmt/lint は既存の描画(kind semantics、message の位置の
+接尾辞、loc field なし、exit 2)を保ちます。column が 1 つある database は引き続き
+有効です。
+
 Kernel の状態フィールドは、単純で決定的な初期値のために `name: Type = expr` を
 使えます。検査の前に通常のルート代入へ正規化されるので、Monitor、明示的探索、BMC、
 induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味論を観測します。
@@ -3649,6 +3677,20 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 宣言できます。これらのフィールドのいずれも — `authority`、`fallback`、下の
 `check hard { }` ブロックも — `"description text"` タグを受け付けません。ここの
 すべてのフィールドは、§13.1 の宣言タグの規約とは違い、裸の識別子または数値です。
+
+カーネル lowering の境界では、単独の `ai_component` は `tool` または `tools` で
+ツールを 1 つ以上宣言する必要があります。
+ツールを省略した形の受理は**破壊的な削除**(#1546)です。
+`ai_component NoTools { }` と `ai_component NoTools { authority { } }` はどちらも
+カーネル lowering の前に `kind: "type"`、そのままの message
+`ai_component 'NoTools' declares no tools`、component 宣言を指す `loc` で
+拒否されます(CLI exit 2)。`check`、`ai check`、BMC、induction、scenarios、testgen は生成された
+`Tool` enum の名前でなく、この利用者の component を名指す診断を返し、Worker の
+check も一致します。ツールが 1 つ以上あれば、空の `authority { }` は引き続き有効です。
+既存の不正な hard rule と未宣言の authority tool のエラーは引き続き優先され、
+各コマンドの従来の envelope を保ちます。この変更は**カーネル境界のみ**です。
+`ai compat`、`ai replay`、`ai_project` の経路は base と同じで、ツールの無い
+component を受理する場合があります。この検査の穴は #1545 で追跡されています。
 
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:

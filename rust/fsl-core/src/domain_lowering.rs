@@ -2183,6 +2183,7 @@ pub(crate) fn lower_domain_surface(
                     .collect(),
                 // The domain surface already records each member's span.
                 member_spans: ty.member_spans.clone(),
+                span: Some(ty.span),
                 symmetric: false,
             }),
             "range" | "external" => {
@@ -2262,6 +2263,7 @@ pub(crate) fn lower_domain_surface(
             .collect(),
             // Generated effect-status members have no source text.
             member_spans: Vec::new(),
+            span: Some(span_at(effect.loc)),
             symmetric: false,
         });
         items.push(SpecItem::Type {

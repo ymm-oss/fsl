@@ -105,14 +105,24 @@ impl SemanticDiagnostic {
         let authored_compose_error = error.origin.as_deref().is_some_and(|origin| {
             origin.dialect == "compose" && origin.id.0.starts_with("compose:error:")
         });
+        let ai_no_tools = error.message.starts_with("ai_component '")
+            && error.message.ends_with(" declares no tools");
+        let database_no_columns = error.message.starts_with("database '")
+            && error.message.ends_with(" declares no columns");
         Self {
-            message: if authored_compose_error {
+            message: if ai_no_tools || database_no_columns {
+                error.message.clone()
+            } else if authored_compose_error {
                 format!("{} at {}:{}", error.message, error.line, error.column)
             } else {
                 error.to_string()
             },
             loc: crate::verification_output::origin_loc(error.origin.as_deref()),
-            class: DiagnosticClass::Core(error.kind.clone()),
+            class: if ai_no_tools || database_no_columns {
+                DiagnosticClass::Message
+            } else {
+                DiagnosticClass::Core(error.kind.clone())
+            },
             diagnostic_code: error.diagnostic_code,
             hint: None,
             quick_fix: None,

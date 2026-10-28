@@ -356,6 +356,17 @@ fn record_component_origins(
     item: &SpecItem,
 ) {
     let (name, targets) = match item {
+        SpecItem::Enum { name, members, .. } if members.is_empty() => {
+            let mut origin = component_use_origin(&component.path, component.use_span);
+            origin
+                .primary
+                .as_mut()
+                .expect("use site")
+                .declaration_path
+                .push(name.clone());
+            origins.insert(crate::type_target(&prefix(&component.alias, name)), origin);
+            return;
+        }
         SpecItem::Action { name, .. } => (
             name.as_str(),
             vec![crate::action_target(&prefix(&component.alias, name))],
@@ -877,11 +888,13 @@ fn rewrite_component_item_inner(
             name,
             members,
             member_spans,
+            span,
             symmetric,
         } => SpecItem::Enum {
             name: prefix(alias, &name),
             members,
             member_spans,
+            span,
             symmetric,
         },
         SpecItem::Struct { name, fields, span } => SpecItem::Struct {

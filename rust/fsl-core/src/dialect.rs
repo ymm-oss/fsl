@@ -1290,6 +1290,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             name: process_enum(&process.name),
             members: process.stages.clone(),
             member_spans: Vec::new(),
+            span: Some(process.span),
             symmetric: false,
         });
     }
@@ -2348,6 +2349,7 @@ pub(crate) fn lower_resolved_requirements(
             name: process_enum(&process.process.name),
             members: process.process.stages.clone(),
             member_spans: Vec::new(),
+            span: Some(process.process.span),
             symmetric: false,
         });
     }
@@ -3598,6 +3600,40 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                 error
             })
     };
+    if component.tools.is_empty() {
+        for rule in component
+            .authority
+            .may_suggest
+            .iter()
+            .chain(&component.authority.may_execute)
+            .chain(&component.authority.requires_human_approval)
+            .chain(&component.authority.forbidden)
+        {
+            member_expr(&rule.name)?;
+        }
+        let span = ai_span(component.loc);
+        let mut error = core_error(
+            format!("ai_component '{}' declares no tools", component.name),
+            span,
+        );
+        error.origin = Some(Box::new(OriginChain {
+            id: OriginId(format!(
+                "ai-component:{}:{}",
+                component.loc.line, component.loc.column
+            )),
+            dialect: "ai_component".to_owned(),
+            primary: Some(OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "ai_component".to_owned(),
+                declaration_path: vec![component.name.clone()],
+            }),
+            secondary: Vec::new(),
+            lowering_steps: Vec::new(),
+            generated: false,
+        }));
+        return Err(error);
+    }
     let tool_span = |tool_name: &str| {
         tool_by_name
             .get(tool_name)
@@ -3614,6 +3650,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                 .map(|tool| members[tool.name.as_str()].clone())
                 .collect(),
             member_spans: Vec::new(),
+            span: Some(ai_span(component.loc)),
             symmetric: false,
         },
         SpecItem::State(vec![
