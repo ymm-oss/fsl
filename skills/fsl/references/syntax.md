@@ -310,7 +310,7 @@ ungated next-edition inputs, not current-edition syntax.
 
 Measured boundary: BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`, built
 implementation `33e3fcc5606249a097814d91cb09b506add8e97d`; `fslc check FORM`,
-cache off, existing gate only for fsl 5 headers, all 597 `.fsl` files in specs/,
+cache off, all 597 `.fsl` files in specs/,
 examples/ and rust/fslc/tests/fixtures/ plus 309 inline occurrences, both binaries
 in both materialized trees: 3,624 checks, empty ok→error set, no excluded fields.
 Only warnings change in 57 corpus forms and 22 inline occurrences. Against parent

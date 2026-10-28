@@ -1404,8 +1404,8 @@ Previously ungated consumers can therefore reject next-edition input they accept
 
 The measured comparison uses BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`
 and built implementation `33e3fcc5606249a097814d91cb09b506add8e97d` in their
-materialized trees. `fslc check FORM`, cache off and the fsl5 gate enabled only
-for fsl 5 headers, covers all 597 `.fsl` files in `specs/`, `examples/`, and
+materialized trees. `fslc check FORM`, with cache off, covers all 597 `.fsl`
+files in `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/` plus 309 inline occurrences, with both binaries in
 both trees (3,624 checks). The ok-to-error transition set is empty; 57 corpus
 forms and 22 inline occurrences change only warnings. No fields are excluded.

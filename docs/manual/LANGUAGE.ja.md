@@ -1328,7 +1328,7 @@ consumer が、以前受理した次エディションの入力を拒否する�
 
 測定は BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4` と build 済み実装
 `33e3fcc5606249a097814d91cb09b506add8e97d` の materialized tree を使います。
-cache 無効の `fslc check FORM` を、fsl 5 ヘッダーだけで既存の fsl5 gate を有効にし、
+cache 無効の `fslc check FORM` を、
 `specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597 `.fsl` と
 inline 309出現について、両方の木で両方のバイナリを使って実行しました(3,624検査)。
 ok→error の遷移集合は空で、corpus 57形式と inline 22出現は warnings だけが変わります。
