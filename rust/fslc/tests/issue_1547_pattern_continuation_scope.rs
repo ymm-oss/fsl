@@ -42,6 +42,16 @@ fn point(source: &str, marker: &str) -> Value {
     json!({"line":before.bytes().filter(|b| *b == b'\n').count()+1,"column":before.rsplit('\n').next().unwrap().chars().count()+1})
 }
 
+fn refusal_location(case: &forms::Case, source: &str, composed: bool) -> Value {
+    match case.id {
+        "requires-or-ensures" | "requires-or-later-requires" => {
+            json!({"line":5,"column":3})
+        }
+        "compose-sync-alias-or" => json!({"line":if composed { 4 } else { 5 },"column":3}),
+        _ => point(source, case.marker),
+    }
+}
+
 fn located(value: &Value, expected: &Value) -> bool {
     value.get("loc") == Some(expected)
 }
@@ -167,9 +177,10 @@ fn cli_pattern_positions_and_consumer_paths() {
                 &case.source
             };
             let preserved = preserved_error(case.id);
-            let expected = preserved
-                .as_ref()
-                .map_or_else(|| point(source, case.marker), |error| error["loc"].clone());
+            let expected = preserved.as_ref().map_or_else(
+                || refusal_location(&case, source, composed),
+                |error| error["loc"].clone(),
+            );
             let paths = paths(&case, composed);
             let class = if preserved.is_some() {
                 "existing-refusal"
@@ -214,8 +225,10 @@ fn cli_pattern_positions_and_consumer_paths() {
                     semantic_error(&actual)
                         && located(&actual.0, &expected)
                         && actual.0["message"]
-                            .as_str()
-                            .is_some_and(|message| message.contains("identifier 'v'"))
+                            == format!(
+                                "invalid model expression: public Kernel cannot type identifier 'v' at {}:{}",
+                                expected["line"], expected["column"]
+                            )
                 } else {
                     control(&actual, case.role, consumer, composed)
                 };
@@ -345,9 +358,7 @@ fn public_scope_entry_points() {
             }
         };
         let ok = if refused {
-            actual["message"]
-                .as_str()
-                .is_some_and(|m| m.contains("identifier 'v'"))
+            actual["message"] == "public Kernel cannot type identifier 'v'"
                 && actual["loc"] == expected_loc
         } else {
             actual.get("value").is_some()
