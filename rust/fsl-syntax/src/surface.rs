@@ -135,6 +135,8 @@ pub enum SpecItem {
         /// construction (issue 576). Generated enums carry an empty vector;
         /// the diagnostic then keeps whatever location its origin supplies.
         member_spans: Vec<Span>,
+        /// Authored declaration location; generated enums may have no source.
+        span: Option<Span>,
         symmetric: bool,
     },
     Struct {

@@ -478,6 +478,7 @@ fn enum_type_members(
     span: Span,
 ) -> Result<Vec<String>, RefinementError> {
     match context.types.get(type_name) {
+        // Defense for constructed models; source empty enums fail model building first.
         Some(TypeDef::Enum { members, .. }) if members.is_empty() => Err(refinement_error(
             format!("{declaration} endpoint '{type_name}' has no members"),
             Some(span),

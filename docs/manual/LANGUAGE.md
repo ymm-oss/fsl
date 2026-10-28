@@ -611,6 +611,36 @@ by itself prove the per-entity decrease required by the `helpful` form.)
 `x: lo..hi` is accepted as an anonymous domain type and is equivalent to
 declaring `type X = lo..hi` and writing `x: X`.
 
+Every spec/Kernel enum declaration, including `symmetric enum`, must contain at least one
+member, even if the type is unused. `enum E { }` is rejected while building the
+checked model with `kind: "type"`, message `enum 'E' has no members`, and `loc`
+at the enum declaration (CLI exit 2). `check` and all model-consuming commands,
+including every verification engine, scenarios, testgen and refine, share this
+gate; Worker checking uses the same rule. This is a **breaking removal** (#1546)
+of earlier acceptance, including the former `EmptyImpl` / `EmptyAbs` refinement
+inputs. Declare the intended members or remove an unused empty declaration;
+do not rely on an empty domain to make verification vacuous. Singleton enums
+remain valid. The domain dialect keeps its existing earlier `semantics` error
+for empty enums; this change does not reclassify that diagnostic. A composed
+child's empty enum follows #567: public loc points at the parent's `use`, and
+the message retains the child's declaration path/position and the parent path.
+This empty-enum wrapper resolves the child path against the parent's directory,
+unlike older #567 wrappers that preserve the literal `use` path.
+For `symmetric enum`, the declaration starts at `symmetric`. See
+[the boundary decision](../design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
+
+A `dbsystem` database must declare at least one column. Both
+`database app { schema 0 }` and a database containing only an empty table are
+**breaking removals** (#1546): database lowering reports exact
+`database 'app' declares no columns`, kind type, database-declaration loc and
+CLI exit 2, before generating the `Column` enum, on `check`, BMC, induction,
+explicit, scenarios, testgen and kernel. `db check` reports that error only when
+it reaches database lowering; static compatibility findings are still reported
+first. An active artifact reading an absent column can therefore yield
+`violated` / exit 1, as on base. DB fmt/lint keep their existing rendering:
+kind semantics, a location suffix in the message and no loc field (exit 2).
+A database with one column remains valid.
+
 A Kernel state field may use `name: Type = expr` for a simple deterministic
 initial value. It is normalized to an ordinary root assignment before checking,
 so Monitor, explicit exploration, BMC, induction, and Public Kernel v1 observe
@@ -3881,6 +3911,20 @@ one `effect <name>;`. None of these fields — nor `authority`, `fallback`, or
 the `check hard { }` block below — accept a `"description text"` tag; every
 field here is a bare identifier or number, unlike the declaration-tag
 convention in §13.1.
+
+At the kernel-lowering boundary, a standalone `ai_component` must declare at
+least one tool, using `tool` or `tools`.
+Omitting tools is a **breaking removal** (#1546): both `ai_component NoTools { }`
+and `ai_component NoTools { authority { } }` are rejected before kernel lowering
+with `kind: "type"`, exact message `ai_component 'NoTools' declares no tools`,
+and `loc` at the component declaration (CLI exit 2). `check`, `ai check`, BMC
+and induction, plus scenarios and testgen, report this authored-component diagnostic, not a generated `Tool`
+enum name; Worker checking agrees. An empty `authority { }` remains valid when
+at least one tool is declared.
+Existing bad hard-rule and unknown-authority-tool errors still take precedence,
+with their historical per-command envelopes. This change is **kernel-only**:
+`ai compat`, `ai replay` and `ai_project` paths remain as on base and may still
+accept tool-less components; their validation gap is tracked by #1545.
 
 An `ai_component` may also declare which hard rules get an explicit,
 separately-reported invariant:

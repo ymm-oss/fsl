@@ -3594,4 +3594,104 @@ mod tests {
             assert_eq!(output["implements"]["result"], "refines", "{output:#}");
         }
     }
+
+    mod issue_1546_empty_enum {
+        use super::*;
+
+        fn worker_check(source: &str) -> Value {
+            let request = Request {
+                cmd: "check".to_owned(),
+                source: source.to_owned(),
+                source_file: "empty-enum.fsl".to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+                unstable: Vec::new(),
+            };
+            // Same check path as Worker dispatch, without the browser-only
+            // solver-version bridge. Plain model checking needs no solver.
+            let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> {
+                panic!("empty-enum check must finish before solver construction")
+            };
+            block_on(check_with(&request, TEST_SOLVER_VERSION, &mut no_solver))
+        }
+
+        fn assert_type_error(source: &str, message: &str, line: u64) {
+            let report = worker_check(source);
+            println!("Worker produced: {report}");
+            assert_eq!(report["result"], "error", "{report}");
+            assert_eq!(report["kind"], "type", "{report}");
+            assert_eq!(report["message"], message, "{report}");
+            assert_eq!(
+                report["loc"],
+                json!({"line": line, "column": 3}),
+                "{report}"
+            );
+        }
+
+        #[test]
+        fn unused_empty_enum_is_a_located_type_error() {
+            assert_type_error(
+                "spec WorkerEmpty {\n  enum E { }\n  state { ready: Bool }\n  init { ready = false }\n  action tick() { ready = ready }\n}\n",
+                "enum 'E' has no members",
+                2,
+            );
+        }
+
+        #[test]
+        fn second_enum_is_checked() {
+            assert_type_error(
+                "spec WorkerSecond {\n  enum First { Only }\n  enum Second { }\n  state { ready: Bool }\n  init { ready = false }\n  action tick() { ready = ready }\n}\n",
+                "enum 'Second' has no members",
+                3,
+            );
+        }
+
+        #[test]
+        fn ai_no_tools_is_a_located_type_error() {
+            assert_type_error(
+                "\n  ai_component NoTools { }\n",
+                "ai_component 'NoTools' declares no tools",
+                2,
+            );
+        }
+
+        #[test]
+        fn ai_empty_authority_is_a_located_type_error() {
+            assert_type_error(
+                "\n  ai_component EmptyAuthority { authority { } }\n",
+                "ai_component 'EmptyAuthority' declares no tools",
+                2,
+            );
+        }
+
+        #[test]
+        fn singleton_control() {
+            let report = worker_check(
+                "spec WorkerOne {\n  enum E { Only }\n  state { e: E }\n  init { e = Only }\n  action tick() { e = e }\n}\n",
+            );
+            assert_eq!(report["result"], "ok", "{report}");
+        }
+
+        #[test]
+        fn duplicate_control() {
+            let report = worker_check(
+                "spec WorkerDuplicate {\n  enum E { Only, Only }\n  state { ready: Bool }\n  init { ready = false }\n}\n",
+            );
+            assert_eq!(report["result"], "error", "{report}");
+            assert_eq!(report["kind"], "name", "{report}");
+            assert_eq!(
+                report["message"], "duplicate enum member 'Only'",
+                "{report}"
+            );
+            assert_eq!(report["loc"], json!({"line": 2, "column": 18}), "{report}");
+        }
+
+        #[test]
+        fn ai_one_tool_empty_authority_control() {
+            let report = worker_check(
+                "\n  ai_component OneTool { tool Search { schema SearchV1; } authority { } }\n",
+            );
+            assert_eq!(report["result"], "ok", "{report}");
+        }
+    }
 }

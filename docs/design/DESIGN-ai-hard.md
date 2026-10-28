@@ -110,6 +110,30 @@ ai_component RefundAgentToolSafety {
 If `check hard` is omitted, the default rule set is the five rules shown above.
 Every authority reference must name a declared `tool`.
 
+### Nonempty tool boundary (#1546)
+
+At least one tool declaration is required at the standalone kernel-lowering
+boundary. A tool-less
+`ai_component X { }`, or one with only `authority { }`, is a breaking removal:
+`check`, `ai check`, BMC, induction, scenarios, testgen and Worker checking reject it with kind type,
+exact message `ai_component 'X' declares no tools`, declaration loc and CLI
+exit 2, rather than silently creating an empty `Tool` enum. One tool with empty
+authority remains valid. This is the AI-specific side of the
+[nonempty enum model boundary](DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
+
+Only this new AI error preserves its raw message and publishes a separate loc
+field; existing AI lowering errors such as unknown hard-rule names retain
+their semantics kind, historical location suffix and absent loc when no origin
+is recorded. This change does not promote AI assurance or alter existing rule
+diagnostic rendering.
+
+Rule and authority validation precede no-tools rejection, preserving the
+existing bad-rule/unknown-tool error and its historical per-command rendering
+even when no tools are declared. `validate_ai_component` is unchanged. This
+decision is kernel-only: `ai compat`, `ai replay` and `ai_project` paths keep
+their base behavior, including tool-less acceptance. Their validation gap is
+owned by #1545, not silently fixed or claimed uniform in #1546.
+
 ## Static Rules
 
 - `tool_authority`: a forbidden tool cannot also be executable.

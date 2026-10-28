@@ -264,6 +264,24 @@ pub(crate) fn lower_db_surface(
         .flat_map(|table| table.columns.iter())
         .map(|column| ((column.table.clone(), column.name.clone()), column))
         .collect::<BTreeMap<_, _>>();
+    if columns.is_empty() {
+        let mut error = crate::core_error(
+            format!("database '{}' declares no columns", system.database.name),
+            system.database.span,
+        );
+        error.origin = Some(Box::new(db_origin(
+            system.database.span,
+            vec![
+                system.name.clone(),
+                "database".to_owned(),
+                system.database.name.clone(),
+            ],
+            "validate_db_columns",
+            false,
+            Vec::new(),
+        )));
+        return Err(error);
+    }
     let artifacts = system
         .artifacts
         .iter()
@@ -349,6 +367,7 @@ pub(crate) fn lower_db_surface(
             name: "Column".to_owned(),
             members: columns.keys().map(column_member).collect(),
             member_spans: Vec::new(),
+            span: Some(system.database.span),
             symmetric: false,
         },
         SpecItem::State(vec![
