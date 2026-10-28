@@ -4192,8 +4192,19 @@ in the type and remains as a runtime/verification obligation). An entity's
 With `--ts`, it outputs a TypeScript scaffold for the derivable portion.
 The native Rust command performs this judgment from the versioned public Kernel
 JSON v1 contract, not private parser/model structures, and fails closed on an
-unsupported Kernel schema version. Its JSON report and TypeScript bytes remain
-compatible with the frozen reference output.
+unsupported Kernel schema version. Relative to the frozen reference, native
+judgment already scopes enum fields by owning struct and drops a disjunctive
+guard when any disjunct does not constrain the entity. Since #680, locally
+guarded state-preserving actions appear as self-loop report entries with
+`state_preserving: true` and generic
+TypeScript signatures preserving the exact input state; #1431 adds reserved-word
+escaping (including collision-free identifier allocation) and model-derived
+parameter types. The JSON `typescript` fields carry all these TypeScript
+differences. The command envelope and existing report field shapes remain
+compatible (including source-name `params`); report values, entity inclusion,
+applicability and summary counts can differ under the earlier judgment rules.
+Native entity order is alphabetical (the frozen reference uses declaration order).
+Neither JSON nor TypeScript is claimed byte-identical to the frozen reference.
 → [`DESIGN-typestate.md`](../design/DESIGN-typestate.md)
 
 ## 17. The causal profile (review-only causal hypothesis graphs)
