@@ -1159,7 +1159,7 @@ Projection equality retains the real relation error over context-needed empty
 literals and keeps the authored/precise inner origin; range bounds and terminal
 also avoid generated 1:1 origins. Numeric/Set compatibility and valid verdicts
 are unchanged. This describes visited expression trees. Helpful argument typing
-was outside the historical round-1 baseline; main's #1483 now checks parameter
+was outside the historical round-1 baseline; main's #1527 now checks parameter
 types and is preserved. Relation-valued temporary collections remain unsupported
 separate upstream work.
 
