@@ -2073,7 +2073,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
     Ok(projected)
 }
 
-/// Every concrete initial state consistent with `model`'s init.
+/// Enumerate initial states for refinement, subject to the legacy limits below.
 ///
 /// A model whose init assigns every state variable on every path returns
 /// exactly the single state [`Monitor::new`] would build — no behavior
@@ -2086,6 +2086,10 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
 /// Init ownership and forall read-order checks also apply to free-root enumeration.
+/// Legacy-accepted partial assignments and reads of later-assigned roots still
+/// use default-filled, program-order execution when free roots exist (#1521).
+/// This is not a complete relational-init enumeration for those shapes; the
+/// stronger admission gate for new per-field shapes does not repair them.
 ///
 /// # Errors
 ///
@@ -2178,11 +2182,11 @@ pub fn check_refinement_with_budget(
     // bounds or invariants. Checking this first — and returning immediately
     // — means the correspondence walk below never needs to decide what a
     // mid-walk self-violation means; by construction it cannot encounter
-    // one within the same `depth`. `impl_initial_states` covers every
-    // concrete initial valuation a nondeterministic impl `init` permits
-    // (issue #493), not one arbitrarily materialized default, so this
-    // precondition cannot miss a self-violation reachable only from a
-    // non-default initial branch either.
+    // one within the same `depth`. `impl_initial_states` enumerates never-assigned
+    // roots (#493), rather than selecting one default for them. This covers the
+    // supported nondeterministic initial branches, subject to the constructor's
+    // legacy partial-assignment / ordered-read limits (#1521); it is not a claim
+    // of complete relational-init coverage for those legacy shapes.
     //
     // The pre-pass walks the same reachable set the correspondence walk
     // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
@@ -2210,10 +2214,10 @@ pub fn check_refinement_with_budget(
         });
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
-    // The set of every concrete state abs's own (possibly nondeterministic)
-    // init permits — init correspondence below asks whether α(s₀) is a
-    // *member* of this set, not whether it equals one materialized default
-    // abs initial state.
+    // States produced by abs's own (possibly nondeterministic) init constructor,
+    // subject to its legacy limits above. Init correspondence below asks whether
+    // α(s₀) is a member of this set, not whether it equals one chosen default for
+    // never-assigned abstract roots.
     let abs_initial_states: BTreeSet<State> =
         concrete_initial_states(abstraction)?.into_iter().collect();
     let action_map = mapping

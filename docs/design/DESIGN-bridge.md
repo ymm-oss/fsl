@@ -95,11 +95,14 @@ Concrete execution requires a deterministic initial state. Static check at
   duplicate (this is exactly how a dialect like fsl-db populates a map one
   column at a time), but the same key assigned twice — whether by two flat
   statements, by a `forall` and a later flat write to one of its covered
-  keys, or by a bound loop variable whose two iterations could alias each
-  other — still is.
+  keys — still is. A finite binder-keyed `forall k: K { m[k] = ... }` is
+  allowed. Ownership summarizes each statement once, not once per iteration:
+  a single forall statement may write the same location repeatedly with agreeing
+  values, while conflicting values make init unsatisfiable.
 - The RHS of init may reference only const and **already-assigned** state
-  variables (evaluated top to bottom). A violation is `FslError(kind="semantics")`
-  + hint "runtime monitor requires a deterministic init".
+  variables (evaluated top to bottom). Native errors use `kind: "semantics"`
+  and the before-assigned message (exit 2); the historical Python deterministic-init
+  hint is not part of the native output contract.
 - All existing specs satisfy this (a spec that does not satisfy it passes verify
   but errors in Monitor — prompting a fix on the spec side).
 - This gate lives in `Monitor::new` itself (#519), not only in the explicit
@@ -199,6 +202,151 @@ and `rust/fslc/tests/fixtures/`: 597 forms, 397 `ok` in each tree,
 **0 `ok`→`error`, 0 `error`→`ok`, and 0 other changes**. The corpus removal set
 is empty; A1–A5 pin five regression forms within this removal, which also
 includes the conservative examples above. No corpus spec was rewritten.
+
+#### Per-field init ownership and coverage (#1481)
+
+Native init ownership tracks `(root, concrete key, field)` (#1481): disjoint
+fields of a struct root or a `Map<K, Struct>` entry can be assigned separately,
+including by a finite `forall`; fields retain their scalar or nested
+`Option<scalar>` types. Overlapping writes by different statements on a path
+still collide, including whole-root/entry writes overlapping a field. Repeats
+across iterations of one statement retain the relational-init rule above, not a
+second ownership identity. Unresolved dynamic keys and binder keys under a
+`where` filter, collection binders and non-constant range binders retain
+whole-root ownership and conflict with other writes to that root. Definite
+assignment keeps recursive coverage per map key and per struct field, joins successive writes and intersects
+`if` branches component-wise. Only complete coverage of every field of every
+entry permits a root read or concrete Monitor construction; these deterministic
+paths reject partial initialization rather than filling it from defaults.
+Refinement's legacy free-root path can still default missing components in
+previously accepted shapes (#1521), including a single-field partial init.
+The existing concrete field updater and symbolic init constraints consume these same checked lvalues;
+no solver dependency is added to the runtime.
+These component identities remain subject to the forall read-order and
+nonempty-domain coverage rules above; they do not bypass either gate.
+
+Admission of a shape requiring the new per-field ownership first requires full
+definite coverage of every root init may assign on every path, including roots
+written only as whole values. This is the same may-assigned set refinement
+excludes from free-root enumeration; never-assigned roots remain free.
+The final coverage
+uses the recursive key/field joins, branch meets and nonempty-domain rollback,
+not a union of field names written somewhere. Missing keys or fields retain the
+legacy probe's original ownership error and location, preventing new partial
+initialization from entering refinement's free-root path. The legacy probe still
+exempts all previously accepted partial forms (including branch-split fields,
+whole-entry key subsets and one-path whole-root writes); their #1521 limitation is not fixed
+here, and partial-field admission is deferred until that issue is resolved.
+
+Only the new admission/read analysis uses scope-aware static proofs. A forall
+source, filter or range bound that freely depends on an enclosing binder cannot
+prove nonemptiness or binder-key values using a same-named global const. Its
+coverage is unproved and rolled back, or its keys remain unresolved, yielding
+the saved legacy refusal. Sources use the enclosing scope; a binder's own filter
+and nested quantified/aggregate bodies use their local scope. No enclosing
+valuation combinations are enumerated. The legacy ownership/concrete paths and
+the symbolic resolver retain their existing behavior; #1515 is not fixed here.
+For outer-dependent ranges, nonempty rollback is the decisive coverage refusal;
+the bound resolver also leaves their keys unresolved, but that guard alone does
+not change admission while the rollback remains in place.
+
+For admitted new shapes, check also requires a complete may-assigned root before
+reading it, including roots written only as whole values. Early reads of
+non-field-written roots return the saved legacy ownership error and location
+unless the higher-priority field-read gate refuses first, even at a later
+statement. This is pass priority, not a globally earliest-read diagnostic.
+A Map needs every key and every field, not merely the selected entry.
+Whole-entry or whole-root reads of a field-written
+root follow the same rule, with `<whole entry>` / `<whole root>` diagnostic markers.
+This rejects `s.a = 1; s.b = (s.a == 1)` and
+reads of an already-written `m[k].f` before its siblings in the forall body;
+reading an already-written field at the current binder key after all binder-keyed
+fields are written remains valid. Whole-entry copies inside the body still fail
+#1518's field-path rule, which does not promote separate field writes to a
+whole-entry write; whole-entry copies outside the loop after full-root init are
+allowed. The same recursive coverage joins, branch meets and nonempty-domain
+rule feed this gate. A keyed write credits all statically known binder keys at
+once; this relies on #1518's separate forall read-order walk running first and
+limiting in-body reads to the current already-written key/path. These walks must
+not be reordered.
+Errors name the root and field and use the containing assignment, if or forall
+span, as the #1518 read-order gate does. The implementation first validates
+per-field ownership, then probes the previous root-granularity ownership rule;
+only a form that needs the new ownership granularity runs the full-coverage
+admission and extra all-assigned-root read checks. Previously accepted shapes
+retain their ownership-check admission. Refinement's free-root constructor default-fills
+roots before executing init in program order, without the deterministic read
+gate. Requiring assigned roots to be complete before a read prevents newly
+admitted shapes from reading those defaults instead of their relational init
+values, on both the implementation and abstraction sides. Never-assigned roots
+remain free; legacy-accepted whole-value read-before-assignment is not repaired
+by this admission-only rule.
+
+Concrete coverage now counts resolved map-entry-field writes even when the legacy
+ownership probe succeeds. A complete map of single-field entries can therefore
+be constructed by explicit/Monitor where main reported missing assignment or an
+early root read. Retained but incomplete entry-field coverage adds the existing
+partial-component suffix to the missing-assignment error; complete coverage can
+also remove the map from the missing-root list. Branch coverage still intersects
+keys and fields, missing arms drop the root, and unproved nonempty loops roll
+back their contribution. Unresolved entry keys, root-field coverage, nested-forall
+restrictions and root-wide concrete reads are unchanged. These are intentional
+concrete changes, not a promise to preserve every legacy concrete error/result.
+Complete coverage need only contain every declared key: a superset such as
+`forall k in 0..2 { m[k].v = true }` for keys `0..1` now reaches the existing
+out-of-domain execution refusal instead of missing assignment. Repeating a
+fixed singleton-map entry's field write in one forall statement can likewise
+reach the existing unsatisfiable-init/vacuity refusal when iteration values
+conflict. A one-iteration fixed-key write becomes constructible. Relational
+repeated-write constraints are unchanged; their concrete refusal stage/kind is
+not. Mixed whole-entry/field branches meet `Full` with field coverage: singleton
+maps can become full, while larger maps retain partial coverage and its suffix.
+
+The consumer boundary includes every use of this concrete initialization, not
+only explicit verification and empty Monitor replay:
+
+- Refinement with no free roots uses `Monitor::new` on both the implementation
+  and abstraction sides. An old constructor error can become `refines` or a
+  genuine mapped-init `refinement_failed`, according to the mapping.
+- `verify --engine auto` can replace unsupported-init fallback to bounded BMC
+  with explicit unbounded closure. On the superset-key example it instead
+  replaces BMC's located message (`in init at 5:29`) with the existing unlocated
+  explicit out-of-domain message. This diagnostic loss is part of the change,
+  not an unchanged-location guarantee.
+- `conformance` can now emit initialized vectors; `testgen` can emit a test
+  module instead of its existing constructor error (exit 3/internal). Their
+  prechecks differ: symbolic init errors can still preempt test generation.
+- Requirement acceptance/forbidden validation constructs a Monitor per case.
+  Newly constructible init can change `check`, proof and testgen outcomes: a
+  valid trace passes, while an incorrect expected value now reaches a located
+  acceptance rejection instead of an init-construction error. Kernel empty
+  replay and conformance vectors do not themselves validate the document's
+  declared acceptance cases.
+
+Thus kernel ownership admission and relational constraints can be preserved
+while consumer verdict, engine/completeness/fallback, diagnostic stage/kind/
+location and generated artifacts change. Four-engine agreement alone is not a
+complete compatibility statement for these consumers. The runtime remains
+independent of solvers.
+
+Diagnostic priority distinguishes the two root sets. If a field-written root is
+itself incomplete, return the saved legacy ownership error first. If all
+field-written roots are complete, run gate(a) before the final completeness
+refusal for other may-assigned roots, so a field read retains its named
+message and statement location. Successful admission still requires every
+may-assigned root to be complete. After gate(a), early reads of other may-assigned
+roots retain the saved ownership refusal, as do incomplete assigned roots. A
+later field read therefore outranks an earlier nonfield read; the concrete
+legacy preflight does not replace that field diagnostic.
+
+On a shared ownership refusal, concrete construction preserves main's earlier
+program-order read or domain failure, if one precedes the legacy collision.
+A private legacy-concrete preflight reproduces that ordering, including the
+existing nested-forall refusal; it only chooses an error and never constructs a
+state. New gate(a) and #1518 read-order diagnostics retain priority when they
+are the shared failure; gate(a) intentionally changes concrete messages on those
+main-rejected shapes. Check/refine report the saved ownership error for other
+admission refusals, including early reads of non-field-written roots.
 
 ### 1.4 Expression evaluation
 

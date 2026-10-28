@@ -2617,8 +2617,62 @@ spec 状態変数をカバーし、<code>action external(params) -&gt; spec_acti
 の一括代入は許されます)。Map/インデックスのターゲット(<code>m[K] = ...</code>)については、
 「ちょうど 1 回の代入」は変数単位ではなく具象キー単位です: 2 つの<em>異なる</em>キーへの
 別々のフラットな <code>m[K1] = ...</code> / <code>m[K2] = ...</code> 文は問題ありません。
-同じキーへの 2 回の代入、またはキー自体が束縛されたループ変数であるもの
-(2 つの反復がエイリアスしうる)は、引き続き拒否されます。</p></div></details>
+同じパスで異なる代入文が同じキーに書く場合は拒否されます。
+有限のバインダーをキーとする <code>forall k: K { m[k] = ... }</code> は許されますが、その
+覆ったキーの 1 つに後続の文が書く場合は所有権の衝突です。
+struct のルートと <code>Map&lt;K, Struct&gt;</code> のエントリでは、所有権は
+<code>(root, key, field)</code> 単位(struct のルートには key なし)です: <code>forall</code> 内も含め
+異なる field は別々に初期化できますが、同じパスで異なる文が同じ field に書く場合や、
+ルート/エントリ全体とその field の重なる代入は拒否されます。
+field の型は引き続きスカラーまたは入れ子の <code>Option&lt;scalar&gt;</code> です。
+所有権は <code>forall</code> の文を 1 回だけ要約します: 同じ文による反復をまたぐ書き込みは値が
+一致すれば許され、値が食い違うと所有権の重複エラーではなく init が充足不能になります。
+解決できない Map のキー(動的なキー、<code>where</code> 付き・コレクション・定数でない範囲の
+バインダー)はルート全体の所有権を保ち、同じルートに書く他の文と衝突します。
+新しい field 単位の所有権を必要とする init は、init がどこかのパスで代入する
+全ルートが全てのパスで確実に完全になる場合だけ受理します。値全体で書くルートも
+含み、Map では全キーの全 field が必要です。一度も代入しないルートは自由のままです。
+部分的な分岐、空または非空と証明できないループ、一部のキーだけでは足りず、従来の
+所有権エラーで拒否します。1 field だけの部分 init、排他的な分岐で別々の field に
+書く形、エントリ全体を一部のキーにだけ書く形、ルート全体を片側のパスでだけ書く形
+など、従来のルート単位の規則で受理した形は、未代入の要素を symbolic な自由値とする
+挙動を維持します。
+refine の既存の自由なルートの経路では、未代入の要素を既定値で埋める場合がまだ
+あります(#1521)。部分的な field init の受理の拡大は、その修正後に行います。
+新しい受理の証明では、source・filter・キーの範囲境界が外側のバインダーに依存すると、
+同名の global const があっても保守的に未解決とします。外側の束縛の組合せは列挙せず、
+既存の受理や symbolic の binder/const shadow 解決(#1515)は変えません。
+新しく受理する形では、init が代入し得る全ルートについて、ルート全体が確実に代入
+されるまで <code>check</code> が読み出しを拒否します。値全体でしか書かないルートや、既に書いた
+field・エントリの読み出しも対象です。field 単位で書かないルートの早すぎる読み出しは、
+field の読み出しの門が先に拒否しない限り、従来の所有権エラーと位置で拒否します。
+field 単位で書く全ルートが最後には完全になる場合、その門を nonfield の読み出しの
+検査より先に実行するため、後の field の読み出しが前の nonfield の読み出しより
+優先されることがあります。field 単位で書くルート自体が不完全なら、保存した
+所有権エラーを返します。
+field に書いたルートのエントリ全体/ルート全体の
+読み出しも同じ規則に従い、診断に <code>&lt;whole entry&gt;</code> / <code>&lt;whole root&gt;</code> と表示します。
+従って <code>s.a = 1; s.b = (s.a == 1)</code> や、
+<code>forall</code> 内で兄弟の field を書く前の <code>m[k].f</code> の読み出しは拒否されます。バインダーの
+キーへの全 field の代入後は、現在のキーの既代入 field の読み出しを許します。
+全 field を別々に書いても、本体内のエントリ全体のコピーは #1518 の読み出し順の
+規則で拒否します。ループ外でルート全体を初期化した後のエントリ全体のコピーは
+許されます。semantics エラーはルートと field を
+示し、読み出しを含む文に位置づけます。従来のルート単位の所有権規則で受理した形は、
+所有権の検査での受理を維持します。
+explicit エンジンと Monitor は、ルートを読む前、および初期化完了時に、全エントリの
+全 field が覆われていることを要求します。従来受理した形でも、解決済みキーへの
+Map エントリの field 代入を被覆に数えるようになります。1 field のエントリからなる
+Map 全体の被覆が完全なら構築でき、不完全な被覆が残る場合は未代入の診断に
+partial-component の接尾辞が付きます。
+同じ concrete な初期化を、両側の決定的な refine、auto のエンジン選択、conformance
+vectors、testgen、requirement trace の検査も使うため、これらの結果も変わり得ます。
+auto は bounded な BMC への fallback から unbounded な explicit の閉包に変わる場合が
+あり、requirement trace の門は check/proof/testgen の結果を変える場合があります。
+Kernel の replay や conformance vectors だけでは、宣言した acceptance trace が通るとは
+言えません。完全な被覆により、従来の未代入エラーに代わって既存の domain 外のキーや
+反復書き込みの vacuity の拒否に到達する場合もあります。この concrete な診断段階の
+違いは、反復書き込みの関係的な制約を変えるものではありません。</p></div></details>
 <details id="13-the-three-layer-dialects-consulting-requirements-design-and-traceability"><summary>13. 3層ダイアレクト(業務コンサルティング / 要件 / 設計)とトレーサビリティ<span class="tree-blurb"> — 業務・要件・設計の3層ダイアレクトとトレーサビリティ。</span></summary><div class="tree-body"><p>設計の背景は <code>DESIGN-layers.md</code> に、実装の仕様は <code>DESIGN-dialects.md</code> にあります。
 カーネルは 1 つ(本書の §1–12)で、レイヤーごとのダイアレクトは AST へ展開される
 フロントエンドです。レイヤーは refinement で接続されます: <strong>business ⊒
