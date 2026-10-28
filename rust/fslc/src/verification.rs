@@ -1299,10 +1299,11 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
         Ok(result) => result,
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
     };
-    if let Err(error) = ::fslc_rust::verification_output::replay_bmc_witnesses(
+    if let Err(error) = ::fslc_rust::verification_output::replay_bmc_witnesses_with_bounds(
         &prepared.model,
         &result,
         request.initial_state,
+        prepared.checked_bounds.as_ref(),
     ) {
         return Err((error_output("internal", &error), 3));
     }

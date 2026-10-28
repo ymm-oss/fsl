@@ -18,7 +18,7 @@
     "has_missing_sequence_slots",
     "chosen_instance",
     "project_action",
-    "replay_bmc_witnesses",
+    "replay_bmc_witnesses_with_bounds",
     "render_violation"
   ],
   "generic_exclusions": [
@@ -124,7 +124,7 @@
     {
       "id": "p2.replay.acceptance",
       "path": "rust/fslc/src/verification_output.rs",
-      "function": "replay_bmc_witnesses",
+      "function": "replay_bmc_witnesses_with_bounds",
       "anchor": "if let Some(violation) = &result.violation {\n        replay(&violation.trace).map_err(|error| error.to_string())?;\n    }",
       "fault_classes": ["replay_acceptance_bypass"]
     },

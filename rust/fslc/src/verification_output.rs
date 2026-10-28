@@ -2051,12 +2051,33 @@ pub fn replay_bmc_witnesses(
     result: &BmcResult,
     initial_state: Option<&fsl_runtime::State>,
 ) -> Result<(), String> {
+    replay_bmc_witnesses_with_bounds(model, result, initial_state, None)
+}
+
+/// Replay witnesses with the run's implicit-bound selection (`None`: all bounds).
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_bmc_witnesses`].
+pub fn replay_bmc_witnesses_with_bounds(
+    model: &KernelModel,
+    result: &BmcResult,
+    initial_state: Option<&fsl_runtime::State>,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), String> {
     let replay = |trace: &[fsl_core::TraceStep]| {
         initial_state
             .or_else(|| trace.first().map(|entry| &entry.state))
             .map_or_else(
-                || fsl_runtime::replay_trace(model.clone(), trace),
-                |state| fsl_runtime::replay_trace_from_state(model.clone(), trace, state),
+                || fsl_runtime::replay_trace_with_bounds(model.clone(), trace, checked_bounds),
+                |state| {
+                    fsl_runtime::replay_trace_from_state_with_bounds(
+                        model.clone(),
+                        trace,
+                        state,
+                        checked_bounds,
+                    )
+                },
             )
     };
     if let Some(violation) = &result.violation {
@@ -2392,7 +2413,7 @@ pub fn render_explicit_output(
     skip_vacuity_probe: bool,
 ) -> Result<(Value, i32), String> {
     let compatible = explicit_as_bmc(result, vacuity, reachable_diagnostics);
-    replay_bmc_witnesses(model, &compatible, None)?;
+    replay_bmc_witnesses_with_bounds(model, &compatible, None, checked_bounds)?;
     let statistics = VerificationStatistics::default();
 
     if let Some(violation) = &compatible.violation {
