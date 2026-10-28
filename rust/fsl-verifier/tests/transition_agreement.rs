@@ -1043,11 +1043,20 @@ spec ZeroCapacityBmc {
     );
 
     let mut solver = fsl_solver_z3::Z3Solver::new().expect("create BMC solver");
-    let error = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
-        .expect_err("ordinary BMC must not consume agreement-only fallback values");
+    let result = block_on(fsl_verifier::verify_bounded(&model, &mut solver, 1))
+        .expect("ordinary BMC classifies reached zero-capacity access as partial_op");
     assert!(
-        error.message.contains("zero-capacity sequence"),
-        "{error:?}"
+        result.violation.is_some(),
+        "ordinary BMC must fail closed, never pass using an agreement-only fallback: {result:?}"
+    );
+    let violation = result.violation.expect("fail-closed BMC violation");
+    assert_eq!(violation.kind, "partial_op", "{violation:?}");
+    assert_eq!(violation.name, "_partial_bad", "{violation:?}");
+    assert_eq!(violation.step, 1, "{violation:?}");
+    assert_eq!(
+        violation.last_action.as_deref(),
+        Some("bad"),
+        "{violation:?}"
     );
 }
 

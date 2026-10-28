@@ -9,8 +9,9 @@ use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
 use crate::eval::{
-    FailureClass, classified_evaluation_status, classified_property_evaluation_status, eval,
-    evaluation_status, property_evaluation_status,
+    FailureClass, binder_source_expressions, binder_values, binder_where, binder_where_expression,
+    classified_evaluation_status, classified_property_evaluation_status, eval, evaluation_status,
+    property_evaluation_status,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition};
 use crate::trace::{has_missing_sequence_slots, project_trace};
@@ -20,7 +21,8 @@ use crate::transition::{
     classified_action_statements_evaluation_status, transition_constraint,
 };
 use crate::value::{
-    Bindings, SymbolicState, bool_term, bounds, i64_index, int_term, symbolic_state_with_suffix,
+    Bindings, SymbolicState, SymbolicValue, bool_term, bounds, i64_index, int_term,
+    symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 
@@ -1427,6 +1429,297 @@ pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
     ranked.into_iter().take(result.proofs.len()).collect()
 }
 
+async fn rank_measure_path_is_reachable<S: SmtSolver>(
+    solver: &mut S,
+    path: &S::Term,
+) -> Result<bool, VerifyError> {
+    solver.push();
+    let result: Result<SatResult, VerifyError> = async {
+        solver.assert(path)?;
+        Ok(solver.check().await?)
+    }
+    .await;
+    solver.pop(1)?;
+    match result? {
+        SatResult::Sat => Ok(true),
+        SatResult::Unsat => Ok(false),
+        SatResult::Unknown => Err(VerifyError::solver(
+            "solver returned unknown in ranking proof",
+        )),
+    }
+}
+
+/// Unlike ordinary property/action reads, decreases measures have no general
+/// definedness probe. Preserve the pre-#1481 error for a reached read with no
+/// physical slot, before eval can construct or expose a fresh measure value.
+/// Only this narrow case is checked: positive-capacity partial measures retain
+/// their existing behavior. Guard each poll of the recursive expression walk,
+/// just as the synchronous evaluator guards its recursion cycle entry.
+#[allow(clippy::too_many_arguments)]
+fn reject_zero_slot_measure_reads<'a, S: SmtSolver>(
+    solver: &'a mut S,
+    model: &'a KernelModel,
+    expr: &'a KernelExpr,
+    state: &'a SymbolicState<S::Term>,
+    bindings: &'a Bindings<S::Term>,
+    old_state: Option<&'a SymbolicState<S::Term>>,
+    path: S::Term,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), VerifyError>> + 'a>> {
+    let mut future = Box::pin(zero_slot_measure_reads_inner(
+        solver, model, expr, state, bindings, old_state, path,
+    ));
+    Box::pin(std::future::poll_fn(move |cx| {
+        recursion::guard(|| future.as_mut().poll(cx))
+    }))
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn zero_slot_measure_reads_inner<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    expr: &KernelExpr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    path: S::Term,
+) -> Result<(), VerifyError> {
+    let mut local = bindings.clone();
+    let mut children: Vec<&KernelExpr> = Vec::new();
+    match expr {
+        KernelExpr::Index(receiver, index) => {
+            for operand in [receiver.as_ref(), index.as_ref()] {
+                reject_zero_slot_measure_reads(
+                    solver,
+                    model,
+                    operand,
+                    state,
+                    &local,
+                    old_state,
+                    path.clone(),
+                )
+                .await?;
+            }
+            if matches!(eval(solver, model, receiver, state, &mut local, old_state)?, SymbolicValue::Seq { slots, .. } if slots.is_empty())
+                && rank_measure_path_is_reachable(solver, &path).await?
+            {
+                return Err(VerifyError::new(
+                    "cannot select from an empty finite domain",
+                ));
+            }
+        }
+        KernelExpr::Method {
+            receiver,
+            name,
+            args,
+        } => {
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                receiver,
+                state,
+                &local,
+                old_state,
+                path.clone(),
+            )
+            .await?;
+            for argument in args {
+                reject_zero_slot_measure_reads(
+                    solver,
+                    model,
+                    argument,
+                    state,
+                    &local,
+                    old_state,
+                    path.clone(),
+                )
+                .await?;
+            }
+            if matches!(name.as_str(), "head" | "at")
+                && matches!(eval(solver, model, receiver, state, &mut local, old_state)?, SymbolicValue::Seq { slots, .. } if slots.is_empty())
+                && rank_measure_path_is_reachable(solver, &path).await?
+            {
+                return Err(VerifyError::new(if name == "head" {
+                    "head() on zero-capacity sequence"
+                } else {
+                    "cannot select from an empty finite domain"
+                }));
+            }
+        }
+        KernelExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                condition,
+                state,
+                &local,
+                old_state,
+                path.clone(),
+            )
+            .await?;
+            let condition = eval(solver, model, condition, state, &mut local, old_state)?;
+            let then_path = solver.and(&[path.clone(), bool_term(&condition)?.clone()])?;
+            let else_path = solver.and(&[path.clone(), solver.not(bool_term(&condition)?)?])?;
+            reject_zero_slot_measure_reads(
+                solver, model, then_expr, state, &local, old_state, then_path,
+            )
+            .await?;
+            reject_zero_slot_measure_reads(
+                solver, model, else_expr, state, &local, old_state, else_path,
+            )
+            .await?;
+        }
+        KernelExpr::Binary { op, left, right } => {
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                left,
+                state,
+                &local,
+                old_state,
+                path.clone(),
+            )
+            .await?;
+            let right_path = if matches!(op.as_str(), "and" | "or" | "=>") {
+                let left = eval(solver, model, left, state, &mut local, old_state)?;
+                let reached = if op == "or" {
+                    solver.not(bool_term(&left)?)?
+                } else {
+                    bool_term(&left)?.clone()
+                };
+                solver.and(&[path.clone(), reached])?
+            } else {
+                path.clone()
+            };
+            reject_zero_slot_measure_reads(
+                solver, model, right, state, &local, old_state, right_path,
+            )
+            .await?;
+        }
+        KernelExpr::Quantified { binder, .. } | KernelExpr::Aggregate { binder, .. } => {
+            for source in binder_source_expressions(binder) {
+                reject_zero_slot_measure_reads(
+                    solver,
+                    model,
+                    source,
+                    state,
+                    &local,
+                    old_state,
+                    path.clone(),
+                )
+                .await?;
+            }
+            let mut active = path.clone();
+            for (name, value, membership) in
+                binder_values(solver, model, binder, state, &local, old_state)?
+            {
+                let mut candidate = local.clone();
+                candidate.insert(name, value);
+                let reached = solver.and(&[
+                    active.clone(),
+                    membership.unwrap_or_else(|| solver.bool_value(true)),
+                ])?;
+                if let Some(filter) = binder_where_expression(binder) {
+                    reject_zero_slot_measure_reads(
+                        solver,
+                        model,
+                        filter,
+                        state,
+                        &candidate,
+                        old_state,
+                        reached.clone(),
+                    )
+                    .await?;
+                }
+                let filter = binder_where(solver, model, binder, state, &mut candidate, old_state)?
+                    .unwrap_or_else(|| solver.bool_value(true));
+                let body_path = solver.and(&[reached, filter])?;
+                let (KernelExpr::Quantified { body, .. }
+                | KernelExpr::Aggregate {
+                    value: Some(body), ..
+                }) = expr
+                else {
+                    continue;
+                };
+                reject_zero_slot_measure_reads(
+                    solver,
+                    model,
+                    body,
+                    state,
+                    &candidate,
+                    old_state,
+                    body_path.clone(),
+                )
+                .await?;
+                if let KernelExpr::Quantified { quantifier, .. } = expr {
+                    let value = eval(solver, model, body, state, &mut candidate, old_state)?;
+                    let stops = if quantifier == "forall" {
+                        solver.not(bool_term(&value)?)?
+                    } else {
+                        bool_term(&value)?.clone()
+                    };
+                    active =
+                        solver.and(&[active, solver.not(&solver.and(&[body_path, stops])?)?])?;
+                }
+            }
+        }
+        KernelExpr::UnaryNamed { name, expr, .. } if name == "old" => {
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                expr,
+                old_state.ok_or_else(|| VerifyError::new("old() used without old state"))?,
+                &local,
+                None,
+                path.clone(),
+            )
+            .await?;
+        }
+        KernelExpr::Some(inner)
+        | KernelExpr::Neg(inner)
+        | KernelExpr::Not(inner)
+        | KernelExpr::Field(inner, _)
+        | KernelExpr::Is { expr: inner, .. }
+        | KernelExpr::UnaryNamed { expr: inner, .. }
+        | KernelExpr::Stage { entity: inner, .. } => children.push(inner),
+        KernelExpr::Set(items) | KernelExpr::Seq(items) | KernelExpr::Call { args: items, .. } => {
+            children.extend(items);
+        }
+        KernelExpr::Struct { fields, .. } => children.extend(fields.iter().map(|(_, value)| value)),
+        KernelExpr::BinaryNamed { left, right, .. } => {
+            children.extend([left.as_ref(), right.as_ref()]);
+        }
+        KernelExpr::TernaryNamed {
+            first,
+            second,
+            third,
+            ..
+        } => children.extend([first.as_ref(), second.as_ref(), third.as_ref()]),
+        KernelExpr::Num(_)
+        | KernelExpr::Bool(_)
+        | KernelExpr::None
+        | KernelExpr::Var(_)
+        | KernelExpr::EnumMember { .. } => {}
+    }
+    for child in children {
+        reject_zero_slot_measure_reads(
+            solver,
+            model,
+            child,
+            state,
+            &local,
+            old_state,
+            path.clone(),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
     model: &KernelModel,
@@ -1475,6 +1768,16 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             let q0 = leadsto_condition(solver, model, &property.after, &state0, &binding.symbolic)?;
             let pending = solver.and(&[p0, solver.not(&q0)?])?;
             let mut measure_bindings = binding.symbolic.clone();
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                measure_expr,
+                &state0,
+                &measure_bindings,
+                None,
+                solver.bool_value(true),
+            )
+            .await?;
             let measure0 = eval(
                 solver,
                 model,
@@ -1581,6 +1884,16 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 leadsto_condition(solver, model, &property.before, &state1, &binding.symbolic)?;
             let q1 = leadsto_condition(solver, model, &property.after, &state1, &binding.symbolic)?;
             let mut next_bindings = binding.symbolic.clone();
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                measure_expr,
+                &state1,
+                &next_bindings,
+                None,
+                solver.bool_value(true),
+            )
+            .await?;
             let measure1 = eval(
                 solver,
                 model,
@@ -1737,6 +2050,16 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 solver.or(&enabled_terms)?
             };
             let mut deadlock_bindings = binding.symbolic.clone();
+            reject_zero_slot_measure_reads(
+                solver,
+                model,
+                measure_expr,
+                &deadlock_state,
+                &deadlock_bindings,
+                None,
+                solver.bool_value(true),
+            )
+            .await?;
             let measure_dl = eval(
                 solver,
                 model,

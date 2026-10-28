@@ -25,7 +25,16 @@ state {
 ```
 
 - `Seq<T, N>`: T is **a scalar type only** (domain type / enum / Bool / Int).
-  N is a positive constant expression (an integer literal or a const name).
+  N is a non-negative constant expression (an integer literal or a const name).
+  At capacity zero, reached `head()`/`at(i)`/index reads of the empty sequence
+  are `partial_op` in ordinary action/property contexts. Ranked `decreases`
+  instead narrowly refuses only reads whose fresh zero-slot value would enter
+  rank evaluation; see the
+  [decreases exception](DESIGN-seq-partial-operations.md#symbolic-contract).
+  This does not close capacity-zero measure definedness: push/pop and
+  conditional-merge temporaries can still prove using stale/default physical
+  slots on both base and head (#1542). Capacity does not bound the live prefix
+  of expression temporaries (§3).
 - Allowed positions: **the type of a state variable only**. It cannot be used in
   a struct field (added to BUG11 checking), a Map value, a Set element, or a Seq
   element — rejected at the `check` stage with `kind: "type"` + a hint.

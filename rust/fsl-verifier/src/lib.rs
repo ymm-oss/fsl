@@ -7,6 +7,8 @@ mod bmc;
 mod eval;
 mod induction;
 mod init_definedness;
+#[cfg(test)]
+mod issue_1481_zero_capacity_seq_terms;
 mod liveness;
 mod refinement;
 mod symmetry;

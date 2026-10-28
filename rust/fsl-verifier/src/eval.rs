@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use fsl_core::recursion;
 use fsl_core::{
@@ -12,7 +13,7 @@ use fsl_solver::SmtSolver;
 use crate::VerifyError;
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, coerce, concrete_value, i64_index, int_term,
-    ite_value, logical_equal, select_finite,
+    ite_value, logical_equal, select_finite, solver_sort,
 };
 
 type BinderCandidates<T> = Vec<(String, SymbolicValue<T>)>;
@@ -1332,16 +1333,47 @@ fn eval_index<S: SmtSolver>(
             };
             select_finite(solver, model, entries, index, key_ty)
         }
-        SymbolicValue::Seq { slots, .. } => {
-            let entries = slots
-                .iter()
-                .enumerate()
-                .map(|(index, value)| Ok((FslValue::Int(i64_index(index)?), value.clone())))
-                .collect::<Result<Vec<_>, VerifyError>>()?;
-            select_finite(solver, model, &entries, index, &TypeRef::Int)
+        SymbolicValue::Seq { ty, slots, .. } => {
+            eval_seq_read(solver, model, ty, slots, Some(index))
         }
         _ => Err(VerifyError::new("indexing requires a map or sequence")),
     }
+}
+
+fn eval_seq_read<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    ty: &TypeRef,
+    slots: &[SymbolicValue<S::Term>],
+    index: Option<&SymbolicValue<S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    static NEXT_SLOT: AtomicU64 = AtomicU64::new(0);
+    if slots.is_empty() {
+        let TypeRef::Seq(element_ty, _) = ty else {
+            unreachable!();
+        };
+        // A capacity-zero Seq still needs an unobservable read term, just like
+        // an empty live prefix at positive capacity. Materialize it lazily so
+        // stored slots, length bounds, and rendered state keep capacity zero.
+        // Definedness, not this unconstrained value, decides partial_op.
+        let id = NEXT_SLOT.fetch_add(1, Ordering::Relaxed);
+        return Ok(SymbolicValue::Scalar {
+            ty: element_ty.as_ref().clone(),
+            term: solver.constant(
+                &format!("@seq_unobserved_slot@{id}"),
+                &solver_sort(model, element_ty)?,
+            )?,
+        });
+    }
+    let Some(index) = index else {
+        return Ok(slots[0].clone());
+    };
+    let entries = slots
+        .iter()
+        .enumerate()
+        .map(|(index, value)| Ok((FslValue::Int(i64_index(index)?), value.clone())))
+        .collect::<Result<Vec<_>, VerifyError>>()?;
+    select_finite(solver, model, &entries, index, &TypeRef::Int)
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -1441,18 +1473,8 @@ fn eval_method<S: SmtSolver>(
                         len: solver.sub(&len, &solver.int_value(1))?,
                     })
                 }
-                ("head", []) => slots
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| VerifyError::new("head() on zero-capacity sequence")),
-                ("at", [index]) => {
-                    let entries = slots
-                        .iter()
-                        .enumerate()
-                        .map(|(index, value)| Ok((FslValue::Int(i64_index(index)?), value.clone())))
-                        .collect::<Result<Vec<_>, VerifyError>>()?;
-                    select_finite(solver, model, &entries, index, &TypeRef::Int)
-                }
+                ("head", []) => eval_seq_read(solver, model, &ty, &slots, None),
+                ("at", [index]) => eval_seq_read(solver, model, &ty, &slots, Some(index)),
                 ("contains", [value]) => {
                     let mut terms = Vec::new();
                     for (index, slot) in slots.iter().enumerate() {

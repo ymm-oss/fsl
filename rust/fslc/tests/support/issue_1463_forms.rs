@@ -548,7 +548,8 @@ pub fn cases() -> Vec<Case> {
                 "done = true",
                 "invariant Capture { xs.head() == 1 }",
             ),
-            [Ok, Violated, Violated, Error],
+            // #1481 cell 2: explicit also reports partial_op for zero-capacity head.
+            [Ok, Violated, Violated, Violated],
         ),
     ] {
         cases.push(case(

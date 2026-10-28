@@ -33,6 +33,32 @@ rather than inventing a witness, while the default concrete pre-pass can instead
 report that overflow as `type_bound`. Non-bound invariant, `trans`, and ranked
 `leadsTo` induction CTIs with missing slots also fail closed; bound-property CTIs
 retain action-based reconstruction without changing the induction premises.
+
+Capacity-zero Seqs with no physical slots follow the same live-prefix
+definedness rule, with a fresh, unconstrained symbolic read slot outside the
+declared capacity, materialized for each read-term construction rather than
+stored as a state slot or a live temporary element. Empty live-prefix
+temporaries that retain physical slots use those existing slots instead.
+For a zero-slot frame whose bound is unchecked (`len > N`), the fail-closed
+guards above from #1519, not definedness, keep the slot unobservable.
+
+The `decreases` measure of a ranked `leadsTo` is a narrow exception to the
+`partial_op` classification: ranking does not generally probe measure
+definedness. Before evaluating its initial, successor, or deadlock measure,
+a rank-only, path-sensitive preflight refuses only reached reads with no
+physical slot whose fresh value would otherwise enter the rank evaluation.
+It retains the pre-#1481 error (`head() on zero-capacity sequence` for `head`,
+`cannot select from an empty finite domain` for `at`/index). Unreached reads in
+untaken conditional branches or short-circuited operands can now yield a ranking
+proof where the base reported a semantics error. Physical-slot measures retain
+their existing behavior; this does not close the capacity-zero case or add
+general measure-definedness semantics. In particular, capacity-zero
+`xs.push(0).pop().head()` and the head of
+`if n > 0 then xs else xs.push(1)` can still read a stale or default physical
+slot and prove on both base and head; these remain #1542. The BMC rank-discharge
+fast path uses the same preflight and discharges nothing on its error; it does
+not report the ranking error itself.
+
 Before testing an invariant, transition, pending reachable predicate, or
 `leadsTo` side, BMC probes the path-sensitive definedness condition. Terminal
 definedness is probed under the deadlock condition, matching concrete

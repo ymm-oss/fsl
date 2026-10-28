@@ -195,9 +195,14 @@ component cause.
 ## Explicitly separate follow-ups
 
 \#1480 owns static/dynamic range bounds, negative within, and typed-domain
-enumeration; #1481 owns Map Struct per-field init coverage and zero-capacity
-head; #1459 owns operand/method/relation-builtin typing gaps. Literal shape
-relatives remain #1467. Their current acceptance/verdicts are preservation
+enumeration; #1481 cell 1 owns Map Struct per-field init coverage.
+Head, `at(i)`, and index reads of empty zero-capacity Seqs are fixed by #1481
+cell 2 in ordinary action/property contexts: supported engines report
+`partial_op` when reached. Ranked decreases narrowly refuses fresh-value cases
+as described in [Seq partial operations](DESIGN-seq-partial-operations.md);
+physical-slot measure gaps, including capacity zero, remain #1542.
+\#1459 owns operand/method/relation-builtin typing gaps. Literal shape relatives
+remain #1467. Their current acceptance/verdicts are preservation
 controls, not additional restrictions or implementation claims in #1463.
 
 #1459 closes the `X1/operand-method-types` row (`acyclic(done)` for Bool `done`),

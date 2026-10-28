@@ -106,8 +106,14 @@ key-domain miss. The P1-c fold must keep that order.
   moved from `fsl-verifier` into `fsl-core` for this purpose. In property
   context (`invariant`, `trans`, `reachable`, `leadsTo`, `terminal`) `/` and `%`
   are total ([`DESIGN-divmod.md`](DESIGN-divmod.md)) and do not count. A
-  `decreases` measure is evaluated without a definedness check today, so it
-  uses the action-context predicate, which counts `/` and `%`.
+  `decreases` measure has no general definedness check today, so it uses the
+  action-context predicate, which counts `/` and `%`. The
+  [ranked decreases exception](DESIGN-seq-partial-operations.md#symbolic-contract)
+  narrowly refuses only reached zero-slot reads whose fresh value would enter
+  rank evaluation; it does not implement the general `PartialDefined` row.
+  Capacity-zero measures with physical slots, including push/pop and
+  conditional-merge temporaries, can still prove using stale/default values
+  on both base and head and remain #1542.
 - `NoOverflow` is syntactic: the site contains `+ - * / %`, unary `-`, `abs`
   or a `sum` aggregate -- the operations whose result the verifier checks
   against the `i64` range.
