@@ -6355,24 +6355,10 @@ fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, St
     parse_surface_document_from_source(path, &source)
 }
 
-/// Load a dialect surface document without flattening a parser diagnostic at
-/// the command boundary.  The legacy string-returning helper above is kept
-/// for callers that deliberately own a non-envelope result; spec-input
-/// commands must retain the parser's class and span through this path.
-fn load_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
-    // This loader's caller contract predates the typed `io` envelope. Keep a
-    // read failure distinct from a parse failure without widening #780 beyond
-    // its declared parse-only surface.
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
-    load_surface_document_from_source(path, &source)
-}
-
 /// Load a dialect surface document from an already-captured source string.
 ///
 /// Domain-projection commands (#796) must validate and project from the same
-/// snapshot they read, so they call this instead of re-reading `path` through
-/// [`load_surface_document`]. `path` is still needed here (not just for
+/// snapshot they read, without re-reading `path`. `path` is still needed here (not just for
 /// diagnostics): a literate (`.md`) document keeps the pre-#780 unlocated
 /// `semantics` classification instead of a located `parse` envelope, and that
 /// dispatch is keyed on the extension, not the content.
@@ -7320,8 +7306,8 @@ fn parse_domain_document_from_source(
 /// this value. Dependencies resolved by `FsResolver` are intentionally outside
 /// this root-input contract.
 fn read_domain_command_source(path: &Path) -> Result<String, SpecLoadError> {
-    // This command's caller contract predates the typed `io` envelope, same as
-    // `load_surface_document` above. Keep a read failure classified as
+    // These surface commands' caller contracts predate the typed `io` envelope.
+    // Keep a read failure classified as
     // `semantics` without widening #780 beyond its declared parse-only scope.
     std::fs::read_to_string(path)
         .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))
@@ -17521,30 +17507,6 @@ fn run_refine_chain(
     (Value::Object(output), 0)
 }
 
-#[allow(clippy::too_many_lines)]
-fn run_verify(
-    path: &Path,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
-    explicit_budget: usize,
-    k_ind: usize,
-) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_verify_from_source(
-        path,
-        &source,
-        depth,
-        deadlock_mode,
-        engine,
-        explicit_budget,
-        k_ind,
-    )
-}
-
 /// Verify one caller-owned root-source snapshot.
 ///
 /// The specialized validation, Kernel/model lowering, requirements metadata,
@@ -19053,7 +19015,7 @@ spec AltFixture {
     /// `run_verify_from_source`'s result derived from source A, not a fresh
     /// read of whatever replaced the path. Source A and B declare distinct
     /// action/spec names so the fallback's `spec`/`invariant`/trace content
-    /// pins to A; reverting the fallback to `run_verify(path, ...)` makes the
+    /// pins to A; reverting to path-based verification makes the
     /// `spec`/`invariant` assertions below observe B instead.
     #[test]
     fn scenarios_violation_fallback_uses_the_captured_root_snapshot() {
