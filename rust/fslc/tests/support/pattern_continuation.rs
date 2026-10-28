@@ -54,6 +54,25 @@ fn case(
     }
 }
 
+pub fn def_call_cases() -> [Case; 2] {
+    [
+        ("def-call-or-free-name", "or"),
+        ("def-call-and-capture-control", "and"),
+    ]
+    .map(|(id, op)| {
+        case(
+            id,
+            "def-expansion,def-call-scope",
+            Role::Refuse,
+            scalar(
+                "  def p() = v == 1\n  action stay() {}\n",
+                &format!("(o is some(v)) {op} p()"),
+            ),
+            "invariant P",
+        )
+    })
+}
+
 #[allow(clippy::too_many_lines)] // Finite position/path table and paired controls.
 pub fn cases() -> Vec<Case> {
     use Role::{Collision, Guard, Proved, Refuse, Violated};

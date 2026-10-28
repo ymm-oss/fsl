@@ -52,12 +52,12 @@ fn refusal_location(case: &forms::Case, source: &str, composed: bool) -> Value {
     }
 }
 
-fn located(value: &Value, expected: &Value) -> bool {
-    value.get("loc") == Some(expected)
-}
-
-fn semantic_error(actual: &(Value, i32)) -> bool {
-    actual.1 == 2 && actual.0["result"] == "error" && actual.0["kind"] == "semantics"
+fn exact_error(actual: &(Value, i32), message: &str, location: Option<&Value>) -> bool {
+    actual.1 == 2
+        && actual.0["result"] == "error"
+        && actual.0["kind"] == "semantics"
+        && actual.0["message"] == message
+        && actual.0.get("loc") == location
 }
 
 fn preserved_error(id: &str) -> Option<Value> {
@@ -218,17 +218,20 @@ fn cli_pattern_positions_and_consumer_paths() {
                     observe(&dir, file, consumer)
                 };
                 let mut ok = if let Some(preserved) = &preserved {
-                    semantic_error(&actual)
-                        && actual.0["message"] == preserved["message"]
-                        && located(&actual.0, &preserved["loc"])
+                    exact_error(
+                        &actual,
+                        preserved["message"].as_str().unwrap(),
+                        preserved.get("loc"),
+                    )
                 } else if rejected {
-                    semantic_error(&actual)
-                        && located(&actual.0, &expected)
-                        && actual.0["message"]
-                            == format!(
-                                "invalid model expression: public Kernel cannot type identifier 'v' at {}:{}",
-                                expected["line"], expected["column"]
-                            )
+                    exact_error(
+                        &actual,
+                        &format!(
+                            "invalid model expression: public Kernel cannot type identifier 'v' at {}:{}",
+                            expected["line"], expected["column"]
+                        ),
+                        Some(&expected),
+                    )
                 } else {
                     control(&actual, case.role, consumer, composed)
                 };
@@ -277,6 +280,81 @@ fn cli_pattern_positions_and_consumer_paths() {
     assert_eq!(
         refusal_failures, 0,
         "out-of-scope binding escaped source validation"
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // Retain both routes and all error packets before asserting.
+fn def_call_scope_after_or_preserves_free_names() {
+    let report = scratch::scratch("issue-1547-def-call-report", &[]);
+    let mut rows = Vec::new();
+    let mut inputs = Vec::new();
+    let mut detectors = 0;
+    let mut controls = 0;
+    for case in forms::def_call_cases() {
+        let dir = fixture(&case);
+        let after_or = case.id == "def-call-or-free-name";
+        let clause = point(&case.source, case.marker);
+        let call = point(&case.source, "p() }");
+        inputs.push(json!({"id":case.id,"source":case.source,"component":case.component,"compose":case.compose,"directory":dir}));
+        for (route, file, composed) in [("direct", "d.fsl", false), ("compose", "c.fsl", true)] {
+            let capture =
+                "predicate 'p' call would capture variable 'v'; rename the binder at the call site";
+            let (message, location) = if after_or {
+                (
+                    format!(
+                        "invalid model expression: public Kernel cannot type identifier 'v' at {}:{}",
+                        clause["line"], clause["column"]
+                    ),
+                    Some(clause.clone()),
+                )
+            } else if composed {
+                (
+                    format!(
+                        "component \"a.fsl\" failed to lower ({capture} at a.fsl:{}:{}) at c.fsl:2:3",
+                        call["line"], call["column"]
+                    ),
+                    Some(json!({"line":2,"column":3})),
+                )
+            } else {
+                // The existing direct capture diagnostic locates the call in
+                // its full message and has NO structured loc (not loc:null).
+                (
+                    format!("{capture} at {}:{}", call["line"], call["column"]),
+                    None,
+                )
+            };
+            let checked = observe(&dir, file, "check");
+            for consumer in ["check", "bmc", "induction", "explicit", "default"] {
+                let actual = if consumer == "check" {
+                    checked.clone()
+                } else {
+                    observe(&dir, file, consumer)
+                };
+                let agreement = actual == checked;
+                let ok = exact_error(&actual, &message, location.as_ref()) && agreement;
+                if after_or {
+                    detectors += usize::from(!ok);
+                } else {
+                    controls += usize::from(!ok);
+                }
+                rows.push(json!({"id":case.id,"path":case.paths,"route":route,"consumer":consumer,"class":if after_or {"caller-scope-detector"} else {"capture-control"},"expected_message":message,"expected_location":location,"structured_location_present":location.is_some(),"call_location":call,"ok":ok,"check_error_agreement":agreement,"output":actual.0,"exit":actual.1}));
+            }
+        }
+    }
+    std::fs::write(report.join("report.json"),serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"detector_failures":detectors,"control_failures":controls})).unwrap()).unwrap();
+    eprintln!(
+        "DEF_CALL_SCOPE_RESULT cells=2 routes=4 observations={} detector_failures={detectors} control_failures={controls} report={}",
+        rows.len(),
+        report.display()
+    );
+    assert_eq!(
+        controls, 0,
+        "conjunction must retain the existing call-site capture diagnostic"
+    );
+    assert_eq!(
+        detectors, 0,
+        "a disjunctive match must not populate the def call's locals"
     );
 }
 
