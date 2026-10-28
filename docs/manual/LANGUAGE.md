@@ -821,14 +821,13 @@ name in a `decreases` call. There are no unrelated breaking removals.
   not add general dependent range bounds (#1480).
   **Measured breaking removals.** Before regression-fixture migration, native
   `check` on base `45a2de33` and implementation `d592ed9f` observed the following
-  case-addressed inline forms (shared consumers counted once):
-
-  | Regression family | `ok`→`error` forms | Representative original collision |
-  |---|---:|---|
-  | Compose binding capture (#1442) | 126: 63 cells, each standalone and composed | `const x = false` with `action go(x: Bool) { requires x }`; also nested binders |
-  | Nested aggregates (#1463), shared CLI/LSP/Worker source | 24 | `const x = false` with `sum(x in 0..1 of count(y in 0..x)) == 3` |
-  | Per-binding helpful arguments (#1333) | 2: standalone and composed | `const c = 0` with `forall c: Case`, action parameter `c`, and `helpful step(c)` |
-
+  case-addressed inline forms (shared consumers counted once): **126**
+  compose-capture forms (#1442: 63 standalone/composed cells), e.g.
+  `const x = false` with `action go(x: Bool) { requires x }`, including nested
+  binders; **24** nested-aggregate forms (#1463, shared CLI/LSP/Worker source),
+  e.g. `const x = false` with `sum(x in 0..1 of count(y in 0..x)) == 3`;
+  **2** per-binding helpful-argument forms (#1333: standalone/composed), e.g.
+  `const c = 0` with `forall c: Case`, action parameter `c`, `helpful step(c)`.
   Total: **152** inline removal forms; the 126 fresh compose controls remain
   `ok`. Rename the local declaration and its uses, not the constant merely to
   hide the collision. Five partial-init sources (#1481) are **error→error**,

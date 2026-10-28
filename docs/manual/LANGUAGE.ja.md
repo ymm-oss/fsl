@@ -779,14 +779,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
   **計測した breaking removal。** 回帰テストの fixture を移す前に、base `45a2de33` と
   実装 `d592ed9f` の native `check` で、次の inline の形の `ok`→`error` を確認しました。
-  数はケース単位で、共有する consumer は重複して数えません。
-
-  | 回帰テストの family | `ok`→`error` の形の数 | 元の衝突の代表 |
-  |---|---:|---|
-  | compose の束縛 capture (#1442) | 126: 63 ケースの単独・compose | `const x = false` と `action go(x: Bool) { requires x }`。入れ子の束縛も含む |
-  | 入れ子の集約 (#1463)、CLI/LSP/Worker の共有 source | 24 | `const x = false` と `sum(x in 0..1 of count(y in 0..x)) == 3` |
-  | 束縛ごとの helpful 引数 (#1333) | 2: 単独・compose | `const c = 0` と `forall c: Case`、action の引数 `c`、`helpful step(c)` |
-
+  数はケース単位で、共有 consumer は重複して数えません。compose の束縛 capture
+  (#1442)は **126** 形(63 ケースの単独・compose)で、代表は `const x = false` と
+  `action go(x: Bool) { requires x }`、入れ子の束縛も含みます。入れ子の集約(#1463、
+  CLI/LSP/Worker の共有 source)は **24** 形で、代表は `const x = false` と
+  `sum(x in 0..1 of count(y in 0..x)) == 3`。束縛ごとの helpful 引数(#1333)は
+  **2** 形(単独・compose)で、代表は `const c = 0` と `forall c: Case`、action の
+  引数 `c`、`helpful step(c)` です。
   合計 **152** 形を受理から除きます。compose の fresh な対照 126 形は `ok` のままです。
   書き直すときは局所の名前と参照を変えてください。衝突を隠すだけのために const を消す
   のではありません。部分 init の 5 形(#1481)は **error→error** であり、受理の縮小
