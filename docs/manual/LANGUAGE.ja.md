@@ -3251,6 +3251,25 @@ lowering 後のイベントに揃えるものです。
   存在しない process、非エンティティの引数、未知の stage メンバー、未解決の修飾子
   は、ソース位置付きの型エラーです。
 
+**破壊的削除 (#1569):** process フィールド `amount` を持つ legacy requirements
+では、`exists c: Amount { stage(c) == Approved and amount == c }` のような
+transition ガードを `check` で拒否するようになりました。非エンティティの
+バインダーが、transition の暗黙のエンティティパラメータ `c` を隠します。
+`c` というフィールドは不要です。以前は、変数捕獲を避ける置換でバインダーだけが
+改名され、stage の引数は改名されませんでした。そのため `check` はガードを受理し、
+`verify` は `verified` と報告しましたが、`stage(c)` は transition 自身の
+インスタンスを黙って読んでいました。現在は `check`、`kernel`、`verify` が
+exit 2、`kind: "semantics"`、
+`stage(c) refers to type 'Amount', which has no process` で拒否します。
+バインダーとその使用箇所を一貫して `d` に改名した同じ不正なガードは、以前から
+このエラーでした。`stage(...)` にはエンティティのパラメータまたはバインダーが
+必要です。transition 自身の stage を読むには、
+`exists n: Amount { stage(c) == Approved and amount == n }` と書き、エンティティ
+には `c` を、非エンティティのバインダーには別の名前を使ってください。この
+書き換え後のガードは `check` を通ります。削除された形を持つチェックイン済みの
+spec や example はなく、base `1844fa74` / head `7b9b34b3` の 597 形式の sweep
+でも、コーパスでの受理から拒否への変化はありませんでした。
+
 ### 13.3 業務コンサルティングレイヤー: `business`(fsl-biz ダイアレクト)
 
 業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は

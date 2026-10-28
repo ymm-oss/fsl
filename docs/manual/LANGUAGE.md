@@ -3424,6 +3424,23 @@ the lowered event.
   missing process, non-entity argument, unknown stage member, or unresolved
   qualifier is a source-located type error.
 
+**Breaking removal (#1569):** in legacy requirements with a process field
+`amount`, `check` now rejects a transition guard such as
+`exists c: Amount { stage(c) == Approved and amount == c }`. The non-entity
+binder shadows the transition's implicit entity parameter `c`; a field named
+`c` is not required. Previously, capture-avoiding substitution renamed the binder
+without renaming the stage operand: `check` accepted the guard and `verify`
+reported `verified`, but `stage(c)` silently read the transition's own instance.
+Now `check`, `kernel`, and `verify` fail with exit 2, `kind: "semantics"`, and
+`stage(c) refers to type 'Amount', which has no process`. The same invalid guard
+with the binder and its uses consistently renamed to `d` already failed this way.
+`stage(...)` requires an entity parameter or binder. To read the transition's own
+stage, use `exists n: Amount { stage(c) == Approved and amount == n }`, keeping
+`c` for the entity and a different name for the non-entity binder; this rewritten
+guard passes `check`. No checked-in spec or example has the removed shape; the
+597-form base `1844fa74` / head `7b9b34b3` sweep found no corpus acceptance
+transitions.
+
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
 Write business processes, policies, and KPIs with zero implementation

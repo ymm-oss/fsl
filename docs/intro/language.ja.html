@@ -3424,6 +3424,24 @@ lowering 後のイベントに揃えるものです。</p>
   <code>claims.Claim.stage(c)</code>(任意深さの <code>SymbolPath</code>)で 1 つを選択してください。
   存在しない process、非エンティティの引数、未知の stage メンバー、未解決の修飾子
   は、ソース位置付きの型エラーです。</p>
+<p><strong>破壊的削除 (#1569):</strong> process フィールド <code>amount</code> を持つ legacy requirements
+では、<code>exists c: Amount { stage(c) == Approved and amount == c }</code> のような
+transition ガードを <code>check</code> で拒否するようになりました。非エンティティの
+バインダーが、transition の暗黙のエンティティパラメータ <code>c</code> を隠します。
+<code>c</code> というフィールドは不要です。以前は、変数捕獲を避ける置換でバインダーだけが
+改名され、stage の引数は改名されませんでした。そのため <code>check</code> はガードを受理し、
+<code>verify</code> は <code>verified</code> と報告しましたが、<code>stage(c)</code> は transition 自身の
+インスタンスを黙って読んでいました。現在は <code>check</code>、<code>kernel</code>、<code>verify</code> が
+exit 2、<code>kind: "semantics"</code>、
+<code>stage(c) refers to type 'Amount', which has no process</code> で拒否します。
+バインダーとその使用箇所を一貫して <code>d</code> に改名した同じ不正なガードは、以前から
+このエラーでした。<code>stage(...)</code> にはエンティティのパラメータまたはバインダーが
+必要です。transition 自身の stage を読むには、
+<code>exists n: Amount { stage(c) == Approved and amount == n }</code> と書き、エンティティ
+には <code>c</code> を、非エンティティのバインダーには別の名前を使ってください。この
+書き換え後のガードは <code>check</code> を通ります。削除された形を持つチェックイン済みの
+spec や example はなく、base <code>1844fa74</code> / head <code>7b9b34b3</code> の 597 形式の sweep
+でも、コーパスでの受理から拒否への変化はありませんでした。</p>
 <h3 id="133-businessfsl-biz">13.3 業務コンサルティングレイヤー: <code>business</code>(fsl-biz ダイアレクト)</h3>
 <p>業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
 <code>DESIGN-dialects.md</code> §3)。process は enum+Map+transition の action へ、policy は
