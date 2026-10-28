@@ -6539,18 +6539,42 @@ fn ai_project_parse_failure(
     (output, 2)
 }
 
+fn read_unprefixed_spec_source(path: &Path) -> Result<String, SpecLoadError> {
+    std::fs::read_to_string(path).map_err(|error| SpecLoadError::Io(error.to_string()))
+}
+
 fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    if fslc_rust::frontend_output::is_ai_project(&source) {
-        return run_ai_project_check(&source, path);
+    run_admitted_root(
+        path,
+        read_unprefixed_spec_source(path),
+        None,
+        false,
+        |source| run_ai_check_from_source(path, source, depth, deadlock, engine),
+    )
+}
+
+fn run_ai_check_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock: &str,
+    engine: &str,
+) -> (Value, i32) {
+    if fslc_rust::frontend_output::is_ai_project(source) {
+        return run_ai_project_check(source, path);
     }
-    match load_surface_document(path) {
+    match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => {
-            let (kernel, status) =
-                run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
+            let (kernel, status) = run_verify_admitted_from_source(
+                path,
+                source,
+                depth,
+                deadlock,
+                engine,
+                DEFAULT_EXPLICIT_BUDGET,
+                1,
+                None,
+            );
             if status == 2 {
                 return (kernel, status);
             }
@@ -6597,13 +6621,24 @@ fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
 }
 
 fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    if fslc_rust::frontend_output::is_ai_project(&source) {
+    run_admitted_root(
+        path,
+        read_unprefixed_spec_source(path),
+        None,
+        false,
+        |source| run_ai_replay_from_source(path, source, logs, selected_component),
+    )
+}
+
+fn run_ai_replay_from_source(
+    path: &Path,
+    source: &str,
+    logs: &Path,
+    selected_component: Option<&str>,
+) -> (Value, i32) {
+    if fslc_rust::frontend_output::is_ai_project(source) {
         let project = match fslc_rust::frontend_output::parse_checked_ai_project(
-            &source,
+            source,
             &ai_project_name(path),
         ) {
             Ok(project) => project,
@@ -6612,7 +6647,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
         if let Some(failure) = reject_invalid_ai_components(&project.components) {
             return failure;
         }
-        let summary = ai_project_summary(&source);
+        let summary = ai_project_summary(source);
         if selected_component.is_some_and(|selected| selected != summary.component) {
             return (
                 semantic_error_output(&format!(
@@ -6646,7 +6681,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
             json!({"result":if findings.is_empty(){"replay_conformant"}else{"replay_nonconformant"},"dialect":"fsl-ai-hard.v0","finding_schema_version":"fsl-ai-finding.v0","event_schema_version":"fsl-ai-event.v0","ai_component":summary.component,"events_checked":events.len(),"formal_result":"not_run","evidence":{"kind":"runtime_replay","formal_proof":false},"assumptions":[],"findings":findings}),
         );
     }
-    let component = match load_surface_document(path) {
+    let component = match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
         Ok(_) => {
             return (
@@ -6838,14 +6873,12 @@ fn ai_project_name(path: &Path) -> String {
     fslc_rust::frontend_output::ai_project_name(&path.to_string_lossy()).to_owned()
 }
 
-fn load_ai_project(path: &Path) -> Result<fsl_syntax::AiProject, (Value, i32)> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| (error_output("io", &error.to_string()), 2))?;
+fn load_ai_project(path: &Path, source: &str) -> Result<fsl_syntax::AiProject, (Value, i32)> {
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-        return fsl_syntax::parse_ai_project(&source, &ai_project_name(path))
+        return fsl_syntax::parse_ai_project(source, &ai_project_name(path))
             .map_err(|error| (semantic_error_output(&error.message), 2));
     }
-    match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+    match fsl_syntax::parse_ai_project(source, &ai_project_name(path)) {
         Ok(project) => Ok(project),
         Err(error) => Err((surface_parse_error_output(&error), 2)),
     }
@@ -6863,7 +6896,24 @@ fn run_ai_eval(
     property: Option<&str>,
     slice: Option<&str>,
 ) -> (Value, i32) {
-    let project = match load_ai_project(path) {
+    run_admitted_root(
+        path,
+        read_unprefixed_spec_source(path),
+        None,
+        false,
+        |source| run_ai_eval_from_source(path, source, records, dataset, property, slice),
+    )
+}
+
+fn run_ai_eval_from_source(
+    path: &Path,
+    source: &str,
+    records: Option<&Path>,
+    dataset: Option<&str>,
+    property: Option<&str>,
+    slice: Option<&str>,
+) -> (Value, i32) {
+    let project = match load_ai_project(path, source) {
         Ok(project) => project,
         Err(failure) => return failure,
     };
@@ -6923,7 +6973,24 @@ fn run_ai_regress(
     dataset: Option<&str>,
     migration: Option<&str>,
 ) -> (Value, i32) {
-    let project = match load_ai_project(path) {
+    run_admitted_root(
+        path,
+        read_unprefixed_spec_source(path),
+        None,
+        false,
+        |source| run_ai_regress_from_source(path, source, before, after, dataset, migration),
+    )
+}
+
+fn run_ai_regress_from_source(
+    path: &Path,
+    source: &str,
+    before: &Path,
+    after: &Path,
+    dataset: Option<&str>,
+    migration: Option<&str>,
+) -> (Value, i32) {
+    let project = match load_ai_project(path, source) {
         Ok(project) => project,
         Err(failure) => return failure,
     };
@@ -6962,7 +7029,36 @@ fn run_ai_drift(
     window: Option<&str>,
     baseline_label: Option<&str>,
 ) -> (Value, i32) {
-    let project = match load_ai_project(path) {
+    run_admitted_root(
+        path,
+        read_unprefixed_spec_source(path),
+        None,
+        false,
+        |source| {
+            run_ai_drift_from_source(
+                path,
+                source,
+                current,
+                baseline,
+                property,
+                window,
+                baseline_label,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_ai_drift_from_source(
+    path: &Path,
+    source: &str,
+    current: &Path,
+    baseline: Option<&Path>,
+    property: Option<&str>,
+    window: Option<&str>,
+    baseline_label: Option<&str>,
+) -> (Value, i32) {
+    let project = match load_ai_project(path, source) {
         Ok(project) => project,
         Err(failure) => return failure,
     };
@@ -6996,18 +7092,24 @@ fn run_ai_drift(
 /// all, previously produced a syntactically empty profile that reported
 /// success indistinguishably from a genuine clean result).
 fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
+    run_admitted_root(
+        path,
+        read_unprefixed_spec_source(path),
+        None,
+        false,
+        |source| run_ai_compat_from_source(path, source, environment),
+    )
+}
+
+fn run_ai_compat_from_source(path: &Path, source: &str, environment: Option<&str>) -> (Value, i32) {
     let components: Vec<fsl_syntax::AiComponent> =
-        if fslc_rust::frontend_output::is_ai_project(&source) {
-            match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+        if fslc_rust::frontend_output::is_ai_project(source) {
+            match fsl_syntax::parse_ai_project(source, &ai_project_name(path)) {
                 Ok(project) => project.components,
                 Err(error) => return (semantic_error_output(&error.message), 2),
             }
         } else {
-            match load_surface_document(path) {
+            match load_surface_document_from_source(path, source) {
                 Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => vec![component],
                 Ok(_) => {
                     return (
