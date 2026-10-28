@@ -335,7 +335,9 @@ status.</p>
 stable <code>deprecated_domain_enum_union</code> warning over the complete declaration,
 including a canonical replacement. <code>fslc check</code>, <code>fslc verify</code>, and
 <code>fslc domain check</code> accept <code>--edition current|next</code>; <code>next</code> rejects the legacy
-union spelling. <code>fslc lint</code> reports the edition finding without mutation, and
+union spelling. Other covered consumers use the source header's edition; this
+does not add an <code>--edition</code> option to those commands. <code>fslc lint</code> reports the
+edition finding without mutation, and
 <code>fslc migrate --edition next</code> supplies the checked canonical edit. Empty enums
 and duplicate members are errors, reported at the declaration and duplicate
 member respectively.</p>
@@ -1479,6 +1481,64 @@ and domain expressions retain their existing behavior.
 Range type endpoints, including parenthesized subexpressions within them,
 retain generic <code>FSL-PARSE</code> diagnostics for these invalid spellings. They remain
 rejected; this exception does not change structural relation arrows.</p>
+<p>In the current edition, <code>check</code>, <code>verify</code>, and Worker JSON
+append migration warnings for declaration string metadata
+(<code>legacy_string_metadata</code>), colon quantifiers (<code>legacy_quantifier_colon</code>), and
+inline action <code>maps</code> (<code>inline_action_maps</code>). These reuse lint's exact locations,
+replacements, edits, and migration-safety information, without changing verdicts
+or exit codes. A refused rewrite remains <code>machine_applicable: false</code>; a warning
+does not mean automatic migration is safe. Prefer typed annotations, braced
+quantifiers, and explicit action correspondences in <code>implements</code>. Lint retains
+exit 0 for no findings, 1 for findings, and 2 for parse/check failure.
+Domain checking rejects quantified domain expressions instead of emitting a
+colon-quantifier warning; legacy string metadata and requirement action mappings
+are not accepted domain forms.</p>
+<p>Captured-root admission also covers <code>db check</code>/<code>compat check</code>, <code>scenarios</code>,
+generic <code>testgen</code>, <code>kernel</code>, <code>conformance</code>, <code>testplan</code>, <code>typestate</code>, <code>explain</code>,
+single-FSL-source <code>analyze</code>, trace replay and the six causal commands (#1449).
+They classify the same captured bytes they consume, before model/solver work or
+output effects. Causal diff includes both operands; observation includes its
+explicit FSL mapping. Each slot is distinct, so repeating a file in two slots
+permits one warning per slot. Headers, existing edition options and read-error
+kinds keep their rules; no new dialect/header combination is accepted.
+The single-input analyze entry also preflights <code>.toml</code> text, without admitting
+the referenced FSL roots or completing project-mode intake. Envelope <code>fsl_edition</code>
+and <code>edition</code> describe only the primary root, while warnings retain each slot.
+Preparing all causal roots means a later operand/mapping read error intentionally
+precedes an earlier root's parse/model error.</p>
+<p>Implemented open envelopes use <code>warnings</code> once. Successful closed schemas
+(<code>kernel</code>, <code>conformance</code>, <code>testplan</code>) and implemented raw TypeScript/readable/graph
+outputs use stderr <code>warning: &lt;finding-json&gt;</code> without changing stdout. Admitted
+verification finalizes after governance; domain/database checks, scenarios and
+generic testgen finish only their outer result. Domain check no longer duplicates
+migration warnings, including non-definitive errors. Worker admission precedes
+model/solver use; editor refusals retain UTF-16 ranges without model/analysis work.
+Current-edition warnings preserve verdicts, assurance and exits; next-edition
+migration findings refuse before consumption with the existing edition error/exit 2.
+Previously ungated consumers can therefore reject next-edition input they accepted.</p>
+<p>The measured comparison uses BASE <code>5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4</code>
+and built implementation <code>33e3fcc5606249a097814d91cb09b506add8e97d</code> in their
+materialized trees. <code>fslc check FORM</code>, cache off and the fsl5 gate enabled only
+for fsl 5 headers, covers all 597 <code>.fsl</code> files in <code>specs/</code>, <code>examples/</code>, and
+<code>rust/fslc/tests/fixtures/</code> plus 309 inline occurrences, with both binaries in
+both trees (3,624 checks). The ok-to-error transition set is empty; 57 corpus
+forms and 22 inline occurrences change only warnings. No fields are excluded.
+The consumer comparison against parent <code>25f68db7fe214ed2ed66034701ed1bf06b5fbe7c</code>
+records a breaking refusal for four next-edition migration forms (enum union,
+metadata, colon quantifier, inline maps) in analyze/conformance/explain/html/
+kernel/ledger/mutate/scenarios/sweep/testgen/typestate, and the enum-union form
+in testplan: 45 command/form observations that check already rejects. This does
+not complete deferred raw-warning, mutate-success-warning or sweep-capture modes.</p>
+<p>This is a partial delivery, not a guarantee for every reader. AI intake, non-check
+domain commands, document/approval intake, live comparison/refinement and log
+mappings, batch/project/chain intake, counterexample ordering, mutate success
+warnings, sweep capture and raw-success HTML/ledger stderr remain tracked by #1449.
+Report baselines and ledger migration rendering are retained; migration-only rows
+use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
+🔴 要確認 / 要確認. Dependencies are not recursively admitted; historical Git roots
+remain #1513. Repair projections/exits stay unchanged, including lint's existing
+dialect limits (#609); this does not remove public-example warnings (#608) or fix
+other ledger warning classifications (#1497).</p>
 <p>Each <code>fslc lint</code> path may be a file or directory. Directories recursively expand
 to regular <code>*.fsl</code> files; symlink entries and other extensions are skipped while
 walking them, and the combined file set is deduplicated and sorted
