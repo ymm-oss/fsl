@@ -84,21 +84,25 @@ impl Fixture {
     }
 
     fn verify(&self, engine: &str, expected_exit: i32) -> Value {
+        self.verify_with_deadlock(engine, "ignore", expected_exit)
+    }
+
+    fn verify_with_deadlock(&self, engine: &str, deadlock: &str, expected_exit: i32) -> Value {
         let depth = self.depth.to_string();
-        json_output(
-            &run(&[
-                "verify",
-                text(&self.spec),
-                "--engine",
-                engine,
-                "--depth",
-                &depth,
-                "--deadlock",
-                "ignore",
-                "--no-cache",
-            ]),
-            expected_exit,
-        )
+        let mut args = vec![
+            "verify",
+            text(&self.spec),
+            "--depth",
+            &depth,
+            "--deadlock",
+            deadlock,
+            "--no-cache",
+        ];
+        // Pin the default BMC path, not merely an explicit --engine bmc alias.
+        if engine != "bmc" {
+            args.extend_from_slice(&["--engine", engine]);
+        }
+        json_output(&run(&args), expected_exit)
     }
 
     fn ledger(&self, label: &str, extra: &[&str], expected_exit: i32) -> String {
@@ -106,6 +110,10 @@ impl Fixture {
     }
 
     fn scenarios(&self, expected_exit: i32) -> Value {
+        self.scenarios_with_deadlock("ignore", expected_exit)
+    }
+
+    fn scenarios_with_deadlock(&self, deadlock: &str, expected_exit: i32) -> Value {
         let depth = self.depth.to_string();
         let value = json_output(
             &run(&[
@@ -114,7 +122,7 @@ impl Fixture {
                 "--depth",
                 &depth,
                 "--deadlock",
-                "ignore",
+                deadlock,
             ]),
             expected_exit,
         );
@@ -127,14 +135,10 @@ impl Fixture {
     fn report(&self, command: &str, label: &str, extra: &[&str], expected_exit: i32) -> String {
         let output_path = self.directory.join(label);
         let depth = self.depth.to_string();
-        let mut args = vec![
-            command,
-            text(&self.spec),
-            "--depth",
-            &depth,
-            "--deadlock",
-            "ignore",
-        ];
+        let mut args = vec![command, text(&self.spec), "--depth", &depth];
+        if !extra.contains(&"--deadlock") {
+            args.extend_from_slice(&["--deadlock", "ignore"]);
+        }
         args.extend_from_slice(extra);
         args.extend_from_slice(&["-o", text(&output_path)]);
         let envelope = json_output(&run(&args), expected_exit);
@@ -347,7 +351,7 @@ fn every_leadsto_ranked_keeps_all_four_aggregate_surfaces_proved() {
     assert_four_surfaces(&Fixture::new("ranked", &source), "ReachFive", true);
 }
 
-fn assert_reachables_not_evaluated(verification: &Value) {
+fn assert_reachable_evaluation_fields_absent(verification: &Value) {
     assert!(!verification["reachables"].is_object(), "{verification}");
     assert!(!verification["unreached"].is_array(), "{verification}");
 }
@@ -373,7 +377,7 @@ fn reachable_skipped_after_ensures_violation_is_not_evaluated() {
     assert_eq!(verification["result"], "violated", "{verification}");
     assert_eq!(verification["violation_kind"], "ensures", "{verification}");
     assert_eq!(verification["checked_to_depth"], 1, "{verification}");
-    assert_reachables_not_evaluated(&verification);
+    assert_reachable_evaluation_fields_absent(&verification);
     let scenarios = fixture.scenarios(1);
     assert_eq!(scenarios["result"], "violated", "{scenarios}");
     assert!(
@@ -404,7 +408,7 @@ fn scenario_confirmed_reachable_under_unknown_cti_keeps_its_current_row() {
     let fixture = cti_fixture();
     let verification = fixture.verify("induction", 1);
     assert_eq!(verification["result"], "unknown_cti", "{verification}");
-    assert_reachables_not_evaluated(&verification);
+    assert_reachable_evaluation_fields_absent(&verification);
     let scenarios = fixture.scenarios(0);
     assert!(
         scenarios["scenarios"]
@@ -422,21 +426,18 @@ fn scenario_confirmed_reachable_under_unknown_cti_keeps_its_current_row() {
 }
 
 #[test]
-fn unconfirmed_reachable_under_unknown_cti_is_intentionally_not_evaluated() {
-    // Approved condition (b), with the clarified scenario-confirmation priority:
-    // unknown_cti + no reachable evaluation + no scenario witness is intended
-    // to show white/not_run. Real CLI attempts with Top at x == 4 (depth 3),
-    // or a ranked leadsTo with unreachable Top, returned reachable_failed
-    // before induction instead. A reachable at x == 2 permits unknown_cti,
-    // but scenarios confirms it. Thus derive ONLY this absence-of-confirmation
-    // case by removing that one Top entry from the real scenarios output.
-    // The real unknown_cti verification envelope is passed through unchanged;
-    // no verification/scenario JSON is invented. The separate CLI control
-    // above pins the priority of the original, real scenario witness.
+fn unconfirmed_reachable_under_unknown_cti_keeps_its_evaluated_bounded_row() {
+    // Round 2 drops the former condition (b): missing envelope fields do not
+    // mean reachability was skipped. Keep the same derived input as round 1:
+    // remove only Top's scenario from real producer output, then pass through
+    // the real unknown_cti envelope unchanged. The base BMC had to verify
+    // before this invariant CTI, so bounded evidence survives even without
+    // the separate scenario confirmation. This is a renderer control, not a
+    // claim that the current CLI naturally loses this scenario witness.
     let fixture = cti_fixture();
     let verification = fixture.verify("induction", 1);
     assert_eq!(verification["result"], "unknown_cti", "{verification}");
-    assert_reachables_not_evaluated(&verification);
+    assert_reachable_evaluation_fields_absent(&verification);
     let original = fixture.scenarios(0);
     let mut derived = original.clone();
     let scenarios = derived["scenarios"].as_array_mut().unwrap();
@@ -471,7 +472,10 @@ fn unconfirmed_reachable_under_unknown_cti_is_intentionally_not_evaluated() {
         None,
         &[],
     );
-    assert_white_not_run(&body);
+    assert_eq!(
+        findings::risk_row(&body, "R-TOP"),
+        "| R-TOP | — | 🟢 反例なし | bounded(BMC depth 3) | — | — | — | — |"
+    );
 }
 
 fn evaluated_reachable(target: u8) -> Fixture {
@@ -525,7 +529,7 @@ fn untagged_skipped_reachable_adds_no_requirement_row_or_finding() {
     let fixture = Fixture::new("untagged", &source);
     let verification = fixture.verify("bmc", 1);
     assert_eq!(verification["result"], "violated", "{verification}");
-    assert_reachables_not_evaluated(&verification);
+    assert_reachable_evaluation_fields_absent(&verification);
     let body = fixture.ledger("untagged.md", &[], 1);
     let rows = findings::section(&body, "リスク一覧（要件ID別）");
     assert_eq!(
@@ -538,4 +542,609 @@ fn untagged_skipped_reachable_adds_no_requirement_row_or_finding() {
     let raw = raw.as_array().unwrap();
     assert_eq!(raw.len(), 1, "only the existing ensures finding: {raw:?}");
     assert_eq!(raw[0]["trace_type"], "ensures");
+}
+
+// Round 2: observed producer/projection order, pinned by real CLI runs below.
+//
+// Engine   | result / kind                       | reachables / unreached | R-TOP
+// BMC/BFS  | violated: invariant/trans/ensures/   | absent / absent        | not_run
+//          | partial_op/type_bound               |                        |
+// BMC      | violated: deadlock or leadsTo       | absent / absent        | bounded
+// BFS      | violated: deadlock (either witness) | absent / absent        | not_run*
+// BMC/BFS  | reachable_failed                    | absent / array         | red/bounded
+// BMC      | unwitnessed + deadlock or leadsTo   | reachable_failed wins  | red/bounded
+// BFS      | unwitnessed + deadlock              | deadlock wins          | not_run*
+// BFS      | any leadsTo                        | semantics refusal      | no artifact
+// induction| unknown_cti / invariant or rank     | absent / absent        | bounded
+// * A real scenario confirmation still wins. The deadlock cases use
+//   --deadlock error, so scenarios itself returns a failure, not a witness.
+//
+// Evidence: fsl-verifier/src/bmc.rs:664-701 checks state/action violations
+// before record_reachables, then records deadlock and liveness at :705-793.
+// fsl-runtime/src/explicit.rs:203-297 checks current violations, records
+// reachables, then steps actions; :100-109 refuses leadsTo before BFS.
+// fslc/src/verification_output.rs:2339-2372 projects BMC early violation >
+// unreached > deadlock > leadsTo; :2398-2477 projects explicit early violation
+// > deadlock > budget > unreached. The latter adds engine:"explicit" at :2657.
+// fslc/src/verification.rs:271-291 returns a non-verified base before ordinary
+// induction; :574-676/:679-740 render invariant CTI/rank failure without the
+// base reachables. Explicit dispatch is :967-1010. Ledger main.rs:13599-13607
+// passes --engine to verify and :13680-13687 passes its full envelope through.
+// The ledger/html CLI options currently accept only bmc/induction
+// (cli_options.rs:724-725); explicit cases therefore feed real verify,
+// scenarios and explain CLI outputs to the same library renderers instead.
+// These are envelope-evidence classifications, not an assertion that no earlier
+// BFS level ever visited a reachable on an early-violation run (#1565).
+
+#[derive(Clone, Copy)]
+enum ProducerCase {
+    Invariant,
+    Transition,
+    Ensures,
+    PartialOp,
+    Bounds,
+    Deadlock,
+    UnwitnessedDeadlock,
+    LeadsTo,
+    UnwitnessedLeadsTo,
+    ReachableFailed,
+}
+
+impl ProducerCase {
+    fn source(self) -> String {
+        let (action, property, target) = match self {
+            Self::Invariant => ("action step() { x = 1 }", "invariant Safe { x == 0 }", 0),
+            Self::Transition => ("action step() { x = 1 }", "trans Stable { x == old(x) }", 0),
+            Self::Ensures => ("action step() { x = 1 ensures x == old(x) + 2 }", "", 0),
+            Self::PartialOp => ("action step() { requires 1 / x > 0 x = 1 }", "", 0),
+            Self::Bounds => ("action step() { x = 4 }", "", 0),
+            Self::Deadlock => ("action step() { requires x == 0 x = 1 }", "", 1),
+            Self::UnwitnessedDeadlock => ("action step() { requires x == 0 x = 1 }", "", 2),
+            Self::LeadsTo => (
+                "action step() { x = x }",
+                "leadsTo Progress { x == 0 ~> x == 1 }",
+                0,
+            ),
+            Self::UnwitnessedLeadsTo => (
+                "action step() { x = x }",
+                "leadsTo Progress { x == 0 ~> x == 1 }",
+                1,
+            ),
+            Self::ReachableFailed => ("action step() { x = x }", "", 1),
+        };
+        format!(
+            r#"spec ProducerOrder {{
+          state {{ x: 0..3 }}
+          init {{ x = 0 }}
+          {action}
+          {property}
+          @requirement("R-TOP")
+          reachable Top {{ x == {target} }}
+        }}"#
+        )
+    }
+}
+
+fn html_property_assurance<'a>(html: &'a str, name: &str) -> &'a str {
+    let properties = html
+        .split_once("id=\"properties\"")
+        .expect("HTML properties section")
+        .1
+        .split_once("</section>")
+        .unwrap()
+        .0;
+    let row = properties
+        .split("<tr>")
+        .find(|row| row.contains(&format!("<code>{name}</code>")))
+        .unwrap_or_else(|| panic!("missing property {name}: {properties}"));
+    row.split("<td>")
+        .nth(3)
+        .expect("property assurance cell")
+        .split_once("</td>")
+        .unwrap()
+        .0
+}
+
+fn row_assurance<'a>(ledger: &'a str, id: &str) -> &'a str {
+    findings::risk_row(ledger, id)
+        .split('|')
+        .nth(4)
+        .unwrap()
+        .trim()
+}
+
+fn panel_assurance(html: &str) -> &str {
+    html.split_once("<th>Assurance</th><td>")
+        .expect("HTML status Assurance")
+        .1
+        .split_once("</td>")
+        .unwrap()
+        .0
+}
+
+fn library_reports(fixture: &Fixture, verification: &Value, scenarios: &Value) -> (String, String) {
+    let source = fs::read_to_string(&fixture.spec).unwrap();
+    let resolver = fsl_core::FsResolver::new(root());
+    let model =
+        fsl_core::build_model(fsl_core::parse_kernel_source(&source, &resolver).unwrap()).unwrap();
+    let explained = json_output(&run(&["explain", text(&fixture.spec)]), 0);
+    let ledger = fsl_tools::render_ledger(
+        text(&fixture.spec),
+        &model,
+        verification,
+        scenarios,
+        None,
+        &[],
+    );
+    let html = fsl_tools::render_html_report(
+        text(&fixture.spec),
+        &source,
+        &model,
+        &explained,
+        verification,
+        &[],
+    );
+    (ledger, html)
+}
+
+fn check_producer_case(
+    engine: &str,
+    case: ProducerCase,
+    result: &str,
+    kind: Option<&str>,
+    unreached: bool,
+    status: &str,
+) {
+    let fixture = Fixture::new("producer", &case.source());
+    let verification = fixture.verify_with_deadlock(engine, "error", 1);
+    assert_eq!(verification["result"], result, "{verification}");
+    assert_eq!(
+        verification["violation_kind"].as_str(),
+        kind,
+        "{verification}"
+    );
+    // A producer-order change must fail here even if presentation still happens
+    // to show the expected status. No missing-field inference defines the rule.
+    assert!(!verification["reachables"].is_object(), "{verification}");
+    assert_eq!(
+        verification["unreached"].is_array(),
+        unreached,
+        "{verification}"
+    );
+    if engine == "explicit" {
+        assert_eq!(verification["engine"], "explicit", "{verification}");
+    }
+    let depth = verification["checked_to_depth"].as_u64().unwrap();
+    let expected_label = if status == "⚪ 未評価" {
+        "not_run".to_owned()
+    } else {
+        format!("bounded(BMC depth {depth})")
+    };
+    let extra = if engine == "bmc" {
+        vec!["--deadlock", "error"]
+    } else {
+        vec!["--engine", engine, "--deadlock", "error"]
+    };
+    let (ledger, html) = if engine == "explicit" {
+        let scenarios = fixture.scenarios_with_deadlock("error", 1);
+        assert!(
+            !scenarios["scenarios"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(confirms_top),
+            "no scenario override in this result-kind matrix: {scenarios}"
+        );
+        library_reports(&fixture, &verification, &scenarios)
+    } else {
+        (
+            fixture.ledger("matrix.md", &extra, 1),
+            fixture.report("html", "matrix.html", &extra, 1),
+        )
+    };
+    let row = findings::risk_row(&ledger, "R-TOP");
+    let observed_status = row.split('|').nth(3).unwrap().trim();
+    let html_label = html_property_assurance(&html, "Top");
+    let agreements = [
+        observed_status == status,
+        row_assurance(&ledger, "R-TOP") == expected_label,
+        html_label == expected_label,
+    ];
+    assert_eq!(
+        agreements, [true; 3],
+        "expected {status:?}/{expected_label:?}; observed ledger={row}, HTML property={html_label:?}; producer={result}/{kind:?}, engine={engine}"
+    );
+}
+
+macro_rules! producer_case {
+    ($name:ident, $engine:literal, $case:ident, $result:literal, $kind:expr, $unreached:literal, $status:literal) => {
+        #[test]
+        fn $name() {
+            check_producer_case(
+                $engine,
+                ProducerCase::$case,
+                $result,
+                $kind,
+                $unreached,
+                $status,
+            );
+        }
+    };
+}
+
+producer_case!(
+    bmc_invariant_stops_reachable_evaluation,
+    "bmc",
+    Invariant,
+    "violated",
+    Some("invariant"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    explicit_invariant_stops_reachable_evaluation,
+    "explicit",
+    Invariant,
+    "violated",
+    Some("invariant"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_transition_stops_reachable_evaluation,
+    "bmc",
+    Transition,
+    "violated",
+    Some("trans"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    explicit_transition_stops_reachable_evaluation,
+    "explicit",
+    Transition,
+    "violated",
+    Some("trans"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_ensures_stops_reachable_evaluation,
+    "bmc",
+    Ensures,
+    "violated",
+    Some("ensures"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    explicit_ensures_stops_reachable_evaluation,
+    "explicit",
+    Ensures,
+    "violated",
+    Some("ensures"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_partial_op_stops_reachable_evaluation,
+    "bmc",
+    PartialOp,
+    "violated",
+    Some("partial_op"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    explicit_partial_op_stops_reachable_evaluation,
+    "explicit",
+    PartialOp,
+    "violated",
+    Some("partial_op"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_bounds_stops_reachable_evaluation,
+    "bmc",
+    Bounds,
+    "violated",
+    Some("type_bound"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    explicit_bounds_stops_reachable_evaluation,
+    "explicit",
+    Bounds,
+    "violated",
+    Some("type_bound"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_deadlock_implies_reachable_was_witnessed,
+    "bmc",
+    Deadlock,
+    "violated",
+    Some("deadlock"),
+    false,
+    "🟢 反例なし"
+);
+producer_case!(
+    explicit_deadlock_does_not_report_reachable_witness_status,
+    "explicit",
+    Deadlock,
+    "violated",
+    Some("deadlock"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_unreached_precedes_deadlock,
+    "bmc",
+    UnwitnessedDeadlock,
+    "reachable_failed",
+    None,
+    true,
+    "🔴 要確認"
+);
+producer_case!(
+    explicit_deadlock_precedes_unreached,
+    "explicit",
+    UnwitnessedDeadlock,
+    "violated",
+    Some("deadlock"),
+    false,
+    "⚪ 未評価"
+);
+producer_case!(
+    bmc_leadsto_implies_reachable_was_witnessed,
+    "bmc",
+    LeadsTo,
+    "violated",
+    Some("leadsTo"),
+    false,
+    "🟢 反例なし"
+);
+producer_case!(
+    bmc_unreached_precedes_leadsto,
+    "bmc",
+    UnwitnessedLeadsTo,
+    "reachable_failed",
+    None,
+    true,
+    "🔴 要確認"
+);
+producer_case!(
+    bmc_reachable_failed_is_evaluated,
+    "bmc",
+    ReachableFailed,
+    "reachable_failed",
+    None,
+    true,
+    "🔴 要確認"
+);
+producer_case!(
+    explicit_reachable_failed_is_evaluated,
+    "explicit",
+    ReachableFailed,
+    "reachable_failed",
+    None,
+    true,
+    "🔴 要確認"
+);
+
+#[test]
+fn explicit_leadsto_is_a_refusal_not_a_reachable_verdict() {
+    for case in [ProducerCase::LeadsTo, ProducerCase::UnwitnessedLeadsTo] {
+        let fixture = Fixture::new("explicit-leadsto-refusal", &case.source());
+        let verification = fixture.verify("explicit", 2);
+        assert_eq!(verification["result"], "error", "{verification}");
+        assert_eq!(verification["kind"], "semantics", "{verification}");
+        assert!(verification["violation_kind"].is_null(), "{verification}");
+        assert_reachable_evaluation_fields_absent(&verification);
+        assert!(
+            verification["message"]
+                .as_str()
+                .unwrap()
+                .contains("explicit engine does not support leadsTo"),
+            "{verification}"
+        );
+        for command in ["ledger", "html"] {
+            let output = fixture.directory.join(format!("refused.{command}"));
+            let envelope = json_output(
+                &run(&[
+                    command,
+                    text(&fixture.spec),
+                    "--engine",
+                    "explicit",
+                    "-o",
+                    text(&output),
+                ]),
+                2,
+            );
+            assert_eq!(envelope["result"], "error", "{envelope}");
+            // Reports currently reject the engine option even before the
+            // explicit engine's own leadsTo semantics gate is reached.
+            assert_eq!(envelope["kind"], "usage", "{envelope}");
+            assert_eq!(
+                envelope["message"], "--engine must be bmc or induction",
+                "{envelope}"
+            );
+            assert!(
+                !output.exists(),
+                "refused report must not fabricate a property row"
+            );
+        }
+    }
+}
+
+const REVIEW_CTI: &str = r#"spec Cti {
+  type N = 0..100
+  state { x: N }
+  init { x = 0 }
+  action step() { requires x < 98 x = x + 2 }
+  @requirement("R-ODD")
+  invariant NotOdd { x != 51 }
+  @requirement("R-TOP")
+  reachable Top { x == 4 }
+}"#;
+
+fn check_induction_reachable(fixture: &Fixture, rank_failure: bool) {
+    let verification = fixture.verify("induction", 1);
+    assert_eq!(verification["result"], "unknown_cti", "{verification}");
+    assert_eq!(
+        verification["violation_kind"].as_str(),
+        rank_failure.then_some("leadsTo_rank"),
+        "{verification}"
+    );
+    if rank_failure {
+        assert_eq!(
+            verification["rank_failure"], "non_decreasing_action",
+            "{verification}"
+        );
+    }
+    assert_reachable_evaluation_fields_absent(&verification);
+    let scenarios = fixture.scenarios(0);
+    assert!(
+        scenarios["scenarios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(confirms_top),
+        "{scenarios}"
+    );
+    let ledger = fixture.ledger("induction.md", &["--engine", "induction"], 1);
+    let html = fixture.report("html", "induction.html", &["--engine", "induction"], 1);
+    let expected = format!("bounded(BMC depth {})", fixture.depth);
+    let row = findings::risk_row(&ledger, "R-TOP");
+    let property = html_property_assurance(&html, "Top");
+    assert_eq!(
+        [
+            row.contains("| 🟢 確認済（承認可） |"),
+            row_assurance(&ledger, "R-TOP") == expected,
+            property == expected
+        ],
+        [true; 3],
+        "evaluated induction reachable: ledger={row}, HTML={property:?}, expected={expected}"
+    );
+}
+
+#[test]
+fn review_cti_keeps_ledger_and_html_reachable_bounded() {
+    check_induction_reachable(&Fixture::new("review-cti", REVIEW_CTI), false);
+}
+
+#[test]
+fn rank_failure_keeps_ledger_and_html_reachable_bounded() {
+    let source = fs::read_to_string(
+        root().join("tests/fixtures/rust_port/ranked_leadsto_non_decreasing.fsl"),
+    )
+    .unwrap();
+    let (prefix, suffix) = source.rsplit_once('}').unwrap();
+    let mut fixture = Fixture::new(
+        "rank-failure",
+        &format!("{prefix}\n @requirement(\"R-TOP\")\n reachable Top {{ x == 2 }}\n}}{suffix}"),
+    );
+    fixture.depth = 3;
+    check_induction_reachable(&fixture, true);
+}
+
+const TWO_LEADSTOS: &str = r#"spec Two {
+  state { x: Int, req: Bool }
+  init { x = 0 req = false }
+  fair action inc() { requires x < 5 x = x + 1 }
+  fair action ask() { requires x == 5 requires req == false req = true }
+  fair action serve() { requires x == 5 requires req == true req = false }
+  invariant XRange { x >= 0 and x <= 5 }
+  @requirement("R-FIVE")
+  leadsTo ReachFive { x < 5 ~> x == 5 decreases 5 - x }
+  @requirement("R-SERVED")
+  leadsTo Served { req == true ~> req == false }
+}"#;
+
+#[test]
+fn two_leadstos_need_any_bounded_obligation_not_all() {
+    let fixture = Fixture::new("two-leadstos", TWO_LEADSTOS);
+    let verification = fixture.verify("induction", 0);
+    assert_eq!(verification["result"], "proved", "{verification}");
+    assert_eq!(verification["completeness"], "unbounded", "{verification}");
+    assert_eq!(verification["leads_to"].as_object().unwrap().len(), 2);
+    assert_eq!(
+        verification["leads_to"]["ReachFive"]["completeness"], "unbounded",
+        "{verification}"
+    );
+    assert!(
+        verification["leads_to"]["Served"]["completeness"].is_null(),
+        "unranked producer entry deliberately omits completeness: {verification}"
+    );
+    assert_eq!(
+        verification["leads_to"]["Served"]["checked_to_depth"], 8,
+        "{verification}"
+    );
+    let ledger = fixture.ledger("two.md", &["--engine", "induction"], 0);
+    let html = fixture.report("html", "two.html", &["--engine", "induction"], 0);
+    assert!(ledger.contains("- 保証限界: BMC（有界モデル検査）: **深さ 8 までの全実行を網羅**。それ以遠の反例は本台帳の対象外"), "{ledger}");
+    assert_eq!(panel_assurance(&html), "bounded(BMC depth 8)");
+    assert_eq!(row_assurance(&ledger, "R-FIVE"), "proved(induction)");
+    assert_eq!(row_assurance(&ledger, "R-SERVED"), "bounded(BMC depth 8)");
+    assert_eq!(
+        html_property_assurance(&html, "ReachFive"),
+        "proved(induction)"
+    );
+    assert_eq!(
+        html_property_assurance(&html, "Served"),
+        "bounded(BMC depth 8)"
+    );
+}
+
+#[test]
+fn refinement_failure_over_induction_keeps_unranked_liveness_and_reachable_bounded() {
+    let fixture = Fixture::new(
+        "refinement",
+        r#"requirements R {
+      implements A from "abs_ensures.fsl" { map y = z action go() -> go() }
+      type N = 0..4
+      state { z: N, req: Bool }
+      init { z = 0 req = false }
+      action go() { z = 0 }
+      fair action ask() { requires req == false req = true }
+      fair action serve() { requires req == true req = false }
+      @requirement("R-LT")
+      leadsTo Served { req == true ~> req == false }
+      @requirement("R-TOP")
+      reachable Top { req == true }
+    }"#,
+    );
+    fs::write(
+        fixture.directory.join("abs_ensures.fsl"),
+        r"spec A {
+      type N = 0..4
+      state { y: N }
+      init { y = 0 }
+      action go() { y = y ensures y == 3 }
+    }",
+    )
+    .unwrap();
+    let verification = fixture.verify("induction", 1);
+    assert_eq!(
+        verification["result"], "refinement_failed",
+        "{verification}"
+    );
+    assert_eq!(verification["completeness"], "unbounded", "{verification}");
+    let ledger = fixture.ledger("refinement.md", &["--engine", "induction"], 1);
+    let html = fixture.report("html", "refinement.html", &["--engine", "induction"], 1);
+    let observed = [
+        row_assurance(&ledger, "R-LT"),
+        row_assurance(&ledger, "R-TOP"),
+        html_property_assurance(&html, "Served"),
+        html_property_assurance(&html, "Top"),
+        panel_assurance(&html),
+    ];
+    assert_eq!(
+        observed, ["bounded(BMC depth 8)"; 5],
+        "rows/properties must match the bounded aggregate under refinement_failed"
+    );
+    assert!(ledger.contains("- 保証限界: BMC（有界モデル検査）: **深さ 8 までの全実行を網羅**。それ以遠の反例は本台帳の対象外"), "{ledger}");
 }
