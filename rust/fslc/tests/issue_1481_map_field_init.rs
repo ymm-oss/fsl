@@ -416,17 +416,6 @@ const N2: &str = r"spec MapFieldInit {
 }
 ";
 
-cell!(
-    n2_read_uncovered_field,
-    N2,
-    clean("ok"),
-    bounds(),
-    bounds(),
-    semantics("init references state variable 'm' before it is assigned"),
-    semantics("init references state variable 'm' before it is assigned"),
-    None
-);
-
 const N3: &str = r"spec MapFieldInit {
   type K = 0..1
   struct Cell { flag: Bool }
@@ -624,6 +613,15 @@ macro_rules! read_rejection_cell {
         }
     };
 }
+
+// #1451: a free component of a may-assigned root still requires full-root coverage.
+read_rejection_cell!(
+    n2_read_uncovered_field,
+    N2,
+    "init references state variable 'm' before it is assigned",
+    5,
+    44
+);
 
 read_rejection_cell!(
     r1_root_field_read_before_sibling,
