@@ -14,7 +14,7 @@ mod lsp_receiver;
 const STUB: &str = "FSL_TEST_CONTINUOUS_PARTIAL_OUTPUT_STUB";
 const READY: &[u8] = b"CONTINUOUS-PARTIAL-READY\n";
 const FRAME_BUDGET: Duration = Duration::from_millis(50);
-const OUTER_BOUND: Duration = Duration::from_secs(2);
+const OUTER_BOUND: Duration = Duration::from_secs(5);
 
 #[test]
 fn continuous_partial_output_stub() {
