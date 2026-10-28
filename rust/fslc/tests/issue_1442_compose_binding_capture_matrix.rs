@@ -5,6 +5,8 @@
 //! Fresh controls must violate Capture at step1 in both engines. Only statement
 //! forall/Collection may instead report the exact known BMC unsupported error;
 //! check must still succeed and explicit must still violate Capture at step1.
+//! Same-name Const factors instead require located const-shadow refusals;
+//! State/Member factors retain the capture oracle and all fresh controls remain.
 
 #[path = "support/compose_aggregate_pattern.rs"]
 mod aggregate;
@@ -59,6 +61,12 @@ impl Cell {
     }
     fn rejection(&self) -> bool {
         matches!(self,Self::Added(c) if c.rejection())
+    }
+    fn constant_shadow_location(&self) -> Option<(u64, u64)> {
+        match self {
+            Self::Legacy(c) => c.constant_shadow_location(),
+            Self::Added(_) => None,
+        }
     }
     fn invariant(&self) -> &str {
         match self {
@@ -270,6 +278,40 @@ fn valid_rejection(observation: &(Value, i32), cell: &extra::Cell) -> bool {
         && (j["message"] == base || j["message"] == at)
 }
 
+fn assert_constant_shadow(
+    direct: &Observation,
+    composed: &[Observation],
+    (line, column): (u64, u64),
+    id: &str,
+) {
+    let (value, exit) = direct;
+    assert_eq!(*exit, 2, "{id}: {value}");
+    assert_eq!(value["result"], "error", "{id}: {value}");
+    assert_eq!(value["kind"], "semantics", "{id}: {value}");
+    assert_eq!(
+        value["loc"],
+        json!({"line":line,"column":column}),
+        "{id}: {value}"
+    );
+    let message = value["message"].as_str().expect("shadow message");
+    assert!(
+        message.contains("local binding 'x' shadows a constant"),
+        "{id}: {value}"
+    );
+    let mut expected = direct.0.clone();
+    let inner = message
+        .strip_suffix(&format!(" at {line}:{column}"))
+        .expect("located source message");
+    expected["message"] = json!(format!(
+        "component \"b.fsl\" failed to lower ({inner} at b.fsl:{line}:{column}) at s.fsl:3:3"
+    ));
+    expected["loc"] = json!({"line":3,"column":3});
+    for (value, exit) in composed {
+        assert_eq!(*exit, 2, "{id}: {value}");
+        assert_eq!(*value, expected, "{id}: full component provenance envelope");
+    }
+}
+
 fn forbidden_names(value: &Value) -> BTreeSet<String> {
     value
         .to_string()
@@ -383,6 +425,7 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     // Disjoint counts: defect-red / full green / invalid / BMC unsupported.
     let mut families: BTreeMap<String, [usize; 6]> = BTreeMap::new();
     let mut owner_refused = Vec::new();
+    let mut constant_refused = Vec::new();
     let mut refusal_failures = [0; 3];
     let mut bad_controls = 0;
     let mut unsupported_bmc = Vec::new();
@@ -410,6 +453,23 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     {
         let (same, explain, same_source) = same_result;
         let (fresh, _, fresh_source) = fresh_result;
+        if let Some(location) = cell.constant_shadow_location() {
+            assert_constant_shadow(
+                same_source.as_ref().expect("component source"),
+                &same,
+                location,
+                &cell.id(),
+            );
+            assert!(
+                accepted(&fresh, &cell),
+                "{}: fresh control {fresh:?}",
+                cell.id()
+            );
+            assert_eq!(fresh_source.as_ref().expect("fresh component").1, 0);
+            constant_refused.push(cell.id());
+            reports.push(json!({"id":cell.id(),"family":cell.family(),"constant_refused":true,"same":same,"fresh":fresh,"source_checks":[same_source,fresh_source],"explain":explain}));
+            continue;
+        }
         // Classification comes from actual standalone checks, even when a
         // faulty compose accepts. No list of root names or messages decides it.
         if fresh_source.as_ref().is_some_and(|(_, code)| *code == 2) {
@@ -519,7 +579,7 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     let elapsed = started.elapsed().as_secs_f64();
     let red: usize = families.values().map(|counts| counts[0]).sum();
     let green: usize = families.values().map(|counts| counts[1]).sum();
-    let report = json!({"cells": reports, "families": families, "red": red, "green": green, "invalid": bad_controls, "bad_controls": bad_controls, "unsupported_bmc": unsupported_bmc,"unsupported":unsupported, "owner_refused":owner_refused,"refusal_failures":refusal_failures, "elapsed_s": elapsed});
+    let report = json!({"cells": reports, "families": families, "red": red, "green": green, "invalid": bad_controls, "bad_controls": bad_controls, "unsupported_bmc": unsupported_bmc,"unsupported":unsupported, "owner_refused":owner_refused,"constant_refused":constant_refused,"refusal_failures":refusal_failures, "elapsed_s": elapsed});
     std::fs::write(
         report_dir.join("report.json"),
         serde_json::to_vec(&report).expect("serialize complete observations"),
@@ -541,6 +601,7 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
         "standalone refusal inventory changed"
     );
     owner_refusal::assert_preserved(refusal_failures);
+    assert_eq!(constant_refused.len(), 63, "const-shadow factor inventory");
     assert_eq!(
         bad_controls, 0,
         "invalid fresh controls; see complete report"
@@ -657,6 +718,7 @@ struct SourceCheckCase {
     owner: aggregate::Owner,
     aggregate_accepts: Option<bool>,
     owner_refusal_candidate: bool,
+    constant_shadow_location: Option<(u64, u64)>,
 }
 
 #[test]
@@ -671,6 +733,9 @@ fn aggregate_pattern_and_owner_source_checks() {
                 owner: cell.source_owner(),
                 aggregate_accepts: None,
                 owner_refusal_candidate: !cell.rejection(),
+                constant_shadow_location: (!fresh)
+                    .then(|| cell.constant_shadow_location())
+                    .flatten(),
             });
         }
     }
@@ -681,6 +746,7 @@ fn aggregate_pattern_and_owner_source_checks() {
             bundle: cell.render(),
             aggregate_accepts: Some(cell.accepts()),
             owner_refusal_candidate: cell.accepts(),
+            constant_shadow_location: None,
         });
     }
     assert_eq!(cases.len(), 5960);
@@ -691,6 +757,7 @@ fn aggregate_pattern_and_owner_source_checks() {
             bundle: cell.bundle,
             aggregate_accepts: None,
             owner_refusal_candidate: false,
+            constant_shadow_location: None,
         });
     }
     assert_eq!(cases.len(), 7896);
@@ -706,6 +773,7 @@ fn aggregate_pattern_and_owner_source_checks() {
     let mut false_accepts = 0;
     let mut false_refusals = 0;
     let mut diagnostic_failures = 0;
+    let mut constant_refused = 0;
     let mut namespace_counts: BTreeMap<String, [usize; 4]> = BTreeMap::new();
     let mut reports = Vec::new();
     let mut table = "case\towner\tstandalone\ttype-identities-or-reason\n".to_owned();
@@ -744,7 +812,16 @@ fn aggregate_pattern_and_owner_source_checks() {
             }
             Ok(holder) => {
                 let direct = direct.expect("standalone owner observation");
-                if direct.1 == 2 {
+                if let Some(location) = case.constant_shadow_location {
+                    assert_constant_shadow(
+                        &direct,
+                        std::slice::from_ref(&composed),
+                        location,
+                        &case.id,
+                    );
+                    constant_refused += 1;
+                }
+                if direct.1 == 2 && case.constant_shadow_location.is_none() {
                     let preserved =
                         holder.refusal_preserved(&case.bundle, case.owner, &direct, &composed);
                     diagnostic_preserved = Some(preserved);
@@ -772,7 +849,9 @@ fn aggregate_pattern_and_owner_source_checks() {
                     case.id, holder.description, holder.type_names
                 )
                 .expect("owner table");
-                let classification = if case.owner_refusal_candidate && direct.1 == 2 {
+                let classification = if case.constant_shadow_location.is_some() {
+                    "constant_refused"
+                } else if case.owner_refusal_candidate && direct.1 == 2 {
                     let check = owner_refusal::checks(
                         &direct,
                         &composed,
@@ -917,6 +996,7 @@ fn aggregate_pattern_and_owner_source_checks() {
         "standalone refusal inventory changed"
     );
     assert_eq!(false_refusals, 0, "owner accepted but compose refused");
+    assert_eq!(constant_refused, 63, "const-shadow source-check inventory");
     assert_eq!(false_accepts, 0, "owner refused but compose accepted");
     assert_eq!(
         diagnostic_failures, 0,

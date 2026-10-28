@@ -350,6 +350,21 @@ impl Cell {
         &self.columns[0]
     }
 
+    /// The same-name Const factor is now refused at its authored AST owner.
+    pub fn constant_shadow_location(&self) -> Option<(u64, u64)> {
+        match self.recipe {
+            Recipe::Prefix(_, NameKind::Const, ..) => Some((7, 3)),
+            Recipe::PrefixNested(kind, _, NameKind::Const, slot) => {
+                Some(if kind == Binding::Forall || slot == Slot::Body {
+                    (8, 1)
+                } else {
+                    (7, 3)
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Known base-verifier limitation, gated by syntax factors, never cell IDs.
     /// A future implemented BMC result uses the normal violation oracle instead.
     pub fn collection_statement(&self) -> bool {
