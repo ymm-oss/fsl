@@ -7250,19 +7250,6 @@ fn parse_domain_document_from_source(
     }
 }
 
-/// Capture the one source snapshot that a domain projection command may use.
-///
-/// The AST projected by `domain analyze` / `domain expand` and the checked
-/// Kernel validation must originate from this same string. Re-reading `path`
-/// after parsing would permit an atomic save to validate different content.
-fn read_domain_command_input(
-    path: &Path,
-) -> Result<(String, fsl_syntax::DomainSpec), SpecLoadError> {
-    let source = read_domain_command_source(path)?;
-    let domain = parse_domain_document_from_source(path, &source)?;
-    Ok((source, domain))
-}
-
 /// Capture a domain command's one root-source snapshot.
 ///
 /// All command-specific projections (the domain AST, checked Kernel/model,
@@ -7361,12 +7348,22 @@ fn run_domain_check_from_source(
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
-    match read_domain_command_input(path) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_domain_analyze_from_source(path, source),
+    )
+}
+
+fn run_domain_analyze_from_source(path: &Path, source: &str) -> (Value, i32) {
+    match parse_domain_document_from_source(path, source) {
         // #726's renderer-side fail-closed guard; #798 slice 1 made the
         // specialized projection agree with direct lowering, so the former
         // #796 post-validation against `load_kernel_model_from_source` is
         // no longer required at this boundary.
-        Ok((_source, domain)) => match fsl_tools::analyze_domain(&domain) {
+        Ok(domain) => match fsl_tools::analyze_domain(&domain) {
             Ok(result) => wrap_specialized(result),
             Err(error) => (domain_projection_error_output(path, &error), 2),
         },
@@ -7375,8 +7372,22 @@ fn run_domain_analyze(path: &Path) -> (Value, i32) {
 }
 
 fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
-    let (_input_source, domain) = match read_domain_command_input(path) {
-        Ok(input) => input,
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        output_path.is_none(),
+        |source| run_domain_expand_from_source(path, source, output_path),
+    )
+}
+
+fn run_domain_expand_from_source(
+    path: &Path,
+    source: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
+        Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let source = match fsl_tools::domain_kernel_source(&domain) {
@@ -7404,11 +7415,23 @@ fn run_domain_generate(
     target: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let domain = match parse_domain_document_from_source(path, &source) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_domain_generate_from_source(path, source, profile, target, output_path),
+    )
+}
+
+fn run_domain_generate_from_source(
+    path: &Path,
+    source: &str,
+    profile: &str,
+    target: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -7421,7 +7444,7 @@ fn run_domain_generate(
             2,
         );
     }
-    let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
+    let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, source, &domain) {
         Ok(input) => input,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -8043,13 +8066,19 @@ fn domain_replay_event_mismatch_finding(
     )
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let domain = match parse_domain_document_from_source(path, &source) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_domain_replay_from_source(path, source, logs),
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_domain_replay_from_source(path: &Path, source: &str, logs: &Path) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -8057,7 +8086,7 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
         Ok(events) => events,
         Err(error) => return (error_output("parse", &error), 2),
     };
-    let model = match load_model_from_source(path, &source) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -8425,7 +8454,6 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     }))
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_domain_testgen(
     path: &Path,
     depth: usize,
@@ -8434,16 +8462,41 @@ fn run_domain_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let domain = match parse_domain_document_from_source(path, &source) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        output_path.is_none(),
+        |source| {
+            run_domain_testgen_from_source(
+                path,
+                source,
+                depth,
+                target,
+                deadlock_mode,
+                strict,
+                output_path,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_domain_testgen_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    target: TestgenTarget<'_>,
+    deadlock_mode: &str,
+    strict: bool,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let (generic, generic_status) =
-        run_testgen_from_source(path, &source, depth, target, deadlock_mode, strict, None);
+        run_testgen_from_source(path, source, depth, target, deadlock_mode, strict, None);
     if generic_status != 0 {
         // Same reasoning as run_testgen above: `domain testgen` must not
         // re-wrap a genuine violated/reachable_failed/internal result from
@@ -8512,7 +8565,7 @@ fn run_domain_testgen(
     );
     if target.name == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
-        let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
+        let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, source, &domain) {
             Ok(input) => input,
             Err(error) => return (spec_load_error_output(&error), 2),
         };
@@ -18144,7 +18197,8 @@ spec InitTraceability {
         )
         .expect("write valid replacement");
 
-        let (source, domain) = read_domain_command_input(&path).expect("capture invalid snapshot");
+        let source = read_domain_command_source(&path).expect("capture invalid snapshot");
+        let domain = parse_domain_document_from_source(&path, &source).expect("parse snapshot");
         std::fs::rename(&replacement, &path).expect("atomically replace input after first read");
 
         assert!(
