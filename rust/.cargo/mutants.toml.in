@@ -22,7 +22,7 @@ examine_re = [
   "(replace has_missing_sequence_slots( ->| with)| in has_missing_sequence_slots$)",
   "(replace chosen_instance( ->| with)| in chosen_instance$)",
   "(replace project_action( ->| with)| in project_action$)",
-  "(replace replay_bmc_witnesses( ->| with)| in replay_bmc_witnesses$)",
+  "(replace replay_bmc_witnesses_with_bounds( ->| with)| in replay_bmc_witnesses_with_bounds$)",
   "(replace render_violation( ->| with)| in render_violation$)",
 ]
 

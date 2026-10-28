@@ -181,6 +181,26 @@ can likewise omit bounds; the symbolic guard applies to each omitted Seq bound.
 This is not a public `--exclude-property _bounds_*` route: the current CLI
 rejects implicit-bound names in `--exclude-property` as `no such property`.
 
+Verification witness replay also carries this same bound selection (#1531),
+for BMC, induction's bounded witnesses, and explicit. The Monitor replay step
+checks only the selected implicit bounds: an omitted range bound must not roll
+back an intermediate step and turn a genuine selected-property counterexample
+into an internal trace mismatch. Explicit now rejects an explored successor
+whose omitted root Seq bound exceeds capacity with the same `semantics` error
+as BMC, before enqueueing or reporting that successor. The initial frame itself
+is not screened by explicit's new guard, but its successors are, including those
+that preserve an initial overflow unchanged. The exact selected-run verdict
+changes are recorded in
+[DESIGN-explicit-engine.md](DESIGN-explicit-engine.md#selected-bounds-and-witness-replay-1531).
+
+The existing `replay_trace`, `replay_trace_from_state`, and
+`replay_bmc_witnesses` entry points remain all-bounds wrappers; their
+`*_with_bounds` variants carry a verification run's selection (`None` still
+means all bounds). Only selected verification orchestration opts into this
+policy. Scenarios, mutation verdict replay, refinement, the `fsl-bmc` binary,
+and Worker verification continue using the all-bounds entry points. Worker
+has no property-selection option; this change adds none.
+
 The induction engine also refuses to display an invariant, `trans`, or ranked
 `leadsTo` CTI if any state in its SAT model has missing sequence slots, returning
 the same `semantics` error rather than reconstructing a trace for a predicate
@@ -231,9 +251,12 @@ action, the engine and path matter (`E` below is exit 2 / `semantics` /
 | `--property _bounds_xs` (pre-pass skipped) | E (symbolic initial projection) | E (symbolic initial projection) | TB@0 |
 
 Selecting a supported user invariant instead leaves the Seq bound unchecked:
-the symbolic engines reject the initial frame via the guard, whereas explicit
-retains the concrete elements and evaluates the selected predicate. A
-reachable-only induction selection is still a usage error. Before #1519,
+the symbolic engines reject the initial frame via the guard. Explicit retains
+the concrete elements and evaluates the selected predicate at depth 0. If that
+predicate holds and an idle successor preserves the initial overflow, depth at
+least 1 now returns the same capacity `semantics` error, before closure can
+report `proved` (#1531); explicit's initial frame alone remains unguarded.
+A reachable-only induction selection is still a usage error. Before #1519,
 explicit rejected the same overflowing literal earlier with `sequence literal
 exceeds capacity` at every depth; it now reaches the concrete initial bound
 check. The default pre-pass's step-1 label versus explicit's step 0 is a separate
