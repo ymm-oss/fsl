@@ -49,9 +49,12 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Map, Value};
+
+#[path = "support/parallel.rs"]
+mod parallel;
+use parallel::failures as for_each_parallel;
 
 #[path = "support/mod.rs"]
 mod support;
@@ -802,36 +805,6 @@ fn expected_status(result: &str) -> i32 {
              expected_status. Do not let a new verdict default to 0."
         ),
     }
-}
-
-/// Runs `job` over `0..count` on a small worker pool and collects the
-/// failure strings. Two `agentic_rag` rows take ~100s and ~126s each in a
-/// debug build and dominate the sweep; running the rows concurrently keeps
-/// the manifest's CI cost near the single slowest row rather than the sum.
-fn for_each_parallel(count: usize, job: impl Fn(usize) -> Option<String> + Sync) -> Vec<String> {
-    let next = AtomicUsize::new(0);
-    let failures = Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism()
-        .map_or(4, std::num::NonZero::get)
-        .min(count.max(1));
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= count {
-                        break;
-                    }
-                    if let Some(failure) = job(index) {
-                        failures.lock().expect("failure list").push(failure);
-                    }
-                }
-            });
-        }
-    });
-    let mut failures = failures.into_inner().expect("failure list");
-    failures.sort();
-    failures
 }
 
 /// Every `refinement`-dialect file in the corpus must carry a live manifest
