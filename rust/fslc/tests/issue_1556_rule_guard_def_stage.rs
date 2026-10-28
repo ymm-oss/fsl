@@ -584,3 +584,44 @@ fn detector_never_def_empties_decision_row() {
         "positive(amount)",
     );
 }
+
+#[test]
+fn limitation_binder_named_like_generated_state_map_fails_closed() {
+    // Pin today's approved fail-closed limitation: the guard copy does not
+    // rename these binders like the main path does. This is a false rejection,
+    // never a false ok; the follow-up issue will change this expectation.
+    for binder in ["claim_amount", "claim_stage"] {
+        let label = format!("limitation_binder_named_like_generated_state_map-{binder}");
+        let outputs = run(
+            &label,
+            &round3_capture_source(
+                &format!("exists {binder}: Claim {{ same({binder}) }}"),
+                &format!("def same(x: Claim) = exists {binder}: Claim {{ {binder} == x }}"),
+            ),
+        );
+        for (mode, exit, value) in &outputs {
+            assert_eq!(
+                (
+                    *exit,
+                    value["result"].as_str(),
+                    value["kind"].as_str(),
+                    value["diagnostic_code"].as_str()
+                ),
+                (
+                    2,
+                    Some("error"),
+                    Some("semantics"),
+                    Some("rule_conflict_unsatisfiable_guard")
+                ),
+                "{binder} {mode}: {outputs:#?}"
+            );
+            assert!(
+                value["message"]
+                    .as_str()
+                    .expect("message")
+                    .ends_with("unexpanded predicate call 'same'"),
+                "{binder} {mode}: {value:#}"
+            );
+        }
+    }
+}
