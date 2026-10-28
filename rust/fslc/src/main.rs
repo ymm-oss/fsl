@@ -3306,6 +3306,21 @@ fn run_sweep(
         };
         value_ranges.insert(name, range);
     }
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    let edition = match fslc_rust::migration::admit_source(
+        &source,
+        &path.to_string_lossy(),
+        None,
+        crate::parse_options(),
+        &envelope,
+        true,
+    ) {
+        Ok(edition) => edition,
+        Err(refusal) => return refusal,
+    };
     let instance_combinations = integer_combinations(&instance_ranges);
     let value_upper_combinations = integer_combinations(&value_ranges);
     let mut results = Vec::new();
@@ -3355,7 +3370,8 @@ fn run_sweep(
                     from_state: None,
                     shared: SharedOptions::default(),
                 };
-                let (mut verification, status) = run_verify_cli(path, path, &options);
+                let (mut verification, status) =
+                    run_verify_cli_admitted(path, path, &source, &options, Some(&edition));
                 if verification.get("result").and_then(Value::as_str) == Some("error") {
                     // A spec error (parse/type/semantics/io/vacuous/…) is not a
                     // counterexample: folding it into the sweep grid let a single
@@ -11993,9 +12009,20 @@ struct MutateOptions<'a> {
     gate: MutationGate,
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_mutate_with(
     path: &Path,
+    options: MutateOptions<'_>,
+    bmc: &mut MutationBmc<'_>,
+) -> (Value, i32) {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_mutate_from_source(path, source, options, bmc)
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_mutate_from_source(
+    path: &Path,
+    source: &str,
     options: MutateOptions<'_>,
     bmc: &mut MutationBmc<'_>,
 ) -> (Value, i32) {
@@ -12014,11 +12041,8 @@ fn run_mutate_with(
     // `verified` result and the enumerated mutant set on different file
     // contents. `FsResolver` still reads compose/import/implements
     // dependencies with their own independent read semantics.
-    let mut source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return mutate_error(spec_load_error_output(&error)),
-    };
-    let (baseline, status) = run_verify_from_source(
+    let mut source = source.to_owned();
+    let (baseline, status) = run_verify_admitted_from_source(
         path,
         &source,
         depth,
@@ -12026,6 +12050,7 @@ fn run_mutate_with(
         "bmc",
         DEFAULT_EXPLICIT_BUDGET,
         1,
+        None,
     );
     if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
         // The baseline envelope is re-emitted verbatim, so its own `result`
@@ -12729,35 +12754,53 @@ fn run_counterexample_export(
     deadlock_mode: &str,
     output_path: &Path,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_counterexample_export_from_source(
+            path,
+            source,
+            depth,
+            engine,
+            deadlock_mode,
+            output_path,
+        )
+    })
+}
+
+fn run_counterexample_export_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    engine: &str,
+    deadlock_mode: &str,
+    output_path: &Path,
+) -> (Value, i32) {
     if let Some(message) = fslc_rust::reproducer::reproducer_source_preflight_error(
-        &source,
+        source,
         engine,
         crate::parse_options(),
     ) {
         return (semantic_error_output(&message), 2);
     }
-    let (_, model) = match load_kernel_model_from_source(path, &source) {
+    let (kernel, model) = match load_kernel_model_from_source(path, source) {
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     if let Some(message) = fslc_rust::reproducer::reproducer_preflight_error(&model) {
         return (semantic_error_output(&message), 2);
     }
-    let spec_digest = match approval::spec_digest(path) {
+    let spec_digest = match approval::spec_digest_kernel(&kernel) {
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let (mut verify_output, status) = run_verify(
+    let (mut verify_output, status) = run_verify_admitted_from_source(
         path,
+        source,
         depth,
         deadlock_mode,
         engine,
         DEFAULT_EXPLICIT_BUDGET,
         1,
+        None,
     );
     if status == 2 {
         return (verify_output, status);
