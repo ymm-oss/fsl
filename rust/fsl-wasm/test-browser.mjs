@@ -244,6 +244,23 @@ const retiredRefinementCase = "specs/cart_refines.fsl";
 if (!parityCases.some((testCase) => testCase.path === retiredRefinementCase)) {
   throw new Error(`${retiredRefinementCase} must remain in the parity corpus`);
 }
+// #1449: accepted current-edition warning finalization runs after the main
+// browser BMC. Keep this verify case in full-envelope parity with depth 3 / warn
+// and reject a vacuous agreement where both surfaces silently drop warnings.
+const editionWarningCase = "examples/named_predicate.fsl";
+const editionWarningParity = parityCases.find(
+  (testCase) => testCase.path === editionWarningCase && testCase.cmd === "verify",
+);
+if (!editionWarningParity) {
+  throw new Error(`${editionWarningCase} (verify) must remain in the parity corpus`);
+}
+const editionWarningNative = await nativeEnvelope(editionWarningParity);
+if (editionWarningNative.result !== "verified"
+    || !Array.isArray(editionWarningNative.warnings) || editionWarningNative.warnings.length === 0
+    || editionWarningNative.warnings.filter((warning) => warning.code === "legacy_string_metadata"
+      && warning.edition === "current" && warning.severity === "warning").length !== 1) {
+  throw new Error(`${editionWarningCase} must verify with one current-edition metadata warning`);
+}
 // #1163: the Worker's `check` now runs the shared `check_stages`, including
 // the lenient Agent analysis native `check` runs, and its `verify` rejects an
 // Agent document the way native `verify` does. The corpus's one Agent

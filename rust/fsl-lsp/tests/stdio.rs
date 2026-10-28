@@ -28,7 +28,7 @@ fn issue_1463_supported_forms_publish_and_clear_located_diagnostics() {
         texts.push(valid);
     }
     let uri = format!("file://{}", dir.join("support.fsl").display());
-    let published = published_diagnostics_each_at(&texts, None, &uri);
+    let published = published_diagnostics_each_at(&texts, None, &[], &uri);
     let (pairs, remainder) = published.as_chunks::<2>();
     assert!(remainder.is_empty());
     assert_eq!(pairs.len(), cases.len());
@@ -88,6 +88,69 @@ fn issue_1463_supported_forms_publish_and_clear_located_diagnostics() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+#[path = "../../fslc/tests/support/edition_cases.rs"]
+mod edition_cases;
+
+/// Same migration cases as both primary adapters. Analysis is explicitly on:
+/// next-edition refusal must not return a model for downstream diagnostics.
+#[test]
+fn edition_findings_are_complete_utf16_warnings_or_pre_analysis_errors() {
+    let scratch = edition_cases::Scratch::new();
+    let mut probes = Vec::new();
+    for &(code, _, body) in edition_cases::WARNING_CASES {
+        let body = edition_cases::legacy(code, body).replace(
+            "\"abstract.fsl\"",
+            &json!(scratch.0.join("abstract.fsl")).to_string(),
+        );
+        for (header, edition, severity) in [
+            ("", fsl_syntax::Edition::Fsl4, 2),
+            ("fsl 4\n", fsl_syntax::Edition::Fsl4, 2),
+            ("fsl 5\n", fsl_syntax::Edition::Fsl5, 1),
+        ] {
+            probes.push((code, header, edition, severity, format!("{header}{body}")));
+        }
+    }
+    let texts = probes
+        .iter()
+        .map(|probe| probe.4.as_str())
+        .collect::<Vec<_>>();
+    let published = published_diagnostics_each(
+        &texts,
+        Some("fsl5"),
+        &[("FSLC_LSP_ANALYSIS_DIAGNOSTICS", "1")],
+    );
+    let mut results = edition_cases::Results::default();
+    for ((code, header, edition, severity, source), diagnostics) in probes.iter().zip(published) {
+        let findings = edition_cases::findings(source, "/tmp/fsl-lsp-astral.fsl", *edition);
+        assert!(findings.iter().any(|f| f["code"] == *code));
+        let expected: Vec<_> = findings.iter().map(|finding| {
+                let edits = finding["loc"].as_object().unwrap();
+                let point = |line: &str, column: &str| {
+                    let line = usize::try_from(edits[line].as_u64().unwrap()).unwrap() - 1;
+                    let column = usize::try_from(edits[column].as_u64().unwrap()).unwrap() - 1;
+                    let text = source.lines().nth(line).unwrap();
+                    let utf16: usize = text.chars().take(column).map(char::len_utf16).sum();
+                    json!({"line":line,"character":utf16})
+                };
+                json!({"range":{"start":point("line","column"),"end":point("end_line","end_column")},"severity":severity,"code":finding["code"],"source":"fslc","message":finding["message"],"data":{"kind":"migration"}})
+            }).collect();
+        // Current may also have structural advisory diagnostics; those are
+        // preserved separately. On refusal NONE may run (whole array).
+        let migration: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d["data"]["kind"] == "migration")
+            .cloned()
+            .collect();
+        results.check(
+            &format!("stdio/{code}/{header:?}"),
+            (&migration, &diagnostics),
+            &expected,
+            migration == expected && (*severity != 1 || diagnostics == expected),
+        );
+    }
+    results.finish();
 }
 
 fn send(stdin: &mut ChildStdin, message: &Value) {
@@ -298,7 +361,7 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
 /// Open `text` in a fresh server with the unstable gate set or unset and
 /// return the diagnostics the server publishes for it.
 fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
-    published_diagnostics_each(&[text], unstable)
+    published_diagnostics_each(&[text], unstable, &[])
         .pop()
         .expect("one publish")
 }
@@ -367,13 +430,23 @@ fn shared_expression_entries_publish_both_operator_endpoints() {
 /// Open the first of `texts` in a fresh server with the unstable gate set or
 /// unset, replace the document's text with each of the others in turn, and
 /// return the diagnostics the server publishes for each.
-fn published_diagnostics_each(texts: &[&str], unstable: Option<&str>) -> Vec<Vec<Value>> {
-    published_diagnostics_each_at(texts, unstable, "file:///tmp/fsl-lsp-astral.fsl")
+fn published_diagnostics_each(
+    texts: &[&str],
+    unstable: Option<&str>,
+    environment: &[(&str, &str)],
+) -> Vec<Vec<Value>> {
+    published_diagnostics_each_at(
+        texts,
+        unstable,
+        environment,
+        "file:///tmp/fsl-lsp-astral.fsl",
+    )
 }
 
 fn published_diagnostics_each_at(
     texts: &[&str],
     unstable: Option<&str>,
+    environment: &[(&str, &str)],
     uri: &str,
 ) -> Vec<Vec<Value>> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
@@ -385,6 +458,7 @@ fn published_diagnostics_each_at(
     if let Some(features) = unstable {
         command.env("FSLC_UNSTABLE", features);
     }
+    command.envs(environment.iter().copied());
     let mut child = command.spawn().expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -468,6 +542,15 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
                 .spawn(|| {
                     let mut z3 =
                         || fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string());
+                    let admission = fslc_rust::migration::admit_source(
+                        &text,
+                        file,
+                        None,
+                        &options,
+                        &serde_json::Map::new,
+                        false,
+                    )
+                    .unwrap();
                     let mut future = std::pin::pin!(fslc_rust::check_stages::run_check_stages(
                         &text,
                         file,
@@ -476,6 +559,7 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
                         &serde_json::Map::new,
                         &options,
                         &mut z3,
+                        &admission,
                     ));
                     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
                     match future.as_mut().poll(&mut context) {
@@ -490,7 +574,7 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
             native["diagnostic_code"], "decide_not_exhaustive",
             "{native:#}"
         );
-        for diagnostics in published_diagnostics_each(&[text.as_str(); 4], Some("fsl5")) {
+        for diagnostics in published_diagnostics_each(&[text.as_str(); 4], Some("fsl5"), &[]) {
             let error = diagnostics
                 .iter()
                 .find(|diagnostic| diagnostic["severity"] == 1)

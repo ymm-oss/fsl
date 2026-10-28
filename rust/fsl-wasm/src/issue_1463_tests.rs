@@ -56,7 +56,13 @@ mod issue_1463 {
                 "{}: full verify preflight envelope", c.id
             );
             let built = build(&request, TEST_SOLVER_VERSION).expect_err("verify build must reject");
-            assert_eq!(built, native, "{}: build must preserve diagnostic", c.id);
+            // Raw build precedes the public check/verify warning finalization.
+            assert_eq!(
+                built,
+                native_check_error_unfinalized(&request, TEST_SOLVER_VERSION),
+                "{}: build must preserve diagnostic",
+                c.id
+            );
         }
         assert!(
             failures.is_empty(),

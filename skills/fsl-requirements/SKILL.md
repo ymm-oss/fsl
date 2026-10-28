@@ -99,12 +99,16 @@ skill produced.
    (`f: Amount = <const-expr>`, defaults to the domain's `lo`), `Bool`/enum
    fields require one (`retried: Bool = false`, `f: T = Member`) — this covers
    simple history flags without routing to kernel-wrapper.
-5. Use the kernel-wrapper form (`struct` / `state` / `init`, `fair action`,
-   `branches`, explicit `maps`) only for hard cases: multi-entity behavior,
+5. Use the kernel-wrapper form (`struct` / `state` / `init`, `fair action`)
+   only for hard cases: multi-entity behavior,
    conservation rules, SLA/time, history that needs kernel state (multiple
    entities, sequences, etc. — a simple flag fits in a carried field, see step 4),
    or a user-visible operation whose data-dependent outcomes need separate upper
-   correspondences.
+   correspondences. Legacy `branches` with inline `maps` remain accepted in the
+   current edition but are rejected for next. For next, split each condition into
+   an explicit fair action and put its correspondence in `implements`, preserving
+   guards, updates and fairness; see `submit_small` / `submit_large` in
+   `examples/layers/return_system.fsl`.
 6. Put positive examples in `acceptance`; put must-reject procedures in
    `forbidden`. Use `forbidden` for missing-guard risk because a safety invariant
    often stays silent when an invalid operation is accepted. Prefer

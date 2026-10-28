@@ -2191,6 +2191,29 @@ pub(super) fn run_verify_cli_from_source(
     source: &str,
     options: &CliVerifyOptions,
 ) -> CommandResult {
+    let edition = match fslc_rust::migration::admit_source(
+        source,
+        &cache_identity_path.to_string_lossy(),
+        options.shared.edition,
+        parse_options(),
+        &envelope,
+        true,
+    ) {
+        Ok(edition) => edition,
+        Err(refusal) => return refusal,
+    };
+    run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition))
+}
+
+/// Consume a captured, admitted root. Specialized outer owners pass `None`;
+/// nested verification owners finish each distinct result here with its token.
+pub(super) fn run_verify_cli_admitted(
+    path: &Path,
+    cache_identity_path: &Path,
+    source: &str,
+    options: &CliVerifyOptions,
+    finish: Option<&fslc_rust::migration::SourceEdition>,
+) -> CommandResult {
     let (mut output, status) =
         run_verify_cli_kernel_from_source(path, cache_identity_path, source, options);
     // A governance document's preservations fold into the verdict here,
@@ -2200,9 +2223,13 @@ pub(super) fn run_verify_cli_from_source(
     // `verify` (including `--lemma`), `sweep` cells, a `chain` spec layer
     // with a `depth`, and the no-cache report/tool baseline adapter -- goes
     // through this one point.
-    match fold_governance_from_source(path, source, &mut output) {
+    let result = match fold_governance_from_source(path, source, &mut output) {
         Ok(folded) => (output, folded.unwrap_or(status)),
         Err(error) => error,
+    };
+    match finish {
+        Some(edition) => edition.finish(result),
+        None => result,
     }
 }
 

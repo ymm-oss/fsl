@@ -501,10 +501,12 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         let metadata = requirement(warning);
         let kind = warning.get("kind").and_then(Value::as_str).unwrap_or("");
         let message = warning.get("message").and_then(Value::as_str).unwrap_or("");
+        let migration = fsl_syntax::CURRENT_EDITION_MIGRATION_CODES.contains(&kind)
+            || kind == "implicit_initial_value";
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
-            trace_type: "vacuity".to_owned(),
+            trace_type: if migration { "migration" } else { "vacuity" }.to_owned(),
             name: name.to_owned(),
             // `vacuity_probe_truncated` (issue #729) is not itself a
             // vacuity finding: it means the reachability probe (state
@@ -514,15 +516,21 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             // distinct claim from "疑い" (suspected hollow), so it gets its
             // own prefix -- "未確立" (not established), not "疑い"
             // (suspected).
-            summary: if kind == "vacuity_probe_truncated" {
+            summary: if migration {
+                format!("移行候補（{kind}）: {message}")
+            } else if kind == "vacuity_probe_truncated" {
                 format!("空虚性未確立（到達性 probe が判定に至らず）: {message}")
             } else {
                 format!("空虚性の疑い（{kind}）: {message}")
             },
-            next_action: warning
-                .get("hint")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            next_action: if migration {
+                None
+            } else {
+                warning
+                    .get("hint")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            },
             raw: warning.clone(),
         });
     }
@@ -1289,6 +1297,16 @@ pub fn render_ledger_with_approvals(
             "\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n",
         );
     }
+    let finding_state = |findings: &[&Finding]| {
+        if findings
+            .iter()
+            .all(|finding| finding.trace_type == "migration")
+        {
+            ("🟡 移行候補", "—")
+        } else {
+            ("🔴 要確認", "要確認")
+        }
+    };
     for requirement_id in &requirement_order {
         let entry = registry.get(requirement_id);
         let requirement_findings = by_requirement
@@ -1339,7 +1357,8 @@ pub fn render_ledger_with_approvals(
                 .into_iter()
                 .collect::<Vec<_>>()
                 .join(" / ");
-            ("🔴 要確認", types, "要確認", "____", action)
+            let (status, risk) = finding_state(requirement_findings);
+            (status, types, risk, "____", action)
         };
         if approvals.is_some() {
             let _ = writeln!(
@@ -1375,6 +1394,7 @@ pub fn render_ledger_with_approvals(
         }
     }
     if !spec_level.is_empty() {
+        let (status, risk) = finding_state(&spec_level);
         let types = spec_level
             .iter()
             .map(|finding| finding.trace_type.as_str())
@@ -1386,14 +1406,14 @@ pub fn render_ledger_with_approvals(
         if approvals.is_some() {
             let _ = writeln!(
                 output,
-                "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | — unapproved | {} | {} | 要確認 | ____ | 下記詳細 |",
+                "| （仕様全体） | 要件ID未付与の検出 | {status} | — unapproved | {} | {} | {risk} | ____ | 下記詳細 |",
                 escape(&assurance_label(assurance_token(verification), depth)),
                 escape(&types)
             );
         } else {
             let _ = writeln!(
                 output,
-                "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {} | {} | 要確認 | ____ | 下記詳細 |",
+                "| （仕様全体） | 要件ID未付与の検出 | {status} | {} | {} | {risk} | ____ | 下記詳細 |",
                 escape(&assurance_label(assurance_token(verification), depth)),
                 escape(&types)
             );

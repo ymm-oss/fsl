@@ -3433,7 +3433,38 @@ fn empty_membership_expansion_checker_rejects_an_unexpanded_domain() {
 
 #[allow(clippy::too_many_lines)]
 fn empty_membership_result_matches(command: &str, actual: &Actual) -> bool {
-    if !actual.stderr.is_empty() {
+    let expected_stderr = if matches!(command, "kernel" | "conformance" | "testplan") {
+        format!(
+            "warning: {}\n",
+            serde_json::json!({
+                "code": "deprecated_domain_enum_union",
+                "kind": "deprecated_domain_enum_union",
+                "taxonomy": "deprecated",
+                "severity": "warning",
+                "edition": "current",
+                "message": "legacy domain enum union syntax is deprecated",
+                "loc": {
+                    "file": EMPTY_MEMBERSHIP_FIXTURE,
+                    "line": 2, "column": 3, "end_line": 2, "end_column": 33
+                },
+                "canonical_replacement": "enum Status { Draft, Approved }",
+                "machine_applicable": true,
+                "edits": [{
+                    "start": 66, "end": 96,
+                    "replacement": "enum Status { Draft, Approved }"
+                }],
+                "suggestion": {
+                    "kind": "replace",
+                    "replacement": "enum Status { Draft, Approved }",
+                    "span": { "start": 66, "end": 96 },
+                    "machine_applicable": true
+                }
+            })
+        )
+    } else {
+        String::new()
+    };
+    if actual.stderr != expected_stderr {
         return false;
     }
     match command {

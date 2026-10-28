@@ -128,9 +128,11 @@ the relevant role skill directs it.
   runtime violation nor an argument outside the `entity` / `number` verify scope
   counts) — otherwise `kind: "forbidden"`.
   Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
-  required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
-  `branches`, and explicit `maps` only for hard cases such as multi-entity
+  required). Use kernel-wrapper `struct` / `state` / `init` and explicit fair
+  actions only for hard cases such as multi-entity
   behavior, conservation rules, SLA/time, or history that needs kernel state.
+  Legacy branch-local `maps` are current-edition only; for next, split fair actions
+  by condition and put their correspondences in `implements`.
   An independent channel for catching under-constraint (missing guards) that a
   safety invariant stays silent about (a receptacle for cross-validation where a
   separate agent writes positive/negative traces from NL)
@@ -367,7 +369,11 @@ verify {
   refinement file and run `fslc refine`. Action↔action
   correspondence can also still be written as the `maps <abs_act>(...)` clause
   **on the requirement-level action** (auto-synthesized for matching names;
-  `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
+  `maps auto` covers same-name kernel-wrapper actions). This legacy clause emits
+  `inline_action_maps` through the shared current-edition check, verify,
+  and Worker JSON warning policy; prefer the explicit
+  correspondence inside `implements`. Branch-specific mappings require manual
+  conversion rather than one unconditional correspondence. Writing both a `maps`
   clause on an action and a matching inline `action ...` item for the same impl
   action name is a duplicate-correspondence error (`kind: "type"`,
   with both origin kinds and locations). An inline `action` item cannot target
@@ -464,8 +470,11 @@ verify {
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use
-  kernel `struct` / `state` / `init`, `fair action`, `branches`, and explicit
-  `maps` where needed. The display of a branches split action is
+  kernel `struct` / `state` / `init` and explicit `fair action`. Legacy `branches`
+  with inline `maps` remain accepted in current, not next. For next, split the
+  conditions into fair actions and map each inside `implements`, preserving guards,
+  effects and fairness; see `submit_small` / `submit_large` in
+  `examples/layers/return_system.fsl`. The display of a branches split action is
   `submit[a <= AUTO_LIMIT]`; diagnostics keep the internal name (`submit__b1`)
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.

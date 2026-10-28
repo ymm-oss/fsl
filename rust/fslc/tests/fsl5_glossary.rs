@@ -368,9 +368,23 @@ fn explain_names_canonical_is_the_canonical_explanation() {
     for source in SOURCES.iter().chain([&ENTITY_FORM]) {
         let (canonical, _) = fslc(&["explain", "--names", "canonical"], &source.path(), true);
         let (twin, _) = fslc(&["explain"], &source.twin_path(), source.twin_gated);
+        let mut canonical = json(&canonical);
+        let twin = json(&twin);
+        assert_eq!(canonical["edition"], "next", "{}", source.context());
+        assert_eq!(canonical["fsl_edition"], 5, "{}", source.context());
+        if source.twin_gated {
+            assert_eq!(twin["edition"], "next", "{}", source.context());
+            assert_eq!(twin["fsl_edition"], 5, "{}", source.context());
+        } else {
+            assert!(twin.get("edition").is_none(), "{}", source.context());
+            assert!(twin.get("fsl_edition").is_none(), "{}", source.context());
+            let primary = canonical.as_object_mut().expect("primary explanation");
+            primary.remove("edition");
+            primary.remove("fsl_edition");
+        }
         assert_eq!(
-            comparable(json(&canonical)),
-            comparable(json(&twin)),
+            comparable(canonical),
+            comparable(twin),
             "{}",
             source.context()
         );

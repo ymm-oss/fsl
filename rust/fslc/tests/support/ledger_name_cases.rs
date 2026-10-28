@@ -481,6 +481,41 @@ pub fn public_name(name: &str, composed: bool) -> String {
 }
 
 pub fn assert_ledger(body: &str, case: &Case, name: &str, annotated: bool) {
+    assert_ledger_expected(body, case, name, annotated, None);
+}
+
+pub fn assert_ledger_with_migration(
+    body: &str,
+    case: &Case,
+    name: &str,
+    annotated: bool,
+    file: &str,
+) {
+    let migration = case.label.starts_with("branched_").then(|| {
+        let source = case.source.replace("OWNER", case.annotation(annotated));
+        let offset = source
+            .find("maps stutter")
+            .expect("authored branch mapping");
+        let column = source[..offset].chars().count() + 1;
+        serde_json::json!({
+            "code":"inline_action_maps", "kind":"inline_action_maps", "taxonomy":"ambiguous_intent",
+            "severity":"warning", "edition":"current",
+            "message":"branch-specific maps cannot be moved to one unconditional correspondence",
+            "loc":{"file":file,"line":1,"column":column,"end_line":1,"end_column":column + 4},
+            "canonical_replacement":"write an explicit refinement correspondence",
+            "machine_applicable":false, "edits":[]
+        })
+    });
+    assert_ledger_expected(body, case, name, annotated, migration.as_ref());
+}
+
+fn assert_ledger_expected(
+    body: &str,
+    case: &Case,
+    name: &str,
+    annotated: bool,
+    migration: Option<&serde_json::Value>,
+) {
     let id = if annotated && case.label != "deadlock" {
         if case.implicit_requirement {
             "DOMAIN-INVARIANT"
@@ -490,7 +525,13 @@ pub fn assert_ledger(body: &str, case: &Case, name: &str, annotated: bool) {
     } else {
         "（仕様全体）"
     };
-    assert_attribution(body, case, name, (id != "（仕様全体）").then_some(id));
+    assert_attribution_expected(
+        body,
+        case,
+        name,
+        (id != "（仕様全体）").then_some(id),
+        migration,
+    );
     if annotated && case.label == "deadlock" {
         assert!(
             super::findings::risk_row(body, "REQ-OWNER").contains("🟢"),
@@ -500,15 +541,51 @@ pub fn assert_ledger(body: &str, case: &Case, name: &str, annotated: bool) {
 }
 
 pub fn assert_attribution(body: &str, case: &Case, name: &str, id: Option<&str>) {
+    assert_attribution_expected(body, case, name, id, None);
+}
+
+fn assert_attribution_expected(
+    body: &str,
+    case: &Case,
+    name: &str,
+    id: Option<&str>,
+    migration: Option<&serde_json::Value>,
+) {
+    if let Some(expected) = migration {
+        let raw = super::findings::raw_findings(body);
+        assert_eq!(
+            raw.as_array().unwrap().len(),
+            2,
+            "one obligation and one migration finding: {raw}"
+        );
+        assert_eq!(
+            &raw[1], expected,
+            "complete migration finding; no other findings"
+        );
+    }
     let detail = super::findings::assert_issue(body, id.unwrap_or("（仕様全体）"), &[name]);
     if case.result == "unknown_cti" {
-        super::findings::assert_uncertain(detail);
+        super::findings::assert_uncertain_with_migration(
+            detail,
+            migration.is_some() && id.is_none(),
+        );
     }
     if id.is_some() {
-        assert!(
-            !super::findings::section(body, "リスク一覧（要件ID別）").contains("| （仕様全体） |"),
-            "unexpected spec-level attribution"
-        );
+        if migration.is_some() {
+            assert!(super::findings::risk_row(body, "（仕様全体）").contains("🟡 移行候補"));
+            assert_eq!(
+                super::findings::section(body, "リスク一覧（要件ID別）")
+                    .matches("| （仕様全体） |")
+                    .count(),
+                1
+            );
+        } else {
+            assert!(
+                !super::findings::section(body, "リスク一覧（要件ID別）")
+                    .contains("| （仕様全体） |"),
+                "unexpected spec-level attribution"
+            );
+        }
     }
 }
 

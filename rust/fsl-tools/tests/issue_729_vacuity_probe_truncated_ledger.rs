@@ -86,8 +86,8 @@ fn an_ordinary_vacuous_implication_still_uses_the_suspected_prefix() {
 /// `guarantee_kind`/`status` -- never `warnings` -- so the rendered
 /// assurance-class row for the spec-level finding must be byte-identical
 /// whether the finding is an ordinary `vacuous_implication` or a
-/// `vacuity_probe_truncated` truncation. `collect_findings` maps every
-/// `warnings` entry to `trace_type: "vacuity"` regardless of `kind`, so the
+/// `vacuity_probe_truncated` truncation. Both warning kinds map to
+/// `trace_type: "vacuity"`, so the
 /// whole spec-level row -- not just the assurance cell -- is expected to
 /// match exactly.
 #[test]
@@ -109,4 +109,52 @@ fn assurance_class_is_unmoved_by_a_truncated_probe_finding() {
         "the spec-level assurance row must not depend on which vacuity `kind` produced the \
          finding: with_vacuous={with_vacuous}\n---\nwith_truncated={with_truncated}"
     );
+}
+
+#[test]
+fn non_migration_findings_keep_red_review_status_and_risk() {
+    let approvals = json!({"requirements": {}});
+    for attributed in [false, true] {
+        for mixed in [false, true] {
+            let mut verification = verification_with("vacuous_implication");
+            if mixed {
+                verification["warnings"]
+                    .as_array_mut()
+                    .expect("warnings")
+                    .push(json!({
+                        "kind": "legacy_string_metadata", "message": "migration candidate"
+                    }));
+            }
+            if attributed {
+                for warning in verification["warnings"].as_array_mut().expect("warnings") {
+                    warning["requirement"] =
+                        json!({"id": "REQ-NEG-001", "text": "Negative control"});
+                }
+            }
+            for approval in [None, Some(&approvals)] {
+                let rendered = fsl_tools::render_ledger_with_approvals(
+                    "ledger_truncated_probe.fsl",
+                    &model(),
+                    &verification,
+                    &json!({}),
+                    None,
+                    &[],
+                    approval,
+                );
+                let prefix = if attributed {
+                    "| REQ-NEG-001 |"
+                } else {
+                    "| （仕様全体） |"
+                };
+                let row = rendered
+                    .lines()
+                    .find(|line| line.starts_with(prefix))
+                    .expect("finding row");
+                assert!(row.contains("| 🔴 要確認 |"), "{row}");
+                assert!(row.contains("| 要確認 | ____ |"), "{row}");
+                assert!(row.contains("vacuity"), "{row}");
+                assert!(!row.contains("🟡 移行候補"), "{row}");
+            }
+        }
+    }
 }

@@ -296,7 +296,9 @@ domain 宣言では、有限のバリアントに `enum Name { Member, ... }` �
 2.x エディションでは引き続き受理され、宣言全体に対して安定した
 `deprecated_domain_enum_union` 警告(正準の置き換えを含む)を生成します。
 `fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next` を
-受け付けます。`next` はレガシーの union 記法を拒否します。`fslc lint` は変更を
+受け付けます。`next` はレガシーの union 記法を拒否します。他の対応済み consumer は
+source のヘッダーのエディションを使います。それらに `--edition` を追加するものではありません。
+`fslc lint` は変更を
 加えずにエディション finding を報告し、`fslc migrate --edition next` は検査済みの
 正準編集を提供します。空の enum と重複メンバーはエラーで、それぞれ宣言と重複
 メンバーの位置で報告されます。
@@ -1288,6 +1290,64 @@ lint/migrate も parse 失敗(exit 2)を維持します。これは新たな
 range 型の端点(内部の括弧付き部分式も含む)では、この不正な綴りに対して汎用の
 `FSL-PARSE` 診断を維持します。引き続き拒否され、この例外は構造的な relation の
 矢印を変更しません。
+
+現行エディションでは、`check`、`verify` と Worker の JSON に宣言の文字列
+メタデータ(`legacy_string_metadata`)、コロン量化子(`legacy_quantifier_colon`)、
+インライン action `maps` (`inline_action_maps`)の移行警告を追加します。位置、置き換え、編集、
+移行安全性は lint と共通で、verdict と終了コードは変わりません。変換を拒否する
+場合は `machine_applicable: false` を維持し、警告があることは自動移行の安全性を
+意味しません。型付き注釈、中括弧の量化子、`implements` 内の明示 action 対応を
+使ってください。lint は findings なしで exit 0、ありで 1、parse/check 失敗で 2
+のままです。
+domain の検査は量化式を拒否し、コロン量化子の警告にはしません。旧文字列メタデータと
+requirements の action 対応も、domain で受理される構文ではありません。
+
+捕捉済み root の admission は `db check`/`compat check`、`scenarios`、汎用 `testgen`、
+`kernel`、`conformance`、`testplan`、`typestate`、`explain`、単一 FSL source の
+`analyze`、trace replay、causal の6コマンドにも対応します(#1449)。モデル構築・
+solver 使用・出力の副作用より前に判定し、捕捉した同じバイト列を消費します。
+causal diff は両方の引数、observation は明示的な FSL mapping も対象です。
+各 slot は独立し、同じファイルを2つの slot に渡した場合は slot ごとに1回の警告を
+許します。ヘッダー・既存の edition オプション・read error の kind の規則を維持し、
+新しい dialect とヘッダーの組み合わせを受理するものではありません。
+単一入力の analyze は `.toml` の本文も preflight しますが、参照先 FSL root の受け入れや
+project-mode intake の完了を意味しません。envelope の `fsl_edition` と `edition` は
+主の root だけを表し、警告は各 slot のものを保持します。全 causal root を先に準備するため、
+後の引数や mapping の read error が、先の root の parse/model error より優先されます。
+
+対応済みの拡張可能な envelope では `warnings` を一度だけ仕上げます。成功時の閉じた
+schema (`kernel`、`conformance`、`testplan`) と対応済みの raw TypeScript/readable/
+graph 出力は、stdout を変えずに stderr へ `warning: <finding-json>` を出します。
+受け入れ済みの verification は governance の後に仕上げ、domain/database check、
+scenarios、汎用 testgen は外側の結果だけを仕上げます。domain check の移行警告は、
+non-definitive なエラーを含め重複しなくなりました。Worker はモデル構築・solver 使用前に
+判定し、editor の拒否ではモデル構築や解析を行わず UTF-16 範囲を維持します。
+現行の警告は verdict・assurance・終了コードを変えません。次のエディションの移行
+finding は消費前に既存の edition error/exit 2 で拒否します。従来は判定を通らなかった
+consumer が、以前受理した次エディションの入力を拒否する場合があります。
+
+測定は BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4` と build 済み実装
+`33e3fcc5606249a097814d91cb09b506add8e97d` の materialized tree を使います。
+cache 無効の `fslc check FORM` を、
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597 `.fsl` と
+inline 309出現について、両方の木で両方のバイナリを使って実行しました(3,624検査)。
+ok→error の遷移集合は空で、corpus 57形式と inline 22出現は warnings だけが変わります。
+除外する出力フィールドはありません。親 `25f68db7fe214ed2ed66034701ed1bf06b5fbe7c`
+との consumer 比較では、次エディションの4つの移行形式(enum union、metadata、
+コロン量化子、inline maps)が analyze/conformance/explain/html/kernel/ledger/mutate/
+scenarios/sweep/testgen/typestate で、enum union だけが testplan でも拒否に変わります。
+これは check が既に拒否する45 command/form 観測の破壊的な削除であり、延期中の
+raw warning、mutate 成功時の warning、sweep capture の完成ではありません。
+
+これは部分的な提供であり、すべての reader の対応を保証しません。AI intake、check
+以外の domain コマンド、document/approval intake、live な比較/refinement と log mapping、
+batch/project/chain intake、counterexample の処理順、mutate 成功時の警告、sweep の
+capture、成功時の raw HTML/ledger の stderr は #1449 の残作業です。report baseline と
+ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
+🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
+依存先を再帰的に admission せず、履歴 Git root は #1513 の範囲です。修復の投影と
+終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
+警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの

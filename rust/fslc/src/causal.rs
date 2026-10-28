@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
 use fslc_rust::literate_access::literate_access;
+use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
 use crate::cli_options::{CommandArgs, required_option_value};
@@ -13,7 +14,9 @@ use crate::log_replay::{
     untyped_replay_enum_mapping_span,
 };
 use crate::process::{block_on_native, parse_options};
-use crate::spec_loading::load_snapshot_value_object;
+use crate::spec_loading::{
+    finish_admitted, load_snapshot_value_object, run_admitted_root, run_admitted_roots,
+};
 
 #[allow(clippy::too_many_lines)]
 pub(super) fn causal_command(
@@ -43,7 +46,9 @@ pub(super) fn causal_command(
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_causal_check(&path))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_check(&path, source)
+            }))
         }
         "analyze" => {
             let mut projection = None;
@@ -77,15 +82,18 @@ pub(super) fn causal_command(
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_causal_analyze(
-                &path,
-                projection.as_deref(),
-                profile.as_deref(),
-                &format,
-                &evidence,
-                &lifecycle,
-                as_of.as_deref(),
-            ))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_analyze(
+                    &path,
+                    source,
+                    projection.as_deref(),
+                    profile.as_deref(),
+                    &format,
+                    &evidence,
+                    &lifecycle,
+                    as_of.as_deref(),
+                )
+            }))
         }
         "verify-expectations" => {
             let mut depth = 8_usize;
@@ -103,7 +111,9 @@ pub(super) fn causal_command(
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_causal_verify_expectations(&path, depth))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_verify_expectations(&path, source, depth)
+            }))
         }
         "observe-expectations" => {
             let mut from_log = None;
@@ -186,15 +196,34 @@ pub(super) fn causal_command(
                     2,
                 ));
             };
-            Ok(run_causal_observe_expectations(
-                &path,
-                &from_log,
-                &mapping,
-                &scope_path,
-                &period_start,
-                &period_end,
-                out.as_deref(),
-                lifecycle_out.as_deref(),
+            Ok(run_admitted_roots(
+                vec![
+                    (&path, read_causal_source(&path)),
+                    (
+                        &mapping,
+                        std::fs::read_to_string(&mapping)
+                            .map_err(|error| SpecLoadError::Io(error.to_string())),
+                    ),
+                ],
+                None,
+                false,
+                |sources, editions| {
+                    finish_admitted(
+                        run_causal_observe_expectations(
+                            &path,
+                            &sources[0],
+                            &from_log,
+                            &sources[1],
+                            &scope_path,
+                            &period_start,
+                            &period_end,
+                            out.as_deref(),
+                            lifecycle_out.as_deref(),
+                        ),
+                        editions,
+                        false,
+                    )
+                },
             ))
         }
         "diff" => {
@@ -225,7 +254,21 @@ pub(super) fn causal_command(
             if let Some(option) = positionals.next() {
                 return Err(unknown(&option.to_string_lossy()));
             }
-            Ok(run_causal_diff(&before, &after))
+            Ok(run_admitted_roots(
+                vec![
+                    (&before, read_causal_source(&before)),
+                    (&after, read_causal_source(&after)),
+                ],
+                None,
+                false,
+                |sources, editions| {
+                    finish_admitted(
+                        run_causal_diff(&before, &sources[0], &after, &sources[1]),
+                        editions,
+                        false,
+                    )
+                },
+            ))
         }
         "ledger" => {
             let mut plans = Vec::new();
@@ -258,13 +301,16 @@ pub(super) fn causal_command(
             if format != "json" {
                 return Err("causal ledger supports only --format json".to_owned());
             }
-            Ok(run_causal_ledger(
-                &path,
-                &plans,
-                &evidence,
-                &lifecycle,
-                as_of.as_deref(),
-            ))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_ledger(
+                    &path,
+                    source,
+                    &plans,
+                    &evidence,
+                    &lifecycle,
+                    as_of.as_deref(),
+                )
+            }))
         }
         other => Err(format!(
             "unknown causal subcommand '{other}' (expected check | analyze | verify-expectations | observe-expectations | diff | ledger; there is deliberately no 'causal verify')"
@@ -323,21 +369,25 @@ fn causal_error_output(error: &fsl_tools::CausalError, legacy_literate: bool) ->
     (output, 2)
 }
 
-fn load_causal_model(
+fn read_causal_source(path: &Path) -> Result<String, SpecLoadError> {
+    std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::Io(format!("cannot read {}: {error}", path.display())))
+}
+
+fn run_causal_root(path: &Path, run: impl FnOnce(&str) -> (Value, i32)) -> (Value, i32) {
+    run_admitted_root(path, read_causal_source(path), None, false, run)
+}
+
+fn load_causal_model_from_source(
     path: &Path,
+    source: &str,
 ) -> Result<(fsl_tools::CausalModel, Vec<fsl_tools::CausalWarning>), (Value, i32)> {
-    let source = std::fs::read_to_string(path).map_err(|error| {
-        (
-            error_output("io", &format!("cannot read {}: {error}", path.display())),
-            2,
-        )
-    })?;
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     let resolver = fsl_core::FsResolver::new(base);
     let legacy_literate = path.extension().and_then(std::ffi::OsStr::to_str) == Some("md");
-    fsl_tools::build_causal_model_with_options(&source, &resolver, crate::process::parse_options())
+    fsl_tools::build_causal_model_with_options(source, &resolver, crate::process::parse_options())
         .map_err(|error| causal_error_output(&error, legacy_literate))
 }
 
@@ -350,8 +400,8 @@ fn merge_causal_envelope(value: Value) -> (Value, i32) {
     (Value::Object(output), 0)
 }
 
-pub(super) fn run_causal_check(path: &Path) -> (Value, i32) {
-    match load_causal_model(path) {
+pub(super) fn run_causal_check(path: &Path, source: &str) -> (Value, i32) {
+    match load_causal_model_from_source(path, source) {
         Ok((model, warnings)) => {
             merge_causal_envelope(fsl_tools::causal_check_json(&model, &warnings))
         }
@@ -423,9 +473,10 @@ fn load_causal_evidence(
     Ok((artifacts, overlay))
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_causal_analyze(
     path: &Path,
+    source: &str,
     projection: Option<&str>,
     profile: Option<&str>,
     format: &str,
@@ -442,7 +493,7 @@ fn run_causal_analyze(
             2,
         );
     }
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
@@ -546,17 +597,8 @@ fn run_causal_analyze(
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            return (
-                error_output("io", &format!("cannot read {}: {error}", path.display())),
-                2,
-            );
-        }
-    };
-    let surface = match fsl_syntax::parse_causal(&source) {
+fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (Value, i32) {
+    let surface = match fsl_syntax::parse_causal(source) {
         Ok(surface) => surface,
         Err(error) => {
             return if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
@@ -566,7 +608,7 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
             };
         }
     };
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
@@ -680,8 +722,9 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_causal_observe_expectations(
     path: &Path,
+    source: &str,
     log_path: &Path,
-    mapping_path: &Path,
+    mapping_source: &str,
     scope_path: &Path,
     period_start: &str,
     period_end: &str,
@@ -689,16 +732,7 @@ fn run_causal_observe_expectations(
     lifecycle_out_path: Option<&Path>,
 ) -> (Value, i32) {
     // ── Parse causal source and compile expectations ──────────────────
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            return (
-                error_output("io", &format!("cannot read {}: {error}", path.display())),
-                2,
-            );
-        }
-    };
-    let surface = match fsl_syntax::parse_causal(&source) {
+    let surface = match fsl_syntax::parse_causal(source) {
         Ok(surface) => surface,
         Err(error) => {
             return if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
@@ -708,7 +742,7 @@ fn run_causal_observe_expectations(
             };
         }
     };
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
@@ -733,11 +767,7 @@ fn run_causal_observe_expectations(
     }
 
     // ── Parse mapping and log ────────────────────────────────────────
-    let mapping_source = match std::fs::read_to_string(mapping_path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let mapping = match fsl_syntax::parse_surface_document_with(&mapping_source, parse_options()) {
+    let mapping = match fsl_syntax::parse_surface_document_with(mapping_source, parse_options()) {
         Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
         Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
         Err(error) => return (error_output("parse", &error.to_string()), 2),
@@ -780,7 +810,7 @@ fn run_causal_observe_expectations(
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
     let log_digest = sha256_digest(&log_raw);
-    let mapping_digest = sha256_digest(&mapping_source);
+    let mapping_digest = sha256_digest(mapping_source);
 
     // ── Build mapping lookup tables ──────────────────────────────────
     let maps_auto = mapping
@@ -1458,12 +1488,13 @@ fn sha256_digest(text: &str) -> String {
 
 fn run_causal_ledger(
     path: &Path,
+    source: &str,
     plan_paths: &[PathBuf],
     evidence_paths: &[PathBuf],
     lifecycle_paths: &[PathBuf],
     as_of: Option<&str>,
 ) -> (Value, i32) {
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
@@ -1546,12 +1577,17 @@ fn run_causal_ledger(
     (Value::Object(output), 0)
 }
 
-fn run_causal_diff(before: &Path, after: &Path) -> (Value, i32) {
-    let (before_model, _) = match load_causal_model(before) {
+fn run_causal_diff(
+    before: &Path,
+    before_source: &str,
+    after: &Path,
+    after_source: &str,
+) -> (Value, i32) {
+    let (before_model, _) = match load_causal_model_from_source(before, before_source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
-    let (after_model, _) = match load_causal_model(after) {
+    let (after_model, _) = match load_causal_model_from_source(after, after_source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };

@@ -578,31 +578,11 @@ pub fn plan_migration(
     })
 }
 
-/// The rendered `edition_conflict` rejection when `source`'s edition header
-/// and the requested `--edition` differ.
-///
-/// # Errors
-///
-/// Returns the parse-error envelope (built on `envelope`) and exit status 2.
-pub fn edition_conflict(
-    source: &str,
-    requested: Option<Edition>,
-    options: &ParseOptions,
-    envelope: Map<String, Value>,
-) -> Result<(), (Value, i32)> {
-    match fsl_syntax::document_edition(source, requested, Edition::Fsl4, options) {
-        Err(error) if error.code() == fsl_syntax::EDITION_CONFLICT => Err((
-            crate::frontend_output::render_surface_parse_error(envelope, &error),
-            2,
-        )),
-        _ => Ok(()),
-    }
-}
-
 /// Apply the edition `source` is read in to a finished `check` / `verify`
 /// result: in the next edition every migration finding is an error, otherwise
-/// the deprecated domain enum union (and, with `implicit_warnings`, an
-/// omitted initial value) is a warning.
+/// deprecated domain enum unions, string metadata, colon quantifiers, and inline
+/// action maps are warnings. With `implicit_warnings`, omitted initial values
+/// also warn. The planner owns each finding's code, span, and migration safety.
 ///
 /// `requested` is the `--edition` value (`None` = `current`). The document is
 /// read in its header's edition when it has one; an unreadable header already
@@ -614,7 +594,7 @@ pub fn edition_conflict(
 /// Panics if `output` already carries a `warnings` member that is not an
 /// array.
 pub fn apply_edition(
-    (mut output, status): (Value, i32),
+    result: (Value, i32),
     source: &str,
     path: &str,
     requested: Option<Edition>,
@@ -622,35 +602,118 @@ pub fn apply_edition(
     envelope: &dyn Fn() -> Map<String, Value>,
     implicit_warnings: bool,
 ) -> (Value, i32) {
-    if let Err(conflict) = edition_conflict(source, requested, options, envelope()) {
-        return conflict;
+    match admit_source(
+        source,
+        path,
+        requested,
+        options,
+        envelope,
+        implicit_warnings,
+    ) {
+        Ok(edition) => edition.finish(result),
+        Err(refusal) => refusal,
     }
+}
+
+/// One input slot's diagnostics, classified before consumption and shared by its
+/// distinct results. Each result is moved into its finalization site once.
+pub struct SourceEdition {
+    declared: Option<Edition>,
+    next: bool,
+    additions: Vec<Value>,
+}
+
+impl SourceEdition {
+    /// Diagnostics for adapters whose closed/raw output needs separate delivery.
+    #[must_use]
+    pub fn warnings(&self) -> &[Value] {
+        &self.additions
+    }
+
+    /// Retain this slot's warnings without projecting secondary-root metadata.
+    #[must_use]
+    pub fn warnings_only(&self) -> Self {
+        Self {
+            declared: None,
+            next: false,
+            additions: self.additions.clone(),
+        }
+    }
+
+    /// Finish an admitted root's open envelope without changing its verdict.
+    ///
+    /// # Panics
+    /// Panics if an existing `warnings` member is not an array.
+    #[must_use]
+    pub fn finish(&self, (mut output, status): (Value, i32)) -> (Value, i32) {
+        if !self.additions.is_empty()
+            && let Value::Object(envelope) = &mut output
+        {
+            envelope
+                .entry("warnings")
+                .or_insert_with(|| Value::Array(Vec::new()))
+                .as_array_mut()
+                .expect("warnings is an array")
+                .extend(self.additions.iter().cloned());
+        }
+        if self.next
+            && let Value::Object(envelope) = &mut output
+        {
+            envelope.insert("edition".to_owned(), json!(Edition::Fsl5.as_str()));
+        }
+        (with_declared_edition(output, self.declared), status)
+    }
+}
+
+/// Classify and admit a caller-owned source snapshot before model/solver or I/O effects.
+/// Repair tools retain their planner projections rather than consumer refusal.
+///
+/// # Errors
+/// Returns the existing edition rejection envelope and exit 2.
+pub fn admit_source(
+    source: &str,
+    path: &str,
+    requested: Option<Edition>,
+    options: &ParseOptions,
+    envelope: &dyn Fn() -> Map<String, Value>,
+    implicit_warnings: bool,
+) -> Result<SourceEdition, (Value, i32)> {
+    let edition = fsl_syntax::document_edition(source, requested, Edition::Fsl4, options).map_err(
+        |error| {
+            (
+                crate::frontend_output::render_surface_parse_error(envelope(), &error),
+                2,
+            )
+        },
+    )?;
     let declared = fsl_syntax::edition_header(source, options)
         .ok()
         .flatten()
         .map(|header| header.edition);
-    let edition = declared.or(requested).unwrap_or_default();
     let next = edition == Edition::Fsl5;
     let Ok(plan) = plan_migration(source, path, edition, options) else {
-        if output["kind"] == "parse"
-            && let Err(original) = fsl_syntax::parse_surface_document_with(source, options)
-        {
+        if let Err(original) = fsl_syntax::parse_surface_document_with(source, options) {
             let error = original.clone().for_edition(source, edition, options);
-            if error != original
-                && let Some(object) = output.as_object_mut()
-            {
-                output = crate::frontend_output::render_surface_parse_error(
-                    std::mem::take(object),
-                    &error,
-                );
+            if error != original || error.code() == fsl_syntax::EDITION_HEADER_NOT_ACCEPTED {
+                return Err((
+                    crate::frontend_output::render_surface_parse_error(envelope(), &error),
+                    2,
+                ));
             }
         }
-        return (with_declared_edition(output, declared), status);
+        // Ordinary parse failures belong to the existing command-specific gate.
+        return Ok(SourceEdition {
+            declared,
+            next: false,
+            additions: Vec::new(),
+        });
     };
     let mut additions = plan
         .diagnostics
         .iter()
-        .filter(|finding| next || finding.code == "deprecated_domain_enum_union")
+        .filter(|finding| {
+            next || fsl_syntax::CURRENT_EDITION_MIGRATION_CODES.contains(&finding.code)
+        })
         .map(|finding| finding.json(path, edition))
         .collect::<Vec<_>>();
     if !next && implicit_warnings {
@@ -671,22 +734,13 @@ pub fn apply_edition(
         error.insert("kind".to_owned(), json!(kind));
         error.insert("edition".to_owned(), json!(edition.as_str()));
         error.insert("findings".to_owned(), Value::Array(additions));
-        return (with_declared_edition(Value::Object(error), declared), 2);
+        return Err((with_declared_edition(Value::Object(error), declared), 2));
     }
-    if !additions.is_empty()
-        && let Value::Object(envelope) = &mut output
-    {
-        envelope
-            .entry("warnings")
-            .or_insert_with(|| Value::Array(Vec::new()))
-            .as_array_mut()
-            .expect("warnings is an array")
-            .extend(additions);
-    }
-    if next && let Value::Object(envelope) = &mut output {
-        envelope.insert("edition".to_owned(), json!(edition.as_str()));
-    }
-    (with_declared_edition(output, declared), status)
+    Ok(SourceEdition {
+        declared,
+        next,
+        additions,
+    })
 }
 
 /// Record the edition a document's header declares as `fsl_edition`. A
