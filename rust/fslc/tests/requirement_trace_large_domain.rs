@@ -105,9 +105,9 @@ fn fslc_check(path: &Path) -> (Value, i32) {
 /// step and aborted past 4 GB of address space; it now stays near the
 /// traceless document's few MB, so 1 GiB is a wide margin that the listing
 /// cannot meet. `ulimit -v` is enforced on Linux only.
-/// Instrumented (sanitizer) builds must exclude this test: ASan's virtual
+/// Instrumented (sanitizer) builds must exclude this test: `ASan`'s virtual
 /// address-space reservations exceed the ceiling regardless of replay memory.
-/// See docs/design/DESIGN-ci.md for the instrumented-job exclusion requirement.
+/// See `docs/design/DESIGN-ci.md` for the instrumented-job exclusion requirement.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_trace_over_a_large_values_scope_checks_under_an_address_space_ceiling() {
