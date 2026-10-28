@@ -3168,6 +3168,21 @@ verify {
   values Amount = 0..3
 }
 </code></pre>
+<p><strong>Breaking removal (#1552):</strong> for requirements <code>rule ... only when</code> conditions,
+<code>check</code> now rejects previously accepted unsatisfiable guards that reuse an entity
+field's name as an <code>is</code> pattern inside a quantifier body or aggregate value. The
+guard copy now reads that name as the field, just as the event's lowering does,
+not as the matched payload. For example,
+<code>amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })</code>
+was accepted even though its event could never occur: the field must be both 0
+and 1. It now fails with exit 2, <code>kind: "semantics"</code>, and
+<code>rule_conflict_unsatisfiable_guard</code>. To test the payload instead, use a non-field
+pattern name: replace <code>some(x) is some(amount) and amount == 1</code> with
+<code>some(x) is some(v) and v == 1</code>. Keeping the outer condition and quantifier, this
+means the field is 0 and there is an <code>x</code> equal to 1 whose matched payload <code>v</code>
+equals 1; the rewritten example passes <code>check</code>. The pattern-name rule itself
+remains tracked in #1561; this correction only aligns the conflict check with
+the lowered event.</p>
 <ul>
 <li>The process+data profile is the primary requirements form for a single-entity
   lifecycle. <code>process E with f: T { ... }</code> creates the entity stage map and
