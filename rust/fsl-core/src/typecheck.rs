@@ -601,7 +601,7 @@ fn ensure_assignable_inner(
 
 /// Cycle entry for pattern-binding extension, and where `recursion::guard`
 /// belongs (#1164): it recurses on itself down both operands of every
-/// `Binary`, so a left-nested chain (`x + x + ... + x`, `a and a and ...`)
+/// `and`; `pattern_binding_flows` also scopes RHS bindings for `and`/`=>`. Such a chain
 /// makes its depth the chain's length. `validate_expression`'s guard does not
 /// cover it: validation calls this once per level, and the walk then descends
 /// the whole left spine without passing back through validation.
