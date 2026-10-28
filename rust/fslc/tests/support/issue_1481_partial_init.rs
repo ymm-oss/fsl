@@ -318,8 +318,8 @@ fn require_one_field(source: &str, name: &str, consumer: Consumer, root: &str) {
     }
 }
 
-// PI5 preservation: only ONE field-writing statement, so legacy ownership
-// already accepted it. Do not turn #1521's existing false refines into a golden.
+// PI5 preservation: legacy ownership already accepted this single field-writing statement.
+// Before #1521 refine reported false refines here; the GS table below now pins the refusal.
 macro_rules! one_field_cell {
     ($name:ident, $source:expr, $spec:expr, $root:expr) => {
         mod $name {
