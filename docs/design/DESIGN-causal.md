@@ -705,9 +705,12 @@ never contradict, the sections above.
   `causal_evidence_lifecycle_mismatch`.
 - **Canonical JSON rules (#1432).** The native `canonical_json` digest format
   recursively sorts object keys by Rust `str` order (UTF-8 byte order) and uses
-  compact separators. Integers remain exact, including values above 2^53;
-  floats use `serde_json`'s shortest round-trip form, and integral floats retain
-  their `.0`. Non-ASCII text remains raw UTF-8. Double quote (`"`), backslash
+  compact separators. Integers remain exact within the i64 and u64 ranges,
+  including values above 2^53. Float spelling is `serde_json`'s shortest
+  round-trip form (version 1.0.150 pinned in `rust/Cargo.lock`): integral floats
+  in plain notation retain `.0` (for example `1.0`), and `-0.0` is kept;
+  exponent notation such as `1e+30` and `1e-7` has no `.0`.
+  Non-ASCII text remains raw UTF-8. Double quote (`"`), backslash
   (`\`), and U+0000..U+001F are escaped: `\n`, `\r`, `\t`, `\b`, `\f`, otherwise
   lowercase `\u00xx`; `/` is not escaped. These pin the existing bytes, not a new
   serialization or digest version. This is not a claim of RFC 8785/JCS
