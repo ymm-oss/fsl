@@ -3306,23 +3306,50 @@ fn run_sweep(
         };
         value_ranges.insert(name, range);
     }
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let edition = match fslc_rust::migration::admit_source(
-        &source,
-        &path.to_string_lossy(),
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
         None,
-        crate::parse_options(),
-        &envelope,
-        true,
-    ) {
-        Ok(edition) => edition,
-        Err(refusal) => return refusal,
-    };
-    let instance_combinations = integer_combinations(&instance_ranges);
-    let value_upper_combinations = integer_combinations(&value_ranges);
+        false,
+        |sources, editions| {
+            run_sweep_grid_from_source(
+                path,
+                &sources[0],
+                &editions[0],
+                depth_lo,
+                depth_hi,
+                deadlock_mode,
+                engine,
+                k_ind,
+                vacuity_mode,
+                property,
+                strict_tags,
+                requirements,
+                &instance_ranges,
+                &value_ranges,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn run_sweep_grid_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    depth_lo: usize,
+    depth_hi: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    k_ind: usize,
+    vacuity_mode: &str,
+    property: Option<&str>,
+    strict_tags: bool,
+    requirements: Option<&Path>,
+    instance_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+    value_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> (Value, i32) {
+    let instance_combinations = integer_combinations(instance_ranges);
+    let value_upper_combinations = integer_combinations(value_ranges);
     let mut results = Vec::new();
     let mut minimal = None;
     let mut spec_name = None;
@@ -3371,7 +3398,7 @@ fn run_sweep(
                     shared: SharedOptions::default(),
                 };
                 let (mut verification, status) =
-                    run_verify_cli_admitted(path, path, &source, &options, Some(&edition));
+                    run_verify_cli_admitted(path, path, source, &options, Some(edition));
                 if verification.get("result").and_then(Value::as_str) == Some("error") {
                     // A spec error (parse/type/semantics/io/vacuous/…) is not a
                     // counterexample: folding it into the sweep grid let a single
@@ -13869,7 +13896,7 @@ fn run_ledger_report_admitted_from_source(
     // baseline `mutate` already shares through `mutate_exit_status`:
     // `prepared.verification` carries the identical `result` vocabulary
     // (`verified`/`proved`/`violated`/`unknown_cti`/`unknown_budget`/`error`)
-    // because both call the same `run_verify`. Reusing the mapping here
+    // because both use `run_verify_admitted_from_source`. Reusing the mapping here
     // instead of writing a second one is the fix issue #592 asked for.
     (
         result,
