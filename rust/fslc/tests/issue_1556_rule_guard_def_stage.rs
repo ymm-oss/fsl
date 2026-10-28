@@ -228,11 +228,36 @@ fn control_inline_unsatisfiable() {
 
 #[test]
 fn detector_def_unsatisfiable_is_a_real_conflict() {
-    assert_conflict(
+    let outputs = run(
         "detector_def_unsatisfiable_is_a_real_conflict",
-        "too_large(amount)",
-        "def too_large(x: Amount) = x > 2",
+        &source("too_large(amount)", "def too_large(x: Amount) = x > 2"),
     );
+    for (mode, exit, value) in &outputs {
+        assert_eq!(
+            (
+                *exit,
+                value["result"].as_str(),
+                value["kind"].as_str(),
+                value["diagnostic_code"].as_str()
+            ),
+            (
+                2,
+                Some("error"),
+                Some("semantics"),
+                Some("rule_conflict_unsatisfiable_guard")
+            ),
+            "{mode}: {outputs:#?}"
+        );
+        let message = value["message"].as_str().expect("message");
+        assert!(
+            message.starts_with("event 'approve' can never occur: when Claim is Draft,"),
+            "{mode}: {value:#}"
+        );
+        assert!(
+            !message.contains("checked by the solver"),
+            "finite enumeration must decide this def-expanded guard: {mode}: {value:#}"
+        );
+    }
 }
 
 #[test]
@@ -417,5 +442,145 @@ fn detector_order_const_hidden_field_is_not_respelled() {
         "detector_order_const_hidden_field_is_not_respelled",
         "Claim.amount == 0 and positive(1)",
         "const amount = 1\n  def positive(x: Amount) = amount == 1",
+    );
+}
+
+fn round3_capture_source(condition: &str, declarations: &str) -> String {
+    source(condition, declarations).replace("instances Claim = 1", "instances Claim = 2")
+}
+
+#[test]
+fn detector_def_capture_matches_main_alpha_renaming() {
+    // Main field substitution renames the outer c before expanding same(c).
+    // The rule copy must apply the same hygiene, not leave a rejected call.
+    round2_assert_enabled(
+        "detector_def_capture_matches_main_alpha_renaming",
+        &round3_capture_source(
+            "exists c: Claim { same(c) }",
+            "def same(x: Claim) = exists c: Claim { c == x }",
+        ),
+        &["approve"],
+    );
+}
+
+#[test]
+fn control_def_capture_noncolliding_argument() {
+    round2_assert_enabled(
+        "control_def_capture_noncolliding_argument",
+        &round3_capture_source(
+            "exists d: Claim { same(d) }",
+            "def same(x: Claim) = exists c: Claim { c == x }",
+        ),
+        &["approve"],
+    );
+}
+
+#[test]
+fn control_def_capture_hand_expanded() {
+    round2_assert_enabled(
+        "control_def_capture_hand_expanded",
+        &round3_capture_source("exists c: Claim { exists k: Claim { k == c } }", ""),
+        &["approve"],
+    );
+}
+
+#[test]
+fn control_def_field_argument_still_rejects_real_capture() {
+    // The spelled field argument is claim_amount[c]. Inserting that under the
+    // def's own c would really capture the implicit action parameter. Preserve
+    // the main-path error; do not silently alpha-rename the def's binder.
+    assert_main_error(
+        "control_def_field_argument_still_rejects_real_capture",
+        "same(amount)",
+        "def same(x: Claim) = exists c: Claim { c == x }",
+        "predicate 'same' call would capture variable 'c'; rename the binder in the def at 12:44",
+    );
+}
+
+#[test]
+fn detector_stage_non_claim_implicit_entity_parameter() {
+    // entity_binder(Order) is o, not Claim's c. An all-Claim suite cannot
+    // distinguish the generated naming rule from a hardcoded c environment.
+    round2_assert_enabled(
+        "detector_stage_non_claim_implicit_entity_parameter",
+        &source("stage(o) == Draft", "").replace("Claim", "Order"),
+        &["approve"],
+    );
+}
+
+fn round3_assert_never_empties_row(label: &str, condition: &str) {
+    let text = source(
+        condition,
+        "def positive(x: Amount) = x > 0\n  concept Positive = Claim where amount > 0",
+    )
+    .replace(
+        "  rule REQ-1",
+        "  decide T \"Approval\" for Draft Claim {\n    Positive => Manager approves\n    otherwise => Manager approves\n  }\n  rule REQ-1",
+    )
+    .replace(
+        "allow Manager approves Claim only when",
+        "never Manager approves Claim when",
+    );
+    let outputs = run(label, &text);
+    for (mode, exit, value) in &outputs {
+        let expected = if *mode == "check" { "ok" } else { "verified" };
+        assert_eq!(
+            (
+                *exit,
+                value["result"].as_str(),
+                value.get("diagnostic_code")
+            ),
+            (0, Some(expected), None),
+            "{label} {mode}: {outputs:#?}"
+        );
+        if *mode == "verify" {
+            assert_eq!(value["checked_to_depth"], 2, "{label}: {value:#}");
+            assert_eq!(value["completeness"], "bounded", "{label}: {value:#}");
+            assert_eq!(
+                value["action_coverage"]["approve"], true,
+                "{label}: {value:#}"
+            );
+        }
+        // Pin the entire observed warning array, including locations. The
+        // quoted rule condition differs by source form; no field is excluded.
+        assert_eq!(
+            value["warnings"],
+            json!([
+                {
+                    "kind": "never_rule_without_forbidden",
+                    "code": "never_rule_without_forbidden",
+                    "severity": "warning",
+                    "message": "rule REQ-1 rejects events with `allow` / `never`, but no forbidden trace ends in an event it guards (approve); add a `forbidden … then rejected` that tries one",
+                    "loc": { "line": 16, "column": 3 }
+                },
+                {
+                    "kind": "decide_row_emptied",
+                    "code": "decide_row_emptied",
+                    "severity": "warning",
+                    "message": format!(
+                        "decision table 'T' for Draft Claim: row 1 `Positive => Manager approves` holds for no value the rules REQ-1 `never Manager approves Claim when {condition}` admit, so its events never take this row"
+                    ),
+                    "loc": { "line": 13, "column": 5 }
+                },
+                {
+                    "kind": "no_user_invariants",
+                    "message": "spec declares no user invariants (only implicit type bounds are checked)"
+                }
+            ]),
+            "{label} {mode}: {value:#}"
+        );
+    }
+}
+
+#[test]
+fn control_never_inline_empties_decision_row() {
+    round3_assert_never_empties_row("control_never_inline_empties_decision_row", "amount > 0");
+}
+
+#[test]
+fn detector_never_def_empties_decision_row() {
+    round3_assert_never_empties_row(
+        "detector_never_def_empties_decision_row",
+        "positive(amount)",
     );
 }
