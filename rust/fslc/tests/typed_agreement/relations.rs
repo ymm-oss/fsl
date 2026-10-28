@@ -961,8 +961,13 @@ fn r7_negative_control_detects_a_mis_lowered_bound() {
 // pad the count.
 // ---------------------------------------------------------------------
 
-fn assert_builtin_mutant_is_a_kill(op: &str, mutant: &BuiltinMutant, depth: usize) {
-    let Ok(kernel) = fsl_core::lower_direct_spec(mutant.spec.clone()) else {
+fn assert_builtin_mutant_is_a_kill(
+    op: &str,
+    mutant: &BuiltinMutant,
+    base: &fsl_syntax::SurfaceSpec,
+    depth: usize,
+) {
+    let Ok(kernel) = fsl_core::lower_direct_spec(mutant.materialize(base)) else {
         return; // failing to build is itself a valid "kill" per the brief
     };
     let Ok(model) = build_model(kernel) else {
@@ -1018,7 +1023,7 @@ fn mutate_reuse_kill_controls_are_measured_non_equivalent_and_detected() {
         .iter()
         .find(|mutant| mutant.op == "type_bound_hi_plus1")
         .expect("type_bound_hi_plus1 mutant must exist for R5's single domain type");
-    assert_builtin_mutant_is_a_kill("type_bound_hi_plus1", hi_plus1, 3);
+    assert_builtin_mutant_is_a_kill("type_bound_hi_plus1", hi_plus1, &r5_spec, 3);
 
     // R6: equality_operator_flip on a requires guard whose flip newly admits
     // a previously-unreachable action. Measured basis: the fixture has
@@ -1049,7 +1054,7 @@ spec R6EqualityKill {
         .iter()
         .find(|mutant| mutant.op == "equality_operator_flip")
         .expect("equality_operator_flip mutant must exist for R6's requires guard");
-    assert_builtin_mutant_is_a_kill("equality_operator_flip", flip, 2);
+    assert_builtin_mutant_is_a_kill("equality_operator_flip", flip, &r6_spec, 2);
 
     // R4: assignment_remove on one of the disjoint assignments. Measured
     // basis: removing `b = 2` leaves `b` unchanged after the step, breaking
@@ -1061,5 +1066,5 @@ spec R6EqualityKill {
         .iter()
         .find(|mutant| mutant.op == "assignment_remove")
         .expect("assignment_remove mutant must exist for R4's disjoint assignments");
-    assert_builtin_mutant_is_a_kill("assignment_remove", removed, 3);
+    assert_builtin_mutant_is_a_kill("assignment_remove", removed, &r4_spec, 3);
 }
