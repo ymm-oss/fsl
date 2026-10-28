@@ -1719,17 +1719,20 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             if let Err(early_return) = gate(&path) {
                 return Ok(early_return);
             }
-            let result = run_document_generate(
-                &path,
-                locale,
-                strict,
-                strict_rendering,
-                glossary.as_deref(),
-                &evidence_paths,
-                &approval_paths,
-                &trust_keys,
-                output.as_deref(),
-            );
+            let result = run_admitted_root(&path, read_spec_source(&path), None, false, |source| {
+                run_document_generate(
+                    &path,
+                    source,
+                    locale,
+                    strict,
+                    strict_rendering,
+                    glossary.as_deref(),
+                    &evidence_paths,
+                    &approval_paths,
+                    &trust_keys,
+                    output.as_deref(),
+                )
+            });
             if output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
@@ -1778,7 +1781,13 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             if let Err(early_return) = gate(&path) {
                 return Ok(early_return);
             }
-            let result = run_document_claims(&path, output.as_deref());
+            let result = run_admitted_root(
+                &path,
+                read_spec_source(&path),
+                None,
+                output.is_none(),
+                |source| run_document_claims(&path, source, output.as_deref()),
+            );
             if output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
@@ -1832,12 +1841,21 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     option.display()
                 ));
             }
-            Ok(run_document_check(
+            Ok(run_admitted_root(
                 &path,
-                &artifact,
-                glossary.as_deref(),
-                &evidence_paths,
-                &approval_paths,
+                read_spec_source(&path),
+                None,
+                false,
+                |source| {
+                    run_document_check(
+                        &path,
+                        source,
+                        &artifact,
+                        glossary.as_deref(),
+                        &evidence_paths,
+                        &approval_paths,
+                    )
+                },
             ))
         }
         _ => Err(format!("unknown document subcommand '{subcommand}'")),
@@ -1871,7 +1889,9 @@ fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) 
 }
 
 fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    load_document_claims_with_label(path, &path.to_string_lossy())
+    let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
+    let claims = load_document_claims_from_source(path, &source, &path.to_string_lossy())?;
+    Ok((source, claims))
 }
 
 /// Like [`load_document_claims`], but projects under an explicit label
@@ -1881,29 +1901,29 @@ fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementCl
 /// (e.g. a relative-path difference from running `check` in another
 /// directory than `generate`) would report false drift. `check` re-projects
 /// under the label the artifact's own frontmatter recorded instead.
-fn load_document_claims_with_label(
+fn load_document_claims_from_source(
     path: &Path,
+    source: &str,
     label: &str,
-) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
+) -> Result<fsl_tools::RequirementClaimSet, Value> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     match fsl_tools::project_requirement_claims_from_source_with_options(
-        &source,
+        source,
         Some(label),
         base,
         crate::parse_options(),
     ) {
         Ok(claims) => {
-            document_trace_gate(&source, base)?;
-            Ok((source, claims))
+            document_trace_gate(source, base)?;
+            Ok(claims)
         }
         // The projector reports a surface-parse failure as a plain message, so
         // recover the span and emit the same `kind:"parse"` envelope `check`
         // emits instead of a location-free `semantics` error.
         Err(error) => Err(
-            surface_parse_failure(&source, crate::parse_options()).map_or_else(
+            surface_parse_failure(source, crate::parse_options()).map_or_else(
                 || {
-                    document_model_failure(&source, base).map_or_else(
+                    document_model_failure(source, base).map_or_else(
                         || document_projection_error_output(&error),
                         |failure| model_error_output(&failure),
                     )
@@ -1916,7 +1936,7 @@ fn load_document_claims_with_label(
 
 /// The requirement-trace gate for every `document` command and the
 /// `requirements_document` approval, which all project through
-/// [`load_document_claims_with_label`]: the document states a claim per
+/// [`load_document_claims_from_source`]: the document states a claim per
 /// acceptance / forbidden case, so a spec whose traces the gate refuses gets
 /// the gate's error (exit 2) instead of a document (#1243). The model is built
 /// the way the document commands build theirs. A requirements check the
@@ -2199,6 +2219,7 @@ fn load_approvals(
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_document_generate(
     path: &Path,
+    source: &str,
     locale: fsl_tools::Locale,
     strict: bool,
     strict_rendering: bool,
@@ -2208,8 +2229,8 @@ fn run_document_generate(
     trust_keys: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let (source, claims) = match load_document_claims(path) {
-        Ok(parts) => parts,
+    let claims = match load_document_claims_from_source(path, source, &path.to_string_lossy()) {
+        Ok(claims) => claims,
         Err(output) => return (output, 2),
     };
     if let Some(error) = document_diagnostics_error(&claims, strict) {
@@ -2250,14 +2271,12 @@ fn run_document_generate(
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source_with_options(
-        &source,
-        &resolver,
-        crate::parse_options(),
-    ) {
-        Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
+    let kernel =
+        match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+        {
+            Ok(kernel) => kernel,
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
@@ -2296,7 +2315,7 @@ fn run_document_generate(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
@@ -2378,7 +2397,7 @@ fn run_document_generate(
             &claims,
             &kernel,
             &model,
-            &source,
+            source,
             locale,
             applied_glossary.as_ref(),
             applied_evidence.as_ref(),
@@ -2479,9 +2498,9 @@ fn run_document_generate(
     (Value::Object(output), 0)
 }
 
-fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
-    let (_, claims) = match load_document_claims(path) {
-        Ok(parts) => parts,
+fn run_document_claims(path: &Path, source: &str, output_path: Option<&Path>) -> (Value, i32) {
+    let claims = match load_document_claims_from_source(path, source, &path.to_string_lossy()) {
+        Ok(claims) => claims,
         Err(output) => return (output, 2),
     };
     let content = match serde_json::to_string_pretty(&claims) {
@@ -2575,6 +2594,7 @@ fn load_approvals_for_check(
 #[allow(clippy::too_many_lines)]
 fn run_document_check(
     spec_path: &Path,
+    source: &str,
     artifact: &Path,
     glossary_path: Option<&Path>,
     evidence_paths: &[PathBuf],
@@ -2615,20 +2635,18 @@ fn run_document_check(
         .source
         .clone()
         .unwrap_or_else(|| spec_path.to_string_lossy().into_owned());
-    let (source, claims) = match load_document_claims_with_label(spec_path, &spec_label) {
-        Ok(parts) => parts,
+    let claims = match load_document_claims_from_source(spec_path, source, &spec_label) {
+        Ok(claims) => claims,
         Err(output) => return (output, 2),
     };
     let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source_with_options(
-        &source,
-        &resolver,
-        crate::parse_options(),
-    ) {
-        Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
+    let kernel =
+        match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+        {
+            Ok(kernel) => kernel,
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
@@ -2658,7 +2676,7 @@ fn run_document_check(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
