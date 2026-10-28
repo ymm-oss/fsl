@@ -43,21 +43,34 @@ For a zero-slot frame whose bound is unchecked (`len > N`), the fail-closed
 guards above from #1519, not definedness, keep the slot unobservable.
 
 The `decreases` measure of a ranked `leadsTo` is a narrow exception to the
-`partial_op` classification: ranking does not generally probe measure
-definedness. Before evaluating its initial, successor, or deadlock measure,
+`partial_op` classification: a possible reached partial measure is refused as
+a semantics error rather than a `partial_op` witness. Before evaluating its
+initial, successor, or deadlock measure,
 a rank-only, path-sensitive preflight refuses only reached reads with no
 physical slot whose fresh value would otherwise enter the rank evaluation.
 It retains the pre-#1481 error (`head() on zero-capacity sequence` for `head`,
 `cannot select from an empty finite domain` for `at`/index). Unreached reads in
 untaken conditional branches or short-circuited operands can now yield a ranking
-proof where the base reported a semantics error. Physical-slot measures retain
-their existing behavior; this does not close the capacity-zero case or add
-general measure-definedness semantics. In particular, capacity-zero
+proof where the base reported a semantics error. This cell-2 preflight runs
+**before** the general measure partial-operation probe added in #1542, and
+keeps its messages unchanged. The general probe uses property-context
+`first_partial` under the inherited rank frame's invariant/transition assumptions
+and the initial pending condition, additionally assuming `¬Q(s')` for the
+successor probe; the independent deadlock frame uses its own pending condition,
+respecting `if`, `and`, `or`, and `=>` short-circuit evaluation. It also rejects
+undefined physical-slot measures, including capacity-zero
 `xs.push(0).pop().head()` and the head of
-`if n > 0 then xs else xs.push(1)` can still read a stale or default physical
-slot and prove on both base and head; these remain #1542. The BMC rank-discharge
-fast path uses the same preflight and discharges nothing on its error; it does
-not report the ranking error itself.
+`if n > 0 then xs else xs.push(1)`, with
+`leadsTo 'L' decreases measure may be undefined: OP` (exit 2, semantics).
+This refusal applies to the rank-proof phase: if base BMC has already found a
+real `leadsTo` counterexample, a refused optional rank diagnosis keeps that
+`violated` verdict (exit 1) instead.
+No hidden, stale or default slot value becomes rank evidence. Measures with no
+partial operations skip the additional solver probes. The BMC rank-discharge
+fast path uses both checks and discharges nothing on any ranking error; it
+does not report the ranking error itself and returns to its own lasso search.
+This is not a new overflow or Map key-domain obligation; see
+[the ranking contract](DESIGN-induction.md#23-ranked-leadsto-step-case).
 
 Before testing an invariant, transition, pending reachable predicate, or
 `leadsTo` side, BMC probes the path-sensitive definedness condition. Terminal

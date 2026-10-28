@@ -1156,8 +1156,17 @@ report `partial_op` in ordinary action/property contexts. Ranked decreases
 narrowly refuses reached zero-slot reads with the base semantics error, before
 their fresh value can enter rank evaluation. Unreached conditional or
 short-circuited reads can now prove by ranking where the base reported a
-semantics error; physical-slot measures retain their existing behavior, with
-the general definedness gap still tracked by #1542 (see
+semantics error. After that narrow preflight, #1542 also probes reached partial
+operations in initial, successor, and deadlock-side measures under the ranking
+pending assumption. A possible undefined measure, including one with physical
+slots, is refused with exit 2, kind `semantics`, and
+`leadsTo 'L' decreases measure may be undefined: OP`, not used as a rank value.
+This is a rank-proof-phase refusal: if base BMC has already found a real
+`leadsTo` counterexample, a refused optional rank diagnosis preserves that
+`violated` verdict (exit 1).
+Short-circuit guards remain effective; measures without partial operations add
+no solver checks. BMC discharges nothing on a ranking error and retains its
+lasso search (see
 [Seq partial operations](../design/DESIGN-seq-partial-operations.md)).
 Other typing gaps are #1459, literal shape relatives #1467. They are not
 additional removals in #1463.

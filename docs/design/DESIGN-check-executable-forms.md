@@ -200,7 +200,8 @@ Head, `at(i)`, and index reads of empty zero-capacity Seqs are fixed by #1481
 cell 2 in ordinary action/property contexts: supported engines report
 `partial_op` when reached. Ranked decreases narrowly refuses fresh-value cases
 as described in [Seq partial operations](DESIGN-seq-partial-operations.md);
-physical-slot measure gaps, including capacity zero, remain #1542.
+the following general partial-operation measure probe (#1542) also covers
+physical-slot temporaries, including capacity zero, without changing `check`.
 \#1459 owns operand/method/relation-builtin typing gaps. Literal shape relatives
 remain #1467. Their current acceptance/verdicts are preservation
 controls, not additional restrictions or implementation claims in #1463.

@@ -462,13 +462,13 @@ reads whose fresh values would otherwise enter the rank evaluation. It retains
 the base semantics error (`head() on zero-capacity sequence` or
 `cannot select from an empty finite domain`). Unreached conditional or
 short-circuited reads can now prove by ranking where the base reported a
-semantics error. Physical-slot measures retain their existing behavior, not a
-new definedness guarantee: capacity-zero push/pop and conditional-merge
-temporaries can still read stale/default physical slots and prove on both base
-and head (#1542). This narrow refusal does not close the capacity-zero case or
-add general measure-definedness semantics; see
+semantics error. That narrow preflight precedes the general reached
+partial-operation measure probe (#1542), which also covers capacity-zero
+push/pop and conditional-merge temporaries with physical slots. A possible
+partial read in the rank-use region is refused as a semantics error rather
+than used as rank evidence; see
 [Seq partial operations](DESIGN-seq-partial-operations.md#symbolic-contract).
-The BMC ranking fast path discharges nothing on the preflight error, as for
+The BMC ranking fast path discharges nothing on either refusal, as for
 other ranking errors.
 Nonempty expression temporaries retain their live elements and normal read
 semantics, independently of declared state capacity. Concrete conformance

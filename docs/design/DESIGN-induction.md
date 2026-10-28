@@ -85,6 +85,29 @@ ranking argument only proves the response while the pending obligation remains
 inside the ranked region. Fairness is not consulted here; every enabled action
 must make progress or establish `Q`.
 
+Before evaluating each initial, successor or independent deadlock-side measure,
+ranking runs the existing zero-slot Seq preflight, then a general
+property-context partial-operation probe (#1542). The probe inherits the
+rank frame's invariant assumptions and, for the initial/successor pair, its
+transition constraint. The initial probe uses `P(s) ∧ ¬Q(s)`; the successor
+probe additionally assumes `¬Q(s')`, since a successor resolving the obligation
+does not use its measure. It does not assume `P(s')`: a pending-not-preserved
+failure still reports the successor measure. The deadlock frame uses its own pending condition
+without being constrained by the selected transition. Successors do not gain
+an extra invariant assumption. `if` branches and `and`/`or`/`=>` operands retain
+their usual short-circuit reachability and first-failure ordering.
+
+A possible reached partial operation refuses the induction rank-proof phase with exit 2, kind
+`semantics`, and `leadsTo 'L' decreases measure may be undefined: OP`
+(`head()`, `pop()`, `at()`, or `index`), before that value can enter a rank
+query, proof or failure witness. The earlier zero-slot preflight keeps its
+existing messages and precedence; see the
+[ranked decreases exception](DESIGN-seq-partial-operations.md#symbolic-contract).
+Measures without partial operations add no solver checks. Property `/` and `%`
+remain total; this probe does not add an i64-overflow or Map key-domain proof.
+If the base BMC has already found a real `leadsTo` counterexample, a refused
+optional rank diagnosis preserves that original `violated` verdict (exit 1).
+
 **With one or more `helpful action(args)` lines**, the third obligation is
 relaxed for non-matching actions, and two extra obligations are added to
 compensate (`bmc.py` `_prove_leadsto_rank_helpful_fairness`,
@@ -226,8 +249,8 @@ only the properties proved before it are discharged, and every other
 are now rejected at the shared source check boundary (#1463), before ranking;
 the earlier general finite-binder language-reference wording did not state
 this restriction. This breaking removal does not implement filtered liveness.
-A ranking error (unsupported measure, solver `unknown`, a missing-slot sequence
-rank model, or a fail-closed `where` filter injected into an unchecked model)
+A ranking error (unsupported or potentially partial measure, solver `unknown`,
+a missing-slot sequence rank model, or a fail-closed `where` filter injected into an unchecked model)
 discharges nothing and is not reported — the BMC run then produces whatever it
 produced before, including
 its own error. The same holds when the pre-pass cannot run at all (no

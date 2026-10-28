@@ -106,14 +106,18 @@ key-domain miss. The P1-c fold must keep that order.
   moved from `fsl-verifier` into `fsl-core` for this purpose. In property
   context (`invariant`, `trans`, `reachable`, `leadsTo`, `terminal`) `/` and `%`
   are total ([`DESIGN-divmod.md`](DESIGN-divmod.md)) and do not count. A
-  `decreases` measure has no general definedness check today, so it uses the
-  action-context predicate, which counts `/` and `%`. The
+  `decreases` measure's catalog candidate still conservatively uses the
+  action-context predicate, which counts `/` and `%`; the ranking evaluator
+  uses property-context definedness, where those two operations are total.
+  Before using a measure value, ranking probes reached partial operations
+  under its pending assumption in the initial, successor and independent
+  deadlock frames (#1542). A possible partial failure is a semantics error,
+  not a rank value or proof; BMC discharges nothing and retains its lasso search. The
   [ranked decreases exception](DESIGN-seq-partial-operations.md#symbolic-contract)
-  narrowly refuses only reached zero-slot reads whose fresh value would enter
-  rank evaluation; it does not implement the general `PartialDefined` row.
-  Capacity-zero measures with physical slots, including push/pop and
-  conditional-merge temporaries, can still prove using stale/default values
-  on both base and head and remain #1542.
+  retains the older zero-slot refusal as a narrow preflight **before** the
+  general probe. Physical-slot measures, including push/pop and conditional
+  temporaries at capacity zero, now receive the general partial-operation
+  check too. This does not add a measure overflow or Map key-domain obligation.
 - `NoOverflow` is syntactic: the site contains `+ - * / %`, unary `-`, `abs`
   or a `sum` aggregate -- the operations whose result the verifier checks
   against the `i64` range.
