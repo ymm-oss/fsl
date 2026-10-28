@@ -158,20 +158,17 @@ fn census() -> BTreeMap<(String, &'static str), usize> {
     let root = workspace();
     let mut found = BTreeMap::new();
     for path in product_sources() {
-        let text = read_source(&path);
+        let text = product_text(&path);
         let relative = path
             .strip_prefix(&root)
             .expect("source under workspace")
             .to_string_lossy()
             .replace('\\', "/");
-        let parses = calls_in_source(&text, PARSE) + calls_in_source(&text, PARSE_WITH_OPTIONS);
+        let parses = calls(&text, PARSE) + calls(&text, PARSE_WITH_OPTIONS);
         if parses > 0 {
             found.insert((relative.clone(), PARSE), parses);
         }
-        let unchecked = UNCHECKED
-            .iter()
-            .map(|name| calls_in_source(&text, name))
-            .sum();
+        let unchecked = UNCHECKED.iter().map(|name| calls(&text, name)).sum();
         if unchecked > 0 {
             found.insert((relative, "unchecked"), unchecked);
         }

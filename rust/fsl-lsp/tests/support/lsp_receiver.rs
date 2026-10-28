@@ -41,9 +41,6 @@ impl LspReceiver {
 
     pub fn recv(&mut self, deadline: Instant) -> Result<Value, String> {
         loop {
-            if Instant::now() >= deadline {
-                return Err(self.failure("LSP receive deadline expired"));
-            }
             if let Some(header_end) = self.buffered.windows(4).position(|s| s == b"\r\n\r\n") {
                 let header = std::str::from_utf8(&self.buffered[..header_end])
                     .map_err(|error| error.to_string())?;
@@ -62,6 +59,9 @@ impl LspReceiver {
                     self.buffered.drain(..frame_end);
                     return Ok(value);
                 }
+            }
+            if Instant::now() >= deadline {
+                return Err(self.failure("LSP receive deadline expired"));
             }
             match self
                 .chunks
@@ -84,5 +84,24 @@ impl LspReceiver {
             "{reason}; partial output: {}",
             String::from_utf8_lossy(&self.buffered)
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_buffered_frame_is_returned_after_the_deadline() {
+        let (_send, chunks) = mpsc::channel();
+        let mut receiver = LspReceiver {
+            chunks,
+            buffered: b"Content-Length: 2\r\n\r\n{}".to_vec(),
+        };
+        let deadline = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .expect("past deadline");
+        assert_eq!(receiver.recv(deadline).unwrap(), serde_json::json!({}));
+        assert!(receiver.buffered.is_empty(), "returned frame is consumed");
     }
 }
