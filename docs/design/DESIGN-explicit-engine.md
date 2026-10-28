@@ -99,9 +99,16 @@ Key points:
   non-indexed `forall k: K { ready = true }`) is unaffected.
 
 Refinement's `concrete_initial_states` free-root path does not call
-`Monitor::new`. #1518 adds ownership and forall read-order validation before
-that enumeration, but empty-domain coverage on this path remains a soundness
-limitation tracked in #1521; the Monitor-construction guarantee does not cover it.
+`Monitor::new`. It shares the ownership, forall read-order, and assigned-root
+read-before-assignment gate, then checks completeness specifically for refinement
+(#1521), for both implementation and abstraction. Every root written anywhere in
+init must be definitely assigned in full: partial fields/keys, a missing branch,
+and empty or not-provably-nonempty forall domains are refused with
+`init does not assign state variable(s): <roots>`, not a refinement verdict.
+Provably nonempty singleton filters remain accepted. Never-assigned finite scalar
+roots remain free and are enumerated; Monitor construction is unchanged.
+For these incomplete inits, bmc and induction still return verdicts using free
+values, whereas refine refuses the init and explains that distinction in its error.
 
 ## 3. Verdict and JSON contract
 

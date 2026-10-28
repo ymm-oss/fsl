@@ -2073,7 +2073,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
     Ok(projected)
 }
 
-/// Enumerate initial states for refinement, subject to the legacy limits below.
+/// Enumerate initial states for refinement, requiring complete assignment of written roots.
 ///
 /// A model whose init assigns every state variable on every path returns
 /// exactly the single state [`Monitor::new`] would build — no behavior
@@ -2086,17 +2086,16 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
 /// Init ownership and forall read-order checks also apply to free-root enumeration.
-/// Legacy-accepted partial assignments still use defaults with free roots (#1521).
-/// The shared gate rejects reads of later-assigned roots, not never-assigned roots.
-/// This is not a complete relational-init enumeration for those shapes; the
-/// stronger admission gate for new per-field shapes does not repair them.
+/// Assigned-root read order and completeness are checked before enumeration (#1521).
 ///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when a free variable's type is not a finite
 /// scalar domain, or a combination cannot be evaluated concretely.
+/// Incomplete assigned roots and invalid init reads/writes also return errors.
 fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
     check_init_write_ownership(model)?;
+    explicit::check_refinement_init(model)?;
     let free = explicit::unassigned_init_state_vars(model);
     if free.is_empty() {
         return Ok(vec![Monitor::new(model.clone())?.state]);
