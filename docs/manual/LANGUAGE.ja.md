@@ -3280,7 +3280,7 @@ lowering 後のイベントに揃えるものです。
   非修飾の `stage(c)` はエラーです。
   `claims.Claim.stage(c)`(任意深さの `SymbolPath`)で 1 つを選択してください。
   存在しない process、非エンティティの引数、未知の stage メンバー、未解決の修飾子
-  は、ソース位置をメッセージ内に含む `kind: "semantics"` のエラーとして報告され、
+  は、関連するソース位置をメッセージ内に含む `kind: "semantics"` のエラーとして報告され、
   診断コードは付きません。
 
 **破壊的削除 (#1569):** process フィールド `amount` を持つ legacy requirements

@@ -3455,7 +3455,7 @@ the lowered event.
   when several processes correspond to `Claim`; use
   `claims.Claim.stage(c)` (arbitrary-depth `SymbolPath`) to select one. A
   missing process, non-entity argument, unknown stage member, or unresolved
-  qualifier is reported as `kind: "semantics"`, with the source location in the
+  qualifier is reported as `kind: "semantics"`, with a source position in the
   message and no diagnostic code.
 
 **Breaking removal (#1569):** in legacy requirements with a process field
