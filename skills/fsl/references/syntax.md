@@ -597,16 +597,22 @@ prompt/model sampling distributions in the kernel. No field on `ai_component`,
 `"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
 convention ([layers](layers.md#declaration-tags-common-to-all-layers)), every field here is a bare identifier or number.
 
-Declare at least one tool (`tool` or `tools`) in a standalone kernel-lowered `ai_component`. A tool-less
+Declare at least one tool (`tool` or `tools`) in every standalone or project-embedded `ai_component`. A tool-less
 component, including one with only `authority { }`, is a breaking removal
 (#1546): `check`, `ai check`, BMC, induction, scenarios, testgen and Worker checking reject it with
 exit 2 / kind type, exact `ai_component '<Name>' declares no tools` and component
 declaration loc. One declared tool with empty authority remains valid; the error
 names the authored component, not the generated `Tool` enum.
 Existing hard-rule/unknown-authority errors retain priority and their historical
-per-command envelopes. The no-tools rule is kernel-lowering-only: `ai compat`,
-`ai replay` and `ai_project` paths remain unchanged from base, including their
-tool-less acceptance gap tracked by #1545.
+per-command envelopes. #1545 extends no-tools rejection to `ai compat`,
+`ai replay`, project `ai check`, and native/Worker project checking: a breaking
+removal of tool-less components, including empty authority blocks. Standalone
+#1546 envelopes are unchanged. Native `check` and shared Worker stages now also
+reject undeclared authority tools and unknown hard rules in every project
+component, matching project `ai check` (semantics / exit 2). Generic checking no
+longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
+`error_envelope_ai_project_invalid_rule.fsl`. Project semantic positions remain
+block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
 
 `check hard { rule <Name>; ... }` selects which of the 5 named rules above get
 an explicit, separately-reported invariant/finding in `fslc ai check`; an

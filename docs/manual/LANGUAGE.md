@@ -3917,8 +3917,8 @@ the `check hard { }` block below — accept a `"description text"` tag; every
 field here is a bare identifier or number, unlike the declaration-tag
 convention in §13.1.
 
-At the kernel-lowering boundary, a standalone `ai_component` must declare at
-least one tool, using `tool` or `tools`.
+Shared validation requires every standalone or project-embedded `ai_component`
+to declare at least one tool, using `tool` or `tools`.
 Omitting tools is a **breaking removal** (#1546): both `ai_component NoTools { }`
 and `ai_component NoTools { authority { } }` are rejected before kernel lowering
 with `kind: "type"`, exact message `ai_component 'NoTools' declares no tools`,
@@ -3927,9 +3927,17 @@ and induction, plus scenarios and testgen, report this authored-component diagno
 enum name; Worker checking agrees. An empty `authority { }` remains valid when
 at least one tool is declared.
 Existing bad hard-rule and unknown-authority-tool errors still take precedence,
-with their historical per-command envelopes. This change is **kernel-only**:
-`ai compat`, `ai replay` and `ai_project` paths remain as on base and may still
-accept tool-less components; their validation gap is tracked by #1545.
+with their historical per-command envelopes. #1545 extends the same no-tools
+rejection to `ai compat`, `ai replay`, project `ai check`, and native/Worker
+project checking: a **breaking removal** of tool-less components, including
+empty authority blocks, on those paths. Standalone #1546 envelopes are unchanged.
+Native `check` and the shared Worker stages also reject every project component
+with an undeclared authority tool or unknown hard rule, matching project
+`ai check` (semantics, exit 2), rather than reporting `ok`. This removes the
+former acceptance of the fixtures `error_envelope_ai_project_unknown_tool.fsl`
+and `error_envelope_ai_project_invalid_rule.fsl` under generic project checking.
+Project semantic coordinates remain component-block-relative (#1574); missing
+LSP project-component diagnostics remain tracked separately (#1575).
 
 An `ai_component` may also declare which hard rules get an explicit,
 separately-reported invariant:

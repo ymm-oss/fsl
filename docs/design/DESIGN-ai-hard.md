@@ -112,8 +112,8 @@ Every authority reference must name a declared `tool`.
 
 ### Nonempty tool boundary (#1546)
 
-At least one tool declaration is required at the standalone kernel-lowering
-boundary. A tool-less
+At least one tool declaration is required by shared component validation,
+both for standalone input and components embedded in an AI project. A tool-less
 `ai_component X { }`, or one with only `authority { }`, is a breaking removal:
 `check`, `ai check`, BMC, induction, scenarios, testgen and Worker checking reject it with kind type,
 exact message `ai_component 'X' declares no tools`, declaration loc and CLI
@@ -129,10 +129,22 @@ diagnostic rendering.
 
 Rule and authority validation precede no-tools rejection, preserving the
 existing bad-rule/unknown-tool error and its historical per-command rendering
-even when no tools are declared. `validate_ai_component` is unchanged. This
-decision is kernel-only: `ai compat`, `ai replay` and `ai_project` paths keep
-their base behavior, including tool-less acceptance. Their validation gap is
-owned by #1545, not silently fixed or claimed uniform in #1546.
+even when no tools are declared. `validate_ai_component` owns the no-tools
+rejection; lowering calls it without duplicating that rule. #1545 extends the
+boundary to `ai compat`, `ai replay`, project `ai check`, and project checking
+through native `check` and the Worker. This is a **breaking removal** of their
+tool-less acceptance, including empty authority blocks. One declared tool with
+empty authority remains valid.
+
+Native `check` and the shared Worker check stages validate every parsed project
+component before reporting success. An undeclared authority tool or unknown
+hard rule now returns the same diagnostic as project `ai check` (semantics,
+exit 2), rather than `ok`. In particular, the previously accepted fixtures
+`error_envelope_ai_project_unknown_tool.fsl` and
+`error_envelope_ai_project_invalid_rule.fsl` are breaking removals from generic
+project checking. Standalone #1546 no-tools envelopes remain unchanged.
+Project semantic positions retain their component-block coordinate frame
+(#1574); LSP project-component diagnostics remain separate work (#1575).
 
 ## Static Rules
 

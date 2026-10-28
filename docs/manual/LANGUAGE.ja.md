@@ -3739,8 +3739,8 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `check hard { }` ブロックも — `"description text"` タグを受け付けません。ここの
 すべてのフィールドは、§13.1 の宣言タグの規約とは違い、裸の識別子または数値です。
 
-カーネル lowering の境界では、単独の `ai_component` は `tool` または `tools` で
-ツールを 1 つ以上宣言する必要があります。
+共有の validation では、単独でも project 内でも、すべての `ai_component` が
+`tool` または `tools` でツールを 1 つ以上宣言する必要があります。
 ツールを省略した形の受理は**破壊的な削除**(#1546)です。
 `ai_component NoTools { }` と `ai_component NoTools { authority { } }` はどちらも
 カーネル lowering の前に `kind: "type"`、そのままの message
@@ -3749,9 +3749,17 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `Tool` enum の名前でなく、この利用者の component を名指す診断を返し、Worker の
 check も一致します。ツールが 1 つ以上あれば、空の `authority { }` は引き続き有効です。
 既存の不正な hard rule と未宣言の authority tool のエラーは引き続き優先され、
-各コマンドの従来の envelope を保ちます。この変更は**カーネル境界のみ**です。
-`ai compat`、`ai replay`、`ai_project` の経路は base と同じで、ツールの無い
-component を受理する場合があります。この検査の穴は #1545 で追跡されています。
+各コマンドの従来の envelope を保ちます。#1545 は同じ no-tools の拒否を
+`ai compat`、`ai replay`、project の `ai check`、native/Worker の project 検査にも
+適用します。空の authority block を含むツールの無い component の受理に対する
+**破壊的な削除**です。単独の component に対する #1546 の envelope は変えません。
+native の `check` と共有 Worker 検査段階は、未宣言の authority tool または未知の
+hard rule を持つ project 内のすべての component も拒否し、`ok` ではなく project の
+`ai check` と同じ診断(semantics、exit 2)を返します。generic な project 検査で従来
+受理した fixture `error_envelope_ai_project_unknown_tool.fsl` と
+`error_envelope_ai_project_invalid_rule.fsl` の受理も削除されます。
+project の意味論的な座標は引き続き component block 内が基準です(#1574)。
+LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
 
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:
