@@ -9,9 +9,15 @@
 //! `main.rs`. Those helpers now live in the modules `main.rs` declares. A
 //! `super::` path or a `crate::` path whose first segment is not one of those
 //! modules names an item (or an import) of `main.rs` again, and is rejected
-//! here. Test modules are skipped: their `super::` is the module under test.
+//! here. Direct `#[cfg(test)]` items and `#[test]` functions are skipped,
+//! including test-only modules, functions, imports and impl blocks: their
+//! dependencies are not part of the product module boundary.
 
 use std::path::Path;
+
+#[path = "support/helper_census_rule.rs"]
+mod helper_census_rule;
+use helper_census_rule::root_dependencies;
 
 /// `(module file, path)` dependencies on `main.rs` that must stay. Empty: no
 /// module needs an item that only `main.rs` can own.
@@ -27,65 +33,6 @@ fn declared_modules(main: &str) -> Vec<String> {
         .filter_map(|line| line.strip_prefix("mod ")?.strip_suffix(';'))
         .map(str::to_owned)
         .collect()
-}
-
-/// Source with every `#[cfg(test)]` module removed and line comments blanked.
-fn product_lines(source: &str) -> Vec<(usize, String)> {
-    let mut lines = Vec::new();
-    let mut in_test_module = false;
-    let mut previous_cfg_test = false;
-    for (index, line) in source.lines().enumerate() {
-        if in_test_module {
-            in_test_module = line != "}";
-            continue;
-        }
-        if previous_cfg_test && line.starts_with("mod ") && line.ends_with('{') {
-            in_test_module = true;
-            previous_cfg_test = false;
-            continue;
-        }
-        previous_cfg_test = line == "#[cfg(test)]";
-        let code = line.split("//").next().unwrap_or_default();
-        lines.push((index + 1, code.to_owned()));
-    }
-    lines
-}
-
-/// Every path in `source` that reaches an item of the crate root.
-fn root_dependencies(source: &str, modules: &[String]) -> Vec<(usize, String)> {
-    let mut found = Vec::new();
-    for (line_number, line) in product_lines(source) {
-        let line = line.replace("pub(super)", "");
-        for (offset, _) in line.match_indices("super::") {
-            let preceded_by_ident = line[..offset]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-            if !preceded_by_ident {
-                found.push((line_number, line[offset..].trim().to_owned()));
-            }
-        }
-        for (offset, _) in line.match_indices("crate::") {
-            let preceded_by_ident = line[..offset]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_');
-            if preceded_by_ident {
-                continue;
-            }
-            let rest = &line[offset + "crate::".len()..];
-            let segment = rest
-                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
-                .next()
-                .unwrap_or_default();
-            let names_a_module = modules.iter().any(|module| module == segment)
-                && rest[segment.len()..].starts_with("::");
-            if !names_a_module {
-                found.push((line_number, line[offset..].trim().to_owned()));
-            }
-        }
-    }
-    found
 }
 
 #[test]

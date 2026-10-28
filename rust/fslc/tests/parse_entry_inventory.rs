@@ -27,6 +27,10 @@ use std::path::{Path, PathBuf};
 
 use syn::visit::Visit;
 
+#[path = "support/product_source.rs"]
+mod product_source;
+use product_source::is_test_only;
+
 /// fsl-syntax entries that read source text without taking `ParseOptions`.
 ///
 /// `parse_expr` is deliberately absent: it parses one expression fragment
@@ -613,7 +617,8 @@ fn scan_source(
     source: &str,
     home: Option<usize>,
 ) -> BTreeMap<(String, String), Vec<String>> {
-    let file = syn::parse_file(source)
+    let source = product_source::product_source(source);
+    let file = syn::parse_file(&source)
         .unwrap_or_else(|error| panic!("{relative}: not parseable as Rust: {error}"));
     let mut imports = Imports::default();
     for item in &file.items {
@@ -722,21 +727,6 @@ fn owner_of(prefix: &[String], home: Option<usize>) -> Option<usize> {
         return home;
     }
     OWNERS.iter().position(|(name, _, _)| first == name)
-}
-
-fn is_test_only(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attribute| {
-        let path = attribute.path();
-        if path.is_ident("test") {
-            return true;
-        }
-        if !path.is_ident("cfg") {
-            return false;
-        }
-        attribute
-            .parse_args::<syn::Ident>()
-            .is_ok_and(|ident| ident == "test")
-    })
 }
 
 struct Scanner<'a> {

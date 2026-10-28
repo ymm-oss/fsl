@@ -43,11 +43,12 @@ sha2.workspace = true
 [dev-dependencies]
 jsonschema = { version = "0.48.0", default-features = false }
 libc = "0.2"
-# `parse_entry_inventory.rs` reads the workspace's Rust sources as syntax
-# trees, not text, so an alias, a function pointer, or a call inside a macro
-# cannot hide a parse entry from the inventory.
-proc-macro2 = { version = "1", default-features = false }
-syn = { version = "2.0.119", default-features = false, features = ["full", "parsing", "visit"] }
+# Syntax-tree users: parse_entry_inventory.rs, edition_dispatch_inventory.rs,
+# census_review_extraction_evidence.rs, and support/{product_source,
+# census_fixture_scanner,helper_census_rule}.rs. Span locations preserve source
+# lines while the shared census extractor blanks comments and test-only items.
+proc-macro2 = { version = "1", default-features = false, features = ["span-locations"] }
+syn = { version = "2.0.119", default-features = false, features = ["full", "parsing", "printing", "visit"] }
 
 [lints]
 workspace = true
