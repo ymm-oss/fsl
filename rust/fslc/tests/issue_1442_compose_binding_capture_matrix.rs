@@ -16,6 +16,8 @@ mod extra;
 mod matrix;
 #[path = "support/compose_owner_refusal.rs"]
 mod owner_refusal;
+#[path = "support/parallel.rs"]
+mod parallel;
 #[path = "support/compose_source_namespace.rs"]
 mod source_namespace;
 #[path = "support/compose_source_owner.rs"]
@@ -165,28 +167,27 @@ fn materialize(bundle: &matrix::SourceBundle) -> std::path::PathBuf {
 }
 
 fn observe(
-    bundle: &matrix::SourceBundle,
+    dir: &Path,
     cell: &Cell,
     with_explain: bool,
 ) -> (Observations, Option<Observation>, Option<Observation>) {
-    let dir = materialize(bundle);
-    let check = invoke(&dir, &["check", "s.fsl"]);
+    let check = invoke(dir, &["check", "s.fsl"]);
     if cell.rejection() {
-        return (vec![check, invoke(&dir, &["check", "b.fsl"])], None, None);
+        return (vec![check, invoke(dir, &["check", "b.fsl"])], None, None);
     }
     let direct = if let aggregate::Owner::Component(file) = cell.source_owner() {
-        Some(invoke(&dir, &["check", file]))
+        Some(invoke(dir, &["check", file]))
     } else {
         None
     };
     let explain = (with_explain && cell.explain())
-        .then(|| invoke(&dir, &["explain", "s.fsl", "--depth", "4"]));
+        .then(|| invoke(dir, &["explain", "s.fsl", "--depth", "4"]));
     (
         vec![
             check,
-            invoke(&dir, &["verify", "s.fsl", "--depth", "4", "--no-cache"]),
+            invoke(dir, &["verify", "s.fsl", "--depth", "4", "--no-cache"]),
             invoke(
-                &dir,
+                dir,
                 &[
                     "verify",
                     "s.fsl",
@@ -386,11 +387,29 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     let mut bad_controls = 0;
     let mut unsupported_bmc = Vec::new();
     let mut unsupported = Vec::new();
-    for cell in cells {
-        let same_bundle = cell.render(false);
-        let fresh_bundle = cell.render(true);
-        let (same, explain, same_source) = observe(&same_bundle, &cell, true);
-        let (fresh, _, fresh_source) = observe(&fresh_bundle, &cell, false);
+    let prepared: Vec<_> = cells
+        .iter()
+        .map(|cell| {
+            let same = cell.render(false);
+            let fresh = cell.render(true);
+            let same_dir = materialize(&same);
+            let fresh_dir = materialize(&fresh);
+            (same, fresh, same_dir, fresh_dir)
+        })
+        .collect();
+    let observations = parallel::map(cells.len(), |index| {
+        let (_, _, same_dir, fresh_dir) = &prepared[index];
+        (
+            observe(same_dir, &cells[index], true),
+            observe(fresh_dir, &cells[index], false),
+        )
+    });
+    for (cell, ((same_bundle, fresh_bundle, _, _), (same_result, fresh_result))) in cells
+        .into_iter()
+        .zip(prepared.into_iter().zip(observations))
+    {
+        let (same, explain, same_source) = same_result;
+        let (fresh, _, fresh_source) = fresh_result;
         // Classification comes from actual standalone checks, even when a
         // faulty compose accepts. No list of root names or messages decides it.
         if fresh_source.as_ref().is_some_and(|(_, code)| *code == 2) {
@@ -690,10 +709,24 @@ fn aggregate_pattern_and_owner_source_checks() {
     let mut namespace_counts: BTreeMap<String, [usize; 4]> = BTreeMap::new();
     let mut reports = Vec::new();
     let mut table = "case\towner\tstandalone\ttype-identities-or-reason\n".to_owned();
-    for case in cases {
-        let dir = materialize(&case.bundle);
-        let composed = invoke(&dir, &["check", "s.fsl"]);
-        let holder = source_owner::standalone(&case.bundle, case.owner);
+    let prepared: Vec<_> = cases
+        .into_iter()
+        .map(|case| {
+            let dir = materialize(&case.bundle);
+            let holder = source_owner::standalone(&case.bundle, case.owner);
+            (case, dir, holder)
+        })
+        .collect();
+    let observations = parallel::map(prepared.len(), |index| {
+        let (_, dir, holder) = &prepared[index];
+        let composed = invoke(dir, &["check", "s.fsl"]);
+        let direct = holder.as_ref().ok().map(|holder| {
+            std::fs::write(dir.join("owner.fsl"), &holder.source).expect("standalone owner source");
+            invoke(dir, &["check", "owner.fsl"])
+        });
+        (composed, direct)
+    });
+    for ((case, dir, holder), (composed, direct)) in prepared.into_iter().zip(observations) {
         let mut error = None;
         let mut refusal_checks = None;
         let mut diagnostic_preserved = None;
@@ -710,9 +743,7 @@ fn aggregate_pattern_and_owner_source_checks() {
                 (None, "unrepresentable".to_owned())
             }
             Ok(holder) => {
-                std::fs::write(dir.join("owner.fsl"), &holder.source)
-                    .expect("standalone owner source");
-                let direct = invoke(&dir, &["check", "owner.fsl"]);
+                let direct = direct.expect("standalone owner observation");
                 if direct.1 == 2 {
                     let preserved =
                         holder.refusal_preserved(&case.bundle, case.owner, &direct, &composed);
