@@ -17,6 +17,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[path = "support/product_source.rs"]
+mod product_source;
+
 const PARSE: &str = "requirements_trace_contract";
 /// The same parse under explicit `ParseOptions`; its calls count as [`PARSE`].
 const PARSE_WITH_OPTIONS: &str = "requirements_trace_contract_with_options";
@@ -138,18 +141,13 @@ fn product_sources() -> Vec<PathBuf> {
     files
 }
 
-/// The text before the first `#[cfg(test)]`, with comments removed line by
-/// line, so a test module or a comment naming an entry does not count.
+/// Product tokens, excluding comments and test-only items without truncating
+/// any product code that follows them.
 fn product_text(path: &Path) -> String {
     let text = std::fs::read_to_string(path)
         .expect("read source")
         .replace("\r\n", "\n");
-    let product = text.split("#[cfg(test)]").next().expect("product body");
-    product
-        .lines()
-        .map(|line| line.split("//").next().unwrap_or_default())
-        .collect::<Vec<_>>()
-        .join("\n")
+    product_source::product_source(&text)
 }
 
 /// Calls of `name`: the identifier followed by `(`, not preceded by another

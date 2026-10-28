@@ -13,6 +13,9 @@
 
 use std::path::Path;
 
+#[path = "support/product_source.rs"]
+mod product_source;
+
 /// `(module file, path)` dependencies on `main.rs` that must stay. Empty: no
 /// module needs an item that only `main.rs` can own.
 const ALLOWED: &[(&str, &str)] = &[];
@@ -29,26 +32,34 @@ fn declared_modules(main: &str) -> Vec<String> {
         .collect()
 }
 
-/// Source with every `#[cfg(test)]` module removed and line comments blanked.
+/// Product tokens with comments and test-only items blanked. Some scanner
+/// controls are statement fragments, so parse those inside a scratch function.
 fn product_lines(source: &str) -> Vec<(usize, String)> {
-    let mut lines = Vec::new();
-    let mut in_test_module = false;
-    let mut previous_cfg_test = false;
-    for (index, line) in source.lines().enumerate() {
-        if in_test_module {
-            in_test_module = line != "}";
-            continue;
-        }
-        if previous_cfg_test && line.starts_with("mod ") && line.ends_with('{') {
-            in_test_module = true;
-            previous_cfg_test = false;
-            continue;
-        }
-        previous_cfg_test = line == "#[cfg(test)]";
-        let code = line.split("//").next().unwrap_or_default();
-        lines.push((index + 1, code.to_owned()));
-    }
-    lines
+    let wrapped;
+    let (source, skip) = if syn::parse_file(source).is_ok() {
+        (source, 0)
+    } else {
+        // The pre-existing controls omit statement terminators on calls.
+        let statements = source
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with("crate::") && !line.ends_with(';') {
+                    format!("{line};")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        wrapped = format!("fn census_fixture() {{\n{statements}\n}}");
+        (wrapped.as_str(), 1)
+    };
+    product_source::product_source(source)
+        .lines()
+        .skip(skip)
+        .enumerate()
+        .map(|(index, line)| (index + 1, line.to_owned()))
+        .collect()
 }
 
 /// Every path in `source` that reaches an item of the crate root.

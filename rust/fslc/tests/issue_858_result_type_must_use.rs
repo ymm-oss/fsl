@@ -21,6 +21,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[path = "support/product_source.rs"]
+mod product_source;
+
 /// The 31 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
@@ -189,7 +192,7 @@ fn census() -> BTreeMap<String, bool> {
     let mut found = BTreeMap::new();
     for file in crate_sources() {
         let text = read_source(&file);
-        let product = text.split("#[cfg(test)]").next().expect("product body");
+        let product = product_source::product_source(&text);
         let lines: Vec<&str> = product.lines().collect();
         for (index, line) in lines.iter().enumerate() {
             let Some(rest) = line
