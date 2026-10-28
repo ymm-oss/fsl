@@ -5023,19 +5023,38 @@ fn replay_snapshot_json(
     load_snapshot_value_object(snapshot, model).map(|state| fslc_rust::state_json(&state))
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, i32) {
+    run_admitted_roots(
+        vec![
+            (path, read_spec_source(path)),
+            (mapping_path, read_unprefixed_spec_source(mapping_path)),
+        ],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_log_replay_from_sources(path, &sources[0], log_path, &sources[1]),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_log_replay_from_sources(
+    path: &Path,
+    source: &str,
+    log_path: &Path,
+    mapping_source: &str,
+) -> (Value, i32) {
     const NOTE: &str = "leadsTo properties are not checked by replay (finite logs only)";
-    let model = match load_model(path) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let mapping_source = match std::fs::read_to_string(mapping_path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
     let mapping =
-        match fsl_syntax::parse_surface_document_with(&mapping_source, crate::parse_options()) {
+        match fsl_syntax::parse_surface_document_with(mapping_source, crate::parse_options()) {
             Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
             Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
             Err(error) => return (error_output("parse", &error.to_string()), 2),
@@ -6418,7 +6437,17 @@ fn run_db_check_from_source(
 }
 
 fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
-    let system = match load_surface_document(path) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_db_observe_from_source(path, source, trace),
+    )
+}
+
+fn run_db_observe_from_source(path: &Path, source: &str, trace: &Path) -> (Value, i32) {
+    let system = match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
         Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
         Err(error) => return (spec_load_error_output(&error), 2),
