@@ -736,6 +736,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fslc/tests/issue_1415_requirements_solver.rs",
+        116,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fslc/tests/support/fifo_snapshot.rs",
         370,
         "try_wait",
