@@ -442,6 +442,18 @@ the same normalized input and never exposes expressions or AST nodes to emitters
 This bridge is retired when Public Kernel supports truthful compose provenance;
 it is not a catch-on-export-error fallback.
 
+**Native source-header contract (#1424).** Source basenames in every target's
+headers share one visible spelling: backslash, both quotes, `*`, `/`, `?`, `>`,
+and ASCII controls become lowercase `\xNN`. Other characters, including
+non-ASCII, remain unchanged. Trusted template slots are filled first; the escaped
+source name is inserted last and is never expanded again, even if it contains a
+slot name. This prevents a basename from closing a docstring/comment or switching
+PHP context. Ordinary output outside the Kotlin helper and its comment is
+unchanged.
+
+Native pytest strings escape controls (#1424): `\n`, `\r`, `\t`, otherwise
+lowercase `\xNN`; quotes/backslashes remain escaped.
+
 The output is a **self-contained pytest file** (the primary dependencies are
 `fslc.runtime` and `pytest`. In addition, only the standard library needed for
 wiring and replay may be imported — `random` (below, 3.) for the fixed-seed
@@ -542,6 +554,12 @@ the unwired behaviour of §3.6 (by default a `scenario()` wrapper throws
 `adapter not wired` from every test; with `--allow-unwired` a top-level guard
 flips `test` to `test.skip`).
 
+**Native integer precision (#1424).** Generation rejects integers outside
+±(2^53−1) before emitting an artifact, rather than writing a lossy JavaScript
+number. The existing semantic-error envelope (exit 2) names the value and its
+input-vector path, including forbidden-step params and rejection data. This
+applies with or without `--allow-unwired`.
+
 Part 3 — the random walk — is the one real design point, because TypeScript has no
 `Monitor`. The chosen approach **bakes the trace at generation time**: the Python
 Monitor runs the fixed-seed (`Random(0)`) walk and the resulting
@@ -597,20 +615,25 @@ again reusing the baked walk. The choices:
   JVM delegates to JUnit, so the generated file carries the lightest dependency. The
   imports are fixed to `kotlin.test.{Test, assertEquals, assertFalse, assertNotNull,
   assertTrue}`.
-- **Dynamic dict is the easy case.** `params`/`observe()` are `Map<String, Any?>`,
-  and Kotlin's structural `==` is already deep on `List`/`Map` and discriminates a
-  boxed `Int` from a `Double`, so `assertPartial` is a plain recursion that asserts
-  only the expected keys and leans on `assertEquals` for leaves.
+- **Dynamic dict + integral equality (#1424).** `params`/`observe()` are
+  `Map<String, Any?>`. `assertPartial` recurses by expected map keys, asserting
+  only the fields the spec mentions. Before leaf `assertEquals`, both sides are
+  normalized recursively through List/Map values: Byte/Short/Int/Long become Long.
+  List order/length and exact map keys/size inside lists remain significant;
+  Float/Double and other non-integral leaves are unchanged and remain distinct.
+  Adapters should read numeric params through `Number`, not cast them to `Int`:
+  generated params can contain Int or Long depending on magnitude.
 - **Fail-when-unwired (§3.6).** `makeAdapter(): Adapter?` returns `null` until
   wired and each `@Test` starts `val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)`.
   kotlin.test has no portable runtime skip (no `assumeTrue`), so the only way to
   "skip" would be the early `?: return` the target used before #1200, under which
   an unwired suite passed. `--allow-unwired` is therefore rejected for Kotlin
   (exit 2) instead of generating that silent green.
-- **Literals.** `_kotlin_literal` renders int as `Int`, float as `Double`, `null`,
-  `listOf`/`mapOf` (empty ones carry explicit type args), and strings with Kotlin
-  escapes — notably `$` must be escaped (string templates). The baked walk is a
-  `List<Triple<String, Map<String, Any?>, Map<String, Any?>>>`. Output defaults to
+- **Native literals (#1424).** Int-range integers remain unsuffixed; wider i64
+  values use `L`, and i64 minimum uses `Long.MIN_VALUE`. Floats render as `Double`,
+  and other literals use `null`, `listOf`/`mapOf` (empty ones carry explicit type
+  args), and Kotlin string escapes — notably `$` must be escaped (string templates).
+  The baked walk is a `List<Triple<String, Map<String, Any?>, Map<String, Any?>>>`. Output defaults to
   `<SpecName>ConformanceTest.kt`.
 
 (No `swiftc -parse`-style syntax gate in tests: kotlinc has no dependency-free
@@ -665,7 +688,9 @@ reusing the baked walk. The choices:
   every test fails. With `--allow-unwired` it calls `markTestSkipped` instead.
 - **Literals.** Strings are single-quoted (PHP single-quotes interpolate nothing;
   only `\\`/`\'` are escaped); JSON arrays render to PHP lists, JSON objects to
-  associative arrays; the baked walk is a `private const WALK`. Output defaults to
+  associative arrays. Native i64 minimum uses `PHP_INT_MIN` (#1424), avoiding a
+  decimal magnitude that PHP lexes as a float. The baked walk is a
+  `private const WALK`. Output defaults to
   `<SpecName>ConformanceTest.php` (PSR-4: class name = file name), test methods are
   `testScenario_<name>` / `testRandomWalkConformance`.
 

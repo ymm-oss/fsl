@@ -2676,7 +2676,9 @@ v1 rejects <code>leadsTo</code>, refinement documents, induction/CTI, nondetermi
   is <strong>baked at generation time</strong> — the concrete Monitor runs the fixed-seed walk and
   the <code>(action, params, expected_state)</code> trace is embedded as a static fixture, so the
   generated tests need <strong>no <code>fslc</code>/Python at runtime</strong>. The output extension defaults
-  to <code>&lt;spec&gt;.test.ts</code>.</li>
+  to <code>&lt;spec&gt;.test.ts</code>. Native generation refuses integers outside ±(2^53−1) before
+  emitting an artifact (exit 2, existing semantic-error envelope), naming the value
+  and its input-vector path rather than emitting a lossy JavaScript number.</li>
 <li><code>--target swift</code>: emits a self-contained Swift Testing file (<code>import Testing</code>,
   <code>@Test</code>, <code>#expect</code>; <strong>not XCTest</strong>). Same baked-walk design as Vitest. Dynamic
   state is <code>[String: Any]</code> with a bundled deep-equality/partial-match helper; an
@@ -2687,9 +2689,13 @@ v1 rejects <code>leadsTo</code>, refinement documents, induction/CTI, nondetermi
   <code>&lt;SpecName&gt;ConformanceTests.swift</code>.</li>
 <li><code>--target kotlin</code>: emits a self-contained kotlin.test file (multiplatform; the
   JVM delegates to JUnit). Same baked-walk design. Dynamic state is
-  <code>Map&lt;String, Any?&gt;</code>, where Kotlin's structural <code>==</code> is deep on <code>List</code>/<code>Map</code> and
-  distinguishes <code>Int</code> from <code>Double</code>, so the partial-match helper is a plain
-  recursion. Until <code>makeAdapter()</code> is wired (it returns <code>null</code>) each test fails
+  <code>Map&lt;String, Any?&gt;</code>. The partial-match helper recurses by expected map keys;
+  before leaf equality it normalizes Byte/Short/Int/Long to Long recursively
+  through List/Map values. List order/length and exact maps inside lists remain
+  significant; Float/Double values are not coerced. Int-range literals remain
+  unsuffixed, wider i64 values use <code>L</code>, and i64 minimum uses <code>Long.MIN_VALUE</code>.
+  Adapters should read numeric params through <code>Number</code>, not cast them to <code>Int</code>.
+  Until <code>makeAdapter()</code> is wired (it returns <code>null</code>) each test fails
   with <code>fail(ADAPTER_NOT_WIRED)</code>. kotlin.test has no portable runtime skip, so
   <code>--allow-unwired</code> is rejected for this target (exit 2) rather than generating
   tests that return early and pass. Output defaults to

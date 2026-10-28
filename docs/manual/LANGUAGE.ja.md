@@ -2445,7 +2445,9 @@ enabled な action が無くなればそこで止まります。`--depth` には
   **生成時に焼き込まれます** — 具象の Monitor が固定シードのウォークを実行し、
   `(action, params, expected_state)` のトレースが静的なフィクスチャとして埋め込ま
   れるので、生成されたテストは実行時に **`fslc`/Python を必要としません**。出力の
-  拡張子のデフォルトは `<spec>.test.ts` です。
+  拡張子のデフォルトは `<spec>.test.ts` です。ネイティブ生成では ±(2^53−1) の
+  範囲外の整数を成果物の出力前に拒否します(exit 2、既存の意味エラーエンベロープ)。
+  精度を失う JavaScript 数値を出力せず、値と入力ベクトル内のパスを示します。
 - `--target swift`: 自己完結の Swift Testing ファイルを出力します(`import Testing`、
   `@Test`、`#expect`。**XCTest ではありません**)。Vitest と同じ焼き込みウォーク
   設計です。動的な状態は `[String: Any]` で、深い等値/部分一致のヘルパーが同梱
@@ -2456,8 +2458,12 @@ enabled な action が無くなればそこで止まります。`--depth` には
   されます。出力のデフォルトは `<SpecName>ConformanceTests.swift` です。
 - `--target kotlin`: 自己完結の kotlin.test ファイルを出力します(マルチ
   プラットフォーム。JVM は JUnit に委譲します)。同じ焼き込みウォーク設計です。
-  動的な状態は `Map<String, Any?>` で、Kotlin の構造的な `==` は `List`/`Map` 上で
-  深く、`Int` と `Double` を区別するので、部分一致ヘルパーは素朴な再帰です。
+  動的な状態は `Map<String, Any?>` です。部分一致ヘルパーは期待されるマップのキーで
+  再帰し、葉の等値比較の前に List/Map の値を再帰的にたどって Byte/Short/Int/Long を
+  Long に正規化します。リストの順序/長さとリスト内のマップの完全一致は維持され、
+  Float/Double の値は強制変換しません。Int 範囲のリテラルはサフィックスなし、
+  より大きな i64 値には `L`、i64 の最小値には `Long.MIN_VALUE` を使います。
+  アダプターは数値パラメーターを `Int` にキャストせず `Number` 経由で読み取ってください。
   `makeAdapter()` が結線される(`null` を返す間)まで、各テストは
   `fail(ADAPTER_NOT_WIRED)` で失敗します。kotlin.test にはポータブルなランタイム
   スキップがないので、このターゲットでは `--allow-unwired` を拒否します(exit 2)。

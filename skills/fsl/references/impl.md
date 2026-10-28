@@ -84,6 +84,8 @@ emit the same scenarios:
   rejected_by`, which is `requires_failed` or `bad_call`); the random walk is **baked at generation time** (the concrete Monitor
   runs the seed-fixed walk and the `(action, params, expected_state)` trace is
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
+  Native generation rejects integers outside ±(2^53−1) before emitting an artifact
+  (exit 2, semantic-error envelope with the value and input-vector path).
   Until `makeAdapter()` is wired every test fails. Output defaults to
   `<spec>.test.ts`.
 - `swift`: a self-contained Swift Testing file (`import Testing` / `@Test` /
@@ -95,8 +97,12 @@ emit the same scenarios:
   defaults to `<SpecName>ConformanceTests.swift`.
 - `kotlin`: a self-contained kotlin.test file (multiplatform; JVM delegates to
   JUnit), same `Adapter` contract and same baked walk. Dynamic state is
-  `Map<String, Any?>` — Kotlin's `==` is deep on `List`/`Map` and distinguishes
-  `Int`/`Double`, so the partial-match helper is a plain recursion. An unwired
+  `Map<String, Any?>`. The partial-match helper recurses by expected map keys and
+  normalizes Byte/Short/Int/Long to Long through List/Map values before leaf
+  equality. List order/length and exact maps inside lists remain significant;
+  Float/Double are not coerced. Int-range literals stay unsuffixed, wider i64
+  values use `L`, and i64 minimum uses `Long.MIN_VALUE`. Adapters should read
+  numeric params through `Number` instead of casting to `Int`. An unwired
   `makeAdapter()` returns `null` and each test fails with
   `fail(ADAPTER_NOT_WIRED)`. kotlin.test has no portable runtime skip, so
   `--allow-unwired` is rejected for Kotlin (exit 2). Output defaults to

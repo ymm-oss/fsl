@@ -2578,7 +2578,9 @@ v1 rejects `leadsTo`, refinement documents, induction/CTI, nondeterministic
   is **baked at generation time** — the concrete Monitor runs the fixed-seed walk and
   the `(action, params, expected_state)` trace is embedded as a static fixture, so the
   generated tests need **no `fslc`/Python at runtime**. The output extension defaults
-  to `<spec>.test.ts`.
+  to `<spec>.test.ts`. Native generation refuses integers outside ±(2^53−1) before
+  emitting an artifact (exit 2, existing semantic-error envelope), naming the value
+  and its input-vector path rather than emitting a lossy JavaScript number.
 - `--target swift`: emits a self-contained Swift Testing file (`import Testing`,
   `@Test`, `#expect`; **not XCTest**). Same baked-walk design as Vitest. Dynamic
   state is `[String: Any]` with a bundled deep-equality/partial-match helper; an
@@ -2589,9 +2591,13 @@ v1 rejects `leadsTo`, refinement documents, induction/CTI, nondeterministic
   `<SpecName>ConformanceTests.swift`.
 - `--target kotlin`: emits a self-contained kotlin.test file (multiplatform; the
   JVM delegates to JUnit). Same baked-walk design. Dynamic state is
-  `Map<String, Any?>`, where Kotlin's structural `==` is deep on `List`/`Map` and
-  distinguishes `Int` from `Double`, so the partial-match helper is a plain
-  recursion. Until `makeAdapter()` is wired (it returns `null`) each test fails
+  `Map<String, Any?>`. The partial-match helper recurses by expected map keys;
+  before leaf equality it normalizes Byte/Short/Int/Long to Long recursively
+  through List/Map values. List order/length and exact maps inside lists remain
+  significant; Float/Double values are not coerced. Int-range literals remain
+  unsuffixed, wider i64 values use `L`, and i64 minimum uses `Long.MIN_VALUE`.
+  Adapters should read numeric params through `Number`, not cast them to `Int`.
+  Until `makeAdapter()` is wired (it returns `null`) each test fails
   with `fail(ADAPTER_NOT_WIRED)`. kotlin.test has no portable runtime skip, so
   `--allow-unwired` is rejected for this target (exit 2) rather than generating
   tests that return early and pass. Output defaults to

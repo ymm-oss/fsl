@@ -174,7 +174,7 @@ fn all_six_public_kernel_targets_match_the_failing_by_default_goldens() {
         ),
         (
             "kotlin",
-            "7786f1afbbcd9b4523e1be5fa25abf1068aacc7df9940ef4f30ede8f92aa3f81",
+            "bd0d5b9d9efe336620083dba8b665d5e2b16b1d9d87df27232a47a3decce59cc",
         ),
         (
             "dart",
