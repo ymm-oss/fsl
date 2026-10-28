@@ -1,53 +1,85 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase-I-owned receiver adapter. Phase T preserves the old blocking read;
-//! Phase I must honor the absolute deadline, preserve buffered frames, report
-//! partial output on expiry, and route stdio.rs's receive through this adapter.
+//! Deadline-bound LSP test receiver. Only the helper thread blocks on the pipe;
+//! the caller retains partial bytes and any subsequent buffered frames.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::Read;
 use std::process::ChildStdout;
+use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
 
 use serde_json::Value;
 
 pub struct LspReceiver {
-    stdout: BufReader<ChildStdout>,
+    chunks: Receiver<Result<Vec<u8>, String>>,
+    buffered: Vec<u8>,
 }
 
 impl LspReceiver {
-    pub fn new(stdout: ChildStdout) -> Self {
+    pub fn new(mut stdout: ChildStdout) -> Self {
+        let (send, chunks) = mpsc::channel();
+        std::thread::spawn(move || {
+            loop {
+                let mut bytes = [0; 4096];
+                let result = match stdout.read(&mut bytes) {
+                    Ok(0) => return,
+                    Ok(length) => Ok(bytes[..length].to_vec()),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => Err(error.to_string()),
+                };
+                let failed = result.is_err();
+                if send.send(result).is_err() || failed {
+                    return;
+                }
+            }
+        });
         Self {
-            stdout: BufReader::new(stdout),
+            chunks,
+            buffered: Vec::new(),
         }
     }
 
-    pub fn recv(&mut self, _deadline: Instant) -> Result<Value, String> {
-        let mut content_length = None;
+    pub fn recv(&mut self, deadline: Instant) -> Result<Value, String> {
         loop {
-            let mut header = String::new();
-            let read = self
-                .stdout
-                .read_line(&mut header)
-                .map_err(|error| error.to_string())?;
-            if read == 0 {
-                return Err("fslc-lsp closed its output".to_owned());
+            if let Some(header_end) = self.buffered.windows(4).position(|s| s == b"\r\n\r\n") {
+                let header = std::str::from_utf8(&self.buffered[..header_end])
+                    .map_err(|error| error.to_string())?;
+                let content_length = header
+                    .split("\r\n")
+                    .find_map(|line| line.strip_prefix("Content-Length: "))
+                    .ok_or("missing content length header")?
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|error| error.to_string())?;
+                let body_start = header_end + 4;
+                if self.buffered.len() - body_start >= content_length {
+                    let frame_end = body_start + content_length;
+                    let value = serde_json::from_slice(&self.buffered[body_start..frame_end])
+                        .map_err(|error| error.to_string())?;
+                    self.buffered.drain(..frame_end);
+                    return Ok(value);
+                }
             }
-            if header == "\r\n" {
-                break;
-            }
-            if let Some(value) = header.strip_prefix("Content-Length: ") {
-                content_length = Some(
-                    value
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|error| error.to_string())?,
-                );
+            match self
+                .chunks
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            {
+                Ok(Ok(bytes)) => self.buffered.extend(bytes),
+                Ok(Err(error)) => return Err(self.failure(&error)),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(self.failure("LSP receive deadline expired"));
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(self.failure("fslc-lsp closed its output"));
+                }
             }
         }
-        let mut body = vec![0; content_length.ok_or("missing content length header")?];
-        self.stdout
-            .read_exact(&mut body)
-            .map_err(|error| error.to_string())?;
-        serde_json::from_slice(&body).map_err(|error| error.to_string())
+    }
+
+    fn failure(&self, reason: &str) -> String {
+        format!(
+            "{reason}; partial output: {}",
+            String::from_utf8_lossy(&self.buffered)
+        )
     }
 }

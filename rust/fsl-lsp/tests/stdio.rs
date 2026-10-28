@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{ChildStdin, ChildStdout, Command, Stdio};
+use std::io::Write;
+use std::process::{ChildStdin, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+
+#[path = "support/lsp_receiver.rs"]
+mod lsp_receiver;
+use lsp_receiver::LspReceiver;
 
 #[allow(dead_code)] // CLI/Worker also consume this inventory's engine metadata.
 #[path = "../../fslc/tests/support/issue_1463_forms.rs"]
@@ -160,30 +165,28 @@ fn send(stdin: &mut ChildStdin, message: &Value) {
     stdin.flush().expect("flush LSP message");
 }
 
-fn receive(stdout: &mut BufReader<ChildStdout>) -> Value {
-    let mut content_length = None;
-    loop {
-        let mut header = String::new();
-        let read = stdout.read_line(&mut header).expect("read LSP header");
-        assert!(
-            read > 0,
-            "fslc-lsp closed its output (did the server panic?)"
-        );
-        if header == "\r\n" {
-            break;
-        }
-        if let Some(value) = header.strip_prefix("Content-Length: ") {
-            content_length = Some(
-                value
-                    .trim()
-                    .parse::<usize>()
-                    .expect("numeric content length"),
-            );
+fn receive(stdout: &mut LspReceiver) -> Value {
+    stdout
+        .recv(Instant::now() + Duration::from_secs(120))
+        .unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    struct ThreadWake(std::thread::Thread);
+    impl std::task::Wake for ThreadWake {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
         }
     }
-    let mut body = vec![0_u8; content_length.expect("content length header")];
-    stdout.read_exact(&mut body).expect("read LSP body");
-    serde_json::from_slice(&body).expect("parse LSP body")
+    let waker = std::task::Waker::from(std::sync::Arc::new(ThreadWake(std::thread::current())));
+    let mut context = std::task::Context::from_waker(&waker);
+    let mut future = std::pin::pin!(future);
+    loop {
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => return output,
+            std::task::Poll::Pending => std::thread::park(),
+        }
+    }
 }
 
 #[test]
@@ -195,7 +198,7 @@ fn stdio_lifecycle_uses_latest_buffer_and_serves_symbols() {
         .spawn()
         .expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
     let uri = "file:///tmp/fsl-lsp-stdio.fsl";
 
     send(
@@ -309,7 +312,7 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
         .spawn()
         .expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
     send(
         &mut stdin,
         &json!({
@@ -461,7 +464,7 @@ fn published_diagnostics_each_at(
     command.envs(environment.iter().copied());
     let mut child = command.spawn().expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
     send(
         &mut stdin,
         &json!({
@@ -551,7 +554,7 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
                         false,
                     )
                     .unwrap();
-                    let mut future = std::pin::pin!(fslc_rust::check_stages::run_check_stages(
+                    let future = fslc_rust::check_stages::run_check_stages(
                         &text,
                         file,
                         file,
@@ -560,10 +563,9 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
                         &options,
                         &mut z3,
                         &admission,
-                    ));
-                    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-                    match future.as_mut().poll(&mut context) {
-                        std::task::Poll::Ready(Err((output, 2))) => output,
+                    );
+                    match block_on(future) {
+                        Err((output, 2)) => output,
                         other => panic!("native check must reject {file}: {other:?}"),
                     }
                 })
@@ -897,7 +899,7 @@ fn ill_typed_trace_arguments_publish_semantic_step_token_ranges() {
 struct Session {
     child: std::process::Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    stdout: LspReceiver,
     next_id: u64,
 }
 
@@ -911,7 +913,7 @@ impl Session {
             .spawn()
             .expect("spawn fslc-lsp");
         let stdin = child.stdin.take().expect("child stdin");
-        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        let stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
         let mut session = Self {
             child,
             stdin,

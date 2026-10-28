@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase-I-owned adapter for the keyword golden's environment policy.
-//! This Phase-T legacy body deliberately preserves the missing CI guard.
+//! Keyword golden updates are local-only; CI always compares without rewriting.
 
-#[allow(clippy::unnecessary_wraps)] // Phase I adds the error path; keep its approved API now.
-pub fn golden_update_requested(update: Option<&str>, _ci: Option<&str>) -> Result<bool, String> {
+pub fn golden_update_requested(update: Option<&str>, ci: Option<&str>) -> Result<bool, String> {
+    if update.is_some() && ci.is_some() {
+        return Err("CI must not set FSLC_SKILLS_KEYWORDS_UPDATE".to_owned());
+    }
     Ok(update == Some("1"))
 }

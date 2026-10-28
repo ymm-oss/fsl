@@ -72,6 +72,17 @@ FSL package's `test:outcome` entry point in the WASM lane before the FSL browser
 A retry is a bounded mitigation, not evidence that the underlying latency cause
 is resolved or that parity has passed.
 
+### Instrumented Rust builds and address-space ceilings
+
+Any sanitizer/instrumented CI job must exclude
+`requirement_trace_large_domain::a_trace_over_a_large_values_scope_checks_under_an_address_space_ceiling`
+(the `fslc-rust` integration test `requirement_trace_large_domain`). On Linux
+this test runs the CLI under a 1 GiB `ulimit -v`; ASan reserves a much larger
+virtual address space and fails under that limit regardless of the replay
+memory property. Keep the test enabled in ordinary, non-instrumented Linux
+builds. There is no instrumented job today; its exclusion mechanism must be
+chosen when such a job is added, not by weakening this test's ceiling.
+
 ### Why the split falls here
 
 Measured on the batch that motivated this revision:

@@ -367,6 +367,9 @@ fn render_keyword_table() -> String {
 const TABLE_BEGIN: &str = "<!-- keyword-table:begin (generated; do not edit by hand) -->\n";
 const TABLE_END: &str = "<!-- keyword-table:end -->\n";
 
+#[path = "support/golden_update.rs"]
+mod golden_update;
+
 /// fsl 5 plan §3 S13 (decisions/045 addendum: skills are English-canonical
 /// and print the keyword table): the table in the requirements skill is the
 /// parser's table, rendered, so it can neither miss nor invent a keyword.
@@ -374,12 +377,19 @@ const TABLE_END: &str = "<!-- keyword-table:end -->\n";
 /// table changed; the diff is then reviewed like any other.
 #[test]
 fn the_requirements_skill_prints_the_parser_keyword_table() {
+    let update = std::env::var_os("FSLC_SKILLS_KEYWORDS_UPDATE");
+    let ci = std::env::var_os("CI");
+    let update_requested = golden_update::golden_update_requested(
+        update.as_ref().map(|value| value.to_str().unwrap_or("")),
+        ci.as_ref().map(|value| value.to_str().unwrap_or("")),
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     let path = repository().join("skills-next/fsl-requirements/references/keywords.md");
     let text = std::fs::read_to_string(&path).expect("read the skill's keyword table");
     let begin = text.find(TABLE_BEGIN).expect("begin marker") + TABLE_BEGIN.len();
     let end = text.find(TABLE_END).expect("end marker");
     let expected = render_keyword_table();
-    if std::env::var_os("FSLC_SKILLS_KEYWORDS_UPDATE").is_some_and(|value| value == "1") {
+    if update_requested {
         let updated = format!("{}{expected}{}", &text[..begin], &text[end..]);
         std::fs::write(&path, updated).expect("rewrite the skill's keyword table");
         return;
