@@ -17,8 +17,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-#[path = "support/product_source.rs"]
-mod product_source;
+#[path = "support/trace_census_rule.rs"]
+mod trace_census_rule;
+use trace_census_rule::{calls, calls_in_source};
 
 const PARSE: &str = "requirements_trace_contract";
 /// The same parse under explicit `ParseOptions`; its calls count as [`PARSE`].
@@ -141,43 +142,36 @@ fn product_sources() -> Vec<PathBuf> {
     files
 }
 
+fn read_source(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .expect("read source")
+        .replace("\r\n", "\n")
+}
+
 /// Product tokens, excluding comments and test-only items without truncating
 /// any product code that follows them.
 fn product_text(path: &Path) -> String {
-    let text = std::fs::read_to_string(path)
-        .expect("read source")
-        .replace("\r\n", "\n");
-    product_source::product_source(&text)
-}
-
-/// Calls of `name`: the identifier followed by `(`, not preceded by another
-/// identifier character or by `fn `.
-fn calls(text: &str, name: &str) -> usize {
-    let needle = format!("{name}(");
-    text.match_indices(&needle)
-        .filter(|(at, _)| {
-            let before = &text[..*at];
-            !before.ends_with(|character: char| character.is_alphanumeric() || character == '_')
-                && !before.ends_with("fn ")
-        })
-        .count()
+    trace_census_rule::product_text(&read_source(path))
 }
 
 fn census() -> BTreeMap<(String, &'static str), usize> {
     let root = workspace();
     let mut found = BTreeMap::new();
     for path in product_sources() {
-        let text = product_text(&path);
+        let text = read_source(&path);
         let relative = path
             .strip_prefix(&root)
             .expect("source under workspace")
             .to_string_lossy()
             .replace('\\', "/");
-        let parses = calls(&text, PARSE) + calls(&text, PARSE_WITH_OPTIONS);
+        let parses = calls_in_source(&text, PARSE) + calls_in_source(&text, PARSE_WITH_OPTIONS);
         if parses > 0 {
             found.insert((relative.clone(), PARSE), parses);
         }
-        let unchecked = UNCHECKED.iter().map(|name| calls(&text, name)).sum();
+        let unchecked = UNCHECKED
+            .iter()
+            .map(|name| calls_in_source(&text, name))
+            .sum();
         if unchecked > 0 {
             found.insert((relative, "unchecked"), unchecked);
         }
@@ -233,7 +227,7 @@ fn every_trace_consumer_fails_closed_through_the_helper() {
     let found = product_sources()
         .into_iter()
         .filter_map(|path| {
-            let count = calls(&product_text(&path), "require_trace_gate");
+            let count = calls_in_source(&read_source(&path), "require_trace_gate");
             let relative = path
                 .strip_prefix(&root)
                 .expect("source under workspace")

@@ -14,28 +14,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-#[path = "support/product_source.rs"]
-mod product_source;
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum Kind {
-    /// A string literal that starts with an engine-synthesised name prefix.
-    SyntheticPrefix,
-    /// A direct call of the internal-to-public string rule.
-    DisplayName,
-    /// `__` joined to a format placeholder: a name built from two parts.
-    SeparatorJoin,
-    /// The model-free string rule, for a context with no `NameMap`.
-    UnmappedSpelling,
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct Finding {
-    path: String,
-    line: usize,
-    kind: Kind,
-    text: String,
-}
+#[path = "support/naming_census_rule.rs"]
+mod naming_census_rule;
+use naming_census_rule::{Finding, Kind, OWNER, line_findings, non_test_lines};
 
 struct Allowed {
     path: &'static str,
@@ -45,10 +26,6 @@ struct Allowed {
     #[allow(dead_code)]
     reason: &'static str,
 }
-
-const OWNER: &str = "rust/fsl-core/src/naming.rs";
-
-const SYNTHETIC_PREFIXES: &[&str] = &["_partial_", "_bounds_", "_requires_failed_", "_key_domain_"];
 
 const ALLOWED: &[Allowed] = &[
     Allowed {
@@ -223,59 +200,10 @@ fn sources() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The source's lines with comments removed and `#[cfg(test)]` items
-/// blanked. String literal contents are kept; they are what the scan reads.
-fn non_test_lines(source: &str) -> Vec<String> {
-    product_source::product_source(source)
-        .lines()
-        .map(str::to_owned)
-        .collect()
-}
-
-fn line_findings(path: &str, line: usize, text: &str) -> Vec<Finding> {
-    let mut kinds = BTreeSet::new();
-    if SYNTHETIC_PREFIXES
-        .iter()
-        .any(|prefix| text.contains(&format!("\"{prefix}")))
-    {
-        kinds.insert(Kind::SyntheticPrefix);
-    }
-    if text.match_indices("display_name(").any(|(offset, _)| {
-        !text[..offset]
-            .chars()
-            .next_back()
-            .is_some_and(|previous| previous.is_alphanumeric() || previous == '_')
-    }) {
-        kinds.insert(Kind::DisplayName);
-    }
-    if text.contains("}__") || text.contains("__{") {
-        kinds.insert(Kind::SeparatorJoin);
-    }
-    if text.contains("unmapped_public_spelling(") {
-        kinds.insert(Kind::UnmappedSpelling);
-    }
-    kinds
-        .into_iter()
-        .map(|kind| Finding {
-            path: path.to_owned(),
-            line,
-            kind,
-            text: text.trim().to_owned(),
-        })
-        .collect()
-}
-
 fn findings(sources: &[(String, String)]) -> Vec<Finding> {
     sources
         .iter()
-        .filter(|(path, _)| path != OWNER)
-        .flat_map(|(path, source)| {
-            non_test_lines(source)
-                .into_iter()
-                .enumerate()
-                .flat_map(|(index, text)| line_findings(path, index + 1, &text))
-                .collect::<Vec<_>>()
-        })
+        .flat_map(|(path, source)| naming_census_rule::findings(path, source))
         .collect()
 }
 
