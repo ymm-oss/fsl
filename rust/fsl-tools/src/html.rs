@@ -961,13 +961,16 @@ fn trace_timeline(trace: &[Value], violated_step: Option<u64>) -> String {
     format!("<div class=\"timeline\">{steps}</div>")
 }
 
-fn relation_graphs(trace: &[Value]) -> String {
+fn relation_graphs(trace: &[Value], state_types: &Value) -> String {
     let mut panels = String::new();
     for entry in trace {
         let Some(state) = entry["state"].as_object() else {
             continue;
         };
         for (name, value) in state {
+            if state_types[name][0].as_str() != Some("relation") {
+                continue;
+            }
             let Some(edges) = value.as_array().filter(|edges| {
                 !edges.is_empty()
                     && edges
@@ -1011,7 +1014,7 @@ fn first_reachable_witness(verification: &Value) -> Option<&Vec<Value>> {
         .find_map(|item| item.get("witness")?.as_array())
 }
 
-fn trace_section(verification: &Value) -> String {
+fn trace_section(verification: &Value, state_types: &Value) -> String {
     let counterexample = verification["trace"].as_array();
     let trace = counterexample.or_else(|| first_reachable_witness(verification));
     let banner = if counterexample.is_some() {
@@ -1043,7 +1046,7 @@ fn trace_section(verification: &Value) -> String {
             format!(
                 "{}{}",
                 trace_timeline(trace, counterexample.and_then(|_| verification["violated_at_step"].as_u64())),
-                relation_graphs(trace)
+                relation_graphs(trace, state_types)
             )
         },
     );
@@ -1277,7 +1280,7 @@ pub fn render_html_report(
     sections.extend([
         status_section(verification),
         String::new(),
-        trace_section(verification),
+        trace_section(verification, &skeleton["state"]),
         witness_section(explained["witnesses"].as_array().map_or(&[], Vec::as_slice)),
         counterfactual_section(
             explained["counterfactuals"]

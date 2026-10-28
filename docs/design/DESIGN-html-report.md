@@ -151,7 +151,10 @@ JSON, and requirement text are HTML-escaped before rendering.
 
 Relation and refinement evidence are display-only views over existing verifier
 JSON. `fslc html` does not invent graph semantics: relation graphs render the
-pair lists already emitted in traces, and refinement panels render
+pair lists already emitted in traces only for state variables whose declared
+explain-skeleton type tag is `relation` (#1433). A pair-shaped Seq or Set is not
+a relation. Empty relations continue to produce no graph panel, and nonempty
+relation panels retain their existing rendering. Refinement panels render
 `implements.violation` / `refinement_failed` payloads side by side.
 
 ## Non-goals
