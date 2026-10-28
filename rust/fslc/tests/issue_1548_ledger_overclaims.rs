@@ -1148,3 +1148,60 @@ fn refinement_failure_over_induction_keeps_unranked_liveness_and_reachable_bound
     );
     assert!(ledger.contains("- 保証限界: BMC（有界モデル検査）: **深さ 8 までの全実行を網羅**。それ以遠の反例は本台帳の対象外"), "{ledger}");
 }
+
+#[test]
+fn unbounded_completeness_keeps_properties_bounded_after_implements_budget() {
+    // Use the real 50,000-state implements cutoff, not an edited envelope or
+    // injected budget. Never-assigned Bool init roots are nondeterministic
+    // (#493): 2^16 initial valuations exceed the seam's self-consistency budget.
+    let fixture = Fixture::new(
+        "induction-budget",
+        r#"requirements Budget {
+      implements Wide from "wide.fsl" { maps auto }
+      state { a: Bool, b: Bool, c: Bool, d: Bool, e: Bool, f: Bool, g: Bool, h: Bool,
+              i: Bool, j: Bool, k: Bool, l: Bool, m: Bool, n: Bool, o: Bool, p: Bool }
+      init {}
+      action stay() { a = a }
+      invariant Bounded { a or not a }
+      @requirement("R-LT")
+      leadsTo Served { a == true ~> a == true }
+      @requirement("R-TOP")
+      reachable Top { a == true }
+    }"#,
+    );
+    fs::write(
+        fixture.directory.join("wide.fsl"),
+        r"spec Wide {
+      state { a: Bool, b: Bool, c: Bool, d: Bool, e: Bool, f: Bool, g: Bool, h: Bool,
+              i: Bool, j: Bool, k: Bool, l: Bool, m: Bool, n: Bool, o: Bool, p: Bool }
+      init {}
+      action stay() { a = a }
+    }",
+    )
+    .unwrap();
+    let verification = fixture.verify("induction", 1);
+    assert_eq!(verification["result"], "unknown_budget", "{verification}");
+    assert_eq!(verification["completeness"], "unbounded", "{verification}");
+    assert_eq!(
+        verification["implements"]["result"], "unknown_budget",
+        "{verification}"
+    );
+    assert!(
+        verification["implements"]["states_explored"]
+            .as_u64()
+            .is_some_and(|count| count >= 50_000),
+        "{verification}"
+    );
+    let ledger = fixture.ledger("budget.md", &["--engine", "induction"], 1);
+    let html = fixture.report("html", "budget.html", &["--engine", "induction"], 1);
+    let observed = [
+        row_assurance(&ledger, "R-LT"),
+        row_assurance(&ledger, "R-TOP"),
+        html_property_assurance(&html, "Served"),
+        html_property_assurance(&html, "Top"),
+    ];
+    assert_eq!(
+        observed, ["bounded(BMC depth 8)"; 4],
+        "unbounded completeness needs per-group assurance beyond refinement_failed"
+    );
+}
