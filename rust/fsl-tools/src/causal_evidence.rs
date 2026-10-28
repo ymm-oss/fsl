@@ -45,6 +45,10 @@ fn error(kind: &'static str, message: impl Into<String>) -> EvidenceError {
 
 /// Canonical JSON: recursively sorted object keys, compact separators.
 /// `preserve_order` is enabled workspace-wide, so sorting must be explicit.
+/// Keys use Rust `str`/UTF-8 byte order; values retain `serde_json`'s exact
+/// integers, shortest round-trip floats (including integral `.0`), raw UTF-8,
+/// and JSON control escaping. See DESIGN-causal.md's canonical JSON rules
+/// (#1432); RFC 8785/JCS conformance is a separate follow-up (#1526).
 #[must_use]
 pub fn canonical_json(value: &Value) -> String {
     fn sort(value: &Value) -> Value {

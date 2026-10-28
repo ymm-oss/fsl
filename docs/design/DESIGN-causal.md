@@ -696,13 +696,23 @@ never contradict, the sections above.
 
 ## 13. Phase 2 implementation notes (fixed by #322)
 
-- **Digest conventions.** `artifact_digest` = `sha256:` over the canonical
-  JSON (recursively sorted keys, compact separators) of the artifact with the
+- **Digest conventions.** `artifact_digest` = `sha256:` over the canonical JSON
+  of the artifact with the
   `artifact_digest` field removed. A lifecycle `record_digest` = the same
   canonicalization of the record with `record_digest` removed plus the
   chain's `evidence_id` and `artifact_digest` injected. Tampering with either
   is a fatal `causal_evidence_digest_mismatch` /
   `causal_evidence_lifecycle_mismatch`.
+- **Canonical JSON rules (#1432).** The native `canonical_json` digest format
+  recursively sorts object keys by Rust `str` order (UTF-8 byte order) and uses
+  compact separators. Integers remain exact, including values above 2^53;
+  floats use `serde_json`'s shortest round-trip form, and integral floats retain
+  their `.0`. Non-ASCII text remains raw UTF-8. Double quote (`"`), backslash
+  (`\`), and U+0000..U+001F are escaped: `\n`, `\r`, `\t`, `\b`, `\f`, otherwise
+  lowercase `\u00xx`; `/` is not escaped. These pin the existing bytes, not a new
+  serialization or digest version. This is not a claim of RFC 8785/JCS
+  conformance; #1526 tracks that separate question. Existing artifact and
+  lifecycle record digests remain unchanged.
 - **Fail-closed boundary.** Artifact schema violations (unknown design/
   support/observation fields, non-`not_run` `formal_result`), digest
   mismatches, and lifecycle-chain violations (sequence gaps/forks, broken
