@@ -1,0 +1,1 @@
+Fixed (#1413): Make LSP stdio tests fail at a deadline instead of hanging, drive a solver test to completion, refuse the `fsl5_keywords` golden-update variable under `CI`, and document the sanitizer exclusion of `requirement_trace_large_domain`.
