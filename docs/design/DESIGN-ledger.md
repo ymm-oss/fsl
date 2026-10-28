@@ -110,8 +110,13 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    (exit 0), so review and re-approve them. Approval schemas are unchanged.
    Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/
    `partial_op`/`type_bound`, or `explicit` deadlock; other results count as evaluated.
-   Scenario confirmation wins (確認済 / `bounded`). This infers evaluation from result kind/engine;
-   per-reachable status is #1565. Under `refinement_failed` over induction, unranked leadsTo
+   Scenario confirmation wins (確認済 / `bounded`) for supplied library inputs.
+   The report CLIs accept only `bmc`/`induction`; explicit verify envelopes may be supplied
+   to library renderers or as document evidence, whose class uses the aggregate token.
+   The per-property explicit-deadlock rule is library-only. After an early violation the CLI's
+   scenario run fails on the same violation, so it cannot supply that confirmation override.
+   "Not evaluated" includes earlier witnesses omitted from the producer's result; precise status is #1565.
+   Under `refinement_failed` over induction, unranked leadsTo
    and reachable ledger/HTML rows stay `bounded`.
 4. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
    business sentence** (dispatched on `trace_type`), the next action, and a

@@ -647,10 +647,10 @@ fn property_group(kind: &str) -> Option<&'static str> {
 }
 
 /// One property row's own assurance class, from the ledger's per-element
-/// rule (issue #525). A reachability witness and action coverage stay
-/// `bounded` even inside an `--engine induction` report, because
-/// k-induction ranks only invariants and leadsTo; labelling them
-/// `proved(induction)` overstates the evidence in an audit artifact.
+/// rule (issue #525). Reachables use `not_run` when the result kind/engine
+/// does not report their evaluation, otherwise `bounded`, even under induction.
+/// Evaluated action coverage is also `bounded`; induction proves safety
+/// invariants/transitions and ranked `leadsTo`, not reachability witnesses.
 fn property_assurance(property: &Value, verification: &Value) -> String {
     property_group(&text(&property["kind"])).map_or_else(String::new, |group| {
         crate::ledger::assurance_label(

@@ -524,7 +524,8 @@ appendix; only each finding's top-level `cost` and `cache` are excluded, not
 same-named nested domain fields. Added findings and corrected attribution change affected
 ledger approval digests and require review and re-approval.
 Aggregate assurance is plain `bounded` if any `leads_to` entry is not `unbounded`.
-Unevaluated reachables show ⚪ 未評価 / `not_run`, unless scenario-confirmed (still 確認済 / `bounded`).
+Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/`partial_op`/`type_bound`;
+the library also applies this to explicit deadlock. Other non-error results count as evaluated (#1565 tracks precise witness status).
 Direct `ledger` and `html` return verification `result:"error"` with the full
 JSON error envelope and exit 2/3, before rendering or output-file creation;
 direct ledger stops before ancillary replay, evidence loading, and witness preparation

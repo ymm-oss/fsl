@@ -114,7 +114,12 @@ else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
 This also corrects unranked leadsTo/reachable rows under `refinement_failed` over induction.
 Otherwise `error` → `not_run`, else `bounded`. Reachables also use `not_run` for `violated` +
 `invariant`/`trans`/`ensures`/`partial_op`/`type_bound`, or `explicit` deadlock.
-This infers evaluation from result kind/engine (#1565 tracks per-reachable status); scenario-confirmed ledger rows retain `bounded`.
+This infers evaluation from result kind/engine: "not evaluated" can include an earlier witness
+that the producer omits; #1565 tracks precise per-reachable status. Scenario-confirmed library
+ledger rows retain `bounded`; after an early violation the CLI scenario run fails on that same
+violation, so this override cannot arise there. Ledger/HTML CLIs accept only `bmc`/`induction`.
+Explicit verify output can be supplied to library renderers or as document evidence, but the
+per-property explicit-deadlock rule is library-only; document evidence uses the aggregate token.
 
 **Rust vs frozen Python — evaluation order (#995, unadjudicated).** The frozen
 Python `classify_element` checks `completeness` **before** `result == "error"`.
@@ -214,7 +219,7 @@ not adopt a future trust model or Adapter contract (issue #994).
 | Producer | Result fields | Class |
 |---|---|---|
 | `fslc verify` (BMC) | `completeness:"bounded"` | `bounded` |
-| `fslc verify --engine induction` | `proved`, `completeness:"unbounded"` | `proved` (per-element nuance above) |
+| `fslc verify --engine induction` | `proved`, `completeness:"unbounded"` | aggregate `bounded` if any leadsTo is not unbounded, otherwise `proved`; unranked leadsTo/reachables stay `bounded` per element |
 | induction `unknown_cti` | `completeness:"bounded"` | `bounded` |
 | `fslc ai check` (component) / `fslc db check` / `fslc domain check` | `verified_under_assumptions` + `kernel.completeness` | `proved`/`bounded` + under-assumptions marker |
 | `fslc replay` (kernel Monitor) | `conformant`/`nonconformant` | `replay-observed` |
