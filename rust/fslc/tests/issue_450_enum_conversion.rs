@@ -152,7 +152,6 @@ fn empty_enum_conversion_is_a_located_type_error_not_a_panic() {
     assert_eq!(status, 2, "{failure}");
     assert_eq!(failure["kind"], "type");
     assert!(failure["loc"].is_object(), "{failure}");
-    assert!(failure["span"].is_object(), "{failure}");
     assert!(
         failure["message"]
             .as_str()

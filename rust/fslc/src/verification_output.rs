@@ -390,6 +390,12 @@ pub fn semantic_error_kind(message: &str) -> &'static str {
         || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
         || message.starts_with("state variable '")
             && message.ends_with(" has unsupported state type")
+        || message.starts_with("enum '") && message.ends_with(" has no members")
+        || message.starts_with("ai_component '") && message.ends_with(" declares no tools")
+        || message.starts_with("database '") && message.ends_with(" declares no columns")
+        || message.starts_with("component \"")
+            && message.contains("\" failed to check (enum '")
+            && message.contains("' has no members at ")
     {
         "type"
     } else {

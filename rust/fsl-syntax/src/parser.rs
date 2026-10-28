@@ -1585,6 +1585,7 @@ impl<'a> Parser<'a> {
         if self.peek_ident("def") {
             return self.def_item();
         }
+        let declaration_span = self.peek().span;
         let symmetric = if self.peek_ident("symmetric") {
             self.bump();
             true
@@ -1614,6 +1615,7 @@ impl<'a> Parser<'a> {
                 name,
                 members,
                 member_spans,
+                span: Some(declaration_span),
                 symmetric,
             });
         }

@@ -596,6 +596,18 @@ prompt/model sampling distributions in the kernel. No field on `ai_component`,
 `tool`, `authority`, `fallback`, or `check` accepts a `"description text"` /
 `"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
 convention ([layers](layers.md#declaration-tags-common-to-all-layers)), every field here is a bare identifier or number.
+
+Declare at least one tool (`tool` or `tools`) in a standalone kernel-lowered `ai_component`. A tool-less
+component, including one with only `authority { }`, is a breaking removal
+(#1546): `check`, `ai check`, BMC, induction, scenarios, testgen and Worker checking reject it with
+exit 2 / kind type, exact `ai_component '<Name>' declares no tools` and component
+declaration loc. One declared tool with empty authority remains valid; the error
+names the authored component, not the generated `Tool` enum.
+Existing hard-rule/unknown-authority errors retain priority and their historical
+per-command envelopes. The no-tools rule is kernel-lowering-only: `ai compat`,
+`ai replay` and `ai_project` paths remain unchanged from base, including their
+tool-less acceptance gap tracked by #1545.
+
 `check hard { rule <Name>; ... }` selects which of the 5 named rules above get
 an explicit, separately-reported invariant/finding in `fslc ai check`; an
 unlisted name is a check-time error (`kind:"semantics"`, hint lists the 5).
@@ -943,6 +955,28 @@ implementation Map (for example `Column -> DesignColumn`).
 Scalar = Int / Bool / domain type / enum. In a `state` declaration,
 `x: lo..hi` is an anonymous domain type and is equivalent to declaring
 `type X = lo..hi` and writing `x: X`.
+
+Spec/Kernel enums (also `symmetric enum`) must have at least one member, even when unused.
+`enum E { }` is a model-build type error: `enum 'E' has no members`, declaration
+loc, CLI exit 2. This breaking removal (#1546) applies to `check` and every
+model-consuming command/engine and Worker checking, including the former
+`EmptyImpl` / `EmptyAbs` refinement inputs. Declare the intended members or
+remove an unused empty declaration; do not exploit an empty domain for vacuity.
+Singleton enums remain valid. Domain dialect empty enums keep their earlier
+semantics diagnostic. A child compose enum uses the #567 wrapper: parent-use
+loc and message with child path/declaration position plus parent path. This
+empty-enum wrapper resolves the child path against the parent's directory,
+unlike older #567 wrappers that preserve the literal `use` path. A
+symmetric declaration starts at the symmetric keyword. A column-less
+`dbsystem`, including `database app { schema 0 }` or only an empty table, is
+also a breaking removal: type / exit2, exact `database 'app' declares no columns`
+and database-declaration loc on check, BMC, induction, explicit, scenarios,
+testgen and kernel. `db check` reports this only after static compatibility
+findings, when lowering is reached: an active artifact reading an absent column
+can instead yield violated/exit1, as on base. DB fmt/lint keep semantics/exit2,
+a location suffix in the message and no loc field. One column remains valid. See
+[the boundary decision](../../../docs/design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
+
 **State-variable whitelist**: scalar | nested Option<scalar> | struct |
 Map<bounded scalar, scalar|nested Option|struct> | Set<bounded scalar> | Seq<scalar, N> |
 relation bounded-scalar -> bounded-scalar.

@@ -109,3 +109,78 @@ Reconsider option C only with all of the following evidence:
 - byte/schema compatibility or an explicit Public Kernel version transition;
 - positive and rejecting concrete/symbolic/replay agreement controls; and
 - a measured reduction in consumer compensation beyond the ambiguity rejection established here.
+
+## Nonempty enum declarations (#1546)
+
+Every spec/Kernel enum must have at least one member before it enters the checked model,
+whether used as state, a Map key/value, an action parameter, a Seq element,
+a struct field, or not used at all. `ModelBuilder::collect_types` rejects empty
+members with `enum '<Name>' has no members`, public kind type, declaration loc
+and CLI exit 2. The domain dialect keeps its earlier semantics rejection, not
+this new type classification. The source parser retains the declaration's
+first keyword (`symmetric` when present, otherwise `enum`) span separately
+from member spans; generated enums retain an authored declaration span where
+available, and composition preserves that optional span. This internal span
+does not change the public Kernel enum representation.
+
+An empty enum in a compose child retains a component-check origin. Its new
+model diagnostic uses #567's `component "<child>" failed to check (enum 'E'
+has no members at <child>:line:column) at <parent>:line:column` wrapper with
+public loc at the parent's use declaration, not an unexplained child coordinate
+against the parent. The child name is unprefixed and its path is resolved
+relative to the authored parent source when that file identity is available.
+Other component failures retain their existing rendering/classification.
+
+This is a breaking removal of formerly accepted empty domains, not a new way
+to model an impossible state. Singleton enums and duplicate-member diagnostics
+are preserved. Every model-consuming command uses this gate, preventing
+engine-dependent vacuous proofs or later internal errors. The refinement
+conversion guard remains as defense in depth for constructed models, but an
+empty source enum now fails model building before mapping elaboration. Its
+`refine` error envelope keeps kind type and exit2, but its message changes from
+`enum conversion endpoint 'X' has no members` or
+`enum abstraction endpoint 'X' has no members` to `enum 'X' has no members`.
+Its loc moves from the mapping endpoint in the mapping file to the enum
+declaration in the implementation or abstraction input file. The later
+mapping-error `span` object is no longer present (#450).
+
+The rewritten required inline fixtures are breaking removals as well:
+
+| Required test input | Former check | New check |
+| --- | --- | --- |
+| `enum_conversion.rs`: Impl with `enum EmptyImpl {}` and `send(s: EmptyImpl)` | ok | type error at EmptyImpl declaration |
+| `enum_conversion.rs`: Abs with `enum EmptyAbs {}` and `send(s: EmptyAbs)` | ok | type error at EmptyAbs declaration |
+| `issue_450_enum_conversion.rs`: Impl with `enum EmptyImpl {}` and `send(s: EmptyImpl)` | ok | type error at EmptyImpl declaration |
+| `issue_450_enum_conversion.rs`: Abs with `enum EmptyAbs {}` and `send(s: EmptyAbs)` | ok | type error at EmptyAbs declaration |
+
+Their unchanged `ready: Bool`, `init { ready = false }` and disabled
+`action send(s: EmptyImpl/EmptyAbs) { requires false }` do not exempt the empty
+declaration. Conversion/abstraction mapping fixtures do not make the enum
+nonempty. Replace the domain with its intended members or remove an unused
+empty declaration. The AI counterpart is a tool-less `ai_component`, including
+one with empty authority: it is rejected at the authored component boundary
+before generating `Tool`; one tool with empty authority remains valid. See
+[the AI lowering decision](DESIGN-ai-hard.md#nonempty-tool-boundary-1546).
+
+A database without columns is another breaking removal: both
+`dbsystem EmptyDb { database app { schema 0 } }` and the variant with only an
+empty table formerly checked successfully. Database lowering now rejects them
+before generating an empty Column enum, with exact
+`database 'app' declares no columns`, kind type, database-declaration loc and
+CLI exit2 on check, BMC, induction, explicit, scenarios, testgen and kernel.
+`db check` reports the same error only when it reaches database lowering:
+static compatibility findings retain priority, so an active artifact reading
+an absent column can still produce violated/exit1, as on base. DB fmt/lint keep
+the existing semantics/exit2 rendering, message location suffix and absent loc
+field. A one-column database stays accepted.
+
+### Final type-boundary sweep evidence
+
+Sweep record: the
+command shapes `<base-binary> check <path>` and `<head-binary> check <path>` were run over
+all 597 `.fsl` files under `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/`, using each SHA's own materialized source tree and
+binary built there. Base commit: `1844fa74a717ba9229e0b292d9421c0939016e5e`. Built implementation commit:
+`91b052822adb9d0d31971d1932a2ba5145487623`. The `ok` to `error` transition set is empty (397 forms check ok on both).
+The inline removals above, tool-less kernel AI and column-less database removals are recorded separately;
+they must not be inferred absent from an empty repository-corpus transition set.

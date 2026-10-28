@@ -670,16 +670,34 @@ impl ModelError {
                 (site.span, site.declaration_path.as_slice())
             && kind == "use"
         {
+            let empty_enum =
+                self.message.starts_with("enum '") && self.message.ends_with(" has no members");
+            let resolved_path = if empty_enum {
+                site.source_file
+                    .as_deref()
+                    .and_then(|file| std::path::Path::new(file).parent())
+                    .map(|parent| parent.join(path).to_string_lossy().into_owned())
+            } else {
+                None
+            };
             let cause = crate::CoreError {
-                message: format!("{declaration}: {}", self.message),
+                message: if empty_enum {
+                    format!("enum '{declaration}' has no members")
+                } else {
+                    format!("{declaration}: {}", self.message)
+                },
                 line: cause_span.start.line,
                 column: cause_span.start.column,
                 origin: None,
                 kind: crate::CoreErrorKind::Semantics,
                 diagnostic_code: self.diagnostic_code,
             };
-            let mut anchored =
-                crate::compose::component_error(path, use_span, &cause, "failed to check");
+            let mut anchored = crate::compose::component_error(
+                resolved_path.as_deref().unwrap_or(path),
+                use_span,
+                &cause,
+                "failed to check",
+            );
             if let (Some(file), Some(anchor_origin)) = (&site.source_file, &mut anchored.origin) {
                 anchor_origin.set_source_file(file);
             }
@@ -1267,6 +1285,7 @@ impl ModelBuilder {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn collect_types(&mut self) -> Result<(), ModelError> {
         let items = self.spec.items.clone();
         for item in &items {
@@ -1296,9 +1315,24 @@ impl ModelBuilder {
                     name,
                     members,
                     member_spans,
+                    span,
                     symmetric,
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
+                    if members.is_empty() {
+                        let mut error =
+                            model_error(format!("enum '{}' has no members", shown(name)));
+                        if let Some(span) = span {
+                            error = error.at(*span);
+                        }
+                        let origin = self
+                            .origins
+                            .diagnostic_origin(&crate::origin::component_check_target(
+                                &type_target(name),
+                            ))
+                            .or(origin);
+                        return Err(error.with_origin(origin));
+                    }
                     self.insert_type(
                         name,
                         TypeDef::Enum {
