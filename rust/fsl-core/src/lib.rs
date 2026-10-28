@@ -1983,7 +1983,11 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
             span,
         } => Expr::Stage {
             process,
-            entity: Box::new(substitute(*entity, replacements, indexed)),
+            // Rename entity binders without replacing them with field reads.
+            entity: match substitute((*entity).clone(), replacements, indexed) {
+                renamed @ Expr::Var(_) => Box::new(renamed),
+                _ => entity,
+            },
             entity_span,
             span,
         },
