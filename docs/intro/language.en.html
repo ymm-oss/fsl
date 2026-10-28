@@ -508,12 +508,16 @@ models, not quantified as algebraic axioms.</p>
 }
 </code></pre>
 <p><code>~&gt;</code> is <strong>exclusive to leadsTo blocks</strong> — it cannot be used in general expressions.
-Each <code>helpful action(args...)</code> argument is checked against its action parameter
+<code>check</code> checks each <code>helpful action(args...)</code> argument against its action parameter
 type in the property's binder scope. This closes a previously unchecked position:
 ill-typed arguments, unknown names and forbidden pattern shadowing now fail <code>check</code>.
 Normalized <code>count</code>/<code>sum</code> patterns retain their standalone acceptance, including
 valid empty aggregates; composition cannot hide an original global-name refusal
 by prefixing, nor introduce one from a foreign declaration.
+Induction additionally requires state-independent arguments: leadsTo binders,
+enum members, literals, and their <code>+</code>, <code>-</code>, <code>*</code> combinations (including unary <code>-</code>).
+Well-typed arguments that read state are accepted by <code>check</code> and BMC;
+only induction refuses them.
 <code>within K</code> is a bounded deadline on a response; <code>K</code> must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 <code>decreases</code> is optional and must be an integer-valued expression. Under
@@ -1006,7 +1010,7 @@ Range-bound errors and terminal errors also use their authored origins, not a
 generated 1:1 location. Numeric/Set compatibility and valid dynamic verdicts
 are unchanged. These claims concern the expression trees visited by the shared
 validator. The historical round-1 baseline checked helpful action existence and
-arity only; main's #1483 now also checks parameter types, and that behavior is
+arity only; main's #1527 now also checks parameter types, and that behavior is
 preserved. Unsupported relation-valued temporary collections remain separate
 upstream work, not newly supported by this fix.</p>
 <p>The round-1 delta compares BASE <code>33d7faa7</code> with HEAD <code>8caf5c2e</code>: <strong>42 additional
