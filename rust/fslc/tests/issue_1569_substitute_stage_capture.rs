@@ -377,3 +377,69 @@ fn control_predicate_expansion_rejects_capture() {
         );
     }
 }
+
+#[test]
+fn control_legacy_field_named_like_implicit_parameter_keeps_stage_operand() {
+    // The field c is numeric, but stage(c) names the implicit Claim parameter.
+    // Replacing field reads c -> claim_c[c] must not rewrite that operand.
+    let source = r"requirements Collision {
+  number Amount
+  entity Claim
+  process Claim with c: Amount = 0 {
+    stages Draft, Approved
+    initial Draft
+    transition approve Draft -> Approved by Manager when stage(c) == Draft
+  }
+  invariant I { forall x: Claim { claim_c[x] == 0 } }
+}
+verify {
+  instances Claim = 2
+  values Amount = 0..1
+}
+";
+    let observations = run("legacy_field_named_c", source, "c", "8");
+    for observation in &observations {
+        let expected = match observation.mode {
+            "check" => "ok",
+            "kernel" => "kernel",
+            "verify" => "verified",
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            (observation.exit, observation.value["result"].as_str()),
+            (0, Some(expected)),
+            "{}: {}",
+            observation.mode,
+            observation.value
+        );
+    }
+    // Base 1844fa74 verifies the invariant; the transition is not vacuous.
+    let verify = &observations[2].value;
+    assert_eq!(verify["checked_to_depth"], 8);
+    assert_eq!(verify["completeness"], "bounded");
+    assert_eq!(verify["action_coverage"]["approve"], true);
+
+    let kernel = &observations[1].value;
+    let action = kernel["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|action| action["name"] == "approve")
+        .expect("approve action");
+    assert_eq!(action["parameters"][0]["name"], "c");
+    assert_eq!(action["parameters"][0]["type"]["name"], "Claim");
+    let guards = action["guards"].as_array().expect("guards");
+    assert_eq!(guards.len(), 2, "source-stage guard and user when guard");
+    // Inspect the user guard, not merely the generated Draft precondition.
+    assert_eq!(guards[1]["kind"], "requires");
+    let expression = &guards[1]["expression"];
+    assert_eq!(expression["kind"], "binary");
+    assert_eq!(expression["operator"], "==");
+    assert_eq!(expression["left"]["kind"], "index");
+    assert_eq!(expression["left"]["collection"]["kind"], "var");
+    assert_eq!(expression["left"]["collection"]["name"], "claim_stage");
+    assert_eq!(expression["left"]["index"]["kind"], "var");
+    assert_eq!(expression["left"]["index"]["name"], "c");
+    assert_eq!(expression["right"]["kind"], "var");
+    assert_eq!(expression["right"]["name"], "Draft");
+}

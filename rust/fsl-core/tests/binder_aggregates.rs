@@ -657,4 +657,43 @@ mod stage_substitution {
         };
         assert_eq!(substitute_expr(expr, &replacement()), expected);
     }
+
+    #[test]
+    fn control_stage_operand_ignores_non_variable_replacements_but_keeps_renames() {
+        assert_eq!(
+            substitute_expr(
+                stage("x"),
+                &HashMap::from([("x".into(), KernelExpr::Var("y".into()))])
+            ),
+            stage("y")
+        );
+        let captured = KernelExpr::Quantified {
+            quantifier: "exists".into(),
+            binder: binder(0, "c", None),
+            body: Box::new(condition("c")),
+        };
+        let KernelExpr::Quantified { binder, body, .. } = substitute_expr(captured, &replacement())
+        else {
+            panic!("quantifier")
+        };
+        let fresh = name_and_filter(&binder).0;
+        assert_ne!(fresh, "c");
+        assert_eq!(*body, expected_condition(fresh));
+
+        let field_read = KernelExpr::Index(
+            Box::new(KernelExpr::Var("claim_c".into())),
+            Box::new(KernelExpr::Var("x".into())),
+        );
+        let fields = HashMap::from([("x".into(), field_read.clone())]);
+        assert_eq!(
+            substitute_expr(KernelExpr::Var("x".into()), &fields),
+            field_read,
+            "the field replacement still applies to ordinary variable reads"
+        );
+        assert_eq!(
+            substitute_expr(stage("x"), &fields),
+            stage("x"),
+            "a field read must not replace the typed entity operand of stage"
+        );
+    }
 }
