@@ -3582,7 +3582,20 @@ pub fn induction_warnings(warnings: &[JsonValue]) -> Vec<JsonValue> {
 /// Returns [`RuntimeError`] for an empty/malformed trace, a disabled action, or
 /// any state/change mismatch.
 pub fn replay_trace(model: KernelModel, trace: &[TraceStep]) -> Result<(), RuntimeError> {
-    replay_trace_with_initial(model, trace, None)
+    replay_trace_with_bounds(model, trace, None)
+}
+
+/// Replay with the verification run's implicit-bound selection (`None`: all bounds).
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_trace`].
+pub fn replay_trace_with_bounds(
+    model: KernelModel,
+    trace: &[TraceStep],
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, None, checked_bounds)
 }
 
 /// Replay a trace whose step zero is a caller-provided complete logical state.
@@ -3596,13 +3609,28 @@ pub fn replay_trace_from_state(
     trace: &[TraceStep],
     initial_state: &State,
 ) -> Result<(), RuntimeError> {
-    replay_trace_with_initial(model, trace, Some(initial_state))
+    replay_trace_from_state_with_bounds(model, trace, initial_state, None)
+}
+
+/// Replay from a complete state with the run's implicit-bound selection.
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_trace_from_state`].
+pub fn replay_trace_from_state_with_bounds(
+    model: KernelModel,
+    trace: &[TraceStep],
+    initial_state: &State,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, Some(initial_state), checked_bounds)
 }
 
 fn replay_trace_with_initial(
     model: KernelModel,
     trace: &[TraceStep],
     initial_state: Option<&State>,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<(), RuntimeError> {
     let first = trace
         .first()
@@ -3652,7 +3680,7 @@ fn replay_trace_with_initial(
                     action.name
                 ))
             })?;
-        let stepped = monitor.step_candidate(candidate, None)?;
+        let stepped = monitor.step_candidate(candidate, checked_bounds)?;
         let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
         if observed_state != &entry.state {
             return Err(runtime_error(format!(

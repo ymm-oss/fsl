@@ -776,6 +776,7 @@ pub fn internal_error(message: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    include!("issue_1531_tests.rs");
     include!("issue_1463_tests.rs");
     include!("issue_1463_aggregate_and_component_locations_tests.rs");
     #[cfg(not(target_arch = "wasm32"))]
