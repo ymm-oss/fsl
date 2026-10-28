@@ -246,3 +246,58 @@ fn full_materialized_finding(output: &Value, source: &str, commit: &str) -> bool
     *output
         == json!({"fsl":"1.0","result":"error","kind":"unsupported_in_edition","edition":"next","fsl_edition":5,"findings":findings})
 }
+
+#[test]
+fn approval_only_report_renderers_do_not_deliver_stderr_warnings() {
+    let mut results = Results::default();
+    for kind in ["html", "ledger"] {
+        let scratch = Scratch::new();
+        scratch.write("spec.fsl", cases::WARNING_CASES[1].2);
+        git(&scratch, &["init", "-q"]);
+        git(&scratch, &["add", "spec.fsl"]);
+        git(&scratch, &["commit", "-qm", "report fixture"]);
+        for (phase, command) in [
+            (
+                "generate",
+                format!("{kind} spec.fsl --depth 2 -o artifact.out"),
+            ),
+            (
+                "create",
+                format!(
+                    "approval create spec.fsl --kind {kind} --artifact artifact.out --approver edition-test --depth 2 -o record.json"
+                ),
+            ),
+            (
+                "check",
+                "approval check spec.fsl --record record.json".into(),
+            ),
+            (
+                "overlay",
+                "ledger spec.fsl --depth 2 --approval record.json -o approved.md".into(),
+            ),
+        ] {
+            let output = run(&scratch, &command);
+            let actual = value(&output);
+            // Until approval admission changes, the flow has no envelope or
+            // stderr warning delivery. Report baselines still embed theirs.
+            let warning_count = actual
+                .to_string()
+                .matches("\"code\":\"legacy_string_metadata\"")
+                .count();
+            let produced = json!([
+                output.status.code(),
+                output.stderr,
+                actual.get("warnings"),
+                warning_count
+            ]);
+            let expected = json!([0, [], null, 0]);
+            results.check(
+                &format!("preserved/approval-render/{kind}/{phase}"),
+                &produced,
+                &expected,
+                produced == expected,
+            );
+        }
+    }
+    results.finish();
+}
