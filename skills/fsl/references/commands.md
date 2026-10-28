@@ -502,7 +502,8 @@ omitting only each finding's top-level `cost` and `cache` execution metadata.
 replay **error** (missing file, malformed JSON, wrong-spec trace,
 schema-invalid trace) fails the whole `ledger` command through the standard
 error envelope and exit code, the same as `--evidence`, rather than rendering
-a ledger with the implementation-log row silently missing. A **failing**
+a ledger with the implementation-log row silently missing. Nonconformance adds a
+spec-level 🔴 `conformance` finding; conformance adds none; exit stays tied to verify. A **failing**
 `--evidence` source (a definitive nonconformant/mismatch/unsupported verdict,
 not a verdict-less gate failure) adds a 🔴 要確認 finding for every
 requirement it attaches to — its own root `requirements`/`requirement.id`, or
@@ -522,6 +523,8 @@ Full CTI/hint/rank-failure evidence stays in the
 appendix; only each finding's top-level `cost` and `cache` are excluded, not
 same-named nested domain fields. Added findings and corrected attribution change affected
 ledger approval digests and require review and re-approval.
+Aggregate assurance is plain `bounded` if any `leads_to` entry is not `unbounded`.
+Unevaluated reachables show ⚪ 未評価 / `not_run`, unless scenario-confirmed (still 確認済 / `bounded`).
 Direct `ledger` and `html` return verification `result:"error"` with the full
 JSON error envelope and exit 2/3, before rendering or output-file creation;
 direct ledger stops before ancillary replay, evidence loading, and witness preparation

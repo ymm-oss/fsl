@@ -802,6 +802,18 @@ fn evidence_verdict(value: &Value) -> Option<bool> {
     }
 }
 
+fn replay_finding(replay: &Value) -> Option<Finding> {
+    (evidence_verdict(replay) == Some(false)).then(|| Finding {
+        requirement_id: None,
+        requirement_text: None,
+        trace_type: "conformance".to_owned(),
+        name: "実装ログ適合".to_owned(),
+        summary: "実装ログが仕様に非適合".to_owned(),
+        next_action: None,
+        raw: replay.clone(),
+    })
+}
+
 /// Turn every failing `--evidence` envelope into ledger [`Finding`]s (issue
 /// #508): a failing source must surface as a 🔴 要確認 row for every
 /// requirement it attaches to (root `requirements`/`requirement.id`, or
@@ -867,6 +879,17 @@ pub(crate) fn assurance_token(value: &Value) -> &'static str {
                 .and_then(Value::as_str)
         });
     if completeness == Some("unbounded") {
+        if value
+            .get("leads_to")
+            .and_then(Value::as_object)
+            .is_some_and(|entries| {
+                entries.values().any(|entry| {
+                    entry.get("completeness").and_then(Value::as_str) != Some("unbounded")
+                })
+            })
+        {
+            return "bounded";
+        }
         return "proved";
     }
     if completeness == Some("bounded") {
@@ -931,6 +954,9 @@ pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String {
 /// stamp one report-wide class on every row and call a bounded reachability
 /// witness `proved(induction)`.
 pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
+    if group == "reachables" && !reachables_evaluated(verification) {
+        return "not_run";
+    }
     if verification.get("result").and_then(Value::as_str) == Some("proved") {
         if matches!(group, "invariants" | "transitions") {
             return "proved";
@@ -961,18 +987,34 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
     }
 }
 
+fn reachables_evaluated(verification: &Value) -> bool {
+    verification.get("reachables").is_some_and(Value::is_object)
+        || verification.get("unreached").is_some_and(Value::is_array)
+        || matches!(
+            verification.get("result").and_then(Value::as_str),
+            Some("verified" | "proved")
+        )
+}
+
 fn assurance_cell(
     requirement_id: &str,
     registry: &BTreeMap<String, RequirementEntry>,
     verification: &Value,
     evidence: &[(String, Value)],
+    confirmed: bool,
 ) -> String {
     let mut sources = Vec::new();
     if let Some(entry) = registry.get(requirement_id) {
         let formal = entry
             .elements
             .iter()
-            .map(|(group, name)| formal_assurance(group, name, verification))
+            .map(|(group, name)| {
+                if group == "reachables" && confirmed {
+                    "bounded"
+                } else {
+                    formal_assurance(group, name, verification)
+                }
+            })
             .max_by_key(|token| match *token {
                 "proved" => 0,
                 "bounded" => 1,
@@ -1017,7 +1059,7 @@ fn assurance_cell(
 }
 
 fn guarantee_line(verification: &Value) -> String {
-    if verification.get("completeness").and_then(Value::as_str) == Some("unbounded") {
+    if assurance_token(verification) == "proved" {
         return "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned();
     }
     let depth = verification
@@ -1162,7 +1204,8 @@ pub fn render_ledger_with_approvals(
     let (mut requirement_order, registry) = requirement_registry(model);
     let undecided = undecided_declarations(model);
     let findings = collect_findings(model, verification);
-    let evidence_findings = collect_evidence_findings(evidence);
+    let mut evidence_findings = collect_evidence_findings(evidence);
+    evidence_findings.extend(replay.and_then(replay_finding));
     let mut by_requirement: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     let mut spec_level = Vec::new();
     for finding in findings.iter().chain(evidence_findings.iter()) {
@@ -1334,6 +1377,13 @@ pub fn render_ledger_with_approvals(
             (
                 if confirmed.contains(requirement_id) {
                     "🟢 確認済（承認可）"
+                } else if entry.is_some_and(|entry| {
+                    entry.elements.iter().any(|(group, name)| {
+                        group == "reachables"
+                            && formal_assurance(group, name, verification) == "not_run"
+                    })
+                }) {
+                    "⚪ 未評価"
                 } else {
                     "🟢 反例なし"
                 },
@@ -1371,7 +1421,8 @@ pub fn render_ledger_with_approvals(
                     requirement_id,
                     &registry,
                     verification,
-                    evidence
+                    evidence,
+                    confirmed.contains(requirement_id)
                 )),
                 escape(&types),
                 escape(&action),
@@ -1386,7 +1437,8 @@ pub fn render_ledger_with_approvals(
                     requirement_id,
                     &registry,
                     verification,
-                    evidence
+                    evidence,
+                    confirmed.contains(requirement_id)
                 )),
                 escape(&types),
                 escape(&action),
@@ -1458,7 +1510,13 @@ pub fn render_ledger_with_approvals(
             let _ = writeln!(
                 output,
                 "- 保証クラス: {}",
-                assurance_cell(&requirement_id, &registry, verification, evidence)
+                assurance_cell(
+                    &requirement_id,
+                    &registry,
+                    verification,
+                    evidence,
+                    confirmed.contains(&requirement_id)
+                )
             );
         }
         for finding in requirement_findings {

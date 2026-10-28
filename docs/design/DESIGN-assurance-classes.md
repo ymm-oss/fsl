@@ -64,7 +64,8 @@ parity inspection only — it is **not** the contract surface.
 object) to a token. Ordered rules, first match wins:
 
 1. formal completeness (`completeness` or nested `kernel.completeness`):
-   `"unbounded"` → `proved`; `"bounded"` → `bounded`. Keys such as
+   `"unbounded"` → `proved`, unless any `leads_to` entry is not `unbounded`, then
+   → `bounded`; `"bounded"` → `bounded`. Keys such as
    `formal_result` and the top-level `result` token are **not** read for
    this step — e.g. `{"result":"proved",...}` without `completeness` does
    not upgrade assurance class.
@@ -110,7 +111,9 @@ result. Under `result:"proved"`: `invariants`/`transitions` → `proved`; a
 `leadstos` entry → `proved` iff
 `verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
 else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
-When `result` is not `"proved"`: if `result == "error"` → `not_run`; else if
+First, an unevaluated reachable is `not_run` (no `reachables` object, no `unreached` array,
+result neither `verified` nor `proved`); scenario-confirmed ledger rows retain `bounded`.
+Otherwise, when `result` is not `"proved"`: if `result == "error"` → `not_run`; else if
 `completeness == "unbounded"` → `proved`; else → `bounded`.
 
 **Rust vs frozen Python — evaluation order (#995, unadjudicated).** The frozen

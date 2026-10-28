@@ -26,7 +26,9 @@ reads as "guarantees nothing".
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log
-  conformance (`conformant` / `nonconformant`). A replay **error** (missing
+  conformance (`conformant` / `nonconformant`). Nonconformance adds a spec-level
+  🔴 `conformance` finding; conformance adds none. Exit remains tied to verify.
+  A replay **error** (missing
   file, malformed JSON, wrong-spec trace, schema-invalid trace) is not
   evidence and must not be rendered as an empty/missing implementation-log
   row: it fails the whole `ledger` command through the same standard error
@@ -69,6 +71,8 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 1. **Header** — the guarantee limit in positive form ("BMC: depth N までの全実行を
    網羅" / "k帰納法で全実行を証明") + the honesty line ("保証するのは内部整合;
    intent fidelity is borne by the per-row 判断").
+   Any `leads_to` entry without `unbounded` completeness makes aggregate assurance
+   plain `bounded`, even under induction, across Markdown, HTML and document evidence.
    - **inline implements** (issue #1336) — after the header and any approval
      comparison, before governance and the undecided list, an `implements`
      envelope adds the folded top-level verdict (`検証判定`) and a table of
@@ -93,7 +97,11 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    identified as metadata, not a verification condition.
 3. **リスク一覧** — one row per requirement id: 業務目的 / 状態 (🔴 要確認 / 🟢
    確認済) / 検出種別 (`trace_type`) / リスク (`control.severity`) / 判断者
-   (`control.owner`) / 次アクション. Coverage findings require an authored
+   (`control.owner`) / 次アクション.
+   An unevaluated requirement-tagged reachable shows ⚪ 未評価 / `not_run`: no
+   `reachables` object, no `unreached` array, and result neither `verified` nor `proved`.
+   Scenario confirmation takes precedence, retaining 🟢 確認済（承認可） / `bounded`.
+   Coverage findings require an authored
    primary-origin span, or otherwise a kernel action span, with positive line
    and column. The shared `KernelModel::action_source_span` owner also governs
    runtime warnings, mutate dead-action notes, and HTML coverage badges/denominators.
