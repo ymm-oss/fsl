@@ -314,12 +314,19 @@ quantifier warning; legacy metadata slots and requirement mappings are not domai
 
 Captured-root admission also covers db/compat check, scenarios, generic testgen,
 kernel/conformance/testplan, typestate, explain, single-FSL-source analyze, trace
-replay and all six causal commands (#1449). Causal diff admits both operands and
+replay and all six causal commands (#1449).
+The single-root extension completes 21 more modes: six AI readers, domain
+analyze/expand/generate/replay/testgen, document check/claims/generate, db observe,
+log replay, counterexample export ordering, mutate success warnings, sweep capture
+and direct HTML/ledger raw-warning delivery. Causal diff admits both operands and
 observation its explicit mapping. Classification and consumption share captured
 bytes; each input slot is distinct, including two slots naming the same file.
 Envelope edition metadata belongs only to the first slot; other slots add warnings.
 All-root preparation makes a later causal root/mapping read error precede an
 earlier root's parse/model error. Project-mode intake remains deferred.
+Log replay similarly reports mapping IO before an ordinary root parse/model
+error. Document check admits before artifact IO/frontmatter, then projects the
+captured source under the recorded display label without reading that label's path.
 Existing header/gate/conflict rules and read-error kinds are retained. Next-edition
 migration findings refuse before consumption (exit 2); this can reject previously
 ungated next-edition inputs, not current-edition syntax.
@@ -334,7 +341,8 @@ Only warnings change in 57 corpus forms and 22 inline occurrences. Against paren
 next-edition migration forms (enum union, metadata, colon quantifier, inline maps)
 in analyze/conformance/explain/html/kernel/ledger/mutate/scenarios/sweep/testgen/
 typestate, plus enum union in testplan: 45 command/form observations, already
-refused by check. Deferred raw-warning/mutate-success/sweep-capture modes stay open.
+refused by check. Those raw-warning/mutate-success/sweep-capture modes were still
+open at that measured revision; the single-root extension now completes them.
 
 Open results finish warnings once; successful closed schemas and implemented raw
 TypeScript/readable/graph outputs use stderr `warning: <finding-json>` instead of
@@ -342,11 +350,32 @@ changing stdout. Verification finalizes after governance; domain/database checks
 scenarios and generic testgen own the outer finish. Worker refusal precedes model/
 solver use; editor refusal precedes model/analysis and retains UTF-16 ranges.
 Repair projections, safety and exits are unchanged.
+Direct raw HTML/ledger, document claims and domain expand/testgen use migration
+stderr delivery too. HTML/ledger file-output envelopes stay unchanged, with one
+warning in the distinct baseline; approval-only rendering self-admits its baseline
+without new stderr delivery. Mutate finishes its authored input once; sweep cells
+borrow the one captured root's token.
 
-Coverage is partial: AI intake, other domain commands, document/approval intake,
-live comparison/refinement/log mappings, batch/project/chain intake, counterexample
-ordering, mutate success warnings, sweep capture and raw-success HTML/ledger stderr
-remain #1449 work. Existing baselines and ledger migration rows are retained;
+Fresh boundary: BASE `c79016efeb630c717292e9392901cfe65ab40915`, implementation
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built in its own clean archive.
+Cache-disabled `fslc check FORM`, all 597 corpus files and eight affected required
+input occurrences per tree (including includes and a helper's approval baseline),
+both binaries in both trees: 2,420 checks, empty ok→error and full stdout/stderr/exit difference
+sets, no excluded fields. Two 21-mode consumer repeats produce 772 observations,
+17 distinct breaking command/source removals (19 control occurrences per repeat,
+including repeated requirements metadata): domain analyze/expand/generate/replay/
+testgen × enum union (5); document claims × metadata in spec and requirements,
+colon quantifier and inline mapping (4); document generate × metadata in spec and
+requirements (2); document check × requirements metadata (1); replay --from-log ×
+enum union, metadata in spec and requirements, colon quantifier and inline mapping
+(5). These were non-error consumer inputs, not grammar removals or proof claims.
+A mapping-only control already errored at BASE and is not counted as a removal.
+
+Coverage remains partial: eight modes across seven leaves remain—analyze batch
+and project, approval check/create/diff, chain admission, live diff and refine.
+The approval-check scope includes ledger `--approval` overlay root rereads.
+Deferred controls still execute and must reject; this does not close #1449.
+Existing baselines and ledger migration rows are retained;
 migration-only rows use 🟡 移行候補 / risk —, mixed/non-migration rows 🔴 要確認 / 要確認.
 Dependencies are not recursively admitted. Git-revision roots (#1513), example
 warning cleanup (#608), lint dialect support (#609) and other ledger warning

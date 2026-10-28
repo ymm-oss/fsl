@@ -171,6 +171,10 @@ and `compat check`, `domain check`, `scenarios`, generic `testgen`, `kernel`,
 `conformance`, `testplan`, `typestate`, `explain`, single-FSL-source `analyze`,
 trace replay, and all six causal commands. These consumers classify a captured
 root before model/solver work or output effects and consume those same bytes.
+The single-root extension completes 21 additional modes: the six AI readers,
+domain analyze/expand/generate/replay/testgen, document check/claims/generate,
+database observation, log replay, counterexample export ordering, mutate success
+warnings, sweep capture and direct HTML/ledger raw-warning delivery.
 Existing header/gate/conflict rules and command-specific read-error kinds are
 retained; this adds no CLI flags or accepted dialect/header combinations.
 The single-input analyze entry also applies edition preflight to `.toml` text;
@@ -187,6 +191,12 @@ secondary slots contribute warnings without overwriting that root's metadata.
 Preparing all direct causal roots also intentionally changes error precedence:
 a later unreadable operand or observation mapping is reported before an earlier
 root's parse/model error, because consumption starts only after preparation.
+Log replay likewise prepares its root and explicit mapping before model work:
+an unreadable mapping now precedes an ordinary root parse/model error.
+Document check admits the captured root before artifact IO or frontmatter parsing,
+then projects those same bytes under the artifact's recorded display label;
+that label is not another path to read. Ordinary projection still follows label
+discovery. These two error-precedence changes are intentional.
 JSON traces, evidence, plans, records and trust keys are not FSL roots. Recursive
 compose `use`, `implements from`, causal `uses` and governance dependencies are
 outside this root-admission change. Git-revision roots are tracked by #1513.
@@ -206,8 +216,15 @@ Native and Worker check pass the admitted token through `run_check_stages` to
 Implemented open JSON outputs receive findings in `warnings`. Closed successful
 Kernel/conformance/testplan output and implemented raw TypeScript/readable/graph
 output instead use stderr `warning: <finding-json>`, retaining stdout schemas and
-formats. Their error envelopes remain open. Existing non-migration warnings,
-verdicts, assurance and exits are preserved on admitted current-edition input;
+formats. Their error envelopes remain open.
+Direct raw HTML/ledger, document claims and domain expansion/test generation also
+deliver migration warnings on stderr. HTML/ledger file-output envelopes remain
+unchanged; their distinct verification baselines retain one finished warning.
+Approval-only rendering retains its own baseline admission without new stderr
+delivery. Mutate finishes the authored source once, even when it later uses a
+synthetic mutation source; sweep captures once and lends its token to each cell.
+Existing non-migration warnings, verdicts, assurance and exits are preserved on
+admitted current-edition input;
 next-edition migration findings refuse with the existing edition error and exit 2.
 Ordinary parser/type errors keep their command-specific diagnostics. Repair tools
 `lint`, `migrate` and `fmt` retain their planner/formatter projections, validation,
@@ -234,25 +251,47 @@ non-error consumer result to edition refusal for `analyze`, `conformance`,
 and `typestate`; `testplan` additionally changes for the enum-union form only.
 That is 45 command/form observations, not 45 distinct sources. Existing check
 already refuses these forms. No canonical control changes result, exit or
-artifact presence. The HTML/ledger raw-warning, mutate-success-warning and sweep
-capture modes remain deferred despite their verification-driven refusals.
+artifact presence. That measurement did not complete HTML/ledger raw warnings,
+mutate success warnings or sweep capture; the single-root extension now does.
 Upstream #1450/#1459 restrictions, including the located Bool `acyclic(done)`
 refusal in the shared #1463 row, belong to BASE and are not attributed here.
 
-This is not all-reader completion. `DEFERRED_TO_SECOND_PR` in the shared edition
-test support names 29 unfinished modes across 28 leaves, including AI intake,
-non-check domain commands, document/approval intake, live comparison/refinement
-and log mappings, batch/project/chain roots, counterexample ordering, mutate
-success warnings, sweep capture, and raw-success HTML/ledger stderr. Existing
-report baselines, ledger migration rendering and per-layer warning behavior are
-retained. Deferred cells still execute, and each named mode must retain a rejecting
+The fresh single-root comparison uses BASE
+`c79016efeb630c717292e9392901cfe65ab40915` and implementation
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built in its own clean archive.
+Cache-disabled `fslc check FORM` runs both binaries in both trees over all 597
+tracked corpus forms and eight input occurrences from rewritten required tests
+(including included files and the approval baseline used by a helper):
+2,420 checks. The full
+stdout/stderr/exit difference set and ok-to-error set are empty, with no excluded
+fields. The 21-mode consumer inventory executes 772 observations across two
+repeats. Both produce 17 distinct breaking command/source removals (19 control
+occurrences per repeat, including repeated requirements-metadata probes):
+
+| Consumer | Previously non-error next-edition sources now refused | Pairs |
+|---|---|---:|
+| domain analyze/expand/generate/replay/testgen | enum union | 5 |
+| document claims | metadata in spec and requirements, colon quantifier, inline mapping | 4 |
+| document generate | metadata in spec and requirements | 2 |
+| document check | requirements metadata | 1 |
+| replay --from-log | enum union, metadata in spec and requirements, colon quantifier, inline mapping | 5 |
+
+These are consumer-intake removals, not grammar removals or proof claims. A
+mapping-only control already errored at BASE and is not counted as a removal.
+
+This is not all-reader completion. `DEFERRED_TO_SECOND_PR` now names eight modes
+across seven leaves: analyze batch and project, approval check/create/diff, chain
+admission, live diff and refine. Approval-check transport explicitly includes the
+ledger `--approval` overlay, whose root rereads remain deferred. Existing report
+baselines, ledger migration rendering and per-layer warning behavior are retained.
+Deferred cells still execute, and each named mode must retain a rejecting
 observation; an unclassified leaf or a fully green mode left deferred fails the
 inventory. `OUT_OF_SCOPE_1513` separately identifies historical revision cells.
 The remaining modes must be completed and the deferred set emptied to close #1449.
 
 Earlier refusal can remove next-edition inputs accepted by an ungated consumer;
 it does not remove current-edition syntax. The final-base corpus and consumer
-comparison, with exact revisions, form counts and per-command transitions, remains
-required before merge; no empty transition set is asserted here. Public-example
+comparison above records the exact revisions, form counts and per-command
+transitions for this extension. Public-example
 warning cleanup (#608), AI/causal lint-planner support (#609) and unrelated ledger
 warning classification (#1497) are not part of this delivery.
