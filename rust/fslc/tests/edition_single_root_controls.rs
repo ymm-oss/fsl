@@ -14,12 +14,13 @@ fn run(scratch: &Scratch, command: &str) -> std::process::Output {
 fn replay_mapping_io_precedes_an_ordinary_root_parse_error() {
     let scratch = Scratch::new();
     scratch.write("broken.fsl", "spec Broken {\n");
+    scratch.write("log.jsonl", "");
     let missing = scratch.0.join("missing.fsl");
     let io = std::fs::read_to_string(&missing).unwrap_err();
     let expected = json!({"fsl":"1.0", "result":"error", "kind":"io", "message":io.to_string()});
     let output = run(
         &scratch,
-        "replay broken.fsl --from-log missing.jsonl --mapping missing.fsl",
+        "replay broken.fsl --from-log log.jsonl --mapping missing.fsl",
     );
     let mut results = Results::default();
     results.error_envelope("ordering/replay/mapping-io", &output, &expected, true);
