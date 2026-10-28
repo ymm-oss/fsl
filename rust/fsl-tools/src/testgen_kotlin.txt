@@ -41,8 +41,18 @@ fun makeAdapter(): Adapter? = null
 const val ADAPTER_NOT_WIRED: String = __NOT_WIRED_MESSAGE__
 
 // Assert only the fields the spec mentions; recurse into nested (Map/struct)
-// shapes. Kotlin's `==` is deep on List/Map and discriminates Int from Double, so
-// leaf assertEquals does the right thing.
+// shapes. Normalize integral values to Long recursively through List/Map before
+// equality, preserving exact list order/length and Float/Double distinctions.
+fun normalizeIntegral(value: Any?): Any? = when (value) {
+    is Byte -> (value as Byte).toLong()
+    is Short -> (value as Short).toLong()
+    is Int -> (value as Int).toLong()
+    is Long -> (value as Long).toLong()
+    is List<*> -> (value as List<*>).map { normalizeIntegral(it) }
+    is Map<*, *> -> (value as Map<*, *>).mapValues { normalizeIntegral(it.value) }
+    else -> value
+}
+
 fun assertPartial(observed: Map<String, Any?>, expected: Map<String, Any?>) {
     for ((key, value) in expected) {
         assertTrue(observed.containsKey(key), "missing state key $key")
@@ -50,11 +60,8 @@ fun assertPartial(observed: Map<String, Any?>, expected: Map<String, Any?>) {
         if (value is Map<*, *> && seen is Map<*, *>) {
             @Suppress("UNCHECKED_CAST")
             assertPartial(seen as Map<String, Any?>, value as Map<String, Any?>)
-        } else if ((value is Byte || value is Short || value is Int || value is Long) &&
-                   (seen is Byte || seen is Short || seen is Int || seen is Long)) {
-            assertEquals((value as Number).toLong(), (seen as Number).toLong(), "state $key")
         } else {
-            assertEquals(value, seen, "state $key")
+            assertEquals(normalizeIntegral(value), normalizeIntegral(seen), "state $key")
         }
     }
 }

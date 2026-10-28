@@ -58,14 +58,14 @@ fn fail_header(prefix: &str) -> String {
         .join("\n")
 }
 
-/// Fill a checked-in template's `__SOURCE__` and named slots.
+/// Fill trusted named slots before inserting the escaped source name as data.
 fn fill_template(template: &str, source_name: &str, slots: &[(&str, String)]) -> String {
-    let mut text = testgen_template(template, source_name);
+    let mut text = template.to_owned();
     for (key, value) in slots {
         debug_assert!(text.contains(key), "template slot {key} missing");
         text = text.replace(key, value);
     }
-    text
+    testgen_template(&text, source_name)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1142,6 +1142,11 @@ fn literal(value: &Value, target: Target) -> String {
             Some(integer) if i32::try_from(integer).is_err() => format!("{integer}L"),
             _ => value.to_string(),
         },
+        Value::Number(value)
+            if matches!(target, Target::Php) && value.as_i64() == Some(i64::MIN) =>
+        {
+            "PHP_INT_MIN".to_owned()
+        }
         Value::Number(value) => value.to_string(),
         Value::String(value) => quoted(value, target),
         Value::Array(values) if values.is_empty() => match target {
