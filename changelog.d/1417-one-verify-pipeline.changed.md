@@ -9,6 +9,6 @@ unchanged. The error-precedence inventory is in docs/design/DESIGN-ledger.md and
 docs/design/DESIGN-html-report.md; both language references and the command skill
 reference describe the shared boundary.
 Approval create for ledger/HTML, approval check, approval diff and counterexample
-export still lower the spec before verification or rerendering; their invalid-input
-precedence and unknown-AI-tool panic/exit 101 are unchanged. The panics are tracked
-in #1464; approval create's diagnostic precedence is a separate issue.
+export still lower the spec before verification or rerendering, retaining their
+invalid-input precedence. Unknown AI tools return JSON `semantics` errors (exit 2);
+approval create's diagnostic precedence remains a separate issue.

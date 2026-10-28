@@ -64,7 +64,8 @@ parity inspection only — it is **not** the contract surface.
 object) to a token. Ordered rules, first match wins:
 
 1. formal completeness (`completeness` or nested `kernel.completeness`):
-   `"unbounded"` → `proved`; `"bounded"` → `bounded`. Keys such as
+   `"unbounded"` → `proved`, unless any `leads_to` entry is not `unbounded`, then
+   → `bounded`; `"bounded"` → `bounded`. Keys such as
    `formal_result` and the top-level `result` token are **not** read for
    this step — e.g. `{"result":"proved",...}` without `completeness` does
    not upgrade assurance class.
@@ -106,12 +107,19 @@ must never change the assurance label, only add a finding.
 
 `pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str`
 (`rust/fsl-tools/src/ledger.rs`) — per spec element against a `verify`/`prove`
-result. Under `result:"proved"`: `invariants`/`transitions` → `proved`; a
+result. Under `result:"proved"` or non-error `completeness:"unbounded"`: `invariants`/`transitions` → `proved`; a
 `leadstos` entry → `proved` iff
 `verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
 else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
-When `result` is not `"proved"`: if `result == "error"` → `not_run`; else if
-`completeness == "unbounded"` → `proved`; else → `bounded`.
+This also corrects unranked leadsTo/reachable rows under `refinement_failed` over induction.
+Otherwise `error` → `not_run`, else `bounded`. Reachables also use `not_run` for `violated` +
+`invariant`/`trans`/`ensures`/`partial_op`/`type_bound`, or `explicit` deadlock.
+This infers evaluation from result kind/engine: "not evaluated" can include an earlier witness
+that the producer omits; #1565 tracks precise per-reachable status. Scenario-confirmed library
+ledger rows retain `bounded`; after an early violation the CLI scenario run fails on that same
+violation, so this override cannot arise there. Ledger/HTML CLIs accept only `bmc`/`induction`.
+Explicit verify output can be supplied to library renderers or as document evidence, but the
+per-property explicit-deadlock rule is library-only; document evidence uses the aggregate token.
 
 **Rust vs frozen Python — evaluation order (#995, unadjudicated).** The frozen
 Python `classify_element` checks `completeness` **before** `result == "error"`.
@@ -211,7 +219,7 @@ not adopt a future trust model or Adapter contract (issue #994).
 | Producer | Result fields | Class |
 |---|---|---|
 | `fslc verify` (BMC) | `completeness:"bounded"` | `bounded` |
-| `fslc verify --engine induction` | `proved`, `completeness:"unbounded"` | `proved` (per-element nuance above) |
+| `fslc verify --engine induction` | `proved`, `completeness:"unbounded"` | aggregate `bounded` if any leadsTo is not unbounded, otherwise `proved`; unranked leadsTo/reachables stay `bounded` per element |
 | induction `unknown_cti` | `completeness:"bounded"` | `bounded` |
 | `fslc ai check` (component) / `fslc db check` / `fslc domain check` | `verified_under_assumptions` + `kernel.completeness` | `proved`/`bounded` + under-assumptions marker |
 | `fslc replay` (kernel Monitor) | `conformant`/`nonconformant` | `replay-observed` |

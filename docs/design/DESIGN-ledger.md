@@ -26,7 +26,8 @@ reads as "guarantees nothing".
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log
-  conformance (`conformant` / `nonconformant`). A replay **error** (missing
+  conformance (`conformant` / `nonconformant`). Nonconformance adds a spec-level
+  🔴 `conformance` finding; conformance adds none. Exit stays tied to verify. A replay **error** (missing
   file, malformed JSON, wrong-spec trace, schema-invalid trace) is not
   evidence and must not be rendered as an empty/missing implementation-log
   row: it fails the whole `ledger` command through the same standard error
@@ -69,6 +70,8 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 1. **Header** — the guarantee limit in positive form ("BMC: depth N までの全実行を
    網羅" / "k帰納法で全実行を証明") + the honesty line ("保証するのは内部整合;
    intent fidelity is borne by the per-row 判断").
+   Any `leads_to` entry without `unbounded` completeness makes aggregate assurance
+   plain `bounded`, even under induction, across Markdown, HTML and document evidence.
    - **inline implements** (issue #1336) — after the header and any approval
      comparison, before governance and the undecided list, an `implements`
      envelope adds the folded top-level verdict (`検証判定`) and a table of
@@ -105,6 +108,16 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    map renders `0/0`. Migration (#1338): removing false sentinel findings changes
    affected ledger/HTML rendering digests; existing approvals report `drifted`
    (exit 0), so review and re-approve them. Approval schemas are unchanged.
+   Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/
+   `partial_op`/`type_bound`, or `explicit` deadlock; other results count as evaluated.
+   Scenario confirmation wins (確認済 / `bounded`) for supplied library inputs.
+   The report CLIs accept only `bmc`/`induction`; explicit verify envelopes may be supplied
+   to library renderers or as document evidence, whose class uses the aggregate token.
+   The per-property explicit-deadlock rule is library-only. After an early violation the CLI's
+   scenario run fails on the same violation, so it cannot supply that confirmation override.
+   "Not evaluated" includes earlier witnesses omitted from the producer's result; precise status is #1565.
+   Under `refinement_failed` over induction, unranked leadsTo
+   and reachable ledger/HTML rows stay `bounded`.
 4. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).
