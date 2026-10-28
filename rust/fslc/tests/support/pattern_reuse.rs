@@ -216,14 +216,45 @@ pub fn cases() -> Vec<Case> {
         ),
     ]
     .into_iter()
-    .map(|(id, role, marker, source)| Case {
-        id,
-        role,
-        marker,
-        paths: "sibling-collision/evaluator-bound-names",
-        source: source.into(),
-        component: source.into(),
-        compose: "compose C {\n  use A as part from \"a.fsl\"\n}\n".into(),
+    .map(|(id, role, marker, source)| {
+        super::forms::case(
+            id,
+            "sibling-collision/evaluator-bound-names",
+            role,
+            source.into(),
+            marker,
+        )
+    })
+    .collect()
+}
+
+pub fn priority_cases() -> Vec<Case> {
+    [
+        (
+            "priority-guards", "priority-guards-renamed", "action a",
+            super::forms::spec(
+                "o: Option<Int>, p: Option<Int>, x: Int", "o = some(1) p = some(2) x = 1",
+                "  action a() {\n    requires (o is some(v)) => true\n    requires v == 1\n    requires p is some(v)\n    x = v\n  }\n", "x >= 0",
+            ),
+            "requires v == 1", "requires x == 1",
+        ),
+        (
+            "priority-siblings", "priority-siblings-renamed", "invariant P",
+            super::forms::spec(
+                "o: Option<Int>, p: Option<Int>, x: Int", "o = some(1) p = some(2) x = 1",
+                "  action stay() {}\n", "((o is some(v)) => true) and (v == 1 and (p is some(v)))",
+            ),
+            "(v == 1 and", "(x == 1 and",
+        ),
+    ]
+    .into_iter()
+    .flat_map(|(id, renamed_id, marker, source, from, to)| {
+        assert_eq!(source.matches(from).count(), 1, "one earlier invalid read");
+        let renamed = source.replacen(from, to, 1);
+        [
+            super::forms::case(id, "diagnostic-priority", Role::Refuse, source, marker),
+            super::forms::case(renamed_id, "diagnostic-priority", Role::Collision, renamed, marker),
+        ]
     })
     .collect()
 }

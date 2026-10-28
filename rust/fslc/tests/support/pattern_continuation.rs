@@ -36,7 +36,7 @@ pub fn scalar(items: &str, predicate: &str) -> String {
     )
 }
 
-fn case(
+pub(super) fn case(
     id: &'static str,
     paths: &'static str,
     role: Role,

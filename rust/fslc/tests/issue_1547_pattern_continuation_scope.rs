@@ -304,6 +304,11 @@ fn def_call_scope_after_or_preserves_free_names() {
         let dir = fixture(&case);
         let after_or = case.id == "def-call-or-free-name";
         let clause = point(&case.source, case.marker);
+        if after_or {
+            // Both routes retain exit 2 / semantics (exact_error). The old direct
+            // capture had no location; both routes now identify this clause.
+            assert_eq!(clause, json!({"line":7,"column":3}));
+        }
         let call = point(&case.source, "p() }");
         inputs.push(json!({"id":case.id,"source":case.source,"component":case.component,"compose":case.compose,"directory":dir}));
         for (route, file, composed) in [("direct", "d.fsl", false), ("compose", "c.fsl", true)] {
@@ -454,6 +459,50 @@ fn sibling_pattern_names_preserve_collisions_and_public_spelling() {
     assert_eq!(
         renamer_failures, 0,
         "two-source diagnostics must name user v, not a substitution temporary"
+    );
+}
+
+#[test]
+fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
+    let report = scratch::scratch("issue-1547-priority-report", &[]);
+    let mut inputs = Vec::new();
+    let mut rows = Vec::new();
+    let mut failures = 0;
+    for case in reuse::priority_cases() {
+        let dir = fixture(&case);
+        let renamed = matches!(case.role, Role::Collision);
+        let location = point(&case.source, case.marker);
+        let mut expected = baseline_collision_packet(&location);
+        if !renamed {
+            expected["message"] = json!(format!(
+                "invalid model expression: public Kernel cannot type identifier 'v' at {}:{}",
+                location["line"], location["column"]
+            ));
+        }
+        inputs.push(json!({"id":case.id,"source":case.source,"component":case.component,"compose":case.compose,"counterfactual":renamed,"directory":dir}));
+        for (route, file) in [("direct", "d.fsl"), ("compose", "c.fsl")] {
+            for consumer in ["check", "bmc", "induction", "explicit", "default"] {
+                let actual = observe(&dir, file, consumer);
+                let ok = actual == (expected.clone(), 2);
+                failures += usize::from(!ok);
+                rows.push(json!({"id":case.id,"route":route,"consumer":consumer,"class":if renamed {"collision-counterfactual"} else {"earlier-invalid-read"},"ok":ok,"expected_packet":expected,"output":actual.0,"exit":actual.1}));
+            }
+        }
+    }
+    std::fs::write(
+        report.join("report.json"),
+        serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"failures":failures}))
+            .unwrap(),
+    )
+    .unwrap();
+    eprintln!(
+        "PATTERN_PRIORITY_RESULT cells=4 observations={} failures={failures} report={}",
+        rows.len(),
+        report.display()
+    );
+    assert_eq!(
+        failures, 0,
+        "a prior invalid read wins, but renaming it restores the collision"
     );
 }
 
