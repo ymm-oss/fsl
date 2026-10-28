@@ -88,7 +88,7 @@ enum Outcome {
 }
 
 /// `expression` with each bare field name of the entity spelled
-/// `Entity.field`; inputs and locally bound names shadow fields.
+/// `Entity.field`; inputs and quantifier/aggregate binders shadow fields.
 fn spell_fields(
     expression: Expr,
     fields: &BTreeSet<&str>,
@@ -102,19 +102,11 @@ fn spell_fields(
             Expr::Var(format!("{entity}.{name}"))
         }
         Expr::Var(_) => expression,
-        Expr::Binary { op, left, right } => {
-            let mut patterns = std::collections::HashSet::new();
-            if op == "and" || op == "=>" {
-                crate::compose::extend_pattern_names(&left, &mut patterns);
-            }
-            let mut scoped = inputs.clone();
-            scoped.extend(patterns.iter().map(String::as_str));
-            Expr::Binary {
-                op,
-                left: boxed(left),
-                right: Box::new(spell_fields(*right, fields, &scoped, entity)),
-            }
-        }
+        Expr::Binary { op, left, right } => Expr::Binary {
+            op,
+            left: boxed(left),
+            right: boxed(right),
+        },
         Expr::Is { expr, pattern } => Expr::Is {
             expr: boxed(expr),
             pattern,
