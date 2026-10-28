@@ -2473,10 +2473,12 @@ mod selected_overflow {
                 }),
                 "{label}"
             );
-        } else if engine != "explicit" {
+        } else {
             // ANS-1519selected option F: bounds are not selected, but a state
             // frame of capacity 1 cannot represent length 2. Fail closed at
             // that boundary instead of proving anything using a lost suffix.
+            // Explicit now fails closed like bmc and induction when a
+            // successor exceeds an unchecked Seq capacity (#1531).
             assert_eq!(
                 (exit, &value["result"], &value["kind"]),
                 (2, &json!("error"), &json!("semantics")),
@@ -2488,44 +2490,6 @@ mod selected_overflow {
                 }),
                 "{label}"
             );
-        } else {
-            // P is true initially by size==1, and on the attempted [0,1]
-            // because at(1)==1. R is false initially and after take: the
-            // appended element is 1, never the 0 demanded by R. Concrete
-            // exploration therefore cannot produce either erroneous verdict.
-            // SF3 has the opposite values: [] -> [1] -> [1,0] is the entire
-            // concrete path. P is true throughout; R asks for at(1)==1 and
-            // is false throughout. At depth 2 explicit is still bounded, so
-            // selected P is verified, not an unbounded claim of closure.
-            let (expected_exit, result) = if property == "P" {
-                (0, "verified")
-            } else {
-                (1, "reachable_failed")
-            };
-            assert_eq!(
-                (
-                    exit,
-                    &value["result"],
-                    &value["violation_kind"],
-                    &value["invariant"],
-                    &value["message"],
-                ),
-                (
-                    expected_exit,
-                    &json!(result),
-                    &Value::Null,
-                    &Value::Null,
-                    &Value::Null,
-                ),
-                "{label}"
-            );
-            if property == "P" {
-                assert_eq!(value["invariants_checked"], json!(["P"]), "{label}");
-            } else {
-                let unreached = value["unreached"].as_array().expect("unreached R");
-                assert_eq!(unreached.len(), 1, "{label}");
-                assert_eq!(unreached[0]["name"], "R", "{label}");
-            }
         }
     }
 
