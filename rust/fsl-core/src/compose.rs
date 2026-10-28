@@ -1268,7 +1268,7 @@ pub(super) fn map_scoped_action_items<E>(
     map_normalized_action_items(items, bound, |item, bound| {
         let item = rewrite(item, bound)?;
         match &item {
-            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals),
+            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals, true),
             ActionItem::Let(name, ..) => {
                 bound.insert(name.clone());
             }
@@ -1447,7 +1447,8 @@ fn rewrite_expr_in_phase(
             )?,
             Expr::Binary { op, left, right } => {
                 let left = rewrite(*left)?;
-                let nested = pattern_scope(&left, bound, &HashSet::new());
+                let ok = crate::pattern_binding_flows(&op, true);
+                let nested = pattern_scope(&left, bound, &HashSet::new(), ok);
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -2004,7 +2005,7 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
                 names.guards.insert(name.clone());
             }
             ActionItem::Requires(expr, _) => {
-                extend_pattern_names(expr, &mut names.guards);
+                crate::collect_pattern_names(expr, &mut names.guards);
             }
             ActionItem::Statement(_) | ActionItem::Ensures(..) => {}
         }
@@ -2338,7 +2339,8 @@ fn resolve_alias_expr_scoped(
             }
             Expr::Binary { op, left, right } => {
                 let left = resolve(*left)?;
-                let nested = pattern_scope(&left, bound, &HashSet::new());
+                let ok = crate::pattern_binding_flows(&op, true);
+                let nested = pattern_scope(&left, bound, &HashSet::new(), ok);
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -2401,11 +2403,12 @@ pub(super) fn pattern_scope(
     expr: &Expr,
     bound: &HashSet<String>,
     globals: &HashSet<String>,
+    active: bool,
 ) -> HashSet<String> {
     let mut patterns = HashSet::new();
     extend_pattern_names(expr, &mut patterns);
     let mut nested = bound.clone();
-    nested.extend(patterns.difference(globals).cloned());
+    nested.extend(patterns.difference(globals).filter(|_| active).cloned());
     nested
 }
 
@@ -2417,7 +2420,7 @@ pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
         } => {
             bound.insert(name.clone());
         }
-        Expr::Binary { left, right, .. } => {
+        Expr::Binary { op, left, right } if crate::pattern_binding_flows(op, false) => {
             extend_pattern_names(left, bound);
             extend_pattern_names(right, bound);
         }

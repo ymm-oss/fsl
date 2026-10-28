@@ -2288,12 +2288,14 @@ pub(crate) fn visit_free_names(
 }
 
 fn visit_free_names_inner(expr: &Expr, bound: &BTreeSet<String>, visit: &mut impl FnMut(&str)) {
-    if let Expr::Binary { left, right, .. } = expr {
+    if let Expr::Binary { op, left, right } = expr {
         visit_free_names(left, bound, visit);
+        let ok = crate::pattern_binding_flows(op, true);
         let local = crate::compose::pattern_scope(
             left,
             &bound.iter().cloned().collect(),
             &std::collections::HashSet::new(),
+            ok,
         );
         visit_free_names(right, &local.into_iter().collect(), visit);
         return;

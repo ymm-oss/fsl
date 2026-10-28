@@ -640,7 +640,7 @@ fn extend_pattern_binding_inner(
                 env.insert(binding.clone(), *inner);
             }
         }
-        Expr::Binary { left, right, .. } => {
+        Expr::Binary { op, left, right } if crate::pattern_binding_flows(op, false) => {
             extend_pattern_binding(left, env, model)?;
             extend_pattern_binding(right, env, model)?;
         }
@@ -1310,7 +1310,9 @@ fn validate_expression_inner(
             let (left_ty, right_ty) = binary_operand_types(op, left, right, env, model)?;
             validate(left, env, span, Some(&left_ty))?;
             let mut right_env = env.clone();
-            extend_pattern_binding(left, &mut right_env, model)?;
+            if crate::pattern_binding_flows(op, true) {
+                extend_pattern_binding(left, &mut right_env, model)?;
+            }
             validate(right, &right_env, span, Some(&right_ty))?;
         }
         Expr::Neg(operand) => {

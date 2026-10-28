@@ -424,7 +424,9 @@ fn expr_json_inner(
             output.insert("operator".to_owned(), json!(op));
             let left_json = expr_json(left, env, model, path, span, Some(&left_ty))?;
             let mut right_env = env.clone();
-            extend_pattern_binding(left, &mut right_env, model)?;
+            if crate::pattern_binding_flows(op, true) {
+                extend_pattern_binding(left, &mut right_env, model)?;
+            }
             output.insert("left".to_owned(), left_json);
             output.insert(
                 "right".to_owned(),

@@ -16,6 +16,9 @@ use serde_json::Value;
 type InstanceOverrides = BTreeMap<String, i64>;
 type ValueOverrides = BTreeMap<String, (i64, i64)>;
 type FilteredScopeOverrides = Option<(InstanceOverrides, ValueOverrides)>;
+pub(crate) fn pattern_binding_flows(op: &str, right_operand: bool) -> bool {
+    op == "and" || (right_operand && op == "=>")
+}
 
 /// Re-exported so every crate that recurses over `KernelExpr` reaches the same
 /// stack guard without depending on `fsl-syntax` directly (#620).
@@ -1702,7 +1705,8 @@ impl PredicateExpander {
             },
             Expr::Binary { op, left, right } => {
                 let left = self.expand_expr(*left, stack)?;
-                let bound = compose::pattern_scope(&left, &self.locals.borrow(), &self.globals);
+                let ok = pattern_binding_flows(&op, true);
+                let bound = compose::pattern_scope(&left, &self.locals.borrow(), &self.globals, ok);
                 self.scoped(bound, || {
                     Ok(Expr::Binary {
                         op,
