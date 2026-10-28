@@ -2720,8 +2720,66 @@ explicitly in the output `note`). `Monitor` requires init to be deterministic
 (forall bulk assignment is allowed). For a Map/index target (`m[K] = ...`),
 "assign exactly once" is per concrete key, not per variable: separate flat
 `m[K1] = ...` / `m[K2] = ...` statements for two *different* keys are fine;
-the same key assigned twice, or a key that is itself a bound loop variable
-(where two iterations could alias), is still rejected.
+different assignment statements that write the same key on a path are rejected.
+A finite binder-keyed `forall k: K { m[k] = ... }` is allowed, but a later
+statement writing one of its covered keys is an ownership conflict.
+For struct roots and `Map<K, Struct>` entries, ownership is per
+`(root, key, field)` (with no key for a struct root): different fields may be
+initialized separately, including in a `forall`, but different statements
+writing the same field or overlapping a whole root/entry with one of its fields
+on a path are rejected. Field types remain scalar or nested `Option<scalar>`.
+Ownership summarizes a `forall` statement once: repeated writes by that same
+statement across iterations are allowed when their values agree; conflicting
+values make init unsatisfiable rather than causing a duplicate-ownership error.
+An unresolved map key (dynamic, `where`-filtered, collection, or non-constant
+range binder) retains whole-root ownership and conflicts with any other
+statement writing that root.
+Init shapes that need the new per-field ownership granularity are admitted only
+when every root init assigns on any path is definitely complete on all paths,
+including all keys and fields of a Map, even for roots written only as whole
+values. Roots init never assigns remain free. A partial branch, empty or not-provably-nonempty
+loop, or subset of keys does not suffice; partial forms retain the previous
+ownership error. Shapes accepted by the previous root-granularity rule, such
+as single-field or mutually exclusive branch-split field writes, whole-entry key
+subsets, or whole-root writes on just one path, retain their symbolic free-component behavior.
+Refinement's legacy free-root path can still fill missing components from
+defaults (#1521); partial-field admission is not expanded until that is fixed.
+For new admission proofs, a source, filter or key bound depending on an outer
+binder is conservatively unresolved, even if a same-named global const exists.
+Enclosing binding combinations are not enumerated; this does not change legacy
+acceptance or repair symbolic binder/const shadow resolution (#1515).
+For newly admitted shapes, `check` rejects reads of any root init may assign
+until the entire root is definitely assigned, including roots written only as
+whole values and reads of an already-written field or entry. Early reads of
+non-field-written roots retain the previous ownership error and location unless
+the field-read gate refuses first. If all field-written roots are complete at
+the end, that gate runs before the nonfield-read pass: a later field read can
+therefore outrank an earlier nonfield read. Incomplete field-written roots retain
+the saved ownership refusal instead.
+The same rule covers whole-entry or whole-root reads of a field-written root;
+their diagnostics identify the read as `<whole entry>` or `<whole root>`.
+Thus `s.a = 1; s.b = (s.a == 1)` is rejected, as is reading `m[k].f` before
+writing its sibling fields inside a `forall`; reads of already-written fields
+at the current binder key after all binder-keyed fields have been written are
+allowed. Writing all fields separately does not permit a whole-entry copy inside
+that body under #1518's read-order rule; whole-entry copies outside the loop
+after full-root initialization are allowed. The semantics error names the
+root and field and locates the containing statement. Shapes accepted by the
+previous root-granularity ownership rule retain their ownership-check admission.
+The explicit engine and Monitor require every field of every entry to be
+covered before the root is read or initialization completes. They now count
+resolved map-entry-field writes toward coverage even for legacy-accepted shapes:
+complete single-field-entry maps can be constructed, while retained incomplete
+coverage adds the partial-component suffix to missing-assignment diagnostics.
+The same concrete initialization is used by deterministic refinement on either
+side, auto engine selection, conformance vectors, test generation and requirement
+trace validation. Their outcomes can therefore change too: auto may replace a
+bounded BMC fallback with unbounded explicit closure, and requirement-trace gates
+can change check/proof/testgen results. Kernel replay or conformance vectors alone
+do not establish that declared acceptance traces pass. Complete coverage can also
+expose existing out-of-domain or repeated-write vacuity refusals rather than an
+earlier missing-assignment error; relational repeated-write constraints are not
+changed by this different concrete diagnostic stage.
 
 ## 13. The three-layer dialects (consulting / requirements / design) and traceability
 

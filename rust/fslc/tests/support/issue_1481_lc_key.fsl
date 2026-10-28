@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+spec MapFieldInit {
+  type K = 0..1
+  struct Full { value: Bool }
+  state { full: Full, m: Map<K, Bool> }
+  init { full.value = true m[0] = true }
+  action idle() { }
+  invariant Initialized { full.value and m[0] }
+}
