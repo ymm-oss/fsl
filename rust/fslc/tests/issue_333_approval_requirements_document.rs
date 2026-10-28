@@ -198,9 +198,36 @@ fn generate_document(root: &Path) -> Value {
 fn assert_base_golden(actual: &Value) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/issue_1475_golden/approval-fixed.json");
-    let expected: Value = serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
-        .expect("base golden JSON");
+    let mut expected: Value =
+        serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
+            .expect("base golden JSON");
     assert_eq!(expected["base"], "c25f8653b9c83a247321f375f98cd59f430b6326");
+    expected["observed"]["overlay"]["generate"]["warnings"] = json!([
+        {
+            "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+            "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+            "message":"legacy string metadata is deprecated; use a typed annotation",
+            "loc":{"file":"spec.fsl", "line":12, "column":20, "end_line":12, "end_column":63},
+            "canonical_replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")",
+            "machine_applicable":true,
+            "edits":[
+                {"start":228, "end":228, "replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "},
+                {"start":245, "end":288, "replacement":""}
+            ]
+        },
+        {
+            "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+            "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+            "message":"legacy string metadata is deprecated; use a typed annotation",
+            "loc":{"file":"spec.fsl", "line":18, "column":30, "end_line":18, "end_column":76},
+            "canonical_replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")",
+            "machine_applicable":true,
+            "edits":[
+                {"start":369, "end":369, "replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "},
+                {"start":396, "end":442, "replacement":""}
+            ]
+        }
+    ]);
     assert_eq!(actual, &expected["observed"], "full base approval output");
 }
 

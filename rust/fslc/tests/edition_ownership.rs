@@ -50,25 +50,207 @@ fn finding(source: &str, code: &str, line: usize, column: usize, end_column: usi
     findings[0].clone()
 }
 
+#[derive(Clone, Copy)]
+enum SuccessInput {
+    Metadata,
+    Violation,
+    Domain,
+    AiProject,
+    AiComponent,
+    Db,
+}
+
 #[test]
+#[allow(clippy::too_many_lines)]
 pub(crate) fn successful_consumers_keep_one_complete_legacy_warning() {
+    use SuccessInput::{AiComponent, AiProject, Db, Domain, Metadata, Violation};
     let mut results = Results::default();
-    let source = cases::WARNING_CASES[1].2;
-    let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
-    for (command, result, artifact) in [
-        ("scenarios source.fsl --depth 2", "scenarios", false),
+    for (command, result, status, kind, artifact, input) in [
+        (
+            "scenarios source.fsl --depth 2",
+            "scenarios",
+            0,
+            None,
+            None,
+            Metadata,
+        ),
         (
             "testgen source.fsl --depth 2 -o generated.py",
             "generated",
-            true,
+            0,
+            None,
+            Some("generated.py"),
+            Metadata,
         ),
-        ("explain source.fsl --depth 2", "explained", false),
-        ("typestate source.fsl", "typestate", false),
-        ("analyze source.fsl", "analyzed", false),
-        ("replay source.fsl --trace trace.json", "conformant", false),
+        (
+            "explain source.fsl --depth 2",
+            "explained",
+            0,
+            None,
+            None,
+            Metadata,
+        ),
+        ("typestate source.fsl", "typestate", 0, None, None, Metadata),
+        ("analyze source.fsl", "analyzed", 0, None, None, Metadata),
+        (
+            "replay source.fsl --trace trace.json",
+            "conformant",
+            0,
+            None,
+            None,
+            Metadata,
+        ),
+        (
+            "ai eval source.fsl --property LooseQuality --records eval.jsonl",
+            "statistically_supported",
+            0,
+            None,
+            None,
+            AiProject,
+        ),
+        (
+            "ai regress source.fsl --migration PromptV7ToV8 --before-records baseline.jsonl --after-records baseline.jsonl",
+            "statistically_supported",
+            0,
+            None,
+            None,
+            AiProject,
+        ),
+        (
+            "ai drift source.fsl --property SupportAgentOperationalQuality --logs current.jsonl --baseline-logs current.jsonl",
+            "observed_supported",
+            0,
+            None,
+            None,
+            AiProject,
+        ),
+        (
+            "ai compat source.fsl",
+            "compat_profile_generated",
+            0,
+            None,
+            None,
+            AiComponent,
+        ),
+        (
+            "ai replay source.fsl --logs records.json",
+            "replay_conformant",
+            0,
+            None,
+            None,
+            AiComponent,
+        ),
+        (
+            "domain analyze source.fsl",
+            "analyzed",
+            0,
+            None,
+            None,
+            Domain,
+        ),
+        (
+            "domain generate source.fsl -o scaffold",
+            "generated",
+            0,
+            None,
+            Some("scaffold"),
+            Domain,
+        ),
+        (
+            "domain replay source.fsl --logs records.json",
+            "conformance_checked",
+            0,
+            None,
+            None,
+            Domain,
+        ),
+        (
+            "domain expand source.fsl -o generated.fsl",
+            "expanded",
+            0,
+            None,
+            Some("generated.fsl"),
+            Domain,
+        ),
+        (
+            "domain testgen source.fsl --depth 2 -o generated.py",
+            "generated",
+            0,
+            Some("domain_testgen"),
+            Some("generated.py"),
+            Domain,
+        ),
+        (
+            "db observe source.fsl --trace records.json",
+            "observed_conformant",
+            0,
+            None,
+            None,
+            Db,
+        ),
+        (
+            "document check source.fsl document.md",
+            "document_conformant",
+            0,
+            None,
+            None,
+            Metadata,
+        ),
+        (
+            "document claims source.fsl -o claims.json",
+            "generated",
+            0,
+            Some("requirement_claims"),
+            Some("claims.json"),
+            Metadata,
+        ),
+        (
+            "counterexample export source.fsl --depth 2 -o reproducer.json",
+            "violated",
+            1,
+            None,
+            Some("reproducer.json"),
+            Violation,
+        ),
     ] {
+        let source = match input {
+            Metadata => cases::WARNING_CASES[1].2.to_owned(),
+            Violation => cases::WARNING_CASES[1].2.replace(
+                "invariant Typed { true }",
+                "invariant Typed { done == false }",
+            ),
+            Domain => cases::legacy("deprecated_domain_enum_union", cases::DOMAIN),
+            AiProject => include_str!("../../../examples/ai/support_answer_quality.fsl").to_owned(),
+            AiComponent => {
+                include_str!("../../../examples/ai/refund_agent_tool_safety.fsl").to_owned()
+            }
+            Db => include_str!("../../../examples/db/safe_add_nullable_column.fsl").to_owned(),
+        };
+        let expected = match input {
+            Metadata | Violation => Some(finding(&source, "legacy_string_metadata", 1, 55, 76)),
+            Domain => Some(finding(&source, "deprecated_domain_enum_union", 1, 12, 39)),
+            // These AI and DB dialects have no current-edition migration forms.
+            AiProject | AiComponent | Db => None,
+        };
         let scratch = Scratch::new();
-        scratch.write("source.fsl", source);
+        scratch.write("source.fsl", &source);
+        scratch.write("records.json", "[]\n");
+        scratch.write(
+            "eval.jsonl",
+            include_str!("../../../examples/ai/support_eval_v3.jsonl"),
+        );
+        scratch.write(
+            "baseline.jsonl",
+            include_str!("../../../examples/ai/support_eval_v7.jsonl"),
+        );
+        scratch.write(
+            "current.jsonl",
+            include_str!("../../../examples/ai/runtime_drift_current.jsonl"),
+        );
+        if command.starts_with("document check ") {
+            let generated = run(&scratch, "document generate source.fsl -o document.md");
+            assert_eq!(generated.status.code(), Some(0), "{}", value(&generated));
+        }
         scratch.write(
             "trace.json",
             &json!({
@@ -80,12 +262,23 @@ pub(crate) fn successful_consumers_keep_one_complete_legacy_warning() {
             .to_string(),
         );
         let output = run(&scratch, command);
+        let actual = value(&output);
+        if expected.is_none() {
+            assert!(actual.get("warnings").is_none(), "{command}: {actual}");
+        }
+        let expected_warnings = expected.iter().cloned().collect::<Vec<_>>();
         let produced = json!([
             summary(&output),
             output.stderr,
-            scratch.0.join("generated.py").exists()
+            artifact.is_some_and(|path| scratch.0.join(path).exists()),
+            actual.get("warnings")
         ]);
-        let wanted = json!([[0, result, null, [expected]], [], artifact]);
+        let wanted = json!([
+            [status, result, kind, expected_warnings],
+            [],
+            artifact.is_some(),
+            expected.map(|warning| vec![warning])
+        ]);
         results.check(
             &format!("success/{command}"),
             &produced,

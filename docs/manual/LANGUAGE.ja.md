@@ -1359,8 +1359,12 @@ requirements の action 対応も、domain で受理される構文ではあり�
 
 捕捉済み root の admission は `db check`/`compat check`、`scenarios`、汎用 `testgen`、
 `kernel`、`conformance`、`testplan`、`typestate`、`explain`、単一 FSL source の
-`analyze`、trace replay、causal の6コマンドにも対応します(#1449)。モデル構築・
-solver 使用・出力の副作用より前に判定し、捕捉した同じバイト列を消費します。
+`analyze`、trace replay、causal の6コマンドにも対応します(#1449)。
+単一 root の拡張では、AI の reader 6コマンド、domain の analyze/expand/generate/
+replay/testgen、document の check/claims/generate、db observe、log replay、
+counterexample export の処理順、mutate 成功時の警告、sweep の捕捉、直接の
+HTML/ledger の raw 警告配信という、追加の21 mode に対応しました。
+モデル構築・solver 使用・出力の副作用より前に判定し、捕捉した同じバイト列を消費します。
 causal diff は両方の引数、observation は明示的な FSL mapping も対象です。
 各 slot は独立し、同じファイルを2つの slot に渡した場合は slot ごとに1回の警告を
 許します。ヘッダー・既存の edition オプション・read error の kind の規則を維持し、
@@ -1369,6 +1373,10 @@ causal diff は両方の引数、observation は明示的な FSL mapping も対�
 project-mode intake の完了を意味しません。envelope の `fsl_edition` と `edition` は
 主の root だけを表し、警告は各 slot のものを保持します。全 causal root を先に準備するため、
 後の引数や mapping の read error が、先の root の parse/model error より優先されます。
+log replay もモデル構築前に root と mapping を準備するため、mapping の IO が
+通常の root の parse/model error より先になります。document check は artifact の
+IO/frontmatter より先に root を受け入れ、その捕捉済みの本文を artifact に記録された
+表示用 label で投影します。label を別のパスとして読み直しません。
 
 対応済みの拡張可能な envelope では `warnings` を一度だけ仕上げます。成功時の閉じた
 schema (`kernel`、`conformance`、`testplan`) と対応済みの raw TypeScript/readable/
@@ -1380,6 +1388,11 @@ non-definitive なエラーを含め重複しなくなりました。Worker は�
 現行の警告は verdict・assurance・終了コードを変えません。次のエディションの移行
 finding は消費前に既存の edition error/exit 2 で拒否します。従来は判定を通らなかった
 consumer が、以前受理した次エディションの入力を拒否する場合があります。
+直接の raw HTML/ledger、document generate/claims、domain expand/testgen は、移行警告を
+stderr に出します。HTML/ledger のファイル出力 envelope は変えず、別の結果である
+baseline に警告を一度だけ保持します。承認専用の render は自分の baseline の受け入れを
+維持し、新しい stderr 配信をしません。mutate は authored source の結果を仕上げ、
+sweep の各 cell は一度捕捉した root の token を借用します。
 
 測定は BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4` と build 済み実装
 `33e3fcc5606249a097814d91cb09b506add8e97d` の materialized tree を使います。
@@ -1391,13 +1404,37 @@ ok→error の遷移集合は空で、corpus 57形式と inline 22出現は warn
 との consumer 比較では、次エディションの4つの移行形式(enum union、metadata、
 コロン量化子、inline maps)が analyze/conformance/explain/html/kernel/ledger/mutate/
 scenarios/sweep/testgen/typestate で、enum union だけが testplan でも拒否に変わります。
-これは check が既に拒否する45 command/form 観測の破壊的な削除であり、延期中の
-raw warning、mutate 成功時の warning、sweep capture の完成ではありません。
+これは check が既に拒否する45 command/form 観測の破壊的な削除です。その時点では
+raw warning、mutate 成功時の warning、sweep capture は未完了でしたが、今回対応しました。
 
-これは部分的な提供であり、すべての reader の対応を保証しません。AI intake、check
-以外の domain コマンド、document/approval intake、live な比較/refinement と log mapping、
-batch/project/chain intake、counterexample の処理順、mutate 成功時の警告、sweep の
-capture、成功時の raw HTML/ledger の stderr は #1449 の残作業です。report baseline と
+最新の sweep は、BASE `1844fa74a717ba9229e0b292d9421c0939016e5e` と実装の Rust revision
+`e04df80f35cf3a7a3b8119dc7b6513ac7272ce76` をそれぞれ clean な archive から build
+しました。cache 無効の `fslc check FORM` は、各 tree の corpus 全597 file と必須 test の
+入力29出現を、両方の tree で両方の binary に渡します。**全2,504検査**の ok→error 集合と
+stdout/stderr/exit の差は空で、除外 field はありません。29出現の内訳は、元の8出現
+(domain snapshot の include 2、scenario literal 2、empty-membership 入力2、固定の承認
+source、command-matrix helper の承認 baseline)、実際に実行した成功 table の source 20、
+強化した replay-order root 1です。include file や同じ source の反復も出現として数えます。
+
+前の測定も名前付きの履歴として残します。BASE `a42d4cede3d8d688daff3173de7bd839a6992172` と
+HEAD `e2669212315f4db9bec2c0c525ba8d44f77bacfd` は各 tree の597+29出現、全2,504検査、
+初回の BASE `c79016efeb630c717292e9392901cfe65ab40915` と実装
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c` は各 tree の597+8出現、全2,420検査でした。
+どちらも ok→error 集合は空ですが、最新の測定の代わりにはしません。
+最新の BASE/Rust revision の組でも21 mode の consumer 比較を2回、全772観測しました。各回の
+拒否への変化は、重複しない command/source 17組(要件 metadata の反復 probe を含む
+control 19出現)でした。domain analyze/expand/generate/replay/testgen の enum union
+(5組)、document claims の spec と requirements の metadata・コロン量化子・inline
+mapping(4組)、document generate の spec と requirements の metadata(2組)、document
+check の requirements metadata(1組)、replay --from-log の enum union・spec と
+requirements の metadata・コロン量化子・inline mapping(5組)です。従来 non-error だった
+consumer 入力の破壊的な削除であり、文法の削除や証明の主張ではありません。mapping だけの
+control は BASE でも error だったため、受理済み入力の削除には数えません。
+
+引き続き部分的な提供です。analyze の batch と project、approval check/create/diff、
+chain admission、live diff、refine の7 leaf・8 mode は延期し、拒否する対照を実行し続けます。
+approval check の transport には ledger `--approval` overlay の root の読み直しも含みます。
+今回の21 mode の完成だけでは #1449 を閉じません。report baseline と
 ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
 🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
 依存先を再帰的に admission せず、履歴 Git root は #1513 の範囲です。修復の投影と

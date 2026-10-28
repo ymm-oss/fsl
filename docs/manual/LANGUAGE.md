@@ -1439,6 +1439,10 @@ are not accepted domain forms.
 Captured-root admission also covers `db check`/`compat check`, `scenarios`,
 generic `testgen`, `kernel`, `conformance`, `testplan`, `typestate`, `explain`,
 single-FSL-source `analyze`, trace replay and the six causal commands (#1449).
+The single-root extension completes 21 further modes: the six AI readers,
+domain analyze/expand/generate/replay/testgen, document check/claims/generate,
+database observation, log replay, counterexample export ordering, mutate success
+warnings, sweep capture and direct HTML/ledger raw-warning delivery.
 They classify the same captured bytes they consume, before model/solver work or
 output effects. Causal diff includes both operands; observation includes its
 explicit FSL mapping. Each slot is distinct, so repeating a file in two slots
@@ -1449,6 +1453,10 @@ the referenced FSL roots or completing project-mode intake. Envelope `fsl_editio
 and `edition` describe only the primary root, while warnings retain each slot.
 Preparing all causal roots means a later operand/mapping read error intentionally
 precedes an earlier root's parse/model error.
+Log replay now prepares its root and mapping before model work, so mapping IO
+precedes an ordinary root parse/model error. Document check admits its captured
+root before artifact IO/frontmatter, then projects the same bytes under the
+artifact's recorded display label without rereading that label as a path.
 
 Implemented open envelopes use `warnings` once. Successful closed schemas
 (`kernel`, `conformance`, `testplan`) and implemented raw TypeScript/readable/graph
@@ -1459,6 +1467,11 @@ migration warnings, including non-definitive errors. Worker admission precedes
 model/solver use; editor refusals retain UTF-16 ranges without model/analysis work.
 Current-edition warnings preserve verdicts, assurance and exits; next-edition
 migration findings refuse before consumption with the existing edition error/exit 2.
+Direct raw HTML/ledger, document generate/claims and domain expansion/testgen deliver
+migration warnings on stderr. HTML/ledger file-output envelopes stay unchanged;
+their distinct baselines retain one warning. Approval-only rendering retains its
+own baseline admission without new stderr delivery. Mutate owns the authored
+source's finish, and each sweep cell borrows one captured root's token.
 Previously ungated consumers can therefore reject next-edition input they accepted.
 
 The measured comparison uses BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`
@@ -1473,12 +1486,42 @@ records a breaking refusal for four next-edition migration forms (enum union,
 metadata, colon quantifier, inline maps) in analyze/conformance/explain/html/
 kernel/ledger/mutate/scenarios/sweep/testgen/typestate, and the enum-union form
 in testplan: 45 command/form observations that check already rejects. This does
-not complete deferred raw-warning, mutate-success-warning or sweep-capture modes.
+not complete raw-warning, mutate-success-warning or sweep-capture modes at that
+revision; the single-root extension now completes them.
 
-This is a partial delivery, not a guarantee for every reader. AI intake, non-check
-domain commands, document/approval intake, live comparison/refinement and log
-mappings, batch/project/chain intake, counterexample ordering, mutate success
-warnings, sweep capture and raw-success HTML/ledger stderr remain tracked by #1449.
+The latest extension sweep uses BASE `1844fa74a717ba9229e0b292d9421c0939016e5e`
+and implementation Rust revision `e04df80f35cf3a7a3b8119dc7b6513ac7272ce76`, each
+built from its own clean archive. Cache-disabled `fslc check FORM` covers 597
+tracked corpus files plus 29 required-test input occurrences in each tree, both
+binaries in both trees: **2,504 checks**, empty ok-to-error and full
+stdout/stderr/exit difference sets, no excluded fields. The 29 comprise eight
+original occurrences (two domain snapshot includes, two scenario literals, two
+empty-membership inputs, fixed approval source and command-matrix helper approval
+baseline), twenty executed success-table sources and one replay-order root.
+Included files and repeated source bytes remain counted as occurrences.
+
+Earlier named sweeps remain valid historical records: BASE
+`a42d4cede3d8d688daff3173de7bd839a6992172` /HEAD
+`e2669212315f4db9bec2c0c525ba8d44f77bacfd` used 597+29 per tree /2,504 checks;
+BASE `c79016efeb630c717292e9392901cfe65ab40915` /implementation
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c` used 597+8 per tree /2,420 checks.
+Both had empty ok-to-error sets; neither is substituted for the latest result.
+The latest BASE/Rust-revision consumer comparison runs twice, 772 observations:
+17 distinct breaking command/source removals (19 control occurrences per repeat,
+including repeated requirements-metadata probes). Domain analyze/expand/generate/
+replay/testgen refuse enum union (5 pairs); document claims refuses metadata in
+spec and requirements, colon quantifier and inline mapping (4); document generate
+refuses metadata in spec and requirements (2); document check refuses requirements
+metadata (1); replay --from-log refuses enum union, metadata in spec and
+requirements, colon quantifier and inline mapping (5). These are formerly
+non-error consumer inputs, not grammar removals or proof claims. A mapping-only
+control already errored at BASE and is not counted as a removal.
+
+This remains partial: eight modes across seven leaves are deferred—analyze batch
+and project, approval check/create/diff, chain admission, live diff and refine.
+Approval-check transport includes the ledger `--approval` overlay's root rereads.
+Their deferred controls still execute and must retain rejecting evidence; #1449
+is not closed by these 21 completed modes.
 Report baselines and ledger migration rendering are retained; migration-only rows
 use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
 🔴 要確認 / 要確認. Dependencies are not recursively admitted; historical Git roots
