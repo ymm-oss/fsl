@@ -582,6 +582,17 @@ fn observe_gate_pair(
             refine["result"].as_str(),
             Some("refines" | "refinement_failed" | "impl_violated")
         );
+    let refine_passes_gate = if matches!(id, "PI5/root" | "PI5/map") {
+        let root = if id == "PI5/root" { "s" } else { "m" };
+        let prefix = format!("init does not assign state variable(s): {root} (partial");
+        ownership.is_ok()
+            && refine_exit == 2
+            && refine["result"] == "error"
+            && refine["kind"] == "type"
+            && refine["message"].as_str().unwrap().starts_with(&prefix)
+    } else {
+        refine_passes_gate
+    };
     let pair = (
         check_ok,
         check_ownership_error,
@@ -596,8 +607,8 @@ fn observe_gate_pair(
 // GS is deliberately a table collected in full before the final assertion:
 // one falsely accepted row must not hide the other partial/refine observations.
 // It observes the public ownership function called at the start of refine's
-// concrete_initial_states, AND the CLI refine route. It does not promote any
-// legacy one-field refine verdict (#1521) into an expected refines.
+// concrete_initial_states and CLI refine. One-field partial init is refused;
+// free-value enumeration of partial init belongs to #1579.
 #[test]
 fn gs_check_and_refine_share_ownership_gate() {
     let full_root = full_with_free_root(A4);
