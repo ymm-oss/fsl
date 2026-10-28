@@ -315,3 +315,107 @@ fn control_def_capture_reports_main_error() {
         "predicate 'positive' call would capture variable 'limit'; rename the binder at the call site at 13:67",
     );
 }
+
+fn round2_assert_enabled(label: &str, text: &str, actions: &[&str]) {
+    let outputs = run(label, text);
+    for (mode, exit, value) in &outputs {
+        let expected = if *mode == "check" { "ok" } else { "verified" };
+        assert_eq!(
+            (
+                *exit,
+                value["result"].as_str(),
+                value.get("diagnostic_code")
+            ),
+            (0, Some(expected), None),
+            "{label} {mode}: {outputs:#?}"
+        );
+        if *mode == "verify" {
+            assert_eq!(value["checked_to_depth"], 2, "{label}: {value:#}");
+            assert_eq!(value["completeness"], "bounded", "{label}: {value:#}");
+            for action in actions {
+                // A bounded verified verdict alone masks the #1569 blocker.
+                // Require the action to execute, not merely an unexercised spec.
+                assert_eq!(
+                    value["action_coverage"][*action], true,
+                    "{label}: action {action} must be covered: {value:#}"
+                );
+            }
+        }
+    }
+}
+
+fn round2_stage_capture_source(binder: &str) -> String {
+    source(
+        &format!("exists {binder}: Claim {{ stage({binder}) == Approved and amount == 0 }}"),
+        "",
+    )
+    .replace("instances Claim = 1", "instances Claim = 2")
+    .replace(
+        "  event approve =",
+        "  event seed = Manager seeds Claim Draft -> Approved\n  event approve =",
+    )
+}
+
+#[test]
+fn detector_stage_capture_tracks_renamed_binder() {
+    // One claim can be seeded to Approved, leaving another Draft claim to
+    // approve at the next step. The source guard is satisfiable. The implicit
+    // entity binder is also c, so field substitution must rename the nested c
+    // AND its stage operand (#1569). Before #1569, check/verify accept but the
+    // action is impossible: Draft(c) and Approved(c) occur in the same guard.
+    round2_assert_enabled(
+        "detector_stage_capture_tracks_renamed_binder",
+        &round2_stage_capture_source("c"),
+        &["seed", "approve"],
+    );
+}
+
+#[test]
+fn control_stage_capture_noncolliding_binder() {
+    // Same result-class and action-coverage contract without binder collision.
+    round2_assert_enabled(
+        "control_stage_capture_noncolliding_binder",
+        &round2_stage_capture_source("d"),
+        &["seed", "approve"],
+    );
+}
+
+fn round2_explicit_input_source(condition: &str) -> String {
+    source(condition, "").replace(
+        "event approve = Manager approves Claim Draft -> Approved",
+        "event approve = Manager approves Claim with candidate: Claim Draft -> Approved",
+    )
+}
+
+#[test]
+fn detector_stage_explicit_entity_input() {
+    // candidate is an explicit Claim input, not the implicit entity binder c.
+    // Dropping typed inputs from RuleGuardLowering::condition's environment
+    // leaves stage(candidate) unresolved, then the retained Stage fails closed.
+    round2_assert_enabled(
+        "detector_stage_explicit_entity_input",
+        &round2_explicit_input_source("stage(candidate) == Draft"),
+        &["approve"],
+    );
+}
+
+#[test]
+fn control_stage_explicit_entity_input_lowered() {
+    round2_assert_enabled(
+        "control_stage_explicit_entity_input_lowered",
+        &round2_explicit_input_source("claim_stage[candidate] == Draft"),
+        &["approve"],
+    );
+}
+
+#[test]
+fn detector_order_const_hidden_field_is_not_respelled() {
+    // The action can typecheck this def's free amount as a global constant.
+    // Re-spelling after expansion in the rule copy would instead impose
+    // Claim.amount == 0 and Claim.amount == 1, producing a false conflict.
+    assert_accepts(
+        "detector_order_const_hidden_field_is_not_respelled",
+        "Claim.amount == 0 and positive(1)",
+        "const amount = 1\n  def positive(x: Amount) = amount == 1",
+    );
+}
