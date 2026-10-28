@@ -283,7 +283,7 @@ fn control_known_separate_defect_unexpanded_call_is_fail_closed() {
     // Not a #1552 detector: RuleGuard.condition keeps the call even though
     // the generated action's expression is def-expanded. Field spelling alone
     // cannot fix that missing expansion. Keep its current rejection explicit
-    // until the separately tracked defect is fixed; cover Call in unit tests.
+    // until #1556 flips this control; cover Call in unit tests.
     let outputs = run(
         "control_known_separate_defect_unexpanded_call",
         &source("positive(amount)", "def positive(x: Amount) = x > 0", false),
@@ -291,6 +291,31 @@ fn control_known_separate_defect_unexpanded_call_is_fail_closed() {
     let expected = "the rule_conflict_unsatisfiable_guard check could not be decided by the solver \
         (enumeration skipped it because its condition uses an expression the enumeration does not evaluate): \
         unexpanded predicate call 'positive'";
+    for (mode, exit, value) in &outputs {
+        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
+        assert_eq!(value["result"], "error", "{mode}: {value:#}");
+        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
+        assert_eq!(
+            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
+            "{mode}: {value:#}"
+        );
+        assert_eq!(value["message"], expected, "{mode}: {value:#}");
+    }
+}
+
+#[test]
+fn control_known_separate_defect_unlowered_stage_is_fail_closed() {
+    // Not a #1552 detector: the rule obligation keeps surface stage access
+    // even though the generated action's expression is lowered. Field spelling
+    // cannot fix that missing lowering. Keep its current rejection explicit
+    // until #1556 flips this control; cover Stage in unit tests.
+    let outputs = run(
+        "control_known_separate_defect_unlowered_stage",
+        &source("exists amount: Claim { stage(amount) == Draft }", "", false),
+    );
+    let expected = "the rule_conflict_unsatisfiable_guard check could not be decided by the solver \
+        (enumeration skipped it because its condition uses an expression the enumeration does not evaluate): \
+        unlowered stage access";
     for (mode, exit, value) in &outputs {
         assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
         assert_eq!(value["result"], "error", "{mode}: {value:#}");

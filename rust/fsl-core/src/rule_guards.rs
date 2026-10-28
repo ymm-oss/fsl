@@ -709,4 +709,948 @@ mod tests {
             binary("+", var("amount"), var("Claim.limit")),
         );
     }
+
+    mod issue_1552_spell_fields {
+        use std::collections::BTreeSet;
+
+        use crate::rule_guards::spell_fields;
+        use fsl_syntax::{
+            AggregateKind, Binder, ConditionalSpans, Expr, Pattern, QualifiedName, SourcePos, Span,
+            SymbolPath,
+        };
+
+        fn span(offset: usize) -> Span {
+            Span {
+                start: SourcePos {
+                    offset,
+                    line: 3,
+                    column: 7,
+                },
+                end: SourcePos {
+                    offset: offset + 5,
+                    line: 3,
+                    column: 12,
+                },
+            }
+        }
+
+        fn assert_fields(before: Expr, expected: &Expr) {
+            assert_eq!(
+                &spell_fields(
+                    before,
+                    &BTreeSet::from(["amount", "limit", "input"]),
+                    &BTreeSet::from(["input"]),
+                    "Claim",
+                ),
+                expected,
+            );
+        }
+
+        #[test]
+        fn var_spells_field_but_not_input_or_other_leaves() {
+            assert_fields(
+                Expr::Var("amount".into()),
+                &Expr::Var("Claim.amount".into()),
+            );
+            for leaf in [
+                Expr::Var("input".into()),
+                Expr::Var("unrelated".into()),
+                Expr::Var("Claim.amount".into()),
+                Expr::Num(2),
+                Expr::Bool(true),
+                Expr::None,
+                Expr::EnumMember {
+                    type_name: "Status".into(),
+                    member: "amount".into(),
+                    source_bare: true,
+                },
+            ] {
+                assert_fields(leaf.clone(), &leaf);
+            }
+        }
+
+        #[test]
+        fn some_payload() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Some(b(Expr::Var("amount".into()))),
+                &Expr::Some(b(Expr::Var("Claim.amount".into()))),
+            );
+        }
+
+        #[test]
+        fn set_elements() {
+            assert_fields(
+                Expr::Set(vec![Expr::Var("amount".into()), Expr::Var("limit".into())]),
+                &Expr::Set(vec![
+                    Expr::Var("Claim.amount".into()),
+                    Expr::Var("Claim.limit".into()),
+                ]),
+            );
+        }
+
+        #[test]
+        fn seq_elements() {
+            assert_fields(
+                Expr::Seq(vec![
+                    Expr::Var("amount".into()),
+                    Expr::Var("input".into()),
+                    Expr::Var("limit".into()),
+                ]),
+                &Expr::Seq(vec![
+                    Expr::Var("Claim.amount".into()),
+                    Expr::Var("input".into()),
+                    Expr::Var("Claim.limit".into()),
+                ]),
+            );
+        }
+
+        #[test]
+        fn struct_values_not_type_or_field_labels() {
+            assert_fields(
+                Expr::Struct {
+                    name: "amount".into(),
+                    fields: vec![
+                        ("amount".into(), Expr::Var("amount".into())),
+                        ("limit".into(), Expr::Var("limit".into())),
+                    ],
+                },
+                &Expr::Struct {
+                    name: "amount".into(),
+                    fields: vec![
+                        ("amount".into(), Expr::Var("Claim.amount".into())),
+                        ("limit".into(), Expr::Var("Claim.limit".into())),
+                    ],
+                },
+            );
+        }
+
+        #[test]
+        fn call_arguments_not_callee_and_preserve_span() {
+            assert_fields(
+                Expr::Call {
+                    name: "amount".into(),
+                    args: vec![Expr::Var("amount".into()), Expr::Var("limit".into())],
+                    span: span(10),
+                },
+                &Expr::Call {
+                    name: "amount".into(),
+                    args: vec![
+                        Expr::Var("Claim.amount".into()),
+                        Expr::Var("Claim.limit".into()),
+                    ],
+                    span: span(10),
+                },
+            );
+        }
+
+        #[test]
+        fn index_receiver_and_key() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Index(b(Expr::Var("amount".into())), b(Expr::Var("limit".into()))),
+                &Expr::Index(
+                    b(Expr::Var("Claim.amount".into())),
+                    b(Expr::Var("Claim.limit".into())),
+                ),
+            );
+        }
+
+        #[test]
+        fn field_receiver_not_label() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Field(b(Expr::Var("amount".into())), "amount".into()),
+                &Expr::Field(b(Expr::Var("Claim.amount".into())), "amount".into()),
+            );
+        }
+
+        #[test]
+        fn method_receiver_and_all_arguments_not_method_name() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Method {
+                    receiver: b(Expr::Var("amount".into())),
+                    name: "amount".into(),
+                    args: vec![Expr::Var("limit".into()), Expr::Var("amount".into())],
+                },
+                &Expr::Method {
+                    receiver: b(Expr::Var("Claim.amount".into())),
+                    name: "amount".into(),
+                    args: vec![
+                        Expr::Var("Claim.limit".into()),
+                        Expr::Var("Claim.amount".into()),
+                    ],
+                },
+            );
+        }
+
+        #[test]
+        fn binary_both_operands() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: ">".into(),
+                    left: b(Expr::Var("amount".into())),
+                    right: b(Expr::Var("limit".into())),
+                },
+                &Expr::Binary {
+                    op: ">".into(),
+                    left: b(Expr::Var("Claim.amount".into())),
+                    right: b(Expr::Var("Claim.limit".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn not_operand() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Not(b(Expr::Var("amount".into()))),
+                &Expr::Not(b(Expr::Var("Claim.amount".into()))),
+            );
+        }
+
+        #[test]
+        fn neg_operand() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Neg(b(Expr::Var("amount".into()))),
+                &Expr::Neg(b(Expr::Var("Claim.amount".into()))),
+            );
+        }
+
+        #[test]
+        fn conditional_all_children_and_distinct_spans() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Conditional {
+                    condition: b(Expr::Var("amount".into())),
+                    then_expr: b(Expr::Var("limit".into())),
+                    else_expr: b(Expr::Var("amount".into())),
+                    spans: Box::new(ConditionalSpans {
+                        condition: span(10),
+                        then_expr: span(20),
+                        else_expr: span(30),
+                    }),
+                },
+                &Expr::Conditional {
+                    condition: b(Expr::Var("Claim.amount".into())),
+                    then_expr: b(Expr::Var("Claim.limit".into())),
+                    else_expr: b(Expr::Var("Claim.amount".into())),
+                    spans: Box::new(ConditionalSpans {
+                        condition: span(10),
+                        then_expr: span(20),
+                        else_expr: span(30),
+                    }),
+                },
+            );
+        }
+
+        #[test]
+        fn is_operand_is_outside_its_pattern_binding() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Is {
+                    expr: b(Expr::Some(b(Expr::Var("amount".into())))),
+                    pattern: Pattern::Some("amount".into()),
+                },
+                &Expr::Is {
+                    expr: b(Expr::Some(b(Expr::Var("Claim.amount".into())))),
+                    pattern: Pattern::Some("amount".into()),
+                },
+            );
+            assert_fields(
+                Expr::Is {
+                    expr: b(Expr::Var("amount".into())),
+                    pattern: Pattern::None,
+                },
+                &Expr::Is {
+                    expr: b(Expr::Var("Claim.amount".into())),
+                    pattern: Pattern::None,
+                },
+            );
+        }
+
+        #[test]
+        fn is_pattern_shadows_field_in_and_continuation_only() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "and".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("amount".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    }),
+                },
+                &Expr::Binary {
+                    op: "and".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("Claim.amount".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    }),
+                },
+            );
+        }
+
+        #[test]
+        fn is_pattern_shadows_field_in_implication_continuation() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "=>".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("limit".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Var("amount".into())),
+                },
+                &Expr::Binary {
+                    op: "=>".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("Claim.limit".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Var("amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_typed_filter_and_body() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Typed {
+                        name: "x".into(),
+                        type_name: QualifiedName {
+                            namespace: Some("types".into()),
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("limit".into()))),
+                    },
+                    body: b(Expr::Var("amount".into())),
+                },
+                &Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Typed {
+                        name: "x".into(),
+                        type_name: QualifiedName {
+                            namespace: Some("types".into()),
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("Claim.limit".into()))),
+                    },
+                    body: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_range_bounds_filter_and_body() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Quantified {
+                    quantifier: "forall".into(),
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Var("amount".into())),
+                        hi: b(Expr::Var("limit".into())),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Var("limit".into())),
+                },
+                &Expr::Quantified {
+                    quantifier: "forall".into(),
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Var("Claim.amount".into())),
+                        hi: b(Expr::Var("Claim.limit".into())),
+                        where_expr: Some(b(Expr::Var("Claim.amount".into()))),
+                    },
+                    body: b(Expr::Var("Claim.limit".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_collection_source_filter_and_body() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Collection {
+                        name: "x".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("amount".into())])),
+                        where_expr: Some(b(Expr::Var("limit".into()))),
+                    },
+                    body: b(Expr::Var("amount".into())),
+                },
+                &Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Collection {
+                        name: "x".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("Claim.amount".into())])),
+                        where_expr: Some(b(Expr::Var("Claim.limit".into()))),
+                    },
+                    body: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_typed_shadow_is_scoped_to_filter_and_body() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Typed {
+                        name: "amount".into(),
+                        type_name: QualifiedName {
+                            namespace: None,
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    }),
+                },
+                &Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Typed {
+                        name: "amount".into(),
+                        type_name: QualifiedName {
+                            namespace: None,
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    }),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_range_shadow_does_not_capture_source() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Quantified {
+                    quantifier: "forall".into(),
+                    binder: Binder::Range {
+                        name: "amount".into(),
+                        lo: b(Expr::Var("amount".into())),
+                        hi: b(Expr::Var("limit".into())),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    }),
+                },
+                &Expr::Quantified {
+                    quantifier: "forall".into(),
+                    binder: Binder::Range {
+                        name: "amount".into(),
+                        lo: b(Expr::Var("Claim.amount".into())),
+                        hi: b(Expr::Var("Claim.limit".into())),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    }),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_collection_shadow_does_not_capture_source() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Collection {
+                        name: "amount".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("amount".into())])),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    }),
+                },
+                &Expr::Quantified {
+                    quantifier: "exists".into(),
+                    binder: Binder::Collection {
+                        name: "amount".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("Claim.amount".into())])),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    body: b(Expr::Binary {
+                        op: ">".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    }),
+                },
+            );
+        }
+
+        #[test]
+        fn quantified_binding_does_not_escape_to_sibling() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "and".into(),
+                    left: b(Expr::Quantified {
+                        quantifier: "exists".into(),
+                        binder: Binder::Typed {
+                            name: "amount".into(),
+                            type_name: QualifiedName {
+                                namespace: None,
+                                name: "Amount".into(),
+                            },
+                            where_expr: None,
+                        },
+                        body: b(Expr::Binary {
+                            op: ">".into(),
+                            left: b(Expr::Var("amount".into())),
+                            right: b(Expr::Var("limit".into())),
+                        }),
+                    }),
+                    right: b(Expr::Var("amount".into())),
+                },
+                &Expr::Binary {
+                    op: "and".into(),
+                    left: b(Expr::Quantified {
+                        quantifier: "exists".into(),
+                        binder: Binder::Typed {
+                            name: "amount".into(),
+                            type_name: QualifiedName {
+                                namespace: None,
+                                name: "Amount".into(),
+                            },
+                            where_expr: None,
+                        },
+                        body: b(Expr::Binary {
+                            op: ">".into(),
+                            left: b(Expr::Var("amount".into())),
+                            right: b(Expr::Var("Claim.limit".into())),
+                        }),
+                    }),
+                    right: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_typed_filter_and_value() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Typed {
+                        name: "x".into(),
+                        type_name: QualifiedName {
+                            namespace: None,
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("limit".into()))),
+                    },
+                    value: Some(b(Expr::Var("amount".into()))),
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Typed {
+                        name: "x".into(),
+                        type_name: QualifiedName {
+                            namespace: None,
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("Claim.limit".into()))),
+                    },
+                    value: Some(b(Expr::Var("Claim.amount".into()))),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_range_bounds_filter_and_value() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Var("amount".into())),
+                        hi: b(Expr::Var("limit".into())),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Var("limit".into()))),
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Var("Claim.amount".into())),
+                        hi: b(Expr::Var("Claim.limit".into())),
+                        where_expr: Some(b(Expr::Var("Claim.amount".into()))),
+                    },
+                    value: Some(b(Expr::Var("Claim.limit".into()))),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_collection_source_filter_and_value() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Collection {
+                        name: "x".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("amount".into())])),
+                        where_expr: Some(b(Expr::Var("limit".into()))),
+                    },
+                    value: Some(b(Expr::Var("amount".into()))),
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Collection {
+                        name: "x".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("Claim.amount".into())])),
+                        where_expr: Some(b(Expr::Var("Claim.limit".into()))),
+                    },
+                    value: Some(b(Expr::Var("Claim.amount".into()))),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_typed_shadow() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Typed {
+                        name: "amount".into(),
+                        type_name: QualifiedName {
+                            namespace: None,
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Binary {
+                        op: "+".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    })),
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Typed {
+                        name: "amount".into(),
+                        type_name: QualifiedName {
+                            namespace: None,
+                            name: "Amount".into(),
+                        },
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Binary {
+                        op: "+".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    })),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_range_shadow_does_not_capture_source() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Range {
+                        name: "amount".into(),
+                        lo: b(Expr::Var("amount".into())),
+                        hi: b(Expr::Var("limit".into())),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Binary {
+                        op: "+".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    })),
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Range {
+                        name: "amount".into(),
+                        lo: b(Expr::Var("Claim.amount".into())),
+                        hi: b(Expr::Var("Claim.limit".into())),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Binary {
+                        op: "+".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    })),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_collection_shadow_does_not_capture_source() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Collection {
+                        name: "amount".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("amount".into())])),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Binary {
+                        op: "+".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("limit".into())),
+                    })),
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Collection {
+                        name: "amount".into(),
+                        collection: b(Expr::Seq(vec![Expr::Var("Claim.amount".into())])),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: Some(b(Expr::Binary {
+                        op: "+".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Var("Claim.limit".into())),
+                    })),
+                },
+            );
+        }
+
+        #[test]
+        fn aggregate_binding_does_not_escape_to_sibling() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "==".into(),
+                    left: b(Expr::Aggregate {
+                        kind: AggregateKind::Sum,
+                        binder: Binder::Typed {
+                            name: "amount".into(),
+                            type_name: QualifiedName {
+                                namespace: None,
+                                name: "Amount".into(),
+                            },
+                            where_expr: None,
+                        },
+                        value: Some(b(Expr::Binary {
+                            op: "+".into(),
+                            left: b(Expr::Var("amount".into())),
+                            right: b(Expr::Var("limit".into())),
+                        })),
+                    }),
+                    right: b(Expr::Var("amount".into())),
+                },
+                &Expr::Binary {
+                    op: "==".into(),
+                    left: b(Expr::Aggregate {
+                        kind: AggregateKind::Sum,
+                        binder: Binder::Typed {
+                            name: "amount".into(),
+                            type_name: QualifiedName {
+                                namespace: None,
+                                name: "Amount".into(),
+                            },
+                            where_expr: None,
+                        },
+                        value: Some(b(Expr::Binary {
+                            op: "+".into(),
+                            left: b(Expr::Var("amount".into())),
+                            right: b(Expr::Var("Claim.limit".into())),
+                        })),
+                    }),
+                    right: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn count_preserves_absent_value() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Count,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Num(0)),
+                        hi: b(Expr::Num(2)),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: None,
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Count,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Num(0)),
+                        hi: b(Expr::Num(2)),
+                        where_expr: Some(b(Expr::Var("Claim.amount".into()))),
+                    },
+                    value: None,
+                },
+            );
+        }
+
+        #[test]
+        fn unique_preserves_kind_and_absent_value() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::Unique,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Num(0)),
+                        hi: b(Expr::Num(2)),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: None,
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::Unique,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Num(0)),
+                        hi: b(Expr::Num(2)),
+                        where_expr: Some(b(Expr::Var("Claim.amount".into()))),
+                    },
+                    value: None,
+                },
+            );
+        }
+
+        #[test]
+        fn exactly_one_preserves_kind_and_absent_value() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Aggregate {
+                    kind: AggregateKind::ExactlyOne,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Num(0)),
+                        hi: b(Expr::Num(2)),
+                        where_expr: Some(b(Expr::Var("amount".into()))),
+                    },
+                    value: None,
+                },
+                &Expr::Aggregate {
+                    kind: AggregateKind::ExactlyOne,
+                    binder: Binder::Range {
+                        name: "x".into(),
+                        lo: b(Expr::Num(0)),
+                        hi: b(Expr::Num(2)),
+                        where_expr: Some(b(Expr::Var("Claim.amount".into()))),
+                    },
+                    value: None,
+                },
+            );
+        }
+
+        #[test]
+        fn stage_entity_and_metadata() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Stage {
+                    process: Some(Box::new(SymbolPath::new(["Proc".into()], span(1)).unwrap())),
+                    entity: b(Expr::Var("amount".into())),
+                    entity_span: span(10),
+                    span: span(20),
+                },
+                &Expr::Stage {
+                    process: Some(Box::new(SymbolPath::new(["Proc".into()], span(1)).unwrap())),
+                    entity: b(Expr::Var("Claim.amount".into())),
+                    entity_span: span(10),
+                    span: span(20),
+                },
+            );
+        }
+
+        #[test]
+        fn unary_named_operand_and_span() {
+            let b = Box::new;
+            assert_fields(
+                Expr::UnaryNamed {
+                    name: "abs".into(),
+                    expr: b(Expr::Var("amount".into())),
+                    span: span(10),
+                },
+                &Expr::UnaryNamed {
+                    name: "abs".into(),
+                    expr: b(Expr::Var("Claim.amount".into())),
+                    span: span(10),
+                },
+            );
+        }
+
+        #[test]
+        fn binary_named_both_operands() {
+            let b = Box::new;
+            assert_fields(
+                Expr::BinaryNamed {
+                    name: "min".into(),
+                    left: b(Expr::Var("amount".into())),
+                    right: b(Expr::Var("limit".into())),
+                },
+                &Expr::BinaryNamed {
+                    name: "min".into(),
+                    left: b(Expr::Var("Claim.amount".into())),
+                    right: b(Expr::Var("Claim.limit".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn ternary_named_all_operands() {
+            let b = Box::new;
+            assert_fields(
+                Expr::TernaryNamed {
+                    name: "rel_reachable".into(),
+                    first: b(Expr::Var("amount".into())),
+                    second: b(Expr::Var("limit".into())),
+                    third: b(Expr::Var("amount".into())),
+                },
+                &Expr::TernaryNamed {
+                    name: "rel_reachable".into(),
+                    first: b(Expr::Var("Claim.amount".into())),
+                    second: b(Expr::Var("Claim.limit".into())),
+                    third: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+    }
 }
