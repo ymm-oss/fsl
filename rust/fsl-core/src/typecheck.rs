@@ -17,6 +17,7 @@ pub(crate) struct TypecheckError {
     pub(crate) message: String,
     pub(crate) span: Option<Span>,
     needs_context: bool,
+    pub(crate) constant_shadow: bool,
 }
 
 impl TypecheckError {
@@ -56,6 +57,7 @@ pub(crate) fn error(message: impl Into<String>) -> TypecheckError {
         message: message.into(),
         span: None,
         needs_context: false,
+        constant_shadow: false,
     }
 }
 
@@ -1188,6 +1190,21 @@ impl ValidationPhase {
     }
 }
 
+pub(crate) fn reject_constant_shadow<'a>(
+    binding: &str,
+    constants: impl IntoIterator<Item = &'a String>,
+) -> Result<(), TypecheckError> {
+    if constants.into_iter().any(|name| name == binding) {
+        return Err(TypecheckError {
+            constant_shadow: true,
+            ..error(format!(
+                "local binding '{binding}' shadows a constant of the same name; rename the local binding"
+            ))
+        });
+    }
+    Ok(())
+}
+
 fn validate_binder(
     binder: &Binder,
     env: &TypeEnv,
@@ -1197,6 +1214,8 @@ fn validate_binder(
     child_phase: &ValidationPhase,
     self_relations: &SelfRelations,
 ) -> Result<TypeRef, TypecheckError> {
+    reject_constant_shadow(binder_name(binder), model.consts.keys())
+        .map_err(|error| error.with_span(span))?;
     // Check authored bounds before the location-free binder type projection.
     if let Binder::Range { lo, hi, .. } = binder {
         for bound in [lo, hi] {
@@ -2069,6 +2088,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
             let mut local = env.clone();
             let mut local_relations = SelfRelations::new();
             for param in &action.params {
+                reject_constant_shadow(param.name(), model.consts.keys())?;
                 local.insert(param.name().to_owned(), param.ty());
             }
             let mut phase = ValidationPhase::normalized();
@@ -2090,6 +2110,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                             phase = phase.after_patterns(expr);
                         }
                         ActionGuard::Let(name, expr) => {
+                            reject_constant_shadow(name, model.consts.keys())?;
                             phase.check(expr, &local, model, span, None, &local_relations)?;
                             let ty = expression_type(expr, &local, model, span, None)?;
                             if matches!(

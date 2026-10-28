@@ -1038,6 +1038,10 @@ struct PredicateExpander {
 impl PredicateExpander {
     fn new(spec: &SurfaceSpec) -> Result<Self, CoreError> {
         let mut definitions = HashMap::new();
+        let constants = spec.items.iter().filter_map(|item| match item {
+            SpecItem::Const { name, .. } => Some(name),
+            _ => None,
+        });
         for item in &spec.items {
             let SpecItem::Def {
                 name,
@@ -1080,7 +1084,17 @@ impl PredicateExpander {
                         .into_name_resolution(),
                 );
             }
-            let bound = bound_vars(value);
+            let bound = bound_vars(value)
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            for binding in names.iter().chain(&bound) {
+                typecheck::reject_constant_shadow(binding, constants.clone()).map_err(|error| {
+                    CoreError {
+                        origin: Some(Box::new(model::type_diagnostic_origin(*span))),
+                        ..core_error(error.message, *span)
+                    }
+                })?;
+            }
             if let Some(shadowed) = names.iter().filter(|name| bound.contains(*name)).min() {
                 return Err(core_error(
                     format!("def '{name}' parameter is shadowed by binder '{shadowed}'"),
