@@ -1402,6 +1402,20 @@ Current-edition warnings preserve verdicts, assurance and exits; next-edition
 migration findings refuse before consumption with the existing edition error/exit 2.
 Previously ungated consumers can therefore reject next-edition input they accepted.
 
+The measured comparison uses BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`
+and built implementation `33e3fcc5606249a097814d91cb09b506add8e97d` in their
+materialized trees. `fslc check FORM`, cache off and the fsl5 gate enabled only
+for fsl 5 headers, covers all 597 `.fsl` files in `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` plus 309 inline occurrences, with both binaries in
+both trees (3,624 checks). The ok-to-error transition set is empty; 57 corpus
+forms and 22 inline occurrences change only warnings. No fields are excluded.
+The consumer comparison against parent `25f68db7fe214ed2ed66034701ed1bf06b5fbe7c`
+records a breaking refusal for four next-edition migration forms (enum union,
+metadata, colon quantifier, inline maps) in analyze/conformance/explain/html/
+kernel/ledger/mutate/scenarios/sweep/testgen/typestate, and the enum-union form
+in testplan: 45 command/form observations that check already rejects. This does
+not complete deferred raw-warning, mutate-success-warning or sweep-capture modes.
+
 This is a partial delivery, not a guarantee for every reader. AI intake, non-check
 domain commands, document/approval intake, live comparison/refinement and log
 mappings, batch/project/chain intake, counterexample ordering, mutate success

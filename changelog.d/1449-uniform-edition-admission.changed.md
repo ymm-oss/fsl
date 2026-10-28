@@ -30,3 +30,10 @@ counterexample ordering, mutate success warnings, sweep capture and raw-success
 HTML/ledger stderr remain tracked by #1449 with executed deferred-mode controls.
 Git-revision roots (#1513), public-example warning cleanup (#608), lint dialect
 support (#609) and other ledger warning classifications (#1497) are separate.
+Breaking consumer removals: four next-edition migration forms (enum union,
+metadata, colon quantifier, inline maps) now refuse in analyze/conformance/explain/
+html/kernel/ledger/mutate/scenarios/sweep/testgen/typestate, and enum union in
+testplan (45 command/form observations already rejected by check). A named
+BASE/implementation `check` audit covers 597 corpus files plus 309 inline
+occurrences in both materialized trees with an empty ok-to-error set; see the
+migration design amendment for SHAs, command and attribution.

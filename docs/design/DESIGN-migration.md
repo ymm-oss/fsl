@@ -213,6 +213,32 @@ Ordinary parser/type errors keep their command-specific diagnostics. Repair tool
 `lint`, `migrate` and `fmt` retain their planner/formatter projections, validation,
 safety and exit contracts rather than treating migration targets as consumer errors.
 
+The measured boundary comparison uses BASE
+`5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`, warning-exposure parent
+`25f68db7fe214ed2ed66034701ed1bf06b5fbe7c`, and built implementation
+`33e3fcc5606249a097814d91cb09b506add8e97d`. With cache disabled,
+`fslc check FORM` checks all 597 tracked `.fsl` files in `specs/`, `examples/`,
+and `rust/fslc/tests/fixtures/`, plus 309 inline occurrences, using BASE and
+implementation binaries in both materialized trees: 3,624 checks. Only forms
+with an fsl 5 header enable the existing fsl5 gate; fixture edition requests are
+retained. The ok-to-error and error-to-ok sets are empty. Full JSON, exit and
+stderr comparison has no excluded fields: 57 corpus forms and 22 inline
+occurrences change only `warnings`, not another output field or exit.
+
+The separate 52-native-leaf × nine-form comparison runs all three binaries
+(1,404 observations). Parent-to-implementation records these **breaking consumer
+removals**, not new grammar removals: the next-edition enum-union form and the
+three next-edition metadata/colon-quantifier/inline-mapping forms change from a
+non-error consumer result to edition refusal for `analyze`, `conformance`,
+`explain`, `html`, `kernel`, `ledger`, `mutate`, `scenarios`, `sweep`, `testgen`,
+and `typestate`; `testplan` additionally changes for the enum-union form only.
+That is 45 command/form observations, not 45 distinct sources. Existing check
+already refuses these forms. No canonical control changes result, exit or
+artifact presence. The HTML/ledger raw-warning, mutate-success-warning and sweep
+capture modes remain deferred despite their verification-driven refusals.
+Upstream #1450/#1459 restrictions, including the located Bool `acyclic(done)`
+refusal in the shared #1463 row, belong to BASE and are not attributed here.
+
 This is not all-reader completion. `DEFERRED_TO_SECOND_PR` in the shared edition
 test support names 29 unfinished modes across 28 leaves, including AI intake,
 non-check domain commands, document/approval intake, live comparison/refinement

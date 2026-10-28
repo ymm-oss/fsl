@@ -1326,6 +1326,19 @@ non-definitive なエラーを含め重複しなくなりました。Worker は�
 finding は消費前に既存の edition error/exit 2 で拒否します。従来は判定を通らなかった
 consumer が、以前受理した次エディションの入力を拒否する場合があります。
 
+測定は BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4` と build 済み実装
+`33e3fcc5606249a097814d91cb09b506add8e97d` の materialized tree を使います。
+cache 無効の `fslc check FORM` を、fsl 5 ヘッダーだけで既存の fsl5 gate を有効にし、
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597 `.fsl` と
+inline 309出現について、両方の木で両方のバイナリを使って実行しました(3,624検査)。
+ok→error の遷移集合は空で、corpus 57形式と inline 22出現は warnings だけが変わります。
+除外する出力フィールドはありません。親 `25f68db7fe214ed2ed66034701ed1bf06b5fbe7c`
+との consumer 比較では、次エディションの4つの移行形式(enum union、metadata、
+コロン量化子、inline maps)が analyze/conformance/explain/html/kernel/ledger/mutate/
+scenarios/sweep/testgen/typestate で、enum union だけが testplan でも拒否に変わります。
+これは check が既に拒否する45 command/form 観測の破壊的な削除であり、延期中の
+raw warning、mutate 成功時の warning、sweep capture の完成ではありません。
+
 これは部分的な提供であり、すべての reader の対応を保証しません。AI intake、check
 以外の domain コマンド、document/approval intake、live な比較/refinement と log mapping、
 batch/project/chain intake、counterexample の処理順、mutate 成功時の警告、sweep の
