@@ -3624,6 +3624,22 @@ the lowered event.</p>
   <code>claims.Claim.stage(c)</code> (arbitrary-depth <code>SymbolPath</code>) to select one. A
   missing process, non-entity argument, unknown stage member, or unresolved
   qualifier is a source-located type error.</p>
+<p><strong>Breaking removal (#1569):</strong> in legacy requirements with a process field
+<code>amount</code>, <code>check</code> now rejects a transition guard such as
+<code>exists c: Amount { stage(c) == Approved and amount == c }</code>. The non-entity
+binder shadows the transition's implicit entity parameter <code>c</code>; a field named
+<code>c</code> is not required. Previously, capture-avoiding substitution renamed the binder
+without renaming the stage operand: <code>check</code> accepted the guard and <code>verify</code>
+reported <code>verified</code>, but <code>stage(c)</code> silently read the transition's own instance.
+Now <code>check</code>, <code>kernel</code>, and <code>verify</code> fail with exit 2, <code>kind: "semantics"</code>, and
+<code>stage(c) refers to type 'Amount', which has no process</code>. The same invalid guard
+with the binder and its uses consistently renamed to <code>d</code> already failed this way.
+<code>stage(...)</code> requires an entity parameter or binder. To read the transition's own
+stage, use <code>exists n: Amount { stage(c) == Approved and amount == n }</code>, keeping
+<code>c</code> for the entity and a different name for the non-entity binder; this rewritten
+guard passes <code>check</code>. No checked-in spec or example has the removed shape; the
+597-form base <code>1844fa74</code> / head <code>7b9b34b3</code> sweep found no corpus acceptance
+transitions.</p>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation
 vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). A process expands into

@@ -472,9 +472,17 @@ impl StageResolver<'_> {
                 };
                 let [resolved] = candidates.as_slice() else {
                     if candidates.is_empty() {
+                        // Matching authored binders decode too; quantifier binders bypass the '__' declaration check.
+                        let display_name = name
+                            .strip_prefix("__")
+                            .and_then(|name| name.rsplit_once("_substitution_"))
+                            .filter(|(original, index)| {
+                                !original.is_empty() && index.parse::<u64>().is_ok()
+                            })
+                            .map_or(name.as_str(), |(original, _)| original);
                         return Err(core_error(
                             format!(
-                                "stage({name}) refers to type '{entity_type}', which has no process"
+                                "stage({display_name}) refers to type '{entity_type}', which has no process"
                             ),
                             span,
                         ));

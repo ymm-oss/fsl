@@ -1976,6 +1976,21 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
     }
     match expr {
         Expr::Some(expr) => Expr::Some(Box::new(substitute(*expr, replacements, indexed))),
+        Expr::Stage {
+            process,
+            entity,
+            entity_span,
+            span,
+        } => Expr::Stage {
+            process,
+            // Rename entity binders without replacing them with field reads.
+            entity: match substitute((*entity).clone(), replacements, indexed) {
+                renamed @ Expr::Var(_) => Box::new(renamed),
+                _ => entity,
+            },
+            entity_span,
+            span,
+        },
         Expr::Set(items) => Expr::Set(
             items
                 .into_iter()
@@ -2111,7 +2126,8 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
 /// Substitute free scalar variable references in an expression.
 ///
 /// Refinement uses this to pull abstract properties back through scalar state
-/// maps before bounded progress checking.
+/// maps before bounded progress checking. Requirements dialect lowering also
+/// uses it to substitute field and stage reads in guards, updates, and properties.
 #[must_use]
 pub fn substitute_expr<S: std::hash::BuildHasher>(
     expr: Expr,
