@@ -443,3 +443,74 @@ verify {
     assert_eq!(expression["right"]["kind"], "var");
     assert_eq!(expression["right"]["name"], "Draft");
 }
+
+fn assert_stage_on_non_entity_binder_message(binder: &str) {
+    let mut observations = Vec::new();
+    for (label, fields) in [
+        ("nonentity_amount_only", "amount: Amount = 0"),
+        ("nonentity_field_c", "c: Amount = 0, amount: Amount = 0"),
+    ] {
+        let source = r"requirements P1 {
+  number Amount
+  entity Claim
+  process Claim with @fields@ {
+    stages Draft, Approved, Paid
+    initial Draft
+    transition fast Draft -> Approved by Manager
+    transition pay Draft -> Paid by Manager when exists $: Amount { stage($) == Approved and amount == $ }
+  }
+  invariant NoPaid { forall x: Claim { stage(x) != Paid } }
+}
+verify {
+  instances Claim = 2
+  values Amount = 0..1
+}
+"
+        .replace("@fields@", fields);
+        for observation in run(label, &source, binder, "8") {
+            observations.push((label, observation));
+        }
+    }
+    // Check all six error envelopes first: a message mismatch must not hide a
+    // changed exit, error kind, or diagnostic code in either field variant.
+    for (label, observation) in &observations {
+        assert_eq!(observation.exit, 2, "{label}/{}", observation.mode);
+        assert_eq!(observation.value["result"], "error");
+        assert_eq!(observation.value["kind"], "semantics");
+        assert!(
+            observation.value.get("diagnostic_code").is_none(),
+            "{label}/{}: {}",
+            observation.mode,
+            observation.value
+        );
+    }
+    let expected = format!("stage({binder}) refers to type 'Amount', which has no process at 8:69");
+    let mismatches = observations
+        .iter()
+        .filter(|(_, observation)| observation.value["message"].as_str() != Some(expected.as_str()))
+        .map(|(label, observation)| {
+            format!(
+                "{label}/{}: actual {}",
+                observation.mode, observation.value["message"]
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        mismatches.is_empty(),
+        "expected exact message {expected:?}; mismatches: {mismatches:#?}"
+    );
+}
+
+#[test]
+fn breaking_removal_stage_on_non_entity_binder_named_like_implicit_parameter() {
+    // Approved breaking removal (#1569): base 1844fa74 wrongly returned
+    // verified / exit 0 at depth 8 for both field variants, because stage(c)
+    // silently read the action's own Claim c instead of the numeric binder.
+    // Pin rejection now, with the user's binder name rather than its fresh name.
+    assert_stage_on_non_entity_binder_message("c");
+}
+
+#[test]
+fn control_stage_on_non_entity_binder_named_d_keeps_existing_diagnostic() {
+    assert_stage_on_non_entity_binder_message("d");
+}
