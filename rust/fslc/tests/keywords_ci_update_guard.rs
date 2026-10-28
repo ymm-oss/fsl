@@ -2,8 +2,8 @@
 
 //! #1413: golden updates must not turn a CI mismatch into a passing rewrite.
 //! The pure helper avoids global environment mutation or touching the golden.
-//! Phase I fixes the helper and wires `fsl5_keywords.rs` through it; do not edit
-//! these detector/control assertions to make the legacy implementation pass.
+//! `fsl5_keywords.rs` uses the same helper; these detector/control assertions
+//! pin the CI rejection and the existing local opt-in behavior.
 
 #[path = "support/golden_update.rs"]
 mod golden_update;

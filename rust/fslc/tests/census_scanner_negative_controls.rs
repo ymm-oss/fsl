@@ -2,8 +2,8 @@
 
 //! Scratch-source calibrations: legacy extraction misses a real product site,
 //! while syn with the inventory's item-level test policy retains it.
-//! Phase I replaces only `support/census_fixture_scanner.rs` with the shared
-//! scanner adapter; these controls and the frozen legacy extractors stay pinned.
+//! The scanner adapter uses the shared product-source extractor; these controls
+//! and the frozen legacy extractors pin its extraction calibrations.
 
 #[path = "support/census_legacy.rs"]
 mod legacy;
