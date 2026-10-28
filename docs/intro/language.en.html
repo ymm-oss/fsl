@@ -515,9 +515,8 @@ Normalized <code>count</code>/<code>sum</code> patterns retain their standalone 
 valid empty aggregates; composition cannot hide an original global-name refusal
 by prefixing, nor introduce one from a foreign declaration.
 Induction additionally requires state-independent arguments: leadsTo binders,
-enum members, literals, and their <code>+</code>, <code>-</code>, <code>*</code> combinations (including unary <code>-</code>).
-Well-typed arguments that read state are accepted by <code>check</code> and BMC;
-only induction refuses them.
+integer/Boolean literals, and integer <code>+</code>, <code>-</code>, <code>*</code> combinations (including unary <code>-</code>).
+<code>check</code> and BMC accept well-typed arguments that read state; induction refuses them.
 <code>within K</code> is a bounded deadline on a response; <code>K</code> must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 <code>decreases</code> is optional and must be an integer-valued expression. Under
