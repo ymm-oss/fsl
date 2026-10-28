@@ -105,8 +105,10 @@ read-before-assignment gate, then checks completeness specifically for refinemen
 init must be definitely assigned in full: partial fields/keys, a missing branch,
 and empty or not-provably-nonempty forall domains are refused with
 `init does not assign state variable(s): <roots>`, not a refinement verdict.
-Provably nonempty singleton filters remain accepted. Never-assigned finite scalar
-roots remain free and are enumerated; Monitor construction is unchanged.
+Singleton fixed-target assignments remain accepted when a state-independent filter
+is statically proven nonempty. State-reading filters do not establish nonemptiness
+and cannot establish complete init coverage. Never-assigned finite scalar roots
+remain free and are enumerated; Monitor construction is unchanged.
 For these incomplete inits, bmc and induction still return verdicts using free
 values, whereas refine refuses the init and explains that distinction in its error.
 

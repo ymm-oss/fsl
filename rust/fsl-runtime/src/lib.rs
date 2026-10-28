@@ -2073,7 +2073,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
     Ok(projected)
 }
 
-/// Enumerate initial states for refinement, requiring complete assignment of written roots.
+/// Enumerate initial states for refinement, subject to the legacy limits below.
 ///
 /// A model whose init assigns every state variable on every path returns
 /// exactly the single state [`Monitor::new`] would build — no behavior
@@ -2092,7 +2092,6 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 ///
 /// Returns [`RuntimeError`] when a free variable's type is not a finite
 /// scalar domain, or a combination cannot be evaluated concretely.
-/// Incomplete assigned roots and invalid init reads/writes also return errors.
 fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
     check_init_write_ownership(model)?;
     explicit::check_refinement_init(model)?;
@@ -2183,9 +2182,7 @@ pub fn check_refinement_with_budget(
     // mid-walk self-violation means; by construction it cannot encounter
     // one within the same `depth`. `impl_initial_states` enumerates never-assigned
     // roots (#493), rather than selecting one default for them. This covers the
-    // supported nondeterministic initial branches, subject to the constructor's
-    // legacy partial-assignment / ordered-read limits (#1521); it is not a claim
-    // of complete relational-init coverage for those legacy shapes.
+    // supported branches; incomplete written roots are refused (future enumeration: #1579).
     //
     // The pre-pass walks the same reachable set the correspondence walk
     // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
@@ -2214,7 +2211,7 @@ pub fn check_refinement_with_budget(
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
     // States produced by abs's own (possibly nondeterministic) init constructor,
-    // subject to its legacy limits above. Init correspondence below asks whether
+    // rejecting incomplete written roots. Init correspondence below asks whether
     // α(s₀) is a member of this set, not whether it equals one chosen default for
     // never-assigned abstract roots.
     let abs_initial_states: BTreeSet<State> =
