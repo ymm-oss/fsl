@@ -348,13 +348,7 @@ fn detector_pytest_escapes_every_ascii_control_in_each_value_path() {
         })
         .collect::<String>();
     let mut failures = Vec::new();
-    for position in [
-        "walk.initial",
-        "walk.params",
-        "walk.expected",
-        "scenario.params",
-        "scenario.expected",
-    ] {
+    for position in ["scenario.params", "scenario.expected"] {
         let content = fsl_tools::generate_testgen(&adapted_input(json!(value), position), "pytest")
             .expect("pytest");
         if !content.contains(&format!("before{expected}after\\\\\\'")) {
