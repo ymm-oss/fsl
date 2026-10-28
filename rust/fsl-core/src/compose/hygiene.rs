@@ -206,7 +206,7 @@ impl<'a> Renamer<'a> {
                 self.source
                     .params
                     .iter()
-                    .chain(scope.renamed.keys())
+                    .chain(&scope.locals)
                     .map(String::as_str),
             )?;
             if decision == PatternBinding::Substituted {
@@ -296,9 +296,14 @@ impl<'a> Renamer<'a> {
     }
 
     fn expression(&mut self, expr: Expr, scope: &mut Scope) -> Result<Expr, TypecheckError> {
-        crate::recursion::guard(|| self.expression_inner(expr, scope))
+        let mut collisions = scope.locals.clone();
+        super::extend_pattern_names(&expr, &mut collisions, true);
+        let expression = crate::recursion::guard(|| self.expression_inner(expr, scope))?;
+        scope.locals = collisions;
+        Ok(expression)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn expression_inner(&mut self, expr: Expr, scope: &mut Scope) -> Result<Expr, TypecheckError> {
         Ok(match expr {
             Expr::Var(name) => {
@@ -361,11 +366,24 @@ impl<'a> Renamer<'a> {
                 expr: Box::new(self.local(*expr, scope)?),
                 pattern: Pattern::None,
             },
-            Expr::Binary { op, left, right } => Expr::Binary {
-                op,
-                left: Box::new(self.expression(*left, scope)?),
-                right: Box::new(self.expression(*right, scope)?),
-            },
+            Expr::Binary { op, left, right } => {
+                let mut left_scope = scope.clone();
+                let left = self.expression(*left, &mut left_scope)?;
+                let mut right_scope = scope.clone();
+                if crate::pattern_binding_flows(&op, true) {
+                    right_scope.renamed = left_scope.renamed;
+                }
+                right_scope.locals = left_scope.locals;
+                let right = self.expression(*right, &mut right_scope)?;
+                if crate::pattern_binding_flows(&op, false) {
+                    scope.renamed = right_scope.renamed;
+                }
+                Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            }
             Expr::Quantified {
                 quantifier,
                 binder,
