@@ -73,7 +73,23 @@ fn passing_inline_seam_does_not_add_findings() {
     assert_eq!(status, 0, "{body}");
     findings::assert_inline_row(&body, "ChainBusiness", "refines");
     assert!(findings::risk_row(&body, "REQ-1").contains("🟢"), "{body}");
-    findings::assert_no_findings(&body);
+    let expected = serde_json::json!({
+        "code":"inline_action_maps", "kind":"inline_action_maps", "taxonomy":"deprecated",
+        "severity":"warning", "edition":"current",
+        "message":"inline maps are deprecated; use an explicit action correspondence",
+        "loc":{"file":SEAM_PASS,"line":17,"column":28,"end_line":17,"end_column":42},
+        "canonical_replacement":"action finish(i: Item) -> finish(i)", "machine_applicable":true,
+        "edits":[{"start":360,"end":374,"replacement":""},
+            {"start":147,"end":147,"replacement":"    action finish(i: Item) -> finish(i)\n"}]
+    });
+    assert_eq!(findings::raw_findings(&body), serde_json::json!([expected]));
+    assert_eq!(
+        findings::section(&body, "要件ID別詳細")
+            .matches("**検出**")
+            .count(),
+        1
+    );
+    assert!(findings::risk_row(&body, "（仕様全体）").contains("🟡 移行候補"));
 }
 
 fn assert_cti(fixture: &str, property: &str, ranked: bool) {

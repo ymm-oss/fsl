@@ -72,9 +72,9 @@ pub use domain::{
     DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
 };
 pub use edition::{
-    EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED, EDITIONLESS_DECLARATIONS, Edition,
-    EditionHeader, MISSING_EDITION_HEADER, UNSUPPORTED_EDITION, document_edition, edition_header,
-    first_significant_offset,
+    CURRENT_EDITION_MIGRATION_CODES, EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED,
+    EDITIONLESS_DECLARATIONS, Edition, EditionHeader, MISSING_EDITION_HEADER, UNSUPPORTED_EDITION,
+    document_edition, edition_header, first_significant_offset,
 };
 pub use glossary::{
     ALIAS_COLLISION, ALIAS_IN_IMPLEMENTS, ALIAS_SHADOWS_KEYWORD, ALIAS_SHADOWS_NAME,

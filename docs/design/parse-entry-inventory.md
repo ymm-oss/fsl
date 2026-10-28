@@ -114,6 +114,8 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
 - A document read in `fsl 5` behaves as `--edition next` does: every migration
   finding is an error (decisions/049 D7 keeps the codes). The language server
   publishes migration diagnostics of such a document as errors.
+  Consumer coverage is partial; the covered and deferred modes are specified in
+  [DESIGN-migration.md](DESIGN-migration.md), not an all-reader guarantee here.
 - `lint` / `migrate` for edition 5 report `missing_edition_header` (severity
   `info`) on a document without a header, and `migrate` inserts `fsl 5` before
   the first significant line. Both stay outside `plan_migration`, which
@@ -122,8 +124,9 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   document without one prints the same bytes with the gate on (R0). The
   verify cache key adds the unstable set and the exact `--edition` request
   when the gate is on; the header itself is part of the hashed source.
-- Every Worker check/verify output, including errors and headerless documents,
-  passes through the same edition step. Check folds governance only after its
+- Worker check/verify validate options first, then admit source before model or
+  solver work. Admitted source results, including errors and headerless documents,
+  share edition finalization. Check folds governance only after its
   model/implements path, not after an early project/agent gate; verify retains
   its native outer governance fold before edition finalization.
 

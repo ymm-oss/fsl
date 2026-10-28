@@ -18,6 +18,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
+#[path = "support/migration_warnings.rs"]
+mod migration_warnings;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -125,7 +127,7 @@ fn the_same_tree_at_a_second_path_hits_the_cache() {
         &abstract_source("0"),
     );
 
-    let (cold, cold_status) = verify(&first, &cache);
+    let (mut cold, cold_status) = verify(&first, &cache);
     assert_eq!(
         (cold_status, cold["result"].as_str()),
         (0, Some("verified")),
@@ -133,12 +135,23 @@ fn the_same_tree_at_a_second_path_hits_the_cache() {
     );
     assert!(!hit(&cold), "the first run has nothing to hit: {cold:#}");
 
-    let (warm, warm_status) = verify(&second, &cache);
+    let (mut warm, warm_status) = verify(&second, &cache);
     assert_eq!(warm_status, 0, "{warm:#}");
     assert!(
         hit(&warm),
         "same content at another path must hit: {warm:#}"
     );
+    // Migration warnings are applied after cache replay. Their file is the
+    // current operand, not the cached first path. Validate the full finding at
+    // each location, then compare every remaining envelope field as before.
+    for (output, path) in [(&mut cold, &first), (&mut warm, &second)] {
+        migration_warnings::take_migration_warnings(
+            output,
+            path,
+            path.to_str().expect("path"),
+            &["inline_action_maps"],
+        );
+    }
     assert_eq!(without_cache(&warm), cold);
 }
 

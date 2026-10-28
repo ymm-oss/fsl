@@ -101,10 +101,15 @@ pub fn assert_no_findings(body: &str) {
 }
 
 pub fn assert_uncertain(detail: &str) {
+    assert_uncertain_with_migration(detail, false);
+}
+
+pub fn assert_uncertain_with_migration(detail: &str, migration: bool) {
     assert!(detail.contains("未確立"), "expected uncertainty: {detail}");
     for forbidden in ["反例", "違反"] {
         assert!(
-            !detail.contains(forbidden),
+            detail.lines().all(|line| !line.contains(forbidden)
+                || (migration && line == "  - 反例要約: 移行候補（inline_action_maps）: branch-specific maps cannot be moved to one unconditional correspondence")),
             "CTI is not an established violation: {detail}"
         );
     }

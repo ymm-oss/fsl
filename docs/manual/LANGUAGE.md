@@ -303,7 +303,9 @@ Domain declarations use `enum Name { Member, ... }` for finite variants and
 stable `deprecated_domain_enum_union` warning over the complete declaration,
 including a canonical replacement. `fslc check`, `fslc verify`, and
 `fslc domain check` accept `--edition current|next`; `next` rejects the legacy
-union spelling. `fslc lint` reports the edition finding without mutation, and
+union spelling. Other covered consumers use the source header's edition; this
+does not add an `--edition` option to those commands. `fslc lint` reports the
+edition finding without mutation, and
 `fslc migrate --edition next` supplies the checked canonical edit. Empty enums
 and duplicate members are errors, reported at the declaration and duplicate
 member respectively.
@@ -1361,6 +1363,69 @@ and domain expressions retain their existing behavior.
 Range type endpoints, including parenthesized subexpressions within them,
 retain generic `FSL-PARSE` diagnostics for these invalid spellings. They remain
 rejected; this exception does not change structural relation arrows.
+
+In the current edition, `check`, `verify`, and Worker JSON
+append migration warnings for declaration string metadata
+(`legacy_string_metadata`), colon quantifiers (`legacy_quantifier_colon`), and
+inline action `maps` (`inline_action_maps`). These reuse lint's exact locations,
+replacements, edits, and migration-safety information, without changing verdicts
+or exit codes. A refused rewrite remains `machine_applicable: false`; a warning
+does not mean automatic migration is safe. Prefer typed annotations, braced
+quantifiers, and explicit action correspondences in `implements`. Lint retains
+exit 0 for no findings, 1 for findings, and 2 for parse/check failure.
+Domain checking rejects quantified domain expressions instead of emitting a
+colon-quantifier warning; legacy string metadata and requirement action mappings
+are not accepted domain forms.
+
+Captured-root admission also covers `db check`/`compat check`, `scenarios`,
+generic `testgen`, `kernel`, `conformance`, `testplan`, `typestate`, `explain`,
+single-FSL-source `analyze`, trace replay and the six causal commands (#1449).
+They classify the same captured bytes they consume, before model/solver work or
+output effects. Causal diff includes both operands; observation includes its
+explicit FSL mapping. Each slot is distinct, so repeating a file in two slots
+permits one warning per slot. Headers, existing edition options and read-error
+kinds keep their rules; no new dialect/header combination is accepted.
+The single-input analyze entry also preflights `.toml` text, without admitting
+the referenced FSL roots or completing project-mode intake. Envelope `fsl_edition`
+and `edition` describe only the primary root, while warnings retain each slot.
+Preparing all causal roots means a later operand/mapping read error intentionally
+precedes an earlier root's parse/model error.
+
+Implemented open envelopes use `warnings` once. Successful closed schemas
+(`kernel`, `conformance`, `testplan`) and implemented raw TypeScript/readable/graph
+outputs use stderr `warning: <finding-json>` without changing stdout. Admitted
+verification finalizes after governance; domain/database checks, scenarios and
+generic testgen finish only their outer result. Domain check no longer duplicates
+migration warnings, including non-definitive errors. Worker admission precedes
+model/solver use; editor refusals retain UTF-16 ranges without model/analysis work.
+Current-edition warnings preserve verdicts, assurance and exits; next-edition
+migration findings refuse before consumption with the existing edition error/exit 2.
+Previously ungated consumers can therefore reject next-edition input they accepted.
+
+The measured comparison uses BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`
+and built implementation `33e3fcc5606249a097814d91cb09b506add8e97d` in their
+materialized trees. `fslc check FORM`, with cache off, covers all 597 `.fsl`
+files in `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` plus 309 inline occurrences, with both binaries in
+both trees (3,624 checks). The ok-to-error transition set is empty; 57 corpus
+forms and 22 inline occurrences change only warnings. No fields are excluded.
+The consumer comparison against parent `25f68db7fe214ed2ed66034701ed1bf06b5fbe7c`
+records a breaking refusal for four next-edition migration forms (enum union,
+metadata, colon quantifier, inline maps) in analyze/conformance/explain/html/
+kernel/ledger/mutate/scenarios/sweep/testgen/typestate, and the enum-union form
+in testplan: 45 command/form observations that check already rejects. This does
+not complete deferred raw-warning, mutate-success-warning or sweep-capture modes.
+
+This is a partial delivery, not a guarantee for every reader. AI intake, non-check
+domain commands, document/approval intake, live comparison/refinement and log
+mappings, batch/project/chain intake, counterexample ordering, mutate success
+warnings, sweep capture and raw-success HTML/ledger stderr remain tracked by #1449.
+Report baselines and ledger migration rendering are retained; migration-only rows
+use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
+🔴 要確認 / 要確認. Dependencies are not recursively admitted; historical Git roots
+remain #1513. Repair projections/exits stay unchanged, including lint's existing
+dialect limits (#609); this does not remove public-example warnings (#608) or fix
+other ledger warning classifications (#1497).
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while

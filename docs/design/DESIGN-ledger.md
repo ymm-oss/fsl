@@ -20,6 +20,9 @@ reads as "guarantees nothing".
   `trace_type` from #23), dead `reachable`s (`unreached[]`), uncovered source-backed actions,
   vacuity warnings, failed acceptance/forbidden (as errors), and the guarantee
   bound (`checked_to_depth` + `completeness`).
+- Edition-migration findings render as `trace_type: migration` with a 移行候補 summary containing the code and message, without mutate advice (#1449).
+- Rows containing only migration findings use status 🟡 移行候補 and risk —; rows with any non-migration finding retain 🔴 要確認 and risk 要確認, including specification-wide and approval views.
+- Baseline migration findings and their evidence are retained; raw-success warning stderr remains deferred under #1449. Other non-migration warning-family classification defects are tracked by #1497, not fixed by the migration-row change.
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log

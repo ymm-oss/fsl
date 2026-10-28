@@ -303,6 +303,130 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
     }
 }
 
+fn assert_next_legacy_rejection(path: &str, headed: bool, code: &str) {
+    let output = run_edition(path, "check", Some("next"), headed, &[]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = json(&output);
+    assert_eq!(output["result"], "error");
+    if headed {
+        assert_eq!(output["kind"], "parse");
+        assert_eq!(output["diagnostic_code"], "edition_conflict");
+        assert!(output.get("findings").is_none());
+    } else {
+        assert_eq!(output["kind"], "unsupported_in_edition");
+        let findings = output["findings"].as_array().expect("findings");
+        assert_eq!(findings.len(), 1, "{output:#}");
+        assert_eq!(findings[0]["code"], code);
+        assert_eq!(findings[0]["severity"], "error");
+    }
+}
+
+fn assert_token_location(finding: &Value, source: &str, token: &str) {
+    let offset = source.find(token).expect("legacy token");
+    let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    assert_eq!(
+        finding["loc"]["line"],
+        source[..offset].matches('\n').count() + 1
+    );
+    assert_eq!(
+        finding["loc"]["column"],
+        source[line_start..offset].chars().count() + 1
+    );
+    assert_eq!(
+        finding["loc"]["end_column"],
+        source[line_start..offset].chars().count() + token.chars().count() + 1
+    );
+}
+
+#[test]
+fn current_edition_exposes_legacy_findings_without_changing_success() {
+    let directory = FixtureDir::new();
+    directory.write(
+        "abstract.fsl",
+        "spec Abstract { state { done: Bool = false } action finish() { done = true } }\n",
+    );
+    for (body, code, token) in [
+        (
+            "spec S { state { done: Bool = false } action finish() \"REQ-PROBE-001: 完了\" { done = true } }\n",
+            "legacy_string_metadata",
+            "\"REQ-PROBE-001: 完了\"",
+        ),
+        (
+            "spec S { state { done: Bool = false } action finish() { done = true } invariant Typed { forall i in 0..1: done == true or done == false } }\n",
+            "legacy_quantifier_colon",
+            "forall",
+        ),
+        (
+            "requirements S { implements Abstract from \"abstract.fsl\" { map done = done } state { done: Bool = false } action complete() maps finish() { done = true } }\n",
+            "inline_action_maps",
+            "maps finish()",
+        ),
+    ] {
+        for (prefix, edition) in [
+            ("// 日本語\n", None),
+            ("// 日本語\n", Some("current")),
+            ("fsl 4\n// 日本語\n", None),
+        ] {
+            let source = format!("{prefix}{body}");
+            let path = directory.write("current.fsl", &source);
+            let path = path.to_str().expect("path");
+            let invoke = |verb: &str, extra: &[&str]| {
+                run_edition(path, verb, edition, prefix.starts_with("fsl 4"), extra)
+            };
+            // Preservation: lint already reports these findings, including exit 1.
+            let lint = invoke("lint", &[]);
+            assert_eq!(lint.status.code(), Some(1));
+            let lint = json(&lint);
+            let findings = lint["files"][0]["findings"].as_array().expect("findings");
+            assert_eq!(lint["finding_count"], findings.len());
+            let expected = findings
+                .iter()
+                .filter(|f| f["code"] == code)
+                .collect::<Vec<_>>();
+            assert_eq!(expected.len(), 1, "{lint:#}");
+            let expected = expected[0];
+            assert_token_location(expected, &source, token);
+            assert_eq!(expected["severity"], "warning");
+            assert_eq!(expected["edition"], "current");
+            for (verb, extra) in [
+                ("check", vec![]),
+                ("verify", vec!["--depth", "2", "--no-cache"]),
+            ] {
+                let output = invoke(verb, &extra);
+                assert_eq!(
+                    output.status.code(),
+                    Some(0),
+                    "{}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                let output = json(&output);
+                let warnings = output["warnings"].as_array().expect("warnings");
+                let actual = warnings
+                    .iter()
+                    .filter(|f| f.get("code").is_some())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual,
+                    vec![expected],
+                    "{verb}: expected {code}, produced {output:#}"
+                );
+                assert_eq!(
+                    output.get("fsl_edition").is_some(),
+                    prefix.starts_with("fsl 4")
+                );
+                if code == "legacy_string_metadata" {
+                    assert!(
+                        warnings.iter().any(|f| f["kind"] == "no_user_invariants"),
+                        "existing warning retained: {output:#}"
+                    );
+                }
+            }
+            // Preservation: the existing next-edition rejection stays exit 2.
+            assert_next_legacy_rejection(path, prefix.starts_with("fsl 4"), code);
+        }
+    }
+}
+
 fn assert_operator_endpoints(source: &str, offset: usize) {
     let options = gated_options();
     let error = fsl_syntax::parse_surface_document_with(source, &options)
@@ -386,6 +510,171 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
         String::from_utf8_lossy(&output.stdout)
     );
     assert_eq!(json(&output)["result"], expected);
+}
+
+#[test]
+fn domain_quantifier_rejection_and_warning_absence_match_the_base_contract() {
+    let directory = FixtureDir::new();
+    let source = concat!(
+        "// SPDX-License-Identifier: Apache-2.0\n",
+        "// Domain check's current projection rejects quantified expressions (exit 2).\n",
+        "domain D { aggregate A { state { ready: Bool = false } command Finish {} event Finished {} decide Finish { emits Finished } evolve Finished { ready = true } invariant Typed { forall i in 0..1: ready == true or ready == false } } }\n"
+    );
+    let path = directory.write("quantifier.fsl", source);
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .env_remove("FSLC_UNSTABLE")
+        .args([
+            "domain",
+            "check",
+            path.to_str().expect("path"),
+            "--depth",
+            "2",
+        ])
+        .output()
+        .expect("domain check");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let output = json(&output);
+    let offset = source.find("forall i").expect("quantifier");
+    let line = source[..offset].matches('\n').count() + 1;
+    let start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let column = source[start..offset].chars().count() + 1;
+    assert_eq!(
+        output,
+        serde_json::json!({
+            "fsl":"1.0", "result":"error", "kind":"semantics",
+            "message":format!("unsupported domain expression construct at {line}:{column}"),
+            "loc":{"line":line,"column":column}
+        }),
+        "the base rejects this domain form without migration warnings"
+    );
+}
+
+#[test]
+fn current_domain_warnings_exclude_unrelated_planner_codes() {
+    let directory = FixtureDir::new();
+    let source = "domain D { enum E { A, B } aggregate X { state { e: E = A } command Finish {} event Finished {} decide Finish { requires e == A || e == B emits Finished } evolve Finished { e = B } invariant I { e == A -> e == A } } }\n";
+    let path = directory.write("logical.fsl", source);
+    let path = path.to_str().expect("path");
+    let lint = run_edition(path, "lint", None, false, &[]);
+    assert_eq!(lint.status.code(), Some(1));
+    assert!(
+        json(&lint)["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|f| f["code"] == "legacy_logical_operator")
+    );
+    for args in [
+        vec!["check", path],
+        vec!["verify", path, "--depth", "2", "--no-cache"],
+        vec!["domain", "check", path, "--depth", "2"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .env_remove("FSLC_UNSTABLE")
+            .args(&args)
+            .output()
+            .expect("run fslc");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let output = json(&output);
+        let warnings = if args[0] == "domain" {
+            assert!(
+                output.get("warnings").is_none(),
+                "unexpected domain edition warnings: {output:#}"
+            );
+            &output["kernel"]["warnings"]
+        } else {
+            &output["warnings"]
+        };
+        let codes = warnings
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter_map(|f| f["code"].as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.is_empty(),
+            "unrelated planner findings leaked: {output:#}"
+        );
+    }
+}
+
+#[test]
+fn current_warnings_preserve_refusals_and_ignore_canonical_and_literal_forms() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let directory = FixtureDir::new();
+    let branch = directory.write("branches.fsl", "requirements Branch { state { done: Bool = false } action complete() { branches { when not done { done = true } maps stutter } } }\n");
+    for (path, status, result) in [
+        (branch, 0, "ok"),
+        (
+            root.join("tests/fixtures/action_correspondence_duplicate.fsl"),
+            2,
+            "error",
+        ),
+    ] {
+        let path = path.to_str().expect("path");
+        let check = run(&["check", path]);
+        assert_eq!(check.status.code(), Some(status));
+        let lint = run(&["lint", path]);
+        assert_eq!(lint.status.code(), Some(1));
+        let lint = json(&lint);
+        let expected = lint["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .filter(|f| f["code"] == "inline_action_maps")
+            .collect::<Vec<_>>();
+        assert!(expected.iter().any(|f| f["machine_applicable"] == false));
+        let check = json(&check);
+        assert_eq!(check["result"], result);
+        let actual = check["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter(|f| f["code"] == "inline_action_maps")
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "{check:#}");
+    }
+    let source = r#"// forall i in 0..1: || -> maps finish()
+spec Canonical {
+  state { done: Bool = false }
+  @requirement("REQ-PROBE-001", "literal maps finish() forall i: -> ||")
+  action finish() { done = true }
+  invariant Typed { forall i in 0..1 { done == true or done == false } }
+}
+"#;
+    let path = directory.write("canonical.fsl", source);
+    for verb in ["check", "lint"] {
+        let output = run(&[verb, path.to_str().expect("path")]);
+        assert_eq!(output.status.code(), Some(0));
+        let output = json(&output);
+        let findings = if verb == "lint" {
+            &output["files"][0]["findings"]
+        } else {
+            &output["warnings"]
+        };
+        assert!(
+            findings
+                .as_array()
+                .expect("findings")
+                .iter()
+                .all(|f| !matches!(
+                    f["code"].as_str(),
+                    Some(
+                        "legacy_string_metadata" | "legacy_quantifier_colon" | "inline_action_maps"
+                    )
+                ))
+        );
+    }
 }
 
 #[test]
