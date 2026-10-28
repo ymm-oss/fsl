@@ -5,6 +5,7 @@
 #[derive(Clone, Copy)]
 pub enum Expected {
     Before(&'static str),
+    FreeRead { root: &'static str, violated: bool },
     Accepted,
     Free { root: &'static str, partial: bool },
     StaticRange,
@@ -14,6 +15,7 @@ impl Expected {
     pub fn name(self) -> &'static str {
         match self {
             Self::Before(_) => "read-before-assigned",
+            Self::FreeRead { .. } => "free-root-read",
             Self::Accepted => "explicit-accepted",
             Self::Free { .. } => "symbolic-free-init",
             Self::StaticRange => "existing-static-range-refusal",
@@ -63,17 +65,35 @@ fn ordered(after: bool, read: &str, write: &str) -> String {
 }
 
 pub const ISSUE: &str = "spec A {\n  state { on: Bool, g: Bool }\n  init { g = on }\n  action stay() { }\n  invariant Same { g == on }\n}\n";
+pub const CHOOSE: &str = "spec A {\n  state { choose: Bool, x: Int }\n  init { if choose { x = 1 } else { x = 0 } }\n  action stay() { }\n  invariant X { x == 1 }\n}\n";
 
 #[allow(clippy::too_many_lines)] // Keep the finite calibrated input table together.
 pub fn cases() -> Vec<Case> {
-    use Expected::{Accepted, Before, ExistingKeyRefusal, Free, StaticRange};
-    let mut rows = vec![Case {
-        id: "issue-exact".into(),
-        family: "root",
-        expected: Before("on"),
-        source: ISSUE.into(),
-        marker: Some("g = on".into()),
-    }];
+    use Expected::{Accepted, Before, ExistingKeyRefusal, Free, FreeRead, StaticRange};
+    // #493: roots never assigned anywhere in init are free values, unlike
+    // roots read before a later assignment. Explicit still cannot run these.
+    let mut rows = vec![
+        Case {
+            id: "issue-exact".into(),
+            family: "root",
+            expected: FreeRead {
+                root: "on",
+                violated: false,
+            },
+            source: ISSUE.into(),
+            marker: Some("g = on".into()),
+        },
+        Case {
+            id: "free-choose".into(),
+            family: "if-condition",
+            expected: FreeRead {
+                root: "choose",
+                violated: true,
+            },
+            source: CHOOSE.into(),
+            marker: Some("if choose".into()),
+        },
+    ];
     for after in [false, true] {
         let suffix = if after { "after" } else { "before" };
         let on = if after { Accepted } else { Before("on") };
@@ -286,6 +306,6 @@ pub fn cases() -> Vec<Case> {
         "not r.on",
         None,
     ));
-    assert_eq!(rows.len(), 35);
+    assert_eq!(rows.len(), 36);
     rows
 }

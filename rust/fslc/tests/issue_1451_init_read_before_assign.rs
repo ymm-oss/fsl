@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! #1451: init read order matches the calibrated concrete root-coverage oracle.
+//! #1451: later-assigned init reads follow the concrete root-coverage oracle;
+//! never-assigned reads remain free (#493), despite explicit's support limit.
 
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)]
@@ -63,9 +64,8 @@ fn accepted(actual: &(Value, i32), consumer: &str) -> bool {
     };
     actual.1 == 0
         && actual.0["result"] == result
+        && no_error(&actual.0)
         && [
-            "kind",
-            "message",
             "violation_kind",
             "invariant",
             "action",
@@ -74,6 +74,23 @@ fn accepted(actual: &(Value, i32), consumer: &str) -> bool {
         ]
         .iter()
         .all(|field| actual.0.get(*field).is_none())
+}
+
+fn no_error(actual: &Value) -> bool {
+    ["kind", "message"]
+        .iter()
+        .all(|field| actual.get(*field).is_none())
+}
+
+fn read_refused(case: &forms::Case, actual: &(Value, i32), name: &str, composed: bool) -> bool {
+    let message = format!(
+        "init references state variable '{}' before it is assigned",
+        root(name, composed)
+    );
+    error(actual, Some(&message))
+        || location_suffixes(&point(case))
+            .iter()
+            .any(|suffix| error(actual, Some(&format!("{message}{suffix}"))))
 }
 
 fn point(case: &forms::Case) -> Value {
@@ -108,15 +125,23 @@ fn matches_oracle(
     composed: bool,
 ) -> bool {
     match case.expected {
-        Expected::Before(name) => {
-            let message = format!(
-                "init references state variable '{}' before it is assigned",
-                root(name, composed)
-            );
-            error(actual, Some(&message))
-                || location_suffixes(&point(case))
-                    .iter()
-                    .any(|suffix| error(actual, Some(&format!("{message}{suffix}"))))
+        Expected::Before(name) => read_refused(case, actual, name, composed),
+        Expected::FreeRead {
+            root: name,
+            violated,
+        } => {
+            if consumer == "explicit" {
+                // Existing concrete support limit, NOT an agreement assertion.
+                read_refused(case, actual, name, composed)
+            } else if violated && consumer != "check" {
+                actual.1 == 1
+                    && actual.0["result"] == "violated"
+                    && no_error(&actual.0)
+                    && actual.0["violation_kind"] == "invariant"
+                    && actual.0["invariant"] == if composed { "part.X" } else { "X" }
+            } else {
+                accepted(actual, consumer)
+            }
         }
         Expected::Free {
             root: name,
@@ -151,7 +176,21 @@ fn init_reads_preserve_the_explicit_assignment_contract() {
     let cases = forms::cases();
     assert_eq!(
         cases.iter().map(|c| &c.id).collect::<BTreeSet<_>>().len(),
-        35
+        36
+    );
+    assert_eq!(
+        cases
+            .iter()
+            .filter(|c| matches!(c.expected, Expected::Before(_)))
+            .count(),
+        13
+    );
+    assert_eq!(
+        cases
+            .iter()
+            .filter(|c| matches!(c.expected, Expected::FreeRead { .. }))
+            .count(),
+        2
     );
     let report = compose_scratch::scratch("issue-1451-init-report", &[]);
     let mut rows = Vec::new();
@@ -235,7 +274,7 @@ fn init_reads_preserve_the_explicit_assignment_contract() {
     }
     std::fs::write(report.join("report.json"),serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"groups":groups,"inapplicable":[],"oracle_failures":oracle_failures,"missing_check_refusals":missing_check_refusals,"detector_failures":detector_failures,"control_failures":control_failures})).unwrap()).unwrap();
     eprintln!(
-        "INIT_READ_RESULT cases=35 N=0 observations={} oracle_failures={oracle_failures} missing_check_refusals={missing_check_refusals} detector_failures={detector_failures} control_failures={control_failures} report={}",
+        "INIT_READ_RESULT cases=36 N=0 observations={} oracle_failures={oracle_failures} missing_check_refusals={missing_check_refusals} detector_failures={detector_failures} control_failures={control_failures} report={}",
         rows.len(),
         report.display()
     );
@@ -245,7 +284,7 @@ fn init_reads_preserve_the_explicit_assignment_contract() {
     );
     assert_eq!(
         control_failures, 0,
-        "accepted/free-init/existing-refusal control changed"
+        "accepted/free-init/free-read/existing-refusal control changed"
     );
     assert_eq!(
         detector_failures, 0,
