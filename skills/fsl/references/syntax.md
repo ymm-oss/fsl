@@ -1110,14 +1110,14 @@ for a later read outside the loop. Use a resolved full-domain binder, e.g.
 `forall k: K { m[k] = true } g = m[0]`, instead of its filtered/collection
 equivalent before reading. Unread omitted/legacy partial init remain accepted.
 
-Historical sweep before the resolved-binder correction:
-`fslc check <form>` in each own materialized tree, base
-`9e8ed724bdbd070868af00d5160e5f6198738c49` versus head
-`5bc59416fa42c3132e33e3e3264ed29c0d77701b`. All 597 files in `specs/`,
+Breaking-removal sweep: `fslc check <form>` in each own materialized tree, base
+`c79016efeb630c717292e9392901cfe65ab40915` versus head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`. All 597 files in `specs/`,
 `examples/`, `rust/fslc/tests/fixtures/` have identical full outputs/exits
 (400 exit 0, 191 exit 2, 6 exit 1), corpus `ok`→`error` set empty. Separately,
-37 inline sources × direct/compose = 74 forms have 28 `ok`→`error` transitions:
-13 read-order cases × 2 plus N2 × 2, and no other output changes. The complete
+42 inline sources × direct/compose = 84 forms have 38 `ok`→`error` transitions:
+original 13 cases × 2, N2 × 2, two static-subset cases × 2 and three post-loop
+coverage cases × 2, and no other output changes. The
 [removal/migration table](../../../docs/design/DESIGN-bridge.md#assigned-root-read-order-1451)
 also covers the added subset/post-loop cases; completeness refers only to the
 measured inline fixture set, not all removed programs. Assign before reading or initialize the

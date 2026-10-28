@@ -1001,14 +1001,15 @@ forall の source/domain は既存の別の規則に従います。早すぎる�
 <code>forall k: K where true { m[k] = true }</code> の後で <code>g = m[0]</code> と読む代わりに
 <code>forall k: K { m[k] = true } g = m[0]</code> と書けます。読まない未代入ルートや
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。</p>
-<p>値が決まる binder の訂正前の測定記録 (#1451): base
-<code>9e8ed724bdbd070868af00d5160e5f6198738c49</code> と head
-<code>5bc59416fa42c3132e33e3e3264ed29c0d77701b</code> のそれぞれの materialized tree で
+<p>breaking-removal sweep (#1451): base
+<code>c79016efeb630c717292e9392901cfe65ab40915</code> と head
+<code>2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4</code> のそれぞれの materialized tree で
 <code>fslc check &lt;form&gt;</code> を実行。<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code>
 の全 <strong>597</strong> 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
-exit 1)で、corpus の <code>ok</code>→<code>error</code> の集合は <strong>空</strong> です。別に inline 37 source
-を直接/compose の両方で検査した74形では <strong>28</strong> 形が <code>ok</code>→<code>error</code> になります。
-内訳は13本の代入前の読み × 2 と #1481 N2 × 2 で、他の出力の変化はありません。
+exit 1)で、corpus の <code>ok</code>→<code>error</code> の集合は <strong>空</strong> です。別に inline 42 source
+を直接/compose の両方で検査した84形では <strong>38</strong> 形が <code>ok</code>→<code>error</code> になります。
+内訳は元の13形 × 2、#1481 N2 × 2、静的な部分 domain の2形 × 2、ループ後の
+coverage の3形 × 2 で、他の出力の変化はありません。
 <a href="../design/DESIGN-bridge.md#assigned-root-read-order-1451">移行表</a>は、追加された
 静的な部分 domain とループ後の読みの族の書き直しも含みます。この一覧の完全性は
 測定した inline fixture 集合内のもので、全ての拒否されるプログラムの列挙ではありません。

@@ -382,21 +382,20 @@ Unread omitted roots and legacy-accepted partial init remain
 accepted. The expression-only read exemption never credits real assignment
 coverage or changes the initialized state.
 
-Historical checkpoint before the resolved-binder correction: run
-`fslc check <form>` with the base/head binaries in each
+Sweep command: run `fslc check <form>` with the base/head binaries in each
 revision's own git-archive materialized tree. Measured base
-`9e8ed724bdbd070868af00d5160e5f6198738c49`, head
-`5bc59416fa42c3132e33e3e3264ed29c0d77701b`; binary SHA-256 respectively
-`01318f3eca18b5cd53d8adcb10e3a2ebbc229b4524a2c4dc5e54a1bb3af6c1b5` and
-`5c0894207548454c3098518a773ddaf3caf82dfd8d5b9423301c139cfc4f421e`.
+`c79016efeb630c717292e9392901cfe65ab40915`, head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`; binary SHA-256 respectively
+`e42827307a61957e16d6a53e12bf84216506fc7eaa2a25ccc3a0084874b748f2` and
+`15ae6af290ba67b7fa8801494ee62fe54b8def11dc1393ba9067553a78953a8b`.
 All **597** `.fsl` files under `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/` have identical full stdout/stderr/exits (400 exit 0,
 191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline
-sweep covers the 36 regression sources plus the rewritten N2 fixture, each
-direct and composed: 37 sources / 74 forms, base 70 exit 0 + 4 exit 2, head
-42 exit 0 + 32 exit 2. Exactly **28** forms become errors: the original 13 cases
-× 2, plus N2 × 2, before the five review fixtures below were added. Those are
-also the only full-output changes; no fields were
+sweep covers the 36 author sources, N2 and five implementer fixtures, each
+direct and composed: 42 sources / 84 forms, base 80 exit 0 + 4 exit 2, head
+42 exit 0 + 42 exit 2. Exactly **38** forms become errors: the original 13 cases
+× 2, N2 × 2, the two static-subset cases × 2 and the three post-loop coverage
+cases × 2. Those are also the only full-output changes; no fields were
 excluded. N2 is not counted among the 597 corpus files.
 
 The table lists the targeted inline removal fixtures and a migration example

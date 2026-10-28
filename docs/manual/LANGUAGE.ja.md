@@ -964,14 +964,15 @@ init が一度も代入しないルートは symbolic な自由値のままで�
 `forall k: K { m[k] = true } g = m[0]` と書けます。読まない未代入ルートや
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
 
-値が決まる binder の訂正前の測定記録 (#1451): base
-`9e8ed724bdbd070868af00d5160e5f6198738c49` と head
-`5bc59416fa42c3132e33e3e3264ed29c0d77701b` のそれぞれの materialized tree で
+breaking-removal sweep (#1451): base
+`c79016efeb630c717292e9392901cfe65ab40915` と head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4` のそれぞれの materialized tree で
 `fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
 の全 **597** 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
-exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 37 source
-を直接/compose の両方で検査した74形では **28** 形が `ok`→`error` になります。
-内訳は13本の代入前の読み × 2 と #1481 N2 × 2 で、他の出力の変化はありません。
+exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 42 source
+を直接/compose の両方で検査した84形では **38** 形が `ok`→`error` になります。
+内訳は元の13形 × 2、#1481 N2 × 2、静的な部分 domain の2形 × 2、ループ後の
+coverage の3形 × 2 で、他の出力の変化はありません。
 [移行表](../design/DESIGN-bridge.md#assigned-root-read-order-1451)は、追加された
 静的な部分 domain とループ後の読みの族の書き直しも含みます。この一覧の完全性は
 測定した inline fixture 集合内のもので、全ての拒否されるプログラムの列挙ではありません。

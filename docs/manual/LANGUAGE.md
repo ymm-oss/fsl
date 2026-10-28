@@ -1014,15 +1014,14 @@ For example, replace `forall k: K where true { m[k] = true }` followed by
 Unread omitted roots and legacy-accepted partial init remain
 accepted; check does not require a deterministic initial state.
 
-Historical checkpoint before the resolved-binder correction (#1451):
-`fslc check <form>` in each revision's own
-materialized tree, base `9e8ed724bdbd070868af00d5160e5f6198738c49` versus
-head `5bc59416fa42c3132e33e3e3264ed29c0d77701b`: all **597** `.fsl` files under
+Breaking-removal sweep (#1451): `fslc check <form>` in each revision's own
+materialized tree, base `c79016efeb630c717292e9392901cfe65ab40915` versus
+head `2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`: all **597** `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` have identical full outputs
 and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus `ok`→`error` set **empty**.
-Separately, 37 inline sources, each direct and composed (74 forms), have **28**
-`ok`→`error` transitions: the 13 read-before-assignment cases × 2, plus #1481
-N2 × 2; no other output changes. The
+Separately, 42 inline sources, each direct and composed (84 forms), have **38**
+`ok`→`error` transitions: the original 13 cases × 2, #1481 N2 × 2, two static
+subset cases × 2 and three post-loop coverage cases × 2; no other output changes. The
 [migration table](../design/DESIGN-bridge.md#assigned-root-read-order-1451)
 also covers the added static-subset and post-loop coverage families. Its list is
 scoped to the measured inline fixtures, not every possible removed program.

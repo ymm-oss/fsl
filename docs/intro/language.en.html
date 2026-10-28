@@ -1050,15 +1050,14 @@ For example, replace <code>forall k: K where true { m[k] = true }</code> followe
 <code>g = m[0]</code> with <code>forall k: K { m[k] = true } g = m[0]</code> for a finite <code>K</code>.
 Unread omitted roots and legacy-accepted partial init remain
 accepted; check does not require a deterministic initial state.</p>
-<p>Historical checkpoint before the resolved-binder correction (#1451):
-<code>fslc check &lt;form&gt;</code> in each revision's own
-materialized tree, base <code>9e8ed724bdbd070868af00d5160e5f6198738c49</code> versus
-head <code>5bc59416fa42c3132e33e3e3264ed29c0d77701b</code>: all <strong>597</strong> <code>.fsl</code> files under
+<p>Breaking-removal sweep (#1451): <code>fslc check &lt;form&gt;</code> in each revision's own
+materialized tree, base <code>c79016efeb630c717292e9392901cfe65ab40915</code> versus
+head <code>2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4</code>: all <strong>597</strong> <code>.fsl</code> files under
 <code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code> have identical full outputs
 and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus <code>ok</code>→<code>error</code> set <strong>empty</strong>.
-Separately, 37 inline sources, each direct and composed (74 forms), have <strong>28</strong>
-<code>ok</code>→<code>error</code> transitions: the 13 read-before-assignment cases × 2, plus #1481
-N2 × 2; no other output changes. The
+Separately, 42 inline sources, each direct and composed (84 forms), have <strong>38</strong>
+<code>ok</code>→<code>error</code> transitions: the original 13 cases × 2, #1481 N2 × 2, two static
+subset cases × 2 and three post-loop coverage cases × 2; no other output changes. The
 <a href="../design/DESIGN-bridge.md#assigned-root-read-order-1451">migration table</a>
 also covers the added static-subset and post-loop coverage families. Its list is
 scoped to the measured inline fixtures, not every possible removed program.
