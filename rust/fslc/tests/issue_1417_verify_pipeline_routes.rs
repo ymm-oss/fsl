@@ -291,14 +291,14 @@ fn oracle(run: &Run, probe: &Probe) -> Value {
     value
 }
 
-// Only these observed leaves vary with process timing. Counts are measured for
-// each probe, not inferred from whatever survives a mutation. All solver memory,
-// counters, locations, traces, warnings, summaries and assurance stay compared.
+// Only these observed leaves vary with process timing or memory. Elapsed counts
+// are measured for each probe, not inferred from whatever survives a mutation.
+// All counters, locations, traces, warnings, summaries and assurance stay compared.
 fn normalize(value: &mut Value, elapsed: usize) -> Result<(), String> {
     fn leaf(value: &mut Value) -> Result<(), String> {
-        let number = value.as_f64().ok_or("missing/non-numeric elapsed leaf")?;
+        let number = value.as_f64().ok_or("missing/non-numeric excluded leaf")?;
         if !number.is_finite() || number < 0.0 {
-            return Err("invalid elapsed leaf".into());
+            return Err("invalid excluded leaf".into());
         }
         *value = json!(0);
         Ok(())
@@ -318,6 +318,13 @@ fn normalize(value: &mut Value, elapsed: usize) -> Result<(), String> {
     leaf(
         cost.pointer_mut("/solver/check_elapsed_s")
             .ok_or("missing solver.check_elapsed_s")?,
+    )?;
+    // `memory_mb` is a process-wide resident value, not a function of the spec.
+    // See the volatile list in `rust/fslc/src/approval.rs:420-432`; exclude
+    // `conflicts`, `decisions` and `propagations` the same way if they fluctuate.
+    leaf(
+        cost.pointer_mut("/solver/memory_mb")
+            .ok_or("missing solver.memory_mb")?,
     )?;
     for property in cost["properties"].as_array_mut().unwrap() {
         leaf(
@@ -621,6 +628,43 @@ fn preservation_controls_compare_whole_envelopes_and_artifacts_twice() {
 }
 
 #[test]
+fn control_normalize_retains_stable_solver_checks() {
+    let probe = PROBES
+        .iter()
+        .find(|probe| probe.name == "control_trace")
+        .unwrap();
+    let run = Run::new(probe);
+    let mut original = oracle(&run, probe);
+    let mut mutated = original.clone();
+    let checks = original["cost"]["solver"]["checks"]
+        .as_u64()
+        .expect("stable solver checks");
+    mutated["cost"]["solver"]["checks"] = json!(checks + 1);
+    normalize(&mut original, probe.elapsed).unwrap();
+    normalize(&mut mutated, probe.elapsed).unwrap();
+    assert_ne!(original, mutated, "stable checks drift must remain visible");
+}
+
+#[test]
+fn control_normalize_ignores_process_memory_difference() {
+    let probe = PROBES
+        .iter()
+        .find(|probe| probe.name == "control_trace")
+        .unwrap();
+    let run = Run::new(probe);
+    let mut first = oracle(&run, probe);
+    let mut second = first.clone();
+    first["cost"]["solver"]["memory_mb"] = json!(17.91);
+    second["cost"]["solver"]["memory_mb"] = json!(17.92);
+    normalize(&mut first, probe.elapsed).unwrap();
+    normalize(&mut second, probe.elapsed).unwrap();
+    assert_eq!(
+        first, second,
+        "ambient memory must not cause envelope drift"
+    );
+}
+
+#[test]
 fn control_elapsed_exclusions_are_live_and_reject_missing_leaves() {
     let probe = PROBES
         .iter()
@@ -632,6 +676,7 @@ fn control_elapsed_exclusions_are_live_and_reject_missing_leaves() {
         "/cost",
         "/cost/elapsed_s",
         "/cost/solver/check_elapsed_s",
+        "/cost/solver/memory_mb",
         "/cost/properties/0/elapsed_s",
     ] {
         let mut mutated = original.clone();
@@ -641,6 +686,13 @@ fn control_elapsed_exclusions_are_live_and_reject_missing_leaves() {
             "dead exclusion accepted at {pointer}"
         );
     }
+    let mut missing_memory = original.clone();
+    missing_memory["cost"]["solver"]
+        .as_object_mut()
+        .unwrap()
+        .remove("memory_mb")
+        .expect("live memory exclusion target");
+    assert!(normalize(&mut missing_memory, probe.elapsed).is_err());
     let mut missing_property = original.clone();
     missing_property["cost"]["properties"]
         .as_array_mut()
@@ -648,9 +700,21 @@ fn control_elapsed_exclusions_are_live_and_reject_missing_leaves() {
         .pop()
         .unwrap();
     assert!(normalize(&mut missing_property, probe.elapsed).is_err());
-    for invalid in [json!(-1), json!("0")] {
-        let mut mutated = original.clone();
-        mutated["cost"]["elapsed_s"] = invalid;
-        assert!(normalize(&mut mutated, probe.elapsed).is_err());
+    for pointer in ["/cost/elapsed_s", "/cost/solver/memory_mb"] {
+        // JSON represents non-finite floats as null; these must also be rejected.
+        for invalid in [
+            json!(-1),
+            json!("0"),
+            json!(f64::NAN),
+            json!(f64::INFINITY),
+            json!(f64::NEG_INFINITY),
+        ] {
+            let mut mutated = original.clone();
+            *mutated.pointer_mut(pointer).expect("live exclusion target") = invalid;
+            assert!(
+                normalize(&mut mutated, probe.elapsed).is_err(),
+                "invalid exclusion accepted at {pointer}"
+            );
+        }
     }
 }
