@@ -10,6 +10,9 @@ use serde_json::{Value, json};
 mod lsp_receiver;
 use lsp_receiver::LspReceiver;
 
+#[path = "support/test_executor.rs"]
+mod test_executor;
+
 #[allow(dead_code)] // CLI/Worker also consume this inventory's engine metadata.
 #[path = "../../fslc/tests/support/issue_1463_forms.rs"]
 mod issue_1463_forms;
@@ -172,21 +175,7 @@ fn receive(stdout: &mut LspReceiver) -> Value {
 }
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
-    struct ThreadWake(std::thread::Thread);
-    impl std::task::Wake for ThreadWake {
-        fn wake(self: std::sync::Arc<Self>) {
-            self.0.unpark();
-        }
-    }
-    let waker = std::task::Waker::from(std::sync::Arc::new(ThreadWake(std::thread::current())));
-    let mut context = std::task::Context::from_waker(&waker);
-    let mut future = std::pin::pin!(future);
-    loop {
-        match future.as_mut().poll(&mut context) {
-            std::task::Poll::Ready(output) => return output,
-            std::task::Poll::Pending => std::thread::park(),
-        }
-    }
+    test_executor::block_on_until(future, Instant::now() + Duration::from_secs(120))
 }
 
 #[test]

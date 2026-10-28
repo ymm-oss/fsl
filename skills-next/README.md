@@ -42,8 +42,10 @@ the `../fsl/` references resolve.
   holds, between its markers, the table rendered from the parser's own table
   (`rust/fsl-syntax/src/keywords.rs`, `KEYWORDS` and `PARTICLES`).
   `rust/fslc/tests/fsl5_keywords.rs` renders it again and fails on any
-  difference; run that test with `FSLC_SKILLS_KEYWORDS_UPDATE=1` to rewrite
-  the block after the table changes, and review the diff.
+  difference; locally, run that test with `FSLC_SKILLS_KEYWORDS_UPDATE=1` to
+  rewrite the block after the table changes, and review the diff. When `CI`
+  is set, any set `FSLC_SKILLS_KEYWORDS_UPDATE` variable fails the test instead
+  of rewriting or comparing; CI without an update request compares normally.
 - **The English and Japanese examples are one spec.** The example of
   `fsl-requirements/SKILL.md` and its Japanese spelling in
   `fsl-requirements/references/glossary.md` lower to the same kernel (spans,

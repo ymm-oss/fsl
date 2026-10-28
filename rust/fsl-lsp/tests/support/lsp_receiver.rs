@@ -41,6 +41,9 @@ impl LspReceiver {
 
     pub fn recv(&mut self, deadline: Instant) -> Result<Value, String> {
         loop {
+            if Instant::now() >= deadline {
+                return Err(self.failure("LSP receive deadline expired"));
+            }
             if let Some(header_end) = self.buffered.windows(4).position(|s| s == b"\r\n\r\n") {
                 let header = std::str::from_utf8(&self.buffered[..header_end])
                     .map_err(|error| error.to_string())?;

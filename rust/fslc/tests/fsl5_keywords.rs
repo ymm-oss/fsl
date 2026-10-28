@@ -373,8 +373,9 @@ mod golden_update;
 /// fsl 5 plan §3 S13 (decisions/045 addendum: skills are English-canonical
 /// and print the keyword table): the table in the requirements skill is the
 /// parser's table, rendered, so it can neither miss nor invent a keyword.
-/// `FSLC_SKILLS_KEYWORDS_UPDATE=1` rewrites the generated block after the
+/// Locally, `FSLC_SKILLS_KEYWORDS_UPDATE=1` rewrites the generated block after the
 /// table changed; the diff is then reviewed like any other.
+/// When `CI` is set, any set update variable fails before comparison or writing.
 #[test]
 fn the_requirements_skill_prints_the_parser_keyword_table() {
     let update = std::env::var_os("FSLC_SKILLS_KEYWORDS_UPDATE");
