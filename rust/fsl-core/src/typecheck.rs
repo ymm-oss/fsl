@@ -120,7 +120,69 @@ pub(crate) fn unknown_span() -> Span {
     }
 }
 
-pub(crate) type TypeEnv = BTreeMap<String, TypeRef>;
+#[derive(Clone, Default)]
+pub(crate) struct TypeScope {
+    types: BTreeMap<String, TypeRef>,
+    /// Scalar candidate values captured when a collection let is evaluated.
+    pub(crate) collections: HashMap<String, Vec<Vec<Expr>>>,
+}
+
+pub(crate) type TypeEnv = TypeScope;
+
+impl std::ops::Deref for TypeEnv {
+    type Target = BTreeMap<String, TypeRef>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.types
+    }
+}
+
+impl std::ops::DerefMut for TypeEnv {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.types
+    }
+}
+
+impl FromIterator<(String, TypeRef)> for TypeEnv {
+    fn from_iter<T: IntoIterator<Item = (String, TypeRef)>>(iter: T) -> Self {
+        Self {
+            types: iter.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+}
+
+impl TypeEnv {
+    pub(crate) fn insert(&mut self, name: String, ty: TypeRef) -> Option<TypeRef> {
+        // A binder or a subsequent binding must not inherit an alias it shadows.
+        self.collections.remove(&name);
+        self.types.insert(name, ty)
+    }
+
+    pub(crate) fn remove(&mut self, name: &str) -> Option<TypeRef> {
+        self.collections.remove(name);
+        self.types.remove(name)
+    }
+
+    pub(crate) fn collection_candidates(
+        &self,
+        expression: &Expr,
+        ty: &TypeRef,
+        model: &KernelModel,
+    ) -> Result<Vec<Vec<Expr>>, TypecheckError> {
+        let endpoints = match ty {
+            TypeRef::Set(element) => vec![(None, element)],
+            TypeRef::Relation(source, target) => vec![(Some(0), source), (Some(1), target)],
+            _ => Vec::new(),
+        };
+        endpoints
+            .into_iter()
+            .map(|(endpoint, element)| {
+                collection_candidates(expression, endpoint, element, self, model)
+            })
+            .collect()
+    }
+}
 // A let's inferred type alone can lose a non-self conditional branch. Keep the
 // identity guarantee separately, captured before installing each new binding.
 type SelfRelations = BTreeMap<String, bool>;
@@ -805,20 +867,44 @@ pub(crate) fn finite_binder_candidates(
         } => {
             let collection_ty = resolve(model, &infer_type(collection, env, model, None)?)?;
             let candidates = match collection_ty {
-                TypeRef::Set(element_ty) => model
-                    .domain_values(&element_ty)
-                    .map_err(|model_error| error(model_error.to_string()))?
-                    .into_iter()
-                    .map(|candidate| {
-                        let candidate = value_expression(candidate)?;
+                TypeRef::Set(element_ty) => {
+                    // Preserve the existing finite-scalar binder boundary;
+                    // syntactically finite Set<Int> literals are not admitted.
+                    model
+                        .domain_values(&element_ty)
+                        .map_err(|model_error| error(model_error.to_string()))?;
+                    let mut seen = Vec::new();
+                    let mut result = Vec::new();
+                    for candidate in
+                        collection_candidates(collection, None, &element_ty, env, model)?
+                    {
+                        if seen.contains(&candidate) {
+                            continue;
+                        }
                         let present = Expr::Method {
                             receiver: collection.clone(),
                             name: "contains".to_owned(),
                             args: vec![candidate.clone()],
                         };
-                        Ok((candidate, present))
-                    })
-                    .collect::<Result<Vec<_>, TypecheckError>>()?,
+                        let present = seen
+                            .iter()
+                            .filter(|previous| {
+                                !literal_scalar(previous) || !literal_scalar(&candidate)
+                            })
+                            .fold(present, |present, previous: &Expr| Expr::Binary {
+                                op: "and".to_owned(),
+                                left: Box::new(present),
+                                right: Box::new(Expr::Binary {
+                                    op: "!=".to_owned(),
+                                    left: Box::new(candidate.clone()),
+                                    right: Box::new(previous.clone()),
+                                }),
+                            });
+                        seen.push(candidate.clone());
+                        result.push((candidate, present));
+                    }
+                    result
+                }
                 TypeRef::Seq(_, capacity) => (0..capacity)
                     .map(|index| {
                         let index = i64::try_from(index)
@@ -846,6 +932,110 @@ pub(crate) fn finite_binder_candidates(
         }
     };
     Ok((name.clone(), candidates, filter.cloned()))
+}
+
+/// Declared state carriers are finite, but expression-local adds can introduce
+/// other members. Enumerate those expressions too, then test actual membership
+/// and distinctness at the use site. This uses only existing Kernel primitives.
+fn collection_candidates(
+    collection: &Expr,
+    endpoint: Option<usize>,
+    element_ty: &TypeRef,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> Result<Vec<Expr>, TypecheckError> {
+    match collection {
+        Expr::Var(name) if env.collections.contains_key(name) => {
+            Ok(env.collections[name][endpoint.unwrap_or(0)].clone())
+        }
+        Expr::Set(items) => Ok(if endpoint.is_none() {
+            items.clone()
+        } else {
+            Vec::new()
+        }),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let default = value_expression(
+                model
+                    .default_value(element_ty)
+                    .map_err(|model_error| error(model_error.to_string()))?,
+            )?;
+            let mut candidates = Vec::new();
+            for (branch, active_then) in [(then_expr, true), (else_expr, false)] {
+                for candidate in collection_candidates(branch, endpoint, element_ty, env, model)? {
+                    // Do not evaluate a candidate from an unchosen branch: its
+                    // add argument may be a partial read. The harmless default
+                    // is still subject to actual membership and deduplication.
+                    let (then_expr, else_expr) = if active_then {
+                        (candidate, default.clone())
+                    } else {
+                        (default.clone(), candidate)
+                    };
+                    candidates.push(Expr::Conditional {
+                        condition: condition.clone(),
+                        then_expr: Box::new(then_expr),
+                        else_expr: Box::new(else_expr),
+                        spans: Box::new(ConditionalSpans {
+                            condition: unknown_span(),
+                            then_expr: unknown_span(),
+                            else_expr: unknown_span(),
+                        }),
+                    });
+                }
+            }
+            Ok(candidates)
+        }
+        Expr::Method {
+            receiver,
+            name,
+            args,
+        } if matches!(name.as_str(), "add" | "remove") => {
+            let mut candidates = collection_candidates(receiver, endpoint, element_ty, env, model)?;
+            if name == "add" {
+                candidates.push(args[endpoint.unwrap_or(0)].clone());
+            }
+            Ok(candidates)
+        }
+        Expr::UnaryNamed { name, expr, .. }
+            if matches!(name.as_str(), "rel_domain" | "rel_range") =>
+        {
+            collection_candidates(
+                expr,
+                Some(usize::from(name == "rel_range")),
+                element_ty,
+                env,
+                model,
+            )
+        }
+        Expr::UnaryNamed { name, expr, span } if name == "old" => Ok(collection_candidates(
+            expr, endpoint, element_ty, env, model,
+        )?
+        .into_iter()
+        .map(|candidate| old_candidate(candidate, *span))
+        .collect()),
+        _ => model
+            .domain_values(element_ty)
+            .map_err(|model_error| error(model_error.to_string()))?
+            .into_iter()
+            .map(value_expression)
+            .collect(),
+    }
+}
+
+fn old_candidate(candidate: Expr, span: Span) -> Expr {
+    Expr::UnaryNamed {
+        name: "old".to_owned(),
+        expr: Box::new(candidate),
+        span,
+    }
+}
+
+pub(crate) fn literal_scalar(expr: &Expr) -> bool {
+    matches!(expr, Expr::Num(_) | Expr::Bool(_) | Expr::EnumMember { .. })
 }
 
 pub(crate) fn aggregate_condition(

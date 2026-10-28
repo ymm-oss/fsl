@@ -14,12 +14,14 @@ use crate::trace::project_trace;
 use crate::transition::{
     ActionInstance, action_guard_definedness, action_guards,
     action_has_partial_operation_candidate, action_instances, action_statements_evaluation_status,
-    init_constraints, init_evaluation_status, transition_constraint,
+    init_constraints, init_evaluation_status, initial_state as symbolic_initial_state,
+    transition_constraint,
 };
 use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, bounds, concrete_value, i64_index,
-    logical_equal, symbolic_state, symbolic_state_with_suffix,
+    logical_equal, reframe_collections, snapshot_collections, symbolic_state,
+    symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 
@@ -436,9 +438,13 @@ async fn check_definedness<S: SmtSolver>(
     if instances.is_empty() && !ask_init {
         return Ok(None);
     }
-    let initial = symbolic_state(solver, model, 0)?;
+    let mut initial = if initial_state.is_some() {
+        symbolic_state(solver, model, 0)?
+    } else {
+        symbolic_initial_state(solver, model, "0")?
+    };
     if let Some(snapshot) = initial_state {
-        assert_snapshot_state(solver, model, &initial, snapshot)?;
+        assert_snapshot_state(solver, model, &mut initial, snapshot)?;
     } else {
         for constraint in init_constraints(solver, model, &initial)? {
             solver.assert(&constraint)?;
@@ -473,7 +479,16 @@ async fn check_definedness<S: SmtSolver>(
             return Ok(Some(Undefined::Action(step)));
         }
         if step + 1 < limit {
-            unroll_step(solver, model, &instances, &mut states, &mut choices, step)?;
+            unroll_step(
+                solver,
+                model,
+                &instances,
+                &mut states,
+                &mut choices,
+                step,
+                checked_bounds,
+            )
+            .await?;
         }
     }
     Ok(None)
@@ -545,7 +560,7 @@ async fn first_init_failure<S: SmtSolver>(
 fn assert_snapshot_state<S: SmtSolver>(
     solver: &mut S,
     model: &KernelModel,
-    initial: &SymbolicState<S::Term>,
+    initial: &mut SymbolicState<S::Term>,
     snapshot: &BTreeMap<String, FslValue>,
 ) -> Result<(), VerifyError> {
     for name in snapshot.keys() {
@@ -558,9 +573,10 @@ fn assert_snapshot_state<S: SmtSolver>(
             .get(name)
             .ok_or_else(|| VerifyError::new(format!("missing state variable '{name}'")))?;
         let symbolic = initial
-            .get(name)
+            .get_mut(name)
             .ok_or_else(|| VerifyError::new(format!("missing symbolic state '{name}'")))?;
         let concrete = concrete_value(solver, model, ty, value)?;
+        snapshot_collections(solver, model, symbolic, &concrete)?;
         solver.assert(&logical_equal(solver, model, symbolic, &concrete)?)?;
     }
     Ok(())
@@ -568,22 +584,31 @@ fn assert_snapshot_state<S: SmtSolver>(
 
 /// Unroll one transition out of `states[step]`: a fresh `step + 1` state and
 /// `__choice@step`, constrained to an action instance whose transition holds.
-fn unroll_step<S: SmtSolver>(
+async fn unroll_step<S: SmtSolver>(
     solver: &mut S,
     model: &KernelModel,
     instances: &[ActionInstance<S::Term>],
     states: &mut Vec<SymbolicState<S::Term>>,
     choices: &mut Vec<S::Term>,
     step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<(), VerifyError> {
-    let next = symbolic_state(solver, model, step + 1)?;
+    reframe_collections(
+        solver,
+        model,
+        &mut states[step],
+        &format!("bmc{step}"),
+        checked_bounds,
+    )
+    .await?;
+    let mut next = symbolic_state(solver, model, step + 1)?;
     let choice = solver.constant(&format!("__choice@{step}"), &fsl_solver::Sort::Int)?;
     let lower = solver.ge(&choice, &solver.int_value(0))?;
     let upper = solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?;
     solver.assert(&lower)?;
     solver.assert(&upper)?;
     let transition =
-        transition_constraint(solver, model, instances, &states[step], &next, &choice)?;
+        transition_constraint(solver, model, instances, &states[step], &mut next, &choice)?;
     solver.assert(&transition)?;
     states.push(next);
     choices.push(choice);
@@ -604,9 +629,13 @@ async fn verify_bounded_config<S: SmtSolver>(
         return Err(VerifyError::new("spec has no actions"));
     }
     let instances = action_instances(solver, model)?;
-    let initial = symbolic_state(solver, model, 0)?;
+    let mut initial = if initial_state.is_some() {
+        symbolic_state(solver, model, 0)?
+    } else {
+        symbolic_initial_state(solver, model, "0")?
+    };
     if let Some(snapshot) = initial_state {
-        assert_snapshot_state(solver, model, &initial, snapshot)?;
+        assert_snapshot_state(solver, model, &mut initial, snapshot)?;
     } else {
         for constraint in init_constraints(solver, model, &initial)? {
             solver.assert(&constraint)?;
@@ -777,7 +806,16 @@ async fn verify_bounded_config<S: SmtSolver>(
         if instances.is_empty() {
             break;
         }
-        unroll_step(solver, model, &instances, &mut states, &mut choices, step)?;
+        unroll_step(
+            solver,
+            model,
+            &instances,
+            &mut states,
+            &mut choices,
+            step,
+            checked_bounds,
+        )
+        .await?;
     }
     if result.leadsto_violation.is_none() {
         let unrolled_depth = states.len() - 1;
@@ -1999,7 +2037,10 @@ fn collect_int_terms<S: SmtSolver>(
                 collect_int_terms(solver, item, out);
             }
         }
-        SymbolicValue::None | SymbolicValue::Set { .. } | SymbolicValue::Relation { .. } => {}
+        SymbolicValue::None
+        | SymbolicValue::Set { .. }
+        | SymbolicValue::Relation { .. }
+        | SymbolicValue::Collection { .. } => {}
     }
 }
 

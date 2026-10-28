@@ -1515,7 +1515,7 @@ pub fn public_kernel_contract(
             let mut guards = Vec::new();
             let mut partial = Vec::new();
             let mut require_spans = action.require_spans.iter();
-            for guard in &action.guards {
+            for (guard_index, guard) in action.guards.iter().enumerate() {
                 match guard {
                     ActionGuard::Requires(expression) => {
                         let span = *require_spans.next().ok_or_else(|| {
@@ -1561,9 +1561,46 @@ pub fn public_kernel_contract(
                             &mut partial,
                         )?;
                         let ty = infer_type(expression, &local, model, None)?;
+                        let candidates = local.collection_candidates(expression, &ty, model)?;
+                        // A source let may shadow a state/local name used by its
+                        // RHS. Preserve that prior binding for candidate reads.
+                        let mut previous = HashMap::new();
+                        if !candidates.is_empty() && let Some(prior_ty) = local.get(name).cloned() {
+                            let prior = format!("$collection:{guard_index}:previous");
+                            let value = expr_json(&Expr::Var(name.clone()), &local, model,
+                                source_path, action.span, None)?;
+                            local.insert(prior.clone(), prior_ty);
+                            if let Some(candidates) = local.collections.get(name).cloned() {
+                                local.collections.insert(prior.clone(), candidates);
+                            }
+                            lets.push(json!({"name":prior,"value":value}));
+                            guards.push(json!({"kind":"let","name":prior,"value":value}));
+                            previous.insert(name.clone(), Expr::Var(prior));
+                        }
                         local.insert(name.clone(), ty);
                         lets.push(json!({"name":name,"value":value}));
                         guards.push(json!({"kind":"let","name":name,"value":value}));
+                        let mut captured = Vec::new();
+                        for (endpoint, candidates) in candidates.into_iter().enumerate() {
+                            let mut values = Vec::new();
+                            for (index, candidate) in candidates.into_iter().enumerate() {
+                                let candidate = crate::substitute_expr(candidate, &previous);
+                                if crate::typecheck::literal_scalar(&candidate)
+                                    || matches!(&candidate, Expr::Var(name) if name.starts_with("$collection:")) {
+                                    values.push(candidate);
+                                    continue;
+                                }
+                                let name = format!("$collection:{guard_index}:{endpoint}:{index}");
+                                let value = expr_json(&candidate, &local, model, source_path, action.span, None)?;
+                                let ty = infer_type(&candidate, &local, model, None)?;
+                                local.insert(name.clone(), ty);
+                                lets.push(json!({"name":name,"value":value}));
+                                guards.push(json!({"kind":"let","name":name,"value":value}));
+                                values.push(Expr::Var(name));
+                            }
+                            captured.push(values);
+                        }
+                        if !captured.is_empty() { local.collections.insert(name.clone(), captured); }
                     }
                 }
             }

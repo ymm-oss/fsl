@@ -140,6 +140,7 @@ fn flatten_row_terms<S: SmtSolver>(
         SymbolicValue::None
         | SymbolicValue::Map { .. }
         | SymbolicValue::Set { .. }
+        | SymbolicValue::Collection { .. }
         | SymbolicValue::Seq { .. }
         | SymbolicValue::Relation { .. }
         | SymbolicValue::SetLiteral(_)
@@ -184,13 +185,18 @@ fn rows_for_type<S: SmtSolver>(
                 if !matches!(element_ty.as_ref(), TypeRef::Named(named) if named == type_name) {
                     continue;
                 }
-                let Some(SymbolicValue::Set { entries, .. }) = state.get(name) else {
+                let Some(value) = state.get(name) else {
                     continue;
                 };
+                let (_, entries) = crate::value::collection_entries(solver, model, value)?;
                 for (entity, row) in values.iter().zip(rows.iter_mut()) {
-                    if let Some((_, term)) = entries.iter().find(|(key, _)| key == entity) {
-                        row.push(coerce_int(solver, term, &TypeRef::Bool)?);
-                    }
+                    let entity = concrete_value(solver, model, element_ty, entity)?;
+                    let present = crate::value::collection_contains(
+                        solver,
+                        &entries,
+                        &[int_term(&entity)?.clone()],
+                    )?;
+                    row.push(coerce_int(solver, &present, &TypeRef::Bool)?);
                 }
             }
             _ => {}
