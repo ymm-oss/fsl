@@ -807,6 +807,43 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   <code>x</code> のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
   なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
   充足した <code>exists</code> が witness を外側の束縛へ出すことはありません。
+  <strong>const と同名の局所束縛は拒否します(#1515)。</strong> 整数以外を含む全 const 型に適用する
+  breaking removal です。量化・集約のバインダー、init/action の文 <code>forall</code>、<code>leadsTo</code>
+  のバインダー、action の引数と <code>let</code>、<code>def</code> の引数は const と同名にできません。
+  requirements の action/transition の入力と indexed age のバインダーも同じ規則です。
+  component の const に prefix を付ける前、def をインライン展開する前に検査します。
+  <code>check</code> と全検証 engine は束縛名を含む同じ <code>semantics</code> エラー(exit 2)を返します。
+  位置は<strong>束縛名の token ではなく、既存 AST が保持する所有元の span</strong>です。式の
+  バインダーは囲む式・宣言、文のバインダーは <code>forall</code> 文、wrapper は <code>leadsTo</code> 宣言、
+  引数・let は action、def の引数は def、lowering された入力は元の transition、
+  indexed age は age キーワードを指します。component のエラーは親の <code>use</code> を指し、
+  メッセージに component の所有元の座標を残します。局所名とその参照を変更してください。
+  <code>const N = 2</code> があるなら <code>forall N in 0..1 { N &lt;= 1 }</code> を
+  <code>forall k in 0..1 { k &lt;= 1 }</code> に書き換えます。状態名を隠す束縛は引き続き使えます。
+  glue/sync の局所 <code>N</code> は qualified const <code>part.N</code> と衝突しません。refinement の
+  indexed-map と action-correspondence の宣言には追加の const-shadow 検査を設けず、
+  元の spec には通常の検査を適用します。既存の pattern binding の freshness 制約は
+  変えません。この拒否により、static const と字句的な束縛の読み方による engine の
+  逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
+  <strong>計測した breaking removal。</strong> 回帰テストの fixture を移す前に、base <code>45a2de33</code> と
+  実装 <code>d592ed9f</code> の native <code>check</code> で、次の inline の形の <code>ok</code>→<code>error</code> を確認しました。
+  数はケース単位で、共有 consumer は重複して数えません。compose の束縛 capture
+  (#1442)は <strong>126</strong> 形(63 ケースの単独・compose)で、代表は <code>const x = false</code> と
+  <code>action go(x: Bool) { requires x }</code>、入れ子の束縛も含みます。入れ子の集約(#1463、
+  CLI/LSP/Worker の共有 source)は <strong>24</strong> 形で、代表は <code>const x = false</code> と
+  <code>sum(x in 0..1 of count(y in 0..x)) == 3</code>。束縛ごとの helpful 引数(#1333)は
+  <strong>2</strong> 形(単独・compose)で、代表は <code>const c = 0</code> と <code>forall c: Case</code>、action の
+  引数 <code>c</code>、<code>helpful step(c)</code> です。
+  合計 <strong>152</strong> 形を受理から除きます。compose の fresh な対照 126 形は <code>ok</code> のままです。
+  書き直すときは局所の名前と参照を変えてください。衝突を隠すだけのために const を消す
+  のではありません。部分 init の 5 形(#1481)は <strong>error→error</strong> であり、受理の縮小
+  ではありません。同名の const を隠す外側の <code>flag</code>/<code>limit</code> の束縛に対して、従来の
+  所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
+  部分 init を有効にするものではありません。別の corpus 計測では、base <code>e856bbe0</code> と
+  head <code>955bea60</code> の各 SHA の archive tree で <code>check &lt;form&gt;</code> を実行し、<code>specs/</code>、
+  <code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の <strong>597</strong> 形(23/191/383)で <code>ok</code>→<code>error</code>
+  が <strong>0</strong>、その他の出力差も 0 でした。この corpus の結果は inline の受理の縮小を
+  否定せず、他の const と同名の局所束縛を受理すると約束するものでもありません。
   この式の一般則は、<code>leadsTo</code> を外から包むバインダーの実行可能性までは約束しません。
   <code>leadsTo</code> の外側のコレクションバインダーと、<code>where</code> 付きバインダーは <code>check</code> が拒否します。
   対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は
@@ -2888,8 +2925,9 @@ refine は実装側・抽象側とも、部分的に代入されたルートの�
 init を拒否します(#1521)。bmc と induction は自由値として verdict を返す挙動を維持します。
 部分 init の要素を自由値として列挙する仕事は今後の課題です(#1579)。
 新しい受理の証明では、source・filter・キーの範囲境界が外側のバインダーに依存すると、
-同名の global const があっても保守的に未解決とします。外側の束縛の組合せは列挙せず、
-既存の受理や symbolic の binder/const shadow 解決(#1515)は変えません。
+同名の global const があっても保守的に未解決とします。外側の束縛の組合せは列挙しません。
+これとは独立に、frontend は const と同名の実行可能な局所束縛を engine ごとの範囲解決の
+前に拒否します(#1515)。依存する範囲境界の対応を追加するものではありません。
 新しく受理する形では、init が代入し得る全ルートについて、ルート全体が確実に代入
 されるまで <code>check</code> が読み出しを拒否します。値全体でしか書かないルートや、既に書いた
 field・エントリの読み出しも対象です。field 単位で書かないルートの早すぎる読み出しは、
