@@ -1074,6 +1074,33 @@ never a state variable named `true`), so the declaration is rejected. No other w
   required when `v` must be bound for the rest of the formula; equality creates
   no binding. The binding is scoped to the logical continuation where the match
   is true, such as the guarded RHS of `=>` or `and`, and is not global.
+  Only `and` exports bindings from a true whole expression, including across
+  conjunctive `requires` guards into later guards and the action body.
+  Breaking removal (#1547): `check` rejects uses on an `or` RHS, after a
+  disjunctive/implicational antecedent of `=>`, across comparison operands or
+  out of comparison results, and bindings escaping negation, quantifiers or
+  aggregates. An `if` condition
+  does not bind a pattern name in either arm. Out-of-scope `v` reports
+  `kind: "semantics"`, exit 2, and
+  `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
+  Location is the containing clause/`if` arm; within `requires`/`ensures`, it
+  is the action location, matching existing type errors. For the intended policy
+  "allow none; require payload 1 when present", repair the undefined
+  `(o is some(v)) or v == 1` to `(o is some(v)) => v == 1`, equivalently
+  `o == none or (o is some(v) and v == 1)`. `and` alone rejects `none` instead;
+  do not claim equivalence with an undefined expression.
+  Sweep: `<binary> check <path>` in each commit's own tree, BASE
+  `1844fa74a717ba9229e0b292d9421c0939016e5e`, implementation HEAD
+  `b47b72f06ec214038f57205699830e91a11b058a`, repeated twice, full stdout/stderr/exit,
+  no excluded fields. The 597 corpus files and 1,713 existing complete static
+  Rust-test literal occurrences had zero `ok`→`error` and zero byte changes.
+  The 47 new sources / 94 direct-compose routes contain 56 breaking removals
+  (28 cells, both routes), listed in
+  [the design](../../../docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  Two existing def-call errors changed diagnostics; acceptance expansions and
+  repeat differences were zero. Another 1,737 candidates (214 interpolated
+  formats, 1,523 incomplete snippets) were inventoried, not executed. This does
+  not cover arbitrary runtime-generated sources or reconstructed sibling files.
   `v` must be fresh: `check` rejects a `v` that names a state variable,
   constant, enum member, action parameter, binder, `let`, or an earlier pattern
   binding in scope.

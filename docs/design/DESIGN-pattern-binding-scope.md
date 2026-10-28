@@ -262,3 +262,134 @@ which `docs/design/DESIGN-def.md` rejects on the ground that synthetic binder na
 would surface in counterexamples. Overturning this decision means
 overturning that one, with evidence that generated names in traces are
 acceptable.
+
+## 3. True-continuation enforcement (#1547)
+
+This amendment makes the native check boundary enforce the language reference's
+true-continuation rule. The measurements and pending-work descriptions above
+are historical; the blanket reference to a match occurring in `requires` does
+not authorize exporting a binding through a disjunction.
+
+### Invariant and boundary
+
+One operator policy governs both the bindings exported by a true whole
+expression and those available while visiting a binary expression's right
+operand:
+
+- Whole-expression export traverses `and` only. A true disjunction or
+  implication does not establish that its pattern matched.
+- The right operand may use the left operand's true-result bindings for
+  `and` and `=>` only.
+- A `requires` guard exports only these whole-expression bindings into later
+  guards and the action body. Existing lexical scopes and collision checks
+  remain in force; no pattern name becomes global.
+
+Previously accepted uses on the right of `or`, after a disjunctive or
+implicational antecedent, across comparison operands or out of comparison
+results, and bindings escaping negation, quantifiers or aggregates are breaking
+removals. Pattern names from an `if` condition are unavailable in both arms.
+An out-of-scope `v` reports `kind: "semantics"`, exit 2, with the existing message
+`invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
+Its location is the containing clause or `if` arm; inside `requires` and
+`ensures`, it is the action location, matching existing type errors. More precise
+guard/postcondition clause locations remain separate work in #1550.
+
+The original baseline accepted
+`((o is some(v)) or x == 0) => v == 1` with `o = none` and `x = 0`;
+BMC and induction could report `violated` using the unbound payload name.
+Rejecting the source is necessary: that verdict cannot establish a valid
+counterexample for an ill-scoped formula. Evaluator semantics are unchanged.
+
+### Shared policy and sibling consumers
+
+`fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
+decision. The initial eight-consumer estimate omitted the separate free-name
+walk; all nine consumers are now coupled:
+
+| Consumer | Source | Use |
+|---|---|---|
+| Typed export collector | `typecheck.rs` | Whole-expression export |
+| Typed expression validation | `typecheck.rs` | RHS flow |
+| Public Kernel serialization | `public_kernel.rs` | RHS flow |
+| Partial-operation classification | `partial_operation.rs` | RHS flow |
+| Component rewrite | `compose.rs` | RHS flow |
+| Compose alias resolution | `compose.rs` | RHS flow |
+| Def expansion | `lib.rs` | RHS flow |
+| Free-name analysis | `model.rs` | RHS flow |
+| Name export collector | `compose.rs` | Whole-expression export |
+
+The compose guard-name set is a syntactic capture-protection inventory, not a
+visible-value scope. It uses the existing general pattern-name collector so
+restricting visible bindings does not remove capture protections. Six focused
+sync/foreign-argument controls (ordinary, disjunctive, negated, quantified,
+conditional and aggregate patterns) stayed accepted on base/head in two runs;
+this is bounded evidence, not an exhaustive admission-equivalence proof.
+
+The 45-source position matrix, 18 public-entry probes and two supplemental
+def-call sources include rejecting controls and legal `and`/`=>`/`requires`
+preservation controls. On base `091cba49`, inverting each consumer separately
+was detected, with exact source restoration between runs. The original def-RHS
+mutation survived the first matrix; the two supplemental def-call sources then
+detected it. Publication/AST preservation controls detect some inversions but
+are not independent negative-admission semantic lineages.
+
+### Repair by intended absence policy
+
+The undefined `(o is some(v)) or v == 1` has no sound equivalence claim. For
+the policy "absence is allowed; a present payload must equal 1", write
+`(o is some(v)) => v == 1`, equivalently
+`o == none or (o is some(v) and v == 1)`. Both total formulas agree over `none`,
+`some(0)` and `some(1)`: their equivalence checks and is BMC-verified to depth 3,
+inductively proved and explicit-state proved. Repeating with `and` alone in
+place of the explicit absence allowance produces a violation at initial
+`none` in all three engines. Thus choosing `and` alone changes the policy; it
+is not an automatic repair when absence must be accepted.
+
+### Measured breaking removals
+
+The sweep ran `<binary> check <path>` in each commit's own archived tree:
+BASE `1844fa74a717ba9229e0b292d9421c0939016e5e`, implementation/test/comment
+HEAD `b47b72f06ec214038f57205699830e91a11b058a`. Base binary SHA256 is
+`1a4c1dc20c31fda70f76164fe2af40b7ad8be7e7a11d7438c2c4d135f574b599`;
+head is `c7037351f28169855eb7963a5119f3e244001a15a4a0d94b4f8c5ea227783807`.
+Two complete runs compared stdout, stderr and exit code, with no excluded fields
+and zero repeat differences. Documentation-only successors do not change these
+measured native sources.
+
+| Group | Forms/routes | Base exits 0 / 1 / 2 | Head exits 0 / 1 / 2 | `ok`→`error` | Full output changes |
+|---|---:|---:|---:|---:|---:|
+| Corpus: `specs/`, `examples/`, `rust/fslc/tests/fixtures/` | 597 | 400 / 6 / 191 | 400 / 6 / 191 | 0 | 0 |
+| Existing static complete Rust-test document literal occurrences | 1,713 | 982 / 0 / 731 | 982 / 0 / 731 | 0 | 0 |
+| New authored sources: 45 main + 2 def-call, direct/compose | 94 | 66 / 0 / 28 | 10 / 0 / 84 | 56 | 58 |
+
+The existing-test inventory scans 522 base / 524 head Rust test source files
+(integration sources plus test-attributed unit scopes). It decodes raw/escaped
+literals and static escaped format braces, but does not substitute interpolated
+placeholders or complete partial templates. Another 1,737 document-like
+candidates are inventoried, not executed: 214 interpolated formats, 1,522
+incomplete fragments and one unterminated FSL string/comment fragment. Negative
+and invalid complete literals are checked, not silently dropped. This bounded
+sweep does not reconstruct arbitrary runtime-generated sources or sibling files
+that a test would create. Source-line movement in the inventories is recorded
+separately from CLI output; the literal contents are unchanged.
+
+Each of the following **28 cells has two breaking removals**, direct and compose
+`0`→`2`. Each removal's complete head packet also matches its authored check
+expectation, including message, location and version envelope:
+
+| Rejected flow | Authored cells (each direct and compose) |
+|---|---|
+| Disjunction | `type-or-right`, `type-nested-and-or-right`, `type-not-inside`, `issue-exact` |
+| Comparison escape | `type-equality-escape`, `type-inequality-escape`, `type-equality-right-operand` |
+| Implication/export escape | `type-implies-left-or`, `type-implies-left-implies`, `type-implies-escape-to-and`, `false-verdict-implies-left-or` |
+| Disjunctive flow into quantifier/aggregate/method | `type-forall-body`, `type-exists-body`, `type-forall-where`, `type-sum-body`, `type-sum-where`, `type-count-where`, `type-method-argument` |
+| Disjunctive flow into partial operations | `partial-seq-index`, `partial-map-key` |
+| Requires export | `requires-or-value`, `requires-or-ensures`, `requires-or-later-requires`, `requires-implies-value` |
+| Def expansion/caller | `def-body-or`, `def-argument-or`, `def-caller-or-right` |
+| Compose sync alias | `compose-sync-alias-or` |
+
+The other two full-output changes are `def-call-or-free-name`, direct and
+compose: both stay `2`→`2`, but report the out-of-scope `v` at `7:3` rather than
+the earlier call-capture diagnostic. The conjunctive def-call capture control
+retains its existing diagnostic. There are no observed acceptance expansions
+or removals outside the approved scope.

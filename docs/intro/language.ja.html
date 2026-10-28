@@ -821,6 +821,31 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
   論理的な後続部分だけです。例えば <code>(x is some(v)) =&gt; ...</code> や
   <code>(x is some(v)) and ...</code> の右辺では使えますが、グローバルな束縛にはなりません。
+  真になった式全体から束縛を引き継ぐ演算子は <code>and</code> だけです。したがって、後の
+  guard や action 本体へ束縛を引き継ぐ <code>requires</code> も、論理積でつながる match に
+  限られます。破壊的な受理範囲の縮小(#1547): 以前受理していた <code>or</code> の右辺、
+  <code>=&gt;</code> の左辺が <code>or</code> や別の含意である場合の後続、比較の operand 間や比較の外、否定・量化・
+  集約の外に漏れた束縛の使用を <code>check</code> が拒否します。<code>if</code> の条件も、いずれの腕にも
+  パターン名を束縛しません。スコープ外の <code>v</code> は <code>kind: "semantics"</code>、終了コード 2、
+  メッセージは
+  <code>invalid model expression: public Kernel cannot type identifier 'v' at &lt;line&gt;:&lt;column&gt;</code>
+  です。位置は使用を含む clause または <code>if</code> の腕を指し、<code>requires</code> と <code>ensures</code> の
+  中では既存の型エラーと同じく action の位置を指します。
+  未定義の <code>(o is some(v)) or v == 1</code> は、意図する <code>none</code> の扱いを決めて修復します。
+  不在を許し、存在する場合だけ値 1 を要求するなら <code>(o is some(v)) =&gt; v == 1</code>、
+  または等価な <code>o == none or (o is some(v) and v == 1)</code> と書きます。
+  <code>and</code> だけにすると <code>none</code> を拒否します。元の未定義の式との等価性は主張しません。
+  境界測定は BASE <code>1844fa74a717ba9229e0b292d9421c0939016e5e</code> と実装 HEAD
+  <code>b47b72f06ec214038f57205699830e91a11b058a</code> の各 tree で
+  <code>&lt;binary&gt; check &lt;path&gt;</code> を 2 回実行し、stdout/stderr/終了コードを除外なしで
+  全文比較しました。コーパス597ファイルと、既存の Rust テスト内の静的で完全な
+  文書リテラル1,713出現の <code>ok</code> → <code>error</code> は<strong>0</strong>、出力はバイト単位で同一でした。
+  新しい作成者テスト47ソースの direct/compose 94経路では、28セルの両経路に
+  <strong>56件の breaking removal</strong> があり、<a href="../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547">スコープ設計</a>
+  に列挙しています。既にエラーだった def-call 2経路は診断だけが変わり、受理の
+  拡大も反復間の差もありません。別の文書候補1,737件(補間のある format 214件、
+  不完全な断片1,523件)は一覧化のみで実行していません。任意の実行時生成ソースや、
+  テストが作る隣接ファイルの再構成は、このリテラル測定の範囲外です。
   <code>v</code> は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
   引数・量化子の束縛変数・<code>let</code>・それより前のパターン束縛と同じ名前の <code>v</code> は
   <code>check</code> が拒否し、名前を変えるよう求めます。

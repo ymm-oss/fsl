@@ -809,7 +809,36 @@ forms and the still-open #1528 path are not negated by that corpus result.
   that binds `v`; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
-  not a global binding. `v` must be a fresh name: `check` rejects a `v` that is
+  not a global binding. Only `and` exports bindings from a true whole expression;
+  consequently only conjunctive `requires` matches export bindings to later
+  guards and the action body. Breaking removal (#1547): `check` now rejects
+  previously accepted uses on the right of `or`, after an `or` or implication
+  on the left of `=>`, across comparison operands or out of comparison results,
+  and outside negated, quantified or aggregate expressions. An `if` condition
+  does not bind a name in either arm.
+  Out-of-scope `v` is a `kind: "semantics"` error (exit 2), with message
+  `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
+  The location identifies the clause or `if` arm containing the use; inside
+  `requires` and `ensures`, it identifies the action, as for existing type errors.
+  Repair the undefined `(o is some(v)) or v == 1` according to the intended
+  treatment of `none`: if absence is allowed and a present payload must equal 1,
+  write `(o is some(v)) => v == 1`, equivalently
+  `o == none or (o is some(v) and v == 1)`. Using `and` alone instead rejects
+  `none`; no equivalence with the old undefined expression is implied.
+  The boundary sweep ran `<binary> check <path>` in each commit's own tree,
+  BASE `1844fa74a717ba9229e0b292d9421c0939016e5e` and implementation HEAD
+  `b47b72f06ec214038f57205699830e91a11b058a`, twice with full stdout/stderr/exit
+  comparison and no excluded fields. All 597 corpus files and 1,713 existing
+  static complete Rust-test literal occurrences had **zero** `ok` → `error`
+  transitions and byte-identical outputs. The 47 new authored sources had 94
+  direct/compose routes: **56 breaking removals** (28 cells on both routes),
+  listed in the [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  Two already-error def-call routes changed diagnostics, not acceptance; there
+  were no acceptance expansions or repeat differences. Another 1,737
+  document-like candidates (214 interpolated formats and 1,523 incomplete
+  snippets) were inventoried, not executed; arbitrary runtime-generated sources
+  and test-created sibling-file reconstruction are outside this literal sweep.
+  `v` must be a fresh name: `check` rejects a `v` that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, `let`, or an earlier pattern binding in scope, and asks you to rename
   it. Ordering is not defined.

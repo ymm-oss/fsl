@@ -857,7 +857,36 @@ forms and the still-open #1528 path are not negated by that corpus result.</p>
   that binds <code>v</code>; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of <code>(x is some(v)) =&gt; ...</code> or <code>(x is some(v)) and ...</code>; it is
-  not a global binding. <code>v</code> must be a fresh name: <code>check</code> rejects a <code>v</code> that is
+  not a global binding. Only <code>and</code> exports bindings from a true whole expression;
+  consequently only conjunctive <code>requires</code> matches export bindings to later
+  guards and the action body. Breaking removal (#1547): <code>check</code> now rejects
+  previously accepted uses on the right of <code>or</code>, after an <code>or</code> or implication
+  on the left of <code>=&gt;</code>, across comparison operands or out of comparison results,
+  and outside negated, quantified or aggregate expressions. An <code>if</code> condition
+  does not bind a name in either arm.
+  Out-of-scope <code>v</code> is a <code>kind: "semantics"</code> error (exit 2), with message
+  <code>invalid model expression: public Kernel cannot type identifier 'v' at &lt;line&gt;:&lt;column&gt;</code>.
+  The location identifies the clause or <code>if</code> arm containing the use; inside
+  <code>requires</code> and <code>ensures</code>, it identifies the action, as for existing type errors.
+  Repair the undefined <code>(o is some(v)) or v == 1</code> according to the intended
+  treatment of <code>none</code>: if absence is allowed and a present payload must equal 1,
+  write <code>(o is some(v)) =&gt; v == 1</code>, equivalently
+  <code>o == none or (o is some(v) and v == 1)</code>. Using <code>and</code> alone instead rejects
+  <code>none</code>; no equivalence with the old undefined expression is implied.
+  The boundary sweep ran <code>&lt;binary&gt; check &lt;path&gt;</code> in each commit's own tree,
+  BASE <code>1844fa74a717ba9229e0b292d9421c0939016e5e</code> and implementation HEAD
+  <code>b47b72f06ec214038f57205699830e91a11b058a</code>, twice with full stdout/stderr/exit
+  comparison and no excluded fields. All 597 corpus files and 1,713 existing
+  static complete Rust-test literal occurrences had <strong>zero</strong> <code>ok</code> → <code>error</code>
+  transitions and byte-identical outputs. The 47 new authored sources had 94
+  direct/compose routes: <strong>56 breaking removals</strong> (28 cells on both routes),
+  listed in the <a href="../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547">scope design</a>.
+  Two already-error def-call routes changed diagnostics, not acceptance; there
+  were no acceptance expansions or repeat differences. Another 1,737
+  document-like candidates (214 interpolated formats and 1,523 incomplete
+  snippets) were inventoried, not executed; arbitrary runtime-generated sources
+  and test-created sibling-file reconstruction are outside this literal sweep.
+  <code>v</code> must be a fresh name: <code>check</code> rejects a <code>v</code> that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, <code>let</code>, or an earlier pattern binding in scope, and asks you to rename
   it. Ordering is not defined.</li>
