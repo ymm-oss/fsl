@@ -106,12 +106,14 @@ pub enum DocumentProjectionError {
 that sentence is a documented contract
 (`docs/design/DESIGN-document-requirement-claim-ir.md`) and does not move.
 
-`fslc`'s single interception point — `load_document_claims_with_label`
+`fslc`'s single interception point — `load_document_claims_from_source`
 (`rust/fslc/src/main.rs`), shared by `document generate`, `document claims`,
 `document check`, and `approval create --kind requirements_document`/
 `document generate --approval`'s re-render path — maps
 `DocumentProjectionError::UnsupportedDialect` to a new coded envelope instead
-of the generic semantic-error path:
+of the generic semantic-error path. Document commands pass their captured,
+admitted source and an independent display label to this projector. The deferred
+approval renderer's `load_document_claims` path wrapper reuses the same projector:
 
 ```json
 {

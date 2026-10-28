@@ -1388,7 +1388,7 @@ non-definitive なエラーを含め重複しなくなりました。Worker は�
 現行の警告は verdict・assurance・終了コードを変えません。次のエディションの移行
 finding は消費前に既存の edition error/exit 2 で拒否します。従来は判定を通らなかった
 consumer が、以前受理した次エディションの入力を拒否する場合があります。
-直接の raw HTML/ledger、document claims、domain expand/testgen は、移行警告を
+直接の raw HTML/ledger、document generate/claims、domain expand/testgen は、移行警告を
 stderr に出します。HTML/ledger のファイル出力 envelope は変えず、別の結果である
 baseline に警告を一度だけ保持します。承認専用の render は自分の baseline の受け入れを
 維持し、新しい stderr 配信をしません。mutate は authored source の結果を仕上げ、
@@ -1407,7 +1407,7 @@ scenarios/sweep/testgen/typestate で、enum union だけが testplan でも拒�
 これは check が既に拒否する45 command/form 観測の破壊的な削除です。その時点では
 raw warning、mutate 成功時の warning、sweep capture は未完了でしたが、今回対応しました。
 
-今回の比較は、BASE `c79016efeb630c717292e9392901cfe65ab40915` と実装
+拡張の初回の比較は、BASE `c79016efeb630c717292e9392901cfe65ab40915` と実装
 `ceb03268e567487f6ec080afcf3ab034d4a5ea0c` をそれぞれ clean な archive から build
 しました。cache 無効の `fslc check FORM` は、各 tree の corpus 全597 file と変更した
 必須 test の入力8出現(include file と helper の承認 baseline も含む)を、両方の tree で両方の

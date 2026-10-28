@@ -45,7 +45,7 @@ testplan (45 command/form observations already rejected by check). A named
 BASE/implementation `check` audit covers 597 corpus files plus 309 inline
 occurrences in both materialized trees with an empty ok-to-error set; see the
 migration design amendment for SHAs, command and attribution.
-The fresh audit uses BASE c79016efeb630c717292e9392901cfe65ab40915 and
+The initial extension audit uses BASE c79016efeb630c717292e9392901cfe65ab40915 and
 implementation ceb03268e567487f6ec080afcf3ab034d4a5ea0c, built in separate clean
 archives. Cache-disabled `fslc check FORM`, 597 corpus files plus eight affected
 required-input occurrences per tree, both binaries in both trees: 2,420 checks,
@@ -60,3 +60,8 @@ metadata (1); replay --from-log refuses enum union, metadata in spec and
 requirements, colon quantifier and inline mapping (5). These previously non-error
 consumer inputs are not grammar removals or proof claims; the mapping-only control
 was already an error at BASE and is not counted as a removal.
+The sweep grid now uses the same admission owner as the other single-root modes,
+retaining per-cell warning ownership without finishing the aggregate. Success
+controls compare one complete finding where the dialect has migration forms and
+require warning absence for AI/DB dialects without those forms. No planner or
+language behavior is added by those controls.

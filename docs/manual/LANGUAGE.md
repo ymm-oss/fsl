@@ -1467,7 +1467,7 @@ migration warnings, including non-definitive errors. Worker admission precedes
 model/solver use; editor refusals retain UTF-16 ranges without model/analysis work.
 Current-edition warnings preserve verdicts, assurance and exits; next-edition
 migration findings refuse before consumption with the existing edition error/exit 2.
-Direct raw HTML/ledger, document claims and domain expansion/testgen deliver
+Direct raw HTML/ledger, document generate/claims and domain expansion/testgen deliver
 migration warnings on stderr. HTML/ledger file-output envelopes stay unchanged;
 their distinct baselines retain one warning. Approval-only rendering retains its
 own baseline admission without new stderr delivery. Mutate owns the authored
@@ -1489,7 +1489,7 @@ in testplan: 45 command/form observations that check already rejects. This does
 not complete raw-warning, mutate-success-warning or sweep-capture modes at that
 revision; the single-root extension now completes them.
 
-The fresh comparison uses BASE `c79016efeb630c717292e9392901cfe65ab40915`
+The initial extension comparison uses BASE `c79016efeb630c717292e9392901cfe65ab40915`
 and implementation `ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built
 from its own clean archive. Cache-disabled `fslc check FORM` covers 597 tracked
 corpus files plus eight input occurrences from rewritten required tests in each

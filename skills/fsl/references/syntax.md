@@ -350,13 +350,13 @@ changing stdout. Verification finalizes after governance; domain/database checks
 scenarios and generic testgen own the outer finish. Worker refusal precedes model/
 solver use; editor refusal precedes model/analysis and retains UTF-16 ranges.
 Repair projections, safety and exits are unchanged.
-Direct raw HTML/ledger, document claims and domain expand/testgen use migration
+Direct raw HTML/ledger, document generate/claims and domain expand/testgen use migration
 stderr delivery too. HTML/ledger file-output envelopes stay unchanged, with one
 warning in the distinct baseline; approval-only rendering self-admits its baseline
 without new stderr delivery. Mutate finishes its authored input once; sweep cells
 borrow the one captured root's token.
 
-Fresh boundary: BASE `c79016efeb630c717292e9392901cfe65ab40915`, implementation
+Initial extension boundary: BASE `c79016efeb630c717292e9392901cfe65ab40915`, implementation
 `ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built in its own clean archive.
 Cache-disabled `fslc check FORM`, all 597 corpus files and eight affected required
 input occurrences per tree (including includes and a helper's approval baseline),

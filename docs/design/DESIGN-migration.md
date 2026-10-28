@@ -217,12 +217,15 @@ Implemented open JSON outputs receive findings in `warnings`. Closed successful
 Kernel/conformance/testplan output and implemented raw TypeScript/readable/graph
 output instead use stderr `warning: <finding-json>`, retaining stdout schemas and
 formats. Their error envelopes remain open.
-Direct raw HTML/ledger, document claims and domain expansion/test generation also
+Direct raw HTML/ledger, document generate/claims and domain expansion/test generation also
 deliver migration warnings on stderr. HTML/ledger file-output envelopes remain
 unchanged; their distinct verification baselines retain one finished warning.
 Approval-only rendering retains its own baseline admission without new stderr
 delivery. Mutate finishes the authored source once, even when it later uses a
 synthetic mutation source; sweep captures once and lends its token to each cell.
+All 21 extension modes use the shared `run_admitted_roots`/`run_admitted_root`
+owner; the sweep grid consumes the captured string and borrows the owner's token
+without finalizing its aggregate envelope.
 Existing non-migration warnings, verdicts, assurance and exits are preserved on
 admitted current-edition input;
 next-edition migration findings refuse with the existing edition error and exit 2.
@@ -256,7 +259,7 @@ mutate success warnings or sweep capture; the single-root extension now does.
 Upstream #1450/#1459 restrictions, including the located Bool `acyclic(done)`
 refusal in the shared #1463 row, belong to BASE and are not attributed here.
 
-The fresh single-root comparison uses BASE
+The initial single-root comparison uses BASE
 `c79016efeb630c717292e9392901cfe65ab40915` and implementation
 `ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built in its own clean archive.
 Cache-disabled `fslc check FORM` runs both binaries in both trees over all 597
