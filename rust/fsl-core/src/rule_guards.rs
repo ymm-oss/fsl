@@ -609,3 +609,104 @@ fn quantified(name: &str, type_name: QualifiedName, body: Expr) -> Expr {
         body: Box::new(body),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fsl_syntax::{ConditionalSpans, SourcePos};
+
+    fn var(name: &str) -> Expr {
+        Expr::Var(name.to_owned())
+    }
+
+    fn spell(expression: Expr) -> Expr {
+        spell_fields(
+            expression,
+            &BTreeSet::from(["amount", "limit", "ready"]),
+            &BTreeSet::new(),
+            "Claim",
+        )
+    }
+
+    #[test]
+    fn spell_fields_qualifies_only_bare_entity_fields() {
+        assert_eq!(spell(var("amount")), var("Claim.amount"));
+        for name in ["LIMIT", "input", "Claim.amount", "Other.amount"] {
+            assert_eq!(spell(var(name)), var(name), "preserve {name}");
+        }
+    }
+
+    #[test]
+    fn spell_fields_recurses_into_both_binary_operands() {
+        let expression = binary("+", var("amount"), binary("*", var("limit"), Expr::Num(2)));
+        let expected = binary(
+            "+",
+            var("Claim.amount"),
+            binary("*", var("Claim.limit"), Expr::Num(2)),
+        );
+        assert_eq!(spell(expression), expected);
+    }
+
+    #[test]
+    fn spell_fields_recurses_into_not() {
+        assert_eq!(
+            spell(Expr::Not(Box::new(var("ready")))),
+            Expr::Not(Box::new(var("Claim.ready"))),
+        );
+    }
+
+    #[test]
+    fn spell_fields_recurses_into_neg() {
+        assert_eq!(
+            spell(Expr::Neg(Box::new(var("amount")))),
+            Expr::Neg(Box::new(var("Claim.amount"))),
+        );
+    }
+
+    #[test]
+    fn spell_fields_recurses_into_every_conditional_branch_and_preserves_spans() {
+        let span = |offset| {
+            let position = SourcePos {
+                offset,
+                line: 1,
+                column: u32::try_from(offset + 1).unwrap(),
+            };
+            Span {
+                start: position,
+                end: position,
+            }
+        };
+        let spans = Box::new(ConditionalSpans {
+            condition: span(1),
+            then_expr: span(5),
+            else_expr: span(9),
+        });
+        let expression = Expr::Conditional {
+            condition: Box::new(var("ready")),
+            then_expr: Box::new(var("amount")),
+            else_expr: Box::new(var("limit")),
+            spans: spans.clone(),
+        };
+        let expected = Expr::Conditional {
+            condition: Box::new(var("Claim.ready")),
+            then_expr: Box::new(var("Claim.amount")),
+            else_expr: Box::new(var("Claim.limit")),
+            spans,
+        };
+        assert_eq!(spell(expression), expected);
+    }
+
+    #[test]
+    fn spell_fields_inputs_shadow_fields_without_hiding_other_fields() {
+        let expression = binary("+", var("amount"), var("limit"));
+        assert_eq!(
+            spell_fields(
+                expression,
+                &BTreeSet::from(["amount", "limit"]),
+                &BTreeSet::from(["amount"]),
+                "Claim",
+            ),
+            binary("+", var("amount"), var("Claim.limit")),
+        );
+    }
+}
