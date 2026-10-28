@@ -490,11 +490,14 @@ step は、上書きなしと同じ <code>kind:"forbidden"</code> エラーで�
 </code></pre>
 <p><code>~&gt;</code> は <strong>leadsTo ブロック専用</strong>です — 一般の式では使えません。
 <code>helpful action(args...)</code> の各引数は、プロパティの束縛の scope で、対応する
-action パラメータの型として検査します。従来は未検査だった位置であり、型の誤り、
+action パラメータの型として <code>check</code> で検査します。従来は未検査だった位置であり、型の誤り、
 未定義の名前、禁止された pattern の shadow は <code>check</code> で拒みます。正規化される
 <code>count</code>/<code>sum</code> は、有効な空の集約も含めて単体と同じ受理を保ちます。compose の
 接頭辞付けで元の global 名との衝突の拒否を隠したり、別の宣言により拒否を増やしたり
 することはありません。
+induction はさらに、引数が状態に依存しないことを求めます。使えるのは leadsTo の
+束縛、整数・真偽値リテラルと、整数の <code>+</code>、<code>-</code>、<code>*</code> の組み合わせ(単項 <code>-</code> を含む)です。
+型が正しく状態を読む引数は <code>check</code> と BMC が受け入れ、induction は拒否します。
 <code>within K</code> は応答に対する有界の締め切りで、<code>K</code> は非負の定数式でなければなりません。
 これは BMC によって検査され、ランク付き induction 証明では検査されません。
 <code>decreases</code> は省略可能で、整数値の式でなければなりません。
@@ -964,7 +967,7 @@ let 別名を経由しても同じです。then 側の自己関係型の推論�
 範囲境界と terminal のエラーも、生成された1:1ではなく作成元の位置を使います。
 数値・Set の互換性と正しい動的な判定は不変です。対象は共有 validator が訪問する
 式の木です。第1回の基準では helpful action の存在・個数だけを検査していましたが、
-現在の main は #1483 により引数のパラメーター型も検査し、その動作を維持します。
+現在の main は #1527 により引数のパラメーター型も検査し、その動作を維持します。
 関係値を含む未対応の一時コレクションは別の上流課題であり、この修正で新たに
 対応するわけではありません。</p>
 <p>第1回の差分は BASE <code>33d7faa7</code> と HEAD <code>8caf5c2e</code> の比較です。非自己関係の選択に

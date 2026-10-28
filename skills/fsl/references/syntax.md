@@ -1159,7 +1159,7 @@ Projection equality retains the real relation error over context-needed empty
 literals and keeps the authored/precise inner origin; range bounds and terminal
 also avoid generated 1:1 origins. Numeric/Set compatibility and valid verdicts
 are unchanged. This describes visited expression trees. Helpful argument typing
-was outside the historical round-1 baseline; main's #1483 now checks parameter
+was outside the historical round-1 baseline; main's #1527 now checks parameter
 types and is preserved. Relation-valued temporary collections remain unsupported
 separate upstream work.
 
@@ -1613,6 +1613,9 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    now reject at `check`. Normalized Count/Sum retain standalone acceptance
    (including valid empty domains), and compose preserves original-global
    refusals without adding foreign-name refusals.
+   Induction additionally requires state-independent helpful arguments: leadsTo
+   binders, integer/Boolean literals, and integer `+`, `-`, `*` (including unary `-`).
+   `check` and BMC accept well-typed state reads; induction refuses them.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.
      Nesting it inside the forall body is a **parse error** — `fslc`
