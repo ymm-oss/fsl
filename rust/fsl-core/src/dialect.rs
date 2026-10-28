@@ -1769,11 +1769,16 @@ impl RuleGuardLowering {
             .iter()
             .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
             .collect::<BTreeMap<_, _>>();
-        environment.insert(crate::naming::entity_binder(entity), entity.to_owned());
+        let binder = crate::naming::entity_binder(entity);
+        environment.insert(binder.clone(), entity.to_owned());
+        // Match the main field substitution's capture avoidance without changing
+        // spelled fields. The empty key cannot match a source identifier.
+        let renaming = std::collections::HashMap::from([(String::new(), Expr::Var(binder))]);
+        let renamed = substitute_expr(condition.clone(), &renaming);
         // Preserve the surface condition on failure: the main path reports the
         // real error, while an unlowered obligation continues to fail closed.
         StageResolver::new(&self.processes)
-            .expression(condition.clone(), &environment)
+            .expression(renamed, &environment)
             .and_then(|lowered| {
                 self.expander
                     .scoped(environment.keys().cloned().collect(), || {
