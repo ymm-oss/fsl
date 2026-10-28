@@ -103,10 +103,17 @@ Tail values beyond len are **don't-care** (not constrained, not read, not displa
   before evaluating a frame whose length exceeds N, rather than reading missing
   elements. Action-based trace reconstruction does not cover init: symbolic
   projection of an unrepresentable initial frame fails closed when that path is
-  used, while default bmc/induction can instead report `type_bound` from the
-  concrete pre-pass at depth at least 1. Explicit retains the concrete initial
-  elements and reports the initial bound violation at step 0; the pre-pass's
-  step-1 label is pre-existing. See the engine/path table in
+  used. For deterministic init with no supplied initial state, bmc/induction
+  runs with `checked_bounds: None` can instead report `type_bound` from the
+  concrete pre-pass at step 0 with the initial state alone, even at depth 0
+  (#1591), provided the model has actions. Every `--property` selection except
+  selected-trans induction bypasses the pre-pass and still fails closed on an
+  unrepresentable symbolic initial frame. Selected-trans induction retains all
+  bounds in its base case; `--exclude-property <user property>` alone also keeps
+  the pre-pass and receives the initial step-0 correction. Explicit
+  retains the concrete initial elements and reports the initial bound violation
+  at step 0. Before #1591 the pre-pass waited for an action and labelled the idle
+  successor step 1. See the engine/path table in
   [the Kernel contract](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget).
 - It also enters the step premise of induction like the other `_bounds_*` (to prevent ghost CTIs).
   A ranked `leadsTo` query does not assume successor bounds merely because a

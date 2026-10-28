@@ -2932,6 +2932,8 @@ pub struct BoundaryProbe {
 
 /// Find the first concrete partial-operation or type-bound violation and its
 /// trace, visiting at most `budget` distinct states.
+/// For models with actions, initial type bounds are checked first at step 0,
+/// with a root-only trace even at depth 0.
 ///
 /// This search is an evidence detour, not a verdict authority: it only ever
 /// returns `partial_op`/`type_bound` findings, and a caller that gets
@@ -2957,6 +2959,19 @@ pub fn find_boundary_violation(
     let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
     let mut visited = BTreeSet::from([initial_state.clone()]);
     let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+
+    if !model.actions.is_empty()
+        && let Some(violation) = check_state_bounds(&initial_state, model, 0, None)?
+    {
+        return Ok(BoundaryProbe {
+            finding: Some((
+                violation,
+                trace::reconstruct_trace(&initial_state, &parents),
+            )),
+            exhausted: false,
+            states_explored: visited.len(),
+        });
+    }
 
     while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
@@ -3039,8 +3054,8 @@ enum SelfConsistency {
 /// Unlike [`find_boundary_violation`], which is scoped to
 /// `partial_op`/`type_bound` for its own narrower callers, this checks every
 /// violation kind `Monitor::current_violation`/`Monitor::step` can report,
-/// including a violation already present in the initial state (init can
-/// itself violate an invariant or type bound before any action runs).
+/// including initial invariant/partial-operation violations rather than only
+/// initial type bounds. Init can violate these before any action runs.
 ///
 /// `budget` bounds `visited.len()` exactly as the correspondence walk's
 /// budget does (issue #1246): checked right after a new insert, so the
@@ -4094,9 +4109,8 @@ fn check_state_selected(
     })
 }
 
-fn check_state_selected_inner(
+fn check_state_bounds(
     state: &State,
-    old_state: Option<&State>,
     model: &KernelModel,
     step: usize,
     checked_bounds: Option<&BTreeSet<String>>,
@@ -4119,6 +4133,19 @@ fn check_state_selected_inner(
                 step,
             }));
         }
+    }
+    Ok(None)
+}
+
+fn check_state_selected_inner(
+    state: &State,
+    old_state: Option<&State>,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<Option<Violation>, RuntimeError> {
+    if let Some(violation) = check_state_bounds(state, model, step, checked_bounds)? {
+        return Ok(Some(violation));
     }
     for property in &model.invariants {
         let mut bindings = Bindings::new();

@@ -266,10 +266,16 @@ not an explicit-only limitation that switching to BMC can bypass.
 BFS in this codebase, and the two must not be confused. `fsl_runtime::
 find_boundary_violation`'s `CONCRETE_PROBE_BUDGET` (issue #697,
 `docs/design/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget") bounds
-the *internal* concrete pre-pass eligible all-bounds BMC/induction `verify`
-runs make ahead of the symbolic engine: no bound selection, no supplied initial
-state, and deterministic init. It looks only for a `partial_op`/`type_bound`
-boundary outcome. Exhausting it is invisible to the caller: it falls through
+the *internal* concrete pre-pass native BMC/induction makes ahead of the symbolic
+engine when the prepared request has `checked_bounds: None`, supplies no initial
+state, and has deterministic init. Every `--property` selection skips it except
+selected-trans induction, which retains all bounds in its base case and can
+still enter it. `--exclude-property <user property>` alone keeps the pre-pass
+and receives its initial step-0 correction. The probe looks only for a
+`partial_op`/`type_bound` boundary outcome; its initial-state check evaluates
+only type bounds for models with actions and reports a violation at step 0 even
+at depth 0 (#1591). Models without actions retain the verifier's semantics error.
+Exhausting it is invisible to the caller: it falls through
 to the symbolic engine exactly like an ordinary empty result, and never
 becomes a public verdict. Exhausting `--explicit-budget`, by contrast, is a
 first-class outcome of a user-selected engine: `unknown_budget`, a real
