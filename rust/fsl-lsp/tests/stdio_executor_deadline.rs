@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1413 / O4 real-executor watchdog.
-//! Phase I support API in `tests/support/test_executor.rs`:
+//! Shared support API in `tests/support/test_executor.rs`:
 //! `pub(crate) fn block_on_until<F: std::future::Future>(future: F,
 //!     deadline: std::time::Instant) -> F::Output`.
-//! The stdio `block_on` must delegate to this same deadline-driven executor;
-//! the test must not get its own implementation. Deadline expiry must panic
-//! with a message containing "deadline", including when Pending never wakes.
+//! The stdio `block_on` delegates to this same deadline-driven executor.
+//! Deadline expiry must panic with a message containing "deadline", including
+//! when Pending never wakes.
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};

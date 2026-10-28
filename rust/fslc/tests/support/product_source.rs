@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared census extraction: the parse-entry inventory's item-level test policy.
-//! Retain original token spelling and locations, not comments or test-only items.
+//! Shared census extraction removes comments and items directly carrying
+//! `#[cfg(test)]` or `#[test]`, retaining original token spelling and locations.
 
 use proc_macro2::{Span, TokenStream, TokenTree};
 use syn::spanned::Spanned;

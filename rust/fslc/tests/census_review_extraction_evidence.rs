@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Runnable extraction evidence while the real-rule controls await Phase I's
-//! support APIs. These are NOT substitutes for the census's actual rules.
+//! Runnable extraction evidence alongside the real-rule controls in sibling
+//! test files. These are NOT substitutes for the census's actual rules.
 
 #[path = "support/census_legacy.rs"]
 #[allow(dead_code)]
@@ -42,9 +42,9 @@ fn comment_padding_explains_the_old_positive_new_negative_boundary() {
         );
         assert!(current.contains(name), "the extractor keeps the identifier");
         syn::parse_file(&current).expect("the extracted call remains valid Rust");
-        // Do not pin padding as desired behavior: Phase I may remove it, or
-        // teach the real naming matcher to tolerate it. The real-rule tests
-        // above, not this extraction observation, must detect both calls.
+        // Do not pin padding as desired behavior: the real naming matcher
+        // tolerates it. The sibling census_naming_rule_controls tests, not
+        // this extraction observation, must detect both calls.
     }
 }
 

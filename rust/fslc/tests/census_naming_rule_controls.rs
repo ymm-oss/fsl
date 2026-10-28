@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1284 real finding-pipeline controls.
-//! Phase I API in `tests/support/naming_census_rule.rs`:
+//! Shared API in `tests/support/naming_census_rule.rs`:
 //! `pub(crate) fn findings(path: &str, source: &str) -> Vec<Finding>`;
 //! `pub(crate) enum Kind` retains the four existing variants;
 //! `pub(crate) struct Finding` retains its existing fields, each `pub(crate)`:
 //! `path: String, line: usize, kind: Kind, text: String`.
-//! Move the real extraction/line matcher/owner exemption there and route the
-//! census through it, preserving its allowed set and drift assertions.
+//! The census uses this same extraction/line matcher/owner exemption, retaining
+//! its allowed set and drift assertions.
 
 #[path = "support/census_legacy.rs"]
 #[allow(dead_code)]

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1171 real-rule detector.
-//! Phase I API in `tests/support/helper_census_rule.rs`:
+//! Shared API in `tests/support/helper_census_rule.rs`:
 //! `pub(crate) fn root_dependencies(source: &str, modules: &[String])
 //!     -> Vec<(usize, String)>`.
-//! Move the census's extraction and root-path rule there, and have the real
-//! module census use it. This is not an AST fixture-scanner adapter.
+//! The module census uses this same extraction and root-path rule, not an AST
+//! fixture-scanner adapter.
 
 #[path = "support/census_legacy.rs"]
 #[allow(dead_code)]
