@@ -1579,9 +1579,11 @@ fn walk_init(
                 let binder_values = compute_binder_values(binder, model, proof_scope)?;
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
-                // Same-forall reads are already checked by walk_init_forall_reads.
+                // Only unresolved binders retain #1520's current-key exemption.
                 let mut nested_roots = BTreeSet::new();
-                let nested_mode = if let InitWalkMode::ReadOrder(roots) = mode {
+                let nested_mode = if let InitWalkMode::ReadOrder(roots) = mode
+                    && nested_bound[binder_name(binder)].is_none()
+                {
                     collect_assigned_init_roots(statements, &mut nested_roots);
                     nested_roots = roots.difference(&nested_roots).cloned().collect();
                     InitWalkMode::ReadOrder(&nested_roots)

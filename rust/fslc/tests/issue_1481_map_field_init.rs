@@ -623,6 +623,93 @@ read_rejection_cell!(
     44
 );
 
+// A resolved binder that covers only part of a root gets no current-key exemption.
+const ISSUE_1451_SUBSET_THEN_FILL: &str = r"spec X6 {
+  type K = 0..1
+  state { m: Map<K, Bool>, seen: Map<K, Bool> }
+  init { forall k in 0..0 { m[k] = true seen[k] = m[k] } m[1] = false seen[1] = false }
+  action idle() { }
+  invariant I { m[0] and seen[0] }
+}
+";
+const ISSUE_1451_SUBSET_ONLY: &str = r"spec X10 {
+  type K = 0..1
+  state { m: Map<K, Bool>, seen: Map<K, Bool> }
+  init { forall k in 0..0 { m[k] = true seen[k] = m[k] } }
+  action idle() { }
+  invariant I { m[0] and seen[0] }
+}
+";
+read_rejection_cell!(
+    issue_1451_static_subset_then_fill,
+    ISSUE_1451_SUBSET_THEN_FILL,
+    "init references state variable 'm' before it is assigned",
+    4,
+    41
+);
+read_rejection_cell!(
+    issue_1451_static_subset_only,
+    ISSUE_1451_SUBSET_ONLY,
+    "init references state variable 'm' before it is assigned",
+    4,
+    41
+);
+
+const ISSUE_1451_FILTERED_FOLLOWED_READ: &str = r"spec F1 {
+  type K = 0..1
+  state { m: Map<K, Bool>, g: Bool }
+  init {
+    forall k: K where true { m[k] = true }
+    g = m[0]
+  }
+  action stay() {}
+  invariant P { g and m[0] and m[1] }
+}
+";
+const ISSUE_1451_COLLECTION_FOLLOWED_READ: &str = r"spec F2 {
+  type K = 0..1
+  state { m: Map<K, Bool>, g: Bool }
+  init {
+    forall k in Set { 0, 1 } { m[k] = true }
+    g = m[0]
+  }
+  action stay() {}
+  invariant P { g and m[0] and m[1] }
+}
+";
+const ISSUE_1451_NESTED_FILTER_FOLLOWED_READ: &str = r"spec N3 {
+  type K = 0..1
+  state { m: Map<K, Bool>, g: Bool }
+  init {
+    forall i: K { forall j: K where j == i { m[j] = true } }
+    g = m[0]
+  }
+  action stay() {}
+  invariant P { g and m[0] and m[1] }
+}
+";
+read_rejection_cell!(
+    issue_1451_filtered_followed_read,
+    ISSUE_1451_FILTERED_FOLLOWED_READ,
+    "init references state variable 'm' before it is assigned",
+    6,
+    5
+);
+read_rejection_cell!(
+    issue_1451_collection_followed_read,
+    ISSUE_1451_COLLECTION_FOLLOWED_READ,
+    "init references state variable 'm' before it is assigned",
+    6,
+    5
+);
+read_rejection_cell!(
+    issue_1451_nested_filter_followed_read,
+    ISSUE_1451_NESTED_FILTER_FOLLOWED_READ,
+    "init references state variable 'm' before it is assigned",
+    6,
+    5
+);
+
 read_rejection_cell!(
     r1_root_field_read_before_sibling,
     R1,

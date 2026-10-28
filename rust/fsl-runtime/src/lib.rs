@@ -2086,8 +2086,8 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
 /// Init ownership and forall read-order checks also apply to free-root enumeration.
-/// Legacy-accepted partial assignments and reads of later-assigned roots still
-/// use default-filled, program-order execution when free roots exist (#1521).
+/// Legacy-accepted partial assignments still use defaults with free roots (#1521).
+/// The shared gate rejects reads of later-assigned roots, not free values.
 /// This is not a complete relational-init enumeration for those shapes; the
 /// stronger admission gate for new per-field shapes does not repair them.
 ///
