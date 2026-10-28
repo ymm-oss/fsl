@@ -45,6 +45,9 @@ impl SmtSolver for StubSolver {
     fn sort(&self, term: &Sort) -> Sort {
         term.clone()
     }
+    fn literal_value(&self, _: &Sort) -> Option<ModelValue> {
+        None
+    }
     fn bool_value(&self, _: bool) -> Sort {
         Sort::Bool
     }
