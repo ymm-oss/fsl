@@ -1716,6 +1716,72 @@ struct RequirementsProcess {
     roles: BTreeSet<String>,
 }
 
+/// The main path's stage lowering and predicate expansion for rule guards.
+pub(crate) struct RuleGuardLowering {
+    processes: Vec<Process>,
+    expander: crate::PredicateExpander,
+}
+
+impl RuleGuardLowering {
+    fn new(
+        requirements: &SurfaceRequirements,
+        processes: &[RequirementsProcess],
+    ) -> Result<Self, CoreError> {
+        let processes = processes
+            .iter()
+            .map(|p| p.process.clone())
+            .collect::<Vec<_>>();
+        let resolver = StageResolver::new(&processes);
+        let mut definitions = SurfaceSpec {
+            name: requirements.name.clone(),
+            meta: None,
+            items: requirements
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    RequirementsItem::Common(item) => Some(item.clone()),
+                    _ => None,
+                })
+                .collect(),
+        };
+        for item in &mut definitions.items {
+            if let SpecItem::Def { params, value, .. } = item {
+                let environment = params
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
+                    .collect();
+                resolve_stage_expression(&resolver, value, &environment)?;
+            }
+        }
+        Ok(Self {
+            expander: crate::PredicateExpander::new(&definitions)?,
+            processes,
+        })
+    }
+
+    pub(crate) fn condition(&self, condition: Expr, inputs: &[(String, QualifiedName)]) -> Expr {
+        let environment = inputs
+            .iter()
+            .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
+            .collect();
+        // Preserve the surface condition on failure: the main path reports the
+        // real error, while an unlowered obligation continues to fail closed.
+        StageResolver::new(&self.processes)
+            .expression(condition.clone(), &environment)
+            .and_then(|lowered| {
+                self.expander.scoped(
+                    inputs.iter().map(|(name, _)| name.clone()).collect(),
+                    || self.expander.expand_expr(lowered, &mut Vec::new()),
+                )
+            })
+            .unwrap_or(condition)
+    }
+}
+
+pub(crate) fn rule_guard_lowering(requirements: &SurfaceRequirements) -> Option<RuleGuardLowering> {
+    RuleGuardLowering::new(requirements, &requirements_processes(requirements).ok()?).ok()
+}
+
 fn requirements_processes(
     requirements: &SurfaceRequirements,
 ) -> Result<Vec<RequirementsProcess>, CoreError> {
@@ -2342,7 +2408,8 @@ pub(crate) fn lower_resolved_requirements(
     let processes = requirements_processes(&requirements)?;
     let binders = process_binders(&requirements, &processes);
     let decision_tables = crate::decision_table::Tables::of(&requirements);
-    let rule_guards = crate::rule_guards::RuleGuards::of(&requirements);
+    let guard_lowering = RuleGuardLowering::new(&requirements, &processes).ok();
+    let rule_guards = crate::rule_guards::RuleGuards::of(&requirements, guard_lowering.as_ref());
     if let Some(next) = &requirements.next {
         check_generated_names(next, &items, &processes, &binders)?;
     }
