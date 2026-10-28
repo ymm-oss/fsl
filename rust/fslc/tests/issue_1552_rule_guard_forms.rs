@@ -305,6 +305,37 @@ fn control_is_pattern_field_name_satisfiable_matches_base() {
 }
 
 #[test]
+fn control_is_pattern_in_quantifier_body_matches_lowering() {
+    // Base accepted this although `approve` can never occur (a false ok).
+    // This is the one intended accepted-to-rejected change: the rule check now
+    // reads the field in the quantifier body as the action lowering does (#1561).
+    let outputs = run(
+        "control_is_pattern_in_quantifier_body_matches_lowering",
+        &source(
+            "amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })",
+            "",
+            false,
+        ),
+    );
+    for (mode, exit, value) in &outputs {
+        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
+        assert_eq!(value["result"], "error", "{mode}: {value:#}");
+        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
+        assert_eq!(
+            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
+            "{mode}: {value:#}"
+        );
+        assert!(
+            value["message"]
+                .as_str()
+                .expect("message")
+                .contains("event 'approve' can never occur"),
+            "{mode}: {value:#}"
+        );
+    }
+}
+
+#[test]
 fn control_unsatisfiable_bare_guard_is_rejected() {
     let outputs = run(
         "control_unsatisfiable_bare_guard",
