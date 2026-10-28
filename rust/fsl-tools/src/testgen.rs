@@ -126,7 +126,21 @@ fn testgen_source_name(source_path: &Path) -> Result<String, String> {
     source_path
         .file_name()
         .and_then(std::ffi::OsStr::to_str)
-        .map(str::to_owned)
+        .map(|name| {
+            // One visible spelling safe in every target's header context:
+            // docstrings, line/block comments, and PHP source alike.
+            let mut escaped = String::new();
+            for character in name.chars() {
+                if character.is_ascii_control()
+                    || matches!(character, '\\' | '\'' | '"' | '*' | '/' | '?' | '>')
+                {
+                    let _ = write!(escaped, "\\x{:02x}", u32::from(character));
+                } else {
+                    escaped.push(character);
+                }
+            }
+            escaped
+        })
         .ok_or_else(|| "testgen spec path must have a UTF-8 file name".to_owned())
 }
 
@@ -612,7 +626,22 @@ fn ordered_object(value: &Value, order: &[String]) -> Value {
 }
 
 fn python_string(value: &str) -> String {
-    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+    let mut result = String::from("'");
+    for character in value.chars() {
+        match character {
+            '\\' => result.push_str("\\\\"),
+            '\'' => result.push_str("\\'"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            value if value.is_control() => {
+                let _ = write!(result, "\\x{:02x}", u32::from(value));
+            }
+            value => result.push(value),
+        }
+    }
+    result.push('\'');
+    result
 }
 
 fn python_literal(value: &Value, key_order: &[String]) -> String {
@@ -1108,6 +1137,11 @@ fn literal(value: &Value, target: Target) -> String {
             _ => "null".to_owned(),
         },
         Value::Bool(value) => value.to_string(),
+        Value::Number(value) if matches!(target, Target::Kotlin) => match value.as_i64() {
+            Some(i64::MIN) => "Long.MIN_VALUE".to_owned(),
+            Some(integer) if i32::try_from(integer).is_err() => format!("{integer}L"),
+            _ => value.to_string(),
+        },
         Value::Number(value) => value.to_string(),
         Value::String(value) => quoted(value, target),
         Value::Array(values) if values.is_empty() => match target {
@@ -1655,6 +1689,37 @@ fn emit_phpunit(
     format!("{preamble}\n\n{}\n", lines.join("\n"))
 }
 
+fn validate_vitest_integers(value: &Value, path: &str) -> Result<(), String> {
+    const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+    match value {
+        Value::Number(number)
+            if number
+                .as_i64()
+                .is_some_and(|value| !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&value))
+                || number
+                    .as_u64()
+                    .is_some_and(|value| value > MAX_SAFE_INTEGER.cast_unsigned()) =>
+        {
+            Err(format!(
+                "testgen --target vitest: integer {number} at {path} is outside the exact JavaScript integer range -{MAX_SAFE_INTEGER}..{MAX_SAFE_INTEGER}"
+            ))
+        }
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                validate_vitest_integers(value, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        Value::Object(values) => {
+            for (key, value) in values {
+                validate_vitest_integers(value, &format!("{path}.{key}"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Generate one target scaffold from the normalized testgen boundary.
 ///
 /// # Errors
@@ -1671,6 +1736,7 @@ pub fn generate_testgen(input: &TestgenInput, target: &str) -> Result<String, St
 /// Rejects unknown targets, and [`UnwiredAdapter::Skip`] for Kotlin: kotlin.test
 /// has no portable runtime skip, so an unwired Kotlin test could only return
 /// early and pass, which is the silent green this option must not produce.
+/// Vitest rejects integers outside JavaScript's exact range with their input path.
 pub fn generate_testgen_with(
     input: &TestgenInput,
     target: &str,
@@ -1678,12 +1744,18 @@ pub fn generate_testgen_with(
 ) -> Result<String, String> {
     let content = match target {
         "pytest" => emit_pytest(input, unwired),
-        "vitest" => emit_vitest(
-            &input.path.source_name,
-            &input.scenarios,
-            &input.walk,
-            unwired,
-        ),
+        "vitest" => {
+            validate_vitest_integers(&input.walk, "walk")?;
+            for (index, scenario) in input.scenarios.iter().enumerate() {
+                validate_vitest_integers(scenario, &format!("scenarios[{index}]"))?;
+            }
+            emit_vitest(
+                &input.path.source_name,
+                &input.scenarios,
+                &input.walk,
+                unwired,
+            )
+        }
         "swift" => emit_swift(
             &input.path.source_name,
             &input.scenarios,

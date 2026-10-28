@@ -50,6 +50,9 @@ fun assertPartial(observed: Map<String, Any?>, expected: Map<String, Any?>) {
         if (value is Map<*, *> && seen is Map<*, *>) {
             @Suppress("UNCHECKED_CAST")
             assertPartial(seen as Map<String, Any?>, value as Map<String, Any?>)
+        } else if ((value is Byte || value is Short || value is Int || value is Long) &&
+                   (seen is Byte || seen is Short || seen is Int || seen is Long)) {
+            assertEquals((value as Number).toLong(), (seen as Number).toLong(), "state $key")
         } else {
             assertEquals(value, seen, "state $key")
         }

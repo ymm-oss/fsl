@@ -455,6 +455,20 @@ pseudorandom walk and `pathlib` for resolving the SPEC path):
        def step(self, action: str, params: dict): ...   # drive the implementation for one action
        def observe(self) -> dict: ...                   # project the implementation's state into the spec's state shape
    ```
+   **Native literal and header contract (#1424).** Kotlin integral leaf values in
+   `assertPartial` compare by value across Byte/Short/Int/Long, without coercing
+   floating-point values; other comparisons are unchanged. Kotlin integers in the
+   Int range remain unsuffixed, wider i64 values use `L`, and i64 minimum uses
+   `Long.MIN_VALUE`. Vitest generation rejects integers outside
+   ±(2^53−1) before emitting an artifact, with the value and input-vector path in
+   the existing exit-2 semantic error envelope. Pytest strings escape controls:
+   `\n`, `\r`, `\t`, otherwise lowercase `\xNN`; quotes/backslashes remain escaped.
+   Source basenames in every target's headers share one visible spelling:
+   backslash, both quotes, `*`, `/`, `?`, `>`, and ASCII controls become lowercase
+   `\xNN`. Other characters, including non-ASCII, remain unchanged. This prevents
+   a basename from closing a docstring/comment or switching PHP context; ordinary
+   names and outputs are unchanged except for the Kotlin helper itself.
+
 2. **Scenario replay test** (run the scenarios mechanism at testgen time and
    embed it): feed each scenario's steps to the Adapter, and assert that after
    each step `observe()` matches **only the fields mentioned** in `expected_states[i]`.
