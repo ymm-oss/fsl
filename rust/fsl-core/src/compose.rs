@@ -1449,10 +1449,16 @@ fn rewrite_expr_in_phase(
                 let left = rewrite(*left)?;
                 let ok = crate::pattern_binding_flows(&op, true);
                 let nested = pattern_scope(&left, bound, &HashSet::new(), ok);
+                let right_phase = phase.after_patterns(&left);
                 Expr::Binary {
                     op,
                     left: Box::new(left),
-                    right: Box::new(rewrite_expr_in_phase(*right, component, &nested, phase)?),
+                    right: Box::new(rewrite_expr_in_phase(
+                        *right,
+                        component,
+                        &nested,
+                        &right_phase,
+                    )?),
                 }
             }
             Expr::Is { expr, pattern } => {
@@ -1464,7 +1470,7 @@ fn rewrite_expr_in_phase(
                         component.names.state.iter().map(String::as_str),
                         component.names.consts.iter().map(String::as_str),
                         component.names.enum_members.keys().map(String::as_str),
-                        bound.iter().map(String::as_str),
+                        bound.iter().chain(&phase.collisions).map(String::as_str),
                     )?;
                 }
                 Expr::Is {
@@ -2406,26 +2412,30 @@ pub(super) fn pattern_scope(
     active: bool,
 ) -> HashSet<String> {
     let mut patterns = HashSet::new();
-    extend_pattern_names(expr, &mut patterns);
+    extend_pattern_names(expr, &mut patterns, false);
     let mut nested = bound.clone();
     nested.extend(patterns.difference(globals).filter(|_| active).cloned());
     nested
 }
 
-pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
-    match expr {
+/// Visible exports use true continuations; collision exports retain all Binary names.
+/// Extend collision traversal here when additional constructors retain bindings (#1573).
+pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>, collisions: bool) {
+    crate::recursion::guard(|| match expr {
         Expr::Is {
             pattern: fsl_syntax::Pattern::Some(name),
             ..
         } => {
             bound.insert(name.clone());
         }
-        Expr::Binary { op, left, right } if crate::pattern_binding_flows(op, false) => {
-            extend_pattern_names(left, bound);
-            extend_pattern_names(right, bound);
+        Expr::Binary { op, left, right }
+            if collisions || crate::pattern_binding_flows(op, false) =>
+        {
+            extend_pattern_names(left, bound, collisions);
+            extend_pattern_names(right, bound, collisions);
         }
         _ => {}
-    }
+    });
 }
 
 fn resolve_alias_action_items(

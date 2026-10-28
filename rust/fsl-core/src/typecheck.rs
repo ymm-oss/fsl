@@ -2,7 +2,7 @@
 
 //! Checked-model expression and statement type validation.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
@@ -671,7 +671,7 @@ fn reject_colliding_pattern_binding(
         model.state.iter().map(|(name, _)| name.as_str()),
         model.consts.keys().map(String::as_str),
         model.enum_members.keys().map(String::as_str),
-        env.keys().map(String::as_str),
+        env.keys().chain(&phase.collisions).map(String::as_str),
     )
     .map(|_| ())
     .map_err(|error| error.with_span(span))
@@ -949,6 +949,8 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
 pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
     substituted: BTreeSet<String>,
+    // Reserved by earlier evaluation, without making those names readable.
+    pub(crate) collisions: HashSet<String>,
 }
 
 impl ValidationPhase {
@@ -959,7 +961,26 @@ impl ValidationPhase {
         Self {
             normalize_aggregates: true,
             substituted: BTreeSet::new(),
+            collisions: HashSet::new(),
         }
+    }
+
+    pub(crate) fn after_patterns(&self, expression: &Expr) -> Self {
+        let mut phase = self.clone();
+        crate::compose::extend_pattern_names(expression, &mut phase.collisions, true);
+        phase
+    }
+
+    fn check(
+        &self,
+        expr: &Expr,
+        env: &TypeEnv,
+        model: &KernelModel,
+        span: Span,
+        expected: Option<&TypeRef>,
+        self_relations: &SelfRelations,
+    ) -> Result<(), TypecheckError> {
+        validate_expression_in_phase(expr, env, model, span, expected, self, self_relations)
     }
 
     fn expands_aggregate(kind: AggregateKind, binder: &Binder) -> bool {
@@ -977,6 +998,7 @@ impl ValidationPhase {
         Self {
             normalize_aggregates: self.normalize_aggregates && !expands,
             substituted,
+            collisions: self.collisions.clone(),
         }
     }
 }
@@ -1070,15 +1092,7 @@ fn validate_expression(
     expected: Option<&TypeRef>,
     self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
-    validate_expression_in_phase(
-        expr,
-        env,
-        model,
-        span,
-        expected,
-        &ValidationPhase::normalized(),
-        self_relations,
-    )
+    ValidationPhase::normalized().check(expr, env, model, span, expected, self_relations)
 }
 
 fn validate_expression_in_phase(
@@ -1313,7 +1327,14 @@ fn validate_expression_inner(
             if crate::pattern_binding_flows(op, true) {
                 extend_pattern_binding(left, &mut right_env, model)?;
             }
-            validate(right, &right_env, span, Some(&right_ty))?;
+            phase.after_patterns(left).check(
+                right,
+                &right_env,
+                model,
+                span,
+                Some(&right_ty),
+                self_relations,
+            )?;
         }
         Expr::Neg(operand) => {
             validate(operand, env, span, Some(&TypeRef::Int))?;
@@ -1477,6 +1498,7 @@ fn validate_statement(
     statement: &Statement,
     env: &TypeEnv,
     model: &KernelModel,
+    phase: &ValidationPhase,
     self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     match statement {
@@ -1487,8 +1509,8 @@ fn validate_statement(
         } => {
             let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
-            validate_lvalue(target, env, model, *span, self_relations)?;
-            validate_expression(value, env, model, *span, Some(&ty), self_relations)
+            validate_lvalue(target, env, model, *span, phase, self_relations)?;
+            phase.check(value, env, model, *span, Some(&ty), self_relations)
         }
         Statement::If {
             condition,
@@ -1496,7 +1518,7 @@ fn validate_statement(
             else_statements,
             span,
         } => {
-            validate_expression(
+            phase.check(
                 condition,
                 env,
                 model,
@@ -1507,22 +1529,21 @@ fn validate_statement(
             then_statements
                 .iter()
                 .chain(else_statements)
-                .try_for_each(|item| validate_statement(item, env, model, self_relations))
+                .try_for_each(|item| validate_statement(item, env, model, phase, self_relations))
         }
         Statement::ForAll {
             binder,
             statements,
             span,
         } => {
-            let phase = ValidationPhase::normalized();
-            let ty = validate_binder(binder, env, model, *span, &phase, &phase, self_relations)?;
+            let ty = validate_binder(binder, env, model, *span, phase, phase, self_relations)?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), ty);
             let mut local_relations = self_relations.clone();
             local_relations.remove(binder_name(binder));
-            statements
-                .iter()
-                .try_for_each(|item| validate_statement(item, &local, model, &local_relations))
+            statements.iter().try_for_each(|item| {
+                validate_statement(item, &local, model, phase, &local_relations)
+            })
         }
     }
 }
@@ -1532,6 +1553,7 @@ fn validate_lvalue(
     env: &TypeEnv,
     model: &KernelModel,
     span: Span,
+    phase: &ValidationPhase,
     self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
     match target {
@@ -1545,9 +1567,9 @@ fn validate_lvalue(
             .index_types(false) else {
                 return Err(error("indexed update target requires Map"));
             };
-            validate_expression(index, env, model, span, Some(&key), self_relations)
+            phase.check(index, env, model, span, Some(&key), self_relations)
         }
-        LValue::Field(base, _) => validate_lvalue(base, env, model, span, self_relations),
+        LValue::Field(base, _) => validate_lvalue(base, env, model, span, phase, self_relations),
     }
 }
 
@@ -1613,7 +1635,14 @@ fn validate_statement_assignments(
             let ty = lvalue_type(target, env, model, *span)?;
             ensure_assignable(value, &ty, env, model, *span)?;
             validate_map_key_const_shadowing(target, env, model, visible_consts, *span)?;
-            validate_lvalue(target, env, model, *span, self_relations)?;
+            validate_lvalue(
+                target,
+                env,
+                model,
+                *span,
+                &ValidationPhase::normalized(),
+                self_relations,
+            )?;
             validate_expression(value, env, model, *span, Some(&ty), self_relations)
         }
         Statement::If {
@@ -1747,7 +1776,13 @@ pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), Ty
     let env = base_env(model);
     let self_relations = SelfRelations::new();
     for statement in &model.init {
-        validate_statement(statement, &env, model, &self_relations)?;
+        validate_statement(
+            statement,
+            &env,
+            model,
+            &ValidationPhase::normalized(),
+            &self_relations,
+        )?;
     }
     validate_model_expression_types(model)?;
     for projection in &model.projections {
@@ -1851,13 +1886,14 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
             for param in &action.params {
                 local.insert(param.name().to_owned(), param.ty());
             }
+            let mut phase = ValidationPhase::normalized();
             for (index, guard) in action.guards.iter().enumerate() {
                 let target = crate::action_guard_target(&action.name, index);
                 let span = model.component_item_span(&target).unwrap_or(action.span);
                 let checked = (|| {
                     match guard {
                         ActionGuard::Requires(expr) => {
-                            validate_expression(
+                            phase.check(
                                 expr,
                                 &local,
                                 model,
@@ -1866,9 +1902,10 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                                 &local_relations,
                             )?;
                             extend_pattern_binding(expr, &mut local, model)?;
+                            phase = phase.after_patterns(expr);
                         }
                         ActionGuard::Let(name, expr) => {
-                            validate_expression(expr, &local, model, span, None, &local_relations)?;
+                            phase.check(expr, &local, model, span, None, &local_relations)?;
                             let ty = expression_type(expr, &local, model, span, None)?;
                             if matches!(
                                 resolve(model, &ty).map_err(|error| error.with_span(span))?,
@@ -1894,7 +1931,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                 checked.map_err(|error: TypecheckError| error.in_component_item(model, &target))?;
             }
             for (index, statement) in action.statements.iter().enumerate() {
-                validate_statement(statement, &local, model, &local_relations).map_err(
+                validate_statement(statement, &local, model, &phase, &local_relations).map_err(
                     |error| {
                         error.in_component_item(
                             model,
@@ -1906,15 +1943,16 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
             for (index, expr) in action.ensures.iter().enumerate() {
                 let target = crate::origin::action_ensure_target(&action.name, index);
                 let span = model.component_item_span(&target).unwrap_or(action.span);
-                validate_expression(
-                    expr,
-                    &local,
-                    model,
-                    span,
-                    Some(&TypeRef::Bool),
-                    &local_relations,
-                )
-                .map_err(|error| error.in_component_item(model, &target))?;
+                phase
+                    .check(
+                        expr,
+                        &local,
+                        model,
+                        span,
+                        Some(&TypeRef::Bool),
+                        &local_relations,
+                    )
+                    .map_err(|error| error.in_component_item(model, &target))?;
             }
             Ok(())
         })();
