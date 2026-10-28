@@ -1102,10 +1102,16 @@ free components/paths of a may-assigned root (`struct-other-partial`,
 free-value semantics. Existing ownership/field/forall diagnostics keep priority.
 Never-assigned roots remain free: check accepts `init { g = on }` or an
 unassigned `choose` condition; explicit still rejects their reads. Permitted
-same-forall current-key reads, including #1520 filtered/collection X1/X2, and
-unread omitted/legacy partial init remain accepted.
+same-forall current-key reads are exempt only for unresolved binder values,
+including #1520 filtered/collection X1/X2. Resolved partial domains require
+full-root coverage; typed full-domain loops remain accepted. Binder-keyed
+filtered/collection writes, also when nested, do not establish full coverage
+for a later read outside the loop. Use a resolved full-domain binder, e.g.
+`forall k: K { m[k] = true } g = m[0]`, instead of its filtered/collection
+equivalent before reading. Unread omitted/legacy partial init remain accepted.
 
-Breaking-removal sweep: `fslc check <form>` in each own materialized tree, base
+Historical sweep before the resolved-binder correction:
+`fslc check <form>` in each own materialized tree, base
 `9e8ed724bdbd070868af00d5160e5f6198738c49` versus head
 `5bc59416fa42c3132e33e3e3264ed29c0d77701b`. All 597 files in `specs/`,
 `examples/`, `rust/fslc/tests/fixtures/` have identical full outputs/exits
@@ -1113,7 +1119,8 @@ Breaking-removal sweep: `fslc check <form>` in each own materialized tree, base
 37 inline sources × direct/compose = 74 forms have 28 `ok`→`error` transitions:
 13 read-order cases × 2 plus N2 × 2, and no other output changes. The complete
 [removal/migration table](../../../docs/design/DESIGN-bridge.md#assigned-root-read-order-1451)
-gives one checked rewrite per case. Assign before reading or initialize the
+also covers the added subset/post-loop cases; completeness refers only to the
+measured inline fixture set, not all removed programs. Assign before reading or initialize the
 whole root; choosing formerly free values is a model-strengthening decision.
 
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`

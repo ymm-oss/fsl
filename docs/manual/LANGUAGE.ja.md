@@ -954,12 +954,17 @@ forall の source/domain は既存の別の規則に従います。早すぎる�
 init が一度も代入しないルートは symbolic な自由値のままです。issue の
 `init { g = on }` や `if choose { x = 1 } else { x = 0 }` の未代入の
 `on`/`choose` も該当します(#493)。check は受理し、explicit は従来どおり読みを
-拒否します。同じ forall が書くルートについては #1518 の現在のキーの規則を使い、
-現在のキーに書いた後の許可された読みを維持します。filter 付き・collection の形
-(#1520、X1/X2)も check/symbolic では受理したままです。読まない未代入ルートや
+拒否します。binder の値が決まらない場合(filter 付き・collection の形である
+#1520、X1/X2 など)だけ、#1518 の現在のキーの規則に従う既代入キーの読みを
+このルート全体の検査から免除します。値が決まる一部の domain では全ルートの
+被覆が必要で、型全体を走る forall は受理したままです。filter 付き・collection
+の binder をキーにする書き込みは、それを入れ子にした場合も、ループ後の読みの
+ための完全な被覆になりません。有限の `K` なら、例えば
+`forall k: K where true { m[k] = true }` の後で `g = m[0]` と読む代わりに
+`forall k: K { m[k] = true } g = m[0]` と書けます。読まない未代入ルートや
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
 
-breaking-removal sweep (#1451): base
+値が決まる binder の訂正前の測定記録 (#1451): base
 `9e8ed724bdbd070868af00d5160e5f6198738c49` と head
 `5bc59416fa42c3132e33e3e3264ed29c0d77701b` のそれぞれの materialized tree で
 `fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
@@ -967,8 +972,9 @@ breaking-removal sweep (#1451): base
 exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 37 source
 を直接/compose の両方で検査した74形では **28** 形が `ok`→`error` になります。
 内訳は13本の代入前の読み × 2 と #1481 N2 × 2 で、他の出力の変化はありません。
-全 removal と各形に1つずつの書き直しは
-[移行表](../design/DESIGN-bridge.md#assigned-root-read-order-1451)を参照してください。
+[移行表](../design/DESIGN-bridge.md#assigned-root-read-order-1451)は、追加された
+静的な部分 domain とループ後の読みの族の書き直しも含みます。この一覧の完全性は
+測定した inline fixture 集合内のもので、全ての拒否されるプログラムの列挙ではありません。
 全代入の後へ読みを移すか、ルート全体を明示的に初期化します。従来自由だった値を
 選ぶ書き直しはモデルの範囲を狭めるため、設計上の判断が必要です。
 

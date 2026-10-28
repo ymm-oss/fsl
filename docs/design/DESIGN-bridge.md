@@ -369,13 +369,21 @@ reject reads of #493-style free values because their root is may-assigned.
 A root never assigned anywhere remains free, including the issue's `on` and
 the `choose` condition of nondeterministic refinement init (#493). Check and
 symbolic verification retain those forms, while explicit still refuses them.
-Permitted current-key reads after a same-forall write remain governed by #1518,
-including filtered/collection X1/X2 (#1520); this change does not promote their
-explicit support. Unread omitted roots and legacy-accepted partial init remain
+Only unresolved binder values retain #1520's same-forall current-key exemption,
+subject to #1518's already-written-key rule, including filtered/collection
+X1/X2. Resolved binders use actual whole-root coverage: a full-domain typed
+loop is accepted, but a loop over only `0..0` cannot read its current `m[k]`
+when `m` has keys `0..1`, even if the remaining keys are written later.
+This does not promote the unresolved forms' explicit support.
+Binder-keyed filtered/collection writes do not establish the complete key set
+for a following read. Nesting an unresolved inner binder does not restore that
+coverage. This does not remove static nonempty proofs for fixed targets.
+Unread omitted roots and legacy-accepted partial init remain
 accepted. The expression-only read exemption never credits real assignment
 coverage or changes the initialized state.
 
-Sweep command: run `fslc check <form>` with the base/head binaries in each
+Historical checkpoint before the resolved-binder correction: run
+`fslc check <form>` with the base/head binaries in each
 revision's own git-archive materialized tree. Measured base
 `9e8ed724bdbd070868af00d5160e5f6198738c49`, head
 `5bc59416fa42c3132e33e3e3264ed29c0d77701b`; binary SHA-256 respectively
@@ -386,12 +394,15 @@ All **597** `.fsl` files under `specs/`, `examples/`, and
 191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline
 sweep covers the 36 regression sources plus the rewritten N2 fixture, each
 direct and composed: 37 sources / 74 forms, base 70 exit 0 + 4 exit 2, head
-42 exit 0 + 32 exit 2. Exactly **28** forms become errors: the 13 rows below
-× 2, plus N2 × 2. Those are also the only full-output changes; no fields were
+42 exit 0 + 32 exit 2. Exactly **28** forms become errors: the original 13 cases
+× 2, plus N2 × 2, before the five review fixtures below were added. Those are
+also the only full-output changes; no fields were
 excluded. N2 is not counted among the 597 corpus files.
 
-The table is the complete inline removal list and a migration example for
-each rejected source. Bodies use `K = 0..1`, `R { on: Bool, other: Bool }`,
+The table lists the targeted inline removal fixtures and a migration example
+for each; it is not an exhaustive list of all removed programs. It includes
+the original cases and the resolved-subset / post-loop coverage families.
+Bodies use `K = 0..1`, `R { on: Bool, other: Bool }`,
 and the corresponding regression's state declarations. Move reads after all
 required assignments or replace partial writes with a whole-value assignment;
 do not add a second overlapping write. Choosing a formerly free value, or
@@ -414,6 +425,11 @@ equivalence-preserving automatic repair.
 | `struct-other-partial` | `r = R { on: false, other: true } g = r.other` |
 | `if-one-branch-read` | `flag = false if flag { on = true } else { on = false } g = on` |
 | `1481-N2` (additional inline fixture) | `forall k: K { m[k] = Cell { flag: false, n: 0 } } done = m[0].n == 0` |
+| `static-subset-then-fill` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` |
+| `static-subset-only` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` |
+| `filtered-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+| `collection-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+| `nested-filter-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
 
 For N2, `m[0].n` has no init assignment although root `m` is written. Its old
 check success and symbolic bounds violation are replaced by the root-read
@@ -423,6 +439,19 @@ same existing message without a location. The fixture is unchanged, only its
 test expectations change. Likewise, `issue-exact` is reclassified as a
 free-root preservation control rather than a refusal detector: `on` is never
 assigned anywhere. This is Part of #1451, not completion of that issue.
+
+Behavior notes: already-refused explicit inputs can gain a statement location
+(for example an unlocated early read becomes 3:10), while a never-assigned
+root's explicit refusal stays unlocated. With both a free and a later-assigned
+root, the named root can change (`choose` to `on`); a permitted unresolved
+current-key read beside a later-assigned root can similarly change `m` to `on`.
+Nested inputs can change from `nested forall in init is not supported` to the
+root-read error. Source admission can also preempt symbolic/auto diagnostics
+for outer-dependent nested ranges without changing their error exit.
+Compose runtime errors use physical names such as `part__x` and the component
+statement's line/column without a filename, like existing ownership errors.
+The remaining free/choose engine disagreement is retained; the PR's Remaining
+risk table records the preserved check/BMC/induction/explicit outcomes.
 
 ### 1.4 Expression evaluation
 

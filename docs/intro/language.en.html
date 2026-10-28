@@ -1040,20 +1040,28 @@ be free under #493. Existing ownership/field/forall refusals keep priority.</p>
 <p>A root init never assigns remains a symbolic free value, including the issue's
 <code>init { g = on }</code> and <code>if choose { x = 1 } else { x = 0 }</code> with unassigned
 <code>on</code>/<code>choose</code> (#493). Check still accepts them; explicit still refuses their
-reads. The #1518 current-key rule remains authoritative inside the forall that
-writes the root: permitted reads after writing the current key, including
-filtered/collection forms (#1520, X1/X2), remain accepted by check/symbolic
-verification. Unread omitted roots and legacy-accepted partial init remain
+reads. Only when binder values are unresolved, including filtered/collection
+forms (#1520, X1/X2), does the #1518 current-key rule exempt an already-written
+current key from this root-wide check. A resolved partial domain still requires
+full root coverage; a typed full-domain forall remains accepted.
+Binder-keyed writes under filtered/collection binders, including a nested such
+binder, do not prove full coverage for a subsequent read outside the loop.
+For example, replace <code>forall k: K where true { m[k] = true }</code> followed by
+<code>g = m[0]</code> with <code>forall k: K { m[k] = true } g = m[0]</code> for a finite <code>K</code>.
+Unread omitted roots and legacy-accepted partial init remain
 accepted; check does not require a deterministic initial state.</p>
-<p>Breaking-removal sweep (#1451): <code>fslc check &lt;form&gt;</code> in each revision's own
+<p>Historical checkpoint before the resolved-binder correction (#1451):
+<code>fslc check &lt;form&gt;</code> in each revision's own
 materialized tree, base <code>9e8ed724bdbd070868af00d5160e5f6198738c49</code> versus
 head <code>5bc59416fa42c3132e33e3e3264ed29c0d77701b</code>: all <strong>597</strong> <code>.fsl</code> files under
 <code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code> have identical full outputs
 and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus <code>ok</code>→<code>error</code> set <strong>empty</strong>.
 Separately, 37 inline sources, each direct and composed (74 forms), have <strong>28</strong>
 <code>ok</code>→<code>error</code> transitions: the 13 read-before-assignment cases × 2, plus #1481
-N2 × 2; no other output changes. See the complete removal list and one rewrite
-for each case in <a href="../design/DESIGN-bridge.md#assigned-root-read-order-1451">the migration table</a>.
+N2 × 2; no other output changes. The
+<a href="../design/DESIGN-bridge.md#assigned-root-read-order-1451">migration table</a>
+also covers the added static-subset and post-loop coverage families. Its list is
+scoped to the measured inline fixtures, not every possible removed program.
 Move a read after complete assignment or explicitly initialize the whole root;
 choosing a formerly free value narrows the model and requires a design decision.</p>
 <ul>
