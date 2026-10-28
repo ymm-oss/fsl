@@ -188,15 +188,25 @@ fn detector_kotlin_helper_compares_integral_numbers_by_value() {
 /// The else branch leaves Double/Float/null and other non-integral leaves alone.
 fn assert_recursive_integral_normalizer(content: &str) {
     let (helper, _) = split_helper(content);
+    let normalizer_start = helper
+        .find("fun normalizeIntegral(")
+        .expect("Kotlin integral normalizer");
+    let normalizer = &helper[normalizer_start..];
+    let normalizer_end = normalizer.find("\n}").expect("normalizer closing brace") + "\n}".len();
+    let normalizer = &normalizer[..normalizer_end];
+    assert!(
+        !normalizer.contains(" as "),
+        "integral normalizer must use Kotlin smart casts:\n{normalizer}"
+    );
     let compact: String = helper.chars().filter(|ch| !ch.is_whitespace()).collect();
     for required in [
         "funnormalizeIntegral(value:Any?):Any?=when(value){",
-        "isByte->(valueasByte).toLong()",
-        "isShort->(valueasShort).toLong()",
-        "isInt->(valueasInt).toLong()",
-        "isLong->(valueasLong).toLong()",
-        "isList<*>->(valueasList<*>).map{normalizeIntegral(it)}",
-        "isMap<*,*>->(valueasMap<*,*>).mapValues{normalizeIntegral(it.value)}",
+        "isByte->value.toLong()",
+        "isShort->value.toLong()",
+        "isInt->value.toLong()",
+        "isLong->value",
+        "isList<*>->value.map{normalizeIntegral(it)}",
+        "isMap<*,*>->value.mapValues{normalizeIntegral(it.value)}",
         "else->value",
         "assertPartial(seenasMap<String,Any?>,valueasMap<String,Any?>)",
         "assertEquals(normalizeIntegral(value),normalizeIntegral(seen),\"state$key\")",
