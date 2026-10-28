@@ -528,7 +528,7 @@ impl<'a> Renamer<'a> {
 }
 
 /// Ordinary children never export a pattern declaration into their parent.
-pub(super) fn map_children<E>(
+pub(crate) fn map_children<E>(
     expr: Expr,
     mut map: impl FnMut(Expr, Option<Span>) -> Result<Expr, E>,
 ) -> Result<Expr, E> {

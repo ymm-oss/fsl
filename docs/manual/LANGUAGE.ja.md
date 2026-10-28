@@ -2929,6 +2929,22 @@ verify {
 }
 ```
 
+**破壊的削除 (#1552):** requirements の `rule ... only when` 条件では、量化子の
+本体または集約の値の式で、エンティティのフィールド名を `is` パターンの名前として
+再利用した、充足不能なガードを、以前は受理していても `check` で拒否するように
+なりました。競合検査用のガードは、イベントの lowering と同じく、その名前を
+マッチしたペイロードではなくフィールドとして読みます。例えば、
+`amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
+は、フィールドが 0 と 1 の両方であることを要求し、イベントが決して起きないのに
+受理されていました。現在は exit 2、`kind: "semantics"`、
+`rule_conflict_unsatisfiable_guard` で拒否されます。ペイロードを検査するには、
+フィールドと異なるパターン名を使い、`some(x) is some(amount) and amount == 1` を
+`some(x) is some(v) and v == 1` に書き換えてください。外側の条件と量化子を保った
+この式は、フィールドが 0 であり、1 に等しい `x` が存在して、そのマッチした
+ペイロード `v` が 1 に等しいことを意味し、書き換え後の例は `check` を通ります。
+パターン名自体の規則は引き続き #1561 で扱います。この修正は、競合検査を
+lowering 後のイベントに揃えるものです。
+
 - process+data プロファイルは、単一エンティティのライフサイクルに対する第一の
   requirements 形式です。`process E with f: T { ... }` は、エンティティの stage
   マップと carried フィールドを作ります。transition は、入力(`with a: T`)、

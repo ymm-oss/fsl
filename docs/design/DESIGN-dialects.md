@@ -185,6 +185,22 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
     use the same `Expr::Stage` node and resolver, and public Kernel provenance
     records both the lowered state symbol and source accessor span.
 
+**Breaking removal (#1552):** for requirements `rule ... only when` conditions,
+`check` now rejects previously accepted unsatisfiable guards that reuse an entity
+field's name as an `is` pattern inside a quantifier body or aggregate value. The
+guard copy now reads that name as the field, just as the event's lowering does,
+not as the matched payload. For example,
+`amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
+was accepted even though its event could never occur: the field must be both 0
+and 1. It now fails with exit 2, `kind: "semantics"`, and
+`rule_conflict_unsatisfiable_guard`. To test the payload instead, use a non-field
+pattern name: replace `some(x) is some(amount) and amount == 1` with
+`some(x) is some(v) and v == 1`. Keeping the outer condition and quantifier, this
+means the field is 0 and there is an `x` equal to 1 whose matched payload `v`
+equals 1; the rewritten example passes `check`. The pattern-name rule itself
+remains tracked in #1561; this correction only aligns the conflict check with
+the lowered event.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

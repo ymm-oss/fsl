@@ -20,6 +20,7 @@ use crate::{
 };
 
 mod hygiene;
+pub(crate) use hygiene::map_children;
 
 pub trait FileResolver {
     /// Read one source-relative FSL dependency.
