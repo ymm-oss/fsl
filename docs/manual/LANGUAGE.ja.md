@@ -940,6 +940,37 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 
 ## 4. 文(init / action 本体)
 
+init がどこかで代入する state のルートは、ルート全体への確実な代入が完了してから
+読みます(#1451)。早すぎる読みは `check` が
+`init references state variable '<name>' before it is assigned`、kind
+`semantics`、exit 2 で拒否し、読みを含む文に位置づけます。通常の verify の入口も
+エンジンを選ぶ前に同じ拒否を返します。被覆はルート単位で、Map の全キー、struct
+の全 field、両分岐を必要とします。短絡評価される RHS、既代入のキーや field、
+部分代入されたルートの自由な要素やパスの読みも保守的に拒否します。特に
+`struct-other-partial`、`if-one-branch-read`、#1481 N2 は、#493 なら自由な値と
+なる読みを拒否します。既存の所有権・field・forall の拒否の優先順は保ちます。
+
+init が一度も代入しないルートは symbolic な自由値のままです。issue の
+`init { g = on }` や `if choose { x = 1 } else { x = 0 }` の未代入の
+`on`/`choose` も該当します(#493)。check は受理し、explicit は従来どおり読みを
+拒否します。同じ forall が書くルートについては #1518 の現在のキーの規則を使い、
+現在のキーに書いた後の許可された読みを維持します。filter 付き・collection の形
+(#1520、X1/X2)も check/symbolic では受理したままです。読まない未代入ルートや
+従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
+
+breaking-removal sweep (#1451): base
+`1ecce12f295f9683eac3bf92f7563e53d8371cda` と head
+`26f4170fe1676af7e0cbfb0caa62817ae27c9878` のそれぞれの materialized tree で
+`fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
+の全 **597** 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
+exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 37 source
+を直接/compose の両方で検査した74形では **28** 形が `ok`→`error` になります。
+内訳は13本の代入前の読み × 2 と #1481 N2 × 2 で、他の出力の変化はありません。
+全 removal と各形に1つずつの書き直しは
+[移行表](../design/DESIGN-bridge.md#assigned-root-read-order-1451)を参照してください。
+全代入の後へ読みを移すか、ルート全体を明示的に初期化します。従来自由だった値を
+選ぶ書き直しはモデルの範囲を狭めるため、設計上の判断が必要です。
+
 - 代入: `x = expr`、`m[k] = expr`、`m[k].field = expr`、`o.field = expr`
 - Set/Seq/relation の更新は**再代入イディオム**を使います:
   `s = s.add(x)`、`q = q.pop()`、`r = r.add(a, b)`

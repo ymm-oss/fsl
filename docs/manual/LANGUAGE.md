@@ -987,6 +987,38 @@ variable.
 
 ## 4. Statements (init / action bodies)
 
+An init read of a state root that init assigns anywhere must follow complete
+definite assignment of that root (#1451). Check rejects an early read with
+`init references state variable '<name>' before it is assigned`, kind
+`semantics`, exit 2, locating the containing statement; ordinary verify entries
+return the same refusal before selecting an engine. Coverage is root-wide:
+every Map key/struct field and both branches must be covered. Even a
+short-circuited RHS, an already-written key/field, or a free component/path of
+a partially assigned root is rejected. In particular, `struct-other-partial`,
+`if-one-branch-read`, and #1481 N2 reject reads of values that would otherwise
+be free under #493. Existing ownership/field/forall refusals keep priority.
+
+A root init never assigns remains a symbolic free value, including the issue's
+`init { g = on }` and `if choose { x = 1 } else { x = 0 }` with unassigned
+`on`/`choose` (#493). Check still accepts them; explicit still refuses their
+reads. The #1518 current-key rule remains authoritative inside the forall that
+writes the root: permitted reads after writing the current key, including
+filtered/collection forms (#1520, X1/X2), remain accepted by check/symbolic
+verification. Unread omitted roots and legacy-accepted partial init remain
+accepted; check does not require a deterministic initial state.
+
+Breaking-removal sweep (#1451): `fslc check <form>` in each revision's own
+materialized tree, base `1ecce12f295f9683eac3bf92f7563e53d8371cda` versus
+head `26f4170fe1676af7e0cbfb0caa62817ae27c9878`: all **597** `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/` have identical full outputs
+and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus `ok`→`error` set **empty**.
+Separately, 37 inline sources, each direct and composed (74 forms), have **28**
+`ok`→`error` transitions: the 13 read-before-assignment cases × 2, plus #1481
+N2 × 2; no other output changes. See the complete removal list and one rewrite
+for each case in [the migration table](../design/DESIGN-bridge.md#assigned-root-read-order-1451).
+Move a read after complete assignment or explicitly initialize the whole root;
+choosing a formerly free value narrows the model and requires a design decision.
+
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
 - Updating a Set/Seq/relation uses the **reassignment idiom**:
   `s = s.add(x)`, `q = q.pop()`, `r = r.add(a, b)`

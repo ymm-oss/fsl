@@ -1090,6 +1090,30 @@ attribution is unchanged. Optional replay not run; sweep outputs not normalized.
 
 ## 4. Statements (init / action body)
 
+Init reads of roots assigned anywhere in init require full definite root coverage
+before the read (#1451), not just the selected key/field or one branch. Early
+reads return `init references state variable '<name>' before it is assigned`,
+semantics/exit 2, at the containing statement under check and ordinary verify.
+This conservatively includes dead RHS reads, already-written components, and
+free components/paths of a may-assigned root (`struct-other-partial`,
+`if-one-branch-read`, #1481 N2), even though those values otherwise follow #493's
+free-value semantics. Existing ownership/field/forall diagnostics keep priority.
+Never-assigned roots remain free: check accepts `init { g = on }` or an
+unassigned `choose` condition; explicit still rejects their reads. Permitted
+same-forall current-key reads, including #1520 filtered/collection X1/X2, and
+unread omitted/legacy partial init remain accepted.
+
+Breaking-removal sweep: `fslc check <form>` in each own materialized tree, base
+`1ecce12f295f9683eac3bf92f7563e53d8371cda` versus head
+`26f4170fe1676af7e0cbfb0caa62817ae27c9878`. All 597 files in `specs/`,
+`examples/`, `rust/fslc/tests/fixtures/` have identical full outputs/exits
+(400 exit 0, 191 exit 2, 6 exit 1), corpus `ok`→`error` set empty. Separately,
+37 inline sources × direct/compose = 74 forms have 28 `ok`→`error` transitions:
+13 read-order cases × 2 plus N2 × 2, and no other output changes. The complete
+[removal/migration table](../../../docs/design/DESIGN-bridge.md#assigned-root-read-order-1451)
+gives one checked rewrite per case. Assign before reading or initialize the
+whole root; choosing formerly free values is a model-strengthening decision.
+
 - Assignment: `x = e`, `m[k] = e`, `m[k].f = e`, `o.f = e`, `o.f = some(e)`
 - In `init`, disjoint struct-root or map-entry fields may be assigned separately
   (also in finite binder-keyed `forall`); overlapping writes by different

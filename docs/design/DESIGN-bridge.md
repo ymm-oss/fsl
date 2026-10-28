@@ -280,7 +280,7 @@ gate. Requiring assigned roots to be complete before a read prevents newly
 admitted shapes from reading those defaults instead of their relational init
 values, on both the implementation and abstraction sides. Never-assigned roots
 remain free; legacy-accepted whole-value read-before-assignment is not repaired
-by this admission-only rule.
+by this admission-only rule. The separate #1451 gate below addresses those reads.
 
 Concrete coverage now counts resolved map-entry-field writes even when the legacy
 ownership probe succeeds. A complete map of single-field entries can therefore
@@ -347,6 +347,80 @@ state. New gate(a) and #1518 read-order diagnostics retain priority when they
 are the shared failure; gate(a) intentionally changes concrete messages on those
 main-rejected shapes. Check/refine report the saved ownership error for other
 admission refusals, including early reads of non-field-written roots.
+
+#### Assigned-root read order (#1451)
+
+After the existing ownership/field/forall gates accept an init, the shared
+runtime admission gate also checks ordered reads of every root init assigns
+anywhere. It reuses `walk_init` and the concrete root-coverage predicate and
+message: `init references state variable '<name>' before it is assigned`.
+Native check and ordinary verification return semantics/exit 2 with the
+containing statement's location. Compose, Worker check/verify and refinement's
+free-root constructor reach the same gate; runtime remains solver-independent.
+Existing refusal priorities, including static forall-range diagnostics, remain
+unchanged. This is a source-acceptance breaking removal, not a totality check.
+
+Coverage is whole-root, even for an already-written key/field, a syntactically
+present but short-circuited read, or a value left free on another branch or
+component. Thus `struct-other-partial`, `if-one-branch-read` and #1481 N2 now
+reject reads of #493-style free values because their root is may-assigned.
+A root never assigned anywhere remains free, including the issue's `on` and
+the `choose` condition of nondeterministic refinement init (#493). Check and
+symbolic verification retain those forms, while explicit still refuses them.
+Permitted current-key reads after a same-forall write remain governed by #1518,
+including filtered/collection X1/X2 (#1520); this change does not promote their
+explicit support. Unread omitted roots and legacy-accepted partial init remain
+accepted. The expression-only read exemption never credits real assignment
+coverage or changes the initialized state.
+
+Sweep command: run `fslc check <form>` with the base/head binaries in each
+revision's own git-archive materialized tree. Measured base
+`1ecce12f295f9683eac3bf92f7563e53d8371cda`, head
+`26f4170fe1676af7e0cbfb0caa62817ae27c9878`; binary SHA-256 respectively
+`3cdea62ef2e233db37c2724cb735272c1f365503ed15014d7c3f08694e23fecf` and
+`7a487aad85f07ade34042940d85391a021a1d773abb99e4933b454d2c45e3477`.
+All **597** `.fsl` files under `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` have identical full stdout/stderr/exits (400 exit 0,
+191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline
+sweep covers the 36 regression sources plus the rewritten N2 fixture, each
+direct and composed: 37 sources / 74 forms, base 70 exit 0 + 4 exit 2, head
+42 exit 0 + 32 exit 2. Exactly **28** forms become errors: the 13 rows below
+× 2, plus N2 × 2. Those are also the only full-output changes; no fields were
+excluded. N2 is not counted among the 597 corpus files.
+
+The table is the complete inline removal list and a migration example for
+each rejected source. Bodies use `K = 0..1`, `R { on: Bool, other: Bool }`,
+and the corresponding regression's state declarations. Move reads after all
+required assignments or replace partial writes with a whole-value assignment;
+do not add a second overlapping write. Choosing a formerly free value, or
+filling a missing branch, intentionally restricts the model and is not an
+equivalence-preserving automatic repair.
+
+| Rejected source | Replacement init body |
+|---|---|
+| `root-value-before` | `on = false g = on` |
+| `root-unary-before` | `on = false g = not on` |
+| `if-condition-before` | `on = false if on { g = true } else { g = false }` |
+| `forall-body-before` | `on = false forall k in 0..1 { m[k] = on }` |
+| `map-index-read-before` | `m[0] = false m[1] = true k = 0 g = m[k]` |
+| `struct-root-before` | `r = R { on: false, other: true } g = r.on` |
+| `conditional-value-before` | `flag = true on = false g = if flag then on else false` |
+| `dead-rhs-before` | `on = false g = false and on` |
+| `map-key0-partial` | `m[0] = false m[1] = true g = m[0]` |
+| `map-key1-partial` | `m[0] = false m[1] = true g = m[1]` |
+| `struct-on-partial` | `r = R { on: false, other: true } g = r.on` |
+| `struct-other-partial` | `r = R { on: false, other: true } g = r.other` |
+| `if-one-branch-read` | `flag = false if flag { on = true } else { on = false } g = on` |
+| `1481-N2` (additional inline fixture) | `forall k: K { m[k] = Cell { flag: false, n: 0 } } done = m[0].n == 0` |
+
+For N2, `m[0].n` has no init assignment although root `m` is written. Its old
+check success and symbolic bounds violation are replaced by the root-read
+error; explicit/Monitor already refused with the same message. Native
+check/verify now locate the read at 5:44; legacy Monitor replay renders the
+same existing message without a location. The fixture is unchanged, only its
+test expectations change. Likewise, `issue-exact` is reclassified as a
+free-root preservation control rather than a refusal detector: `on` is never
+assigned anywhere. This is Part of #1451, not completion of that issue.
 
 ### 1.4 Expression evaluation
 

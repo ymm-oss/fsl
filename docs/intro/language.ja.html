@@ -979,7 +979,35 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <p>このシュガーは、「解放されるまで保持される」「完了するまで保留」のような持続する
 ワークフロー状態に使ってください。任意の履歴の事実には、明示的な ghost 変数を
 使います。</p></div></details>
-<details id="4-statements-init-action-bodies"><summary>4. 文(init / action 本体)<span class="tree-blurb"> — init と action の本体で使える文。</span></summary><div class="tree-body"><ul>
+<details id="4-statements-init-action-bodies"><summary>4. 文(init / action 本体)<span class="tree-blurb"> — init と action の本体で使える文。</span></summary><div class="tree-body"><p>init がどこかで代入する state のルートは、ルート全体への確実な代入が完了してから
+読みます(#1451)。早すぎる読みは <code>check</code> が
+<code>init references state variable '&lt;name&gt;' before it is assigned</code>、kind
+<code>semantics</code>、exit 2 で拒否し、読みを含む文に位置づけます。通常の verify の入口も
+エンジンを選ぶ前に同じ拒否を返します。被覆はルート単位で、Map の全キー、struct
+の全 field、両分岐を必要とします。短絡評価される RHS、既代入のキーや field、
+部分代入されたルートの自由な要素やパスの読みも保守的に拒否します。特に
+<code>struct-other-partial</code>、<code>if-one-branch-read</code>、#1481 N2 は、#493 なら自由な値と
+なる読みを拒否します。既存の所有権・field・forall の拒否の優先順は保ちます。</p>
+<p>init が一度も代入しないルートは symbolic な自由値のままです。issue の
+<code>init { g = on }</code> や <code>if choose { x = 1 } else { x = 0 }</code> の未代入の
+<code>on</code>/<code>choose</code> も該当します(#493)。check は受理し、explicit は従来どおり読みを
+拒否します。同じ forall が書くルートについては #1518 の現在のキーの規則を使い、
+現在のキーに書いた後の許可された読みを維持します。filter 付き・collection の形
+(#1520、X1/X2)も check/symbolic では受理したままです。読まない未代入ルートや
+従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。</p>
+<p>breaking-removal sweep (#1451): base
+<code>1ecce12f295f9683eac3bf92f7563e53d8371cda</code> と head
+<code>26f4170fe1676af7e0cbfb0caa62817ae27c9878</code> のそれぞれの materialized tree で
+<code>fslc check &lt;form&gt;</code> を実行。<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code>
+の全 <strong>597</strong> 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
+exit 1)で、corpus の <code>ok</code>→<code>error</code> の集合は <strong>空</strong> です。別に inline 37 source
+を直接/compose の両方で検査した74形では <strong>28</strong> 形が <code>ok</code>→<code>error</code> になります。
+内訳は13本の代入前の読み × 2 と #1481 N2 × 2 で、他の出力の変化はありません。
+全 removal と各形に1つずつの書き直しは
+<a href="../design/DESIGN-bridge.md#assigned-root-read-order-1451">移行表</a>を参照してください。
+全代入の後へ読みを移すか、ルート全体を明示的に初期化します。従来自由だった値を
+選ぶ書き直しはモデルの範囲を狭めるため、設計上の判断が必要です。</p>
+<ul>
 <li>代入: <code>x = expr</code>、<code>m[k] = expr</code>、<code>m[k].field = expr</code>、<code>o.field = expr</code></li>
 <li>Set/Seq/relation の更新は<strong>再代入イディオム</strong>を使います:
   <code>s = s.add(x)</code>、<code>q = q.pop()</code>、<code>r = r.add(a, b)</code></li>
