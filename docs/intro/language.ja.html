@@ -4118,8 +4118,20 @@ DESIGN-*.md があります)。</p>
 します。
 ネイティブ Rust のコマンドは、この判定を、非公開のパーサー/モデルの構造ではなく、
 バージョン付きの公開 Kernel JSON v1 コントラクトから行い、未対応の Kernel
-スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
-バイト列は、凍結された参照実装の出力と互換のままです。
+スキーマバージョンでは fail closed します。凍結された参照実装に比べて、ネイティブの
+判定は以前から、enum フィールドを所有 struct ごとに区別し、選言項のいずれかが
+エンティティを制約しない場合は選言ガードを落とします。
+#680 から、ローカルなガードを持つ状態保存 action は、
+<code>state_preserving: true</code> 付きの自己ループのレポート項目と、入力の正確な状態を保存する
+ジェネリックな TypeScript シグネチャとして現れます。#1431 では予約語のエスケープ
+(衝突しない識別子の割り当てを含む)とモデル由来のパラメーター型を追加しています。
+JSON の <code>typescript</code> フィールドにも、これらすべての TypeScript の違いが含まれます。
+コマンドのエンベロープと既存レポートフィールドの形(ソース名の <code>params</code> を含む)は
+互換のままですが、以前からの判定規則により、レポートの値、含まれるエンティティ、
+applicability、summary の件数は異なり得ます。
+ネイティブのエンティティ順はアルファベット順です(凍結された参照実装は宣言順です)。
+JSON も TypeScript も、凍結された参照実装との
+バイト単位の一致は主張しません。
 → <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-typestate.md"><code>DESIGN-typestate.md</code></a></p></div></details>
 <details id="17-the-causal-profile-review-only-causal-hypothesis-graphs"><summary>17. causal プロファイル(レビュー専用の因果仮説グラフ)<span class="tree-blurb"> — レビュー専用の因果仮説グラフ — proved/verified は決して付かない。</span></summary><div class="tree-body"><p><code>causal &lt;Name&gt; { ... }</code> は独立したサイドカードキュメント(それ自体が 1 つの
 <code>.fsl</code> ファイルで、kernel spec の一部にはなりません)で、長期の因果仮説 —

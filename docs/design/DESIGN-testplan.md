@@ -80,6 +80,15 @@ For each `requires` guard of the direct form *parameter op integer-literal*
 (`<=`, `<`, `>=`, `>`, in either operand order), the planner selects the
 accepting vector at the boundary and the rejecting vector one step past it,
 named `boundary_accept_<param>` and `boundary_reject_<param>`.
+Names are allocated in the existing stable plan order (sorted by the plain
+names). The first occurrence of each plain name keeps it, and all such names
+are reserved before allocating any qualified names. A later duplicate uses
+`boundary_accept_<action>_<param>` or `boundary_reject_<action>_<param>`,
+with every character outside `[A-Za-z0-9_]` in the public action spelling
+replaced by `_`. If that name is reserved or already allocated, suffixes `_2`,
+`_3`, and so on are re-checked against every reserved and allocated name until
+unique. Finally, cases are sorted by their final names. A boundary side outside
+the representable integer range selects no case; boundary arithmetic never wraps.
 
 <!-- claim
 id: REQ-TESTPLAN-BOUNDARY-001
