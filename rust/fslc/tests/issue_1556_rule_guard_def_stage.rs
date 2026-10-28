@@ -162,6 +162,13 @@ accepts!(
 accepts!(control_lowered_stage_literal, "claim_stage[0] == Draft", "");
 
 accepts!(detector_def_field_argument, "positive(amount)", POSITIVE);
+// The generated action also has its implicit typed entity parameter (`c`).
+// Main-path stage resolution accepts it even without an explicit event input.
+accepts!(
+    detector_stage_implicit_entity_parameter,
+    "stage(c) == Draft",
+    ""
+);
 accepts!(
     detector_def_explicit_field_argument,
     "positive(Claim.amount)",

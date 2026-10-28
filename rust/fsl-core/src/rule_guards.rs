@@ -362,7 +362,7 @@ fn event_guards(
                     spell_fields(guard.condition.clone(), &field_names, &input_names, entity);
                 lowering.map_or_else(
                     || condition.clone(),
-                    |lowering| lowering.condition(condition.clone(), &inputs),
+                    |lowering| lowering.condition(condition.clone(), entity, &inputs),
                 )
             },
         })

@@ -1759,20 +1759,26 @@ impl RuleGuardLowering {
         })
     }
 
-    pub(crate) fn condition(&self, condition: Expr, inputs: &[(String, QualifiedName)]) -> Expr {
-        let environment = inputs
+    pub(crate) fn condition(
+        &self,
+        condition: Expr,
+        entity: &str,
+        inputs: &[(String, QualifiedName)],
+    ) -> Expr {
+        let mut environment = inputs
             .iter()
             .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+        environment.insert(crate::naming::entity_binder(entity), entity.to_owned());
         // Preserve the surface condition on failure: the main path reports the
         // real error, while an unlowered obligation continues to fail closed.
         StageResolver::new(&self.processes)
             .expression(condition.clone(), &environment)
             .and_then(|lowered| {
-                self.expander.scoped(
-                    inputs.iter().map(|(name, _)| name.clone()).collect(),
-                    || self.expander.expand_expr(lowered, &mut Vec::new()),
-                )
+                self.expander
+                    .scoped(environment.keys().cloned().collect(), || {
+                        self.expander.expand_expr(lowered, &mut Vec::new())
+                    })
             })
             .unwrap_or(condition)
     }
