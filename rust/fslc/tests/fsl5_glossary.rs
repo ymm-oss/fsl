@@ -28,6 +28,8 @@ use serde_json::Value;
 
 #[path = "support/kernel_compare.rs"]
 mod kernel_compare;
+#[path = "support/parallel.rs"]
+mod parallel;
 
 /// A glossary source and its canonical twin, the same model in canonical
 /// names: `fsl5/<example>/<twin>`, read behind the gate when `twin_gated`.
@@ -236,13 +238,58 @@ fn k_glossary_sources_lower_to_the_canonical_kernel() {
     }
 }
 
+const KERNEL_VERSIONS: [&str; 2] = ["1", "2"];
+const TARGETS: [&str; 6] = ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"];
+const EXPLAIN_COMMANDS: [&[&str]; 4] = [
+    &["explain", "--names", "canonical"],
+    &["explain", "--readable", "--names", "canonical"],
+    &["explain"],
+    &["explain", "--readable"],
+];
+
+fn observe_outputs(jobs: &[(PathBuf, Vec<&str>, bool)]) -> std::vec::IntoIter<(String, i32)> {
+    parallel::map(jobs.len(), |index| {
+        let (path, args, gate) = &jobs[index];
+        fslc(args, path, *gate)
+    })
+    .into_iter()
+}
+
+fn assert_ascii_outputs(sources: &[(PathBuf, String, bool)]) {
+    let jobs = sources
+        .iter()
+        .flat_map(|(path, _, japanese)| {
+            KERNEL_VERSIONS
+                .map(|version| vec!["kernel", "--kernel-version", version])
+                .into_iter()
+                .chain(TARGETS.map(|target| vec!["testgen", "--target", target]))
+                .chain(
+                    EXPLAIN_COMMANDS
+                        .into_iter()
+                        .take(if *japanese { 4 } else { 2 })
+                        .map(<[_]>::to_vec),
+                )
+                .map(move |args| (path.clone(), args, true))
+        })
+        .collect::<Vec<_>>();
+    let mut outputs = observe_outputs(&jobs);
+    for (_, context, japanese) in sources {
+        assert_source_outputs(context, *japanese, &mut outputs);
+    }
+    assert!(outputs.next().is_none(), "unconsumed output observation");
+}
+
 /// Acceptance 2 for one source: the outputs an implementation consumes
 /// carry canonical names only. For a source in Japanese aliases, the same
 /// scan finds the aliases in `explain`'s default rendering, so it is not
 /// vacuous.
-fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
-    for version in ["1", "2"] {
-        let (stdout, exit) = fslc(&["kernel", "--kernel-version", version], path, true);
+fn assert_source_outputs(
+    context: &str,
+    japanese: bool,
+    outputs: &mut impl Iterator<Item = (String, i32)>,
+) {
+    for version in KERNEL_VERSIONS {
+        let (stdout, exit) = outputs.next().expect("kernel observation");
         assert_eq!(exit, 0, "{context}: kernel v{version}: {stdout}");
         assert_eq!(
             non_ascii_names(&json(&stdout)),
@@ -250,8 +297,8 @@ fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
             "{context}: kernel v{version}"
         );
     }
-    for target in ["pytest", "vitest", "swift", "kotlin", "dart", "phpunit"] {
-        let (stdout, exit) = fslc(&["testgen", "--target", target], path, true);
+    for target in TARGETS {
+        let (stdout, exit) = outputs.next().expect("testgen observation");
         assert_eq!(exit, 0, "{context}: testgen {target}: {stdout}");
         assert_eq!(
             non_ascii_identifiers(&stdout, &[]),
@@ -259,7 +306,7 @@ fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
             "{context}: testgen {target}"
         );
     }
-    let (stdout, exit) = fslc(&["explain", "--names", "canonical"], path, true);
+    let (stdout, exit) = outputs.next().expect("canonical explanation observation");
     assert_eq!(exit, 0, "{context}: explain: {stdout}");
     let explained = json(&stdout);
     assert_eq!(
@@ -268,11 +315,7 @@ fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
         "{context}: explain --names canonical"
     );
     let wording = prose(&explained);
-    let (readable, exit) = fslc(
-        &["explain", "--readable", "--names", "canonical"],
-        path,
-        true,
-    );
+    let (readable, exit) = outputs.next().expect("readable explanation observation");
     assert_eq!(exit, 0, "{context}: explain --readable: {readable}");
     assert_eq!(
         non_ascii_identifiers(&readable, &wording),
@@ -280,12 +323,12 @@ fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
         "{context}: explain --readable --names canonical"
     );
     if japanese {
-        let (aliased, _) = fslc(&["explain"], path, true);
+        let (aliased, _) = outputs.next().expect("aliased explanation observation");
         assert!(
             !non_ascii_names(&json(&aliased)).is_empty(),
             "{context}: explain shows aliases by default"
         );
-        let (aliased, _) = fslc(&["explain", "--readable"], path, true);
+        let (aliased, _) = outputs.next().expect("readable aliased observation");
         assert!(
             !non_ascii_identifiers(&aliased, &wording).is_empty(),
             "{context}: explain --readable shows aliases by default"
@@ -297,20 +340,24 @@ fn assert_ascii_outputs(path: &Path, context: &str, japanese: bool) {
 /// names only.
 #[test]
 fn implementations_see_only_ascii_canonical_names() {
-    for source in SOURCES {
-        assert_ascii_outputs(
-            &source.path(),
-            &source.context(),
-            source.name.ends_with("_ja.fsl"),
-        );
-    }
-    for name in JAPANESE_KEYWORD_SOURCES {
-        assert_ascii_outputs(
-            &fixtures().join("fsl5").join(name),
-            &format!("fsl5/{name}"),
-            true,
-        );
-    }
+    let sources = SOURCES
+        .iter()
+        .map(|source| {
+            (
+                source.path(),
+                source.context(),
+                source.name.ends_with("_ja.fsl"),
+            )
+        })
+        .chain(JAPANESE_KEYWORD_SOURCES.iter().map(|name| {
+            (
+                fixtures().join("fsl5").join(name),
+                format!("fsl5/{name}"),
+                true,
+            )
+        }))
+        .collect::<Vec<_>>();
+    assert_ascii_outputs(&sources);
 }
 
 /// Aliases written in the next edition's entity, lifecycle, concept, event
@@ -322,7 +369,7 @@ fn implementations_see_only_ascii_canonical_names() {
 fn aliases_resolve_inside_entity_event_and_scenario() {
     let source = ENTITY_FORM;
     assert_canonical_kernel(&source);
-    assert_ascii_outputs(&source.path(), &source.context(), true);
+    assert_ascii_outputs(&[(source.path(), source.context(), true)]);
     let kernel = kernel_compare::kernel_v2_fsl5(&source.path());
     let mut phrases = Vec::new();
     for origin in kernel["provenance"]["origins"].as_array().expect("origins") {
@@ -365,9 +412,25 @@ fn explain_names_canonical_is_the_canonical_explanation() {
         strip(&mut value);
         value
     }
-    for source in SOURCES.iter().chain([&ENTITY_FORM]) {
-        let (canonical, _) = fslc(&["explain", "--names", "canonical"], &source.path(), true);
-        let (twin, _) = fslc(&["explain"], &source.twin_path(), source.twin_gated);
+    let sources: Vec<_> = SOURCES.iter().chain([&ENTITY_FORM]).collect();
+    let mut outputs = observe_outputs(
+        &sources
+            .iter()
+            .flat_map(|source| {
+                [
+                    (source.path(), EXPLAIN_COMMANDS[0].to_vec(), true),
+                    (
+                        source.twin_path(),
+                        EXPLAIN_COMMANDS[2].to_vec(),
+                        source.twin_gated,
+                    ),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    );
+    for source in sources {
+        let (canonical, _) = outputs.next().expect("canonical explanation observation");
+        let (twin, _) = outputs.next().expect("twin explanation observation");
         let mut canonical = json(&canonical);
         let twin = json(&twin);
         assert_eq!(canonical["edition"], "next", "{}", source.context());
@@ -389,6 +452,10 @@ fn explain_names_canonical_is_the_canonical_explanation() {
             source.context()
         );
     }
+    assert!(
+        outputs.next().is_none(),
+        "unconsumed explanation observation"
+    );
 }
 
 /// One way to break `e2e/glossary_ja.fsl`: replace `from` by `to` (exactly

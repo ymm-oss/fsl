@@ -41,10 +41,12 @@
 
 use std::path::Path;
 use std::process::Command;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
+
+#[path = "support/parallel.rs"]
+mod parallel;
+use parallel::failures as for_each_parallel;
 
 #[path = "support/mod.rs"]
 mod support;
@@ -560,34 +562,4 @@ fn compare_case_reports_a_wrong_expectation_as_a_mismatch() {
         right.is_none(),
         "a correct expectation must not be reported as a mismatch: {right:?}"
     );
-}
-
-/// Runs `job` over `0..count` on a small worker pool and collects the failure
-/// strings, matching `refine_corpus_parity.rs`'s parallel harness: several
-/// rows here run `--engine induction`, and running them concurrently keeps
-/// this manifest's wall-clock cost near the slowest row rather than the sum.
-fn for_each_parallel(count: usize, job: impl Fn(usize) -> Option<String> + Sync) -> Vec<String> {
-    let next = AtomicUsize::new(0);
-    let failures = Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism()
-        .map_or(4, std::num::NonZero::get)
-        .min(count.max(1));
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= count {
-                        break;
-                    }
-                    if let Some(failure) = job(index) {
-                        failures.lock().expect("failure list").push(failure);
-                    }
-                }
-            });
-        }
-    });
-    let mut failures = failures.into_inner().expect("failure list");
-    failures.sort();
-    failures
 }
