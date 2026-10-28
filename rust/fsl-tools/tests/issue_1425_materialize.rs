@@ -55,7 +55,7 @@ fn item_replaces_only_the_selected_top_level_item() {
     let SpecItem::Const { value, .. } = &mut expected.items[1] else {
         panic!("second const");
     };
-    *value = Box::new(Expr::Num(21));
+    **value = Expr::Num(21);
     assert_materializes(&base, &expected, "integer_literal_plus1", "const SECOND");
 }
 
