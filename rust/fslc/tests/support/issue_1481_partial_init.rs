@@ -1012,9 +1012,42 @@ fn mx6_refine_abstract_mixed() {
     );
 }
 
-// SH1/SH2 detectors: an outer binder shadows the global const. The inner
-// filter is false, so it supplies NO coverage. Do not use the global value to
-// admit new partial init. This is not a fix/golden for #1515's symbolic domain.
+// SH1–SH5 now stop at #1515's frontend const-shadow refusal, before ownership
+// or concrete nested-forall checks. Keep the original sources as precedence
+// controls, including implementation-side and abstraction-side refine entry.
+fn shadow_error(name: &str, line: u64) -> Value {
+    semantics_at(
+        &format!(
+            "invalid init statement: local binding '{name}' shadows a constant of the same name; rename the local binding at {line}:5"
+        ),
+        line,
+        5,
+    )
+}
+
+macro_rules! shadow_cell {
+    ($name:ident, $source:expr, $binding:expr, $line:expr,
+     $refine:ident, $implementation:expr, $abstraction:expr, $mapping:expr $(,)?) => {
+        cell!(
+            $name, $source,
+            shadow_error($binding, $line), shadow_error($binding, $line),
+            shadow_error($binding, $line), shadow_error($binding, $line),
+            shadow_error($binding, $line), None
+        );
+        #[test]
+        fn $refine() {
+            let (actual, exit) = observe_refine($implementation, $abstraction, $mapping);
+            let expected = shadow_error($binding, $line);
+            assert_eq!(exit, 2, "refine: {actual}");
+            assert_eq!(actual, json!({"fsl":"1.0", "result":"error", "kind":"semantics",
+                "message":expected["message"], "loc":expected["loc"]}),
+                "refine: complete frontend shadow-refusal envelope");
+        }
+    };
+}
+
+// The inner filters in SH1/SH2 are lexically false: the global value must not
+// supply phantom coverage even though these sources are now rejected earlier.
 const SH1: &str = r"spec Extra {
   const flag = true
   type K = 0..1
@@ -1060,27 +1093,29 @@ const SH_ROOT_MAPPING: &str = r"refinement ExtraMapping {
   action idle() -> idle()
 }
 ";
-six_consumer_partial_cell!(
+shadow_cell!(
     sh1_shadow_filter_collection,
+    SH1,
+    "flag",
+    9,
+    sh1_refine_shadow_filter_collection,
     SH1,
     SH_ABS,
     SH_ROOT_MAPPING,
-    "state variable 's' assigned more than once in init",
-    8,
-    5
 );
-six_consumer_partial_cell!(
+shadow_cell!(
     sh2_shadow_filter_range,
+    SH2,
+    "flag",
+    9,
+    sh2_refine_shadow_filter_range,
     SH2,
     SH_ABS,
     SH_ROOT_MAPPING,
-    "state variable 's' assigned more than once in init",
-    8,
-    5
 );
 
-// SH3 detects the same phantom coverage on the abstraction side, where the
-// consequence is a false mismatch rather than a false refines.
+// SH3 retains the abstraction-side phantom-coverage source; refine must reject
+// its local/const collision before it can report a spurious mismatch.
 const SH3: &str = r"spec ExtraAbsShadow {
   const flag = true
   type K = 0..1
@@ -1111,26 +1146,19 @@ const SH3_MAPPING: &str = r"refinement ExtraAbsShadowMapping {
   action idle() -> idle()
 }
 ";
-ownership_cell!(
+shadow_cell!(
     sh3_abstract_shadow_filter,
     SH3,
-    "state variable 's' assigned more than once in init",
-    8,
-    5
+    "flag",
+    9,
+    sh3_refine_abstract_shadow_filter,
+    SH3_IMPL,
+    SH3,
+    SH3_MAPPING,
 );
-#[test]
-fn sh3_refine_abstract_shadow_filter() {
-    require_refine_error(
-        SH3_IMPL,
-        SH3,
-        SH3_MAPPING,
-        "state variable 's' assigned more than once in init",
-    );
-}
 
-// SH4/SH5 pin MAIN's refusals for shadowed range bounds, not a resolution of
-// #1515. In SH5 concrete main stops at nested-forall before ownership: that
-// distinct error/no-location is deliberately preserved, not allowlisted away.
+// SH4/SH5 retain outer-dependent empty bounds/keys, but const-shadow rejection
+// now precedes the old ownership and concrete nested-forall refusals.
 const SH4: &str = r"spec Extra {
   const limit = 1
   struct T { a: Bool, b: Bool, c: Bool }
@@ -1171,46 +1199,26 @@ const SH_MAP_MAPPING: &str = r"refinement ExtraMapping {
   action idle() -> idle()
 }
 ";
-six_consumer_partial_cell!(
+shadow_cell!(
     sh4_shadow_bound,
+    SH4,
+    "limit",
+    8,
+    sh4_refine_shadow_bound,
     SH4,
     SH_ABS,
     SH_ROOT_MAPPING,
-    "state variable 's' assigned more than once in init",
-    7,
-    5
 );
-cell!(
+shadow_cell!(
     sh5_shadow_keys,
     SH5,
-    semantics_at(
-        "state variable 'm' assigned more than once in init forall",
-        10,
-        9
-    ),
-    semantics_at(
-        "state variable 'm' assigned more than once in init forall",
-        10,
-        9
-    ),
-    semantics_at(
-        "state variable 'm' assigned more than once in init forall",
-        10,
-        9
-    ),
-    semantics("nested forall in init is not supported"),
-    semantics("nested forall in init is not supported"),
-    None
+    "limit",
+    7,
+    sh5_refine_shadow_keys,
+    SH5,
+    SH_ABS,
+    SH_MAP_MAPPING,
 );
-#[test]
-fn sh5_refine_shadow_keys() {
-    require_refine_error(
-        SH5,
-        SH_ABS,
-        SH_MAP_MAPPING,
-        "state variable 'm' assigned more than once in init forall",
-    );
-}
 
 // Positive controls defeat a blanket nested-forall ban and a blanket ban on
 // free roots alongside new field-wise init. Values/invariants are independent
