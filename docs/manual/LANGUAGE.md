@@ -1008,8 +1008,8 @@ verification. Unread omitted roots and legacy-accepted partial init remain
 accepted; check does not require a deterministic initial state.
 
 Breaking-removal sweep (#1451): `fslc check <form>` in each revision's own
-materialized tree, base `1ecce12f295f9683eac3bf92f7563e53d8371cda` versus
-head `26f4170fe1676af7e0cbfb0caa62817ae27c9878`: all **597** `.fsl` files under
+materialized tree, base `e64d3fb148ca94d179e755e541de9b2ecd7fade7` versus
+head `eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`: all **597** `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` have identical full outputs
 and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus `ok`→`error` set **empty**.
 Separately, 37 inline sources, each direct and composed (74 forms), have **28**

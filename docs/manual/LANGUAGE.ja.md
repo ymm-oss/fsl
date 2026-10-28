@@ -959,8 +959,8 @@ init が一度も代入しないルートは symbolic な自由値のままで�
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
 
 breaking-removal sweep (#1451): base
-`1ecce12f295f9683eac3bf92f7563e53d8371cda` と head
-`26f4170fe1676af7e0cbfb0caa62817ae27c9878` のそれぞれの materialized tree で
+`e64d3fb148ca94d179e755e541de9b2ecd7fade7` と head
+`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330` のそれぞれの materialized tree で
 `fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
 の全 **597** 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
 exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 37 source

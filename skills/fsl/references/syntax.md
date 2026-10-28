@@ -1104,8 +1104,8 @@ same-forall current-key reads, including #1520 filtered/collection X1/X2, and
 unread omitted/legacy partial init remain accepted.
 
 Breaking-removal sweep: `fslc check <form>` in each own materialized tree, base
-`1ecce12f295f9683eac3bf92f7563e53d8371cda` versus head
-`26f4170fe1676af7e0cbfb0caa62817ae27c9878`. All 597 files in `specs/`,
+`e64d3fb148ca94d179e755e541de9b2ecd7fade7` versus head
+`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`. All 597 files in `specs/`,
 `examples/`, `rust/fslc/tests/fixtures/` have identical full outputs/exits
 (400 exit 0, 191 exit 2, 6 exit 1), corpus `ok`→`error` set empty. Separately,
 37 inline sources × direct/compose = 74 forms have 28 `ok`→`error` transitions:

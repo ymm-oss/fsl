@@ -375,10 +375,10 @@ coverage or changes the initialized state.
 
 Sweep command: run `fslc check <form>` with the base/head binaries in each
 revision's own git-archive materialized tree. Measured base
-`1ecce12f295f9683eac3bf92f7563e53d8371cda`, head
-`26f4170fe1676af7e0cbfb0caa62817ae27c9878`; binary SHA-256 respectively
-`3cdea62ef2e233db37c2724cb735272c1f365503ed15014d7c3f08694e23fecf` and
-`7a487aad85f07ade34042940d85391a021a1d773abb99e4933b454d2c45e3477`.
+`e64d3fb148ca94d179e755e541de9b2ecd7fade7`, head
+`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`; binary SHA-256 respectively
+`4517d0a4dd697c128868445c0610344d5722cb07b78803d4dd2d922e48d6f063` and
+`41a18ca563b19d4e53ae412c9997e0c12f71141e2266de186135013152f03323`.
 All **597** `.fsl` files under `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/` have identical full stdout/stderr/exits (400 exit 0,
 191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline

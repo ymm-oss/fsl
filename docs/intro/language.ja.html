@@ -996,8 +996,8 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 (#1520、X1/X2)も check/symbolic では受理したままです。読まない未代入ルートや
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。</p>
 <p>breaking-removal sweep (#1451): base
-<code>1ecce12f295f9683eac3bf92f7563e53d8371cda</code> と head
-<code>26f4170fe1676af7e0cbfb0caa62817ae27c9878</code> のそれぞれの materialized tree で
+<code>e64d3fb148ca94d179e755e541de9b2ecd7fade7</code> と head
+<code>eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330</code> のそれぞれの materialized tree で
 <code>fslc check &lt;form&gt;</code> を実行。<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code>
 の全 <strong>597</strong> 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
 exit 1)で、corpus の <code>ok</code>→<code>error</code> の集合は <strong>空</strong> です。別に inline 37 source
