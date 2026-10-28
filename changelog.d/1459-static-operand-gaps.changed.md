@@ -46,7 +46,7 @@ and terminal no longer report generated 1:1 origins for authored input. Existing
 numeric/Set compatibility and valid dynamic verdicts are unchanged. At that
 historical baseline, checked positions did not include helpful parameter types;
 this does not add relation-valued temporary collection support. Helpful argument
-typing was separate upstream work at that historical baseline; main's #1483 now
+typing was separate upstream work at that historical baseline; main's #1527 now
 checks parameter types and is preserved.
 
 Round-1 delta BASE 33d7faa7 to HEAD 8caf5c2e: 42 additional mode-form removals

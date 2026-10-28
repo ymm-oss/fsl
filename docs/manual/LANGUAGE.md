@@ -502,9 +502,8 @@ Normalized `count`/`sum` patterns retain their standalone acceptance, including
 valid empty aggregates; composition cannot hide an original global-name refusal
 by prefixing, nor introduce one from a foreign declaration.
 Induction additionally requires state-independent arguments: leadsTo binders,
-enum members, literals, and their `+`, `-`, `*` combinations (including unary `-`).
-Well-typed arguments that read state are accepted by `check` and BMC;
-only induction refuses them.
+integer/Boolean literals, and integer `+`, `-`, `*` combinations (including unary `-`).
+`check` and BMC accept well-typed arguments that read state; induction refuses them.
 `within K` is a bounded deadline on a response; `K` must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under
