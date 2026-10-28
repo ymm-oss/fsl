@@ -174,6 +174,8 @@ fn applicable(route: Route, probe: &Probe) -> bool {
     }
 }
 
+#[path = "support/scratch_identity.rs"]
+mod scratch_identity;
 struct Run {
     manifest: PathBuf,
     source: PathBuf,
@@ -187,6 +189,7 @@ impl Run {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
+        let directory = scratch_identity::unique(directory);
         std::fs::create_dir(&directory).expect("create test-owned chain directory");
         let source = root().join(probe.file);
         let manifest = directory.join("chain.toml");

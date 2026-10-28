@@ -1926,6 +1926,8 @@ fn class_classification_count(
             .count()
 }
 
+#[path = "support/scratch_identity.rs"]
+mod scratch_identity;
 const APPROVAL_BASELINE: &str = include_str!("../../../tests/fixtures/approval.fsl");
 
 /// A test-owned repository is the only Git surface these tests use. Its
@@ -1943,6 +1945,7 @@ impl ApprovalFixture {
             "fslc-error-envelope-approval-{}-{sequence}",
             std::process::id()
         ));
+        let root = scratch_identity::unique(root);
         std::fs::create_dir(&root)
             .unwrap_or_else(|error| panic!("create {}: {error}", root.display()));
         let approval = Self {
@@ -3004,6 +3007,7 @@ impl SpecializedOutputDirectory {
             "fslc-specialized-rejection-{}-{sequence}",
             std::process::id()
         ));
+        let path = scratch_identity::unique(path);
         std::fs::create_dir(&path).expect("test-owned output directory");
         Self(path)
     }
