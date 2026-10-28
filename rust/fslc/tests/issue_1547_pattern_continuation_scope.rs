@@ -4,6 +4,8 @@
 
 #[path = "support/pattern_continuation.rs"]
 mod forms;
+#[path = "support/pattern_reuse.rs"]
+mod reuse;
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)]
 mod scratch;
@@ -52,12 +54,20 @@ fn refusal_location(case: &forms::Case, source: &str, composed: bool) -> Value {
     }
 }
 
+fn semantic_error(actual: &(Value, i32)) -> bool {
+    actual.1 == 2 && actual.0["result"] == "error" && actual.0["kind"] == "semantics"
+}
+
 fn exact_error(actual: &(Value, i32), message: &str, location: Option<&Value>) -> bool {
-    actual.1 == 2
-        && actual.0["result"] == "error"
-        && actual.0["kind"] == "semantics"
-        && actual.0["message"] == message
-        && actual.0.get("loc") == location
+    semantic_error(actual) && actual.0["message"] == message && actual.0.get("loc") == location
+}
+
+const LOCAL_COLLISION_REASON: &str = "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)";
+
+fn collision_message(reason: &str, line: u64, column: u64) -> String {
+    format!(
+        "invalid model expression: pattern binding 'v' in 'is some(v)' shadows {reason} of the same name; rename the pattern variable at {line}:{column}"
+    )
 }
 
 fn preserved_error(id: &str) -> Option<Value> {
@@ -78,20 +88,16 @@ fn preserved_error(id: &str) -> Option<Value> {
         "collision-state" => "a state variable",
         "collision-constant" => "a constant",
         "collision-enum" => "an enum member",
-        _ => {
-            "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)"
-        }
+        _ => LOCAL_COLLISION_REASON,
     };
-    let detail = if id.starts_with("collision-") {
-        format!(
-            "pattern binding 'v' in 'is some(v)' shadows {reason} of the same name; rename the pattern variable"
-        )
+    let message = if id.starts_with("collision-") {
+        collision_message(reason, line, column)
     } else {
-        "public Kernel cannot type identifier 'v'".into()
+        format!(
+            "invalid model expression: public Kernel cannot type identifier 'v' at {line}:{column}"
+        )
     };
-    Some(
-        json!({"message":format!("invalid model expression: {detail} at {line}:{column}"),"loc":{"line":line,"column":column}}),
-    )
+    Some(json!({"message":message,"loc":{"line":line,"column":column}}))
 }
 
 fn paths(case: &forms::Case, composed: bool) -> Vec<&str> {
@@ -111,21 +117,24 @@ fn fixture(case: &forms::Case) -> PathBuf {
         ("a.fsl", case.component.as_str()),
         ("c.fsl", case.compose.as_str()),
     ];
+    fixture_files(case.id, &files)
+}
+
+fn fixture_files(id: &str, files: &[(&str, &str)]) -> PathBuf {
     if let Some(root) = std::env::var_os("FSL_MATRIX_FIXTURES") {
         // A pre-materialized, read-only tree gives repeated public Kernel runs
         // identical source/provenance identities. Never trust stale fixtures.
-        let dir = PathBuf::from(root).join(case.id);
-        for (name, source) in files {
+        let dir = PathBuf::from(root).join(id);
+        for &(name, source) in files {
             assert_eq!(
                 std::fs::read_to_string(dir.join(name)).unwrap(),
                 source,
-                "{} {name}",
-                case.id
+                "{id} {name}"
             );
         }
         dir
     } else {
-        scratch::scratch("issue-1547-cli-case", &files)
+        scratch::scratch("issue-1547-cli-case", files)
     }
 }
 
@@ -355,6 +364,96 @@ fn def_call_scope_after_or_preserves_free_names() {
     assert_eq!(
         detectors, 0,
         "a disjunctive match must not populate the def call's locals"
+    );
+}
+
+fn baseline_collision_packet(location: &Value) -> Value {
+    // Keep the entire baseline envelope. Version values describe this build
+    // and linked solver, never the target's observed verdict or diagnostics.
+    json!({
+        "fsl":"1.0", "result":"error", "kind":"semantics",
+        "message":collision_message(LOCAL_COLLISION_REASON,location["line"].as_u64().unwrap(),location["column"].as_u64().unwrap()),
+        "loc":location,
+        "versions":{
+            "verifier":{"name":"fslc-rust","version":env!("CARGO_PKG_VERSION")},
+            "core":{"name":"fsl-core","version":env!("CARGO_PKG_VERSION")},
+            "solver":{"name":"z3","backend":"native-z3","version":fsl_solver_z3::version()}
+        }
+    })
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // Record every regression and unchanged route before the intended red assertion.
+fn sibling_pattern_names_preserve_collisions_and_public_spelling() {
+    let cases = reuse::cases();
+    assert_eq!(cases.len(), 15);
+    let report = scratch::scratch("issue-1547-reuse-report", &[]);
+    let mut inputs = Vec::new();
+    let mut rows = Vec::new();
+    let mut collision_failures = 0;
+    let mut control_failures = 0;
+    let mut missing_collisions = 0;
+    let mut changed_diagnostics = 0;
+    for case in cases {
+        let dir = fixture(&case);
+        let collision = matches!(case.role, Role::Collision);
+        let expected = baseline_collision_packet(&point(&case.source, case.marker));
+        inputs.push(json!({"id":case.id,"source":case.source,"component":case.component,"compose":case.compose,"directory":dir}));
+        for (route, file, composed) in [("direct", "d.fsl", false), ("compose", "c.fsl", true)] {
+            let checked = observe(&dir, file, "check");
+            if collision {
+                missing_collisions += usize::from(checked.1 == 0);
+                changed_diagnostics += usize::from(checked.1 == 2 && checked.0 != expected);
+            }
+            for consumer in ["check", "bmc", "induction", "explicit", "default"] {
+                let actual = if consumer == "check" {
+                    checked.clone()
+                } else {
+                    observe(&dir, file, consumer)
+                };
+                let ok = if collision {
+                    actual == (expected.clone(), 2)
+                } else {
+                    control(&actual, case.role, consumer, composed)
+                };
+                if collision {
+                    collision_failures += usize::from(!ok);
+                } else {
+                    control_failures += usize::from(!ok);
+                }
+                rows.push(json!({"id":case.id,"route":route,"consumer":consumer,"class":if collision {"collision-preservation"} else {"renamed-control"},"expected_packet":if collision {Some(&expected)} else {None},"ok":ok,"output":actual.0,"exit":actual.1}));
+            }
+        }
+    }
+    let dir = fixture_files("h1", reuse::RENAMER_FILES);
+    inputs.push(json!({"id":"h1","files":reuse::RENAMER_FILES,"directory":dir}));
+    let mut renamer_failures = 0;
+    for consumer in ["check", "bmc", "induction", "explicit", "default"] {
+        let actual = observe(&dir, "h1.fsl", consumer);
+        let ok = semantic_error(&actual)
+            && actual.0["message"].as_str().is_some_and(|message| {
+                message.contains("'v'") && !message.contains("v_substitution")
+            });
+        renamer_failures += usize::from(!ok);
+        rows.push(json!({"id":"h1","route":"compose","consumer":consumer,"class":"two-source-renamer","ok":ok,"output":actual.0,"exit":actual.1}));
+    }
+    std::fs::write(report.join("report.json"),serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"collision_failures":collision_failures,"control_failures":control_failures,"missing_collisions":missing_collisions,"changed_diagnostics":changed_diagnostics,"renamer_failures":renamer_failures,"inapplicable":[{"id":"h1","route":"direct","reason":"Two synchronized component sources are required to exercise Renamer; no direct-spec adapter represents that path."}]})).unwrap()).unwrap();
+    eprintln!(
+        "PATTERN_REUSE_RESULT cells=16 observations={} missing_collisions={missing_collisions} changed_diagnostics={changed_diagnostics} collision_failures={collision_failures} control_failures={control_failures} renamer_failures={renamer_failures} report={}",
+        rows.len(),
+        report.display()
+    );
+    assert_eq!(
+        control_failures, 0,
+        "distinct pattern names must keep the calibrated verdicts"
+    );
+    assert_eq!(
+        collision_failures, 0,
+        "true-continuation visibility must not weaken evaluator-name collisions"
+    );
+    assert_eq!(
+        renamer_failures, 0,
+        "two-source diagnostics must name user v, not a substitution temporary"
     );
 }
 
