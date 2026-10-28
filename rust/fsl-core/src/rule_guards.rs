@@ -21,7 +21,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use fsl_syntax::{
-    BusinessItem, DecisionTable, Expr, Param, ProcessField, ProcessItem, QualifiedName,
+    Binder, BusinessItem, DecisionTable, Expr, Param, ProcessField, ProcessItem, QualifiedName,
     RequirementsItem, Span, SurfaceRequirements, stage_reference,
 };
 use serde_json::{Value, json};
@@ -88,38 +88,90 @@ enum Outcome {
 }
 
 /// `expression` with each bare field name of the entity spelled
-/// `Entity.field`; inputs, which shadow fields of the same name, stay bare.
+/// `Entity.field`; inputs and locally bound names shadow fields.
 fn spell_fields(
     expression: Expr,
     fields: &BTreeSet<&str>,
     inputs: &BTreeSet<&str>,
     entity: &str,
 ) -> Expr {
-    let recurse = |expression: Expr| spell_fields(expression, fields, inputs, entity);
-    let boxed = |expression: Box<Expr>| Box::new(recurse(*expression));
+    let recurse = |expr: Expr| spell_fields(expr, fields, inputs, entity);
+    let boxed = |expr: Box<Expr>| Box::new(recurse(*expr));
     match expression {
         Expr::Var(name) if fields.contains(name.as_str()) && !inputs.contains(name.as_str()) => {
             Expr::Var(format!("{entity}.{name}"))
         }
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: boxed(left),
-            right: boxed(right),
+        Expr::Var(_) => expression,
+        Expr::Binary { op, left, right } => {
+            let mut patterns = std::collections::HashSet::new();
+            if op == "and" || op == "=>" {
+                crate::compose::extend_pattern_names(&left, &mut patterns);
+            }
+            let mut scoped = inputs.clone();
+            scoped.extend(patterns.iter().map(String::as_str));
+            Expr::Binary {
+                op,
+                left: boxed(left),
+                right: Box::new(spell_fields(*right, fields, &scoped, entity)),
+            }
+        }
+        Expr::Is { expr, pattern } => Expr::Is {
+            expr: boxed(expr),
+            pattern,
         },
-        Expr::Not(value) => Expr::Not(boxed(value)),
-        Expr::Neg(value) => Expr::Neg(boxed(value)),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            spans,
-        } => Expr::Conditional {
-            condition: boxed(condition),
-            then_expr: boxed(then_expr),
-            else_expr: boxed(else_expr),
-            spans,
-        },
-        other => other,
+        mut expression @ (Expr::Quantified { .. } | Expr::Aggregate { .. }) => {
+            let (Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. }) =
+                &mut expression
+            else {
+                unreachable!()
+            };
+            let replace = |expr: &mut Expr| *expr = recurse(std::mem::replace(expr, Expr::None));
+            let (name, filter) = match binder {
+                Binder::Typed {
+                    name, where_expr, ..
+                } => (name, where_expr),
+                Binder::Range {
+                    name,
+                    lo,
+                    hi,
+                    where_expr,
+                } => {
+                    replace(lo);
+                    replace(hi);
+                    (name, where_expr)
+                }
+                Binder::Collection {
+                    name,
+                    collection,
+                    where_expr,
+                } => {
+                    replace(collection);
+                    (name, where_expr)
+                }
+            };
+            let name = name.clone();
+            let mut scoped = inputs.clone();
+            scoped.insert(name.as_str());
+            let replace_scoped = |expr: &mut Expr| {
+                *expr = spell_fields(std::mem::replace(expr, Expr::None), fields, &scoped, entity);
+            };
+            if let Some(filter) = filter {
+                replace_scoped(filter);
+            }
+            let value = match &mut expression {
+                Expr::Quantified { body, .. } => Some(body),
+                Expr::Aggregate { value, .. } => value.as_mut(),
+                _ => unreachable!(),
+            };
+            if let Some(value) = value {
+                replace_scoped(value);
+            }
+            expression
+        }
+        other => crate::compose::map_children(other, |child, _| {
+            Ok::<_, std::convert::Infallible>(recurse(child))
+        })
+        .unwrap_or_else(|never| match never {}),
     }
 }
 
