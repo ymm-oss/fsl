@@ -2087,7 +2087,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// is a different surface (issue #519).
 /// Init ownership and forall read-order checks also apply to free-root enumeration.
 /// Legacy-accepted partial assignments still use defaults with free roots (#1521).
-/// The shared gate rejects reads of later-assigned roots, not free values.
+/// The shared gate rejects reads of later-assigned roots, not never-assigned roots.
 /// This is not a complete relational-init enumeration for those shapes; the
 /// stronger admission gate for new per-field shapes does not repair them.
 ///

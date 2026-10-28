@@ -1580,6 +1580,7 @@ fn walk_init(
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
                 // Only unresolved binders retain #1520's current-key exemption.
+                // compute_binder_values leaves filtered binders unresolved for their read check.
                 let mut nested_roots = BTreeSet::new();
                 let nested_mode = if let InitWalkMode::ReadOrder(roots) = mode
                     && nested_bound[binder_name(binder)].is_none()

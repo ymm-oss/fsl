@@ -425,7 +425,7 @@ equivalence-preserving automatic repair.
 | `if-one-branch-read` | `flag = false if flag { on = true } else { on = false } g = on` |
 | `1481-N2` (additional inline fixture) | `forall k: K { m[k] = Cell { flag: false, n: 0 } } done = m[0].n == 0` |
 | `static-subset-then-fill` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` |
-| `static-subset-only` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` |
+| `static-subset-only` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` — assigning formerly free `m[1]` and `seen[1]` narrows the model. |
 | `filtered-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
 | `collection-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
 | `nested-filter-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
@@ -449,8 +449,8 @@ root-read error. Source admission can also preempt symbolic/auto diagnostics
 for outer-dependent nested ranges without changing their error exit.
 Compose runtime errors use physical names such as `part__x` and the component
 statement's line/column without a filename, like existing ownership errors.
-The remaining free/choose engine disagreement is retained; the PR's Remaining
-risk table records the preserved check/BMC/induction/explicit outcomes.
+The remaining free/choose engine disagreement is tracked on #1451: check and
+symbolic verification retain these free-value forms, while explicit refuses them.
 
 ### 1.4 Expression evaluation
 
