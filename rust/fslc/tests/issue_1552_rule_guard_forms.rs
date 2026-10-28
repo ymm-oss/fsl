@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! #1552: a rule reads an entity field in every expression form, while event
-//! inputs and expression binders shadow that field. Detectors intentionally
+//! inputs and quantifier/aggregate binders shadow that field. Detectors intentionally
 //! fail on the pre-fix implementation; preservation controls are separate.
 
 use std::path::Path;
@@ -243,15 +243,65 @@ control!(
 );
 
 #[test]
-fn detector_is_pattern_shadows_field_in_continuation() {
-    // Unlike quantifiers/aggregates, the old Binary arm already rewrites this
-    // continuation, falsely making field amount both zero and one.
-    assert_accepts(
-        "detector_is_pattern_shadows_field_in_continuation",
-        "amount == 0 and (some(1) is some(amount) and amount == 1)",
-        "",
-        false,
+fn control_is_pattern_field_name_matches_lowering() {
+    // The guard copy follows the action's lowering: a pattern named `amount`
+    // does not hide that entity field in the continuation. Both guards are
+    // impossible field constraints and must be rejected, just as on base.
+    // The typecheck/lowering discrepancy is tracked separately in #1561.
+    let outputs = [
+        (
+            "control_is_pattern_field_name_matches_lowering-and",
+            "amount == 0 and (some(1) is some(amount) and amount == 1)",
+        ),
+        (
+            "control_is_pattern_field_name_matches_lowering-implication",
+            "amount == 1 and (some(0) is some(amount) => amount == 0)",
+        ),
+    ]
+    .map(|(label, condition)| run(label, &source(condition, "", false)));
+    for (mode, exit, value) in outputs.iter().flatten() {
+        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
+        assert_eq!(value["result"], "error", "{mode}: {value:#}");
+        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
+        assert_eq!(
+            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
+            "{mode}: {value:#}"
+        );
+        assert!(
+            value["message"]
+                .as_str()
+                .expect("message")
+                .contains("event 'approve' can never occur"),
+            "{mode}: {value:#}"
+        );
+    }
+}
+
+#[test]
+fn control_is_pattern_field_name_satisfiable_matches_base() {
+    // #1561: lowering still reads the field, which can equal the payload here.
+    // Preserve base's accepted result classes; this does not establish that
+    // pattern binding and field lookup have the same meaning.
+    let outputs = run(
+        "control_is_pattern_field_name_satisfiable_matches_base",
+        &source("some(1) is some(amount) and amount == 1", "", false),
     );
+    for (mode, exit, value) in &outputs {
+        let expected = if *mode == "check" { "ok" } else { "verified" };
+        assert_eq!(
+            (
+                *exit,
+                value["result"].as_str(),
+                value.get("diagnostic_code")
+            ),
+            (0, Some(expected), None),
+            "{mode}: {outputs:#?}"
+        );
+        if *mode == "verify" {
+            assert_eq!(value["checked_to_depth"], 2, "{mode}: {value:#}");
+            assert_eq!(value["completeness"], "bounded", "{mode}: {value:#}");
+        }
+    }
 }
 
 #[test]

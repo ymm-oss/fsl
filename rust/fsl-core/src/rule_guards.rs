@@ -1025,7 +1025,7 @@ mod tests {
         }
 
         #[test]
-        fn is_pattern_shadows_field_in_and_continuation_only() {
+        fn is_pattern_does_not_shadow_field_in_and_continuation() {
             let b = Box::new;
             assert_fields(
                 Expr::Binary {
@@ -1048,7 +1048,7 @@ mod tests {
                     }),
                     right: b(Expr::Binary {
                         op: ">".into(),
-                        left: b(Expr::Var("amount".into())),
+                        left: b(Expr::Var("Claim.amount".into())),
                         right: b(Expr::Var("Claim.limit".into())),
                     }),
                 },
@@ -1056,7 +1056,7 @@ mod tests {
         }
 
         #[test]
-        fn is_pattern_shadows_field_in_implication_continuation() {
+        fn is_pattern_does_not_shadow_field_in_implication_continuation() {
             let b = Box::new;
             assert_fields(
                 Expr::Binary {
@@ -1073,7 +1073,92 @@ mod tests {
                         expr: b(Expr::Some(b(Expr::Var("Claim.limit".into())))),
                         pattern: Pattern::Some("amount".into()),
                     }),
+                    right: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn is_pattern_does_not_shadow_field_in_or_continuation() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "or".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("limit".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
                     right: b(Expr::Var("amount".into())),
+                },
+                &Expr::Binary {
+                    op: "or".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("Claim.limit".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn is_pattern_does_not_shadow_field_in_equality_continuation() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "==".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("limit".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Var("amount".into())),
+                },
+                &Expr::Binary {
+                    op: "==".into(),
+                    left: b(Expr::Is {
+                        expr: b(Expr::Some(b(Expr::Var("Claim.limit".into())))),
+                        pattern: Pattern::Some("amount".into()),
+                    }),
+                    right: b(Expr::Var("Claim.amount".into())),
+                },
+            );
+        }
+
+        #[test]
+        fn is_pattern_does_not_shadow_field_after_nested_and_left_operand() {
+            let b = Box::new;
+            assert_fields(
+                Expr::Binary {
+                    op: "and".into(),
+                    left: b(Expr::Binary {
+                        op: "and".into(),
+                        left: b(Expr::Is {
+                            expr: b(Expr::Var("x".into())),
+                            pattern: Pattern::Some("amount".into()),
+                        }),
+                        right: b(Expr::Var("y".into())),
+                    }),
+                    right: b(Expr::Binary {
+                        op: "==".into(),
+                        left: b(Expr::Var("amount".into())),
+                        right: b(Expr::Num(1)),
+                    }),
+                },
+                &Expr::Binary {
+                    op: "and".into(),
+                    left: b(Expr::Binary {
+                        op: "and".into(),
+                        left: b(Expr::Is {
+                            expr: b(Expr::Var("x".into())),
+                            pattern: Pattern::Some("amount".into()),
+                        }),
+                        right: b(Expr::Var("y".into())),
+                    }),
+                    right: b(Expr::Binary {
+                        op: "==".into(),
+                        left: b(Expr::Var("Claim.amount".into())),
+                        right: b(Expr::Num(1)),
+                    }),
                 },
             );
         }
