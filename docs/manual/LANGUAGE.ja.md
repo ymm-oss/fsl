@@ -1130,8 +1130,16 @@ Map Struct のフィールド別 init を扱い、cell 2 は空の容量 0 の S
 到達した読み出しは `partial_op` です。ranked decreases は、新しい slot の値が
 rank 評価に入る前に、到達した zero-slot 読み出しだけを base の意味論エラーで
 狭く拒否します。未到達の条件分岐や短絡で読まない measure は、base で意味論エラー
-だったものも ranking で proved になりました。physical slot を持つ measure の
-既存の挙動は維持し、一般の定義性の欠落は #1542 に残ります
+だったものも ranking で proved になりました。その狭い preflight の後、#1542 は
+初期・後続・deadlock 側の measure について、ranking の pending 仮定の下で
+到達する部分演算も probe します。physical slot を持つ場合を含め、未定義になりうる
+measure は rank 値として使わず、exit 2、kind `semantics`、
+`leadsTo 'L' decreases measure may be undefined: OP` で拒否します。
+これは rank 証明 phase の拒否です。base BMC が実際の `leadsTo` 反例をすでに
+見つけていた場合、追加の rank 診断が拒否されても、元の `violated` verdict
+(exit 1)を維持します。
+短絡の guard は有効なままで、部分演算のない measure は solver check を増やしません。
+BMC は ranking エラーで何も discharge せず、自分の lasso 探索を維持します
 ([Seq の部分操作](../design/DESIGN-seq-partial-operations.md)を参照)。
 他の型の穴は #1459、リテラルの形の同類は #1467 です。
 これらを #1463 の追加の削除へ混ぜていません。

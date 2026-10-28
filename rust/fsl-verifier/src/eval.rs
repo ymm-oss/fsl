@@ -429,9 +429,19 @@ pub(crate) enum FailureClass {
     /// LANGUAGE.md §6: `head`/`pop`/`at`, a `Seq` index, `/` and `%` (the
     /// last two in action context only).
     PartialOperation,
+    /// Attribute a reached partial failure without changing evaluation order
+    /// or the definedness of operations outside this selected kind.
+    PartialOperationKind(fsl_core::PartialOperation),
     /// A `Map` index (read or indexed assignment) outside the map's finite
     /// key domain.
     KeyDomain,
+}
+
+impl FailureClass {
+    fn classifies_partial(self, operation: Option<fsl_core::PartialOperation>) -> bool {
+        self == Self::PartialOperation
+            || matches!(self, Self::PartialOperationKind(selected) if Some(selected) == operation)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -744,7 +754,9 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 .collect::<Result<Vec<_>, _>>()?;
             let operation_defined =
                 method_definedness(solver, name, &receiver_value, argument_values.as_slice())?;
-            let classified = policy.classify == FailureClass::PartialOperation;
+            let classified = policy
+                .classify
+                .classifies_partial(fsl_core::PartialOperation::candidate(expr));
             sequence_statuses(
                 solver,
                 [
@@ -806,7 +818,10 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 let zero = solver.equal(int_term(&right_value)?, &solver.int_value(0))?;
                 if !policy.total_division {
                     parts.push(solver.not(&zero)?);
-                    if policy.classify == FailureClass::PartialOperation {
+                    if policy
+                        .classify
+                        .classifies_partial(fsl_core::PartialOperation::candidate(expr))
+                    {
                         operation_partial = solver.and(&[operands_defined.clone(), zero])?;
                     }
                 }
@@ -833,7 +848,9 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                     || right_status.has_partial_operation
                     || (matches!(op.as_str(), "/" | "%")
                         && !policy.total_division
-                        && policy.classify == FailureClass::PartialOperation),
+                        && policy
+                            .classify
+                            .classifies_partial(fsl_core::PartialOperation::candidate(expr))),
             })
         }
         Expr::Conditional {
@@ -976,12 +993,17 @@ pub(crate) fn index_access_status<S: SmtSolver>(
     class: FailureClass,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     Ok(match (class, base) {
-        (FailureClass::PartialOperation, _) => {
+        (FailureClass::PartialOperation | FailureClass::PartialOperationKind(_), _) => {
             let partial_accessible = partial_operation_index_accessible(solver, base, index)?;
+            let classified = class.classifies_partial(Some(fsl_core::PartialOperation::Index));
             EvaluationStatus {
                 fully_defined: fully_accessible,
-                first_partial: solver.not(&partial_accessible)?,
-                has_partial_operation: matches!(base, SymbolicValue::Seq { .. }),
+                first_partial: if classified {
+                    solver.not(&partial_accessible)?
+                } else {
+                    solver.bool_value(false)
+                },
+                has_partial_operation: classified && matches!(base, SymbolicValue::Seq { .. }),
             }
         }
         (FailureClass::KeyDomain, SymbolicValue::Map { .. }) => EvaluationStatus {

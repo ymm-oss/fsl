@@ -1387,7 +1387,8 @@ pub async fn prove_ranked_leadstos<S: SmtSolver>(
 /// uses (`None` = every `_bounds_*`); a bound the run does not check is not
 /// assumed here, because an unrolled state may violate it. The ranking stops
 /// at its first failing property, so only the properties proved before it
-/// are returned. Any ranking error (unsupported measure, solver `unknown` --
+/// are returned. Any ranking error (unsupported or possibly undefined measure,
+/// solver `unknown` --
 /// including a solver timeout -- or fail-closed filters) returns the empty
 /// set: the fast path never reports anything itself, it only withdraws probes
 /// whose answer it has already shown to be `unsat`. See
@@ -1449,11 +1450,10 @@ async fn rank_measure_path_is_reachable<S: SmtSolver>(
     }
 }
 
-/// Unlike ordinary property/action reads, decreases measures have no general
-/// definedness probe. Preserve the pre-#1481 error for a reached read with no
+/// Preserve the pre-#1481 error for a reached read with no
 /// physical slot, before eval can construct or expose a fresh measure value.
-/// Only this narrow case is checked: positive-capacity partial measures retain
-/// their existing behavior. Guard each poll of the recursive expression walk,
+/// This narrow preflight precedes the general partial-operation probe.
+/// Guard each poll of the recursive expression walk,
 /// just as the synchronous evaluator guards its recursion cycle entry.
 #[allow(clippy::too_many_arguments)]
 fn reject_zero_slot_measure_reads<'a, S: SmtSolver>(
@@ -1720,6 +1720,64 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
     Ok(())
 }
 
+/// The caller has already asserted the rank frame's invariants and transition.
+/// Ask only reached partial failures while this obligation is pending, before
+/// a measure value can be used as rank evidence. Property arithmetic remains
+/// total for division and does not acquire an overflow obligation here.
+async fn reject_partial_rank_measure<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &LeadsToDef,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    pending: &S::Term,
+) -> Result<(), VerifyError> {
+    let expr = property.decreases.as_ref().expect("ranked property");
+    let status = property_evaluation_status(solver, model, expr, state, bindings, None)?;
+    if !status.has_partial_operation {
+        return Ok(());
+    }
+    let partial = solver.and(&[pending.clone(), status.first_partial])?;
+    if !rank_measure_path_is_reachable(solver, &partial).await? {
+        return Ok(());
+    }
+    // Attribute the refusal using the same first-failure/short-circuit walk,
+    // not a syntactic candidate that may be guarded or follow another failure.
+    for operation in fsl_core::PartialOperation::ALL {
+        let status = classified_property_evaluation_status(
+            solver,
+            model,
+            expr,
+            state,
+            bindings,
+            None,
+            FailureClass::PartialOperationKind(operation),
+        )?;
+        if !status.has_partial_operation {
+            continue;
+        }
+        let partial = solver.and(&[pending.clone(), status.first_partial])?;
+        if rank_measure_path_is_reachable(solver, &partial).await? {
+            let label = match operation {
+                fsl_core::PartialOperation::Head => "head()",
+                fsl_core::PartialOperation::Pop => "pop()",
+                fsl_core::PartialOperation::At => "at()",
+                fsl_core::PartialOperation::Index => "index",
+                fsl_core::PartialOperation::Divide => "divide",
+                fsl_core::PartialOperation::Remainder => "remainder",
+            };
+            return Err(VerifyError::new(format!(
+                "leadsTo '{}' decreases measure may be undefined: {label}",
+                property.name
+            )));
+        }
+    }
+    Err(VerifyError::new(format!(
+        "leadsTo '{}' decreases measure may be undefined: partial operation",
+        property.name
+    )))
+}
+
 #[allow(clippy::too_many_lines)]
 async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
     model: &KernelModel,
@@ -1776,6 +1834,15 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 &measure_bindings,
                 None,
                 solver.bool_value(true),
+            )
+            .await?;
+            reject_partial_rank_measure(
+                solver,
+                model,
+                property,
+                &state0,
+                &measure_bindings,
+                &pending,
             )
             .await?;
             let measure0 = eval(
@@ -1892,6 +1959,16 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 &next_bindings,
                 None,
                 solver.bool_value(true),
+            )
+            .await?;
+            let post_pending = solver.and(&[pending.clone(), solver.not(&q1)?])?;
+            reject_partial_rank_measure(
+                solver,
+                model,
+                property,
+                &state1,
+                &next_bindings,
+                &post_pending,
             )
             .await?;
             let measure1 = eval(
@@ -2058,6 +2135,16 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 &deadlock_bindings,
                 None,
                 solver.bool_value(true),
+            )
+            .await?;
+            let pending_dl = solver.and(&[p_dl.clone(), solver.not(&q_dl)?])?;
+            reject_partial_rank_measure(
+                solver,
+                model,
+                property,
+                &deadlock_state,
+                &deadlock_bindings,
+                &pending_dl,
             )
             .await?;
             let measure_dl = eval(
