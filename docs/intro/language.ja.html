@@ -3452,7 +3452,8 @@ lowering 後のイベントに揃えるものです。</p>
   非修飾の <code>stage(c)</code> はエラーです。
   <code>claims.Claim.stage(c)</code>(任意深さの <code>SymbolPath</code>)で 1 つを選択してください。
   存在しない process、非エンティティの引数、未知の stage メンバー、未解決の修飾子
-  は、ソース位置付きの型エラーです。</p>
+  は、関連するソース位置をメッセージ内に含む <code>kind: "semantics"</code> のエラーとして報告され、
+  診断コードは付きません。</p>
 <p><strong>破壊的削除 (#1569):</strong> process フィールド <code>amount</code> を持つ legacy requirements
 では、<code>exists c: Amount { stage(c) == Approved and amount == c }</code> のような
 transition ガードを <code>check</code> で拒否するようになりました。非エンティティの
