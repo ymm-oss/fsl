@@ -32,6 +32,8 @@ const DB04: &str = "// SPDX-License-Identifier: Apache-2.0\n\ndbsystem Db04 {\n 
 
 static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
+#[path = "support/scratch_identity.rs"]
+mod scratch_identity;
 struct FixtureDirectory(PathBuf);
 
 impl FixtureDirectory {
@@ -41,6 +43,7 @@ impl FixtureDirectory {
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
+        let path = scratch_identity::unique(path);
         std::fs::create_dir(&path).expect("test-owned directory");
         Self(path)
     }

@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 #[path = "support/migration_warnings.rs"]
 mod migration_warnings;
+#[path = "support/scratch_identity.rs"]
+mod scratch_identity;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -32,6 +34,7 @@ impl Scratch {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
+        let dir = scratch_identity::unique(dir);
         std::fs::create_dir(&dir).expect("scratch dir must not already exist");
         Self(dir)
     }

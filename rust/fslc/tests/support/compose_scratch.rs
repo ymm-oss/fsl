@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
+#[path = "scratch_identity.rs"]
+mod scratch_identity;
+
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 
 pub fn scratch(label: &str, files: &[(&str, &str)]) -> PathBuf {
@@ -19,6 +22,7 @@ pub fn scratch(label: &str, files: &[(&str, &str)]) -> PathBuf {
         .join(format!("target/{label}-{}-{id}", std::process::id()));
     // No deletion or stale-fixture reuse: an unexpected existing directory is
     // a test setup failure, not a reason to overwrite someone else's files.
+    let dir = scratch_identity::unique(dir);
     std::fs::create_dir(&dir).expect("create fresh scratch dir");
     for (name, source) in files {
         std::fs::write(dir.join(name), source).expect("write fixture");

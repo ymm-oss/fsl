@@ -26,6 +26,8 @@ enum Consumer {
     Monitor,
 }
 
+#[path = "support/scratch_identity.rs"]
+mod scratch_identity;
 struct Fixture(PathBuf);
 
 impl Fixture {
@@ -35,6 +37,7 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
+        let root = scratch_identity::unique(root);
         std::fs::create_dir(&root).expect("create test directory");
         std::fs::write(root.join("model.fsl"), source).expect("write inline spec");
         // No observed initial state: replay must construct Monitor::new rather
