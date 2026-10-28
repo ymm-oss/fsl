@@ -1489,14 +1489,24 @@ in testplan: 45 command/form observations that check already rejects. This does
 not complete raw-warning, mutate-success-warning or sweep-capture modes at that
 revision; the single-root extension now completes them.
 
-The initial extension comparison uses BASE `c79016efeb630c717292e9392901cfe65ab40915`
-and implementation `ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built
-from its own clean archive. Cache-disabled `fslc check FORM` covers 597 tracked
-corpus files plus eight input occurrences from rewritten required tests in each
-tree (including already-listed files and a helper's approval baseline), both
-binaries in both trees:
-2,420 checks, empty ok-to-error and full stdout/stderr/exit difference sets,
-no excluded fields. The 21-mode consumer comparison runs twice, 772 observations:
+The latest extension sweep uses BASE `1844fa74a717ba9229e0b292d9421c0939016e5e`
+and implementation Rust revision `e04df80f35cf3a7a3b8119dc7b6513ac7272ce76`, each
+built from its own clean archive. Cache-disabled `fslc check FORM` covers 597
+tracked corpus files plus 29 required-test input occurrences in each tree, both
+binaries in both trees: **2,504 checks**, empty ok-to-error and full
+stdout/stderr/exit difference sets, no excluded fields. The 29 comprise eight
+original occurrences (two domain snapshot includes, two scenario literals, two
+empty-membership inputs, fixed approval source and command-matrix helper approval
+baseline), twenty executed success-table sources and one replay-order root.
+Included files and repeated source bytes remain counted as occurrences.
+
+Earlier named sweeps remain valid historical records: BASE
+`a42d4cede3d8d688daff3173de7bd839a6992172` /HEAD
+`e2669212315f4db9bec2c0c525ba8d44f77bacfd` used 597+29 per tree /2,504 checks;
+BASE `c79016efeb630c717292e9392901cfe65ab40915` /implementation
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c` used 597+8 per tree /2,420 checks.
+Both had empty ok-to-error sets; neither is substituted for the latest result.
+The latest BASE/Rust-revision consumer comparison runs twice, 772 observations:
 17 distinct breaking command/source removals (19 control occurrences per repeat,
 including repeated requirements-metadata probes). Domain analyze/expand/generate/
 replay/testgen refuse enum union (5 pairs); document claims refuses metadata in

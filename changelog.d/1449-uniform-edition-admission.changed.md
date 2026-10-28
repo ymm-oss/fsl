@@ -45,12 +45,20 @@ testplan (45 command/form observations already rejected by check). A named
 BASE/implementation `check` audit covers 597 corpus files plus 309 inline
 occurrences in both materialized trees with an empty ok-to-error set; see the
 migration design amendment for SHAs, command and attribution.
-The initial extension audit uses BASE c79016efeb630c717292e9392901cfe65ab40915 and
-implementation ceb03268e567487f6ec080afcf3ab034d4a5ea0c, built in separate clean
-archives. Cache-disabled `fslc check FORM`, 597 corpus files plus eight affected
-required-input occurrences per tree, both binaries in both trees: 2,420 checks,
-empty ok-to-error and full stdout/stderr/exit difference sets, no excluded fields.
-The repeated 21-mode consumer comparison executes 772 observations and records
+The latest audit uses BASE 1844fa74a717ba9229e0b292d9421c0939016e5e and Rust
+revision e04df80f35cf3a7a3b8119dc7b6513ac7272ce76, built in separate clean archives.
+Cache-disabled `fslc check FORM`, 597 corpus files +29 required input occurrences
+per tree, both binaries in both trees: 2,504 checks, empty ok-to-error and full
+stdout/stderr/exit difference sets, no excluded fields. The 29 comprise the original
+eight (two domain snapshot includes, two scenario literals, two empty-membership
+inputs, fixed approval source and command-matrix approval baseline), twenty actual
+success-table sources and one replay-order root; repeated/included files remain
+occurrences. Historical BASE a42d4cede3d8d688daff3173de7bd839a6992172 /HEAD
+e2669212315f4db9bec2c0c525ba8d44f77bacfd measured 597+29 per tree /2,504 checks.
+Initial BASE c79016efeb630c717292e9392901cfe65ab40915 /implementation
+ceb03268e567487f6ec080afcf3ab034d4a5ea0c measured 597+8 per tree /2,420 checks.
+Both historical ok-to-error sets were empty; neither substitutes for the latest.
+The latest repeated 21-mode consumer comparison executes 772 observations and records
 17 distinct breaking command/source removals (19 control occurrences per repeat,
 including repeated requirements metadata): domain analyze/expand/generate/replay/
 testgen refuse enum union (5); document claims refuses metadata in spec and

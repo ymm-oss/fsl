@@ -259,15 +259,28 @@ mutate success warnings or sweep capture; the single-root extension now does.
 Upstream #1450/#1459 restrictions, including the located Bool `acyclic(done)`
 refusal in the shared #1463 row, belong to BASE and are not attributed here.
 
-The initial single-root comparison uses BASE
-`c79016efeb630c717292e9392901cfe65ab40915` and implementation
-`ceb03268e567487f6ec080afcf3ab034d4a5ea0c`, each built in its own clean archive.
+The latest single-root sweep uses BASE
+`1844fa74a717ba9229e0b292d9421c0939016e5e` and implementation Rust revision
+`e04df80f35cf3a7a3b8119dc7b6513ac7272ce76`, each built in its own clean archive.
 Cache-disabled `fslc check FORM` runs both binaries in both trees over all 597
-tracked corpus forms and eight input occurrences from rewritten required tests
-(including included files and the approval baseline used by a helper):
-2,420 checks. The full
-stdout/stderr/exit difference set and ok-to-error set are empty, with no excluded
-fields. The 21-mode consumer inventory executes 772 observations across two
+tracked corpus forms and 29 required-test input occurrences: **2,504 checks**.
+The 29 comprise the original eight (two domain snapshot includes, two scenario
+literals, two empty-membership inputs, the fixed approval source and the
+command-matrix helper's approval baseline), twenty actually executed success-table
+sources and one strengthened replay-order root. Included-file and repeated-source
+occurrences are retained. The full stdout/stderr/exit difference set and ok-to-error
+set are empty, with no excluded fields.
+
+Both earlier measurements remain historical evidence: BASE
+`a42d4cede3d8d688daff3173de7bd839a6992172` and HEAD
+`e2669212315f4db9bec2c0c525ba8d44f77bacfd` also covered 597+29 occurrences per
+tree /2,504 checks; the initial BASE `c79016efeb630c717292e9392901cfe65ab40915`
+and implementation `ceb03268e567487f6ec080afcf3ab034d4a5ea0c` covered 597+8
+per tree /2,420 checks. Their ok-to-error sets were empty too; they are not
+relabeled as the latest sweep.
+
+The latest BASE/Rust-revision pair also reruns the 21-mode consumer inventory,
+772 observations across two
 repeats. Both produce 17 distinct breaking command/source removals (19 control
 occurrences per repeat, including repeated requirements-metadata probes):
 

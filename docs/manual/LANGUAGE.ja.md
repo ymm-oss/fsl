@@ -1407,12 +1407,21 @@ scenarios/sweep/testgen/typestate で、enum union だけが testplan でも拒�
 これは check が既に拒否する45 command/form 観測の破壊的な削除です。その時点では
 raw warning、mutate 成功時の warning、sweep capture は未完了でしたが、今回対応しました。
 
-拡張の初回の比較は、BASE `c79016efeb630c717292e9392901cfe65ab40915` と実装
-`ceb03268e567487f6ec080afcf3ab034d4a5ea0c` をそれぞれ clean な archive から build
-しました。cache 無効の `fslc check FORM` は、各 tree の corpus 全597 file と変更した
-必須 test の入力8出現(include file と helper の承認 baseline も含む)を、両方の tree で両方の
-binary に渡します。全2,420検査の ok→error 集合と stdout/stderr/exit の差は空で、
-除外 field はありません。21 mode の consumer 比較は2回、全772観測です。各回の
+最新の sweep は、BASE `1844fa74a717ba9229e0b292d9421c0939016e5e` と実装の Rust revision
+`e04df80f35cf3a7a3b8119dc7b6513ac7272ce76` をそれぞれ clean な archive から build
+しました。cache 無効の `fslc check FORM` は、各 tree の corpus 全597 file と必須 test の
+入力29出現を、両方の tree で両方の binary に渡します。**全2,504検査**の ok→error 集合と
+stdout/stderr/exit の差は空で、除外 field はありません。29出現の内訳は、元の8出現
+(domain snapshot の include 2、scenario literal 2、empty-membership 入力2、固定の承認
+source、command-matrix helper の承認 baseline)、実際に実行した成功 table の source 20、
+強化した replay-order root 1です。include file や同じ source の反復も出現として数えます。
+
+前の測定も名前付きの履歴として残します。BASE `a42d4cede3d8d688daff3173de7bd839a6992172` と
+HEAD `e2669212315f4db9bec2c0c525ba8d44f77bacfd` は各 tree の597+29出現、全2,504検査、
+初回の BASE `c79016efeb630c717292e9392901cfe65ab40915` と実装
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c` は各 tree の597+8出現、全2,420検査でした。
+どちらも ok→error 集合は空ですが、最新の測定の代わりにはしません。
+最新の BASE/Rust revision の組でも21 mode の consumer 比較を2回、全772観測しました。各回の
 拒否への変化は、重複しない command/source 17組(要件 metadata の反復 probe を含む
 control 19出現)でした。domain analyze/expand/generate/replay/testgen の enum union
 (5組)、document claims の spec と requirements の metadata・コロン量化子・inline
