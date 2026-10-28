@@ -12,12 +12,8 @@ use sha2::{Digest, Sha256};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 fn scratch() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("root");
-    let dir = root.join(format!(
-        "rust/target/issue-1433-{}-{}",
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "issue-1433-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
