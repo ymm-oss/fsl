@@ -671,6 +671,34 @@ by itself prove the per-entity decrease required by the <code>helpful</code> for
 <p><strong>Scalar</strong> = Int / Bool / domain type / enum. In a <code>state</code> declaration,
 <code>x: lo..hi</code> is accepted as an anonymous domain type and is equivalent to
 declaring <code>type X = lo..hi</code> and writing <code>x: X</code>.</p>
+<p>Every spec/Kernel enum declaration, including <code>symmetric enum</code>, must contain at least one
+member, even if the type is unused. <code>enum E { }</code> is rejected while building the
+checked model with <code>kind: "type"</code>, message <code>enum 'E' has no members</code>, and <code>loc</code>
+at the enum declaration (CLI exit 2). <code>check</code> and all model-consuming commands,
+including every verification engine, scenarios, testgen and refine, share this
+gate; Worker checking uses the same rule. This is a <strong>breaking removal</strong> (#1546)
+of earlier acceptance, including the former <code>EmptyImpl</code> / <code>EmptyAbs</code> refinement
+inputs. Declare the intended members or remove an unused empty declaration;
+do not rely on an empty domain to make verification vacuous. Singleton enums
+remain valid. The domain dialect keeps its existing earlier <code>semantics</code> error
+for empty enums; this change does not reclassify that diagnostic. A composed
+child's empty enum follows #567: public loc points at the parent's <code>use</code>, and
+the message retains the child's declaration path/position and the parent path.
+This empty-enum wrapper resolves the child path against the parent's directory,
+unlike older #567 wrappers that preserve the literal <code>use</code> path.
+For <code>symmetric enum</code>, the declaration starts at <code>symmetric</code>. See
+<a href="../design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546">the boundary decision</a>.</p>
+<p>A <code>dbsystem</code> database must declare at least one column. Both
+<code>database app { schema 0 }</code> and a database containing only an empty table are
+<strong>breaking removals</strong> (#1546): database lowering reports exact
+<code>database 'app' declares no columns</code>, kind type, database-declaration loc and
+CLI exit 2, before generating the <code>Column</code> enum, on <code>check</code>, BMC, induction,
+explicit, scenarios, testgen and kernel. <code>db check</code> reports that error only when
+it reaches database lowering; static compatibility findings are still reported
+first. An active artifact reading an absent column can therefore yield
+<code>violated</code> / exit 1, as on base. DB fmt/lint keep their existing rendering:
+kind semantics, a location suffix in the message and no loc field (exit 2).
+A database with one column remains valid.</p>
 <p>A Kernel state field may use <code>name: Type = expr</code> for a simple deterministic
 initial value. It is normalized to an ordinary root assignment before checking,
 so Monitor, explicit exploration, BMC, induction, and Public Kernel v1 observe
@@ -4000,6 +4028,19 @@ one <code>effect &lt;name&gt;;</code>. None of these fields — nor <code>author
 the <code>check hard { }</code> block below — accept a <code>"description text"</code> tag; every
 field here is a bare identifier or number, unlike the declaration-tag
 convention in §13.1.</p>
+<p>At the kernel-lowering boundary, a standalone <code>ai_component</code> must declare at
+least one tool, using <code>tool</code> or <code>tools</code>.
+Omitting tools is a <strong>breaking removal</strong> (#1546): both <code>ai_component NoTools { }</code>
+and <code>ai_component NoTools { authority { } }</code> are rejected before kernel lowering
+with <code>kind: "type"</code>, exact message <code>ai_component 'NoTools' declares no tools</code>,
+and <code>loc</code> at the component declaration (CLI exit 2). <code>check</code>, <code>ai check</code>, BMC
+and induction, plus scenarios and testgen, report this authored-component diagnostic, not a generated <code>Tool</code>
+enum name; Worker checking agrees. An empty <code>authority { }</code> remains valid when
+at least one tool is declared.
+Existing bad hard-rule and unknown-authority-tool errors still take precedence,
+with their historical per-command envelopes. This change is <strong>kernel-only</strong>:
+<code>ai compat</code>, <code>ai replay</code> and <code>ai_project</code> paths remain as on base and may still
+accept tool-less components; their validation gap is tracked by #1545.</p>
 <p>An <code>ai_component</code> may also declare which hard rules get an explicit,
 separately-reported invariant:</p>
 <pre><code class="language-fsl">  check hard {
