@@ -979,8 +979,9 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <p>このシュガーは、「解放されるまで保持される」「完了するまで保留」のような持続する
 ワークフロー状態に使ってください。任意の履歴の事実には、明示的な ghost 変数を
 使います。</p></div></details>
-<details id="4-statements-init-action-bodies"><summary>4. 文(init / action 本体)<span class="tree-blurb"> — init と action の本体で使える文。</span></summary><div class="tree-body"><p>init がどこかで代入する state のルートは、ルート全体への確実な代入が完了してから
-読みます(#1451)。早すぎる読みは <code>check</code> が
+<details id="4-statements-init-action-bodies"><summary>4. 文(init / action 本体)<span class="tree-blurb"> — init と action の本体で使える文。</span></summary><div class="tree-body"><p>init の代入値/キー、if 条件、forall の filter/本体では、init がどこかで代入する
+state のルートを、ルート全体への確実な代入が完了してから読みます(#1451)。
+forall の source/domain は既存の別の規則に従います。早すぎる読みは <code>check</code> が
 <code>init references state variable '&lt;name&gt;' before it is assigned</code>、kind
 <code>semantics</code>、exit 2 で拒否し、読みを含む文に位置づけます。通常の verify の入口も
 エンジンを選ぶ前に同じ拒否を返します。被覆はルート単位で、Map の全キー、struct
@@ -996,8 +997,8 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 (#1520、X1/X2)も check/symbolic では受理したままです。読まない未代入ルートや
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。</p>
 <p>breaking-removal sweep (#1451): base
-<code>e64d3fb148ca94d179e755e541de9b2ecd7fade7</code> と head
-<code>eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330</code> のそれぞれの materialized tree で
+<code>9e8ed724bdbd070868af00d5160e5f6198738c49</code> と head
+<code>5bc59416fa42c3132e33e3e3264ed29c0d77701b</code> のそれぞれの materialized tree で
 <code>fslc check &lt;form&gt;</code> を実行。<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code>
 の全 <strong>597</strong> 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
 exit 1)で、corpus の <code>ok</code>→<code>error</code> の集合は <strong>空</strong> です。別に inline 37 source

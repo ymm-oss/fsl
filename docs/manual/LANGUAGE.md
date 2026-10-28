@@ -987,8 +987,10 @@ variable.
 
 ## 4. Statements (init / action bodies)
 
-An init read of a state root that init assigns anywhere must follow complete
-definite assignment of that root (#1451). Check rejects an early read with
+Init assignment values/keys, if conditions and forall filters/bodies may read
+a root assigned anywhere in init only after complete definite assignment
+(#1451). Forall sources keep their separate existing source/domain rules.
+Check rejects an early read with
 `init references state variable '<name>' before it is assigned`, kind
 `semantics`, exit 2, locating the containing statement; ordinary verify entries
 return the same refusal before selecting an engine. Coverage is root-wide:
@@ -1008,8 +1010,8 @@ verification. Unread omitted roots and legacy-accepted partial init remain
 accepted; check does not require a deterministic initial state.
 
 Breaking-removal sweep (#1451): `fslc check <form>` in each revision's own
-materialized tree, base `e64d3fb148ca94d179e755e541de9b2ecd7fade7` versus
-head `eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`: all **597** `.fsl` files under
+materialized tree, base `9e8ed724bdbd070868af00d5160e5f6198738c49` versus
+head `5bc59416fa42c3132e33e3e3264ed29c0d77701b`: all **597** `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` have identical full outputs
 and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus `ok`→`error` set **empty**.
 Separately, 37 inline sources, each direct and composed (74 forms), have **28**

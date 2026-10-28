@@ -940,8 +940,9 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 
 ## 4. 文(init / action 本体)
 
-init がどこかで代入する state のルートは、ルート全体への確実な代入が完了してから
-読みます(#1451)。早すぎる読みは `check` が
+init の代入値/キー、if 条件、forall の filter/本体では、init がどこかで代入する
+state のルートを、ルート全体への確実な代入が完了してから読みます(#1451)。
+forall の source/domain は既存の別の規則に従います。早すぎる読みは `check` が
 `init references state variable '<name>' before it is assigned`、kind
 `semantics`、exit 2 で拒否し、読みを含む文に位置づけます。通常の verify の入口も
 エンジンを選ぶ前に同じ拒否を返します。被覆はルート単位で、Map の全キー、struct
@@ -959,8 +960,8 @@ init が一度も代入しないルートは symbolic な自由値のままで�
 従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
 
 breaking-removal sweep (#1451): base
-`e64d3fb148ca94d179e755e541de9b2ecd7fade7` と head
-`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330` のそれぞれの materialized tree で
+`9e8ed724bdbd070868af00d5160e5f6198738c49` と head
+`5bc59416fa42c3132e33e3e3264ed29c0d77701b` のそれぞれの materialized tree で
 `fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
 の全 **597** 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
 exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 37 source

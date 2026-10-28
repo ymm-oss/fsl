@@ -1025,8 +1025,10 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~&gt; Q progress 
 <p>Use this sugar for persistent workflow states such as "held until released" or
 "pending until completed". For arbitrary history facts, use an explicit ghost
 variable.</p></div></details>
-<details id="4-statements-init-action-bodies"><summary>4. Statements (init / action bodies)<span class="tree-blurb"> — Statements usable inside init/action bodies.</span></summary><div class="tree-body"><p>An init read of a state root that init assigns anywhere must follow complete
-definite assignment of that root (#1451). Check rejects an early read with
+<details id="4-statements-init-action-bodies"><summary>4. Statements (init / action bodies)<span class="tree-blurb"> — Statements usable inside init/action bodies.</span></summary><div class="tree-body"><p>Init assignment values/keys, if conditions and forall filters/bodies may read
+a root assigned anywhere in init only after complete definite assignment
+(#1451). Forall sources keep their separate existing source/domain rules.
+Check rejects an early read with
 <code>init references state variable '&lt;name&gt;' before it is assigned</code>, kind
 <code>semantics</code>, exit 2, locating the containing statement; ordinary verify entries
 return the same refusal before selecting an engine. Coverage is root-wide:
@@ -1044,8 +1046,8 @@ filtered/collection forms (#1520, X1/X2), remain accepted by check/symbolic
 verification. Unread omitted roots and legacy-accepted partial init remain
 accepted; check does not require a deterministic initial state.</p>
 <p>Breaking-removal sweep (#1451): <code>fslc check &lt;form&gt;</code> in each revision's own
-materialized tree, base <code>e64d3fb148ca94d179e755e541de9b2ecd7fade7</code> versus
-head <code>eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330</code>: all <strong>597</strong> <code>.fsl</code> files under
+materialized tree, base <code>9e8ed724bdbd070868af00d5160e5f6198738c49</code> versus
+head <code>5bc59416fa42c3132e33e3e3264ed29c0d77701b</code>: all <strong>597</strong> <code>.fsl</code> files under
 <code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code> have identical full outputs
 and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus <code>ok</code>→<code>error</code> set <strong>empty</strong>.
 Separately, 37 inline sources, each direct and composed (74 forms), have <strong>28</strong>

@@ -1090,8 +1090,10 @@ attribution is unchanged. Optional replay not run; sweep outputs not normalized.
 
 ## 4. Statements (init / action body)
 
-Init reads of roots assigned anywhere in init require full definite root coverage
-before the read (#1451), not just the selected key/field or one branch. Early
+Init assignment values/keys, if conditions and forall filters/bodies require
+full definite coverage of a may-assigned root before reading it (#1451), not
+just the selected key/field or one branch. Forall source/domain checks are
+unchanged. Early
 reads return `init references state variable '<name>' before it is assigned`,
 semantics/exit 2, at the containing statement under check and ordinary verify.
 This conservatively includes dead RHS reads, already-written components, and
@@ -1104,8 +1106,8 @@ same-forall current-key reads, including #1520 filtered/collection X1/X2, and
 unread omitted/legacy partial init remain accepted.
 
 Breaking-removal sweep: `fslc check <form>` in each own materialized tree, base
-`e64d3fb148ca94d179e755e541de9b2ecd7fade7` versus head
-`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`. All 597 files in `specs/`,
+`9e8ed724bdbd070868af00d5160e5f6198738c49` versus head
+`5bc59416fa42c3132e33e3e3264ed29c0d77701b`. All 597 files in `specs/`,
 `examples/`, `rust/fslc/tests/fixtures/` have identical full outputs/exits
 (400 exit 0, 191 exit 2, 6 exit 1), corpus `ok`→`error` set empty. Separately,
 37 inline sources × direct/compose = 74 forms have 28 `ok`→`error` transitions:

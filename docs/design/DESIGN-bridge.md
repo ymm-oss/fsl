@@ -352,7 +352,9 @@ admission refusals, including early reads of non-field-written roots.
 
 After the existing ownership/field/forall gates accept an init, the shared
 runtime admission gate also checks ordered reads of every root init assigns
-anywhere. It reuses `walk_init` and the concrete root-coverage predicate and
+anywhere, in assignment values/keys, if conditions and forall filters/bodies.
+Forall sources retain their separate existing validation. It reuses
+`walk_init` and the concrete root-coverage predicate and
 message: `init references state variable '<name>' before it is assigned`.
 Native check and ordinary verification return semantics/exit 2 with the
 containing statement's location. Compose, Worker check/verify and refinement's
@@ -375,10 +377,10 @@ coverage or changes the initialized state.
 
 Sweep command: run `fslc check <form>` with the base/head binaries in each
 revision's own git-archive materialized tree. Measured base
-`e64d3fb148ca94d179e755e541de9b2ecd7fade7`, head
-`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`; binary SHA-256 respectively
-`4517d0a4dd697c128868445c0610344d5722cb07b78803d4dd2d922e48d6f063` and
-`41a18ca563b19d4e53ae412c9997e0c12f71141e2266de186135013152f03323`.
+`9e8ed724bdbd070868af00d5160e5f6198738c49`, head
+`5bc59416fa42c3132e33e3e3264ed29c0d77701b`; binary SHA-256 respectively
+`01318f3eca18b5cd53d8adcb10e3a2ebbc229b4524a2c4dc5e54a1bb3af6c1b5` and
+`5c0894207548454c3098518a773ddaf3caf82dfd8d5b9423301c139cfc4f421e`.
 All **597** `.fsl` files under `specs/`, `examples/`, and
 `rust/fslc/tests/fixtures/` have identical full stdout/stderr/exits (400 exit 0,
 191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline

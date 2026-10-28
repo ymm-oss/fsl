@@ -11,8 +11,8 @@ assignment or explicitly initializing the whole root; the complete 13-case
 migration table plus N2 is in
 [DESIGN-bridge](../docs/design/DESIGN-bridge.md#assigned-root-read-order-1451).
 Breaking-removal evidence: `fslc check <form>` in each own materialized tree,
-base `e64d3fb148ca94d179e755e541de9b2ecd7fade7` versus head
-`eb6e2a46f94ed9826b02237ac7cb9ea0af4d5330`, all 597 `.fsl` files under `specs/`,
+base `9e8ed724bdbd070868af00d5160e5f6198738c49` versus head
+`5bc59416fa42c3132e33e3e3264ed29c0d77701b`, all 597 `.fsl` files under `specs/`,
 `examples/`, `rust/fslc/tests/fixtures/` unchanged in full output/exit (400 exit 0,
 191 exit 2, 6 exit 1); corpus removal set empty. Separately, 37 inline sources
 direct/composed (74 forms) have 28 `ok`→`error` transitions: 13 read-order cases
