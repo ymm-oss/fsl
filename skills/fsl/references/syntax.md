@@ -1089,6 +1089,24 @@ message begins `relation role name '__owner' contains '__', ...` (or
 - Comparison: `== != < <= > >=` / logic: `and or not =>`
 - Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each with an
   optional `where BoolExpr`. Maps and unbounded domains are rejected.
+  **Const-name collisions are a breaking removal (#1515):** for all const
+  types, reject quantifier/aggregate binders, init/action statement `forall`,
+  `leadsTo` binders, action params/lets and def params named like a const.
+  Requirements action/transition inputs and indexed ages inherit the rule.
+  Components are checked before prefixing, defs before inlining. Refusals are
+  `semantics`, exit 2, with identical full envelopes across check and engines.
+  The message names the local; loc is an existing AST owner, not its name token:
+  enclosing expression/declaration, `forall` statement, `leadsTo` declaration,
+  action for params/lets, def for its params, source transition for lowered
+  inputs, age keyword for indexed ages. Component loc is the parent's `use`,
+  with the component owner coordinate in the message. Rename the local and
+  its uses, e.g. `forall N in 0..1 { N <= 1 }` →
+  `forall k in 0..1 { k <= 1 }` with `const N = 2`.
+  Preserve state-name shadowing, local `N` versus qualified `part.N` in
+  glue/sync, and existing pattern freshness rules. Refinement indexed-map and
+  action-correspondence declarations have no additional const gate, but their
+  source specs still undergo ordinary checking. General dependent ranges
+  (#1480) are not added by this refusal.
   Position matters: `check` rejects collection domains and all `where` filters
   on outer `leadsTo` wrapper binders. Supported unfiltered typed/range wrappers
   and collection quantifiers inside P/Q remain distinct. This breaking removal
@@ -1377,7 +1395,8 @@ whole root; choosing formerly free values is a model-strengthening decision.
   the relational repeated-write constraint itself is unchanged.
   New admission proofs treat outer-binder-dependent sources/filters/key bounds
   as unproved, never as same-named global consts; no outer valuation product is
-  enumerated and #1515's symbolic shadow-resolution behavior is not repaired.
+  enumerated. Independently, #1515 rejects executable const-shadowing locals
+  before engine-specific resolution; dependent-range support is unchanged.
   For shapes newly admitted by per-field ownership, `check` also requires the
   entire may-assigned root (all Map keys/fields) to be covered before a read,
   including roots written only as whole values; early reads of non-field-written

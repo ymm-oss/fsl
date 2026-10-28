@@ -796,6 +796,29 @@ name in a `decreases` call. There are no unrelated breaking removals.
   outside is a type error, and when it shadows an enclosing name (an action
   parameter, say) the shadowing is confined to that scope — a satisfied
   `exists` never exports its witness to the enclosing bindings.
+  **Constant-name collisions are rejected (#1515).** This breaking removal
+  applies to every const type, not just integer constants: quantifier and
+  aggregate binders, statement `forall` in init/actions, `leadsTo` binders,
+  action parameters and `let` bindings, and `def` parameters may not have the
+  same name as a const. Requirements action/transition inputs and indexed age
+  binders follow the same rule. Components are checked before constant prefixing;
+  defs are checked before inlining. `check` and all verification engines return
+  the same `semantics` error (exit 2), naming the binding. The location is the
+  existing AST owner's span, **not the binding-name token**: the enclosing
+  expression/declaration for expression binders, the `forall` statement for
+  statement binders, the `leadsTo` declaration for wrapper binders, the action
+  for parameters/lets, the def for its parameters, the source transition for
+  lowered inputs, and the age keyword for an indexed age. Component errors
+  locate the parent's `use` and retain the component owner's coordinate in the
+  message. Rename the local and its uses: with `const N = 2`, replace
+  `forall N in 0..1 { N <= 1 }` with `forall k in 0..1 { k <= 1 }`.
+  State-name shadowing remains valid; bare local `N` does not collide with
+  qualified component const `part.N` in glue/sync. Refinement indexed-map and
+  action-correspondence declarations have no additional const-shadow gate;
+  their source specs still obey the ordinary checks. Existing pattern-binding
+  freshness restrictions remain unchanged. This refusal prevents static-const
+  and lexical-bound resolution from yielding opposite engine verdicts; it does
+  not add general dependent range bounds (#1480).
   This expression rule does not promise executable `leadsTo` wrapper binders:
   `check` rejects a collection domain or any `where` filter on an outer
   `leadsTo` binder. Unfiltered supported typed/range wrappers remain available,
@@ -2966,8 +2989,9 @@ missing components (#1521); bmc and induction retain their free-value verdicts.
 Enumerating partial init components is future work (#1579).
 For new admission proofs, a source, filter or key bound depending on an outer
 binder is conservatively unresolved, even if a same-named global const exists.
-Enclosing binding combinations are not enumerated; this does not change legacy
-acceptance or repair symbolic binder/const shadow resolution (#1515).
+Enclosing binding combinations are not enumerated. Independently, the frontend
+rejects executable local bindings that share a const's name (#1515), before
+engine-specific bound resolution; this does not add dependent-range support.
 For newly admitted shapes, `check` rejects reads of any root init may assign
 until the entire root is definitely assigned, including roots written only as
 whole values and reads of an already-written field or entry. Early reads of

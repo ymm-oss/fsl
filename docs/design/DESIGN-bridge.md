@@ -246,8 +246,10 @@ prove nonemptiness or binder-key values using a same-named global const. Its
 coverage is unproved and rolled back, or its keys remain unresolved, yielding
 the saved legacy refusal. Sources use the enclosing scope; a binder's own filter
 and nested quantified/aggregate bodies use their local scope. No enclosing
-valuation combinations are enumerated. The legacy ownership/concrete paths and
-the symbolic resolver retain their existing behavior; #1515 is not fixed here.
+valuation combinations are enumerated. The ownership and engine bound resolvers
+are unchanged; independently, #1515 rejects executable local bindings that share
+a const's name before those paths can interpret the name differently. This is
+a source-acceptance restriction, not general dependent-range support.
 For outer-dependent ranges, nonempty rollback is the decisive coverage refusal;
 the bound resolver also leaves their keys unresolved, but that guard alone does
 not change admission while the rollback remains in place.

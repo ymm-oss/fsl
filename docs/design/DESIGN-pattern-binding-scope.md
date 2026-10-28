@@ -32,11 +32,11 @@ Python implementation via `python -m fslc`. `--no-cache` was used for every
    outside it. This is the rule `docs/manual/LANGUAGE.md` already states for
    quantifier binders: *"when it shadows an enclosing name (an action
    parameter, say) the shadowing is confined to that scope"*.
-4. The collision should additionally be a **located `check`-time error**
+4. The collision is additionally a **located `check`-time error**
    ("pattern variable `v` shadows an action parameter; rename it"), for the
    reason recorded in `docs/design/DESIGN-def.md`: this repository prefers an
-   explicit local repair over silently changing meaning. See "Work this
-   decision implies" below — the error is not implemented yet.
+   explicit local repair over silently changing meaning. Implemented in #1259;
+   see "Work this decision implies" below for its full collision scope.
 
 ### Why not "match"
 
@@ -580,3 +580,67 @@ including S1/d06/collision/location pins and the newer baseline's explicit/init
 coverage controls; workspace Clippy, fmt, native build and generated-page
 freshness pass twice. Six guard-inventory controls additionally agree in full
 on the final normal binary in two runs.
+
+## 4. Executable locals may not shadow constants (#1515)
+
+### Decision and breaking removal
+
+`check` rejects an executable local binding whose name equals a const name,
+including non-integer constants. This is a breaking `ok`→`error` restriction,
+not a change to engine range evaluators. Symbolic range bounds previously
+resolved the name as the global const while concrete lexical evaluation used
+the local. Both false violations and false passes resulted. Rejecting the
+ambiguous source before selecting an engine prevents that disagreement.
+
+The shared diagnostic names the local and says it `shadows a constant`;
+`check`, BMC, induction and explicit return identical complete `semantics`
+error envelopes, exit 2. No verdict, assurance or location fields are excluded
+from that refusal comparison. The existing broader pattern-binding collision
+rule in section 1 is preserved, not replaced by this narrower const rule.
+
+### Binding inventory and location precision
+
+The location is the existing AST owner's span, **not a newly recovered name
+token**. No parser span carrier or source rereading is added.
+
+| Authored introduction | New const refusal | Diagnostic owner / reason |
+|---|---|---|
+| `forall`/`exists`, typed/range/collection | yes | enclosing expression or declaration retaining a span |
+| `count`, `sum`, `unique`, `exactlyOne` | yes | enclosing expression/declaration, before aggregate normalization |
+| statement `forall` in init/action | yes | `forall` statement |
+| outer `leadsTo` binder | yes | `leadsTo` declaration; existing collection/filter restrictions remain |
+| action typed/range param and `let` | yes | action declaration |
+| def param and binders in its body | yes | def declaration before substitution or dropping unused defs |
+| component versions of these forms | yes | parent's `use`; component owner coordinate retained in causal message |
+| requirements action/branch params and lets | yes | source action retained by lowering |
+| requirements transition/event inputs | yes | transition retained by generated action |
+| requirements indexed age binder | yes | age keyword retained by generated init/tick forall |
+| `is some(v)` pattern | existing refusal | existing owning-declaration precision, unchanged |
+| compose glue/sync locals using `part.N` | no same-name collision | bare local `N` and qualified const `part.N` are distinct declarations |
+| refinement indexed-map binder | no additional gate | concrete correspondence binds keys locally before const lookup |
+| refinement action-correspondence formals | no additional gate | formals mirror the source action; that action still obeys ordinary checking |
+| business transition inputs | no new reachable gate | data-carrying `with` is already unsupported and rejected |
+| business Responds binders | shared leadsTo rule after lowering | business has no authored const declaration to collide with |
+| requirements imported as compose component | no new gate | compose already requires a `spec` component |
+
+Component source checks happen before constants acquire component prefixes and
+before local hygiene/substitution can erase a collision. Def parameters and
+body binders are checked before inlining; body-name diagnostic selection is
+deterministic. Requirements aliases retain their existing owner spans through
+lowering, rather than claiming a token-level position they do not store.
+
+### Migration and preserved behavior
+
+Rename the local declaration and its uses. With `const N = 2`, replace
+`forall N in 0..1 { N <= 1 }` with
+`forall k in 0..1 { k <= 1 }`; likewise rename an action/def parameter or let.
+This does not promise general dependent ranges (#1480): alpha-renaming a
+dependent bound alone may expose the existing static-bound limitation. Use
+supported static domains and, where supported, a `where` membership guard.
+
+State-name shadowing remains lexical and valid. Qualified component const
+accesses in glue and sync remain valid. Existing pattern errors and temporal
+capability boundaries remain unchanged: in particular, explicit still refuses
+supported-source `leadsTo` verification. The all-engine comparison above is
+for the new source errors, not a claim that successful engine-specific proof
+reports or supported temporal capabilities are identical.

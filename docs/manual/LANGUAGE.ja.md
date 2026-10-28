@@ -759,6 +759,24 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `x` のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
   なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
   充足した `exists` が witness を外側の束縛へ出すことはありません。
+  **const と同名の局所束縛は拒否します(#1515)。** 整数以外を含む全 const 型に適用する
+  breaking removal です。量化・集約のバインダー、init/action の文 `forall`、`leadsTo`
+  のバインダー、action の引数と `let`、`def` の引数は const と同名にできません。
+  requirements の action/transition の入力と indexed age のバインダーも同じ規則です。
+  component の const に prefix を付ける前、def をインライン展開する前に検査します。
+  `check` と全検証 engine は束縛名を含む同じ `semantics` エラー(exit 2)を返します。
+  位置は**束縛名の token ではなく、既存 AST が保持する所有元の span**です。式の
+  バインダーは囲む式・宣言、文のバインダーは `forall` 文、wrapper は `leadsTo` 宣言、
+  引数・let は action、def の引数は def、lowering された入力は元の transition、
+  indexed age は age キーワードを指します。component のエラーは親の `use` を指し、
+  メッセージに component の所有元の座標を残します。局所名とその参照を変更してください。
+  `const N = 2` があるなら `forall N in 0..1 { N <= 1 }` を
+  `forall k in 0..1 { k <= 1 }` に書き換えます。状態名を隠す束縛は引き続き使えます。
+  glue/sync の局所 `N` は qualified const `part.N` と衝突しません。refinement の
+  indexed-map と action-correspondence の宣言には追加の const-shadow 検査を設けず、
+  元の spec には通常の検査を適用します。既存の pattern binding の freshness 制約は
+  変えません。この拒否により、static const と字句的な束縛の読み方による engine の
+  逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
   この式の一般則は、`leadsTo` を外から包むバインダーの実行可能性までは約束しません。
   `leadsTo` の外側のコレクションバインダーと、`where` 付きバインダーは `check` が拒否します。
   対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は
@@ -2810,8 +2828,9 @@ refine は実装側・抽象側とも、部分的に代入されたルートの�
 init を拒否します(#1521)。bmc と induction は自由値として verdict を返す挙動を維持します。
 部分 init の要素を自由値として列挙する仕事は今後の課題です(#1579)。
 新しい受理の証明では、source・filter・キーの範囲境界が外側のバインダーに依存すると、
-同名の global const があっても保守的に未解決とします。外側の束縛の組合せは列挙せず、
-既存の受理や symbolic の binder/const shadow 解決(#1515)は変えません。
+同名の global const があっても保守的に未解決とします。外側の束縛の組合せは列挙しません。
+これとは独立に、frontend は const と同名の実行可能な局所束縛を engine ごとの範囲解決の
+前に拒否します(#1515)。依存する範囲境界の対応を追加するものではありません。
 新しく受理する形では、init が代入し得る全ルートについて、ルート全体が確実に代入
 されるまで `check` が読み出しを拒否します。値全体でしか書かないルートや、既に書いた
 field・エントリの読み出しも対象です。field 単位で書かないルートの早すぎる読み出しは、
