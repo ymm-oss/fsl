@@ -50,97 +50,97 @@ fn cases() -> Vec<Case> {
     let mut cases = vec![
         case(
             "forall-false-violation",
-            invariant("invariant Shadow { forall @LOCAL in 0..1 { forall z in 0..LOCAL { z <= 1 } } }"),
+            invariant("@invariant Shadow { forall LOCAL in 0..1 { forall z in 0..LOCAL { z <= 1 } } }"),
             Safe,
         ),
         case(
             "count-false-pass-state-name",
-            invariant("invariant C { forall @LOCAL in 0..1 { count(y in 0..LOCAL) == 3 } }"),
+            invariant("@invariant C { forall LOCAL in 0..1 { count(y in 0..LOCAL) == 3 } }"),
             Violated,
         ),
         case(
             "count-false-pass-fresh-name",
-            invariant("invariant C { forall @LOCAL in 0..1 { count(w in 0..LOCAL) == 3 } }"),
+            invariant("@invariant C { forall LOCAL in 0..1 { count(w in 0..LOCAL) == 3 } }"),
             Violated,
         ),
         case(
             "exists",
-            invariant("invariant E { exists @LOCAL in 0..1 { forall z in 0..LOCAL { z <= 1 } } }"),
+            invariant("@invariant E { exists LOCAL in 0..1 { forall z in 0..LOCAL { z <= 1 } } }"),
             Safe,
         ),
         case(
             "typed-quantifier",
-            spec("type K = 0..1", "y: Int = 0", "", "action tick() { y = y }", "invariant Q { forall @LOCAL: K { forall z in 0..LOCAL { z <= 1 } } }"),
+            spec("type K = 0..1", "y: Int = 0", "", "action tick() { y = y }", "@invariant Q { forall LOCAL: K { forall z in 0..LOCAL { z <= 1 } } }"),
             Safe,
         ),
         case(
             "collection-quantifier",
-            invariant("invariant Q { forall @LOCAL in Set {0, 1} { forall z in 0..LOCAL { z <= 1 } } }"),
+            invariant("@invariant Q { forall LOCAL in Set {0, 1} { forall z in 0..LOCAL { z <= 1 } } }"),
             Safe,
         ),
         case(
             "count-binder",
-            invariant("invariant Q { count(@LOCAL in 0..1 where forall z in 0..LOCAL { z <= 1 }) == 2 }"),
+            invariant("@invariant Q { count(LOCAL in 0..1 where forall z in 0..LOCAL { z <= 1 }) == 2 }"),
             Safe,
         ),
         case(
             "nested-sum",
-            invariant("invariant A { sum(@LOCAL in 0..1 of count(w in 0..LOCAL)) == 3 }"),
+            invariant("@invariant A { sum(LOCAL in 0..1 of count(w in 0..LOCAL)) == 3 }"),
             Safe,
         ),
         case(
             "unique-binder",
-            invariant("invariant Q { unique(@LOCAL in 0..1 where forall z in 0..LOCAL { z <= 1 }) }"),
+            invariant("@invariant Q { unique(LOCAL in 0..1 where forall z in 0..LOCAL { z <= 1 }) }"),
             Violated,
         ),
         case(
             "exactly-one-binder",
-            invariant("invariant Q { exactlyOne(@LOCAL in 0..1 where forall z in 0..LOCAL { z <= 1 }) }"),
+            invariant("@invariant Q { exactlyOne(LOCAL in 0..1 where forall z in 0..LOCAL { z <= 1 }) }"),
             Violated,
         ),
         case(
             "range-action-parameter",
-            spec("", "y: Int = 0", "", "action tick(@LOCAL in 0..1) { requires forall z in 0..LOCAL { z <= 1 } y = 1 }", "invariant Z { y == 0 }"),
+            spec("", "y: Int = 0", "", "@action tick(LOCAL in 0..1) { requires forall z in 0..LOCAL { z <= 1 } y = 1 }", "invariant Z { y == 0 }"),
             Violated,
         ),
         case(
             "typed-action-parameter",
-            spec("type K = 0..1", "y: Int = 0", "", "action tick(@LOCAL: K) { requires forall z in 0..LOCAL { z <= 1 } y = 1 }", "invariant Z { y == 0 }"),
+            spec("type K = 0..1", "y: Int = 0", "", "@action tick(LOCAL: K) { requires forall z in 0..LOCAL { z <= 1 } y = 1 }", "invariant Z { y == 0 }"),
             Violated,
         ),
         case(
             "let",
-            spec("", "y: Int = 0", "", "action tick() { let @LOCAL = 1 requires forall z in 0..LOCAL { z <= 1 } y = 1 }", "invariant Z { y == 0 }"),
+            spec("", "y: Int = 0", "", "@action tick() { let LOCAL = 1 requires forall z in 0..LOCAL { z <= 1 } y = 1 }", "invariant Z { y == 0 }"),
             Violated,
         ),
         case(
             "def-parameter",
-            spec("type K = 0..1\n  def bounded(@LOCAL: K) = forall z in 0..LOCAL { z <= 1 }", "y: Int = 0", "", "action tick() { y = y }", "invariant D { bounded(1) }"),
+            spec("type K = 0..1\n  @def bounded(LOCAL: K) = forall z in 0..LOCAL { z <= 1 }", "y: Int = 0", "", "action tick() { y = y }", "invariant D { bounded(1) }"),
             Safe,
         ),
         case(
             "action-statement-forall",
-            spec("", "m: Map<0..2, Int>", "init { forall i in 0..2 { m[i] = 0 } }", "action tick() { forall @LOCAL in 0..1 { m[LOCAL] = 1 } }", "invariant M { m[2] == 0 }"),
+            spec("", "m: Map<0..2, Int>", "init { forall i in 0..2 { m[i] = 0 } }", "action tick() { @forall LOCAL in 0..1 { m[LOCAL] = 1 } }", "invariant M { m[2] == 0 }"),
             Safe,
         ),
         case(
             "init-statement-forall",
-            spec("", "m: Map<0..2, Int>, y: Int = 0", "init { forall @LOCAL in 0..2 { m[LOCAL] = 0 } }", "action tick() { y = y }", "invariant M { m[2] == 0 }"),
+            spec("", "m: Map<0..2, Int>, y: Int = 0", "init { @forall LOCAL in 0..2 { m[LOCAL] = 0 } }", "action tick() { y = y }", "invariant M { m[2] == 0 }"),
             Safe,
         ),
         case(
             "leads-to-binder",
-            invariant("leadsTo L { forall @LOCAL in 0..1 { forall z in 0..LOCAL { true ~> z <= 1 } } }"),
+            invariant("@leadsTo L { forall LOCAL in 0..1 { forall z in 0..LOCAL { true ~> z <= 1 } } }"),
             Temporal,
         ),
         case(
             "requirements-transition-input",
-            "requirements Shadow {\n  const N = CONSTANT\n  number Amount\n  process Case with value: Amount = 0 {\n    stages Idle, Done\n    initial Idle\n    transition act Idle -> Done by System with @LOCAL: Amount set value = LOCAL\n  }\n  invariant P { true }\n}\nverify { instances Case = 1 values Amount = 0..1 }\n".to_owned(),
+            "requirements Shadow {\n  const N = CONSTANT\n  number Amount\n  process Case with value: Amount = 0 {\n    stages Idle, Done\n    initial Idle\n    @transition act Idle -> Done by System with LOCAL: Amount set value = LOCAL\n  }\n  invariant P { true }\n}\nverify { instances Case = 1 values Amount = 0..1 }\n".to_owned(),
             Safe,
         ),
         case(
             "time-age-binder",
-            "requirements Shadow {\n  const N = CONSTANT\n  type K = 0..1\n  state { y: Int = 0 }\n  time { age waitAge[@LOCAL: K] while LOCAL == 0 }\n  requirement SLA \"bounded waiting\" { deadline waitAge <= 1 }\n  action stay() { y = y }\n}\n".to_owned(),
+            "requirements Shadow {\n  const N = CONSTANT\n  type K = 0..1\n  state { y: Int = 0 }\n  time { @age waitAge[LOCAL: K] while LOCAL == 0 }\n  requirement SLA \"bounded waiting\" { deadline waitAge <= 1 }\n  action stay() { y = y }\n}\n".to_owned(),
             Violated,
         ),
     ];
@@ -173,6 +173,8 @@ fn static_domain(source: &str) -> String {
 }
 
 fn authored(template: &str, constant: &str, name: &str) -> (String, Value) {
+    // Mark the enclosing span the Kernel AST keeps, not the span-free binding
+    // token: declaration for expressions/params/lets, forall statement, or age.
     let marked = template
         .replace("CONSTANT", constant)
         .replace("LOCAL", name);
