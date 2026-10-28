@@ -359,8 +359,8 @@ message: `init references state variable '<name>' before it is assigned`.
 Native check and ordinary verification return semantics/exit 2 with the
 containing statement's location. Compose, Worker check/verify and refinement's
 free-root constructor reach the same gate; runtime remains solver-independent.
-Existing refusal priorities, including static forall-range diagnostics, remain
-unchanged. This is a source-acceptance breaking removal, not a totality check.
+Existing shared ownership/field/forall refusals keep priority. This is a
+source-acceptance breaking removal, not a totality check.
 
 Coverage is whole-root, even for an already-written key/field, a syntactically
 present but short-circuited read, or a value left free on another branch or
