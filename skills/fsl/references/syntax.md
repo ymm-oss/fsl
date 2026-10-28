@@ -1107,6 +1107,22 @@ message begins `relation role name '__owner' contains '__', ...` (or
   action-correspondence declarations have no additional const gate, but their
   source specs still undergo ordinary checking. General dependent ranges
   (#1480) are not added by this refusal.
+  Measured inline breaking removals, native `check` before fixture migration
+  (base `45a2de33`, implementation `d592ed9f`; shared consumers counted once):
+  **126** compose-capture forms (#1442: 63 cells × standalone/composed), e.g.
+  `const x = false` with `action go(x: Bool) { requires x }`; **24** nested
+  aggregate forms (#1463), e.g. `const x = false` with
+  `sum(x in 0..1 of count(y in 0..x)) == 3`; **2** helpful-argument forms
+  (#1333: standalone/composed), e.g. `const c = 0`, `forall c: Case`, action
+  param `c` and `helpful step(c)`. Total **152** `ok`→`error` forms; 126 fresh
+  compose controls remain `ok`. Rename the local and its uses. Five partial-init
+  forms (#1481) remain **error→error**: the outer `flag`/`limit` const-shadow
+  error now precedes the previous ownership error, changing message/owner loc
+  priority rather than acceptance. The separate own-archive `check <form>`
+  corpus sweep (base `e856bbe0`, head `955bea60`) found **0** removals and **0**
+  other output differences in all **597** forms under `specs/` (23),
+  `examples/` (191), `rust/fslc/tests/fixtures/` (383); that does not negate the
+  inline restriction or establish completeness over all removed programs.
   Position matters: `check` rejects collection domains and all `where` filters
   on outer `leadsTo` wrapper binders. Supported unfiltered typed/range wrappers
   and collection quantifiers inside P/Q remain distinct. This breaking removal

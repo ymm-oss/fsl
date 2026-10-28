@@ -644,3 +644,42 @@ capability boundaries remain unchanged: in particular, explicit still refuses
 supported-source `leadsTo` verification. The all-engine comparison above is
 for the new source errors, not a claim that successful engine-specific proof
 reports or supported temporal capabilities are identical.
+
+### Measured removal inventory and diagnostic priority
+
+Native `check`, base `45a2de33` versus implementation `d592ed9f`, measured the
+original inline sources before regression-fixture migration. Counts below are
+case-addressed forms; shared CLI/LSP/Worker consumers and repeated test products
+are counted once, not presented as byte-unique programs.
+
+| Regression family | `ok`→`error` forms | Representative original form | Migration |
+|---|---:|---|---|
+| Compose binding capture (#1442) | 126: 63 cells × standalone/composed | `const x = false` with `action go(x: Bool) { requires x }` | Rename local `x` and its uses; keep legal fresh/state/member controls. Original const-collision cells now assert located refusal. |
+| Nested aggregate bounds (#1463) | 24, shared across CLI/LSP/Worker | `const x = false` with `sum(x in 0..1 of count(y in 0..x)) == 3` | Rename the local and uses subject to the existing dependent-bound limitation; original collision sources remain refusal detectors. |
+| Per-binding helpful arguments (#1333) | 2: standalone/composed | `const c = 0` with `forall c: Case`, action parameter `c`, and `helpful step(c)` | Rename local `c` and uses. The regression uses a legal initialized state decoy to retain its helpful-argument capture control. |
+
+Total **152** removed inline forms. Of the 63 compose cells, 42 combine a
+typed/range parameter or let with seven expression/body positions and two
+orders; 21 cover nested quantifiers, aggregates and statement forall across
+typed/range/collection domains. All 126 fresh standalone/composed controls
+still check. These are deliberate capture decoys, not dispensable constants
+removed merely to make tests green.
+
+Five partial-init sources (#1481) are a separate **error→error diagnostic
+priority change**, not additional acceptance removals. Three have same-named
+`flag` consts and outer collection/range binders whose false inner filter must
+not establish coverage; two have `limit` consts and outer binders used in inner
+range/key bounds. The frontend const-shadow error now precedes the ownership
+refusal, at the outer forall owner. This also supersedes the former unlocated
+Monitor/refine ownership diagnostics with located frontend errors. The source
+strings remain unchanged, and other partial-init ownership controls remain.
+
+The separate pre-migration corpus sweep ran `check <form>` using base
+`e856bbe023f8fb64557658afbd365c355ac56715` and head
+`955bea60ea2463668fe1bc1bd14ff0d6909a353d`, each in its own archived tree:
+**597 forms** under `specs/` (23), `examples/` (191) and
+`rust/fslc/tests/fixtures/` (383), **0 `ok`→`error` transitions**, **0 other
+output differences**. Full exits/stdout/stderr were compared without exclusions;
+400 inputs exited 0, 191 exited 2 and 6 exited 1 on both binaries. This bounded
+corpus result does not erase the inline removals or claim all possible removed
+programs were enumerated.

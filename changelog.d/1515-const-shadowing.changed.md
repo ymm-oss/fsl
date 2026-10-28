@@ -7,3 +7,16 @@ and compose-component forms. Rename the local name and its uses, for example
 exists. Diagnostics name the binding and locate its existing AST owner, not
 the binding-name token; qualified component constants and legal state-name
 shadowing remain available. General dependent range bounds are not added.
+Before regression-fixture migration, native `check` on base `45a2de33` versus
+implementation `d592ed9f` measured 152 removed inline forms: 126 compose-capture
+forms (#1442; e.g. `const x = false` with `action go(x: Bool) { requires x }`),
+24 nested-aggregate forms (#1463; e.g. `const x = false` with
+`sum(x in 0..1 of count(y in 0..x)) == 3`), and 2 direct/composed helpful-argument
+forms (#1333; `const c = 0` with local `c` and `helpful step(c)`). Rename the
+local name and its uses; 126 fresh compose controls remain accepted. Five
+partial-init forms (#1481) remain error→error but now report const-shadowing
+before ownership, changing diagnostic priority and owner locations. The
+separate own-archive corpus sweep of all 597 forms in `specs/`, `examples/`
+and `rust/fslc/tests/fixtures/` (base `e856bbe0`, head `955bea60`) found zero
+ok→error transitions and zero other output differences; it does not negate
+the inline breaking removals.
