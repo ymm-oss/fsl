@@ -107,14 +107,14 @@ must never change the assurance label, only add a finding.
 
 `pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str`
 (`rust/fsl-tools/src/ledger.rs`) — per spec element against a `verify`/`prove`
-result. Under `result:"proved"`: `invariants`/`transitions` → `proved`; a
+result. Under `result:"proved"` or non-error `completeness:"unbounded"`: `invariants`/`transitions` → `proved`; a
 `leadstos` entry → `proved` iff
 `verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
 else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
-First, an unevaluated reachable is `not_run` (no `reachables` object, no `unreached` array,
-result neither `verified` nor `proved`); scenario-confirmed ledger rows retain `bounded`.
-Otherwise, when `result` is not `"proved"`: if `result == "error"` → `not_run`; else if
-`completeness == "unbounded"` → `proved`; else → `bounded`.
+This also corrects unranked leadsTo/reachable rows under `refinement_failed` over induction.
+Otherwise `error` → `not_run`, else `bounded`. Reachables also use `not_run` for `violated` +
+`invariant`/`trans`/`ensures`/`partial_op`/`type_bound`, or `explicit` deadlock.
+This infers evaluation from result kind/engine (#1565 tracks per-reachable status); scenario-confirmed ledger rows retain `bounded`.
 
 **Rust vs frozen Python — evaluation order (#995, unadjudicated).** The frozen
 Python `classify_element` checks `completeness` **before** `result == "error"`.

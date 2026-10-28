@@ -954,10 +954,13 @@ pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String {
 /// stamp one report-wide class on every row and call a bounded reachability
 /// witness `proved(induction)`.
 pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
-    if group == "reachables" && !reachables_evaluated(verification) {
+    let result = verification.get("result").and_then(Value::as_str);
+    if result == Some("error") || (group == "reachables" && !reachables_evaluated(verification)) {
         return "not_run";
     }
-    if verification.get("result").and_then(Value::as_str) == Some("proved") {
+    if result == Some("proved")
+        || verification.get("completeness").and_then(Value::as_str) == Some("unbounded")
+    {
         if matches!(group, "invariants" | "transitions") {
             return "proved";
         }
@@ -978,22 +981,19 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
         }
         return "bounded";
     }
-    if verification.get("result").and_then(Value::as_str) == Some("error") {
-        "not_run"
-    } else if verification.get("completeness").and_then(Value::as_str) == Some("unbounded") {
-        "proved"
-    } else {
-        "bounded"
-    }
+    "bounded"
 }
 
 fn reachables_evaluated(verification: &Value) -> bool {
-    verification.get("reachables").is_some_and(Value::is_object)
-        || verification.get("unreached").is_some_and(Value::is_array)
-        || matches!(
-            verification.get("result").and_then(Value::as_str),
-            Some("verified" | "proved")
-        )
+    if verification.get("result").and_then(Value::as_str) != Some("violated") {
+        return true;
+    }
+    // Infer from producer projection order; per-reachable status is #1565.
+    match verification.get("violation_kind").and_then(Value::as_str) {
+        Some("invariant" | "trans" | "ensures" | "partial_op" | "type_bound") => false,
+        Some("deadlock") => verification.get("engine").and_then(Value::as_str) != Some("explicit"),
+        _ => true,
+    }
 }
 
 fn assurance_cell(

@@ -27,8 +27,7 @@ reads as "guarantees nothing".
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log
   conformance (`conformant` / `nonconformant`). Nonconformance adds a spec-level
-  🔴 `conformance` finding; conformance adds none. Exit remains tied to verify.
-  A replay **error** (missing
+  🔴 `conformance` finding; conformance adds none. Exit stays tied to verify. A replay **error** (missing
   file, malformed JSON, wrong-spec trace, schema-invalid trace) is not
   evidence and must not be rendered as an empty/missing implementation-log
   row: it fails the whole `ledger` command through the same standard error
@@ -97,11 +96,7 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    identified as metadata, not a verification condition.
 3. **リスク一覧** — one row per requirement id: 業務目的 / 状態 (🔴 要確認 / 🟢
    確認済) / 検出種別 (`trace_type`) / リスク (`control.severity`) / 判断者
-   (`control.owner`) / 次アクション.
-   An unevaluated requirement-tagged reachable shows ⚪ 未評価 / `not_run`: no
-   `reachables` object, no `unreached` array, and result neither `verified` nor `proved`.
-   Scenario confirmation takes precedence, retaining 🟢 確認済（承認可） / `bounded`.
-   Coverage findings require an authored
+   (`control.owner`) / 次アクション. Coverage findings require an authored
    primary-origin span, or otherwise a kernel action span, with positive line
    and column. The shared `KernelModel::action_source_span` owner also governs
    runtime warnings, mutate dead-action notes, and HTML coverage badges/denominators.
@@ -113,6 +108,11 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
    map renders `0/0`. Migration (#1338): removing false sentinel findings changes
    affected ledger/HTML rendering digests; existing approvals report `drifted`
    (exit 0), so review and re-approve them. Approval schemas are unchanged.
+   Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/
+   `partial_op`/`type_bound`, or `explicit` deadlock; other results count as evaluated.
+   Scenario confirmation wins (確認済 / `bounded`). This infers evaluation from result kind/engine;
+   per-reachable status is #1565. Under `refinement_failed` over induction, unranked leadsTo
+   and reachable ledger/HTML rows stay `bounded`.
 4. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).
