@@ -940,6 +940,45 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 
 ## 4. 文(init / action 本体)
 
+init の代入値/キー、if 条件、forall の filter/本体では、init がどこかで代入する
+state のルートを、ルート全体への確実な代入が完了してから読みます(#1451)。
+forall の source/domain は既存の別の規則に従います。早すぎる読みは `check` が
+`init references state variable '<name>' before it is assigned`、kind
+`semantics`、exit 2 で拒否し、読みを含む文に位置づけます。通常の verify の入口も
+エンジンを選ぶ前に同じ拒否を返します。被覆はルート単位で、Map の全キー、struct
+の全 field、両分岐を必要とします。短絡評価される RHS、既代入のキーや field、
+部分代入されたルートの自由な要素やパスの読みも保守的に拒否します。特に
+`struct-other-partial`、`if-one-branch-read`、#1481 N2 は、#493 なら自由な値と
+なる読みを拒否します。既存の所有権・field・forall の拒否の優先順は保ちます。
+
+init が一度も代入しないルートは symbolic な自由値のままです。issue の
+`init { g = on }` や `if choose { x = 1 } else { x = 0 }` の未代入の
+`on`/`choose` も該当します(#493)。check は受理し、explicit は従来どおり読みを
+拒否します。binder の値が決まらない場合(filter 付き・collection の形である
+#1520、X1/X2 など)だけ、#1518 の現在のキーの規則に従う既代入キーの読みを
+このルート全体の検査から免除します。値が決まる一部の domain では全ルートの
+被覆が必要で、型全体を走る forall は受理したままです。filter 付き・collection
+の binder をキーにする書き込みは、それを入れ子にした場合も、ループ後の読みの
+ための完全な被覆になりません。有限の `K` なら、例えば
+`forall k: K where true { m[k] = true }` の後で `g = m[0]` と読む代わりに
+`forall k: K { m[k] = true } g = m[0]` と書けます。読まない未代入ルートや
+従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
+
+breaking-removal sweep (#1451): base
+`c79016efeb630c717292e9392901cfe65ab40915` と head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4` のそれぞれの materialized tree で
+`fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
+の全 **597** 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
+exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 42 source
+を直接/compose の両方で検査した84形では **38** 形が `ok`→`error` になります。
+内訳は元の13形 × 2、#1481 N2 × 2、静的な部分 domain の2形 × 2、ループ後の
+coverage の3形 × 2 で、他の出力の変化はありません。
+[移行表](../design/DESIGN-bridge.md#assigned-root-read-order-1451)は、追加された
+静的な部分 domain とループ後の読みの族の書き直しも含みます。この一覧の完全性は
+測定した inline fixture 集合内のもので、全ての拒否されるプログラムの列挙ではありません。
+全代入の後へ読みを移すか、ルート全体を明示的に初期化します。従来自由だった値を
+選ぶ書き直しはモデルの範囲を狭めるため、設計上の判断が必要です。
+
 - 代入: `x = expr`、`m[k] = expr`、`m[k].field = expr`、`o.field = expr`
 - Set/Seq/relation の更新は**再代入イディオム**を使います:
   `s = s.add(x)`、`q = q.pop()`、`r = r.add(a, b)`

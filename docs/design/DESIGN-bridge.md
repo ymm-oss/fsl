@@ -280,7 +280,7 @@ gate. Requiring assigned roots to be complete before a read prevents newly
 admitted shapes from reading those defaults instead of their relational init
 values, on both the implementation and abstraction sides. Never-assigned roots
 remain free; legacy-accepted whole-value read-before-assignment is not repaired
-by this admission-only rule.
+by this admission-only rule. The separate #1451 gate below addresses those reads.
 
 Concrete coverage now counts resolved map-entry-field writes even when the legacy
 ownership probe succeeds. A complete map of single-field entries can therefore
@@ -347,6 +347,110 @@ state. New gate(a) and #1518 read-order diagnostics retain priority when they
 are the shared failure; gate(a) intentionally changes concrete messages on those
 main-rejected shapes. Check/refine report the saved ownership error for other
 admission refusals, including early reads of non-field-written roots.
+
+#### Assigned-root read order (#1451)
+
+After the existing ownership/field/forall gates accept an init, the shared
+runtime admission gate also checks ordered reads of every root init assigns
+anywhere, in assignment values/keys, if conditions and forall filters/bodies.
+Forall sources retain their separate existing validation. It reuses
+`walk_init` and the concrete root-coverage predicate and
+message: `init references state variable '<name>' before it is assigned`.
+Native check and ordinary verification return semantics/exit 2 with the
+containing statement's location. Compose, Worker check/verify and refinement's
+free-root constructor reach the same gate; runtime remains solver-independent.
+Existing shared ownership/field/forall refusals keep priority. This is a
+source-acceptance breaking removal, not a totality check.
+
+Coverage is whole-root, even for an already-written key/field, a syntactically
+present but short-circuited read, or a value left free on another branch or
+component. Thus `struct-other-partial`, `if-one-branch-read` and #1481 N2 now
+reject reads of #493-style free values because their root is may-assigned.
+A root never assigned anywhere remains free, including the issue's `on` and
+the `choose` condition of nondeterministic refinement init (#493). Check and
+symbolic verification retain those forms, while explicit still refuses them.
+Only unresolved binder values retain #1520's same-forall current-key exemption,
+subject to #1518's already-written-key rule, including filtered/collection
+X1/X2. Resolved binders use actual whole-root coverage: a full-domain typed
+loop is accepted, but a loop over only `0..0` cannot read its current `m[k]`
+when `m` has keys `0..1`, even if the remaining keys are written later.
+This does not promote the unresolved forms' explicit support.
+Binder-keyed filtered/collection writes do not establish the complete key set
+for a following read. Nesting an unresolved inner binder does not restore that
+coverage. This does not remove static nonempty proofs for fixed targets.
+Unread omitted roots and legacy-accepted partial init remain
+accepted. The expression-only read exemption never credits real assignment
+coverage or changes the initialized state.
+
+Sweep command: run `fslc check <form>` with the base/head binaries in each
+revision's own git-archive materialized tree. Measured base
+`c79016efeb630c717292e9392901cfe65ab40915`, head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`; binary SHA-256 respectively
+`e42827307a61957e16d6a53e12bf84216506fc7eaa2a25ccc3a0084874b748f2` and
+`15ae6af290ba67b7fa8801494ee62fe54b8def11dc1393ba9067553a78953a8b`.
+All **597** `.fsl` files under `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` have identical full stdout/stderr/exits (400 exit 0,
+191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline
+sweep covers the 36 author sources, N2 and five implementer fixtures, each
+direct and composed: 42 sources / 84 forms, base 80 exit 0 + 4 exit 2, head
+42 exit 0 + 42 exit 2. Exactly **38** forms become errors: the original 13 cases
+× 2, N2 × 2, the two static-subset cases × 2 and the three post-loop coverage
+cases × 2. Those are also the only full-output changes; no fields were
+excluded. N2 is not counted among the 597 corpus files.
+
+The table lists the targeted inline removal fixtures and a migration example
+for each; it is not an exhaustive list of all removed programs. It includes
+the original cases and the resolved-subset / post-loop coverage families.
+Bodies use `K = 0..1`, `R { on: Bool, other: Bool }`,
+and the corresponding regression's state declarations. Move reads after all
+required assignments or replace partial writes with a whole-value assignment;
+do not add a second overlapping write. Choosing a formerly free value, or
+filling a missing branch, intentionally restricts the model and is not an
+equivalence-preserving automatic repair.
+
+| Rejected source | Replacement init body |
+|---|---|
+| `root-value-before` | `on = false g = on` |
+| `root-unary-before` | `on = false g = not on` |
+| `if-condition-before` | `on = false if on { g = true } else { g = false }` |
+| `forall-body-before` | `on = false forall k in 0..1 { m[k] = on }` |
+| `map-index-read-before` | `m[0] = false m[1] = true k = 0 g = m[k]` |
+| `struct-root-before` | `r = R { on: false, other: true } g = r.on` |
+| `conditional-value-before` | `flag = true on = false g = if flag then on else false` |
+| `dead-rhs-before` | `on = false g = false and on` |
+| `map-key0-partial` | `m[0] = false m[1] = true g = m[0]` |
+| `map-key1-partial` | `m[0] = false m[1] = true g = m[1]` |
+| `struct-on-partial` | `r = R { on: false, other: true } g = r.on` |
+| `struct-other-partial` | `r = R { on: false, other: true } g = r.other` |
+| `if-one-branch-read` | `flag = false if flag { on = true } else { on = false } g = on` |
+| `1481-N2` (additional inline fixture) | `forall k: K { m[k] = Cell { flag: false, n: 0 } } done = m[0].n == 0` |
+| `static-subset-then-fill` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` |
+| `static-subset-only` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` — assigning formerly free `m[1]` and `seen[1]` narrows the model. |
+| `filtered-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+| `collection-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+| `nested-filter-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+
+For N2, `m[0].n` has no init assignment although root `m` is written. Its old
+check success and symbolic bounds violation are replaced by the root-read
+error; explicit/Monitor already refused with the same message. Native
+check/verify now locate the read at 5:44; legacy Monitor replay renders the
+same existing message without a location. The fixture is unchanged, only its
+test expectations change. Likewise, `issue-exact` is reclassified as a
+free-root preservation control rather than a refusal detector: `on` is never
+assigned anywhere. This is Part of #1451, not completion of that issue.
+
+Behavior notes: already-refused explicit inputs can gain a statement location
+(for example an unlocated early read becomes 3:10), while a never-assigned
+root's explicit refusal stays unlocated. With both a free and a later-assigned
+root, the named root can change (`choose` to `on`); a permitted unresolved
+current-key read beside a later-assigned root can similarly change `m` to `on`.
+Nested inputs can change from `nested forall in init is not supported` to the
+root-read error. Source admission can also preempt symbolic/auto diagnostics
+for outer-dependent nested ranges without changing their error exit.
+Compose runtime errors use physical names such as `part__x` and the component
+statement's line/column without a filename, like existing ownership errors.
+The remaining free/choose engine disagreement is tracked on #1451: check and
+symbolic verification retain these free-value forms, while explicit refuses them.
 
 ### 1.4 Expression evaluation
 

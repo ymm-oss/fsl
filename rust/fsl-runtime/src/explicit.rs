@@ -429,6 +429,7 @@ enum InitWalkMode<'a> {
     Concrete,
     LegacyConcrete,
     ScopedFields(&'a BTreeSet<String>),
+    ReadOrder(&'a BTreeSet<String>),
 }
 
 /// Names and declared types of state roots that `model`'s init never
@@ -951,11 +952,11 @@ pub fn check_init_write_ownership(model: &KernelModel) -> Result<(), RuntimeErro
         // Keep the first collision's legacy location for already rejected init.
         return Err(legacy_error.unwrap_or(error));
     }
+    let mut assigned_roots = BTreeSet::new();
+    collect_assigned_init_roots(&model.init, &mut assigned_roots);
     if let Some(legacy_error) = legacy_error {
         let mut field_roots = BTreeSet::new();
         collect_field_init_roots(&model.init, &mut field_roots);
-        let mut assigned_roots = BTreeSet::new();
-        collect_assigned_init_roots(&model.init, &mut assigned_roots);
         // Summarize coverage without read refusals or concrete-only restrictions.
         // Partial field-written roots keep the legacy error. When those roots
         // are complete, an early field read wins over partial other roots.
@@ -1013,6 +1014,15 @@ pub fn check_init_write_ownership(model: &KernelModel) -> Result<(), RuntimeErro
             return Err(legacy_error);
         }
     }
+    walk_init(
+        &model.init,
+        BTreeMap::new(),
+        BTreeSet::new(),
+        false,
+        &BTreeMap::new(),
+        model,
+        InitWalkMode::ReadOrder(&assigned_roots),
+    )?;
     Ok(())
 }
 
@@ -1436,12 +1446,13 @@ fn walk_init(
     mode: InitWalkMode<'_>,
 ) -> Result<(BTreeMap<String, Coverage>, BTreeSet<InitWriteKey>), RuntimeError> {
     let field_read_roots = match mode {
-        InitWalkMode::ScopedFields(roots) => Some(roots),
+        InitWalkMode::ScopedFields(roots) | InitWalkMode::ReadOrder(roots) => Some(roots),
         InitWalkMode::Concrete | InitWalkMode::LegacyConcrete => None,
     };
+    let read_order = matches!(mode, InitWalkMode::ReadOrder(_));
     let field_reads_only = field_read_roots.is_some();
     let legacy = matches!(mode, InitWalkMode::LegacyConcrete);
-    let proof_scope = field_reads_only.then_some(bound_names);
+    let proof_scope = matches!(mode, InitWalkMode::ScopedFields(_)).then_some(bound_names);
     for statement in statements {
         match statement {
             Statement::Assign {
@@ -1485,6 +1496,7 @@ fn walk_init(
                             model,
                             *span,
                             roots,
+                            read_order,
                         )?;
                     }
                     check_init_field_expr(
@@ -1494,6 +1506,7 @@ fn walk_init(
                         model,
                         *span,
                         roots,
+                        read_order,
                     )?;
                 } else {
                     // Concrete mode checks Index keys, not Field(Index) keys.
@@ -1519,7 +1532,7 @@ fn walk_init(
                 if in_forall && !field_reads_only {
                     return Err(runtime_error("nested forall in init is not supported"));
                 }
-                if let Some(roots) = field_read_roots {
+                if let Some(roots) = field_read_roots.filter(|_| !read_order) {
                     let (sources, _) = init_binder_exprs(binder);
                     for source in sources {
                         check_init_field_expr(
@@ -1529,6 +1542,7 @@ fn walk_init(
                             model,
                             *span,
                             roots,
+                            read_order,
                         )?;
                     }
                 }
@@ -1565,6 +1579,18 @@ fn walk_init(
                 let binder_values = compute_binder_values(binder, model, proof_scope)?;
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
+                // Only unresolved binders retain #1520's current-key exemption.
+                // compute_binder_values leaves filtered binders unresolved for their read check.
+                let mut nested_roots = BTreeSet::new();
+                let nested_mode = if let InitWalkMode::ReadOrder(roots) = mode
+                    && nested_bound[binder_name(binder)].is_none()
+                {
+                    collect_assigned_init_roots(statements, &mut nested_roots);
+                    nested_roots = roots.difference(&nested_roots).cloned().collect();
+                    InitWalkMode::ReadOrder(&nested_roots)
+                } else {
+                    mode
+                };
                 if let Some(where_expr) = where_expr {
                     if let Some(roots) = field_read_roots {
                         check_init_field_expr(
@@ -1573,7 +1599,8 @@ fn walk_init(
                             &nested_bound,
                             model,
                             *span,
-                            roots,
+                            if read_order { &nested_roots } else { roots },
+                            read_order,
                         )?;
                     } else {
                         check_init_expr(where_expr, &definitely_assigned, &nested_bound, model)?;
@@ -1587,7 +1614,7 @@ fn walk_init(
                     true,
                     &nested_bound,
                     model,
-                    mode,
+                    nested_mode,
                 )?;
                 if !init_binder_is_nonempty(binder, model, proof_scope) {
                     definitely_assigned = before_forall;
@@ -1607,6 +1634,7 @@ fn walk_init(
                         model,
                         *span,
                         roots,
+                        read_order,
                     )?;
                 } else {
                     check_init_expr(condition, &definitely_assigned, bound_names, model)?;
@@ -1644,7 +1672,21 @@ fn check_init_field_expr(
     model: &KernelModel,
     span: fsl_core::Span,
     roots: &BTreeSet<String>,
+    read_order: bool,
 ) -> Result<(), RuntimeError> {
+    if read_order {
+        // Exempt free/current-forall roots only in this expression's read check.
+        let mut assigned = assigned.clone();
+        assigned.extend(
+            model
+                .state
+                .iter()
+                .filter(|(name, _)| !roots.contains(name))
+                .map(|(name, _)| (name.clone(), Coverage::Full)),
+        );
+        return check_init_expr(expr, &assigned, bound_names, model)
+            .map_err(|error| runtime_error_at(error.message, span));
+    }
     let locals = bound_names.keys().cloned().collect::<Vec<_>>();
     check_init_read_expr(
         expr,
