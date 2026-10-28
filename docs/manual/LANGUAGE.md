@@ -987,6 +987,47 @@ variable.
 
 ## 4. Statements (init / action bodies)
 
+Init assignment values/keys, if conditions and forall filters/bodies may read
+a root assigned anywhere in init only after complete definite assignment
+(#1451). Forall sources keep their separate existing source/domain rules.
+Check rejects an early read with
+`init references state variable '<name>' before it is assigned`, kind
+`semantics`, exit 2, locating the containing statement; ordinary verify entries
+return the same refusal before selecting an engine. Coverage is root-wide:
+every Map key/struct field and both branches must be covered. Even a
+short-circuited RHS, an already-written key/field, or a free component/path of
+a partially assigned root is rejected. In particular, `struct-other-partial`,
+`if-one-branch-read`, and #1481 N2 reject reads of values that would otherwise
+be free under #493. Existing ownership/field/forall refusals keep priority.
+
+A root init never assigns remains a symbolic free value, including the issue's
+`init { g = on }` and `if choose { x = 1 } else { x = 0 }` with unassigned
+`on`/`choose` (#493). Check still accepts them; explicit still refuses their
+reads. Only when binder values are unresolved, including filtered/collection
+forms (#1520, X1/X2), does the #1518 current-key rule exempt an already-written
+current key from this root-wide check. A resolved partial domain still requires
+full root coverage; a typed full-domain forall remains accepted.
+Binder-keyed writes under filtered/collection binders, including a nested such
+binder, do not prove full coverage for a subsequent read outside the loop.
+For example, replace `forall k: K where true { m[k] = true }` followed by
+`g = m[0]` with `forall k: K { m[k] = true } g = m[0]` for a finite `K`.
+Unread omitted roots and legacy-accepted partial init remain
+accepted; check does not require a deterministic initial state.
+
+Breaking-removal sweep (#1451): `fslc check <form>` in each revision's own
+materialized tree, base `c79016efeb630c717292e9392901cfe65ab40915` versus
+head `2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`: all **597** `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/` have identical full outputs
+and exits (400 exit 0, 191 exit 2, 6 exit 1); corpus `ok`→`error` set **empty**.
+Separately, 42 inline sources, each direct and composed (84 forms), have **38**
+`ok`→`error` transitions: the original 13 cases × 2, #1481 N2 × 2, two static
+subset cases × 2 and three post-loop coverage cases × 2; no other output changes. The
+[migration table](../design/DESIGN-bridge.md#assigned-root-read-order-1451)
+also covers the added static-subset and post-loop coverage families. Its list is
+scoped to the measured inline fixtures, not every possible removed program.
+Move a read after complete assignment or explicitly initialize the whole root;
+choosing a formerly free value narrows the model and requires a design decision.
+
 - Assignment: `x = expr`, `m[k] = expr`, `m[k].field = expr`, `o.field = expr`
 - Updating a Set/Seq/relation uses the **reassignment idiom**:
   `s = s.add(x)`, `q = q.pop()`, `r = r.add(a, b)`
