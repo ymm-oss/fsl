@@ -575,7 +575,7 @@ outside {0,1,2}, and inside `run_db_check` no `.fsl` input can produce one.
 `check_db` calls `validate_db` first, so every input `run_verify` would reject
 with status 2 is already rejected before the kernel runs; `run_verify`'s
 remaining non-{0,1} exits are status 3 from `Z3Solver::new`, from
-`replay_bmc_witnesses`, and from `render_explicit_output` — internal
+`replay_bmc_witnesses_with_bounds`, and from `render_explicit_output` — internal
 inconsistencies, not spec properties. The guard is defensive depth against a
 verifier fault, not a reachable behavior, so no fixture can calibrate it and an
 operator for it would only ever report "primary did not fail". An operator whose

@@ -277,7 +277,7 @@ The `replay` column rests on a source-verified structural fact: every
 native verify run replays *every* symbolic witness (violation trace,
 leadsTo violation trace, each reachable witness trace, deadlock trace)
 through the solver-independent Monitor before rendering
-(`verification_output.rs::replay_bmc_witnesses`, exit 3 on failure, called
+(`verification_output.rs::replay_bmc_witnesses_with_bounds`, exit 3 on failure, called
 on both the BMC seam and the explicit renderer). A cited test asserting
 exit 0/1 on a witnessed/violated verdict is therefore genuine replay
 evidence: a Monitor rejection would have produced exit 3 and failed the
