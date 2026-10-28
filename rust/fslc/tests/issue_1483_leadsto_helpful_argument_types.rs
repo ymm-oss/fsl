@@ -12,7 +12,6 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// The abs(true) issue reproducer is not asserted: abs operand typing is a separate validation gap.
 const BINDER: &str = "spec P {
   enum Color { Red, Blue }
   type Case = 0..1
@@ -39,12 +38,13 @@ fn fixture(params: &str, argument: &str) -> String {
     )
 }
 
-fn run_check(binary: &Path, directory: &Path, file: &str) -> (Value, i32) {
+fn run_cli(binary: &Path, directory: &Path, args: &[&str]) -> (Value, i32) {
     let output = Command::new(binary)
-        .args(["check", file])
+        .args(args)
+        .env_remove("FSLC_CACHE")
         .current_dir(directory)
         .output()
-        .expect("native check");
+        .expect("native command");
     assert!(output.stderr.is_empty(), "{:?}", output.stderr);
     (
         serde_json::from_slice(&output.stdout).expect("native JSON"),
@@ -55,6 +55,10 @@ fn run_check(binary: &Path, directory: &Path, file: &str) -> (Value, i32) {
 fn cases(reject: bool) -> Vec<(&'static str, String)> {
     if reject {
         vec![
+            (
+                "abs-bool-issue-reproducer",
+                BINDER.replace("helpful step(c)", "helpful step(abs(true))"),
+            ),
             ("bool-to-enum", fixture("l: Level", "true")),
             ("int-to-enum", fixture("l: Level", "1")),
             ("wrong-enum", fixture("l: Level", "Red")),
@@ -96,8 +100,8 @@ fn check_cases(reject: bool) {
             "issue-1483-helpful-case",
             &[("a.fsl", &source), ("c.fsl", COMPOSE)],
         );
-        let direct = run_check(&binary, &directory, "a.fsl");
-        let composed = run_check(&binary, &directory, "c.fsl");
+        let direct = run_cli(&binary, &directory, &["check", "a.fsl"]);
+        let composed = run_cli(&binary, &directory, &["check", "c.fsl"]);
         agreement_failures +=
             usize::from(direct.1 != composed.1 || direct.0.get("kind") != composed.0.get("kind"));
         for (route, (output, code)) in [("direct", &direct), ("compose", &composed)] {
@@ -172,4 +176,38 @@ fn wrong_kind_helpful_arguments_are_rejected() {
 #[test]
 fn well_typed_helpful_arguments_are_accepted() {
     check_cases(false);
+}
+
+#[test]
+fn state_independence_is_an_induction_only_restriction() {
+    let binary = Path::new(env!("CARGO_BIN_EXE_fslc"));
+    let source = BINDER.replace("helpful step(c)", "helpful step(level[c])");
+    let directory = compose_scratch::scratch("issue-1483-engines", &[("a.fsl", &source)]);
+    let (checked, code) = run_cli(binary, &directory, &["check", "a.fsl"]);
+    assert_eq!((checked["result"].as_str(), code), (Some("ok"), 0));
+    for engine in ["bmc", "induction"] {
+        let (result, code) = run_cli(
+            binary,
+            &directory,
+            &[
+                "verify",
+                "a.fsl",
+                "--engine",
+                engine,
+                "--depth",
+                "3",
+                "--no-cache",
+            ],
+        );
+        if engine == "induction" {
+            assert_eq!(code, 2, "{result}");
+            assert_eq!(result["result"], "error", "{result}");
+            assert!(result["message"].as_str().is_some_and(|m| m.contains(
+                    "helpful action arguments must be state-independent leadsto binders, constants, enum members, or arithmetic (+, -, *) over those values"
+                )), "{result}");
+        } else {
+            assert_eq!(code, 0, "{result}");
+            assert_eq!(result["result"], "verified", "{result}");
+        }
+    }
 }

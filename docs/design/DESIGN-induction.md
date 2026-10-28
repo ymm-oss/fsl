@@ -108,6 +108,11 @@ remain total; this probe does not add an i64-overflow or Map key-domain proof.
 If the base BMC has already found a real `leadsTo` counterexample, a refused
 optional rank diagnosis preserves that original `violated` verdict (exit 1).
 
+Helpful argument state independence is an induction-only restriction (#1483):
+`check` validates action parameter types, not state independence; BMC accepts well-typed state reads.
+Induction uses `HELPFUL_ARG_HINT` and `eval_state_independent` in rust/fsl-verifier/src/induction.rs
+to refuse state reads and select a fixed action instance for each leadsTo binding.
+
 **With one or more `helpful action(args)` lines**, the third obligation is
 relaxed for non-matching actions, and two extra obligations are added to
 compensate (`bmc.py` `_prove_leadsto_rank_helpful_fairness`,
