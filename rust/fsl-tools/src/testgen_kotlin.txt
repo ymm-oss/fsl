@@ -44,12 +44,12 @@ const val ADAPTER_NOT_WIRED: String = __NOT_WIRED_MESSAGE__
 // shapes. Normalize integral values to Long recursively through List/Map before
 // equality, preserving exact list order/length and Float/Double distinctions.
 fun normalizeIntegral(value: Any?): Any? = when (value) {
-    is Byte -> (value as Byte).toLong()
-    is Short -> (value as Short).toLong()
-    is Int -> (value as Int).toLong()
-    is Long -> (value as Long).toLong()
-    is List<*> -> (value as List<*>).map { normalizeIntegral(it) }
-    is Map<*, *> -> (value as Map<*, *>).mapValues { normalizeIntegral(it.value) }
+    is Byte -> value.toLong()
+    is Short -> value.toLong()
+    is Int -> value.toLong()
+    is Long -> value
+    is List<*> -> value.map { normalizeIntegral(it) }
+    is Map<*, *> -> value.mapValues { normalizeIntegral(it.value) }
     else -> value
 }
 
