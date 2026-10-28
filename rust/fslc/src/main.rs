@@ -12987,6 +12987,52 @@ fn report_verification_error(verification: &Value, status: i32) -> Option<(Value
     (verification["result"] == "error").then(|| (verification.clone(), status))
 }
 
+/// Baselines are distinct results. Direct-report errors stay open for the
+/// outer owner; approval-only renderers retain their own admission and finish.
+fn report_verification_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    edition: Option<&SourceEdition>,
+) -> (Value, i32) {
+    let result = if edition.is_some() {
+        run_verify_admitted_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            engine,
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+            None,
+        )
+    } else {
+        run_verify_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            engine,
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        )
+    };
+    match edition {
+        Some(edition) if result.0["result"] != "error" => edition.finish(result),
+        _ => result,
+    }
+}
+
+fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (Value, i32) {
+    if result.0["result"] == "generated" {
+        result
+    } else {
+        finish_admitted(result, editions, false)
+    }
+}
+
 fn run_html_report(
     path: &Path,
     depth: usize,
@@ -12994,7 +13040,11 @@ fn run_html_report(
     engine: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    run_html_report_with_timing(path, depth, deadlock_mode, engine, output_path, false)
+    let source = match read_spec_source(path) {
+        Ok(source) => source,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
+    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
 }
 
 fn run_html_report_with_timing(
@@ -13005,23 +13055,26 @@ fn run_html_report_with_timing(
     output_path: Option<&Path>,
     no_timing: bool,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    if no_timing {
-        run_html_report_from_source_with_timing(
-            path,
-            &source,
-            depth,
-            deadlock_mode,
-            engine,
-            output_path,
-            true,
-        )
-    } else {
-        run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
-    }
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        output_path.is_none(),
+        |sources, editions| {
+            finish_admitted_report(
+                run_html_report_from_source_with_timing(
+                    path,
+                    &sources[0],
+                    depth,
+                    deadlock_mode,
+                    engine,
+                    output_path,
+                    no_timing,
+                    Some(&editions[0]),
+                ),
+                editions,
+            )
+        },
+    )
 }
 
 /// Render one HTML report from one caller-owned root-source snapshot.
@@ -13045,9 +13098,11 @@ fn run_html_report_from_source(
         engine,
         output_path,
         false,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_html_report_from_source_with_timing(
     path: &Path,
     source: &str,
@@ -13056,16 +13111,10 @@ fn run_html_report_from_source_with_timing(
     engine: &str,
     output_path: Option<&Path>,
     no_timing: bool,
+    edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let (verification, verification_status) = run_verify_from_source(
-        path,
-        source,
-        depth,
-        deadlock_mode,
-        engine,
-        DEFAULT_EXPLICIT_BUDGET,
-        1,
-    );
+    let (verification, verification_status) =
+        report_verification_from_source(path, source, depth, deadlock_mode, engine, edition);
     if let Some(error) = report_verification_error(&verification, verification_status) {
         return error;
     }
@@ -13742,7 +13791,33 @@ fn run_ledger_report_from_source(
     approval_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, true) {
+    run_admitted_roots(
+        vec![(request.path, Ok(source.to_owned()))],
+        None,
+        request.output_path.is_none(),
+        |sources, editions| {
+            finish_admitted_report(
+                run_ledger_report_admitted_from_source(
+                    request,
+                    &sources[0],
+                    approval_paths,
+                    trust_keys,
+                    &editions[0],
+                ),
+                editions,
+            )
+        },
+    )
+}
+
+fn run_ledger_report_admitted_from_source(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+    approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+    edition: &SourceEdition,
+) -> (Value, i32) {
+    let prepared = match prepare_ledger_report_from_source(request, source, true, Some(edition)) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -13786,7 +13861,7 @@ fn generate_unapproved_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, false) {
+    let prepared = match prepare_ledger_report_from_source(request, source, false, None) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -13797,15 +13872,15 @@ fn prepare_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
     direct_report: bool,
+    edition: Option<&SourceEdition>,
 ) -> Result<PreparedLedgerReport, (Value, i32)> {
-    let (verification, verification_status) = run_verify_from_source(
+    let (verification, verification_status) = report_verification_from_source(
         request.path,
         source,
         request.depth,
         request.deadlock_mode,
         request.engine,
-        DEFAULT_EXPLICIT_BUDGET,
-        1,
+        edition,
     );
     // Approval-only rerendering deliberately keeps processing ancillary inputs.
     // Direct reports must preserve this error before replay, evidence or witnesses.
