@@ -794,6 +794,24 @@ mod tests {
 
     const TEST_SOLVER_VERSION: &str = "Z3 4.16.0.0";
 
+    #[test]
+    fn issue_1543_worker_init_failure_location() {
+        // Acceptance replay constructs Monitor before the browser SMT boundary.
+        let request: Request = serde_json::from_value(json!({
+            "cmd": "verify", "source_file": "model.fsl",
+            "source": "requirements InitFailure {\n  type K = 0..1\n  struct One { v: Bool }\n  state { m: Map<K, One> }\n  init { forall k in 0..2 { m[k].v = true } }\n  requirement REQ-1 \"step\" { action step() { } }\n  acceptance AC-1 \"ready\" { step() expect true }\n}\n"
+        })).expect("Worker request");
+        let value = block_on(verify(&request, TEST_SOLVER_VERSION));
+        assert_eq!(
+            value,
+            error(
+                TEST_SOLVER_VERSION,
+                "semantics",
+                "map assignment index outside key domain in init at 5:29"
+            )
+        );
+    }
+
     // Messages native `fslc check` reports for the specialized-validation
     // fixtures below (issue #1163), and the Agent analysis verdict it reports
     // for `issue_468_unsafe_graph.fsl`.

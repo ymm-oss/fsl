@@ -575,9 +575,10 @@ fn init_failure_evidence(case: &Case, observations: &[(&str, (i32, Value)); 3]) 
     let mut failures = Vec::new();
     let (oracle_status, oracle) = &observations[2].1;
     let source = case.source(true);
-    // Init errors have no loc/trace. The symbolic diagnostic appends the
-    // enclosing failure-site statement's position; explicit omits it. This
-    // is the only normalization (r2 lane decision), with a live suffix check.
+    // Init errors have no loc/trace. Since #1543 explicit appends the same
+    // enclosing failure-site statement's position as the symbolic engines.
+    // The expected position is computed from the generated source, never
+    // from any engine's output, and checked live on explicit's message.
     let marker = if case.failure_stage == "body" {
         "if 1 /"
     } else {
@@ -589,20 +590,17 @@ fn init_failure_evidence(case: &Case, observations: &[(&str, (i32, Value)); 3]) 
     let prefix = &source[..offset];
     let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
     let column = prefix.rsplit('\n').next().expect("line prefix").len() + 1;
+    let expected_message = oracle["message"]
+        .as_str()
+        .expect("explicit init error message");
+    let suffix = format!(" in init at {line}:{column}");
+    if !expected_message.ends_with(&suffix) {
+        failures.push(format!(
+            "{} explicit: expected init error message ending with {suffix:?}; produced {oracle}",
+            case.name
+        ));
+    }
     for (engine, (status, report)) in observations {
-        let expected_message = if *engine == "explicit" {
-            oracle["message"]
-                .as_str()
-                .expect("explicit init error message")
-                .to_owned()
-        } else {
-            format!(
-                "{} in init at {line}:{column}",
-                oracle["message"]
-                    .as_str()
-                    .expect("explicit init error message")
-            )
-        };
         let mut normalized = report.clone();
         normalized["message"] = oracle["message"].clone();
         if *oracle_status != 2

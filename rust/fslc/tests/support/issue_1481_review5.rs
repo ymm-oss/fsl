@@ -247,7 +247,7 @@ macro_rules! probe_cell {
 }
 
 // Superset coverage does not authorize an out-of-domain write. Preserve the
-// symbolic diagnostic's location TEXT and concrete diagnostic's missing loc.
+// symbolic and concrete diagnostics' location TEXT, without a structured loc.
 probe_cell!(
     l3_range_over_domain,
     OVER_DOMAIN,
@@ -255,7 +255,10 @@ probe_cell!(
         "semantics",
         "map assignment index outside key domain in init at 5:29"
     )),
-    Some(("semantics", "map assignment index outside key domain")),
+    Some((
+        "semantics",
+        "map assignment index outside key domain in init at 5:29"
+    )),
     Value::Null
 );
 // Relational repetition requires both false and true in the same slot, not
@@ -431,7 +434,7 @@ fn require_auto(source: &str) {
             without_versions(actual, Consumer::Explicit),
             json!({
                 "fsl": "1.0", "result": "error", "kind": "semantics",
-                "message": "map assignment index outside key domain"
+                "message": "map assignment index outside key domain in init at 5:29"
             })
         );
     } else {
