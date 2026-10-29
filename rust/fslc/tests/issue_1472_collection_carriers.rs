@@ -148,8 +148,8 @@ const CASES: &[Case] = &[
         init: "ys = Set {} xs = Set {}",
         actions: "action addy() { ys = ys.add(2, 2) } action snap() { requires ys.contains(2, 2) xs = ys }",
         property: "not xs.contains(2, 2)",
-        actual: "Relation(N, N)",
-        expected: "Relation(M, M)",
+        actual: r#"Relation(Named("N"), Named("N"))"#,
+        expected: r#"Relation(Named("M"), Named("M"))"#,
         loc: (7, 82),
     },
     Case {
@@ -168,8 +168,8 @@ const CASES: &[Case] = &[
         init: "r = Set {} q = Set {} flag = false",
         actions: "action go() { requires not flag r = r.add(1, 2) flag = true }",
         property: "not reachable(if flag then r else q, 1, 2)",
-        actual: "Relation(M, M)",
-        expected: "Relation(N, N)",
+        actual: r#"Relation(Named("M"), Named("M"))"#,
+        expected: r#"Relation(Named("N"), Named("N"))"#,
         loc: (8, 51),
     },
     Case {
