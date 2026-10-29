@@ -300,5 +300,11 @@ fn refused_baseline_has_no_progress() {
     assert!(output.stderr.is_empty(), "{output:?}");
     let value: Value = serde_json::from_slice(&output.stdout).expect("baseline JSON");
     assert_eq!(value["result"], "violated");
+    // Main bc14d885's BMC refusal has no engine key; rejected auto instead
+    // carries engine:"explicit". Pin the route without comparing run metrics.
+    assert!(
+        value.get("engine").is_none(),
+        "must emit the BMC rerun's envelope, not the rejected auto envelope: {value}"
+    );
     assert!(value.get("mutants").is_none());
 }
