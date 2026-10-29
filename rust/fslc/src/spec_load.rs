@@ -203,6 +203,15 @@ pub fn kernel_load_error(
     SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_core_error(error)))
 }
 
+/// Render a core diagnostic without discarding its classification or origin.
+#[must_use]
+pub fn render_core_error(output: Map<String, Value>, error: &fsl_core::CoreError) -> Value {
+    render_spec_load_error(
+        output,
+        &SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_core_error(error))),
+    )
+}
+
 /// Render a classified spec-load failure into the public error envelope.
 #[must_use]
 pub fn render_spec_load_error(mut output: Map<String, Value>, error: &SpecLoadError) -> Value {

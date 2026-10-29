@@ -273,7 +273,7 @@ fn insert_message_hint(output: &mut Map<String, Value>, message: &str, hint: Opt
         );
     }
     // A core error flattened to a `String` before it reaches a renderer (for
-    // example `check_stages::validate_specialized_document`) has lost its
+    // legacy string-only callers) has lost its
     // `CoreErrorKind`, so this rule still covers that path.
     if message.starts_with("unknown ai hard-contract rule '") {
         output.insert("hint".to_owned(), json!(AI_HARD_CONTRACT_RULE_HINT));

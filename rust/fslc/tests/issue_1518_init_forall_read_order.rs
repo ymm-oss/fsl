@@ -239,7 +239,7 @@ macro_rules! positive_cell {
     ($id:ident, $source:expr, $state:expr) => {
         mod $id {
             use super::*;
-            const SOURCE: &str = $source;
+            pub(super) const SOURCE: &str = $source;
             #[test]
             fn check() {
                 assert_clean(SOURCE, "check", "ok", None);
@@ -814,75 +814,9 @@ fn ea_auto_falls_back_to_symbolic_free_value_semantics() {
     );
 }
 
-fn assert_legacy_current_key_refused(source: &str, consumer: &str) {
-    let (actual, exit) = Fixture::new(source).observe(consumer);
-    assert_eq!(exit, 2, "{consumer}: {actual:#}");
-    assert_eq!(actual["result"], "error", "{consumer}: {actual:#}");
-    assert_eq!(actual["kind"], "semantics", "{consumer}: {actual:#}");
-    assert_eq!(
-        actual["message"], "init references state variable 'm' before it is assigned",
-        "{consumer}: existing deterministic-init limitation: {actual:#}"
-    );
-    for field in [
-        "loc",
-        "violation_kind",
-        "invariant",
-        "action",
-        "last_action",
-        "violation",
-        "final_state",
-    ] {
-        assert!(actual.get(field).is_none(), "{consumer}: {actual:#}");
-    }
-}
-
-macro_rules! legacy_current_key_cell {
-    ($id:ident, $source:expr) => {
-        mod $id {
-            use super::*;
-            const SOURCE: &str = $source;
-            #[test]
-            fn check() {
-                assert_clean(SOURCE, "check", "ok", None);
-            }
-            #[test]
-            fn bmc() {
-                assert_clean(SOURCE, "bmc", "verified", None);
-            }
-            #[test]
-            fn induction() {
-                assert_clean(SOURCE, "induction", "proved", None);
-            }
-            #[test]
-            fn explicit() {
-                assert_legacy_current_key_refused(SOURCE, "explicit");
-            }
-            #[test]
-            fn monitor() {
-                assert_legacy_current_key_refused(SOURCE, "Monitor");
-            }
-            // In addition to the five consumers, pin the auto fallback envelope.
-            #[test]
-            fn auto() {
-                let (actual, exit) = Fixture::new(SOURCE).observe("auto");
-                assert_verdict("auto", &actual, exit, 0, "verified", None);
-                assert_eq!(actual["engine"], "bmc", "auto: {actual:#}");
-                assert_eq!(
-                    actual["engine_fallback"],
-                    json!({
-                        "from": "explicit", "kind": "unsupported",
-                        "reason": "init references state variable 'm' before it is assigned",
-                    }),
-                    "auto: exact existing-init fallback: {actual:#}"
-                );
-            }
-        }
-    };
-}
-
-// X1/X2 record false refusals by explicit/Monitor already present at base,
-// not incorrect verdicts. Removing these existing limitations belongs to #1520.
-legacy_current_key_cell!(
+// X1/X2 have static domains: current-key reads after writes initialize the
+// same state in symbolic verification, explicit and Monitor (#1520).
+positive_cell!(
     x1_filter_current_key,
     r"spec ReviewFilteredCurrentKey {
   type K = 0..1
@@ -891,10 +825,11 @@ legacy_current_key_cell!(
   action idle() { }
   invariant Initialized { m[0] and m[1] and seen[0] and seen[1] }
 }
-"
+",
+    json!({"m": {"0": true, "1": true}, "seen": {"0": true, "1": true}})
 );
 
-legacy_current_key_cell!(
+positive_cell!(
     x2_collection_current_key,
     r"spec ReviewCollectionCurrentKey {
   type K = 0..1
@@ -903,7 +838,33 @@ legacy_current_key_cell!(
   action idle() { }
   invariant Initialized { m[0] and m[1] and seen[0] and seen[1] }
 }
-"
+",
+    json!({"m": {"0": true, "1": true}, "seen": {"0": true, "1": true}})
+);
+
+#[test]
+fn static_current_key_auto_uses_explicit_without_fallback() {
+    let observations = [
+        x1_filter_current_key::SOURCE,
+        x2_collection_current_key::SOURCE,
+    ]
+    .map(|source| Fixture::new(source).observe("auto"));
+    for (actual, exit) in observations {
+        assert_verdict("auto", &actual, exit, 0, "proved", None);
+        assert_eq!(actual["engine"], "explicit", "auto: {actual:#}");
+        assert!(actual.get("engine_fallback").is_none(), "auto: {actual:#}");
+    }
+}
+
+empty_cell!(
+    n1_empty_filtered_map,
+    "spec EmptyMap { type K = 0..1 state { m: Map<K, Bool> }
+     init { forall k: K where false { m[k] = true } } action idle() {}
+     invariant Initialized { m[0] and m[1] } }",
+    "invariant",
+    "Initialized",
+    "m",
+    false
 );
 
 // C1/C2 are order-independent init forms, intentionally removed by the approved

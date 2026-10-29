@@ -1086,11 +1086,13 @@ Monitor は exit 2 で拒否し、既定値で埋めません。symbolic init �
 `where flag and k == 0` の固定 target の書き込みは、実行時の domain が非空でも
 explicit と Monitor が `init does not assign` で拒否するのであって、誤った verdict ではありません。
 
-別の既存の explicit の制限も残ります (#1520)。where の付いた binder や collection の
-binder では、今の key を書いた後に読む形は #1518 の読み出し規則では許しますが、
-explicit と Monitor は base と同じく `before it is assigned` で拒否します。
-これは binder-key の覆いの保守的な制限であり、誤った verdict ではありません。
-`--engine auto` は BMC へ回ります。これらの形への対応は #1520 で扱います。
+explicit、Monitor、refine は状態に依存しない filter 付きの型・range と collection の
+binder domain を静的に求め、init の key の覆いに使います (#1520)。選んだ key が root
+全体を覆えば、今の key を書いた後に読む形に対応し、`--engine auto` も fallback せず
+explicit を使います。空の domain は覆いを足さず、部分 domain は選んだ key だけを覆い、
+状態に依存する filter は未解決のままです。check 時の読み出し順の規則は変えません。
+同名の const を隠す外の binder に依存した入れ子の固定 target の初期化は、以前は誤って
+`refines` になりましたが、今は refine が拒否します。
 
 breaking removal の sweep (#1518): base
 `28c4eab710f8d83e766bb0e7c7e006d09d7777d8` と、head
@@ -2496,6 +2498,15 @@ compose OrderSystem {
   宣言の物理名 `alias__x` と、requirements の `branches` の action を分けた
   `submit__b1` です。作られた名前を参照することはできます(refinement の対応が
   `submit__b1` を参照するように)。
+  破壊的な削除 (#1600): 次のエディションの requirements では、関係の役割
+  (`Claim belongs to User as __owner via approve`)、resource の名前
+  (`resource __r: Amount = 0`)、measure の名前
+  (`measure __m = count Claim in Approved`)にも `__` を含められません。
+  これらは以前は `check` を通っていました。`fslc check` は宣言の位置で拒否し
+  (`kind:"name"`、exit 2)、たとえば
+  `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`
+  と報告します。役割・resource・measure を `__` を含まない名前に変え、その参照も
+  更新してください。
 - JSON の表示: 作られた名前は `__` を `.` に置き換えた 1 つの綴りで、すべての
   出力に出ます。物理名 `alias__x` は `alias.x`、`branches` で分けた
   `submit__b1` は `submit.b1` です(状態のキー、action 名、invariant /
@@ -3760,8 +3771,8 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `check hard { }` ブロックも — `"description text"` タグを受け付けません。ここの
 すべてのフィールドは、§13.1 の宣言タグの規約とは違い、裸の識別子または数値です。
 
-カーネル lowering の境界では、単独の `ai_component` は `tool` または `tools` で
-ツールを 1 つ以上宣言する必要があります。
+共有の validation では、単独でも project 内でも、すべての `ai_component` が
+`tool` または `tools` でツールを 1 つ以上宣言する必要があります。
 ツールを省略した形の受理は**破壊的な削除**(#1546)です。
 `ai_component NoTools { }` と `ai_component NoTools { authority { } }` はどちらも
 カーネル lowering の前に `kind: "type"`、そのままの message
@@ -3770,9 +3781,60 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `Tool` enum の名前でなく、この利用者の component を名指す診断を返し、Worker の
 check も一致します。ツールが 1 つ以上あれば、空の `authority { }` は引き続き有効です。
 既存の不正な hard rule と未宣言の authority tool のエラーは引き続き優先され、
-各コマンドの従来の envelope を保ちます。この変更は**カーネル境界のみ**です。
-`ai compat`、`ai replay`、`ai_project` の経路は base と同じで、ツールの無い
-component を受理する場合があります。この検査の穴は #1545 で追跡されています。
+各コマンドの従来の envelope を保ちます。#1545 は同じ no-tools の拒否を
+`ai compat`、`ai replay`、project の `ai check`、native/Worker の project 検査にも
+適用します。空の authority block を含むツールの無い component の受理に対する
+**破壊的な削除**です。check と specialized-preflight の道では、単独の component に対する
+#1546 の envelope は変えません。lowering だけの道での fallback 重複の優先順位の例外は
+下記の実測に示します。
+native の `check` と共有 Worker 検査段階は、未宣言の authority tool または未知の
+hard rule を持つ project 内のすべての component も拒否し、`ok` ではなく project の
+`ai check` と同じ診断(semantics、exit 2)を返します。generic な project 検査で従来
+受理した fixture `error_envelope_ai_project_unknown_tool.fsl` と
+`error_envelope_ai_project_invalid_rule.fsl` の受理も削除されます。
+project の意味論的な座標は引き続き component block 内が基準です(#1574)。
+LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
+
+**境界 sweep の実測 (#1545):** B
+`d37a215e8df6c00222e6aafd94bc9b556c445521` と H
+`99810256faca086360c6ca4233f935b9b56b1ec8` を、それぞれ独立した git archive の
+tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
+tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
+`rust/fslc/tests/fixtures/` の全597 `.fsl`、Markdown 30件、新しい test の inline 入力
+12出現を各 tree で検査しました(**計1,278検査**)。Markdown の4件は compiler が
+FSL fence を認識します。bash fence だけの `examples/ai/README.md` も含め、30件を
+すべて検査しました。cache と unstable の環境上書きは unset、
+除外した出力 field はありません。corpus の ok/exit0 → error/exit2 はちょうど
+**3件**で、`error_envelope_ai_project_unknown_tool.fsl`、
+`error_envelope_ai_project_invalid_rule.fsl`、`error_envelope_literate_ai_project.md` です。
+Markdown project は type、`ai_component 'EnvelopeParityLiterateProject' declares no tools`、
+block 内 loc 1:1、exit 2 を返します。単独の literate component の拒否と、複数 block の
+toggle 2件の受理は変わりません。新しい test の inline の削除は
+**4出現**です: CLI 側と Worker-shaped 側のツールの無い component を含む project
+(2出現)、空の authority だけの component を含む project(1出現)、正常な最初の
+component の後ろに不正な component がある project(1出現)。書き直した既存の inline
+FSL は0件です。ツールの無い3出現は block 内 loc 1:1 の type、後ろの未宣言 tool は
+loc なしの semantics を返します。この check だけの sweep で、それ以外の exit/result と stdout/stderr 全文は
+変わりません。意図した tool を宣言するか不要な component を除き、不明な tool/rule
+の参照を修正してください。
+
+lowering だけの道も同じ validation 全体を使います。同じ B/H で `analyze <relative-path>`
+を AI に言及する corpus 18入力と明示的な4形式に実行し、変化した形式と compose の対照を
+`scenarios <relative-path> --depth 2 --deadlock ignore` と `explain <relative-path>` でも
+比較しました。コマンドと形式の30組 × 2バイナリ = 計60観測で、
+analyze(22形式)、scenarios(4形式)、explain(4形式)は各々
+**ok→error 1、error→ok 0、error の envelope 変化2** です。破壊的削除は
+`tool_authority` だけを選んで生成された参照から隠れていた未宣言 authority tool X で、
+成功の代わりに semantics、`unknown tool 'X' in authority block`、loc なし、exit 2 を
+返します。ツール無しで fallback x が重複すると、
+type/`ai_component 'DupNoTools' declares no tools`/loc 1:1 から
+semantics/`duplicate fallback reason 'x'`/loc なしへ変わります(ともに exit 2)。ツールが
+ある場合は、loc なしの semantics/`duplicate action 'fallback_x'` から
+semantics/`duplicate fallback reason 'x'`/loc なしに変わります(ともに exit 2)。
+AI component を use する compose は引き続き
+`compose use must reference a spec at 2:3`、loc 2:3 で拒否されます。ほかの lowering の
+受理削除は観測していません。check だけの一致を、これらの意図した診断変更にまで
+一般化しないでください。
 
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:

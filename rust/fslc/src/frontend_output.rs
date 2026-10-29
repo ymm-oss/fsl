@@ -97,6 +97,10 @@ pub struct AiProjectParseError {
 
 /// Render the multi-declaration AI project check result when applicable,
 /// paired with its process exit code.
+///
+/// # Panics
+///
+/// Panics if a failed project parse does not contain its error.
 #[must_use]
 pub fn ai_project_check_output(
     source: &str,
@@ -107,7 +111,9 @@ pub fn ai_project_check_output(
         return None;
     }
     let spec = ai_project_name(source_file);
-    if let Err(error) = parse_checked_ai_project(source, spec) {
+    let parsed = parse_checked_ai_project(source, spec);
+    let Ok(project) = parsed else {
+        let error = parsed.expect_err("project parse failed");
         output.insert("result".to_owned(), json!("error"));
         output.insert("kind".to_owned(), json!("parse"));
         output.insert("message".to_owned(), json!(error.message));
@@ -118,6 +124,11 @@ pub fn ai_project_check_output(
             output.insert("diagnostic_code".to_owned(), json!(code));
         }
         return Some((Value::Object(output), 2));
+    };
+    for component in &project.components {
+        if let Err(error) = fsl_core::validate_ai_component(component) {
+            return Some((crate::spec_load::render_core_error(output, &error), 2));
+        }
     }
     output.insert("result".to_owned(), json!("ok"));
     output.insert("spec".to_owned(), json!(spec));

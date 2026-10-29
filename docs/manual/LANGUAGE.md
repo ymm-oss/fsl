@@ -1150,12 +1150,14 @@ This is also a conservative concrete-support breaking removal: after
 by explicit and Monitor with `init does not assign` even if the runtime domain
 is nonempty, rather than producing an incorrect verdict.
 
-There is a separate pre-existing explicit limitation (#1520): with a
-where-filtered or collection binder, reading the current key after writing it
-is allowed by the #1518 read-order rule, but explicit and Monitor still refuse
-with `before it is assigned`, as they did on the base. This is a conservative
-binder-key coverage limitation, not an incorrect verdict; `--engine auto`
-falls back to BMC. #1520 tracks support for these forms.
+Explicit, Monitor and refinement resolve state-independent filtered type/range
+and collection binder domains for init key coverage (#1520). A current-key read
+after its write is supported when the selected keys establish full-root coverage;
+`--engine auto` then uses explicit without fallback. Empty domains contribute no
+coverage, partial domains cover only selected keys, and state-dependent filters
+remain unresolved. The check-time read-order rule is unchanged.
+Refinement now refuses nested fixed-target initialization depending on an outer binder
+that shadows a same-named constant, previously incorrectly accepted as `refines`.
 
 Breaking-removal sweep (#1518): base
 `28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head
@@ -2643,6 +2645,14 @@ compose OrderSystem {
   physical name `alias__x` of a compose component declaration and the split
   `submit__b1` of a requirements `branches` action. A generated name may still
   be referenced, as a refinement mapping does with `submit__b1`.
+  Breaking removal (#1600): in next-edition requirements, a relation role
+  (`Claim belongs to User as __owner via approve`), a resource name
+  (`resource __r: Amount = 0`), and a measure name
+  (`measure __m = count Claim in Approved`) must not contain `__` either.
+  These previously passed `check`; `fslc check` now rejects one at the
+  declaration (`kind:"name"`, exit 2) with, for example,
+  `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`.
+  Rename the role, resource, or measure without `__` and update its references.
 - JSON display: a generated name is published with `.` in place of its `__`,
   in one spelling for every output: the physical name `alias__x` is `alias.x`,
   and a branch split `submit__b1` is `submit.b1` (state keys, action names,
@@ -3943,8 +3953,8 @@ the `check hard { }` block below — accept a `"description text"` tag; every
 field here is a bare identifier or number, unlike the declaration-tag
 convention in §13.1.
 
-At the kernel-lowering boundary, a standalone `ai_component` must declare at
-least one tool, using `tool` or `tools`.
+Shared validation requires every standalone or project-embedded `ai_component`
+to declare at least one tool, using `tool` or `tools`.
 Omitting tools is a **breaking removal** (#1546): both `ai_component NoTools { }`
 and `ai_component NoTools { authority { } }` are rejected before kernel lowering
 with `kind: "type"`, exact message `ai_component 'NoTools' declares no tools`,
@@ -3953,9 +3963,63 @@ and induction, plus scenarios and testgen, report this authored-component diagno
 enum name; Worker checking agrees. An empty `authority { }` remains valid when
 at least one tool is declared.
 Existing bad hard-rule and unknown-authority-tool errors still take precedence,
-with their historical per-command envelopes. This change is **kernel-only**:
-`ai compat`, `ai replay` and `ai_project` paths remain as on base and may still
-accept tool-less components; their validation gap is tracked by #1545.
+with their historical per-command envelopes. #1545 extends the same no-tools
+rejection to `ai compat`, `ai replay`, project `ai check`, and native/Worker
+project checking: a **breaking removal** of tool-less components, including
+empty authority blocks, on those paths. Standalone #1546 envelopes are unchanged
+on check and specialized-preflight paths; the lowering-only duplicate-fallback
+priority exception is measured below.
+Native `check` and the shared Worker stages also reject every project component
+with an undeclared authority tool or unknown hard rule, matching project
+`ai check` (semantics, exit 2), rather than reporting `ok`. This removes the
+former acceptance of the fixtures `error_envelope_ai_project_unknown_tool.fsl`
+and `error_envelope_ai_project_invalid_rule.fsl` under generic project checking.
+Project semantic coordinates remain component-block-relative (#1574); missing
+LSP project-component diagnostics remain tracked separately (#1575).
+
+**Measured boundary sweep (#1545):** B
+`d37a215e8df6c00222e6aafd94bc9b556c445521` and H
+`99810256faca086360c6ca4233f935b9b56b1ec8` were built separately in their own
+git-archive trees. `<B-binary> check <relative-path>` in B and
+`<H-binary> check <relative-path>` in H checked all 597 corpus `.fsl` files and
+30 Markdown files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, plus
+twelve new inline occurrences per tree (**1,278 checks**). Four Markdown files
+contain compiler-recognized FSL fences; all 30, including the bash-only
+`examples/ai/README.md` negative control, were checked. Cache/unstable overrides
+unset and no excluded output fields. Corpus ok/exit0 → error/exit2 removals
+are exactly **three**: `error_envelope_ai_project_unknown_tool.fsl`,
+`error_envelope_ai_project_invalid_rule.fsl` and
+`error_envelope_literate_ai_project.md`. The Markdown project reports type,
+`ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc 1:1,
+exit 2; the standalone literate component's rejection and both multi-block
+toggles are unchanged. New test-inline removals are
+**four**: tool-less-component projects in CLI and Worker-shaped tests (two),
+an empty-authority-only component in a project (one), and an invalid later
+component after a valid first component (one). Zero existing inline FSL forms
+were rewritten. The three tool-less occurrences report type at block loc 1:1;
+the later undeclared tool reports unlocated semantics. Other exit/result and
+complete stdout/stderr observations in this check-only sweep are unchanged. Declare a tool or remove
+an unneeded component, and correct unknown tool/rule references.
+
+Lowering-only commands share the full validator too. With the same B/H,
+`analyze <relative-path>` covered 18 AI-mentioning corpus inputs and four
+explicit forms; changed forms plus a compose control were compared through
+`scenarios <relative-path> --depth 2 --deadlock ignore` and `explain <relative-path>`.
+Across 30 command-form pairs × 2 binaries = 60 observations,
+analyze (22 forms), scenarios (4) and explain (4) each
+have **one ok→error**, **zero error→ok**, and **two changed error envelopes**.
+The breaking removal is an undeclared authority tool X hidden from generated
+references by selecting only `tool_authority`: it now gives semantics,
+`unknown tool 'X' in authority block`, no loc, exit 2 instead of success.
+Duplicate fallback x without tools changes
+type/`ai_component 'DupNoTools' declares no tools`/loc 1:1 to
+semantics/`duplicate fallback reason 'x'`/no loc (both exit 2); with a tool it
+changes unlocated semantics/`duplicate action 'fallback_x'` to
+semantics/`duplicate fallback reason 'x'`/no loc (both exit 2).
+A compose use of an AI component remains rejected
+with `compose use must reference a spec at 2:3`, loc 2:3. No other lowering-only
+acceptance removal was observed; do not generalize check-only agreement to
+these intentional lowering diagnostic changes.
 
 An `ai_component` may also declare which hard rules get an explicit,
 separately-reported invariant:

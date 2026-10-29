@@ -597,16 +597,60 @@ prompt/model sampling distributions in the kernel. No field on `ai_component`,
 `"ID: text"` tag — unlike the kernel/business/requirements declaration-tag
 convention ([layers](layers.md#declaration-tags-common-to-all-layers)), every field here is a bare identifier or number.
 
-Declare at least one tool (`tool` or `tools`) in a standalone kernel-lowered `ai_component`. A tool-less
+Declare at least one tool (`tool` or `tools`) in every standalone or project-embedded `ai_component`. A tool-less
 component, including one with only `authority { }`, is a breaking removal
 (#1546): `check`, `ai check`, BMC, induction, scenarios, testgen and Worker checking reject it with
 exit 2 / kind type, exact `ai_component '<Name>' declares no tools` and component
 declaration loc. One declared tool with empty authority remains valid; the error
 names the authored component, not the generated `Tool` enum.
 Existing hard-rule/unknown-authority errors retain priority and their historical
-per-command envelopes. The no-tools rule is kernel-lowering-only: `ai compat`,
-`ai replay` and `ai_project` paths remain unchanged from base, including their
-tool-less acceptance gap tracked by #1545.
+per-command envelopes. #1545 extends no-tools rejection to `ai compat`,
+`ai replay`, project `ai check`, and native/Worker project checking: a breaking
+removal of tool-less components, including empty authority blocks. Standalone
+#1546 envelopes are unchanged on check and specialized-preflight paths; the
+lowering-only duplicate-fallback priority exception is measured below.
+Native `check` and shared Worker stages now also
+reject undeclared authority tools and unknown hard rules in every project
+component, matching project `ai check` (semantics / exit 2). Generic checking no
+longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
+`error_envelope_ai_project_invalid_rule.fsl`. Project semantic positions remain
+block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
+
+Measured #1545 breaking-removal sweep: independently built B
+`d37a215e8df6c00222e6aafd94bc9b556c445521` and H
+`99810256faca086360c6ca4233f935b9b56b1ec8`, each in its own git-archive tree.
+Commands `<B-binary> check <relative-path>` in B and
+`<H-binary> check <relative-path>` in H cover all 597 `.fsl` files and 30 Markdown
+files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, plus twelve new
+inline occurrences per tree: **1,278 checks**, cache/unstable overrides unset,
+no output exclusions. Four Markdown inputs have compiler-recognized FSL fences;
+all 30 were checked, including bash-only `examples/ai/README.md` as a negative control.
+The **three corpus ok/exit0 → error/exit2 removals** are
+`error_envelope_ai_project_unknown_tool.fsl`,
+`error_envelope_ai_project_invalid_rule.fsl`, and `error_envelope_literate_ai_project.md`.
+The Markdown project returns type/`ai_component 'EnvelopeParityLiterateProject' declares no tools`/
+block loc 1:1/exit2; standalone literate rejection and both multi-block toggle
+acceptances are unchanged. The **four new-inline removals**
+are tool-less-component projects in CLI and Worker-shaped tests (two), an
+empty-authority-only component in a project (one), and an invalid later component
+after a valid first one (one). Three return type at block loc 1:1; the later
+unknown tool returns unlocated semantics. Rewritten existing inline FSL: zero.
+Other check-only exit/result/stdout/stderr comparisons agree. Declare a tool or remove
+an unneeded component, and repair undeclared tool/unknown rule references.
+
+Lowering-only validation was measured with the same B/H: `analyze <relative-path>`
+on 18 AI-mentioning corpus inputs plus four explicit shapes; changed shapes and
+compose control through `scenarios <relative-path> --depth 2 --deadlock ignore`
+and `explain <relative-path>` (30 command-form pairs × 2 binaries = 60 observations).
+Analyze22/scenarios4/explain4
+each show **one ok→error, zero error→ok, two changed error envelopes**. Selecting
+only `tool_authority` no longer hides undeclared `forbidden X`: success becomes
+semantics/`unknown tool 'X' in authority block`/no loc/exit2. With no tools,
+duplicate fallback x changes type/`ai_component 'DupNoTools' declares no tools`/loc1:1 to semantics/
+`duplicate fallback reason 'x'`/no loc; with a tool, unlocated semantics/
+`duplicate action 'fallback_x'` becomes semantics/`duplicate fallback reason 'x'`/no loc (all exit2).
+Compose use of an AI component stays rejected: `compose use must reference a spec at 2:3`,
+loc2:3. No other lowering-only acceptance removal was observed.
 
 `check hard { rule <Name>; ... }` selects which of the 5 named rules above get
 an explicit, separately-reported invariant/finding in `fslc ai check`; an
@@ -706,8 +750,8 @@ formal proof and does not model LLM truth or statistical/evaluator quality.
 Stochastic / migration / drift evidence declarations (project-level fsl-ai;
 dialect tag `fsl-ai-project.v0`). These blocks are read by a deliberately
 lenient line scanner separate from the kernel parser; they may sit alongside
-`ai_component` in one file. `fslc ai check` on such a file returns
-`ai_project_analyzed` (`fslc check` returns `ok` with
+`ai_component` in one file. When every component passes validation,
+`fslc ai check` returns `ai_project_analyzed` (`fslc check` returns `ok` with
 `ai_analysis_result:"ai_project_analyzed"`) — a declaration listing, not
 verification. The example shows only the lines the scanner reads; any other
 line in these bodies is skipped without validation, so it constrains nothing:
@@ -1006,6 +1050,16 @@ literal, so such a declaration is unreadable from every expression and the
 misreading would be silent (`invariant AlwaysHolds { true }` reads the literal,
 never a state variable named `true`), so the declaration is rejected. No other word is reserved — `count`, `sum`, `stage`, `in`,
 `is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
+
+A next-edition relation role, resource name, or measure name must not contain
+`__`, which is reserved for the names FSL
+generates (`alias__x`, `submit__b1`); check rejects one at the declaration with
+`kind: "name"`, exit 2. Breaking removal (#1600): in next-edition requirements
+this now also covers a relation role (`Claim belongs to User as __owner via approve`),
+a resource name (`resource __r: Amount = 0`), and a measure name
+(`measure __m = count Claim in Approved`), which previously passed check; the
+message begins `relation role name '__owner' contains '__', ...` (or
+`resource name`, `measure name`). Rename it without `__` and update its references.
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a,b)` `max(a,b)` `abs(a)`
   (in `a//b` everything after `//` becomes a comment, so write division with a
