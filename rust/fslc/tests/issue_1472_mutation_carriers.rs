@@ -5,6 +5,9 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
+#[path = "support/mutate_progress.rs"]
+mod mutation_progress;
+
 fn run(directory: &Path, maps: &str) -> Value {
     std::fs::create_dir_all(directory).expect("create isolated fixtures");
     std::fs::write(
@@ -50,9 +53,23 @@ fn run(directory: &Path, maps: &str) -> Value {
         ])
         .output()
         .expect("run mutation classification");
-    assert!(output.stderr.is_empty(), "{output:?}");
+    assert_eq!(
+        mutation_progress::progress(&output),
+        [
+            ("mutate baseline: proved", "explicit"),
+            (
+                "mutate [1/1] type_bound_lo_minus1 type V lo: invalid",
+                "explicit"
+            ),
+            ("mutate external [1/2] carrier: invalid", "explicit"),
+            ("mutate external [2/2] control: survived", "explicit"),
+        ],
+        "{output:?}"
+    );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    serde_json::from_slice(&output.stdout).expect("mutation JSON")
+    let report = serde_json::from_slice(&output.stdout).expect("mutation JSON");
+    mutation_progress::assert_report_progress(&output, &report);
+    report
 }
 
 #[test]
