@@ -4,6 +4,8 @@
 mod cases;
 #[path = "support/edition_cases.rs"]
 mod common;
+#[path = "support/edition_dependency_nonreader.rs"]
+mod nonreader;
 use cases::{Observations, Variant};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -112,6 +114,14 @@ fn preserve(
         (first.status.code(), second.status.code(), &a, &first.stderr),
         (Some(status), Some(status), &b, &second.stderr),
     );
+    if matches!(id, "A14" | "T11" | "T12" | "T13" | "T16" | "T16/fallback") {
+        let expected = cases::stable(nonreader::expected(id, command));
+        observations.eq(
+            &format!("{id}/independent"),
+            (&a, &first.stderr),
+            (&expected, &Vec::<u8>::new()),
+        );
+    }
     a.0
 }
 
@@ -173,14 +183,13 @@ fn dependency_edition_causal_routes_and_all_observation_outputs() {
                 let after = tree(&s.0);
                 observations.eq(&format!("{}/artifacts", row.id), &after, &before);
             } else {
-                let expected = cases::twin_expected(&row, &fixture, &s, || {
-                    let expected = payload(&run(&s, &command));
-                    assert_ne!(
-                        expected["result"], "error",
-                        "canonical causal route {command}: {expected}"
+                let mut expected = causal_expected(command.split_whitespace().nth(1).unwrap());
+                if row.variant == Variant::W {
+                    expected = cases::with_child_warnings(
+                        expected,
+                        cases::findings(source, &cases::identity(&s, &fixture.child), "current"),
                     );
-                    expected
-                });
+                }
                 let actual = run(&s, &command);
                 let value = payload(&actual);
                 observations.eq(
@@ -192,6 +201,78 @@ fn dependency_edition_causal_routes_and_all_observation_outputs() {
         }
     }
     observations.finish();
+}
+
+fn causal_expected(command: &str) -> Value {
+    let claims = [
+        "claim:C_AlertQuality_Mttr",
+        "claim:C_Guardrails_AlertQuality",
+    ];
+    let support = || {
+        claims
+            .iter()
+            .map(|id| json!({"id":id,"formal_assurance":"not_run","causal_support":"untested"}))
+            .collect::<Vec<_>>()
+    };
+    let mut expected = json!({"fsl":"1.0","formal_result":"not_run","model":"IncidentResponse"});
+    let fields = match command {
+        "check" => {
+            json!({"result":"causal_model_checked","schema_version":"causal-check.v0","variables_checked":3,"claims_checked":2,"feedbacks_checked":0,"evidence_refs_checked":0,"retired_claims":0,"warnings":[],"do_not_assume":["The causal claims are true","The graph is causally complete","Structural or temporal consistency establishes real-world causality"]})
+        }
+        "diff" => {
+            expected.as_object_mut().unwrap().remove("model");
+            json!({"result":"causal_diffed","schema_version":"causal-diff.v0","before":"IncidentResponse","after":"IncidentResponse","changes":[],"do_not_assume":["The causal claims are true","A structural diff implies a support change","Removed or retired claims were false"]})
+        }
+        "analyze" => {
+            json!({"result":"causal_analyzed","schema_version":"causal-graph.v0","projection":"causal_graph","timebase":"day","horizon":365,"do_not_assume":["The causal claims are true","Path existence establishes real-world causality","Timeline bounds are guarantees about the real world"],
+            "nodes":[{"id":"variable:alert_quality","kind":"variable","role":"mediator","indicator_class":"leading"},{"id":"variable:guardrails","kind":"variable","role":"intervention"},{"id":"variable:mttr","kind":"variable","role":"outcome","indicator_class":"lagging"}],
+            "edges":[{"id":claims[0],"kind":"claim","source":"variable:alert_quality","target":"variable:mttr","polarity":"negative","lag":{"min":31,"max":60},"persists":{"min":30,"max":180},"version":1,"status":"active","basis":"hypothesis"},{"id":claims[1],"kind":"claim","source":"variable:guardrails","target":"variable:alert_quality","polarity":"positive","lag":{"min":14,"max":45},"persists":{"min":14,"max":90},"version":1,"status":"active","basis":"hypothesis"}],
+            "paths":[{"source":"variable:guardrails","target":"variable:mttr","claims":[claims[1],claims[0]],"polarity":"negative","first_response":{"min":45,"max":105}}],"feedbacks":[],"truncation":{"paths_cap":16,"paths_truncated":0}})
+        }
+        "ledger" => {
+            let entries = claims.iter().map(|id| json!({"id":id,"version":1,"status":"active","formal_assurance":"not_run","causal_support":"untested","plans":{"applicable":[],"excluded":[]},"evidence":{"applicable":[],"excluded":[]},"external_refs":[],"attention_reasons":[{"reason":"validation_plan_missing","witness":{"claim_id":id}},{"reason":"current_evidence_missing","witness":{"claim_id":id}}]})).collect::<Vec<_>>();
+            json!({"result":"causal_ledger","schema_version":"causal-ledger.v0","as_of":null,"claims":entries,"do_not_assume":["The causal claim is proved or verified","A completed validation plan establishes causality","No unmodeled common cause exists","Absence of challenging evidence means the claim is true","Portfolio readiness is a formal assurance class"]})
+        }
+        "verify-expectations" | "observe-expectations" => {
+            let observe = command == "observe-expectations";
+            let assumptions = if observe {
+                json!([
+                    "The causal claim is proved",
+                    "Temporal co-occurrence establishes causality",
+                    "No unmodeled common cause exists",
+                    "Expectation violation refutes the causal claim",
+                    "Unobserved behavior did not occur"
+                ])
+            } else {
+                json!([
+                    "The causal claim is proved",
+                    "No unmodeled common cause exists",
+                    "Expectation violation refutes the causal claim"
+                ])
+            };
+            let expectations = [("E_GuardrailsVisible",1), ("E_AlertQualityImproves",5)].iter().map(|(id, ticks)| {
+                let mut entry = json!({"id":format!("expectation:{id}"),"verdict":if observe && *ticks == 5 {"violated"} else {"pass"},"assurance":if observe {"replay-observed"} else {"bounded"},"within_ticks":ticks,"clock":"ops_clock","trigger_kind":"action","derived_from_claim":claims[1],"do_not_assume":assumptions});
+                if observe { entry["event_counts"] = json!({"observed":6,"unmapped":0,"missing_required":0}); } else { entry["checked_to_depth"] = json!(2); }
+                entry
+            }).collect::<Vec<_>>();
+            let mut fields = json!({"result":if observe {"causal_expectations_observed"} else {"causal_expectations_checked"},"schema_version":if observe {"causal-observation.v0"} else {"causal-expectations.v0"},"claims":support(),"expectations":expectations,"do_not_assume":if observe {assumptions} else {json!(["The causal claims are true","A passing expectation proves the causal claim","Expectation violation refutes the causal claim"])}});
+            if observe {
+                fields["events_observed"] = json!(6);
+                fields["artifacts_generated"] = json!(2);
+                fields["artifact_digests"] = json!([
+                    "sha256:6d00b457a38f64ac40da6006f780a2673cc1b65590cc846ea3a11f2eb3996bbb",
+                    "sha256:663350789acbc9b0065c450f11de48cc7bfcf121f31109b62fea5fc773460c8e"
+                ]);
+            }
+            fields
+        }
+        _ => panic!("unregistered causal expectation {command}"),
+    };
+    expected
+        .as_object_mut()
+        .unwrap()
+        .extend(fields.as_object().unwrap().clone());
+    expected
 }
 
 fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings() {
@@ -802,44 +883,44 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         let actual = run(&s, &command);
         let value = payload(&actual);
         let id = if signed { "A06" } else { "A05" };
-        observations.compare(
+        observations.eq(
             id,
             (
-                actual.status.code(),
-                &value,
+                cases::unowned(&value, actual.status.code()),
                 std::fs::read(s.0.join("record.json")).unwrap(),
             ),
-            "nonzero and original record bytes",
-            !actual.status.success()
-                && std::fs::read(s.0.join("record.json")).unwrap() == b"sentinel\n",
+            (
+                cases::unowned_expected(&cases::identity(&s, "dep.fsl")),
+                b"sentinel\n".to_vec(),
+            ),
         );
         for (id, command) in [("T18", command), ("T19", evaluation), ("T20", difference)] {
             let actual = run(&s, &command);
             let value = payload(&actual);
-            observations.compare(
+            observations.eq(
                 id,
-                (actual.status.code(), &value),
-                "strict dependency rejection before records",
-                actual.status.code() == Some(2)
-                    && value["result"] == "error"
-                    && value["kind"] != "io"
-                    && value.get("record").is_none()
-                    && std::fs::read(s.0.join("record.json")).unwrap() == b"sentinel\n",
+                (
+                    cases::unowned(&value, actual.status.code()),
+                    std::fs::read(s.0.join("record.json")).unwrap(),
+                ),
+                (
+                    cases::unowned_expected(&cases::identity(&s, "dep.fsl")),
+                    b"sentinel\n".to_vec(),
+                ),
             );
         }
         if let Some(command) = overlay {
             let actual = run(&s, &command);
             let value = payload(&actual);
             let bytes = std::fs::read(s.0.join("overlay.md")).unwrap();
-            let guarded = actual.status.code() == Some(2)
-                && value["result"] == "error"
-                && bytes == b"overlay sentinel\n";
             for id in ["A03/approval-overlay", "T10/approval-overlay"] {
-                observations.compare(
+                observations.eq(
                     id,
-                    (actual.status.code(), &value, &bytes),
-                    "strict rejection before overlay write (direct digest may have no owner)",
-                    guarded,
+                    (cases::unowned(&value, actual.status.code()), &bytes),
+                    (
+                        cases::unowned_expected(&cases::identity(&s, "dep.fsl")),
+                        &b"overlay sentinel\n".to_vec(),
+                    ),
                 );
             }
         }
@@ -1061,12 +1142,10 @@ fn dependency_edition_observation_writers_and_three_read_dedup() {
             s.write(&fixture.child, &current);
             let actual = run(&s, &command);
             let value = payload(&actual);
-            let mut expected = canonical;
-            expected["warnings"] = json!(cases::findings(
-                &current,
-                &cases::identity(&s, &fixture.child),
-                "current"
-            ));
+            let expected = cases::with_child_warnings(
+                canonical,
+                cases::findings(&current, &cases::identity(&s, &fixture.child), "current"),
+            );
             observations.eq("W06", (actual.status.code(), &value), (Some(0), &expected));
         }
     }
@@ -1098,11 +1177,7 @@ fn dependency_edition_plain_kernel_schema_controls() {
         let first = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root, true);
         let second = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root, true);
         let actual = payload(&first);
-        let expected = if version == 1 {
-            serde_json::from_str(include_str!("fixtures/kernel_contract.v1.json")).unwrap()
-        } else {
-            payload(&second)
-        };
+        let expected = kernel_contract_expected(version);
         assert!(
             actual["$schema"]
                 .as_str()
@@ -1130,6 +1205,51 @@ fn dependency_edition_plain_kernel_schema_controls() {
         );
     }
     observations.finish();
+}
+
+fn kernel_contract_expected(version: i32) -> Value {
+    let mut expected: Value =
+        serde_json::from_str(include_str!("fixtures/kernel_contract.v1.json")).unwrap();
+    if version == 1 {
+        return expected;
+    }
+    // KernelContract's authored declarations, not the exporter's target list.
+    // Plain kernel parsing has no lowering provenance: all 18 are unknown.
+    let targets = "\
+/actions/0|action:add
+/actions/1|action:remove
+/constants/0|constant:CAP
+/init|init
+/properties/invariants/0|property:invariant:Capacity
+/properties/leads_to/0|property:leadsto:Drained
+/properties/reachables/0|property:reachable:Full
+/properties/transitions/0|property:trans:EmptyUntilAdd
+/properties/transitions/1|property:trans:Monotone
+/state/0|state:active
+/state/1|state:queue
+/state/2|state:seen
+/state/3|state:slots
+/state/4|state:total
+/types/0|type:Id
+/types/1|type:Qty
+/types/2|type:Slot
+/types/3|type:Status";
+    let mut origins = Vec::new();
+    let mut bindings = Vec::new();
+    let mut reverse = Vec::new();
+    for line in targets.lines() {
+        let (pointer, target) = line.split_once('|').unwrap();
+        expected.pointer_mut(pointer).unwrap()["origin"] = json!({"target":target});
+        let source = format!("source:unknown#unknown:{target}");
+        let id = format!("{source}@{target}:0");
+        origins.push(json!({"kind":"source_chain","id":id,"dialect":"kernel","assurance":"unknown","primary":null,"secondary":[],"lowering_steps":[],"generated":false,"extensions":{},"source_node_id":source}));
+        bindings.push(json!({"target":target,"origin_ids":[id]}));
+        reverse.push(json!({"source_node_id":source,"targets":[target]}));
+    }
+    expected["$schema"] = json!("https://fsl.dev/schemas/fslc/kernel/kernel.v2.schema.json");
+    expected["schema_version"] = json!("2.0.0");
+    expected["provenance"] = json!({"schema_version":"2.0.0","identity_stability":"exact_source_revision","completeness":"unknown","assurance_counts":{"known":0,"unknown":18},"coordinates":{"bytes":"utf8_zero_based_half_open","lines":"unicode_scalar_one_based_end_exclusive"},"origins":origins,"bindings":bindings,"reverse_index":reverse});
+    expected
 }
 
 fn dependency_edition_p03_document_recovery_reads_without_writing_artifacts() {

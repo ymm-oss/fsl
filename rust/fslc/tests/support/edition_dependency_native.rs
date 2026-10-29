@@ -42,11 +42,10 @@ fn dependency_edition_o01_fresh_thread_has_no_owner_and_fails_closed() {
         .join()
         .unwrap();
     let mut observations = cases::Observations::default();
-    observations.compare(
+    observations.eq(
         "O01",
-        &result,
-        "error/nonzero and no model",
-        result.1 != 0 && result.0["result"] == "error" && result.0.get("$schema").is_none(),
+        cases::unowned(&result.0, Some(result.1)),
+        cases::unowned_expected(&cases::identity(&scratch, "dep.fsl")),
     );
     observations.finish();
 }
@@ -176,11 +175,10 @@ fn dependency_edition_o04_nested_owner_and_o05_fresh_child_thread() {
     let result = run_admitted_root(&path, Ok(source.clone()), None, false, |source| {
         std::thread::scope(|scope| scope.spawn(|| consume(&path, source)).join().unwrap())
     });
-    observations.compare(
+    observations.eq(
         "O05",
-        &result,
-        "error/2 and no model",
-        result.1 == 2 && result.0["result"] == "error",
+        cases::unowned(&result.0, Some(result.1)),
+        cases::unowned_expected(&cases::identity(&scratch, "dep.fsl")),
     );
     observations.finish();
 }
@@ -227,15 +225,15 @@ fn dependency_edition_t06_isolates_the_actual_unowned_refine_step() {
     scratch.write("dep.fsl", &cases::next_leaf());
     let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap());
     let mut observations = cases::Observations::default();
-    observations.compare(
-        "T06/direct-step",
-        &result,
-        "unowned actual refine step fails closed, no solver result",
-        result.1
-            && result.0["exit_code"] == 2
-            && result.0["detail"]["result"] == "error"
-            && result.0["detail"].get("checked_to_depth").is_none(),
+    let expected = json!({"layer":"design->requirements","kind":"refine","file":path,"against":"requirements","abs_file":scratch.0.join("abstract.fsl"),"mapping":scratch.0.join("map.fsl"),"depth":2,"status":"failed","result":"error","exit_code":2,"detail":cases::unowned_expected(&cases::identity(&scratch,"dep.fsl"))});
+    let mut actual = result.0;
+    actual["detail"] = cases::unowned(
+        &actual["detail"],
+        actual["exit_code"]
+            .as_i64()
+            .map(|v| i32::try_from(v).unwrap()),
     );
+    observations.eq("T06/direct-step", (actual, result.1), (expected, true));
     observations.finish();
 }
 

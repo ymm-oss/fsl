@@ -48,6 +48,8 @@ fn production_files(rust: &std::path::Path) -> BTreeMap<String, String> {
     let mut files = BTreeMap::new();
     let mut queue = [
         "fsl-core/src/lib.rs",
+        "fsl-runtime/src/lib.rs",
+        "fsl-verifier/src/lib.rs",
         "fsl-tools/src/lib.rs",
         "fslc/src/lib.rs",
         "fslc/src/main.rs",
@@ -95,10 +97,21 @@ impl<'ast> Visit<'ast> for Reads {
         self.function = saved;
     }
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        if node.method == "read"
-            && matches!(node.receiver.as_ref(), syn::Expr::Path(path) if path.path.is_ident("resolver"))
-        {
-            self.endpoints.push(self.function.clone());
+        if node.method == "read" {
+            let mut endpoint = self.function.clone();
+            if self.function == "governance_output" {
+                let syn::Expr::Reference(argument) = &node.args[0] else {
+                    panic!("unbound governance read")
+                };
+                let syn::Expr::Field(field) = argument.expr.as_ref() else {
+                    panic!("unnamed governance operand")
+                };
+                let syn::Member::Named(name) = &field.member else {
+                    panic!("positional governance operand")
+                };
+                endpoint = format!("{endpoint}:{name}");
+            }
+            self.endpoints.push(endpoint);
         }
         if node.method == "spawn" || node.method == "spawn_scoped" {
             self.spawns.insert(self.function.clone());
@@ -113,6 +126,9 @@ impl<'ast> Visit<'ast> for Reads {
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect::<Vec<_>>();
+            if names.ends_with(&["thread".into(), "spawn".into()]) {
+                self.spawns.insert(self.function.clone());
+            }
             if names.ends_with(&["FsResolver".into(), "new".into()])
                 || names.ends_with(&["RecordingResolver".into(), "new".into()])
             {
@@ -141,21 +157,20 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
     let mut discovered = BTreeSet::new();
     let mut spawn_sites = BTreeSet::new();
     let mut providers = BTreeMap::new();
+    let mut library_counts = BTreeMap::<String, (usize, usize, usize)>::new();
     for (path, text) in production_files(&rust) {
         let mut visitor = Reads::default();
         visitor.visit_file(&syn::parse_file(&text).unwrap());
-        let mut indices = BTreeMap::<String, usize>::new();
+        let crate_name = path.split('/').next().unwrap();
+        if matches!(crate_name, "fsl-runtime" | "fsl-verifier") {
+            let counts = library_counts.entry(crate_name.into()).or_default();
+            counts.0 += 1;
+            counts.1 += visitor.endpoints.len();
+            counts.2 += visitor.spawns.len();
+        }
         for function in visitor.endpoints {
-            let endpoint = if path == "fsl-wasm/src/lib.rs" {
-                let index = indices.entry(function.clone()).or_default();
-                let name = format!("{path}:{function}:{index}");
-                *index += 1;
-                name
-            } else {
-                format!("{path}:{function}")
-            };
             assert!(
-                discovered.insert(endpoint),
+                discovered.insert(format!("{path}:{function}")),
                 "unclassified repeated endpoint"
             );
         }
@@ -163,6 +178,12 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
         for (function, count) in visitor.constructors {
             providers.insert(format!("{path}:{function}"), count);
         }
+    }
+    for name in ["fsl-runtime", "fsl-verifier"] {
+        let (files, reads, spawns) = library_counts[name];
+        assert!(files > 0);
+        assert_eq!((reads, spawns), (0, 0), "unclassified library consumer");
+        println!("LIBRARY_INVENTORY {name} files={files} reads={reads} spawns={spawns}");
     }
     let expected = cases::EDGES
         .iter()
@@ -290,4 +311,22 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
     println!(
         "DEPENDENCY I01 agreement=true produced=discovered read/provider/spawn sets expected=registry incidence and assignments"
     );
+}
+
+#[test]
+fn inventory_recognizes_receiver_aliases_and_free_thread_spawns() {
+    let source = "fn consumer() { r.read(path); self.resolver.read(path); std::thread::spawn(|| {}); } fn governance_output() { r.read(&p.refinement_path); r.read(&p.after_path); r.read(&p.before_path); }";
+    let mut visitor = Reads::default();
+    visitor.visit_file(&syn::parse_file(source).unwrap());
+    assert_eq!(
+        visitor.endpoints,
+        [
+            "consumer",
+            "consumer",
+            "governance_output:refinement_path",
+            "governance_output:after_path",
+            "governance_output:before_path"
+        ]
+    );
+    assert_eq!(visitor.spawns, BTreeSet::from(["consumer".into()]));
 }

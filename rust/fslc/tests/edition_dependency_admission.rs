@@ -34,18 +34,7 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
                     cases::fsl_envelope(),
                 )
             } else {
-                cases::twin_expected(&row, &fixture, &scratch, || {
-                    let baseline =
-                        common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args, true);
-                    assert_eq!(
-                        baseline.status.code(),
-                        Some(0),
-                        "canonical verification must finish"
-                    );
-                    let expected = cases::versioned_native_value(common::value(&baseline));
-                    assert_eq!(expected["result"], "verified");
-                    expected
-                })
+                cases::expected_verify(&row, &fixture, child.to_str().unwrap())
             };
             let output = common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args, true);
             let actual = cases::versioned_native_value(common::value(&output));

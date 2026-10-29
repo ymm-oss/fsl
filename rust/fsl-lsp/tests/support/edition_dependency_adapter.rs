@@ -93,18 +93,13 @@ fn dependency_edition_lsp_both_store_routes_use_open_child_and_child_utf16() {
             ]
         };
         let expected = json!({"uri":root_uri,"version":1,"diagnostics":diagnostics});
-        let labels: &[&str] = match id {
-            "L01" => &["L01", "L03"],
-            "L02" => &["L02", "L04"],
-            _ => &["L05"],
-        };
-        for label in labels {
-            observations.eq(&format!("{label}/model"), model.is_some(), severity != 1);
-            observations.eq(&format!("{label}/publish"), &actual, &expected);
-        }
+        observations.eq(&format!("{id}/model"), model.is_some(), severity != 1);
+        observations.eq(&format!("{id}/publish"), &actual, &expected);
         if matches!(id, "L01" | "L02") {
             let id = if id == "L01" { "L03" } else { "L04" };
             let actions = serde_json::to_value(code_actions(&state, &root_uri)).unwrap();
+            // Null preserves parent-edit safety; it does not observe the
+            // code-actions resolver's internal refusal (still deferred).
             observations.eq(&format!("{id}/actions"), &actions, &Value::Null);
         }
     }
@@ -168,7 +163,12 @@ fn dependency_edition_t21_existing_requirements_solver_thread_is_preserved() {
         "decide_not_exhaustive"
     );
     let mut observations = cases::Observations::default();
-    observations.eq("T21", &replies[0], &replies[1]);
+    let expected = json!({"uri":uri,"version":1,"diagnostics":[{
+        "range":{"start":{"line":26,"character":2},"end":{"line":26,"character":42}},
+        "severity":1,"code":"decide_not_exhaustive","source":"fslc","data":{"kind":"semantics"},
+        "message":"decision table 'T' for Submitted Claim: no row holds in a state the solver found; add a row, close the table with `otherwise`, or state what holds at Submitted with `assuming` (checked by the solver, because its fields take 1212201 values, more than the 1000000 enumerated); counterexample: claim_stage = {\"0\":\"Submitted\"}, claim_amount = {\"0\":10}, claim_days = {\"0\":952}"
+    }]});
+    observations.eq("T21", &replies[0], &expected);
     observations.finish();
 }
 

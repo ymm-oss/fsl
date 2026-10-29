@@ -68,12 +68,20 @@ pub const EDGES: &[(&str, &str, &str)] = &[
         "uses",
         "fslc/src/causal.rs:run_causal_observe_expectations",
     ),
-    ("E10", "after", "fsl-wasm/src/lib.rs:governance_output:0"),
-    ("E11", "before", "fsl-wasm/src/lib.rs:governance_output:1"),
+    (
+        "E10",
+        "after",
+        "fsl-wasm/src/lib.rs:governance_output:after_path",
+    ),
+    (
+        "E11",
+        "before",
+        "fsl-wasm/src/lib.rs:governance_output:before_path",
+    ),
     (
         "E12",
         "checked_by",
-        "fsl-wasm/src/lib.rs:governance_output:2",
+        "fsl-wasm/src/lib.rs:governance_output:refinement_path",
     ),
 ];
 
@@ -149,7 +157,7 @@ A13|document check|document check|owner nonreader|root before artifact IO
 A14|domain and SQL writers|domain/db import|owner nonreader|ordinary validation before output
 A15|repair output|migrate --write/fmt|repair|only root edits
 A16|verify cache|verify|owner Recording|refusal cold hit lemma
-A17|plain kernel schema|kernel versions 1/2|owner nonreader|complete independent v1 golden and complete repeated v2 schema
+A17|plain kernel schema|kernel versions 1/2|owner nonreader|complete independent v1/v2 schemas and repeat agreement
 T01|fslc/src/main.rs:main|check|fslc thread owner; main inactive|no model before refusal
 T02|fslc/src/verification.rs:ranked_lasso_discharges|verify bmc/auto|owner; ranking inactive/read0|no solver after refusal
 T03|sweep|sweep|outer owner; cells borrow; ranking inactive/read0|no multiplication
@@ -391,32 +399,6 @@ impl Fixture {
     }
 }
 
-pub fn twin_expected(
-    row: &Row,
-    fixture: &Fixture,
-    scratch: &common::Scratch,
-    run: impl FnOnce() -> Value,
-) -> Value {
-    let mut twin = row.clone();
-    twin.variant = Variant::P;
-    let twin = self::fixture(&twin);
-    scratch.write(&fixture.child, &twin.files[&fixture.child]);
-    let expected = run();
-    scratch.write(&fixture.child, &fixture.files[&fixture.child]);
-    if row.variant == Variant::W {
-        with_child_warnings(
-            expected,
-            findings(
-                &fixture.files[&fixture.child],
-                &identity(scratch, &fixture.child),
-                "current",
-            ),
-        )
-    } else {
-        expected
-    }
-}
-
 pub fn fixture(row: &Row) -> Fixture {
     let id = row.id.split('/').next().unwrap();
     let mut files = BTreeMap::from([
@@ -430,17 +412,17 @@ pub fn fixture(row: &Row) -> Fixture {
             let canonical = legacy.replace("  invariant OnlyEligibleAutoApproved \"REQ-2: only eligible claims are auto-approved\" {", include_str!("../../../fsl-wasm/tests/support/dependency_canonical.txt").trim_end());
             (include_str!("../../../fsl-wasm/tests/support/dependency_root.txt").into(), "dep_next_colon.fsl", canonical, legacy)
         }
-        "E02" => (IMPLEMENTS.into(), "dep.fsl", LEAF.into(), LEGACY_LEAF.into()),
+        "E02" => (IMPLEMENTS.into(), "dep.fsl", annotated(LEAF), LEGACY_LEAF.into()),
         "E03" => (
             "governance G { control CTRL-1 \"Keep\" delegates Flow from \"dep.fsl\" { require CTRL-1 } }\n".into(),
             "dep.fsl", BUSINESS.into(), BUSINESS.replace("forall i in 0..1 { true }", "forall i in 0..1: true")),
         "E04" | "E12" => (GOVERNANCE.into(), "mapping.fsl", MAPPING.replace("map done = done", "map done = forall i in 0..1 { done }"), MAPPING.replace("map done = done", "map done = forall i in 0..1: done")),
-        "E05" | "E11" => (GOVERNANCE.into(), "before.fsl", LEAF.into(), LEGACY_LEAF.into()),
-        "E06" | "E10" => (GOVERNANCE.into(), "after.fsl", LEAF.into(), LEGACY_LEAF.into()),
+        "E05" | "E11" => (GOVERNANCE.into(), "before.fsl", annotated(LEAF), LEGACY_LEAF.into()),
+        "E06" | "E10" => (GOVERNANCE.into(), "after.fsl", annotated(LEAF), LEGACY_LEAF.into()),
         "E07" | "E08" | "E09" => (
             include_str!("../../../../examples/causal/incident_response.fsl").into(),
             "incident_system.fsl",
-            include_str!("../../../../examples/causal/incident_system.fsl").into(),
+            include_str!("../../../../examples/causal/incident_system.fsl").replace("invariant PrecisionBounded", "@requirement(\"REQ-DEP-001\", \"日本語😀\") invariant PrecisionBounded"),
             causal_legacy()),
         _ => panic!("unknown edge row {id}"),
     };
@@ -557,6 +539,29 @@ pub fn refusal(source: &str, path: &str, envelope: serde_json::Map<String, Value
     expected
 }
 
+// Owner-free renderers have no agreed complete diagnostic envelope yet. Check
+// this exact refusal projection, including *all* non-diagnostic payload keys,
+// rather than accepting any nonzero status or sampling a successful output.
+pub fn unowned(value: &Value, status: Option<i32>) -> Value {
+    let mut payload = value.as_object().unwrap().clone();
+    for key in [
+        "fsl",
+        "result",
+        "kind",
+        "message",
+        "loc",
+        "edition",
+        "fsl_edition",
+        "findings",
+    ] {
+        payload.remove(key);
+    }
+    json!({"exit":status,"result":value["result"],"kind":value["kind"],"file":value.pointer("/loc/file"),"non_diagnostic_payload":payload})
+}
+pub fn unowned_expected(file: &str) -> Value {
+    json!({"exit":2,"result":"error","kind":"unsupported_in_edition","file":file,"non_diagnostic_payload":{}})
+}
+
 pub fn expected_check(
     row: &Row,
     fixture: &Fixture,
@@ -597,6 +602,70 @@ pub fn expected_check(
         result["fsl_edition"] = json!(5);
     }
     result
+}
+
+// Fixed fixture contracts, not a second verifier invocation. Property names,
+// source locations and state changes follow the authored issue pair and the
+// bounded depth-two output contract. Ambient timings alone use stable().
+pub fn expected_verify(row: &Row, fixture: &Fixture, child: &str) -> Value {
+    let mut expected = expected_check(row, fixture, child, fsl_envelope());
+    let compose = row.edge == "use";
+    let implements = row.edge == "implements";
+    let invariant = if compose {
+        "claims.OnlyEligibleAutoApproved"
+    } else if implements {
+        "Typed"
+    } else {
+        "_governance_catalog_ok"
+    };
+    expected["result"] = json!("verified");
+    for (key, value) in json!({"depth":2,"checked_to_depth":2,"completeness":"bounded","transitions_checked":[],"reachables":{},"deadlock":{"found":false},"note":"bounded verification: no violation within depth 2"}).as_object().unwrap() {
+        expected[key] = value.clone();
+    }
+    expected["invariants_checked"] = if compose {
+        json!(["_bounds_claims.amount", invariant])
+    } else {
+        json!([invariant])
+    };
+    let (properties, statistics) = if compose {
+        expected["action_coverage"] = json!({"claims.auto_approve":true,"claims.submit":true});
+        let state = |amount, submitted| json!({"claims.amount":amount,"claims.submitted":submitted,"claims.auto_approved":{"0":false,"1":false}});
+        let trace = json!([
+            {"step":0,"state":state(json!({"0":0,"1":0}), json!({"0":false,"1":false}))},
+            {"step":1,"state":state(json!({"0":100,"1":0}),json!({"0":true,"1":false})),"action":{"name":"claims.submit","params":{"c":0,"requested":100},"loc":{"line":27,"column":3}},"changes":{"claims.amount[0]":{"from":0,"to":100},"claims.submitted[0]":{"from":false,"to":true}}},
+            {"step":2,"state":state(json!({"0":100,"1":99}),json!({"0":true,"1":true})),"action":{"name":"claims.submit","params":{"c":1,"requested":99},"loc":{"line":27,"column":3}},"changes":{"claims.amount[1]":{"from":0,"to":99},"claims.submitted[1]":{"from":false,"to":true}}}
+        ]);
+        expected["deadlock"] = json!({"found":true,"at_step":2,"trace":trace});
+        expected["warnings"].as_array_mut().unwrap().insert(0, json!({"kind":"deadlock","message":"deadlock reachable at step 2 (state: claims.amount={0: 100, 1: 99}, claims.submitted={0: true, 1: true}, claims.auto_approved={0: false, 1: false})","hint":"add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional"}));
+        (
+            "action_coverage|claims.auto_approve|3\naction_coverage|claims.submit|1\ndeadlock|deadlock|4\ninit|initial_state|1\ninvariant|claims.OnlyEligibleAutoApproved|3\npartial_op|actions|4\npartial_op|claims.OnlyEligibleAutoApproved|3\ntype_bound|_bounds_claims.amount|3\ntype_bound|_bounds_claims.auto_approved|3\ntype_bound|_bounds_claims.submitted|3\nvacuity|claims.auto_approve|1\nvacuity|claims.submit|1\nvacuity|session|1",
+            json!({"checks":31,"conflicts":707,"decisions":23_093,"propagations":221_786}),
+        )
+    } else if implements {
+        expected["action_coverage"] = json!({"finish":true});
+        (
+            "action_coverage|finish|1\ndeadlock|deadlock|3\ninit|initial_state|1\ninvariant|Typed|3\npartial_op|Typed|3\npartial_op|actions|2\ntype_bound|_bounds_done|3\nvacuity|session|1",
+            json!({"checks":17,"conflicts":null,"decisions":1,"propagations":4}),
+        )
+    } else {
+        expected["action_coverage"] = json!({"_governance_noop":{"covered":false,"blocking_requires":[],"hint":"these requires clauses are unsatisfiable at every step up to depth 2; weaken one of them, add an action that establishes them, or increase --depth","faithfulness_class":"intent_unexercised","recommended_action":"add a single-shot reachable for the action / raise --depth","requirement":{"id":"GOV","text":"governance catalog G"},"requirements":[{"id":"GOV","text":"governance catalog G"}]}});
+        (
+            "action_coverage|_governance_noop|3\ninit|initial_state|1\ninvariant|_governance_catalog_ok|3\npartial_op|_governance_catalog_ok|3\npartial_op|actions|2\npartial_op|terminal|6\ntype_bound|_bounds__governance_ok|3\nvacuity|session|1",
+            json!({"checks":22,"conflicts":4,"decisions":1,"propagations":1}),
+        )
+    };
+    expected["cost"] = cost(properties, statistics);
+    expected
+}
+
+pub fn cost(properties: &str, mut solver: Value) -> Value {
+    let properties = properties.lines().map(|line| {
+        let parts = line.split('|').collect::<Vec<_>>();
+        json!({"kind":parts[0],"name":parts[1],"checks":parts[2].parse::<u64>().unwrap(),"elapsed_s":0})
+    }).collect::<Vec<_>>();
+    solver["check_elapsed_s"] = json!(0);
+    solver["memory_mb"] = json!(0);
+    json!({"elapsed_s":0,"solver":solver,"properties":properties})
 }
 
 // Observed native BMC costs include wall-clock durations and process solver
