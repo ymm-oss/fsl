@@ -105,3 +105,37 @@ fn no_tools_are_rejected_before_profiles_replay_and_project_analysis() {
         assert_eq!(value["result"], expected);
     }
 }
+
+#[test]
+fn lowering_only_commands_reject_unselected_authority_reference() {
+    let path = fixture(
+        "ai_component ReviewAuthority {\n  tool Search { schema S; }\n  authority { may_execute Search; forbidden X; }\n  check hard { rule tool_authority; }\n}\n",
+    );
+    for command in ["analyze", "scenarios", "explain"] {
+        let (value, status) = run(&[command], &path);
+        assert_eq!(status, 2, "{command}: {value}");
+        assert_eq!(
+            value,
+            json!({"fsl":"1.0","result":"error","kind":"semantics",
+            "message":"unknown tool 'X' in authority block"}),
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn lowering_only_commands_keep_duplicate_fallback_priority() {
+    let path = fixture(
+        "ai_component DupNoTools {\n  fallback {\n    when x require human_review;\n    when x require human_review;\n  }\n}\n",
+    );
+    for command in ["analyze", "scenarios", "explain"] {
+        let (value, status) = run(&[command], &path);
+        assert_eq!(status, 2, "{command}: {value}");
+        assert_eq!(
+            value,
+            json!({"fsl":"1.0","result":"error","kind":"semantics",
+            "message":"duplicate fallback reason 'x'"}),
+            "{command}"
+        );
+    }
+}
