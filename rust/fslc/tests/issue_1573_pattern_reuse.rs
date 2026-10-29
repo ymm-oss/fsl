@@ -125,10 +125,10 @@ impl Fixture {
     }
 }
 
-fn collision(value: &Value, exit: i32, line: u32, column: u32) -> bool {
+fn collision(value: &Value, exit: i32, line: u32, column: u32, context: &str) -> bool {
     // Measured direct and compose errors both carry numeric coordinates only.
     let message = format!(
-        "invalid model expression: pattern binding 'v' in 'is some(v)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable at {line}:{column}"
+        "{context}: pattern binding 'v' in 'is some(v)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable at {line}:{column}"
     );
     exit == 2
         && value["fsl"] == "1.0"
@@ -183,6 +183,10 @@ fn verdict(value: &Value, exit: i32, consumer: &str, truth: bool, property: &str
 }
 
 fn matrix(cases: Vec<Case>) {
+    matrix_in_context(cases, "invalid model expression");
+}
+
+fn matrix_in_context(cases: Vec<Case>, context: &str) {
     eprintln!(
         "AXIS visibility: unchanged, no name-export contract is granted by collision-set rows"
     );
@@ -197,7 +201,7 @@ fn matrix(cases: Vec<Case>) {
             eprintln!("FIXTURE {label} root={}", fixture.root.display());
             let (value, exit) = fixture.observe(&label, "check");
             let matches = match case.expected {
-                Expected::Reject(line, column) => collision(&value, exit, line, column),
+                Expected::Reject(line, column) => collision(&value, exit, line, column, context),
                 Expected::Check | Expected::Truth(_) => accepted(&value, exit),
             };
             if !matches {
@@ -276,6 +280,35 @@ fn statement_if_arms_remain_independent_unlike_expression_arms() {
 #[test]
 fn nested_statement_arm_names_are_reserved_in_later_statements() {
     matrix(forms::nested_statement_arm_exports());
+}
+
+#[test]
+fn ordinary_init_entries_reject_retained_pattern_reuse() {
+    matrix_in_context(forms::init_positions(), "invalid init statement");
+}
+
+#[test]
+fn composed_init_check_preserved_and_renamed_sources_are_conformant() {
+    for renamed in [false, true] {
+        let (case, second) = forms::init_source_pair(renamed);
+        let fixture = Fixture::new(&case, true);
+        std::fs::write(fixture.root.join("b.fsl"), second).expect("write init source B");
+        std::fs::write(
+            fixture.root.join("s.fsl"),
+            "compose C {\n  use A as a from \"a.fsl\"\n  use B as b from \"b.fsl\"\n}\n",
+        )
+        .expect("write init composition");
+        assert!(accepted_envelope(&fixture, &case.name, "C"));
+        if renamed {
+            for consumer in ["bmc", "induction", "explicit", "Monitor"] {
+                let (value, exit) = fixture.observe(&case.name, consumer);
+                assert!(verdict(&value, exit, consumer, true, "a.P"), "{value}");
+                if consumer == "Monitor" {
+                    assert_eq!(value["final_state"]["b.flag"], true);
+                }
+            }
+        }
+    }
 }
 
 fn accepted_envelope(fixture: &Fixture, label: &str, spec: &str) -> bool {

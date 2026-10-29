@@ -1996,7 +1996,9 @@ pub(crate) fn expression_binder_type(
 pub(crate) fn validate_statement_types(
     statement: &Statement,
     model: &KernelModel,
+    phase: &mut ValidationPhase,
 ) -> Result<(), TypecheckError> {
+    let self_relations = SelfRelations::new();
     let visible_consts = model
         .consts
         .keys()
@@ -2013,8 +2015,11 @@ pub(crate) fn validate_statement_types(
         &base_env(model),
         model,
         &visible_consts,
-        &SelfRelations::new(),
-    )
+        &self_relations,
+    )?;
+    validate_statement(statement, &base_env(model), model, phase, &self_relations)?;
+    crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
+    Ok(())
 }
 
 pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), TypecheckError> {

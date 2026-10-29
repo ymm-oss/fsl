@@ -913,20 +913,25 @@ name in a `decreases` call. There are no unrelated breaking removals.
   A statement-if condition reserves names in both arms and later statements;
   bindings inside either arm also reserve names in later statements. Opposite
   statement arms remain independent, and candidate-local names do not escape
-  a quantifier/aggregate. Rename the later binding, for example change
+  a quantifier/aggregate. These statement rules apply in init and action bodies;
+  ordinary init validation shares the reservation walk while preserving its
+  existing initializer/const/map-key diagnostic owners. Rename the later binding,
+  for example change
   `(p is some(v)) and v == 2` to `(p is some(w)) and w == 2`.
   None of these reservations grants additional read visibility. This includes
   four breaking-removal routes from the earlier #1442 nested-if examples
   (standalone/compose): retain the original rejection, and rename only the inner
   `u` binding to `w` for the accepted preservation control.
-  Compose separates such bindings across independent sources; rendered guards
+  For sync actions and non-init paths, compose separates such bindings across
+  independent sources; rendered guards
   may now use `__v_substitution_0/1` instead of the authored `v`. The explain
   result and ordinary verification verdicts of the guard-name regression cases
   are unchanged. For two sources whose statement payloads were incorrectly
   shared, check remains accepted but the previously false `violated` verdict
   becomes holds after separation; a genuinely false payload condition remains
   violated. These are checker/hygiene compensations, not an evaluator repair
-  (the remaining binding-lifetime work is tracked in #1622).
+  (the remaining binding-lifetime work is tracked in #1622). Independent-source
+  init pattern separation is not repaired here and remains part of that work.
   Out-of-scope `v` is a `kind: "semantics"` error (exit 2), with message
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
   The location identifies the clause or `if` arm containing the use. Guards and

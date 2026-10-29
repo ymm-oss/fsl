@@ -1241,17 +1241,20 @@ when checking a file, the message suffix changes from `at L:C` to
   exactlyOne have only their filter. Statement-if conditions reserve both arms
   and later statements, and bindings inside either arm reserve later statements.
   Opposite statement arms stay independent; candidate-local bindings stay local.
+  The statement rules apply to ordinary init and action checking; init retains
+  its initializer/const/map-key diagnostic owners while using the shared walk.
   Repair by renaming the later declaration and its reads, e.g. replace
   `(p is some(v)) and v == 2` with `(p is some(w)) and w == 2`; do not treat a
   reservation as permission to read a name. Four formerly accepted #1442 nested
   if routes (standalone/compose) are also breaking removals: keep the original
   rejection inputs and rename only the inner `u` to `w` in preservation controls.
-  Compose may print hygienic
+  In sync actions and non-init paths, compose may print hygienic
   `__v_substitution_0/1` instead of `v` to keep independent sources distinct.
   Guard-name regression examples retain their explain result/verify verdict.
   In the two-source statement-payload case, check remains accepted and erroneous
   violated verdicts become holds; a genuinely false payload stays violated.
-  Evaluator binding-lifetime work remains #1622. Out-of-scope `v` reports
+  Independent-source init separation is not repaired here. It belongs to the
+  remaining evaluator binding-lifetime work in #1622. Out-of-scope `v` reports
   `kind: "semantics"`, exit 2, and
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
   Location is the containing clause/if arm; guards/ensures retain the action-level

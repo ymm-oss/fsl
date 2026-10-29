@@ -781,17 +781,19 @@ clause locations remain separate work in #1550.
 
 ### Invariant and shared implementation
 
+For sync actions and the non-init paths covered here, the invariant is:
+
 **合わせた kernel を syntax に戻して検査し直すツールは、source の判断に頼らない。
 syntax の上で名前を離す。**
 
-Compose must leave distinct binding identities in the lowered syntax, not only
-in transient source-check decisions. Structural consumers discard those
+In those paths, compose must leave distinct binding identities in the lowered
+syntax, not only in transient source-check decisions. Structural consumers discard those
 decisions when converting a Kernel back to syntax: reachable/invariant
 counterfactuals used by explain and HTML, and mutation oracles that build a
 materialized candidate again. Preserving an original checked model alone does
 not repair the changed candidates, and skipping their checks is not a repair.
-Source capture protection therefore uses the same widened name collector as
-collision reservation. There is no separate inventory mode or explain bypass.
+Their source capture protection therefore uses the same widened name collector
+as collision reservation. There is no separate inventory mode or explain bypass.
 The existing hygiene `Scope.locals` remains the reservation set; moving it into
 another phase is unnecessary because it already uses the shared collector.
 
@@ -804,6 +806,21 @@ candidates. Native validation and hygiene consume those same summaries while
 advancing statement cursors. Each opposite statement arm starts from its own
 copy of the condition's reservations, rather than the previous arm's cursor.
 Ensures retain the final guard phase, not the action body's statement cursor.
+Ordinary model construction carries one phase through the logical init sequence
+and invokes the same statement validator after its existing assignment checks.
+Its per-statement wrapper still owns init/inline-initializer, const/map-key and
+component-origin diagnostics. Public Kernel revalidation is not the only init
+gate. The native borrowed-AST checker and owned-AST source rewriter retain their
+separate condition/where/cursor wiring and diagnostic-owner loops; extraction
+and outward statement summaries, not all traversal wiring, are shared once.
+
+Independent-source init separation remains outside this patch. Concatenating A's
+init match of some(1) and B's same-named match of some(2) can still make b.P
+incorrectly violated even though B alone verifies; this pre-existing init
+reproduction belongs to the evaluator-lifetime family in #1622, alongside the
+sync-action capture that hygiene compensates for here. It is not a preserved
+bad-verdict oracle. A later-name-only init repair is accepted and conformant,
+while the raw unresolved fixture checks only acceptance.
 
 ### Breaking removals and repair
 

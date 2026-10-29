@@ -1222,8 +1222,11 @@ impl ModelBuilder {
             .into_iter()
             .map(|(index, name, span)| (index, (name, span)))
             .collect::<BTreeMap<_, _>>();
+        let mut init_phase = crate::typecheck::ValidationPhase::normalized();
         for (index, statement) in model.init.iter().enumerate() {
-            crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
+            let checked =
+                crate::typecheck::validate_statement_types(statement, &model, &mut init_phase);
+            checked.map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
                 let context = if let Some((name, _)) = inline_initializers.get(&index) {
                     ExpressionErrorContext::InlineInitializer(name)

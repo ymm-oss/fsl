@@ -960,20 +960,25 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   A statement-if condition reserves names in both arms and later statements;
   bindings inside either arm also reserve names in later statements. Opposite
   statement arms remain independent, and candidate-local names do not escape
-  a quantifier/aggregate. Rename the later binding, for example change
+  a quantifier/aggregate. These statement rules apply in init and action bodies;
+  ordinary init validation shares the reservation walk while preserving its
+  existing initializer/const/map-key diagnostic owners. Rename the later binding,
+  for example change
   <code>(p is some(v)) and v == 2</code> to <code>(p is some(w)) and w == 2</code>.
   None of these reservations grants additional read visibility. This includes
   four breaking-removal routes from the earlier #1442 nested-if examples
   (standalone/compose): retain the original rejection, and rename only the inner
   <code>u</code> binding to <code>w</code> for the accepted preservation control.
-  Compose separates such bindings across independent sources; rendered guards
+  For sync actions and non-init paths, compose separates such bindings across
+  independent sources; rendered guards
   may now use <code>__v_substitution_0/1</code> instead of the authored <code>v</code>. The explain
   result and ordinary verification verdicts of the guard-name regression cases
   are unchanged. For two sources whose statement payloads were incorrectly
   shared, check remains accepted but the previously false <code>violated</code> verdict
   becomes holds after separation; a genuinely false payload condition remains
   violated. These are checker/hygiene compensations, not an evaluator repair
-  (the remaining binding-lifetime work is tracked in #1622).
+  (the remaining binding-lifetime work is tracked in #1622). Independent-source
+  init pattern separation is not repaired here and remains part of that work.
   Out-of-scope <code>v</code> is a <code>kind: "semantics"</code> error (exit 2), with message
   <code>invalid model expression: public Kernel cannot type identifier 'v' at &lt;line&gt;:&lt;column&gt;</code>.
   The location identifies the clause or <code>if</code> arm containing the use. Guards and

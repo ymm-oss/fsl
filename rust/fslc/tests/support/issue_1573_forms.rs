@@ -507,3 +507,100 @@ pub fn sync_sources(negative: bool) -> (Case, Case) {
         .replace("v == 1", if negative { "v < 1" } else { "v == 2" });
     (first, second)
 }
+
+pub fn init_positions() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for route in [
+        "condition-then",
+        "condition-else",
+        "condition-later",
+        "then-later",
+        "else-later",
+        "where-body",
+        "review-false-proof",
+    ] {
+        for renamed in [false, true] {
+            let name = if renamed { "w" } else { "v" };
+            let later = format!("(some(2) is some({name})) and {name} == 2");
+            let (body, line, column) = match route {
+                "condition-then" => (
+                    format!(
+                        "    if (some(1) is some(v)) {{\n      flag = {later}\n    }} else {{\n      flag = true\n    }}\n    seen = true"
+                    ),
+                    6,
+                    7,
+                ),
+                "condition-else" => (
+                    format!(
+                        "    if (some(1) is some(v)) and false {{\n      flag = true\n    }} else {{\n      flag = {later}\n    }}\n    seen = true"
+                    ),
+                    8,
+                    7,
+                ),
+                "condition-later" => (
+                    format!(
+                        "    if (some(1) is some(v)) {{ flag = true }} else {{ flag = true }}\n    seen = {later}"
+                    ),
+                    6,
+                    5,
+                ),
+                "then-later" | "else-later" => {
+                    let first = "(some(1) is some(v)) and v == 1";
+                    let then_body = if route == "then-later" { first } else { "true" };
+                    let else_body = if route == "else-later" { first } else { "true" };
+                    let condition = route == "then-later";
+                    (
+                        format!(
+                            "    if {condition} {{ flag = {then_body} }} else {{ flag = {else_body} }}\n    seen = {later}"
+                        ),
+                        6,
+                        5,
+                    )
+                }
+                "where-body" => (
+                    format!(
+                        "    forall k: K where (some(1) is some(v)) and v == 1 {{\n      flag = {later}\n    }}\n    seen = true"
+                    ),
+                    6,
+                    7,
+                ),
+                "review-false-proof" => (String::new(), 5, 7),
+                _ => unreachable!(),
+            };
+            let source = if route == "review-false-proof" {
+                format!(
+                    "spec InitReuse {{\n  state {{ flag: Bool }}\n  init {{\n    if (some(1) is some(v)) {{\n      flag = (some(2) is some({name})) and {name} == 1\n    }} else {{\n      flag = false\n    }}\n  }}\n  action stay() {{}}\n  invariant P {{ flag }}\n}}\n"
+                )
+            } else {
+                format!(
+                    "spec A {{\n  type K = 0..0\n  state {{ flag: Bool, seen: Bool }}\n  init {{\n{body}\n  }}\n  action stay() {{}}\n  invariant P {{ flag and seen }}\n}}\n"
+                )
+            };
+            cases.push(Case::new(
+                format!("init/{route}/renamed={renamed}"),
+                source,
+                if renamed {
+                    Expected::Truth(route != "review-false-proof")
+                } else {
+                    Expected::Reject(line, column)
+                },
+            ));
+        }
+    }
+    cases
+}
+
+pub fn init_source_pair(renamed: bool) -> (Case, String) {
+    let first = Case::new(
+        format!("init-source-pair/renamed={renamed}"),
+        "spec A {\n  state { flag: Bool }\n  init { flag = if (some(1) is some(v)) then true else false }\n  action stay() {}\n  invariant P { flag }\n}\n".into(),
+        if renamed { Expected::Truth(true) } else { Expected::Check },
+    );
+    let name = if renamed { "w" } else { "v" };
+    (
+        first,
+        format!(
+            "spec B {{\n  state {{ flag: Bool }}\n  init {{ flag = (some(2) is some({name})) and {name} == 2 }}\n  action stay() {{}}\n  invariant P {{ flag }}\n}}\n"
+        ),
+    )
+}
