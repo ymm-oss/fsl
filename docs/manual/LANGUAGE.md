@@ -2883,8 +2883,9 @@ loop, or subset of keys does not suffice; partial forms retain the previous
 ownership error. Shapes accepted by the previous root-granularity rule, such
 as single-field or mutually exclusive branch-split field writes, whole-entry key
 subsets, or whole-root writes on just one path, retain their symbolic free-component behavior.
-Refinement's legacy free-root path can still fill missing components from
-defaults (#1521); partial-field admission is not expanded until that is fixed.
+Refinement refuses incomplete assigned roots on either side instead of defaulting
+missing components (#1521); bmc and induction retain their free-value verdicts.
+Enumerating partial init components is future work (#1579).
 For new admission proofs, a source, filter or key bound depending on an outer
 binder is conservatively unresolved, even if a same-named global const exists.
 Enclosing binding combinations are not enumerated; this does not change legacy
@@ -3455,7 +3456,8 @@ the lowered event.
   when several processes correspond to `Claim`; use
   `claims.Claim.stage(c)` (arbitrary-depth `SymbolPath`) to select one. A
   missing process, non-entity argument, unknown stage member, or unresolved
-  qualifier is a source-located type error.
+  qualifier is reported as `kind: "semantics"`, with a source position in the
+  message and no diagnostic code.
 
 **Breaking removal (#1569):** in legacy requirements with a process field
 `amount`, `check` now rejects a transition guard such as

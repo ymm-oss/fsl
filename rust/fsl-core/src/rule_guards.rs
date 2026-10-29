@@ -325,6 +325,7 @@ fn event_guards(
     next: &fsl_syntax::NextEditionRequirements,
     transition: &fsl_syntax::ProcessTransition,
     event: &fsl_syntax::EventForm,
+    lowering: Option<&crate::dialect::RuleGuardLowering>,
 ) -> EventGuards {
     let roles = next
         .relations
@@ -356,7 +357,14 @@ fn event_guards(
             kind: guard.kind,
             requirement: guard.requirement.clone(),
             detail: guard.written.clone(),
-            condition: spell_fields(guard.condition.clone(), &field_names, &input_names, entity),
+            condition: {
+                let condition =
+                    spell_fields(guard.condition.clone(), &field_names, &input_names, entity);
+                lowering.map_or_else(
+                    || condition.clone(),
+                    |lowering| lowering.condition(condition.clone(), entity, &inputs),
+                )
+            },
         })
         .collect();
     EventGuards {
@@ -377,7 +385,10 @@ fn event_guards(
 }
 
 impl RuleGuards {
-    pub(crate) fn of(requirements: &SurfaceRequirements) -> Self {
+    pub(crate) fn of(
+        requirements: &SurfaceRequirements,
+        lowering: Option<&crate::dialect::RuleGuardLowering>,
+    ) -> Self {
         let mut events = Vec::new();
         let tables = requirements
             .next
@@ -406,7 +417,14 @@ impl RuleGuards {
                     && let Some(event) = &transition.event
                     && !event.rule_guards.is_empty()
                 {
-                    events.push(event_guards(name.name(), fields, next, transition, event));
+                    events.push(event_guards(
+                        name.name(),
+                        fields,
+                        next,
+                        transition,
+                        event,
+                        lowering,
+                    ));
                 }
             }
         }

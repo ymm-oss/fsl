@@ -360,51 +360,41 @@ fn control_unsatisfiable_bare_guard_is_rejected() {
 }
 
 #[test]
-fn control_known_separate_defect_unexpanded_call_is_fail_closed() {
-    // Not a #1552 detector: RuleGuard.condition keeps the call even though
-    // the generated action's expression is def-expanded. Field spelling alone
-    // cannot fix that missing expansion. Keep its current rejection explicit
-    // until #1556 flips this control; cover Call in unit tests.
+fn control_def_call_matches_inline() {
+    // #1556 fixed the separate missing def expansion in rule obligations;
+    // this now has the same accepted result as the inline positive guard.
     let outputs = run(
-        "control_known_separate_defect_unexpanded_call",
+        "control_def_call_matches_inline",
         &source("positive(amount)", "def positive(x: Amount) = x > 0", false),
     );
-    let expected = "the rule_conflict_unsatisfiable_guard check could not be decided by the solver \
-        (enumeration skipped it because its condition uses an expression the enumeration does not evaluate): \
-        unexpanded predicate call 'positive'";
     for (mode, exit, value) in &outputs {
-        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
-        assert_eq!(value["result"], "error", "{mode}: {value:#}");
-        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
-        assert_eq!(
-            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
-            "{mode}: {value:#}"
-        );
-        assert_eq!(value["message"], expected, "{mode}: {value:#}");
+        let expected = if *mode == "check" { "ok" } else { "verified" };
+        assert_eq!(*exit, 0, "{mode}: {outputs:#?}");
+        assert_eq!(value["result"], expected, "{mode}: {value:#}");
+        assert!(value.get("diagnostic_code").is_none(), "{mode}: {value:#}");
+        if *mode == "verify" {
+            assert_eq!(value["checked_to_depth"], 2, "{mode}: {value:#}");
+            assert_eq!(value["completeness"], "bounded", "{mode}: {value:#}");
+        }
     }
 }
 
 #[test]
-fn control_known_separate_defect_unlowered_stage_is_fail_closed() {
-    // Not a #1552 detector: the rule obligation keeps surface stage access
-    // even though the generated action's expression is lowered. Field spelling
-    // cannot fix that missing lowering. Keep its current rejection explicit
-    // until #1556 flips this control; cover Stage in unit tests.
+fn control_stage_access_matches_lowered() {
+    // #1556 fixed the separate missing stage lowering in rule obligations;
+    // this now has the same accepted result as the lowered stage guard.
     let outputs = run(
-        "control_known_separate_defect_unlowered_stage",
+        "control_stage_access_matches_lowered",
         &source("exists amount: Claim { stage(amount) == Draft }", "", false),
     );
-    let expected = "the rule_conflict_unsatisfiable_guard check could not be decided by the solver \
-        (enumeration skipped it because its condition uses an expression the enumeration does not evaluate): \
-        unlowered stage access";
     for (mode, exit, value) in &outputs {
-        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
-        assert_eq!(value["result"], "error", "{mode}: {value:#}");
-        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
-        assert_eq!(
-            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
-            "{mode}: {value:#}"
-        );
-        assert_eq!(value["message"], expected, "{mode}: {value:#}");
+        let expected = if *mode == "check" { "ok" } else { "verified" };
+        assert_eq!(*exit, 0, "{mode}: {outputs:#?}");
+        assert_eq!(value["result"], expected, "{mode}: {value:#}");
+        assert!(value.get("diagnostic_code").is_none(), "{mode}: {value:#}");
+        if *mode == "verify" {
+            assert_eq!(value["checked_to_depth"], 2, "{mode}: {value:#}");
+            assert_eq!(value["completeness"], "bounded", "{mode}: {value:#}");
+        }
     }
 }

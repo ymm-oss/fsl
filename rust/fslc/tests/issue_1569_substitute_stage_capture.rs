@@ -336,12 +336,29 @@ fn control_r3_without_field_mention_is_verified_to_depth_two() {
 }
 
 #[test]
-fn control_rule_guard_still_fails_closed_before_event_guard_substitution() {
-    assert_fail_closed_pair(
-        "rule_guard",
-        RULE_GUARD,
-        "rule_conflict_unsatisfiable_guard",
-    );
+fn control_rule_guard_accepts_stage_after_1556() {
+    // #1556 lowers stage access in rule guards before checking obligations.
+    for binder in ["c", "d"] {
+        let observations = run("rule_guard", RULE_GUARD, binder, "2");
+        for observation in &observations {
+            let expected = match observation.mode {
+                "check" => "ok",
+                "kernel" => "kernel",
+                "verify" => "verified",
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                (observation.exit, observation.value["result"].as_str()),
+                (0, Some(expected)),
+                "rule_guard/{binder} {}: {}",
+                observation.mode,
+                observation.value
+            );
+        }
+        let verify = &observations[2].value;
+        assert_eq!(verify["checked_to_depth"], 2, "{binder}: {verify:#}");
+        assert_eq!(verify["completeness"], "bounded", "{binder}: {verify:#}");
+    }
 }
 
 #[test]

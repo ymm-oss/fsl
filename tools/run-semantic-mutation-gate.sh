@@ -90,7 +90,7 @@ run_manifest_test() {
   # for the mutants lane) and neither half is expensive enough to be worth
   # splitting further.
   cargo test --manifest-path "$root/rust/Cargo.toml" -p fslc-rust \
-    --test implementation_mutation_manifest --locked
+    --test implementation_mutation_manifest --locked "$@"
 }
 
 run_operators_lane() {
@@ -208,9 +208,7 @@ if [ "$mode" = changed ]; then
           mutants: []
         }' >"$output/implementation-mutation-report.v1.json"
       FSL_IMPLEMENTATION_MUTATION_REPORT="$output/implementation-mutation-report.v1.json" \
-        cargo test --manifest-path "$root/rust/Cargo.toml" -p fslc-rust \
-          --test implementation_mutation_manifest --locked \
-          emitted_report_matches_schema_when_requested -- --exact
+        run_manifest_test emitted_report_matches_schema_when_requested -- --exact
       printf 'semantic-mutation: mode=%s mutants=0 report=%s\n' "$mode" "$output"
       if [ -n "${GITHUB_OUTPUT:-}" ]; then
         printf 'report=%s\n' "$output" >>"$GITHUB_OUTPUT"
@@ -434,10 +432,13 @@ while IFS=$'\t' read -r mutant_index log_path; do
   mv "$report_tmp" "$output/implementation-mutation-report.v1.json"
 done <"$caught_mutant_rows"
 
-FSL_IMPLEMENTATION_MUTATION_REPORT="$output/implementation-mutation-report.v1.json" \
-  cargo test --manifest-path "$root/rust/Cargo.toml" -p fslc-rust \
-    --test implementation_mutation_manifest --locked \
-    emitted_report_matches_schema_when_requested -- --exact
+# Reuse the initial manifest build, not cargo-mutants' cap-lints artifacts.
+# Only the report JSON is checked; the mutation build directory stays isolated.
+(
+  unset CARGO_TARGET_DIR
+  FSL_IMPLEMENTATION_MUTATION_REPORT="$output/implementation-mutation-report.v1.json" \
+    run_manifest_test emitted_report_matches_schema_when_requested -- --exact
+)
 
 unreviewed_survivors="$(jq --slurpfile equivalents "$equivalents" '[
   .outcomes[]

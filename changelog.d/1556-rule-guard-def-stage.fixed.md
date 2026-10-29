@@ -1,0 +1,1 @@
+Fixed (#1556): A requirements `rule` condition that calls a `def` predicate or uses `stage(...)` of a typed entity parameter or binder, including `<process>.stage(x)`, is now checked as its expanded and lowered form instead of being rejected with `rule_conflict_unsatisfiable_guard`.
