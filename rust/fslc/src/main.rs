@@ -10042,9 +10042,10 @@ fn invariant_counterfactuals_from_source(
         let Some(span) = candidate.span else {
             continue;
         };
+        let mutated_spec = candidate.materialize(&document);
         let removed_init_root = (candidate.op == "assignment_remove"
             && candidate.action.as_deref() == Some("init"))
-        .then(|| removed_init_assignment_root(&document, &candidate.spec))
+        .then(|| removed_init_assignment_root(&document, &mutated_spec))
         .flatten();
         if let Some(root) = removed_init_root.as_ref().filter(|root| {
             original
@@ -10056,7 +10057,7 @@ fn invariant_counterfactuals_from_source(
             continue;
         }
         let started = Instant::now();
-        let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
+        let Ok(mut model) = fsl_core::build_surface_model(mutated_spec) else {
             continue;
         };
         model.inherit_compose_names(names);
@@ -12159,8 +12160,8 @@ fn run_mutate_from_source(
     let source_lines = source.lines().collect::<Vec<_>>();
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     for mutant in all_mutants.into_iter().take(max_mutants) {
-        let mutated_spec = mutant.spec.clone();
-        let main = mutation_oracle(mutant.spec, depth, &model, bmc);
+        let mutated_spec = mutant.materialize(&spec);
+        let main = mutation_oracle(mutated_spec.clone(), depth, &model, bmc);
         let mut outcome = main.outcome.clone();
         let mut inconclusive = None;
         if outcome.is_clean()
@@ -19131,7 +19132,13 @@ spec GrowFixture {
                 mutant.op == "requires_remove" && mutant.action.as_deref() == Some("dec")
             })
             .expect("dec requires_remove mutant present in source A");
-        let outcome = mutation_oracle(mutant.spec, 4, &model, &mut native_mutation_bmc).outcome;
+        let outcome = mutation_oracle(
+            mutant.materialize(&spec),
+            4,
+            &model,
+            &mut native_mutation_bmc,
+        )
+        .outcome;
         assert!(
             !outcome.is_clean(),
             "removing dec's requires guard must be killed by source A's NonNegative invariant, \

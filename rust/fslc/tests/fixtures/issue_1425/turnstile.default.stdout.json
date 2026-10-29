@@ -1,0 +1,300 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "GalleryTinyTurnstile",
+  "depth": 4,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "type_bound_lo_minus1",
+      "loc": null,
+      "target": "type Entries lo",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_lo_plus1",
+      "loc": null,
+      "target": "type Entries lo",
+      "status": "killed",
+      "killed_by": "_bounds_entries",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_hi_minus1",
+      "loc": null,
+      "target": "type Entries hi",
+      "status": "killed",
+      "killed_by": "_bounds_entries",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_hi_plus1",
+      "loc": null,
+      "target": "type Entries hi",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 11,
+        "column": 10
+      },
+      "target": "init assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 11,
+        "column": 25
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_entries",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_minus1",
+      "loc": {
+        "line": 11,
+        "column": 25
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_entries",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_plus1",
+      "loc": {
+        "line": 11,
+        "column": 25
+      },
+      "target": "init assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 14,
+        "column": 5
+      },
+      "target": "coin requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 14,
+        "column": 5
+      },
+      "target": "coin requires #1",
+      "status": "killed",
+      "killed_by": "OneEntry",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 14,
+        "column": 5
+      },
+      "target": "coin requires #1",
+      "status": "killed",
+      "killed_by": "OneEntry",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 15,
+        "column": 5
+      },
+      "target": "coin assignment",
+      "status": "killed",
+      "killed_by": "OneEntry",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 19,
+        "column": 5
+      },
+      "target": "push requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 19,
+        "column": 5
+      },
+      "target": "push requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 19,
+        "column": 5
+      },
+      "target": "push requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 20,
+        "column": 5
+      },
+      "target": "push requires #2",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 20,
+        "column": 5
+      },
+      "target": "push requires #2",
+      "status": "killed",
+      "killed_by": "OneEntry",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_minus1",
+      "loc": {
+        "line": 20,
+        "column": 5
+      },
+      "target": "push requires #2",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_plus1",
+      "loc": {
+        "line": 20,
+        "column": 5
+      },
+      "target": "push requires #2",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 21,
+        "column": 5
+      },
+      "target": "push assignment",
+      "status": "killed",
+      "killed_by": "OneEntry",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "push assignment",
+      "status": "killed",
+      "killed_by": "push",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_minus1",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "push assignment",
+      "status": "killed",
+      "killed_by": "push",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_plus1",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "push assignment",
+      "status": "killed",
+      "killed_by": "push",
+      "requirement": null,
+      "source": "builtin"
+    }
+  ],
+  "summary": {
+    "total": 23,
+    "killed": 12,
+    "survived": 11,
+    "invalid": 0,
+    "kill_rate": 0.5217,
+    "by_source": {
+      "builtin": {
+        "total": 23,
+        "killed": 12,
+        "survived": 11,
+        "invalid": 0,
+        "kill_rate": 0.5217
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure"
+  ]
+}

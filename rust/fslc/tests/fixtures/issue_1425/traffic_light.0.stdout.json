@@ -1,0 +1,36 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "GalleryTinyTrafficLight",
+  "depth": 4,
+  "baseline": "verified",
+  "mutants": [],
+  "summary": {
+    "total": 0,
+    "killed": 0,
+    "survived": 0,
+    "invalid": 0,
+    "kill_rate": null,
+    "by_source": {
+      "builtin": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure",
+    "mutant cap 0 reached: 20 dropped"
+  ]
+}

@@ -174,10 +174,19 @@ failure: it can reject a selected run even when its property does not read the
 Seq, or after a reachable target was already witnessed, if a later explored
 frame overflows.
 
-The pre-pass runs when `selected_implicit_bounds` returns `None`. The public
-CLI's `--property` can select a user property or an implicit bound and produce a
-narrowed set, skipping the pre-pass. Internally, `checked_bounds: Some(...)`
-can likewise omit bounds; the symbolic guard applies to each omitted Seq bound.
+The native `prepare_bmc` pre-pass runs when `selected_implicit_bounds` returns
+`None`, no initial state is supplied, and init is deterministic. Every public
+CLI `--property` selection skips the pre-pass except selected-trans induction,
+which instead retains all bounds and invariant hypotheses in its base-case
+model and clears the
+property selection before `prepare_bmc`, so it can still enter the pre-pass and
+receives the same initial step-0 correction. Dispatch conditions are unchanged.
+`--exclude-property <user property>` alone leaves all implicit bounds checked
+and still enters the pre-pass: its initial-bound evidence also moves from
+step 1 / two states to step 0 / one state when the old probe found an idle
+successor. It can likewise change a depth-0 Seq projection error to a violation.
+Internally, `checked_bounds: Some(...)` can likewise omit bounds; the symbolic
+guard applies to each omitted Seq bound.
 This is not a public `--exclude-property _bounds_*` route: the current CLI
 rejects implicit-bound names in `--exclude-property` as `no such property`.
 
@@ -200,6 +209,34 @@ means all bounds). Only selected verification orchestration opts into this
 policy. Scenarios, mutation verdict replay, refinement, the `fsl-bmc` binary,
 and Worker verification continue using the all-bounds entry points. Worker
 has no property-selection option; this change adds none.
+
+Before exploring successors, the pre-pass checks only the initial state's type
+bounds using the same bounds helper as the `Monitor`; it does not evaluate user
+invariants or propagate their evaluation errors at this point. An initial
+`type_bound` violation in a model with actions is returned at step 0 with exactly
+one trace state (the initial state), no action, `exhausted: false`, and
+`states_explored: 1`, even at depth 0 (#1591). It does not wait for an enabled
+action to reproduce the invalid value. The native default `bmc` and `induction`
+paths therefore agree with explicit on this initial-bound evidence. Selections
+that bypass the pre-pass, supplied initial states, and nondeterministic init
+retain their existing routes. A valid initial state followed by an overflowing
+first action still reports step 1 and two
+trace states. With no actions, the probe skips this initial check and the
+existing verifier rejection remains exit 2 / `semantics` / `spec has no actions`
+under bmc, induction, explicit, and auto. The search budget and exhaustion
+fallthrough are unchanged.
+
+The WASM Worker's `verify` shares `find_boundary_violation`, so deterministic
+models with actions receive the same step-0/root-only initial-bound correction.
+Its caller has no property-selection or supplied-state option. This shared
+runtime change does not add either option to the Worker.
+
+This is not a replay change: the CLI's legacy empty action trace `[]` still
+does not evaluate initial-state bounds (#1591's third issue item). It is not
+evidence that the initial state satisfies its bounds. Versioned replay with an
+observed initial state has its existing safety check; the runtime's kernel
+state-trace replay rejects a completely empty trace. None of these replay
+contracts is changed by the boundary pre-pass fix.
 
 The induction engine also refuses to display an invariant, `trans`, or ranked
 `leadsTo` CTI if any state in its SAT model has missing sequence slots, returning
@@ -246,9 +283,37 @@ action, the engine and path matter (`E` below is exit 2 / `semantics` /
 
 | Path | bmc | induction | explicit |
 |---|---|---|---|
-| Default, depth 0 | E (symbolic initial projection) | E (symbolic initial projection) | TB@0 |
-| Default, depth at least 1 | TB@1 (concrete pre-pass) | TB@1 (concrete pre-pass) | TB@0 |
+| Default, depth 0 | TB@0 (concrete initial check) | TB@0 (concrete initial check) | TB@0 |
+| Default, depth at least 1 | TB@0 (concrete initial check) | TB@0 (concrete initial check) | TB@0 |
 | `--property _bounds_xs` (pre-pass skipped) | E (symbolic initial projection) | E (symbolic initial projection) | TB@0 |
+
+Each default TB@0 above has the one-state trace `[{step: 0, state: {xs: [0, 1]}}]`
+and `last_action: null`. This replaces the former depth-at-least-1 default
+TB@1/two-state idle trace, and changes the two symbolic engines' depth-0 default
+Seq result from exit 2 / `semantics` to exit 1 / `violated` / `type_bound`.
+The same step-0 rule applies to an initial range overflow. The regression matrix
+in `rust/fslc/tests/issue_1591_init_bound_step0.rs` covers both forms at depths
+0/1/2 under all three engines (18 cells): eight symbolic depth-1/2 cells change
+step/trace length, two symbolic depth-0 Seq cells change error to violation,
+and the other eight core cells retain step 0. The JSON schema is unchanged;
+`violated_at_step` and `checked_to_depth` now identify 0 on the corrected path.
+
+That matrix counts verdict/step/trace changes, not complete JSON-value equality.
+An initial violation formerly reported by the symbolic engine (for example a
+range overflow at depth 0, or a value repaired by the first action) is now
+rendered by the boundary renderer: `violating_bindings` is `[{}]` rather than
+`null`, and `cost.properties` is empty. The probe performs no solver checks
+(`cost.solver.checks: 0`, with solver memory unavailable/null), unlike the former
+symbolic query. Explicit retains its own `violating_bindings: null`; agreement
+above refers to the initial violation and trace, not all engine metadata.
+
+The exit-2-to-exit-1 change is not limited to Seq at depth 0. If init already
+violates a bound and the first action errors, the probe now returns the initial
+`type_bound` instead of exploring that action. For example, `n: 0..5`,
+`init { n = 9223372036854775807 }`, `action inc() { n = n + 1 }` changes bmc and
+induction at depths 1/2 (four example cells) from exit 2 / `semantics` /
+`integer overflow in addition` to exit 1 / `type_bound` / step 0 / one state.
+The no-actions case is deliberately not an exit-code change.
 
 Selecting a supported user invariant instead leaves the Seq bound unchecked:
 the symbolic engines reject the initial frame via the guard. Explicit retains
@@ -259,8 +324,8 @@ report `proved` (#1531); explicit's initial frame alone remains unguarded.
 A reachable-only induction selection is still a usage error. Before #1519,
 explicit rejected the same overflowing literal earlier with `sequence literal
 exceeds capacity` at every depth; it now reaches the concrete initial bound
-check. The default pre-pass's step-1 label versus explicit's step 0 is a separate
-pre-existing discrepancy, not an init-labelling fix in #1519.
+check. #1591 resolves the default pre-pass's separate step-1 versus explicit
+step-0 discrepancy; #1519 did not change that label.
 
 Before the budget, this pre-pass cloned its `Monitor` (the whole `KernelModel`
 by value) and its trace per visited BFS node; a spec whose history-recording

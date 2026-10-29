@@ -1,0 +1,55 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "BankAccount",
+  "depth": 8,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "type_bound_lo_minus1",
+      "loc": null,
+      "target": "type Amount lo",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_lo_plus1",
+      "loc": null,
+      "target": "type Amount lo",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "killed": 0,
+    "survived": 2,
+    "invalid": 0,
+    "kill_rate": 0.0,
+    "by_source": {
+      "builtin": {
+        "total": 2,
+        "killed": 0,
+        "survived": 2,
+        "invalid": 0,
+        "kill_rate": 0.0
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure",
+    "mutant cap 2 reached: 17 dropped"
+  ]
+}
