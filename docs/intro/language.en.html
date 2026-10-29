@@ -2937,7 +2937,33 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   These previously passed <code>check</code>; <code>fslc check</code> now rejects one at the
   declaration (<code>kind:"name"</code>, exit 2) with, for example,
   <code>relation role name '__owner' contains '__', which is reserved for the names FSL generates ...</code>.
-  Rename the role, resource, or measure without <code>__</code> and update its references.</li>
+  Rename the role, resource, or measure without <code>__</code> and update its references.
+  Breaking removal (#1602/#1603): this also covers goal and policy IDs,
+  requirement IDs (<code>rule</code> in the next edition), scenario IDs (<code>acceptance</code> in
+  legacy), forbidden IDs, decision-table IDs (<code>decide</code>), and glossary aliases,
+  in both editions wherever the construct exists. These previously passed
+  <code>check</code>; they now fail with exit 2, <code>kind:"name"</code>, and structured <code>loc</code> at the
+  ID or alias, subject to the legacy locator limitation below. The existing
+  separator message uses the position <code>goal</code>, <code>policy</code>,
+  <code>requirement</code>, <code>scenario</code>, <code>forbidden</code>, <code>decision</code>, or <code>glossary alias</code>.
+  Rename the ID or alias without <code>__</code> and update its references.
+  Next-edition rule IDs are located only from their header token spans, including
+  rules with deadlines or IDs preceded by comments. Explicit <code>requirement</code>
+  blocks also remain supported and their IDs are checked in both editions,
+  with or without deadlines. Only rule-generated requirement
+  copies are excluded from the duplicate ID check.
+  Known legacy-syntax limitation (also for explicit blocks):
+  split-spelled requirement, acceptance and forbidden IDs such as <code>REQ - __1</code>
+  are still rejected, but the fallback locator may report the declaration keyword
+  or a later repeated normalized spelling rather than the ID tokens. This
+  syntax-specific location limitation is not fixed here.
+  A next-edition rule-property label containing <code>__</code> or naming a literal
+  (such as <code>none:</code>) remains rejected with exit 2 and
+  <code>diagnostic_code:"invalid_rule_property_name"</code>. Its kind changes from
+  <code>semantics</code> to <code>name</code>, with structured <code>loc</code> at the statement's start, not
+  the label. Its diagnostic wording is unchanged; when checking a file, the
+  message suffix changes from <code>at L:C</code> to <code>at &lt;source-file&gt;:L:C</code>, like other
+  located name errors.</li>
 <li>JSON display: a generated name is published with <code>.</code> in place of its <code>__</code>,
   in one spelling for every output: the physical name <code>alias__x</code> is <code>alias.x</code>,
   and a branch split <code>submit__b1</code> is <code>submit.b1</code> (state keys, action names,
