@@ -753,11 +753,11 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec と 
 <code>where</code> を拒否する既存エラーより先に出る場合があります。
 元から不正な、状態を読む <code>within</code> の呼び出しでは、<code>unknown constant</code> の代わりに
 呼び出し位置の <code>would capture</code> を報告する場合があります。exit 2 / semantics は不変です。</p>
-<p>#1528 の <code>check</code> sweep は、base <code>f5f3f1942220ad6c1e1802fe9bc523fabe2155ae</code> と実装
-<code>2c955b9756b5fd8f5d0650ffef650ba9952571bc</code> の別々に build した <code>git archive</code> tree で実施しました。
-<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全598個の <code>.fsl</code> は、stdout/stderr の
+<p>#1528 の <code>check</code> sweep は、base <code>08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc</code> と実装
+<code>c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286</code> の別々に build した <code>git archive</code> tree で実施しました。
+<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全601個の <code>.fsl</code> は、stdout/stderr の
 全内容と exit が一致し、ok→error と error→error の診断変化はともに0件でした。
-移した既存の inline テストの1形 (合計599形) だけが ok→error に変わりました。
+移した既存の inline テストの1形 (合計602形) だけが ok→error に変わりました。
 これは宣言バインダーが <code>decreases</code> 内の def 呼び出しの自由な状態名を捕まえる形です。
 捕獲と無関係な受理の削除はありません。</p>
 <ul>
