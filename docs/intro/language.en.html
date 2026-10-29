@@ -4090,8 +4090,8 @@ one <code>effect &lt;name&gt;;</code>. None of these fields — nor <code>author
 the <code>check hard { }</code> block below — accept a <code>"description text"</code> tag; every
 field here is a bare identifier or number, unlike the declaration-tag
 convention in §13.1.</p>
-<p>At the kernel-lowering boundary, a standalone <code>ai_component</code> must declare at
-least one tool, using <code>tool</code> or <code>tools</code>.
+<p>Shared validation requires every standalone or project-embedded <code>ai_component</code>
+to declare at least one tool, using <code>tool</code> or <code>tools</code>.
 Omitting tools is a <strong>breaking removal</strong> (#1546): both <code>ai_component NoTools { }</code>
 and <code>ai_component NoTools { authority { } }</code> are rejected before kernel lowering
 with <code>kind: "type"</code>, exact message <code>ai_component 'NoTools' declares no tools</code>,
@@ -4100,9 +4100,61 @@ and induction, plus scenarios and testgen, report this authored-component diagno
 enum name; Worker checking agrees. An empty <code>authority { }</code> remains valid when
 at least one tool is declared.
 Existing bad hard-rule and unknown-authority-tool errors still take precedence,
-with their historical per-command envelopes. This change is <strong>kernel-only</strong>:
-<code>ai compat</code>, <code>ai replay</code> and <code>ai_project</code> paths remain as on base and may still
-accept tool-less components; their validation gap is tracked by #1545.</p>
+with their historical per-command envelopes. #1545 extends the same no-tools
+rejection to <code>ai compat</code>, <code>ai replay</code>, project <code>ai check</code>, and native/Worker
+project checking: a <strong>breaking removal</strong> of tool-less components, including
+empty authority blocks, on those paths. Standalone #1546 envelopes are unchanged
+on check and specialized-preflight paths; the lowering-only duplicate-fallback
+priority exception is measured below.
+Native <code>check</code> and the shared Worker stages also reject every project component
+with an undeclared authority tool or unknown hard rule, matching project
+<code>ai check</code> (semantics, exit 2), rather than reporting <code>ok</code>. This removes the
+former acceptance of the fixtures <code>error_envelope_ai_project_unknown_tool.fsl</code>
+and <code>error_envelope_ai_project_invalid_rule.fsl</code> under generic project checking.
+Project semantic coordinates remain component-block-relative (#1574); missing
+LSP project-component diagnostics remain tracked separately (#1575).</p>
+<p><strong>Measured boundary sweep (#1545):</strong> B
+<code>d37a215e8df6c00222e6aafd94bc9b556c445521</code> and H
+<code>99810256faca086360c6ca4233f935b9b56b1ec8</code> were built separately in their own
+git-archive trees. <code>&lt;B-binary&gt; check &lt;relative-path&gt;</code> in B and
+<code>&lt;H-binary&gt; check &lt;relative-path&gt;</code> in H checked all 597 corpus <code>.fsl</code> files and
+30 Markdown files under <code>specs/</code>, <code>examples/</code>, <code>rust/fslc/tests/fixtures/</code>, plus
+twelve new inline occurrences per tree (<strong>1,278 checks</strong>). Four Markdown files
+contain compiler-recognized FSL fences; all 30, including the bash-only
+<code>examples/ai/README.md</code> negative control, were checked. Cache/unstable overrides
+unset and no excluded output fields. Corpus ok/exit0 → error/exit2 removals
+are exactly <strong>three</strong>: <code>error_envelope_ai_project_unknown_tool.fsl</code>,
+<code>error_envelope_ai_project_invalid_rule.fsl</code> and
+<code>error_envelope_literate_ai_project.md</code>. The Markdown project reports type,
+<code>ai_component 'EnvelopeParityLiterateProject' declares no tools</code>, block loc 1:1,
+exit 2; the standalone literate component's rejection and both multi-block
+toggles are unchanged. New test-inline removals are
+<strong>four</strong>: tool-less-component projects in CLI and Worker-shaped tests (two),
+an empty-authority-only component in a project (one), and an invalid later
+component after a valid first component (one). Zero existing inline FSL forms
+were rewritten. The three tool-less occurrences report type at block loc 1:1;
+the later undeclared tool reports unlocated semantics. Other exit/result and
+complete stdout/stderr observations in this check-only sweep are unchanged. Declare a tool or remove
+an unneeded component, and correct unknown tool/rule references.</p>
+<p>Lowering-only commands share the full validator too. With the same B/H,
+<code>analyze &lt;relative-path&gt;</code> covered 18 AI-mentioning corpus inputs and four
+explicit forms; changed forms plus a compose control were compared through
+<code>scenarios &lt;relative-path&gt; --depth 2 --deadlock ignore</code> and <code>explain &lt;relative-path&gt;</code>.
+Across 30 command-form pairs × 2 binaries = 60 observations,
+analyze (22 forms), scenarios (4) and explain (4) each
+have <strong>one ok→error</strong>, <strong>zero error→ok</strong>, and <strong>two changed error envelopes</strong>.
+The breaking removal is an undeclared authority tool X hidden from generated
+references by selecting only <code>tool_authority</code>: it now gives semantics,
+<code>unknown tool 'X' in authority block</code>, no loc, exit 2 instead of success.
+Duplicate fallback x without tools changes
+type/<code>ai_component 'DupNoTools' declares no tools</code>/loc 1:1 to
+semantics/<code>duplicate fallback reason 'x'</code>/no loc (both exit 2); with a tool it
+changes unlocated semantics/<code>duplicate action 'fallback_x'</code> to
+semantics/<code>duplicate fallback reason 'x'</code>/no loc (both exit 2).
+A compose use of an AI component remains rejected
+with <code>compose use must reference a spec at 2:3</code>, loc 2:3. No other lowering-only
+acceptance removal was observed; do not generalize check-only agreement to
+these intentional lowering diagnostic changes.</p>
 <p>An <code>ai_component</code> may also declare which hard rules get an explicit,
 separately-reported invariant:</p>
 <pre><code class="language-fsl">  check hard {

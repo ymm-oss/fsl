@@ -119,7 +119,7 @@ pub(crate) fn raw_delivery_allowed(result: &(Value, i32)) -> bool {
 pub(crate) fn validate_specialized_document_from_source(
     path: &Path,
     source: &str,
-) -> Result<(), String> {
+) -> Result<(), SpecLoadError> {
     fslc_rust::check_stages::validate_specialized_document(
         source,
         &path.display().to_string(),

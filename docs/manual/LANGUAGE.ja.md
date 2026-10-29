@@ -3739,8 +3739,8 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `check hard { }` ブロックも — `"description text"` タグを受け付けません。ここの
 すべてのフィールドは、§13.1 の宣言タグの規約とは違い、裸の識別子または数値です。
 
-カーネル lowering の境界では、単独の `ai_component` は `tool` または `tools` で
-ツールを 1 つ以上宣言する必要があります。
+共有の validation では、単独でも project 内でも、すべての `ai_component` が
+`tool` または `tools` でツールを 1 つ以上宣言する必要があります。
 ツールを省略した形の受理は**破壊的な削除**(#1546)です。
 `ai_component NoTools { }` と `ai_component NoTools { authority { } }` はどちらも
 カーネル lowering の前に `kind: "type"`、そのままの message
@@ -3749,9 +3749,60 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `Tool` enum の名前でなく、この利用者の component を名指す診断を返し、Worker の
 check も一致します。ツールが 1 つ以上あれば、空の `authority { }` は引き続き有効です。
 既存の不正な hard rule と未宣言の authority tool のエラーは引き続き優先され、
-各コマンドの従来の envelope を保ちます。この変更は**カーネル境界のみ**です。
-`ai compat`、`ai replay`、`ai_project` の経路は base と同じで、ツールの無い
-component を受理する場合があります。この検査の穴は #1545 で追跡されています。
+各コマンドの従来の envelope を保ちます。#1545 は同じ no-tools の拒否を
+`ai compat`、`ai replay`、project の `ai check`、native/Worker の project 検査にも
+適用します。空の authority block を含むツールの無い component の受理に対する
+**破壊的な削除**です。check と specialized-preflight の道では、単独の component に対する
+#1546 の envelope は変えません。lowering だけの道での fallback 重複の優先順位の例外は
+下記の実測に示します。
+native の `check` と共有 Worker 検査段階は、未宣言の authority tool または未知の
+hard rule を持つ project 内のすべての component も拒否し、`ok` ではなく project の
+`ai check` と同じ診断(semantics、exit 2)を返します。generic な project 検査で従来
+受理した fixture `error_envelope_ai_project_unknown_tool.fsl` と
+`error_envelope_ai_project_invalid_rule.fsl` の受理も削除されます。
+project の意味論的な座標は引き続き component block 内が基準です(#1574)。
+LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
+
+**境界 sweep の実測 (#1545):** B
+`d37a215e8df6c00222e6aafd94bc9b556c445521` と H
+`99810256faca086360c6ca4233f935b9b56b1ec8` を、それぞれ独立した git archive の
+tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
+tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
+`rust/fslc/tests/fixtures/` の全597 `.fsl`、Markdown 30件、新しい test の inline 入力
+12出現を各 tree で検査しました(**計1,278検査**)。Markdown の4件は compiler が
+FSL fence を認識します。bash fence だけの `examples/ai/README.md` も含め、30件を
+すべて検査しました。cache と unstable の環境上書きは unset、
+除外した出力 field はありません。corpus の ok/exit0 → error/exit2 はちょうど
+**3件**で、`error_envelope_ai_project_unknown_tool.fsl`、
+`error_envelope_ai_project_invalid_rule.fsl`、`error_envelope_literate_ai_project.md` です。
+Markdown project は type、`ai_component 'EnvelopeParityLiterateProject' declares no tools`、
+block 内 loc 1:1、exit 2 を返します。単独の literate component の拒否と、複数 block の
+toggle 2件の受理は変わりません。新しい test の inline の削除は
+**4出現**です: CLI 側と Worker-shaped 側のツールの無い component を含む project
+(2出現)、空の authority だけの component を含む project(1出現)、正常な最初の
+component の後ろに不正な component がある project(1出現)。書き直した既存の inline
+FSL は0件です。ツールの無い3出現は block 内 loc 1:1 の type、後ろの未宣言 tool は
+loc なしの semantics を返します。この check だけの sweep で、それ以外の exit/result と stdout/stderr 全文は
+変わりません。意図した tool を宣言するか不要な component を除き、不明な tool/rule
+の参照を修正してください。
+
+lowering だけの道も同じ validation 全体を使います。同じ B/H で `analyze <relative-path>`
+を AI に言及する corpus 18入力と明示的な4形式に実行し、変化した形式と compose の対照を
+`scenarios <relative-path> --depth 2 --deadlock ignore` と `explain <relative-path>` でも
+比較しました。コマンドと形式の30組 × 2バイナリ = 計60観測で、
+analyze(22形式)、scenarios(4形式)、explain(4形式)は各々
+**ok→error 1、error→ok 0、error の envelope 変化2** です。破壊的削除は
+`tool_authority` だけを選んで生成された参照から隠れていた未宣言 authority tool X で、
+成功の代わりに semantics、`unknown tool 'X' in authority block`、loc なし、exit 2 を
+返します。ツール無しで fallback x が重複すると、
+type/`ai_component 'DupNoTools' declares no tools`/loc 1:1 から
+semantics/`duplicate fallback reason 'x'`/loc なしへ変わります(ともに exit 2)。ツールが
+ある場合は、loc なしの semantics/`duplicate action 'fallback_x'` から
+semantics/`duplicate fallback reason 'x'`/loc なしに変わります(ともに exit 2)。
+AI component を use する compose は引き続き
+`compose use must reference a spec at 2:3`、loc 2:3 で拒否されます。ほかの lowering の
+受理削除は観測していません。check だけの一致を、これらの意図した診断変更にまで
+一般化しないでください。
 
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:
