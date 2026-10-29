@@ -58,6 +58,7 @@ const EXTERNAL_GATE: &[&str] = &[
     "--min-kill-rate",
     "1",
 ];
+const UNREADABLE_CATALOG: &str = "does/not/exist.jsonl";
 const UNREADABLE: &[&str] = &[
     "rust/fslc/tests/fixtures/sweep_clean.fsl",
     "--depth",
@@ -65,7 +66,7 @@ const UNREADABLE: &[&str] = &[
     "--max-mutants",
     "1",
     "--from",
-    "does/not/exist.jsonl",
+    UNREADABLE_CATALOG,
 ];
 
 fn run(args: &[&str]) -> Output {
@@ -197,6 +198,31 @@ fn successful_report_stdout_is_byte_identical_to_main() {
 fn unreadable_catalog_after_a_clean_baseline_is_quiet_and_byte_identical() {
     // Cap one matters: preloading must fail before even a built-in progress
     // line, not merely happen to stay quiet in an external-only invocation.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    // A missing directory is OS error 3 on Windows, not missing-file error 2.
+    let error = std::fs::read_to_string(root.join(UNREADABLE_CATALOG))
+        .expect_err("catalog must remain unreadable");
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    let expected = format!(
+        concat!(
+            "{{\n",
+            "  \"fsl\": \"1.0\",\n",
+            "  \"result\": \"error\",\n",
+            "  \"kind\": \"io\",\n",
+            "  \"message\": {}\n",
+            "}}\n",
+        ),
+        serde_json::to_string(&error.to_string()).expect("serialize OS error message"),
+    );
+    // Retain main's Unix identity while allowing the platform's own OS text.
+    #[cfg(unix)]
+    assert_eq!(
+        format!("{:x}", Sha256::digest(expected.as_bytes())),
+        "0378857af9ede852462b991c4c66b1c8013673f8ac882187cc1739a5b515b6f8"
+    );
     let output = run(UNREADABLE);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stderr.is_empty(), "{output:?}");
@@ -204,8 +230,9 @@ fn unreadable_catalog_after_a_clean_baseline_is_quiet_and_byte_identical() {
     assert_eq!(value["result"], "error");
     assert_eq!(value["kind"], "io");
     assert_eq!(
-        format!("{:x}", Sha256::digest(&output.stdout)),
-        "0378857af9ede852462b991c4c66b1c8013673f8ac882187cc1739a5b515b6f8"
+        output.stdout.as_slice(),
+        expected.as_bytes(),
+        "complete unreadable-catalog stdout drifted; no fields or bytes excluded"
     );
 }
 
