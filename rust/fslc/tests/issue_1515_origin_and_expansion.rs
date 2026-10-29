@@ -204,6 +204,15 @@ fn hidden_kpi_name_preserves_values_and_verdicts() {
         .unwrap();
         let model = fsl_core::build_model(kernel).unwrap();
         assert_eq!(model.projections[0].name, "waiting");
+        let expected = if text == &source {
+            "__c_substitution_0"
+        } else {
+            "c"
+        };
+        // Pin both the Count binding and the where-expression's stage-index Var.
+        let expression = model.projections[0].expr.kernel_ast_v1();
+        assert_eq!(expression[1], expected);
+        assert_eq!(expression[3][2][2], json!(["var", expected]));
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).unwrap();
         for expected in [1, 0] {
             let value = fsl_runtime::eval(

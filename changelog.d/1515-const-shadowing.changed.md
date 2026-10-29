@@ -20,7 +20,9 @@ same rule also rejects documented implicit process c, next-edition entity
 instance first-letter names and relation actor-instance params, at the source
 process/entity/event declaration even when no local declaration was written.
 Rename a conflicting const in those implicit-name cases. Hidden KPI projection
-binders instead freshen only on collision. Nested init with const i=1 and
+binders instead freshen only on collision: only then does the projection's
+Kernel AST JSON name change; the public Kernel export is unchanged.
+Nested init with const i=1 and
 `forall i in 0..0 { forall j in 0..i { m[j] = true } }` is an additional removal:
 it checked on base c32e7f5a and now refuses the outer forall at 5:10. Rename the
 local and its bound uses. Def-call argument binders are checked before expansion
