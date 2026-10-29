@@ -147,7 +147,7 @@ fn issue_1475_project(design: &str) -> PathBuf {
 }
 
 fn issue_1475_check_detail(dir: &Path) -> Value {
-    let expected = serde_json::json!({
+    let mut expected = serde_json::json!({
         "fsl":"1.0", "result":"ok", "spec":"ApprovalReview",
         "warnings":[
             {
@@ -179,6 +179,12 @@ fn issue_1475_check_detail(dir: &Path) -> Value {
     let checked = run(dir, &["check", "./spec.fsl"]);
     assert_eq!(checked.status.code(), Some(0));
     assert_eq!(json(&checked)["warnings"], expected["warnings"]);
+    // A standalone check echoes its argument; chain detail warnings carry the
+    // native path chain passed to check (`.\spec.fsl` on Windows).
+    let native = format!(".{}spec.fsl", std::path::MAIN_SEPARATOR);
+    for warning in expected["warnings"].as_array_mut().expect("warnings") {
+        warning["loc"]["file"] = Value::from(native.as_str());
+    }
     expected
 }
 
