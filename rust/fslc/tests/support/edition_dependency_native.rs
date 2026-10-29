@@ -5,6 +5,7 @@ mod cases;
 #[path = "edition_cases.rs"]
 mod common;
 use super::*;
+use fsl_tools::{build_causal_model_with_options as causal_model, compile_expectations};
 
 fn fixture() -> (common::Scratch, std::path::PathBuf, String) {
     let scratch = common::Scratch::new();
@@ -118,11 +119,7 @@ fn dependency_edition_p01_p04_lenient_helpers_cannot_swallow_refusal() {
         let rejected = cases::next(&cases::legacy(&body));
         scratch.write("dep.fsl", &rejected);
         let produced = run();
-        let child = scratch.0.join("dep.fsl").canonicalize().unwrap();
-        let expected = (
-            cases::refusal(&rejected, child.to_str().unwrap(), envelope()),
-            2,
-        );
+        let expected = (cases::cli_refusal(&rejected, "dep.fsl"), 2);
         observations.eq(id, &produced, &expected);
     }
     observations.finish();
@@ -137,11 +134,8 @@ fn dependency_edition_o02_o03_sequential_owners_do_not_share_records() {
         })
     };
     let first = run();
-    let child = scratch.0.join("dep.fsl").canonicalize().unwrap();
-    let expected_a = (
-        cases::refusal(&cases::next_leaf(), child.to_str().unwrap(), envelope()),
-        2,
-    );
+    let child = "dep.fsl";
+    let expected_a = (cases::cli_refusal(&cases::next_leaf(), child), 2);
     observations.eq("O02/A", &first, &expected_a);
     scratch.write("dep.fsl", cases::LEAF);
     let second = run();
@@ -151,7 +145,7 @@ fn dependency_edition_o02_o03_sequential_owners_do_not_share_records() {
     let warning_a = run();
     let warning_b = run();
     let expected = (
-        json!({"fsl":"1.0","result":"ok","warnings":[cases::metadata_finding(cases::LEGACY_LEAF, child.to_str().unwrap(), "current")]}),
+        json!({"fsl":"1.0","result":"ok","warnings":[cases::metadata_finding(cases::LEGACY_LEAF, child, "current")]}),
         0,
     );
     for (label, result) in [("O03/A", warning_a), ("O03/B", warning_b)] {
@@ -168,9 +162,9 @@ fn dependency_edition_o04_nested_owner_and_o05_fresh_child_thread() {
             consume(&path, source)
         })
     });
-    let child = scratch.0.join("dep.fsl").canonicalize().unwrap();
+    let child = "dep.fsl";
     let expected = (
-        json!({"fsl":"1.0","result":"ok","warnings":[cases::metadata_finding(cases::LEGACY_LEAF,child.to_str().unwrap(),"current")]}),
+        json!({"fsl":"1.0","result":"ok","warnings":[cases::metadata_finding(cases::LEGACY_LEAF,child,"current")]}),
         0,
     );
     let mut observations = cases::Observations::default();
@@ -256,10 +250,7 @@ fn dependency_edition_mapping_role_calibration() {
         };
         let actual = run();
         if row.variant == cases::Variant::N {
-            let expected = (
-                cases::refusal(source, path.to_str().unwrap(), envelope()),
-                2,
-            );
+            let expected = (cases::cli_refusal(source, path.to_str().unwrap()), 2);
             println!("CALIBRATION {id}/mapping-role produced={actual:?} expected={expected:?}");
             assert_eq!(actual, expected);
         } else {
@@ -271,8 +262,78 @@ fn dependency_edition_mapping_role_calibration() {
     }
 }
 
+fn dependency_edition_e08_compiles_against_a_canonical_prefix() {
+    let mut observations = cases::Observations::default();
+    for row in cases::flat_rows()
+        .into_iter()
+        .filter(|row| row.id.starts_with("E08/"))
+    {
+        let s = common::Scratch::new();
+        let canonical = cases::fixture(&cases::row("E08/P"));
+        canonical.materialize(&s, "root.fsl");
+        let raw = fsl_core::FsResolver::new(&s.0);
+        let (model, _) = causal_model(&canonical.root, &raw, crate::parse_options()).unwrap();
+        let fixture = cases::fixture(&row);
+        fixture.materialize(&s, "root.fsl");
+        let surface = fsl_syntax::parse_causal(&fixture.root).unwrap();
+        let actual = run_admitted_root(
+            &s.0.join("root.fsl"),
+            Ok(fixture.root.clone()),
+            None,
+            false,
+            |_| {
+                let resolver = dependency_resolver(&s.0);
+                let compiled =
+                    compile_expectations(&surface, &model, &resolver, crate::parse_options());
+                observations.eq(
+                    &format!("{}/compile-rejected", row.id),
+                    compiled.is_err(),
+                    row.variant == cases::Variant::N,
+                );
+                match compiled {
+                    Ok(compiled) => (json!({"count":compiled.len(),"warnings":[]}), 0),
+                    Err(_) => (Value::Null, 2),
+                }
+            },
+        );
+        let path = cases::identity(&s, &fixture.child);
+        let expected = if row.variant == cases::Variant::N {
+            (cases::cli_refusal(&fixture.files[&fixture.child], &path), 2)
+        } else {
+            (
+                json!({"count":2,"warnings":if row.variant == cases::Variant::W { cases::findings(&fixture.files[&fixture.child], &path, "current") } else { Vec::<Value>::new() }}),
+                0,
+            )
+        };
+        observations.eq(&format!("{}/compile-only", row.id), actual, expected);
+    }
+    observations.finish();
+}
+
 #[test]
 fn dependency_edition_private_adapter_executes_all_assigned_rows() {
+    let gate = fsl_syntax::UnstableFeature::Fsl5;
+    if !crate::parse_options().unstable().contains(gate) {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+        child.args([std::thread::current().name().unwrap(), "--exact"]);
+        child.env("FSLC_UNSTABLE", "fsl5");
+        assert!(child.status().unwrap().success());
+        return;
+    }
+    let scratch = common::Scratch::new();
+    scratch.write("dep.fsl", "fsl 99\n");
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let resolver = dependency_resolver(&scratch.0).report_to(log.clone());
+    assert_eq!(
+        fsl_core::FileResolver::read(&resolver, "dep.fsl").unwrap(),
+        "fsl 99\n"
+    );
+    assert_eq!(
+        log.borrow().warnings,
+        vec![
+            json!({"code":"unsupported_edition","kind":"parse","severity":"warning","message":"unsupported syntax edition 'fsl 99'; supported editions: 4, 5 at 1:1","loc":{"file":"dep.fsl","line":1,"column":1}})
+        ]
+    );
     cases::exercise(
         "private",
         &[
@@ -283,6 +344,7 @@ fn dependency_edition_private_adapter_executes_all_assigned_rows() {
             dependency_edition_c03_direct_slots_keep_individual_warning_cardinality,
             dependency_edition_t06_isolates_the_actual_unowned_refine_step,
             dependency_edition_mapping_role_calibration,
+            dependency_edition_e08_compiles_against_a_canonical_prefix,
         ],
     );
 }

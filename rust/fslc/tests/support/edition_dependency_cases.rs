@@ -108,8 +108,7 @@ pub fn flat_rows() -> Vec<Row> {
         .collect()
 }
 
-// One definition per additional acceptance contract. Direct scope probes and
-// isolated late endpoints are connected only after the implementation exists.
+// Independent acceptance definitions; late consumers have typed inventory pins.
 // A17 is the additional plain-Spec export control: A10's compose Kernel and
 // typestate exports preserve their existing refusals, not fictitious successes.
 pub const ADDITIONAL: &str = "\
@@ -137,7 +136,7 @@ P03|document_model_failure|helper/document generate|owner|refusal identity and n
 P04|readable_implements_text_from_source|helper|owner|refusal beats Option
 L01|publish_diagnostics|open rejected/disk canonical|explicit local|related child error and no model
 L02|publish_diagnostics|open canonical/disk rejected|explicit local|open wins
-L03|code_actions|open rejected/disk canonical|explicit local|no child edits; internal probe deferred
+L03|code_actions|open rejected/disk canonical|explicit local|own parent-quickfix refusal gate
 L04|code_actions|open canonical/disk rejected|explicit local|open wins; no child edits
 L05|publish_diagnostics|mixed current child|explicit local|child UTF16 warning
 L06|both Store routes|unsupported header|explicit local|child identity and no model
@@ -214,7 +213,9 @@ pub fn assigned(adapter: &str) -> BTreeSet<String> {
                 "worker" => worker_edge(id) || id == "C01",
                 "lsp" => id.starts_with('L') || id == "T21",
                 "private" => {
-                    id.starts_with('O') || id.starts_with('P') || matches!(id, "C03" | "T06")
+                    id.starts_with('O')
+                        || id.starts_with('P')
+                        || matches!(id, "C03" | "T06" | "E08")
                 }
                 "cli" => matches!(id, "E01" | "E02" | "E03" | "E04" | "E05" | "E06"),
                 "routes" => {
@@ -247,12 +248,11 @@ pub fn worker_rows() -> Vec<Row> {
 }
 
 pub fn deferred_rows() -> Vec<String> {
-    all_rows()
+    // Only accepted browser verify remains unobserved. Late rereads use the
+    // prior-read/type table; threads use the owner/spawn table and route tests.
+    worker_rows()
         .into_iter()
-        .filter(|row| {
-            let id = row.id.split('/').next().unwrap();
-            worker_edge(id) || matches!(id, "E08" | "E09" | "L03" | "O05") || id.starts_with('T')
-        })
+        .filter(|row| row.variant != Variant::N)
         .map(|r| r.id)
         .collect()
 }
@@ -349,13 +349,8 @@ pub fn causal_legacy() -> String {
 pub fn row(id: &str) -> Row {
     flat_rows().into_iter().find(|r| r.id == id).unwrap()
 }
-pub fn identity(s: &common::Scratch, name: &str) -> String {
-    s.0.join(name)
-        .canonicalize()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .into()
+pub fn identity(_s: &common::Scratch, name: &str) -> String {
+    name.into()
 }
 pub fn fsl_envelope() -> serde_json::Map<String, Value> {
     serde_json::from_value(json!({"fsl":"1.0"})).unwrap()
@@ -541,17 +536,21 @@ pub fn refusal(source: &str, path: &str, envelope: serde_json::Map<String, Value
 
 // Without an owner, component_error reanchors the resolver's one-line error at
 // the fixture's use declaration. Compare the entire existing renderer contract.
+pub fn component_error(detail: &str, root: &str) -> Value {
+    let prefix = format!("{root}{}", if root.is_empty() { "" } else { ":" });
+    json!({"fsl":"1.0","result":"error","kind":"semantics","message":format!("{detail} at {prefix}1:13"),"loc":{"line":1,"column":13}})
+}
 pub fn unowned_expected(file: &str, root: &str) -> Value {
     // approval_spec_digest uses parse_kernel_source_with_options and flattens
     // its CoreError with unlocated_semantic; other loaders retain their origin.
-    let prefix = if root.is_empty() {
-        String::new()
-    } else {
-        format!("{root}:")
-    };
-    let mut expected = json!({"fsl":"1.0","result":"error","kind":"semantics","message":format!("component \"dep.fsl\" could not be read (dependency \"{file}\" rejected by edition: legacy_string_metadata) at {prefix}1:13")});
-    if !root.is_empty() {
-        expected["loc"] = json!({"line":1,"column":13});
+    let mut expected = component_error(
+        &format!(
+            "component \"dep.fsl\" could not be read (dependency \"{file}\" rejected by edition: legacy_string_metadata)"
+        ),
+        root,
+    );
+    if root.is_empty() {
+        expected.as_object_mut().unwrap().remove("loc");
     }
     expected
 }
@@ -601,16 +600,26 @@ pub fn expected_check(
     result
 }
 
-// Fixed fixture contracts, not a second verifier invocation. Property names,
-// source locations and state changes follow the authored issue pair and the
-// bounded depth-two output contract. Ambient timings alone use stable().
+// Independent fixture envelopes: property names/locations and depth-two shape
+// are exact; ambient costs/non-unique witness values use stable().
 pub fn expected_verify(row: &Row, fixture: &Fixture, child: &str) -> Value {
     let mut expected = expected_check(row, fixture, child, fsl_envelope());
-    let compose = row.edge == "use";
+    if row.edge == "use" {
+        let mut verified: Value = serde_json::from_str(include_str!(
+            "../../../fsl-wasm/tests/support/dependency_verify.json"
+        ))
+        .unwrap();
+        verified.as_object_mut().unwrap().remove("_license");
+        let verified =
+            with_child_warnings(verified, expected["warnings"].as_array().unwrap().clone());
+        expected
+            .as_object_mut()
+            .unwrap()
+            .extend(verified.as_object().unwrap().clone());
+        return expected;
+    }
     let implements = row.edge == "implements";
-    let invariant = if compose {
-        "claims.OnlyEligibleAutoApproved"
-    } else if implements {
+    let invariant = if implements {
         "Typed"
     } else {
         "_governance_catalog_ok"
@@ -619,39 +628,15 @@ pub fn expected_verify(row: &Row, fixture: &Fixture, child: &str) -> Value {
     for (key, value) in json!({"depth":2,"checked_to_depth":2,"completeness":"bounded","transitions_checked":[],"reachables":{},"deadlock":{"found":false},"note":"bounded verification: no violation within depth 2"}).as_object().unwrap() {
         expected[key] = value.clone();
     }
-    expected["invariants_checked"] = if compose {
-        json!(["_bounds_claims.amount", invariant])
-    } else {
-        json!([invariant])
-    };
-    let (properties, statistics) = if compose {
-        expected["action_coverage"] = json!({"claims.auto_approve":true,"claims.submit":true});
-        let state = |amount, submitted| json!({"claims.amount":amount,"claims.submitted":submitted,"claims.auto_approved":{"0":false,"1":false}});
-        let trace = json!([
-            {"step":0,"state":state(json!({"0":0,"1":0}), json!({"0":false,"1":false}))},
-            {"step":1,"state":state(json!({"0":100,"1":0}),json!({"0":true,"1":false})),"action":{"name":"claims.submit","params":{"c":0,"requested":100},"loc":{"line":27,"column":3}},"changes":{"claims.amount[0]":{"from":0,"to":100},"claims.submitted[0]":{"from":false,"to":true}}},
-            {"step":2,"state":state(json!({"0":100,"1":99}),json!({"0":true,"1":true})),"action":{"name":"claims.submit","params":{"c":1,"requested":99},"loc":{"line":27,"column":3}},"changes":{"claims.amount[1]":{"from":0,"to":99},"claims.submitted[1]":{"from":false,"to":true}}}
-        ]);
-        expected["deadlock"] = json!({"found":true,"at_step":2,"trace":trace});
-        expected["warnings"].as_array_mut().unwrap().insert(0, json!({"kind":"deadlock","message":"deadlock reachable at step 2 (state: claims.amount={0: 100, 1: 99}, claims.submitted={0: true, 1: true}, claims.auto_approved={0: false, 1: false})","hint":"add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional"}));
-        (
-            "action_coverage|claims.auto_approve|3\naction_coverage|claims.submit|1\ndeadlock|deadlock|4\ninit|initial_state|1\ninvariant|claims.OnlyEligibleAutoApproved|3\npartial_op|actions|4\npartial_op|claims.OnlyEligibleAutoApproved|3\ntype_bound|_bounds_claims.amount|3\ntype_bound|_bounds_claims.auto_approved|3\ntype_bound|_bounds_claims.submitted|3\nvacuity|claims.auto_approve|1\nvacuity|claims.submit|1\nvacuity|session|1",
-            json!({"checks":31,"conflicts":707,"decisions":23_093,"propagations":221_786}),
-        )
-    } else if implements {
+    expected["invariants_checked"] = json!([invariant]);
+    let properties = if implements {
         expected["action_coverage"] = json!({"finish":true});
-        (
-            "action_coverage|finish|1\ndeadlock|deadlock|3\ninit|initial_state|1\ninvariant|Typed|3\npartial_op|Typed|3\npartial_op|actions|2\ntype_bound|_bounds_done|3\nvacuity|session|1",
-            json!({"checks":17,"conflicts":null,"decisions":1,"propagations":4}),
-        )
+        "action_coverage|finish|1\ndeadlock|deadlock|3\ninit|initial_state|1\ninvariant|Typed|3\npartial_op|Typed|3\npartial_op|actions|2\ntype_bound|_bounds_done|3\nvacuity|session|1"
     } else {
         expected["action_coverage"] = json!({"_governance_noop":{"covered":false,"blocking_requires":[],"hint":"these requires clauses are unsatisfiable at every step up to depth 2; weaken one of them, add an action that establishes them, or increase --depth","faithfulness_class":"intent_unexercised","recommended_action":"add a single-shot reachable for the action / raise --depth","requirement":{"id":"GOV","text":"governance catalog G"},"requirements":[{"id":"GOV","text":"governance catalog G"}]}});
-        (
-            "action_coverage|_governance_noop|3\ninit|initial_state|1\ninvariant|_governance_catalog_ok|3\npartial_op|_governance_catalog_ok|3\npartial_op|actions|2\npartial_op|terminal|6\ntype_bound|_bounds__governance_ok|3\nvacuity|session|1",
-            json!({"checks":22,"conflicts":4,"decisions":1,"propagations":1}),
-        )
+        "action_coverage|_governance_noop|3\ninit|initial_state|1\ninvariant|_governance_catalog_ok|3\npartial_op|_governance_catalog_ok|3\npartial_op|actions|2\npartial_op|terminal|6\ntype_bound|_bounds__governance_ok|3\nvacuity|session|1"
     };
-    expected["cost"] = cost(properties, statistics);
+    expected["cost"] = cost(properties, json!({"checks":if implements {17} else {22}}));
     expected
 }
 
@@ -661,52 +646,127 @@ pub fn cost(properties: &str, mut solver: Value) -> Value {
         json!({"kind":parts[0],"name":parts[1],"checks":parts[2].parse::<u64>().unwrap(),"elapsed_s":0})
     }).collect::<Vec<_>>();
     solver["check_elapsed_s"] = json!(0);
-    solver["memory_mb"] = json!(0);
+    for key in ["memory_mb", "conflicts", "decisions", "propagations"] {
+        solver[key] = Value::Null;
+    }
     json!({"elapsed_s":0,"solver":solver,"properties":properties})
 }
 
-// Observed native BMC costs include wall-clock durations and process solver
-// memory. Validate every excluded value and preserve their live JSON paths;
-// no verdict, location, assurance, statistic count or warning is discarded.
+// Shape only solver-chosen values; retain object keys, arrays and parameter types.
+fn witness_values(value: &mut Value, typed: bool) {
+    match value {
+        Value::Object(object) => object.values_mut().for_each(|v| witness_values(v, typed)),
+        Value::Array(array) => array.iter_mut().for_each(|v| witness_values(v, typed)),
+        _ => {
+            *value = json!(if typed {
+                match value {
+                    Value::Null => "<null>",
+                    Value::Bool(_) => "<boolean>",
+                    Value::Number(_) => "<number>",
+                    _ => "<string>",
+                }
+            } else {
+                "<value>"
+            });
+        }
+    }
+}
+
+fn witness_trace(value: &mut Value) {
+    let trace = value.as_array_mut().expect("witness trace array");
+    assert!(!trace.is_empty());
+    for (index, entry) in trace.iter_mut().enumerate() {
+        assert_eq!(entry["step"], index);
+        entry["step"] = json!(usize::from(index != 0));
+        witness_values(entry.get_mut("state").expect("witness state"), false);
+        if let Some(action) = entry.get_mut("action") {
+            witness_values(action.get_mut("params").expect("action parameters"), true);
+        }
+        if let Some(blame) = entry.get_mut("blame") {
+            witness_values(blame, true);
+        }
+        if let Some(changes) = entry.get_mut("changes") {
+            let mut shapes = changes
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(path, change)| {
+                    let path = path
+                        .split('[')
+                        .map(|part| part.split_once(']').map_or(part, |(_, tail)| tail))
+                        .collect::<Vec<_>>()
+                        .join("[*]");
+                    let mut change = change.clone();
+                    witness_values(&mut change, true);
+                    json!({"path":path,"shape":change})
+                })
+                .collect::<Vec<_>>();
+            shapes.sort_by_key(Value::to_string);
+            *changes = json!(shapes);
+        }
+    }
+    trace[1..].sort_by_key(Value::to_string);
+}
+
+// Costs vary by process; witnesses vary by solver choice (parity.mjs). Keep live
+// cost paths, trace steps/keys, verdicts, bounds, locations and warning kinds exact.
+// Witness policy: rust/fsl-wasm/parity.mjs:7-95 (values, commuting steps, warning text).
 pub fn stable(mut value: Value) -> (Value, BTreeSet<String>) {
-    fn metric(value: &Value, path: String, nullable: bool, paths: &mut BTreeSet<String>) {
+    fn metric(value: &mut Value, path: String, nullable: bool, paths: &mut BTreeSet<String>) {
         assert!(
             (nullable && value.is_null())
                 || value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
             "invalid ambient cost {path}"
         );
         paths.insert(path);
+        *value = Value::Null;
     }
     fn walk(value: &mut Value, path: &str, paths: &mut BTreeSet<String>) {
+        if path == "/trace"
+            || path == "/deadlock/trace"
+            || (path.starts_with("/reachables/") && path.ends_with("/witness"))
+        {
+            witness_trace(value);
+        }
         match value {
             Value::Object(object) => {
                 if (object.get("fsl").and_then(Value::as_str) == Some("1.0")
                     || path == "/verification/engine_metadata")
                     && object.contains_key("cost")
                 {
-                    let cost = &object["cost"];
-                    for pointer in ["/elapsed_s", "/solver/check_elapsed_s", "/solver/memory_mb"] {
-                        let value = cost.pointer(pointer).expect("missing excluded cost field");
+                    let cost = &mut object["cost"];
+                    for pointer in [
+                        "/elapsed_s",
+                        "/solver/check_elapsed_s",
+                        "/solver/memory_mb",
+                        "/solver/conflicts",
+                        "/solver/decisions",
+                        "/solver/propagations",
+                    ] {
+                        let value = cost
+                            .pointer_mut(pointer)
+                            .expect("missing excluded cost field");
                         metric(
                             value,
                             format!("{path}/cost{pointer}"),
-                            pointer.ends_with("memory_mb"),
+                            pointer.starts_with("/solver/") && !pointer.ends_with("elapsed_s"),
                             paths,
                         );
                     }
+                    let measured = cost["solver"]["checks"].as_u64().unwrap() > 0;
                     let properties = cost["properties"]
-                        .as_array()
+                        .as_array_mut()
                         .expect("cost property timing array");
-                    if cost["solver"]["checks"].as_u64().unwrap() > 0 {
+                    if measured {
                         assert!(
                             !properties.is_empty(),
                             "measured solver run needs property timing evidence"
                         );
                     }
-                    for (i, property) in properties.iter().enumerate() {
+                    for (i, property) in properties.iter_mut().enumerate() {
                         metric(
                             property
-                                .get("elapsed_s")
+                                .get_mut("elapsed_s")
                                 .expect("missing excluded property elapsed_s"),
                             format!("{path}/cost/properties/{i}/elapsed_s"),
                             false,
@@ -716,17 +776,22 @@ pub fn stable(mut value: Value) -> (Value, BTreeSet<String>) {
                 }
                 for (key, value) in object {
                     let path = format!("{path}/{key}");
-                    if paths.contains(&path) {
-                        *value = Value::Null;
-                    } else {
-                        walk(value, &path, paths);
-                    }
+                    walk(value, &path, paths);
                 }
             }
             Value::Array(array) => {
                 for (i, value) in array.iter_mut().enumerate() {
                     walk(value, &format!("{path}/{i}"), paths);
                 }
+            }
+            Value::String(message)
+                if path.starts_with("/warnings/")
+                    && path.ends_with("/message")
+                    && message.starts_with("deadlock reachable at step ")
+                    && message.ends_with(')')
+                    && let Some((prefix, _)) = message.split_once(" (state: ") =>
+            {
+                *message = format!("{prefix} (state: <witness>)");
             }
             _ => {}
         }
@@ -755,6 +820,20 @@ pub fn versioned_native_value(value: Value) -> Value {
 #[derive(Default)]
 pub struct Observations(common::Results);
 impl Observations {
+    pub fn output(
+        &mut self,
+        id: &str,
+        output: &std::process::Output,
+        expected: Value,
+        status: i32,
+    ) {
+        let value = native_value(serde_json::from_slice(&output.stdout).unwrap());
+        self.eq(
+            id,
+            (output.status.code(), stable(value), &output.stderr),
+            (Some(status), stable(expected), &Vec::<u8>::new()),
+        );
+    }
     pub fn eq<T: PartialEq + std::fmt::Debug>(&mut self, id: &str, actual: T, expected: T) {
         let equal = actual == expected;
         self.compare(id, actual, expected, equal);

@@ -321,23 +321,25 @@ for (const binder of ["seq_literal", "set_statement"]) {
     });
   }
 }
-// One exact issue-pair negative, observed only by Linux WASM integration.
+// Exact issue-pair rejection and one-time warning, Linux WASM integration only.
 // The native test seam cannot run the pre-fix main browser BMC. Read the same
 // fixture files as the shared Rust table, rather than maintaining byte copies.
 // The existing batch protocol retains explicit unstable options; no product
 // transport or solver-injection surface is changed here.
 const dependencyRoot = await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_root.txt"), "utf8");
-const dependencyChild = `fsl 5\n${await readFile(join(repository, editionWarningCase), "utf8")}`;
+const dependencyVerify = JSON.parse(await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_verify.json"), "utf8"));
+delete dependencyVerify._license;
+const dependencyLegacy = await readFile(join(repository, editionWarningCase), "utf8");
 const dependencyCases = [];
-{
+for (const [variant, header, expected_status] of [["N", 5, 2], ["W", 4, 0]]) {
+  const dependencyChild = `fsl ${header}\n${dependencyLegacy}`;
   const directory = await mkdtemp(join(dist, "dependency-edition-"));
   const path = relative(repository, join(directory, "root_compose.fsl")).split("\\").join("/");
   await writeFile(join(repository, path), dependencyRoot, "utf8");
   await writeFile(join(directory, "dep_next_colon.fsl"), dependencyChild, "utf8");
   dependencyCases.push({
-    id: "E01/N/worker-verify", dependency_edition: true, cmd: "verify", path, source: dependencyRoot, source_file: path,
-    files: { "dep_next_colon.fsl": dependencyChild }, unstable: ["fsl5"], options: { depth: 2, deadlock: "warn" }, expected_status: 2,
-    child_identity: join(directory, "dep_next_colon.fsl"),
+    id: `E01/${variant}/worker-verify`, variant, dependency_edition: true, cmd: "verify", path, source: dependencyRoot, source_file: path,
+    files: { "dep_next_colon.fsl": dependencyChild }, unstable: ["fsl5"], options: { depth: 2, deadlock: "warn" }, expected_status,
   });
 }
 await writeFile(
@@ -582,24 +584,30 @@ for (const [index, testCase] of dependencyCases.entries()) {
   const native = await nativeEnvelope(testCase);
   const worker = dependencyEnvelopes[index];
     // Exact independent finding, including every edit.
-    // Native FS canonical paths and MemoryResolver keys have different identity
-    // representations; compare each in full to its own independently fixed
-    // envelope, rather than excluding the location from parity.
-    for (const [actual, file] of [[native, testCase.child_identity], [worker, "dep_next_colon.fsl"]]) {
+    // Display the reference spelling on both surfaces; do not exclude locations.
+    for (const actual of [native, worker]) {
+      const file = "dep_next_colon.fsl";
       const frontend = actual === native ? "fslc-rust" : "fsl-wasm";
       const backend = actual === native ? "native-z3" : "z3-solver-wasm";
       if (actual.versions?.verifier?.name !== frontend || actual.versions?.solver?.backend !== backend) {
         throw new ParityViolationError(`dependency runtime identity drift for ${frontend}`);
       }
-      const expected = { fsl: "1.0", result: "error", kind: "unsupported_in_edition", edition: "next", fsl_edition: 5,
-        findings: [{ code: "legacy_string_metadata", kind: "legacy_string_metadata", taxonomy: "deprecated", severity: "error", edition: "next",
+       const finding = { code: "legacy_string_metadata", kind: "legacy_string_metadata", taxonomy: "deprecated",
+           severity: testCase.variant === "N" ? "error" : "warning", edition: testCase.variant === "N" ? "next" : "current",
           message: "legacy string metadata is deprecated; use a typed annotation",
           loc: { file, line: 38, column: 38, end_line: 38, end_column: 85 },
           canonical_replacement: '@requirement("REQ-2", "only eligible claims are auto-approved")', machine_applicable: true,
           edits: [{ start: 770, end: 770, replacement: '@requirement("REQ-2", "only eligible claims are auto-approved")\n  ' },
-            { start: 805, end: 852, replacement: "" }] }], versions: actual.versions };
-      // Normalization validates the live backend/version envelope; every other
-      // key, including loc, verdict, assurance and extra output, is exact.
+             { start: 805, end: 852, replacement: "" }] };
+       let expected = { fsl: "1.0", result: "error", kind: "unsupported_in_edition", edition: "next", fsl_edition: 5,
+         findings: [finding], versions: actual.versions };
+       if (testCase.variant === "W") {
+          expected = structuredClone(dependencyVerify);
+          expected.versions = actual.versions;
+          expected.warnings.push(finding);
+       }
+       // Normalization validates runtime identity/cost and shapes non-unique
+       // witnesses/state text; loc, verdict, assurance and extra keys stay exact.
       const drift = differences(normalizeEnvelope(actual), normalizeEnvelope(expected));
       if (drift.length) throw new ParityViolationError(JSON.stringify({ case: testCase.id, drift }));
     }

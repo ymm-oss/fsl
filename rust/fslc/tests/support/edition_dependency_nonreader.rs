@@ -163,7 +163,7 @@ fn domain_failure() -> Value {
     let requirement = json!({"id":"DOMAIN-INVARIANT","text":"Doc.Typed"});
     let cost = cases::cost(
         "action_coverage|doc_close|1\naction_coverage|doc_reopen|1\ninit|initial_state|1\ninvariant|Doc_Typed|3\npartial_op|Doc_Typed|2\npartial_op|actions|2\npartial_op|terminal|2\ntype_bound|_bounds_doc_status|2\ntype_bound|_bounds_event_ClosedDoc|2\ntype_bound|_bounds_event_OpenedDoc|2",
-        json!({"checks":18,"conflicts":1,"decisions":null,"propagations":6}),
+        json!({"checks":18}),
     );
     json!({"fsl":"1.0","spec":"D","result":"violated","violation_kind":"invariant","invariant":"Typed","generated_name":"Doc_Typed","origin":property,"requirement":requirement,"requirements":[requirement],"loc":{"line":1,"column":351},"violated_at_step":1,"violating_bindings":[{}],"blame":{"conjuncts":[{"index":0,"text":"doc_status == Status_Open","holds":false,"violating_bindings":[{}]}]},"last_action":action,
         "trace":[{"step":0,"state":{"doc_status":"Status_Open","event_ClosedDoc":false,"event_OpenedDoc":false}},{"step":1,"state":{"doc_status":"Status_Closed","event_ClosedDoc":true,"event_OpenedDoc":false},"action":action,"changes":{"doc_status":{"from":"Status_Open","to":"Status_Closed"},"event_ClosedDoc":{"from":false,"to":true}},"blame":{"guards":[],"effects":[]}}],"checked_to_depth":1,"completeness":"bounded","cost":cost,"trace_type":"invariant"})

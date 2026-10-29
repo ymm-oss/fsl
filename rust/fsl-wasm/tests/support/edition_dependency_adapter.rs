@@ -14,22 +14,45 @@ fn expected_envelope() -> serde_json::Map<String, serde_json::Value> {
     .unwrap()
 }
 
+fn worker(request: &Request, verify: bool) -> (serde_json::Value, usize) {
+    let mut calls = 0;
+    let mut solver = || {
+        calls += 1;
+        native_z3()
+    };
+    let output = if verify {
+        block_on(crate::verify_with(
+            request,
+            TEST_SOLVER_VERSION,
+            &mut solver,
+        ))
+    } else {
+        block_on(check_with(request, TEST_SOLVER_VERSION, &mut solver))
+    };
+    (output, calls)
+}
+
 fn dependency_edition_worker_check_uses_child_edition_and_ignores_unused_files() {
     let mut observations = cases::Observations::default();
     for row in cases::worker_rows() {
         let fixture = cases::fixture(&row);
         let request: Request = serde_json::from_value(serde_json::json!({"cmd":"check","source":fixture.root,"source_file":"root_compose.fsl","files":fixture.files,"options":{"depth":2},"unstable":["fsl5"]})).unwrap();
-        let mut calls = 0;
-        let actual = block_on(check_with(&request, TEST_SOLVER_VERSION, &mut || {
-            calls += 1;
-            native_z3()
-        }));
+        let (actual, calls) = worker(&request, false);
         let expected = cases::expected_check(&row, &fixture, &fixture.child, expected_envelope());
         observations.eq(
             &format!("{}/worker-check", row.id),
             (&actual, calls),
             (&expected, 0),
         );
+        if row.variant == cases::Variant::N {
+            // Only this operand is rejected; every other dependency is canonical.
+            let (actual, calls) = worker(&request, true);
+            observations.eq(
+                &format!("{}/worker-verify", row.id),
+                (&actual, calls),
+                (&expected, 0),
+            );
+        }
     }
     let row = cases::row("E01/P");
     let fixture = cases::fixture(&row);
@@ -37,23 +60,15 @@ fn dependency_edition_worker_check_uses_child_edition_and_ignores_unused_files()
     request
         .files
         .insert("unused.fsl".into(), cases::next_leaf());
-    let actual = block_on(check_with(&request, TEST_SOLVER_VERSION, &mut native_z3));
+    let actual = worker(&request, false).0;
     let expected = cases::expected_check(&row, &fixture, &fixture.child, expected_envelope());
     observations.eq("C01/unused", &actual, &expected);
     request.source = cases::next_leaf();
-    let actual = block_on(check_with(&request, TEST_SOLVER_VERSION, &mut native_z3));
+    let actual = worker(&request, false).0;
     let expected = cases::refusal(&request.source, "root_compose.fsl", expected_envelope());
     observations.eq("C01/root-refusal", &actual, &expected);
     request.options.deadlock = "invalid-option".into();
-    let mut calls = 0;
-    let actual = block_on(crate::verify_with(
-        &request,
-        TEST_SOLVER_VERSION,
-        &mut || {
-            calls += 1;
-            native_z3()
-        },
-    ));
+    let (actual, calls) = worker(&request, true);
     let mut expected = serde_json::Value::Object(expected_envelope());
     expected["result"] = serde_json::json!("error");
     expected["kind"] = serde_json::json!("usage");

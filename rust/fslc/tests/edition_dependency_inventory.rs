@@ -64,7 +64,7 @@ fn production_files(rust: &std::path::Path) -> BTreeMap<String, String> {
             .strip_prefix(rust)
             .unwrap()
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         if files.contains_key(&relative) {
             continue;
         }
@@ -88,13 +88,59 @@ struct Reads {
     function: String,
     endpoints: Vec<String>,
     spawns: BTreeSet<String>,
-    constructors: BTreeMap<String, usize>,
+    constructors: BTreeMap<String, Vec<String>>,
+    admitted: BTreeSet<String>,
+    reader_types: BTreeMap<String, bool>,
+}
+impl Reads {
+    fn admitting(path: &syn::Path) -> bool {
+        path.segments
+            .iter()
+            .any(|s| s.ident == "DependencyResolver")
+            || path.segments.last().is_some_and(|s| {
+                matches!(
+                    s.ident.to_string().as_str(),
+                    "dependency_resolver" | "admitted_resolver"
+                )
+            })
+    }
+    fn provider(&self, expr: &syn::Expr) -> bool {
+        match expr {
+            syn::Expr::Reference(reference) => self.provider(&reference.expr),
+            syn::Expr::Path(path) => path
+                .path
+                .get_ident()
+                .is_some_and(|name| self.admitted.contains(&name.to_string())),
+            syn::Expr::Call(call) => {
+                matches!(call.func.as_ref(), syn::Expr::Path(path) if Self::admitting(&path.path))
+            }
+            _ => false,
+        }
+    }
 }
 impl<'ast> Visit<'ast> for Reads {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if node.sig.ident == "dependency_resolver" || node.sig.ident == "admitted_resolver" {
+            assert!(
+                matches!(&node.sig.output, syn::ReturnType::Type(_, ty) if matches!(ty.as_ref(), syn::Type::Path(path) if path.path.segments.last().unwrap().ident == "DependencyResolver")),
+                "native factory provider type"
+            );
+        }
         let saved = std::mem::replace(&mut self.function, node.sig.ident.to_string());
+        let locals = std::mem::take(&mut self.admitted);
         syn::visit::visit_item_fn(self, node);
+        self.admitted = locals;
         self.function = saved;
+    }
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        if let (syn::Pat::Ident(name), Some(init)) = (&node.pat, &node.init) {
+            if self.provider(&init.expr) {
+                self.admitted.insert(name.ident.to_string());
+            } else {
+                self.admitted.remove(&name.ident.to_string());
+            }
+        }
+        syn::visit::visit_local(self, node);
     }
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         if node.method == "read" {
@@ -111,6 +157,8 @@ impl<'ast> Visit<'ast> for Reads {
                 };
                 endpoint = format!("{endpoint}:{name}");
             }
+            self.reader_types
+                .insert(endpoint.clone(), self.provider(&node.receiver));
             self.endpoints.push(endpoint);
         }
         if node.method == "spawn" || node.method == "spawn_scoped" {
@@ -126,13 +174,31 @@ impl<'ast> Visit<'ast> for Reads {
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect::<Vec<_>>();
-            if names.ends_with(&["thread".into(), "spawn".into()]) {
+            if names.last().is_some_and(|name| name == "spawn") {
                 self.spawns.insert(self.function.clone());
+            }
+            if names
+                .last()
+                .is_some_and(|name| name == "compile_expectations")
+            {
+                self.reader_types.insert(
+                    format!("{}:compile_expectations", self.function),
+                    self.provider(&node.args[2]),
+                );
             }
             if names.ends_with(&["FsResolver".into(), "new".into()])
                 || names.ends_with(&["RecordingResolver".into(), "new".into()])
+                || Self::admitting(&path.path)
             {
-                *self.constructors.entry(self.function.clone()).or_default() += 1;
+                let kind = if Self::admitting(&path.path) {
+                    "DependencyResolver"
+                } else {
+                    names[names.len() - 2].as_str()
+                };
+                self.constructors
+                    .entry(self.function.clone())
+                    .or_default()
+                    .push(kind.into());
             }
         }
         syn::visit::visit_expr_call(self, node);
@@ -144,7 +210,10 @@ impl<'ast> Visit<'ast> for Reads {
             .last()
             .is_some_and(|s| s.ident == "MemoryResolver" || s.ident == "StoreResolver")
         {
-            *self.constructors.entry(self.function.clone()).or_default() += 1;
+            self.constructors
+                .entry(self.function.clone())
+                .or_default()
+                .push(node.path.segments.last().unwrap().ident.to_string());
         }
         syn::visit::visit_expr_struct(self, node);
     }
@@ -158,9 +227,31 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
     let mut spawn_sites = BTreeSet::new();
     let mut providers = BTreeMap::new();
     let mut library_counts = BTreeMap::<String, (usize, usize, usize)>::new();
+    let mut reader_types = BTreeMap::new();
     for (path, text) in production_files(&rust) {
         let mut visitor = Reads::default();
         visitor.visit_file(&syn::parse_file(&text).unwrap());
+        if matches!(
+            path.as_str(),
+            "fslc/src/migration.rs" | "fslc/src/source_diagnostic.rs"
+        ) {
+            // The one trait-provider forwarding read is not a language edge.
+            assert_eq!(
+                visitor
+                    .endpoints
+                    .iter()
+                    .filter(|name| name.is_empty())
+                    .count(),
+                1
+            );
+            visitor.endpoints.retain(|name| !name.is_empty());
+        }
+        reader_types.extend(
+            visitor
+                .reader_types
+                .into_iter()
+                .map(|(name, ty)| (format!("{path}:{name}"), ty)),
+        );
         let crate_name = path.split('/').next().unwrap();
         if matches!(crate_name, "fsl-runtime" | "fsl-verifier") {
             let counts = library_counts.entry(crate_name.into()).or_default();
@@ -179,75 +270,76 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
             providers.insert(format!("{path}:{function}"), count);
         }
     }
+    for endpoint in [
+        "fslc/src/causal.rs:run_causal_observe_expectations",
+        "fslc/src/causal.rs:run_causal_verify_expectations:compile_expectations",
+        "fslc/src/causal.rs:run_causal_observe_expectations:compile_expectations",
+        "fsl-wasm/src/lib.rs:governance_output:after_path",
+        "fsl-wasm/src/lib.rs:governance_output:before_path",
+        "fsl-wasm/src/lib.rs:governance_output:refinement_path",
+    ] {
+        assert_eq!(
+            reader_types.get(endpoint),
+            Some(&true),
+            "late read provider type: {endpoint}"
+        );
+    }
     for name in ["fsl-runtime", "fsl-verifier"] {
         let (files, reads, spawns) = library_counts[name];
         assert!(files > 0);
         assert_eq!((reads, spawns), (0, 0), "unclassified library consumer");
-        println!("LIBRARY_INVENTORY {name} files={files} reads={reads} spawns={spawns}");
     }
     let expected = cases::EDGES
         .iter()
         .map(|e| e.2.to_owned())
         .collect::<BTreeSet<_>>();
-    assert_eq!(expected.len(), 11);
+    let kinds = cases::EDGES.iter().map(|e| e.1).collect::<BTreeSet<_>>();
+    assert_eq!((expected.len(), kinds.len()), (11, 7));
     assert_eq!(
         discovered, expected,
         "a dependency read has no acceptance incidence"
     );
-    assert_eq!(
-        cases::EDGES
-            .iter()
-            .map(|e| e.1)
-            .collect::<BTreeSet<_>>()
-            .len(),
-        7
-    );
-    assert_eq!(cases::all_rows().len(), 128);
-    assert_eq!(
-        cases::all_rows()
-            .iter()
-            .map(|r| &r.id)
-            .collect::<BTreeSet<_>>()
-            .len(),
-        128
-    );
+    let rows = cases::all_rows();
+    assert_eq!(rows.len(), 128);
+    let ids = rows.into_iter().map(|r| r.id).collect::<BTreeSet<_>>();
+    assert_eq!(ids.len(), 128);
     let assigned = ["cli", "routes", "worker", "lsp", "private", "inventory"]
         .into_iter()
         .flat_map(cases::assigned)
         .collect::<BTreeSet<_>>();
-    assert_eq!(
-        assigned,
-        cases::all_rows().iter().map(|r| r.id.clone()).collect(),
-        "adapter assignment gap"
-    );
-    for endpoint in [
-        "fsl-lsp/src/server.rs:publish_diagnostics",
-        "fsl-lsp/src/server.rs:code_actions",
-    ] {
-        assert_eq!(providers[endpoint], 1);
-    }
-    assert_eq!(
-        providers
-            .iter()
-            .filter(|(path, _)| path.starts_with("fsl-wasm/"))
-            .map(|(_, n)| n)
-            .sum::<usize>(),
-        4
-    );
-    assert_eq!(
-        providers
-            .iter()
-            .filter(|(path, _)| path.starts_with("fslc/")
-                && !path.starts_with("fslc/src/coverage.rs:")
-                && !path.starts_with("fslc/src/origin_coverage.rs:"))
-            .map(|(_, n)| n)
-            .sum::<usize>(),
-        26
-    );
+    assert_eq!(assigned, ids, "adapter assignment gap");
+    providers.retain(|path, _| {
+        ![
+            "fslc/src/coverage.rs:",
+            "fslc/src/origin_coverage.rs:",
+            "fsl-tools/src/document_project.rs:",
+        ]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    });
+    let expected = "\
+fsl-lsp/src/server.rs|code_actions publish_diagnostics|StoreResolver
+fsl-wasm/src/lib.rs|admitted_resolver|DependencyResolver,MemoryResolver
+fsl-wasm/src/lib.rs|build check_kernel governance_output implements_output|DependencyResolver
+fslc/src/approval.rs|spec_digest|DependencyResolver
+fslc/src/causal.rs|load_causal_model_from_source run_causal_observe_expectations run_causal_verify_expectations|DependencyResolver
+fslc/src/main.rs|apply_implements_mutation_oracle approval_spec_digest document_model_failure document_trace_gate external_mutation_model invariant_counterfactuals_from_source reachable_counterfactuals_from_source render_document_for_approval run_check_from_source run_document_check run_document_generate run_kernel_contract_from_source run_mutate_from_source run_typestate_from_source validate_fmt_semantics validate_migration_input_semantics|DependencyResolver
+fslc/src/migration.rs|kernel_contract|FsResolver
+fslc/src/refinement.rs|governance_result_from_source implements_result_from_source_with_bounds|DependencyResolver
+fslc/src/source_diagnostic.rs|diagnostics_with_model|DependencyResolver
+fslc/src/spec_loading.rs|dependency_resolver|DependencyResolver,FsResolver
+fslc/src/spec_loading.rs|load_declared_model_beside_scope load_kernel_model_from_source|DependencyResolver
+fslc/src/verification.rs|run_verify_cli_kernel_from_source|DependencyResolver,RecordingResolver"
+    .lines().flat_map(|line| {
+        let fields = line.split('|').collect::<Vec<_>>();
+        fields[1].split_whitespace().map(move |function| (format!("{}:{function}", fields[0]), fields[2].split(',').map(str::to_owned).collect::<Vec<_>>()))
+    }).collect::<BTreeMap<_, _>>();
+    assert_eq!(providers, expected, "per-site provider types");
     let expected_spawns = cases::additional_rows()
         .iter()
         .filter(|r| r.id.starts_with('T') && r.endpoint.contains("/src/"))
         .map(|r| r.endpoint.to_owned())
+        .chain(["fslc/src/main.rs:native_mutation_bmc".into()]) // read-free main.rs:10613,10632
         .collect::<BTreeSet<_>>();
     assert_eq!(
         spawn_sites, expected_spawns,
@@ -297,17 +389,8 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
             1,
             "test adapter hook is not inside one cfg(test) module: {path}"
         );
-        let (outer, hook) = hooks[0];
-        println!(
-            "HOOK {path} cfg_module={}..{} added_module={}..{}",
-            outer.start().line,
-            outer.end().line,
-            hook.start().line,
-            hook.end().line
-        );
     }
-    println!("DISCOVERED reads={discovered:?} spawns={spawn_sites:?}");
-    assert_eq!(cases::deferred_rows().len(), 76);
+    assert_eq!(cases::deferred_rows().len(), 36);
     println!(
         "DEPENDENCY I01 agreement=true produced=discovered read/provider/spawn sets expected=registry incidence and assignments"
     );

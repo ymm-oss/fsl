@@ -62,21 +62,20 @@ fn tree(path: &Path) -> BTreeMap<String, (usize, String)> {
         if !path.exists() {
             return;
         }
+        let relative = path
+            .strip_prefix(base)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         if path.is_dir() {
-            files.insert(
-                format!("{}/", path.strip_prefix(base).unwrap().display()),
-                (0, String::new()),
-            );
+            files.insert(format!("{relative}/"), (0, String::new()));
             for entry in std::fs::read_dir(path).unwrap() {
                 visit(base, &entry.unwrap().path(), files);
             }
         } else {
             let bytes = std::fs::read(path).unwrap();
             files.insert(
-                path.strip_prefix(base)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned(),
+                relative,
                 (bytes.len(), format!("{:x}", sha2::Sha256::digest(bytes))),
             );
         }
@@ -135,11 +134,7 @@ fn reject(
 ) {
     let actual = run(s, command);
     let expected = cases::cli_refusal(source, &cases::identity(s, child));
-    observations.eq(
-        id,
-        (actual.status.code(), payload(&actual), &actual.stderr),
-        (Some(2), expected, &Vec::<u8>::new()),
-    );
+    observations.output(id, &actual, expected, 2);
 }
 
 fn dependency_edition_causal_routes_and_all_observation_outputs() {
@@ -191,11 +186,11 @@ fn dependency_edition_causal_routes_and_all_observation_outputs() {
                     );
                 }
                 let actual = run(&s, &command);
-                let value = payload(&actual);
-                observations.eq(
+                observations.output(
                     &format!("{}/{}", row.id, command.split_whitespace().nth(1).unwrap()),
-                    (actual.status.code(), &value),
-                    (Some(0), &expected),
+                    &actual,
+                    expected,
+                    0,
                 );
             }
         }
@@ -311,10 +306,8 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
             "check root.fsl"
         };
         let actual = run(&s, command);
-        let value = payload(&actual);
         let mut expected = json!({"fsl":"1.0","result":"ok","spec":"C","warnings":[]});
-        let identity = s.0.join("dep.fsl").canonicalize().unwrap();
-        let mut findings = cases::findings(&body, identity.to_str().unwrap(), "current");
+        let mut findings = cases::findings(&body, "dep.fsl", "current");
         if id == "W04" {
             findings.push(cases::metadata_finding(
                 &body,
@@ -325,7 +318,7 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
         if id == "W03" {
             let admitted = fslc_rust::migration::admit_source(
                 &body,
-                identity.to_str().unwrap(),
+                "dep.fsl",
                 None,
                 &common::gated(),
                 &serde_json::Map::new,
@@ -343,7 +336,7 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
             expected["edition"] = json!("next");
             expected["fsl_edition"] = json!(5);
         }
-        observations.eq(id, (actual.status.code(), &value), (Some(0), &expected));
+        observations.output(id, &actual, expected, 0);
     }
     observations.finish();
 }
@@ -393,20 +386,16 @@ T17|explain root.fsl --depth 2|true"
         s.write("dep.fsl", &canonical_body);
         s.write("root.fsl", "compose C { use S as s from \"dep.fsl\" }\n");
         let canonical_command = command.replace("output/result", "output/canonical");
+        let artifact = || {
+            (command.contains("-o") && id != "T15")
+                .then(|| stable_artifact(&s.0.join("output/canonical")))
+        };
         let canonical = run(&s, &canonical_command);
         let value = payload(&canonical);
-        let first_artifact = if command.contains("-o") && id != "T15" {
-            Some(stable_artifact(&s.0.join("output/canonical")))
-        } else {
-            None
-        };
+        let first_artifact = artifact();
         let repeated = run(&s, &canonical_command);
         let repeated_value = payload(&repeated);
-        let repeated_artifact = if command.contains("-o") && id != "T15" {
-            Some(stable_artifact(&s.0.join("output/canonical")))
-        } else {
-            None
-        };
+        let repeated_artifact = artifact();
         let first = cases::stable(value.clone());
         let second = cases::stable(repeated_value);
         observations.eq(
@@ -569,12 +558,7 @@ fn dependency_edition_repair_roles_report_but_do_not_reject_or_edit_children() {
         let finding = cases::metadata_finding(&child, &cases::identity(&s, "dep.fsl"), "next");
         expected = cases::with_child_warnings(expected, vec![finding]);
         let actual = run(&s, command);
-        let value = payload(&actual);
-        observations.eq(
-            id,
-            (actual.status.code(), &value),
-            (Some(status), &expected),
-        );
+        observations.output(id, &actual, expected, status);
         assert_eq!(std::fs::read_to_string(s.0.join("dep.fsl")).unwrap(), child);
         assert_eq!(std::fs::read(s.0.join("root.fsl")).unwrap(), expected_root);
     }
@@ -607,27 +591,18 @@ fn dependency_edition_document_nonreaders_and_specialized_controls_are_preserved
         );
         s.write("dep.fsl", &cases::next_leaf());
         let actual = run(&s, command);
-        let value = payload(&actual);
         let after = (
             std::fs::read(s.0.join("document.md")).unwrap(),
             std::fs::read(s.0.join("claims.json")).ok(),
         );
-        observations.eq(
-            id,
-            (actual.status.code(), &value, &after),
-            (Some(0), &expected, &before),
-        );
+        observations.output(id, &actual, expected, 0);
+        observations.eq(&format!("{id}/artifacts"), &after, &before);
     }
     let root_refused = cases::next_leaf();
     s.write("root.fsl", &root_refused);
     let actual = run(&s, "document check root.fsl absent-document.md");
-    let value = payload(&actual);
     let expected = cases::cli_refusal(&root_refused, "root.fsl");
-    observations.eq(
-        "A13/root-priority",
-        (actual.status.code(), &value),
-        (Some(2), &expected),
-    );
+    observations.output("A13/root-priority", &actual, expected, 2);
     let repo = common::root();
     s.write("domain.fsl", common::DOMAIN);
     for line in "\
@@ -745,7 +720,7 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
                 "dep.fsl"
             };
             let detail = cases::cli_refusal(&child, &cases::identity(&s, child_path));
-            let mut entry = json!({"layer":layer,"kind":if depth||refine||parallel {"verify"} else {"check"},"file":if *layer=="requirements" {"./abstract.fsl"} else {"./root.fsl"},"status":"failed","result":"error","exit_code":2,"detail":detail});
+            let mut entry = json!({"layer":layer,"kind":if depth||refine||parallel {"verify"} else {"check"},"file":std::path::Path::new(".").join(if *layer=="requirements" {"abstract.fsl"} else {"root.fsl"}),"status":"failed","result":"error","exit_code":2,"detail":detail});
             if depth || refine || parallel {
                 entry["depth"] = json!(2);
             }
@@ -760,14 +735,8 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
             layers.push(json!({"layer":"impl","kind":"impl","status":"skipped","result":"skipped","exit_code":0}));
         }
         let expected = json!({"fsl":"1.0","result":"error","manifest":"chain.toml","keep_going":parallel,"layers":layers,"failed":failed,"kind":"chain","message":"one or more chain layers returned an error"});
-        observations.eq(
-            id,
-            (actual.status.code(), &value, s.0.join("marker").exists()),
-            (Some(2), &expected, false),
-        );
-        if !parallel {
-            observations.eq("A09", s.0.join("marker").exists(), false);
-        }
+        observations.eq(id, (actual.status.code(), value), (Some(2), expected));
+        observations.eq("A09", s.0.join("marker").exists(), false);
     }
     observations.finish();
 }
@@ -889,25 +858,16 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         // Direct digest loads have no owner; the existing read-error renderer
         // carries the path/code in its message, not a new edition envelope.
         let actual = run(&s, &command);
-        let value = payload(&actual);
         let id = if signed { "A06" } else { "A05" };
+        let expected = cases::unowned_expected("dep.fsl", "root.fsl");
+        observations.output(id, &actual, expected, 2);
         observations.eq(
             id,
-            (
-                (actual.status.code(), &value),
-                std::fs::read(s.0.join("record.json")).unwrap(),
-            ),
-            (
-                (
-                    Some(2),
-                    &cases::unowned_expected(&cases::identity(&s, "dep.fsl"), "root.fsl"),
-                ),
-                b"sentinel\n".to_vec(),
-            ),
+            std::fs::read(s.0.join("record.json")).unwrap(),
+            b"sentinel\n".to_vec(),
         );
         for (id, command) in [("T18", command), ("T19", evaluation), ("T20", difference)] {
             let actual = run(&s, &command);
-            let value = payload(&actual);
             let mut expected = cases::unowned_expected(
                 &cases::identity(&s, "dep.fsl"),
                 if id == "T19" { "" } else { "root.fsl" },
@@ -916,32 +876,19 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
                 // Diff appends this fixture-bound metadata to ordinary errors too.
                 expected["approval"] = json!({"record":"valid-record.json","baseline_digest":record["spec"]["digest"],"baseline_commit":record["spec"]["git_commit"],"signature_status":if signed {"signed"} else {"unsigned"},"key_id":if signed {record["signature"]["key_id"].clone()} else {Value::Null}});
             }
+            observations.output(id, &actual, expected, 2);
             observations.eq(
                 id,
-                (
-                    (actual.status.code(), &value),
-                    std::fs::read(s.0.join("record.json")).unwrap(),
-                ),
-                ((Some(2), &expected), b"sentinel\n".to_vec()),
+                std::fs::read(s.0.join("record.json")).unwrap(),
+                b"sentinel\n".to_vec(),
             );
         }
         if let Some(command) = overlay {
             let actual = run(&s, &command);
-            let value = payload(&actual);
             let bytes = std::fs::read(s.0.join("overlay.md")).unwrap();
             for id in ["A03/approval-overlay", "T10/approval-overlay"] {
-                observations.eq(
-                    id,
-                    ((actual.status.code(), &value), &bytes),
-                    (
-                        // The report owner reads before the overlay: exact E/N envelope.
-                        (
-                            Some(2),
-                            &cases::cli_refusal(&child, &cases::identity(&s, "dep.fsl")),
-                        ),
-                        &b"overlay sentinel\n".to_vec(),
-                    ),
-                );
+                observations.output(id, &actual, cases::cli_refusal(&child, "dep.fsl"), 2);
+                observations.eq(id, bytes.as_slice(), b"overlay sentinel\n".as_slice());
             }
         }
     }
@@ -1024,8 +971,7 @@ fn dependency_edition_deep_reads_and_governance_rereads() {
         cases::fsl_envelope(),
     );
     let actual = run(&s, "check root.fsl");
-    let value = payload(&actual);
-    observations.eq("W05", (actual.status.code(), &value), (Some(0), &expected));
+    observations.output("W05", &actual, expected, 0);
     observations.finish();
 }
 
@@ -1087,25 +1033,25 @@ fn dependency_edition_a16_cache_and_c04_materialized_source_controls() {
         s.write("root.fsl",&source.replace("dep.fsl",target));if let Some(body)=body {s.write(target,body);}
         // Direct error_at failures have no source origin; component_error
         // failures retain the parent's filename in their display message.
-        let message=if matches!(label,"parse"|"missing") {format!("{detail} at root.fsl:1:13")} else {format!("{detail} at 1:13")};
-        let expected=json!({"fsl":"1.0","result":"error","kind":"semantics","message":message,"loc":{"line":1,"column":13}});
+        let expected=cases::component_error(&detail, if matches!(label,"parse"|"missing") {"root.fsl"} else {""});
         for repeat in 0..2 {let actual=run(&s,"check root.fsl");let value=payload(&actual);observations.eq(&format!("C02/{label}/{repeat}"),(actual.status.code(),&value,&actual.stderr),(Some(2),&expected,&Vec::<u8>::new()));}
     }
     s.write("root.fsl", cases::IMPLEMENTS);
     s.write("dep.fsl", cases::LEAF);
     let command = "verify root.fsl --depth 2 --no-cache --property Typed";
     let baseline = run(&s, command);
-    let expected = cases::stable(payload(&baseline));
+    let expected = payload(&baseline);
     assert_eq!(baseline.status.code(), Some(0));
-    assert_eq!(expected.0["implements"]["result"], "not_evaluated");
+    assert_eq!(expected["implements"]["result"], "not_evaluated");
     s.write("dep.fsl", &rejected);
     let actual = run(&s, command);
-    let value = cases::stable(payload(&actual));
-    observations.eq(
-        "C02/suppression",
-        (actual.status.code(), &value),
-        (Some(0), &expected),
+    observations.output("C02/suppression", &actual, expected.clone(), 0);
+    s.write(
+        "root.fsl",
+        &cases::IMPLEMENTS.replace("dep.fsl", "never-present.fsl"),
     );
+    let unread = run(&s, command);
+    observations.output("C02/nonreader", &unread, expected, 0);
     observations.finish();
 }
 
@@ -1161,12 +1107,11 @@ fn dependency_edition_observation_writers_and_three_read_dedup() {
             let current = child.replacen("fsl 5", "fsl 4", 1);
             s.write(&fixture.child, &current);
             let actual = run(&s, &command);
-            let value = payload(&actual);
             let expected = cases::with_child_warnings(
                 canonical,
                 cases::findings(&current, &cases::identity(&s, &fixture.child), "current"),
             );
-            observations.eq("W06", (actual.status.code(), &value), (Some(0), &expected));
+            observations.output("W06", &actual, expected, 0);
         }
     }
     observations.finish();
