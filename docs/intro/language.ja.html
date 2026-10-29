@@ -2775,7 +2775,32 @@ const と同名の local は先に <code>check</code> が拒否します。性�
   (<code>kind:"name"</code>、exit 2)、たとえば
   <code>relation role name '__owner' contains '__', which is reserved for the names FSL generates ...</code>
   と報告します。役割・resource・measure を <code>__</code> を含まない名前に変え、その参照も
-  更新してください。</li>
+  更新してください。
+  破壊的な削除 (#1602/#1603): goal と policy の ID、requirement の ID
+  (次のエディションでは <code>rule</code>)、scenario の ID (legacy では <code>acceptance</code>)、
+  forbidden の ID、決定表の ID (<code>decide</code>)、glossary の alias にも適用します。
+  両エディションで、その構文が存在する位置が対象です。これらは以前は <code>check</code> を
+  通っていましたが、今は exit 2、<code>kind:"name"</code>、ID または alias の位置の構造化された
+  <code>loc</code> で拒否します。ただし、後述の legacy の位置の制限があります。
+  既存の separator のメッセージで使う位置の語は <code>goal</code>、
+  <code>policy</code>、<code>requirement</code>、<code>scenario</code>、<code>forbidden</code>、<code>decision</code>、<code>glossary alias</code> です。
+  ID または alias を <code>__</code> を含まない名前に変え、その参照も更新してください。
+  次のエディションの rule の ID は header の token の span だけから位置を求めます。
+  deadline がある rule や ID の前にコメントがある場合も同じです。明示の <code>requirement</code>
+  block も両エディションで引き続き使え、その ID を検査します。
+  deadline の有無を問いません。重複する ID の検査から外すのは rule から生成された
+  requirement の複製だけです。
+  既存構文の位置に関する既知の制限 (明示の block も対象):
+  requirement、acceptance、forbidden の ID を <code>REQ - __1</code> のように分けて
+  書いた場合も拒否しますが、fallback の位置探索は ID の token ではなく、宣言の
+  キーワードや後で繰り返された正規化済みの綴りを指す場合があります。この構文に
+  固有の位置の制限は今回の修正では直していません。
+  次のエディションの rule の property のラベルに <code>__</code> を含む場合、またはリテラルを
+  名前に使う場合 (<code>none:</code> など) は、引き続き exit 2、
+  <code>diagnostic_code:"invalid_rule_property_name"</code> で拒否します。kind は <code>semantics</code> から
+  <code>name</code> に変わり、ラベルではなく文の先頭を示す構造化された <code>loc</code> が付きます。
+  診断の文言は変わりません。ファイルを検査する場合、ほかの位置付き名前エラーと
+  同様に、メッセージの末尾は <code>at L:C</code> から <code>at &lt;source-file&gt;:L:C</code> に変わります。</li>
 <li>JSON の表示: 作られた名前は <code>__</code> を <code>.</code> に置き換えた 1 つの綴りで、すべての
   出力に出ます。物理名 <code>alias__x</code> は <code>alias.x</code>、<code>branches</code> で分けた
   <code>submit__b1</code> は <code>submit.b1</code> です(状態のキー、action 名、invariant /

@@ -2868,6 +2868,32 @@ compose OrderSystem {
   declaration (`kind:"name"`, exit 2) with, for example,
   `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`.
   Rename the role, resource, or measure without `__` and update its references.
+  Breaking removal (#1602/#1603): this also covers goal and policy IDs,
+  requirement IDs (`rule` in the next edition), scenario IDs (`acceptance` in
+  legacy), forbidden IDs, decision-table IDs (`decide`), and glossary aliases,
+  in both editions wherever the construct exists. These previously passed
+  `check`; they now fail with exit 2, `kind:"name"`, and structured `loc` at the
+  ID or alias, subject to the legacy locator limitation below. The existing
+  separator message uses the position `goal`, `policy`,
+  `requirement`, `scenario`, `forbidden`, `decision`, or `glossary alias`.
+  Rename the ID or alias without `__` and update its references.
+  Next-edition rule IDs are located only from their header token spans, including
+  rules with deadlines or IDs preceded by comments. Explicit `requirement`
+  blocks also remain supported and their IDs are checked in both editions,
+  with or without deadlines. Only rule-generated requirement
+  copies are excluded from the duplicate ID check.
+  Known legacy-syntax limitation (also for explicit blocks):
+  split-spelled requirement, acceptance and forbidden IDs such as `REQ - __1`
+  are still rejected, but the fallback locator may report the declaration keyword
+  or a later repeated normalized spelling rather than the ID tokens. This
+  syntax-specific location limitation is not fixed here.
+  A next-edition rule-property label containing `__` or naming a literal
+  (such as `none:`) remains rejected with exit 2 and
+  `diagnostic_code:"invalid_rule_property_name"`. Its kind changes from
+  `semantics` to `name`, with structured `loc` at the statement's start, not
+  the label. Its diagnostic wording is unchanged; when checking a file, the
+  message suffix changes from `at L:C` to `at <source-file>:L:C`, like other
+  located name errors.
 - JSON display: a generated name is published with `.` in place of its `__`,
   in one spelling for every output: the physical name `alias__x` is `alias.x`,
   and a branch split `submit__b1` is `submit.b1` (state keys, action names,

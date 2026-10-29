@@ -714,6 +714,8 @@ pub struct SurfaceRequirements {
 /// items, and this keeps the rest.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NextEditionRequirements {
+    /// Every written rule ID and its source ID span, even when no effect survives.
+    pub rule_headers: Vec<(String, Span)>,
     /// The declared actors.
     pub actors: Vec<String>,
     /// The entities declared with a body, each desugared into a `process` of
