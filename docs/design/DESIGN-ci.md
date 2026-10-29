@@ -109,10 +109,12 @@ per topic.
 
 A merge queue is now the other mitigation: it validates queued candidates against current `main`
 without requiring a chain of branch updates. Adopted on 2026-10-29 after an explicit review-policy
-change, it uses the existing `merge_group` triggers in `merge-readiness.yml` and `ci.yml`.
+change, it uses the existing `merge_group` triggers in four workflows: `merge-readiness.yml`,
+`ci.yml`, `site-reference-freshness.yml`, and `cache-budget-audit-wiring.yml`.
 Pull requests still retain their full pre-merge evidence; this is not a reduction in per-push checks.
 See "Merge queue adoption (2026-10-29)" below. The unsuccessful 2026-08-05 experiment is retained
-there as dated history, not the current policy.
+there as dated history, not the current policy: this paragraph is corrected rather than deleted,
+with the history kept in the dedicated subsection.
 
 ## Merge readiness contract
 
@@ -281,7 +283,7 @@ parallel:
 **The first two carry no event condition beyond scope evidence and therefore also run on every
 pull request today**, which is what makes the Linux evidence pre-merge. Only `native Z3 4.16` and
 the aggregate `product gate` context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into
-`main`.
+`main` and on `merge_group` events.
 
 All four heavy jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`) are required
 contexts on the `main` ruleset, and all four also carry an active `merge_group` trigger.
@@ -1650,8 +1652,8 @@ parameters; a clean audit is not evidence that their values match this table.
 
 **Full evidence stays on both paths.** `FSL_MERGE_QUEUE_CI` remains unset. Pull requests keep
 their full pre-merge evidence under the existing scope policy, and every `merge_group` run computes
-its own scope with `diff_scope`. A queued product change is checked on its pull-request head and
-again on its merge with current `main`. The `queue-entry-stub` path must stay off: an
+its own scope with `diff_scope`. A queued product change is checked in the pull-request run and
+again on the queue's combined revision with current `main`. The `queue-entry-stub` path must stay off: an
 administrator's merge still bypasses the queue, so replacing pull-request checks with stubs could
 land a change with no pre-merge Linux evidence if no queue run replaces them. Queue adoption does
 not make that confidently-green false negative acceptable. Administrator queue bypass is reserved

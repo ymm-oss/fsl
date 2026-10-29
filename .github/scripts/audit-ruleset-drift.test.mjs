@@ -267,6 +267,15 @@ test("fail-closed: omitting merge_queue from the contract yields rule-type-unexp
   assert.match(unexpected[0].detail, /merge_queue/);
 });
 
+test("fail-closed: removing merge_queue from the observation yields rule-type-missing", () => {
+  const mutated = structuredClone(fixture);
+  mutated.rules = mutated.rules.filter((rule) => rule.type !== "merge_queue");
+  const comparison = compareRuleset(contractEntry, mutated);
+  assert.equal(comparison.verdict, "drift");
+  assert.deepEqual(findingClasses(comparison), ["rule-type-missing"]);
+  assert.match(comparison.findings[0].detail, /merge_queue/);
+});
+
 test("fail-closed: enforcement other than active yields an enforcement finding", () => {
   const mutated = structuredClone(fixture);
   mutated.enforcement = "evaluate";
