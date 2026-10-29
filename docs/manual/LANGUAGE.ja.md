@@ -3762,22 +3762,42 @@ project の意味論的な座標は引き続き component block 内が基準で�
 LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
 
 **境界 sweep の実測 (#1545):** B
-`e856bbe023f8fb64557658afbd365c355ac56715` と H
-`651e58b344d0b4c95712ea216b9b177cdd7a7ca9` を、それぞれ独立した git archive の
+`173e5f970e571f46ef84f750287761919df2582e` と H
+`c35fdf94d5d5e0c32d207c95c7fd1c2c79b47bc9` を、それぞれ独立した git archive の
 tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
 tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
-`rust/fslc/tests/fixtures/` の全597 `.fsl` と、新しい test の inline 入力10出現を
-各 tree で検査しました(**計1,214検査**)。cache と unstable の環境上書きは unset、
+`rust/fslc/tests/fixtures/` の全597 `.fsl`、Markdown 30件、新しい test の inline 入力
+12出現を各 tree で検査しました(**計1,278検査**)。Markdown の4件は compiler が
+FSL fence を認識します。bash fence だけの `examples/ai/README.md` も含め、30件を
+すべて検査しました。cache と unstable の環境上書きは unset、
 除外した出力 field はありません。corpus の ok/exit0 → error/exit2 はちょうど
-**2件**で、`error_envelope_ai_project_unknown_tool.fsl` と
-`error_envelope_ai_project_invalid_rule.fsl` です。新しい test の inline の削除は
+**3件**で、`error_envelope_ai_project_unknown_tool.fsl`、
+`error_envelope_ai_project_invalid_rule.fsl`、`error_envelope_literate_ai_project.md` です。
+Markdown project は type、`ai_component 'EnvelopeParityLiterateProject' declares no tools`、
+block 内 loc 1:1、exit 2 を返します。単独の literate component の拒否と、複数 block の
+toggle 2件の受理は変わりません。新しい test の inline の削除は
 **4出現**です: CLI 側と Worker-shaped 側のツールの無い component を含む project
 (2出現)、空の authority だけの component を含む project(1出現)、正常な最初の
 component の後ろに不正な component がある project(1出現)。書き直した既存の inline
 FSL は0件です。ツールの無い3出現は block 内 loc 1:1 の type、後ろの未宣言 tool は
-loc なしの semantics を返します。それ以外の exit/result と stdout/stderr 全文は
+loc なしの semantics を返します。この check だけの sweep で、それ以外の exit/result と stdout/stderr 全文は
 変わりません。意図した tool を宣言するか不要な component を除き、不明な tool/rule
 の参照を修正してください。
+
+lowering だけの道も同じ validation 全体を使います。同じ B/H で `analyze <relative-path>`
+を AI に言及する corpus 18入力と明示的な4形式に実行し、変化した形式と compose の対照を
+`scenarios <relative-path> --depth 2 --deadlock ignore` と `explain <relative-path>` でも
+比較しました。計60観測で、analyze(22形式)、scenarios(4形式)、explain(4形式)は各々
+**ok→error 1、error→ok 0、error の envelope 変化2** です。破壊的削除は
+`tool_authority` だけを選んで生成された参照から隠れていた未宣言 authority tool X で、
+成功の代わりに semantics、`unknown tool 'X' in authority block`、loc なし、exit 2 を
+返します。ツール無しで fallback x が重複すると、type/`declares no tools`/loc 1:1 から
+semantics/`duplicate fallback reason 'x'`/loc なしへ変わります(ともに exit 2)。ツールが
+ある場合は、loc なしの semantics/`duplicate action 'fallback_x'` から同じ重複 reason の
+message に変わります(ともに exit 2)。AI component を use する compose は引き続き
+`compose use must reference a spec at 2:3`、loc 2:3 で拒否されます。ほかの lowering の
+受理削除は観測していません。check だけの一致を、これらの意図した診断変更にまで
+一般化しないでください。
 
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:

@@ -3940,22 +3940,45 @@ Project semantic coordinates remain component-block-relative (#1574); missing
 LSP project-component diagnostics remain tracked separately (#1575).
 
 **Measured boundary sweep (#1545):** B
-`e856bbe023f8fb64557658afbd365c355ac56715` and H
-`651e58b344d0b4c95712ea216b9b177cdd7a7ca9` were built separately in their own
+`173e5f970e571f46ef84f750287761919df2582e` and H
+`c35fdf94d5d5e0c32d207c95c7fd1c2c79b47bc9` were built separately in their own
 git-archive trees. `<B-binary> check <relative-path>` in B and
-`<H-binary> check <relative-path>` in H checked all 597 corpus `.fsl` files
-under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`, plus ten new inline
-test occurrences per tree (**1,214 checks**), with cache/unstable overrides
+`<H-binary> check <relative-path>` in H checked all 597 corpus `.fsl` files and
+30 Markdown files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, plus
+twelve new inline occurrences per tree (**1,278 checks**). Four Markdown files
+contain compiler-recognized FSL fences; all 30, including the bash-only
+`examples/ai/README.md` negative control, were checked. Cache/unstable overrides
 unset and no excluded output fields. Corpus ok/exit0 → error/exit2 removals
-are exactly **two**: `error_envelope_ai_project_unknown_tool.fsl` and
-`error_envelope_ai_project_invalid_rule.fsl`. New test-inline removals are
+are exactly **three**: `error_envelope_ai_project_unknown_tool.fsl`,
+`error_envelope_ai_project_invalid_rule.fsl` and
+`error_envelope_literate_ai_project.md`. The Markdown project reports type,
+`ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc 1:1,
+exit 2; the standalone literate component's rejection and both multi-block
+toggles are unchanged. New test-inline removals are
 **four**: tool-less-component projects in CLI and Worker-shaped tests (two),
 an empty-authority-only component in a project (one), and an invalid later
 component after a valid first component (one). Zero existing inline FSL forms
 were rewritten. The three tool-less occurrences report type at block loc 1:1;
 the later undeclared tool reports unlocated semantics. Other exit/result and
-complete stdout/stderr observations are unchanged. Declare a tool or remove
+complete stdout/stderr observations in this check-only sweep are unchanged. Declare a tool or remove
 an unneeded component, and correct unknown tool/rule references.
+
+Lowering-only commands share the full validator too. With the same B/H,
+`analyze <relative-path>` covered 18 AI-mentioning corpus inputs and four
+explicit forms; changed forms plus a compose control were compared through
+`scenarios <relative-path> --depth 2 --deadlock ignore` and `explain <relative-path>`.
+Across 60 observations, analyze (22 forms), scenarios (4) and explain (4) each
+have **one ok→error**, **zero error→ok**, and **two changed error envelopes**.
+The breaking removal is an undeclared authority tool X hidden from generated
+references by selecting only `tool_authority`: it now gives semantics,
+`unknown tool 'X' in authority block`, no loc, exit 2 instead of success.
+Duplicate fallback x without tools changes type/`declares no tools`/loc 1:1 to
+semantics/`duplicate fallback reason 'x'`/no loc (both exit 2); with a tool it
+changes unlocated semantics/`duplicate action 'fallback_x'` to the same duplicate
+reason message (both exit 2). A compose use of an AI component remains rejected
+with `compose use must reference a spec at 2:3`, loc 2:3. No other lowering-only
+acceptance removal was observed; do not generalize check-only agreement to
+these intentional lowering diagnostic changes.
 
 An `ai_component` may also declare which hard rules get an explicit,
 separately-reported invariant:
