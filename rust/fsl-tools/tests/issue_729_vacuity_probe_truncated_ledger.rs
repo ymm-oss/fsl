@@ -84,12 +84,9 @@ fn an_ordinary_vacuous_implication_still_uses_the_suspected_prefix() {
 /// Negative control (c) from the implementation brief: `assurance_token`
 /// reads only `completeness`/`kernel.completeness`/`result`/`evidence.kind`/
 /// `guarantee_kind`/`status` -- never `warnings` -- so the rendered
-/// assurance-class row for the spec-level finding must be byte-identical
-/// whether the finding is an ordinary `vacuous_implication` or a
-/// `vacuity_probe_truncated` truncation. Both warning kinds map to
-/// `trace_type: "vacuity"`, so the
-/// whole spec-level row -- not just the assurance cell -- is expected to
-/// match exactly.
+/// assurance cell must be byte-identical whether the finding is an ordinary
+/// `vacuous_implication` or a `vacuity_probe_truncated` truncation. #1497
+/// distinguishes their trace types; full expected rows pin every other cell.
 #[test]
 fn assurance_class_is_unmoved_by_a_truncated_probe_finding() {
     let with_vacuous = render(&verification_with("vacuous_implication"));
@@ -105,9 +102,11 @@ fn assurance_class_is_unmoved_by_a_truncated_probe_finding() {
 
     assert_eq!(
         spec_level_row(&with_vacuous),
+        "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth 8) | vacuity | 要確認 | ____ | 下記詳細 |"
+    );
+    assert_eq!(
         spec_level_row(&with_truncated),
-        "the spec-level assurance row must not depend on which vacuity `kind` produced the \
-         finding: with_vacuous={with_vacuous}\n---\nwith_truncated={with_truncated}"
+        "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth 8) | verification_incomplete | 要確認 | ____ | 下記詳細 |"
     );
 }
 
