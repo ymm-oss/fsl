@@ -461,12 +461,7 @@ enum InitWalkMode<'a> {
 /// regardless of read order or which branch is taken; it never errors and
 /// never rejects a read.
 ///
-/// A root assigned on *some* but not all paths (e.g. only inside an `if`
-/// with no `else`) is left out — treated as "assigned", not free — and
-/// keeps the prior default-filled behavior for the remaining path. Fully
-/// characterizing that partial-coverage case belongs to `Monitor`
-/// construction generally (issue #519), not this refinement-local
-/// enumeration.
+/// Partially assigned roots are not free; refinement rejects them before enumeration (#1521).
 pub(crate) fn unassigned_init_state_vars(model: &KernelModel) -> Vec<(String, TypeRef)> {
     let mut assigned = BTreeSet::new();
     collect_assigned_init_roots(&model.init, &mut assigned);
@@ -522,6 +517,13 @@ pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), Runtim
         }
         return Err(error);
     }
+    check_init_coverage(model, None)
+}
+
+fn check_init_coverage(
+    model: &KernelModel,
+    roots: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
     let (assigned, _) = walk_init(
         &model.init,
         BTreeMap::new(),
@@ -529,12 +531,13 @@ pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), Runtim
         false,
         &BTreeMap::new(),
         model,
-        InitWalkMode::Concrete,
+        roots.map_or(InitWalkMode::Concrete, InitWalkMode::ReadOrder),
     )?;
     let mut missing_is_partial = false;
     let mut missing = model
         .state
         .iter()
+        .filter(|(name, _)| roots.is_none_or(|roots| roots.contains(name)))
         .filter(|(name, ty)| {
             let coverage = assigned.get(name);
             if coverage_is_full(coverage, ty, model) {
@@ -560,6 +563,17 @@ pub(crate) fn check_deterministic_init(model: &KernelModel) -> Result<(), Runtim
             missing.join(", ")
         )))
     }
+}
+
+pub(crate) fn check_refinement_init(model: &KernelModel) -> Result<(), RuntimeError> {
+    let mut roots = BTreeSet::new();
+    collect_assigned_init_roots(&model.init, &mut roots);
+    check_init_coverage(model, Some(&roots)).map_err(|error| {
+        runtime_error(format!(
+            "{} bmc and induction return verdicts using free values for this init, but refine refuses it.",
+            error.message
+        ))
+    })
 }
 
 /// Whether `coverage` amounts to a complete definite assignment of `ty`.
