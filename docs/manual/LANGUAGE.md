@@ -4482,6 +4482,16 @@ DESIGN-*.md).
   automatic missing-invariant findings: a survivor may be an equivalent
   mutant, behavior dead at baseline, an effect visible only beyond the depth
   bound, or genuine under-constraint.
+  The baseline uses auto (default 1,000,000-state budget), accepting `verified`
+  or `proved`; a nonaccepted auto result reruns BMC on a fresh thread, continuing
+  if verified or returning that baseline envelope otherwise. JSON retains
+  `baseline:"verified"`. For each mutant, a finding-free, non-exhausted boundary
+  probe permits explicit exploration (50,000 states) to certify clean through K
+  only when every reachable is witnessed; all other cases retain the existing
+  BMC path and kill labels. Secondary checks still run. Stderr reports the
+  accepted baseline and each evaluated mutant, with `engine=explicit|bmc|probe|none`
+  and elapsed seconds; the engine names the main-oracle route, not later checks.
+  Stdout is unchanged, and baseline refusals/command errors emit no progress.
   `--from mutants.jsonl` additionally adjudicates externally generated
   mutations expressed as a full `mutated_spec` or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid external

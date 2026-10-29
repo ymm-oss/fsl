@@ -615,7 +615,20 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
-  whether it is killed by BMC/acceptance/forbidden/refinement. exit is 0 unless an
+  whether it is killed by the main/acceptance/forbidden/refinement oracle.
+  The baseline uses auto with its default 1,000,000-state budget, accepting
+  verified or proved; otherwise a fresh-thread BMC rerun either verifies and
+  continues or supplies the refused baseline envelope. JSON keeps
+  `baseline:"verified"`. After a successful, empty, non-exhausted boundary probe,
+  explicit (50,000 states) can certify only clean main results, with all
+  reachables witnessed through K; every other outcome uses the existing BMC
+  path and kill labels. Secondary checks remain unchanged. Report progress goes
+  to stderr: `mutate baseline: <verdict> (engine=<route>, <seconds>s)`, then
+  `mutate [i/N] <op> <target>: <status>[ <killer>] (engine=<route>, <seconds>s)`
+  or `mutate external [i/M] <id>: ...`. Routes are explicit, bmc, probe, none;
+  they name the main oracle, not later checks. Counts cover evaluated records,
+  including invalid externals. No progress on command/baseline errors; stdout
+  is unchanged. There is no mutate engine/budget CLI flag. exit is 0 unless an
   opt-in gate is requested: `--fail-on-survivors` / `--min-kill-rate R` (`R` in
   `[0, 1]`) add `gate{..., violations, passed}` and exit 1 when `passed` is
   false. Zero judged mutants fails either flag (`no_judged_mutants`), and so

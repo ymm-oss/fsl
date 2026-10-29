@@ -156,6 +156,16 @@ Each row was reproduced with `fslc 4.11.0`, and each row that starts with
 
 ## 6. Spec strength (mutate)
 
+The baseline uses auto (1,000,000 states), accepting verified or proved; an
+unaccepted result reruns BMC on a fresh thread and continues only if verified.
+JSON still says `baseline:"verified"`. Mutants try explicit-clean first after a
+completed empty boundary probe (50,000 states, all reachables witnessed through
+K); otherwise existing BMC chooses the verdict/killer. Secondary checks remain.
+Stderr progress shows baseline and per-mutant time plus the main-oracle route
+(`explicit`, `bmc`, `probe`, `none`), not the later check deciding final status.
+Stdout is unchanged; refused baselines and command errors have no progress.
+This optimization does not make mutation unbounded or guarantee a fast run.
+
 `mutate` changes the model (a guard, an assignment, a bound) and checks
 whether your properties notice. A survivor is a change your spec cannot tell
 apart from the original.

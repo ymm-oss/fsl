@@ -10733,7 +10733,10 @@ impl BoundaryKiller {
 struct MainOracle {
     outcome: MutationOracle,
     boundary_killer: Option<BoundaryKiller>,
+    engine: &'static str,
 }
+
+const MUTATION_EXPLICIT_BUDGET: usize = fsl_runtime::CONCRETE_PROBE_BUDGET;
 
 /// A built-in mutant that does not lower/build never reaches the oracle: it is
 /// `Invalid`, exactly like an external mutant that fails to build (#1251).
@@ -10741,6 +10744,7 @@ fn mutation_oracle(
     spec: fsl_syntax::SurfaceSpec,
     depth: usize,
     names: &KernelModel,
+    explicit_budget: Option<usize>,
     bmc: &mut MutationBmc<'_>,
 ) -> MainOracle {
     let mut model = match fsl_core::lower_direct_spec(spec)
@@ -10752,31 +10756,50 @@ fn mutation_oracle(
             return MainOracle {
                 outcome: MutationOracle::Invalid(message),
                 boundary_killer: None,
+                engine: "none",
             };
         }
     };
     model.inherit_compose_names(names);
-    mutation_oracle_for_model(model, depth, bmc)
+    mutation_oracle_for_model(model, depth, explicit_budget, bmc)
 }
 
 fn mutation_oracle_for_model(
     model: KernelModel,
     depth: usize,
+    explicit_budget: Option<usize>,
     bmc: &mut MutationBmc<'_>,
 ) -> MainOracle {
+    let probe =
+        fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET);
     if let Ok(fsl_runtime::BoundaryProbe {
         finding: Some((violation, trace)),
         ..
-    }) = fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
+    }) = &probe
     {
         return MainOracle {
             outcome: MutationOracle::killed(
-                trace_last_action(&trace)
+                trace_last_action(trace)
                     .and_then(|action| model.component_public_name(&violation.name, action))
                     .unwrap_or_else(|| violation.name.clone()),
                 property_requirements(&model, &violation.name),
             ),
-            boundary_killer: Some(BoundaryKiller::Label(violation.name)),
+            boundary_killer: Some(BoundaryKiller::Label(violation.name.clone())),
+            engine: "probe",
+        };
+    }
+    if let Some(budget) = explicit_budget
+        && matches!(probe, Ok(ref probe) if !probe.exhausted)
+        && let verification::ExplicitFirst::Ran(Ok(result)) =
+            verification::explicit_first(&model, depth, budget, None)
+        && !result.budget_exceeded
+        && result.violation.is_none()
+        && result.reachables.values().all(Option::is_some)
+    {
+        return MainOracle {
+            outcome: MutationOracle::Clean,
+            boundary_killer: None,
+            engine: "explicit",
         };
     }
     let mut automatic = model.clone();
@@ -10795,11 +10818,13 @@ fn mutation_oracle_for_model(
         return MainOracle {
             outcome: automatic_result,
             boundary_killer,
+            engine: "bmc",
         };
     }
     MainOracle {
         outcome: mutation_model_oracle(model, depth, bmc),
         boundary_killer: None,
+        engine: "bmc",
     }
 }
 
@@ -11896,6 +11921,7 @@ fn run_mutate(
         path,
         MutateOptions {
             depth,
+            explicit_budget: Some(MUTATION_EXPLICIT_BUDGET),
             max_mutants,
             by_requirement,
             oracle_attribution,
@@ -11911,6 +11937,7 @@ fn run_mutate(
 #[derive(Clone, Copy)]
 struct MutateOptions<'a> {
     depth: usize,
+    explicit_budget: Option<usize>,
     max_mutants: usize,
     by_requirement: bool,
     oracle_attribution: bool,
@@ -11937,6 +11964,7 @@ fn run_mutate_from_source(
 ) -> (Value, i32) {
     let MutateOptions {
         depth,
+        explicit_budget,
         max_mutants,
         by_requirement,
         oracle_attribution,
@@ -11951,17 +11979,39 @@ fn run_mutate_from_source(
     // contents. `FsResolver` still reads compose/import/implements
     // dependencies with their own independent read semantics.
     let mut source = source.to_owned();
-    let (baseline, status) = run_verify_admitted_from_source(
+    let baseline_started = std::time::Instant::now();
+    let (mut baseline, mut status) = run_verify_admitted_from_source(
         path,
         &source,
         depth,
         "warn",
-        "bmc",
+        "auto",
         DEFAULT_EXPLICIT_BUDGET,
         1,
         None,
     );
-    if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
+    if status != 0 || !matches!(baseline["result"].as_str(), Some("verified" | "proved")) {
+        (baseline, status) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(STACK_SIZE)
+                .spawn_scoped(scope, || {
+                    run_verify_admitted_from_source(
+                        path,
+                        &source,
+                        depth,
+                        "warn",
+                        "bmc",
+                        DEFAULT_EXPLICIT_BUDGET,
+                        1,
+                        None,
+                    )
+                })
+                .expect("spawn mutation baseline BMC thread")
+                .join()
+                .expect("mutation baseline BMC thread panicked")
+        });
+    }
+    if status != 0 || !matches!(baseline["result"].as_str(), Some("verified" | "proved")) {
         // The baseline envelope is re-emitted verbatim, so its own `result`
         // decides the exit code through `docs/manual/LANGUAGE.md`'s table: `violated`
         // and the other row-1 verdicts exit 1, and a *spec error* keeps the
@@ -11969,6 +12019,7 @@ fn run_mutate_from_source(
         let baseline_status = mutate_exit_status(&baseline, status);
         return (baseline, baseline_status);
     }
+    let baseline_elapsed = baseline_started.elapsed().as_secs_f64();
     let model = match load_model_from_source(path, &source) {
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
@@ -12040,6 +12091,18 @@ fn run_mutate_from_source(
             ));
         }
     };
+    let candidates = match external_mutants
+        .map(|path| load_external_mutations(path, &source))
+        .transpose()
+    {
+        Ok(candidates) => candidates.unwrap_or_default(),
+        Err(error) => return mutate_error(error_output("io", &error)),
+    };
+    eprintln!(
+        "mutate baseline: {} (engine={}, {baseline_elapsed:.3}s)",
+        baseline["result"].as_str().unwrap_or("verified"),
+        baseline["engine"].as_str().unwrap_or("bmc"),
+    );
     let all_mutants = fsl_tools::enumerate_builtin_mutants(&spec);
     let discovered = all_mutants.len();
     let dead_actions = fsl_tools::source_action_coverage(&model, &baseline["action_coverage"])
@@ -12056,9 +12119,10 @@ fn run_mutate_from_source(
     let mut public_mutants = Vec::new();
     let source_lines = source.lines().collect::<Vec<_>>();
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    for mutant in all_mutants.into_iter().take(max_mutants) {
+    for (index, mutant) in all_mutants.into_iter().take(max_mutants).enumerate() {
+        let started = std::time::Instant::now();
         let mutated_spec = mutant.materialize(&spec);
-        let main = mutation_oracle(mutated_spec.clone(), depth, &model, bmc);
+        let main = mutation_oracle(mutated_spec.clone(), depth, &model, explicit_budget, bmc);
         let mut outcome = main.outcome.clone();
         let mut inconclusive = None;
         if outcome.is_clean()
@@ -12196,15 +12260,27 @@ fn run_mutate_from_source(
                 entry.insert("kills".to_owned(), json!(kills + 1));
             }
         }
+        mutation_progress(
+            &public,
+            index,
+            discovered.min(max_mutants),
+            main.engine,
+            started,
+        );
         public_mutants.push(public);
     }
-    if let Some(external_path) = external_mutants {
-        let candidates = match load_external_mutations(external_path, &source) {
-            Ok(candidates) => candidates,
-            Err(error) => return mutate_error(error_output("io", &error)),
-        };
-        for candidate in candidates {
+    {
+        let count = candidates.len();
+        for (index, candidate) in candidates.into_iter().enumerate() {
+            let started = std::time::Instant::now();
             if let Some(invalid) = candidate.invalid.clone() {
+                mutation_progress(
+                    &external_mutant_public(&candidate, "invalid", None, None),
+                    index,
+                    count,
+                    "none",
+                    started,
+                );
                 public_mutants.push(external_mutant_public(
                     &candidate,
                     "invalid",
@@ -12214,6 +12290,13 @@ fn run_mutate_from_source(
                 continue;
             }
             let Some(mutated_source) = candidate.source.as_deref() else {
+                mutation_progress(
+                    &external_mutant_public(&candidate, "invalid", None, None),
+                    index,
+                    count,
+                    "none",
+                    started,
+                );
                 public_mutants.push(external_mutant_public(
                     &candidate,
                     "invalid",
@@ -12229,6 +12312,13 @@ fn run_mutate_from_source(
             let mutated_model = match external_mutation_model(mutated_source, base, &model.name) {
                 Ok(model) => model,
                 Err(invalid) => {
+                    mutation_progress(
+                        &external_mutant_public(&candidate, "invalid", None, None),
+                        index,
+                        count,
+                        "none",
+                        started,
+                    );
                     public_mutants.push(external_mutant_public(
                         &candidate,
                         "invalid",
@@ -12242,7 +12332,8 @@ fn run_mutate_from_source(
             // built-in one: a semantic BMC error is the `build_spec` kill, any
             // oracle failure is `error` (neither `invalid` nor killed, #1251),
             // and an implements cutoff is `inconclusive` (#1262).
-            let main = mutation_oracle_for_model(mutated_model.clone(), depth, bmc);
+            let main =
+                mutation_oracle_for_model(mutated_model.clone(), depth, explicit_budget, bmc);
             let (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 main.outcome.clone(),
                 |outcome| {
@@ -12292,6 +12383,7 @@ fn run_mutate_from_source(
                     }
                 }
             }
+            mutation_progress(&public, index, count, main.engine, started);
             public_mutants.push(public);
         }
     }
@@ -12374,6 +12466,37 @@ fn run_mutate_from_source(
     let output = Value::Object(output);
     let status = mutate_exit_status(&output, 3);
     (output, status)
+}
+
+fn mutation_progress(
+    public: &Value,
+    index: usize,
+    count: usize,
+    engine: &str,
+    started: std::time::Instant,
+) {
+    let label = if public["source"] == "builtin" {
+        format!(
+            "[{}/{count}] {} {}",
+            index + 1,
+            public["op"].as_str().unwrap_or(""),
+            public["target"].as_str().unwrap_or("")
+        )
+    } else {
+        format!(
+            "external [{}/{count}] {}",
+            index + 1,
+            public["id"].as_str().unwrap_or("")
+        )
+    };
+    let killer = public["killed_by"]
+        .as_str()
+        .map_or_else(String::new, |name| format!(" {name}"));
+    eprintln!(
+        "mutate {label}: {}{killer} (engine={engine}, {:.3}s)",
+        public["status"].as_str().unwrap_or(""),
+        started.elapsed().as_secs_f64()
+    );
 }
 
 fn run_typestate(path: &Path, typescript_only: bool) -> (Value, i32) {
@@ -18992,7 +19115,7 @@ spec GrowFixture {
             &captured,
             4,
             "warn",
-            "bmc",
+            "auto",
             DEFAULT_EXPLICIT_BUDGET,
             1,
         );
@@ -19033,6 +19156,7 @@ spec GrowFixture {
             mutant.materialize(&spec),
             4,
             &model,
+            None,
             &mut native_mutation_bmc,
         )
         .outcome;
@@ -19183,7 +19307,7 @@ mod mutate_oracle_error_tests {
         else {
             panic!("fixture must parse as a spec");
         };
-        let outcome = mutation_oracle(spec, 1, &small_model(), &mut |_, _| {
+        let outcome = mutation_oracle(spec, 1, &small_model(), None, &mut |_, _| {
             panic!("an unbuildable mutant must not reach the BMC oracle")
         })
         .outcome;
@@ -19217,6 +19341,7 @@ mod mutate_oracle_error_tests {
     ) -> MutateOptions<'_> {
         MutateOptions {
             depth: 4,
+            explicit_budget: None,
             max_mutants,
             by_requirement: false,
             oracle_attribution: false,
@@ -19466,6 +19591,146 @@ mod mutant_status_tests {
 }
 
 #[cfg(test)]
+mod mutate_explicit_first_tests {
+    use super::*;
+
+    const TOGGLE: &str = "spec Toggle { type Small = 0..1 state { x: Small } init { x = 0 } action flip() { x = 1 - x } invariant Safe { x <= 1 } }";
+    const REACH: &str = "spec Reach { type Small = 0..2 state { x: Small } init { x = 1 } action step() { requires x < 2 x = x + 1 } reachable End { x == 2 } }";
+
+    fn compare(relative: &str, source: &str, depth: usize, cap: usize, budget: usize) -> Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(relative);
+        let run = |explicit_budget| {
+            std::thread::scope(|scope| {
+                std::thread::Builder::new()
+                    .stack_size(STACK_SIZE)
+                    .spawn_scoped(scope, || {
+                        run_mutate_from_source(
+                            &path,
+                            source,
+                            MutateOptions {
+                                depth,
+                                max_mutants: cap,
+                                explicit_budget,
+                                by_requirement: false,
+                                oracle_attribution: true,
+                                external_mutants: None,
+                                gate: MutationGate::default(),
+                            },
+                            &mut native_mutation_bmc,
+                        )
+                    })
+                    .expect("spawn subset")
+                    .join()
+                    .expect("subset panicked")
+            })
+        };
+        let (explicit, explicit_status) = run(Some(budget));
+        let (bmc, bmc_status) = run(None);
+        assert_eq!(explicit_status, 0, "{explicit:#}");
+        assert_eq!(bmc_status, 0, "{bmc:#}");
+        assert_eq!(explicit["result"], "mutated", "{explicit:#}");
+        assert_eq!(bmc["result"], "mutated", "{bmc:#}");
+        assert!(!explicit["mutants"].as_array().expect("records").is_empty());
+        assert_eq!(
+            explicit["mutants"], bmc["mutants"],
+            "full records: {relative}"
+        );
+        explicit
+    }
+
+    #[test]
+    fn pointer_registry() {
+        compare(
+            "rust/fslc/tests/fixtures/issue_1283_pointer_registry.fsl",
+            include_str!("../tests/fixtures/issue_1283_pointer_registry.fsl"),
+            3,
+            6,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+    }
+
+    #[test]
+    fn fold_legacy_killer() {
+        let report = compare(
+            "examples/self/fslc_fold.fsl",
+            include_str!("../../../examples/self/fslc_fold.fsl"),
+            8,
+            72,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+        let record = &report["mutants"][71];
+        assert_eq!(record["op"], "enum_constant_swap", "{record:#}");
+        assert_eq!(
+            record["target"], "finalize_fail assignment FinalizedFail->FinalizedPass",
+            "{record:#}"
+        );
+        assert_eq!(record["loc"], json!({"line":116,"column":5}), "{record:#}");
+        assert_eq!(record["killed_by"], "FailureIsSticky", "{record:#}");
+    }
+
+    #[test]
+    fn rbac() {
+        compare(
+            "examples/structural/rbac.fsl",
+            include_str!("../../../examples/structural/rbac.fsl"),
+            8,
+            6,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+    }
+
+    #[test]
+    fn retry_liveness_slice() {
+        compare(
+            "examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl",
+            include_str!("../../../examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl"),
+            6,
+            3,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+    }
+
+    fn main_route(source: &str, depth: usize, budget: usize) -> (MainOracle, usize) {
+        let kernel =
+            fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new(".")).expect("parse");
+        let model = fsl_core::build_model(kernel).expect("build");
+        let mut calls = 0;
+        let main = mutation_oracle_for_model(model, depth, Some(budget), &mut |model, depth| {
+            calls += 1;
+            native_mutation_bmc(model, depth)
+        });
+        (main, calls)
+    }
+
+    #[test]
+    fn budget_one() {
+        compare("subset.fsl", TOGGLE, 2, 6, 1);
+        let (main, calls) = main_route(TOGGLE, 2, 1);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(calls, 2);
+        let (main, calls) = main_route(TOGGLE, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "explicit");
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn reachable_at_k_plus_one() {
+        compare("subset.fsl", REACH, 1, 12, MUTATION_EXPLICIT_BUDGET);
+        let delayed = REACH.replace("init { x = 1 }", "init { x = 0 }");
+        let (main, calls) = main_route(&delayed, 1, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("End"));
+        assert_eq!(calls, 2);
+        let (main, calls) = main_route(&delayed, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "explicit");
+        assert!(main.outcome.is_clean());
+        assert_eq!(calls, 0);
+    }
+}
+
+#[cfg(test)]
 mod mutate_init_bounds_override_tests {
     //! #1283 / #1251: the unit behavior of `apply_init_bounds_override` is
     //! pinned in `mutate_oracle_error_tests`; this pins its wiring in
@@ -19483,6 +19748,7 @@ mod mutate_init_bounds_override_tests {
             .join("tests/fixtures/issue_1283_pointer_registry.fsl");
         let options = MutateOptions {
             depth: 2,
+            explicit_budget: None,
             max_mutants: 5,
             by_requirement: false,
             oracle_attribution: false,
@@ -19535,7 +19801,7 @@ mod mutate_attribution_reuse_tests {
             calls.set(calls.get() + 1);
             native_mutation_bmc(model, depth)
         };
-        let main = mutation_oracle_for_model(model.clone(), 2, &mut bmc);
+        let main = mutation_oracle_for_model(model.clone(), 2, None, &mut bmc);
         assert!(main.outcome.killed_by().is_some(), "{main:?}");
         let main_calls = calls.replace(0);
         let killers =

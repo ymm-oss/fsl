@@ -1034,22 +1034,22 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
     }
-    if let Some(reason) = fsl_runtime::explicit_unsupported_reason(&model) {
-        return auto_fallback_to_bmc(request, &reason, "unsupported");
-    }
     let checked_bounds = selected_implicit_bounds(
         &model,
         request.selection.property,
         request.selection.excluded,
     );
-    let result = match fsl_runtime::verify_explicit_selected(
-        model.clone(),
+    let result = match explicit_first(
+        &model,
         request.depth,
         request.budget,
         checked_bounds.as_ref(),
     ) {
-        Ok(result) => result,
-        Err(error) => {
+        ExplicitFirst::Unsupported(reason) => {
+            return auto_fallback_to_bmc(request, &reason, "unsupported");
+        }
+        ExplicitFirst::Ran(Ok(result)) => result,
+        ExplicitFirst::Ran(Err(error)) => {
             return (
                 fslc_rust::verification_output::render_runtime_error(envelope(), &error),
                 2,
@@ -1077,6 +1077,31 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
     }
     (output, status)
+}
+
+// A short-lived return value, not a stored collection; keep the raw runtime result.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum ExplicitFirst {
+    Unsupported(String),
+    Ran(Result<fsl_runtime::ExplicitResult, fsl_runtime::RuntimeError>),
+}
+
+/// Shared raw decision; callers retain their own verdict/fallback policy.
+pub(super) fn explicit_first(
+    model: &KernelModel,
+    depth: usize,
+    budget: usize,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+) -> ExplicitFirst {
+    if let Some(reason) = fsl_runtime::explicit_unsupported_reason(model) {
+        return ExplicitFirst::Unsupported(reason);
+    }
+    ExplicitFirst::Ran(fsl_runtime::verify_explicit_selected(
+        model.clone(),
+        depth,
+        budget,
+        checked_bounds,
+    ))
 }
 
 fn auto_fallback_to_bmc(request: ExplicitRequest<'_>, reason: &str, kind: &str) -> (Value, i32) {
