@@ -89,8 +89,9 @@ Key points:
   `init references state variable '<name>' before it is assigned` check refusal.
   Check still accepts free-root reads; BMC/induction keep symbolic free values
   (#493), and refinement's separate free-root enumeration remains unchanged
-  (#1521). Auto still falls back to BMC and forwards the new diagnostic in
-  `engine_fallback.reason`; no free-root enumeration is added to explicit.
+  (#1521). Auto still falls back to BMC. For non-error BMC results,
+  `engine_fallback.reason` carries the new diagnostic; BMC error results still
+  omit fallback metadata. No free-root enumeration is added to explicit.
 - **Unsatisfiable init (fail closed, kind `vacuous`).** Definite assignment
   alone does not guarantee a consistent initial state: `init forall` executes
   once per binder value, and when two binder values write different concrete

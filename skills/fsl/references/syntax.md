@@ -1495,8 +1495,9 @@ and refinement's free-root enumeration is unchanged (#1521). Explicit/Monitor
 still reject their reads, now with
 `the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
 (semantics/exit 2, retaining compose prefixes), not the assigned-root early-read
-message. Auto still falls back to BMC and forwards this diagnostic in
-`engine_fallback.reason`. This changes only the message, not check acceptance
+message. Auto still falls back to BMC. For non-error BMC results,
+`engine_fallback.reason` carries this diagnostic; BMC error results still omit
+fallback metadata. This changes only the message, not check acceptance
 or explicit's lack of free-root enumeration. Permitted
 same-forall current-key reads are exempt only for unresolved binder values,
 including #1520 filtered/collection X1/X2. Resolved partial domains require

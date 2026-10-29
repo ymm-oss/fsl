@@ -1227,7 +1227,8 @@ symbolic free values, and refinement's free-root enumeration is unchanged
 unsupported nondeterministic init from assigned-root early reads with
 `the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
 (kind `semantics`, exit 2; compose prefixes are retained). Auto still falls
-back to BMC, forwarding that diagnostic in `engine_fallback.reason`.
+back to BMC. For non-error BMC results, `engine_fallback.reason` carries
+that diagnostic; BMC error results still omit fallback metadata.
 This is a message-only change, not new explicit enumeration or check rejection.
 Only when binder values are unresolved, including filtered/collection
 forms (#1520, X1/X2), does the #1518 current-key rule exempt an already-written

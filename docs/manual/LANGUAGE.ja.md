@@ -1147,7 +1147,9 @@ init が一度も代入しないルートは symbolic な自由値のままで�
 非決定的 init として次のメッセージを返します。
 `the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
 (kind `semantics`、exit 2。compose の接頭辞も保持)。auto は引き続き BMC に
-フォールバックし、`engine_fallback.reason` にこの診断を転送します。
+フォールバックします。BMC の結果がエラーでない場合は、
+`engine_fallback.reason` にこの診断を転送します。BMC がエラーを返す場合は、
+従来どおりフォールバックのメタデータを付けません。
 メッセージのみの変更で、explicit の列挙機能や check の拒否は追加しません。
 binder の値が決まらない場合(filter 付き・collection の形である
 #1520、X1/X2 など)だけ、#1518 の現在のキーの規則に従う既代入キーの読みを
