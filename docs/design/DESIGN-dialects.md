@@ -218,6 +218,18 @@ guard passes `check`. No checked-in spec or example has the removed shape; the
 597-form base `1844fa74` / head `7b9b34b3` sweep found no corpus acceptance
 transitions.
 
+**Breaking removal (#1600):** for next-edition (`fsl 5`) requirements, the
+declared-name walk of #1256 (`rust/fsl-core/src/declared_names.rs`) now also
+visits relation roles, resource names, and measure names, so `check` rejects
+`Claim belongs to User as __owner via approve`, `resource __r: Amount = 0`, and
+`measure __m = count Claim in Approved` with exit 2, `kind: "name"`, located at
+the declared name. The message is the #1256 one with the position
+`relation role name`, `resource name`, or `measure name`, for example
+`relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`.
+Previously the walk missed these three, so they passed `check`. No spec or
+example in the repository has such a name. Migration: rename the role,
+resource, or measure without `__` and update its references.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:
