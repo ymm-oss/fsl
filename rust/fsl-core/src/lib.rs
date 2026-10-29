@@ -120,8 +120,9 @@ pub use public_kernel::{
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
-    Refinement, RefinementError, StateMap, parse_refinement, parse_refinement_with_options,
-    pull_refinement_leadsto, requirements_implements, requirements_implements_with_bounds,
+    Refinement, RefinementError, RefinementErrorKind, StateMap, parse_refinement,
+    parse_refinement_with_options, pull_refinement_leadsto, requirements_implements,
+    requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
 pub use resolve_aliases::lower_requirements;
