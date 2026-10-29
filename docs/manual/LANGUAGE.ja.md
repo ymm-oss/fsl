@@ -694,15 +694,24 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 `requires` のガード、または binary 式の左辺から後続へ出る、global でない
 `is some(v)` のパターン束縛も、この検査では呼び出し側の束縛に含めます。
 
+最終の実装では、base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4` と build 済みの実装
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` の各 materialized tree で、
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597個の `.fsl` を
+`check` した結果、ok→error の遷移集合は空です。新たに拒否する inline の形は、この
+corpus の結果で否定されません。`leadsTo` 宣言バインダーの経路は後の #1528 で拒否しました。
+
 **破壊的な受理の削除 (#1528):** `leadsTo` のプロパティ宣言直下のバインダーも、
 before/after の式、`helpful` の引数、`decreases`、`within` の捕獲検査に含めます。
-def 本体の自由な名前を捕まえる呼び出しは、通常の spec と compose 部品の両方で、
+def 本体の自由な名前を捕まえる呼び出しは、通常の spec、compose 部品と root のプロパティ、
+`leadsTo` に下ろされる dialect のプロパティ (requirements など) で、
 呼び出し位置の `would capture variable` エラー (exit 2、`kind: "semantics"`)
 になります。宣言バインダーを改名してください。バインダーの範囲と自身の `where`
 式の展開は変わりません。`where` の捕獲エラーが、未対応のプロパティ外側バインダーの
 `where` を拒否する既存エラーより先に出る場合があります。
 元から不正な、状態を読む `within` の呼び出しでは、`unknown constant` の代わりに
 呼び出し位置の `would capture` を報告する場合があります。exit 2 / semantics は不変です。
+既に不正なパターン束縛のスコープ外参照 (#1547) もある `leadsTo` では、同様に
+`would capture` がその拒否より先に出る場合があります。exit 2 / semantics は不変です。
 
 #1528 の `check` sweep は、base `08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` と実装
 `c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` の別々に build した `git archive` tree で実施しました。

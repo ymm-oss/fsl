@@ -724,15 +724,26 @@ in compose components and synchronized actions.
 A non-global `is some(v)` binding exported by a `requires` guard or the left
 operand of a binary expression is also a caller binding for this check.
 
+The final implementation's `check` sweep of all 597 `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, using base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` in their respective materialized
+trees, has an empty ok-to-error transition set. The newly rejected inline
+forms are not negated by that corpus result; the `leadsTo` declaration-binder
+path was closed later by #1528.
+
 **Breaking removal (#1528):** binders declared directly by a `leadsTo` property
 also participate in this capture check for before/after expressions, `helpful`
 arguments, `decreases`, and `within`. A call capturing a def-body free name now
 rejects with exit 2, `kind: "semantics"`, and `would capture variable` at the
-call, in direct specs and compose components. Rename the declaration binder.
+call, in direct specs, compose components and root properties, and dialect
+properties lowered to `leadsTo` (such as requirements). Rename the declaration binder.
 Binder ranges and the binder's own `where` expansion are unchanged; capture in
 `where` can still precede the unsupported-property-wrapper-where rejection.
 An already-invalid state-reading `within` call can now report `would capture`
 at the call instead of `unknown constant`, still with exit 2 / semantics.
+When a `leadsTo` also contains an already-invalid pattern-scope escape (#1547),
+`would capture` can likewise precede that rejection; exit 2 / semantics is unchanged.
 
 The #1528 `check` sweep used separately built `git archive` trees for base
 `08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation

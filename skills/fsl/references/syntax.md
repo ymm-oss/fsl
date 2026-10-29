@@ -115,14 +115,23 @@ call; rename the caller binding. Existing global/pattern shadowing refusals
 remain unchanged. Direct and compose-source/component defs share the check.
 Non-global `is some(v)` bindings exported by `requires` or a binary expression's
 left operand also count as caller bindings, so those captures now reject.
+The final implementation's full 597-form `check` sweep over `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` in base
+`11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` materialized trees has zero
+ok-to-error transitions; inline captures still constitute a breaking removal.
+
 Breaking removal (#1528): declaration-level `leadsTo` binders also protect
 before/after, `helpful` arguments, `decreases`, and `within`. Calls capturing a
 def-body free name reject with the same exit 2 / semantics / would-capture
-diagnostic at the call, including in compose components; rename the binder.
+diagnostic at the call, in direct specs, compose components and root properties,
+and dialect properties lowered to `leadsTo` (such as requirements); rename the binder.
 Binder ranges and the binder's own `where` expansion are unchanged; capture in
 `where` can precede the existing unsupported-property-wrapper-where diagnostic.
 State-reading `within` calls already rejecting with `unknown constant` can
 instead report `would capture` at the call, still exit 2 / semantics.
+When a `leadsTo` also contains an already-invalid pattern-scope escape (#1547),
+`would capture` can likewise precede that rejection; exit 2 / semantics is unchanged.
 The #1528 `check` sweep in separately built `git archive` trees for base
 `08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
 `c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` compares all 601 `.fsl` files under

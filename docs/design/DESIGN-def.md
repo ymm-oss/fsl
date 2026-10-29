@@ -61,11 +61,16 @@ also protect before/after expressions, `helpful` arguments, `decreases`, and
 `within`. A def call whose expanded body has a free name captured by any of
 these declaration binders rejects with exit 2, `kind: "semantics"`, and
 `would capture variable` at the call; rename the declaration binder. This
-applies to direct specs and compose components, including later declaration
+applies to direct specs, compose components and root properties, and dialect
+properties lowered to `leadsTo` (such as requirements), including later declaration
 binders. Definitions with no colliding free name remain accepted. The existing
 scope restoration and capture diagnostic are reused; binder ranges and the
 binder's own `where` expansion are unchanged. Capture in `where` can still
 precede the existing unsupported-wrapper-where diagnostic.
+An already-invalid state-reading `within` call can report `would capture` instead
+of `unknown constant`, still with exit 2 / semantics.
+When a `leadsTo` also contains an already-invalid pattern-scope escape (#1547),
+`would capture` can likewise precede that rejection; exit 2 / semantics is unchanged.
 
 ## Caller scope and compose source names (#1450)
 
@@ -180,6 +185,11 @@ the constant/enum `helpful` argument behavior from #1580 remain unchanged.
 
 ## Diagnostic-order exceptions
 
+- **#1528 — capture alongside another invalid `leadsTo` expression:** a
+  state-reading `within` can report `would capture` at the call instead of
+  `unknown constant` (acceptance-source details above); likewise capture can
+  precede #1547's rejection of a name outside its pattern's true continuation.
+  Both remain exit 2 / `semantics`; neither is a newly accepted form.
 - **v01 — invalid parameter range and action body:** if both contain undefined
   predicate calls, both versions reject with exit 2 and kind `name`, but the
   parameter-range error can become the action-body error. For the documented
