@@ -1853,6 +1853,13 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    A symbolic init failure found only beyond a stored `Seq`'s represented capacity,
    such as when init stores an over-capacity sequence and reads beyond its slots,
    is instead refused without a location as `model sequence length exceeds capacity`.
+   Binder init failures name the first reached concrete operation in every engine
+   (#1607): source first, then each present candidate's `where`, then its body or
+   summand only when the filter is true. `forall` stops on a false body and
+   `exists` on a true body; `count`/`unique`/`exactlyOne` do not stop early.
+   `sum` checks each partial sum (`integer overflow in sum`), even if the final
+   mathematical sum fits i64; an undefined summand reports its own error first.
+   These failures retain the containing init statement's location.
    Dividing the minimum i64 value by `-1` (`MIN / -1`) or taking its remainder
    (`MIN % -1`) is integer overflow, including in property contexts where only
    zero divisors are totalized to `0`.

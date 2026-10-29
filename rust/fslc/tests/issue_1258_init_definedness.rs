@@ -243,10 +243,10 @@ fn undefined_init_is_a_located_semantics_error_under_bmc_and_induction() {
     }
 }
 
-/// An init failure inside a binder expression (#1258 m1). The binder is one
-/// failure site; its message pins that the site, not the generic fallback,
-/// names the failure, so the verdict and the message both depend on the
-/// `Quantified` arm of the site enumeration.
+/// An init failure inside a binder expression (#1258 m1). Since #1607 the
+/// message names the reached division in the first candidate, not the whole
+/// binder or the generic fallback. This nondeterministic fixture remains a
+/// symbolic-engine test: explicit rejects the unassigned `junk` variable.
 const INIT_QUANT_ND: &str = r"spec InitQuant {
   type Small = 0..3
   state {
@@ -271,7 +271,7 @@ fn an_undefined_binder_expression_in_init_is_a_located_semantics_error() {
     let fixture = Fixture::new("quant-nd", INIT_QUANT_ND);
     for engine in SYMBOLIC_ENGINES {
         let (output, status) = verify(&fixture, engine);
-        assert_semantics_error(&output, status, "undefined evaluation in init at 10:5");
+        assert_semantics_error(&output, status, "division by zero in init at 10:5");
     }
 }
 

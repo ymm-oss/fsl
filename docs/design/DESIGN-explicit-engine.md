@@ -155,7 +155,8 @@ symbolic counterparts are located by `init_definedness`: out-of-domain Map reads
 and writes, out-of-range Seq operations, empty `head`/`pop`, zero division or
 remainder, and integer overflow (including sum). Undefined quantified/aggregate
 evaluation keeps the concrete underlying failure message. Runtime message stems
-are unchanged; sum and quantified/aggregate stems can still differ from BMC.
+were unchanged by #1543; at that point sum and quantified/aggregate stems could
+still differ from BMC. The #1607 amendment below removes that difference.
 The separate MIN divided/remaindered by -1 panic (#1596) and bounded-target pop
 diagnostic discrepancy (#1597) are not repaired by this change. Indexed Seq
 assignment remains unreachable through a checked model.
@@ -186,6 +187,27 @@ appended the location to explicit's message to construct symbolic expectations.
 It now expects all three engines to match explicit's message and separately
 checks that explicit's message ends with the location computed from the generated
 source. No existing runtime message stem, kind, exit code, or JSON field changes.
+
+### Binder init failure messages (#1607)
+
+BMC and induction now name the concrete operation inside a quantified/aggregate
+init expression, rather than one generic binder site. Diagnostics visit the
+source first and then candidates in runtime order, guarded by membership so
+absent Set members and non-live Seq slots cannot fail. Each candidate visits
+`where` before its selected body/summand. `forall` stops on a false body and
+`exists` on a true body; `count`, `unique`, and `exactlyOne` do not stop early.
+An undefined summand reports its own operation before accumulation; `sum` checks
+every running partial sum, not only the final mathematical sum, for i64 overflow.
+All later candidate sites are unreachable after an evaluation failure.
+
+**Contract change.** Symbolic CLI and Worker JSON `message` stems change from
+`integer overflow in sum or undefined summand` to `integer overflow in sum` for
+an accumulation overflow, or to the summand's concrete failure. The old
+`undefined evaluation` stem for other binder failures becomes the source,
+filter, or body's concrete failure, such as `division by zero`. Explicit/auto
+runtime stems, the containing-statement ` in init at L:C` suffix, error kinds,
+exit codes, and JSON fields are unchanged. Definedness remains a separate
+obligation; expanding diagnostic sites does not change acceptance or verdicts.
 
 ## 4. Property semantics
 
