@@ -2682,10 +2682,10 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 <code>fair action</code> 宣言から来ます。
 抽象の Int/Bool 定数は P/Q、<code>decreases</code>、範囲と入れ子のフィルターでリテラルになります。
-別モデルの impl の定数と同名の binder と、読まれる抽象の const/state の同名は拒否します。
-const と同名の local は先に <code>check</code> が拒否し、pull では再判定しません。性質内の pattern binder が、
-字句 scope を考慮して実際に使う map の導入する自由な impl 名と同名なら、読める続きの
-規則とは独立に拒否します。抽象の pattern binder を改名してください。通常の scope は不変です。
+別モデルの impl 定数との binder 衝突と、読まれる抽象の const/state の同名は拒否します。
+const と同名の local は先に <code>check</code> が拒否します。性質の pattern が、字句 scope で使う map の
+自由な impl 名と同名なら、読める続きとは別に拒否します。使う map 式の pattern が性質の binder や
+他の使用 map 式の pattern と同名でも拒否します。抽象/写像の pattern を改名してください。通常の scope は不変です。
 直接の refine は <code>respond</code> の位置つきエラー(exit 2、<code>kind:"type"</code>、<code>loc</code> あり)です。
 抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が exit 1 です。
 未使用の map/合法な local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
