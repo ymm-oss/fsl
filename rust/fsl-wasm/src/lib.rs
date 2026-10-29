@@ -805,6 +805,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn issue_1596_worker_init_division_overflow() {
+        let request: Request = serde_json::from_value(json!({
+            "cmd": "verify", "source_file": "model.fsl",
+            "source": "requirements Overflow {\n  state { a: Int, t: Int }\n  init {\n    a = -9223372036854775807 - 1\n    t = a / -1\n  }\n  requirement REQ-1 \"step\" { action step() { } }\n  acceptance AC-1 \"ready\" { step() expect true }\n}\n"
+        })).expect("Worker request");
+        let value = block_on(verify(&request, TEST_SOLVER_VERSION));
+        assert_eq!(
+            value,
+            error(
+                TEST_SOLVER_VERSION,
+                "semantics",
+                "integer overflow in division in init at 5:5"
+            )
+        );
+    }
+
     // Messages native `fslc check` reports for the specialized-validation
     // fixtures below (issue #1163), and the Agent analysis verdict it reports
     // for `issue_468_unsafe_graph.fsl`.
