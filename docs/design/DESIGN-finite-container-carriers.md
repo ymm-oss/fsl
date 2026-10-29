@@ -49,8 +49,10 @@ documenting symbolic refusal as a supported engine difference.
 
 ## Mutation classification
 
-A statically ill-typed map is invalid mutant input, even when its type check
-runs after the main model check. The shared refinement validator carries a
+A statically ill-typed map is invalid mutant input, independent of runtime
+oracle order. Static implements validation runs before the main and requirement
+oracles, while the runtime refinement walk remains after both leave the mutant
+clean. The shared refinement validator carries a
 typed `RefinementErrorKind::Type`; mutation consumes that kind, not a phase name
 or message substring, and publishes through the same `MutationOracle::Invalid`
 path used for check-invalid builtins and external mutants. Whole-container

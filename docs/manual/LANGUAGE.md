@@ -4688,9 +4688,14 @@ DESIGN-*.md).
   instruction, parse, name, type, and construction errors are `invalid`, never
   killed, and are excluded from combined/per-source kill-rate denominators
   (they measure external generator quality, not spec strength); a built-in
-  mutant that does not build is `invalid` the same way. A mutant the oracle
+  mutant that does not build is `invalid` the same way. `invalid` means statically
+  invalid input, including implements-map static type errors (auto or explicit
+  maps). This validation precedes runtime oracles: a main or requirement kill
+  cannot turn an invalid map into a judged mutant. Invalid inputs are excluded
+  from `gate.judged` and `kill_rate`, regardless of runtime verdict order.
+  A mutant the oracle
   could not judge (Z3 unavailable, solver `unknown`/backend failure, or an
-  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  acceptance/forbidden/implements evaluation failure) remains `status:"error"` with
   `error{stage, message}`: never killed, excluded from `kill_rate`, counted in
   `summary.errored` (present only when non-zero, like `summary.inconclusive`),
   and it fails any requested gate (`oracle_errors`). Precedence for one mutant:

@@ -4457,9 +4457,13 @@ DESIGN-*.md があります)。
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
   combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
   なく、外部ジェネレーターの品質を測ります)。構築できない組み込みミュータントも
-  同じく `invalid` です。オラクルが判定できなかったミュータント(Z3 を作れない、
+  同じく `invalid` です。`invalid` は静的に不正な入力を意味し、implements の map の
+  静的な型の誤り(auto と明示の maps)も含みます。この検査は実行時のオラクルより先に
+  行うため、main や requirement による kill が不正な map を判定済みに変えることは
+  ありません。実行時の判定の順に依らず、`gate.judged` と `kill_rate` から除外します。
+  オラクルが判定できなかったミュータント(Z3 を作れない、
   solver の `unknown`/backend の失敗、acceptance/forbidden/implements オラクルの
-  エラー)は `status:"error"` と `error{stage, message}` になり、決して killed には
+  評価の失敗)は引き続き `status:"error"` と `error{stage, message}` になり、決して killed には
   ならず、`kill_rate` から除外され、`summary.errored`(`summary.inconclusive` と同じく非 0 のときだけ出ます)に数えられ、要求された
   gate を不合格にします(`oracle_errors`)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は

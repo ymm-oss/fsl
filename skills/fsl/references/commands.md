@@ -665,9 +665,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
   same oracle; malformed JSON/instructions and parse/name/type/construction
   errors are `invalid` rather than killed (a built-in mutant that does not
-  build is `invalid` too). A mutant the oracle could not judge (Z3
+  build is `invalid` too). `invalid` means statically invalid input, including
+  static implements-map type errors with auto or explicit maps. Validation
+  precedes runtime oracles; a main or requirement kill cannot hide an invalid
+  map. Invalid inputs are excluded from `gate.judged` and `kill_rate`, independent
+  of runtime verdict order. A mutant the oracle could not judge (Z3
   unavailable, solver `unknown`/backend failure, or an
-  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  acceptance/forbidden/implements evaluation failure) remains `status:"error"` with
   `error{stage, message}`, never killed, and counted in `summary.errored`
   (present only when non-zero). Precedence for one mutant: `killed` > `error`
   > `inconclusive` > `survived`.
