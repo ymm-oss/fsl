@@ -13,17 +13,13 @@ const HEADER: &str = "// location sentinel\n\n   refinement R { impl Impl1599Spe
 const IMPL_RANGE: &str = "spec Impl1599Spec { type Carrier1599 = 0..2 state { x: Carrier1599 = 0 } action go() { requires x == 0 x = 1 } }";
 const ABS_PROGRESS: &str = "spec Abs1599Spec { type Carrier1599 = 0..0 state { y: Int = 0 } fair action step() { requires y < 2 y = y + 1 } leadsTo L { y == 0 ~> y == 2 } }";
 const PROGRESS: &str = "action go() -> step() preserve progress { respond L by go } }";
+const DOMAIN_NAMES: [&str; 3] = ["Carrier1599", "Impl1599Spec", "Abs1599Spec"];
 
 struct Fixture(PathBuf);
 impl Fixture {
     fn new(implementation: &str, abstraction: &str, mapping: &str) -> Self {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../target")
-            .join(format!(
-                "fsl-1599-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = root().join(format!("rust/target/fsl-1599-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let fixture = Self(dir);
         for (file, source) in [
@@ -129,19 +125,13 @@ fn issue_case(index: usize, control: bool) {
         ),
     ];
     let (implementation, abstraction, body, name, failure) = &rows[index];
+    let (from, to) = if *name == "Carrier1599" {
+        ("type Carrier1599", "type Renamed1599")
+    } else {
+        ("{ Member1599B }", "{ Q }")
+    };
     let abstraction = if control {
-        abstraction.replace(
-            if *name == "Carrier1599" {
-                "type Carrier1599"
-            } else {
-                "{ Member1599B }"
-            },
-            if *name == "Carrier1599" {
-                "type Renamed1599"
-            } else {
-                "{ Q }"
-            },
-        )
+        abstraction.replace(from, to)
     } else {
         (*abstraction).to_owned()
     };
@@ -190,12 +180,7 @@ fn definitions(left: &str, right: &str, reject: bool) {
     );
     let observed = fixture.refine();
     if reject {
-        located_collision(
-            &observed,
-            ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
-            3,
-            4,
-        );
+        located_collision(&observed, DOMAIN_NAMES, 3, 4);
     } else {
         verdict(&observed, 0, "refines", None);
     }
@@ -261,12 +246,7 @@ fn governance_collision(cmd: &str) {
         &(HEADER.to_owned() + "map y = x " + PROGRESS),
     );
     fixture.write("governance.fsl", GOVERNANCE);
-    located_collision(
-        &fixture.run(&[cmd, "governance.fsl"]),
-        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
-        4,
-        3,
-    );
+    located_collision(&fixture.run(&[cmd, "governance.fsl"]), DOMAIN_NAMES, 4, 3);
 }
 #[test]
 fn governance_check_collision() {
@@ -284,12 +264,7 @@ fn inline_collision_is_located_at_implements() {
         "",
     );
     fixture.write("inline.fsl", "requirements Impl1599Spec {\n\n   implements Abs1599Spec from \"abs.fsl\" { maps auto }\n type Carrier1599 = 0..2\n state { x: Int = 0 }\n}");
-    located_collision(
-        &fixture.run(&["check", "inline.fsl"]),
-        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
-        3,
-        4,
-    );
+    located_collision(&fixture.run(&["check", "inline.fsl"]), DOMAIN_NAMES, 3, 4);
 }
 #[test]
 fn chain_collision_reports_failed_link() {
@@ -316,12 +291,7 @@ fn chain_collision_reports_failed_link() {
         "--depth",
         "4",
     ]);
-    located_collision(
-        &observed,
-        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
-        3,
-        4,
-    );
+    located_collision(&observed, DOMAIN_NAMES, 3, 4);
     assert_eq!(
         observed.0["failed_link"],
         json!({"from":"Impl1599Spec", "to":"Abs1599Spec", "kind":"type"})
@@ -388,12 +358,7 @@ fn progress_governance_corpus(cmd: &str) {
         args.push("--no-cache");
     }
     let observed = run(&root(), &args);
-    located_collision(
-        &observed,
-        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
-        7,
-        3,
-    );
+    located_collision(&observed, DOMAIN_NAMES, 7, 3);
 }
 #[test]
 fn progress_governance_corpus_check() {

@@ -4,7 +4,10 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
+use fsl_core::{
+    FsResolver, KernelModel, Refinement, build_model, parse_kernel_source, parse_refinement,
+};
+use fsl_verifier::{ProgressCheck, VerifyError, check_refinement_progress};
 
 #[path = "../../fslc/tests/support/identifiers.rs"]
 mod identifiers;
@@ -24,31 +27,16 @@ fn model(source: &str) -> fsl_core::KernelModel {
         .expect("build model")
 }
 
-fn mapping(
-    implementation: &fsl_core::KernelModel,
-    abstraction: &fsl_core::KernelModel,
-) -> fsl_core::Refinement {
-    parse_refinement("refinement R { impl Impl1599Spec abs Abs1599Spec map y = x action go() -> step() preserve progress { respond Progress1599 by go } }", implementation, abstraction).unwrap()
+type ProgressResult = Result<ProgressCheck, VerifyError>;
+fn mapping(imp: &KernelModel, abs: &KernelModel) -> Refinement {
+    parse_refinement("refinement R { impl Impl1599Spec abs Abs1599Spec map y = x action go() -> step() preserve progress { respond Progress1599 by go } }", imp, abs).unwrap()
 }
-fn progress(
-    implementation: &fsl_core::KernelModel,
-    abstraction: &fsl_core::KernelModel,
-    mapping: &fsl_core::Refinement,
-) -> Result<fsl_verifier::ProgressCheck, fsl_verifier::VerifyError> {
+fn progress(imp: &KernelModel, abs: &KernelModel, mapping: &Refinement) -> ProgressResult {
     let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
-    block_on(fsl_verifier::check_refinement_progress(
-        implementation,
-        abstraction,
-        mapping,
-        &mut solver,
-        4,
-    ))
+    block_on(check_refinement_progress(imp, abs, mapping, &mut solver, 4))
 }
 
-fn pulled_safety(
-    broken: bool,
-    name: &str,
-) -> Result<fsl_verifier::ProgressCheck, fsl_verifier::VerifyError> {
+fn pulled_safety(broken: bool, name: &str) -> ProgressResult {
     let implementation = model(&format!(
         "spec Impl1599Spec {{ state {{ x: Int = 0 }} fair action go() {{ requires x == 0 x = 1 }} invariant {name} {{ x <= {} }} }}",
         i32::from(!broken)
