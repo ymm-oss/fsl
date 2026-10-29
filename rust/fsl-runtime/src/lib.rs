@@ -655,8 +655,10 @@ fn eval_binary(
                 Ok(Value::Int(left.rem_euclid(right)))
             }
         }
-        "==" => Ok(Value::Bool(left == right)),
-        "!=" => Ok(Value::Bool(left != right)),
+        "==" | "!=" => {
+            let equal = normalize_relation_comparison(left) == normalize_relation_comparison(right);
+            Ok(Value::Bool(if op == "==" { equal } else { !equal }))
+        }
         "<" | "<=" | ">" | ">=" => {
             let ordering = left.cmp(&right);
             Ok(Value::Bool(match op {
@@ -1964,7 +1966,7 @@ fn alpha_state_inner(
                 None,
             )?
         };
-        alpha.insert(name.clone(), value);
+        alpha.insert(name.clone(), coerce_relation_literal(value, Some(abs_ty)));
     }
     let _ = implementation;
     Ok(alpha)
@@ -4512,7 +4514,10 @@ fn assign(
 ) -> Result<(), RuntimeError> {
     match target {
         LValue::Var(name) => {
-            target_state.insert(name.clone(), coerce_relation_literal(name, value, model));
+            target_state.insert(
+                name.clone(),
+                coerce_relation_literal(value, model.state_type(name)),
+            );
         }
         LValue::Index(name, index_expr) => {
             let index = eval(index_expr, read_state, bindings, model, None)?;
@@ -4593,18 +4598,27 @@ fn assign(
 
 /// `Set {}` is the only relation literal surface syntax accepts (public
 /// Kernel typing rejects a non-empty one), but `eval`'s `Expr::Set` arm has
-/// no assignment-target type context and always produces `Value::Set`.
-/// Coerce it here, where the target variable's declared type is known --
-/// mirrors the symbolic evaluator's `SymbolicValue::SetLiteral` ->
+/// no expected type context and always produces `Value::Set`.
+/// State writes supply the target type. This mirrors the symbolic
+/// evaluator's `SymbolicValue::SetLiteral` ->
 /// `SymbolicValue::Relation` coercion (`fsl-verifier/src/value.rs::coerce`).
-fn coerce_relation_literal(name: &str, value: Value, model: &KernelModel) -> Value {
+fn coerce_relation_literal(value: Value, expected: Option<&TypeRef>) -> Value {
     if let Value::Set(items) = &value
         && items.is_empty()
-        && matches!(model.state_type(name), Some(TypeRef::Relation(_, _)))
+        && matches!(expected, Some(TypeRef::Relation(_, _)))
     {
         return Value::Relation(BTreeSet::new());
     }
     value
+}
+
+/// Normalize empty relations only at the comparison root or inside `Some`.
+fn normalize_relation_comparison(value: Value) -> Value {
+    match value {
+        Value::Relation(items) if items.is_empty() => Value::Set(BTreeSet::new()),
+        Value::Some(inner) => Value::Some(Box::new(normalize_relation_comparison(*inner))),
+        value => value,
+    }
 }
 
 fn lvalue_key(
