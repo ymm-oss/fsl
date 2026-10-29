@@ -94,6 +94,10 @@ impl SmtSolver for FirstCheckFault {
         self.inner.sort(term)
     }
 
+    fn literal_value(&self, term: &Self::Term) -> Option<ModelValue> {
+        self.inner.literal_value(term)
+    }
+
     fn bool_value(&self, value: bool) -> Self::Term {
         self.inner.bool_value(value)
     }

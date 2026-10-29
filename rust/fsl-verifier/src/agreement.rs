@@ -79,14 +79,6 @@ async fn transition_matches_step_with_bounds<S: SmtSolver>(
     let mut symbolic_current = symbolic_state_with_suffix(solver, model, "agreement_current")?;
     let mut symbolic_next = symbolic_state_with_suffix(solver, model, "agreement_next")?;
     pin_state(solver, model, &symbolic_current, current, "current", false)?;
-    pin_state(
-        solver,
-        model,
-        &symbolic_next,
-        next,
-        "next",
-        allow_next_bound_violation,
-    )?;
     if totalize_partial_values {
         totalize_agreement_state(solver, model, &mut symbolic_current)?;
         totalize_agreement_state(solver, model, &mut symbolic_next)?;
@@ -98,10 +90,18 @@ async fn transition_matches_step_with_bounds<S: SmtSolver>(
         model,
         &instances,
         &symbolic_current,
-        &symbolic_next,
+        &mut symbolic_next,
         &choice,
     )?;
     solver.assert(&transition)?;
+    pin_state(
+        solver,
+        model,
+        &symbolic_next,
+        next,
+        "next",
+        allow_next_bound_violation,
+    )?;
 
     for (index, instance) in instances.iter().enumerate() {
         if instance.action != action {
@@ -795,6 +795,7 @@ fn totalize_agreement_value<S: SmtSolver>(
         SymbolicValue::Scalar { .. }
         | SymbolicValue::None
         | SymbolicValue::Set { .. }
+        | SymbolicValue::Collection { .. }
         | SymbolicValue::Relation { .. } => Ok(()),
     }
 }

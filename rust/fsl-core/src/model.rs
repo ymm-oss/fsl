@@ -206,6 +206,27 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    /// Whether a state type contributes an implicit verifier bound property.
+    #[must_use]
+    pub fn type_has_bounds(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Int | TypeRef::Bool => false,
+            TypeRef::Range(_, _)
+            | TypeRef::Set(_)
+            | TypeRef::Seq(_, _)
+            | TypeRef::Relation(_, _) => true,
+            TypeRef::Option(inner) => self.type_has_bounds(inner),
+            TypeRef::Map(_, value) => self.type_has_bounds(value),
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
+                Some(TypeDef::Struct { fields }) => {
+                    fields.iter().any(|(_, ty)| self.type_has_bounds(ty))
+                }
+                None => false,
+            },
+        }
+    }
+
     pub(crate) fn component_item_span(&self, target: &str) -> Option<Span> {
         self.origins
             .primary_for(&crate::origin::component_check_target(target))?

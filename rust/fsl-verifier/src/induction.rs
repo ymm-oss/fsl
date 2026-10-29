@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::obligation::{ObligationKind, Site, SiteRef, catalog};
 use fsl_core::recursion;
-use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef, TypeDef, TypeRef};
+use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
@@ -22,7 +22,7 @@ use crate::transition::{
 };
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, bounds, i64_index, int_term,
-    symbolic_state_with_suffix,
+    reframe_collections, symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 
@@ -111,25 +111,11 @@ impl Property<'_> {
     }
 }
 
-fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
-    }
-}
-
 fn properties(model: &KernelModel) -> Vec<Property<'_>> {
     let mut properties = model
         .state
         .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
+        .filter(|(_, ty)| model.type_has_bounds(ty))
         .map(|(name, _)| Property::Bound(name.as_str()))
         .collect::<Vec<_>>();
     properties.extend((0..model.invariants.len()).map(Property::Invariant));
@@ -253,17 +239,25 @@ async fn prove_induction_scoped<S: SmtSolver>(
         if k == 1 {
             states.push(symbolic_state_with_suffix(solver, model, "ind0")?);
         }
-        let previous = &states[k - 1];
         for property in &properties {
-            let assumption = property_condition(solver, model, *property, previous, None)?;
+            let assumption = property_condition(solver, model, *property, &states[k - 1], None)?;
             solver.assert(&assumption)?;
         }
-        let next = symbolic_state_with_suffix(solver, model, &format!("ind{k}"))?;
+        reframe_collections(
+            solver,
+            model,
+            &mut states[k - 1],
+            &format!("ind{}", k - 1),
+            None,
+        )
+        .await?;
+        let previous = &states[k - 1];
+        let mut next = symbolic_state_with_suffix(solver, model, &format!("ind{k}"))?;
         let choice = solver.constant(&format!("__ind_choice@{}", k - 1), &fsl_solver::Sort::Int)?;
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
         solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
         solver.assert(&transition_constraint(
-            solver, model, &instances, previous, &next, &choice,
+            solver, model, &instances, previous, &mut next, &choice,
         )?)?;
         states.push(next);
         choices.push(choice);
@@ -510,7 +504,7 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
     }
     let class = FailureClass::KeyDomain;
     let properties = properties(model);
-    let key_states = vec![
+    let mut key_states = vec![
         symbolic_state_with_suffix(solver, model, "key0")?,
         symbolic_state_with_suffix(solver, model, "key1")?,
     ];
@@ -679,12 +673,13 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
         }
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
         solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
+        let current = key_states[0].clone();
         solver.assert(&transition_constraint(
             solver,
             model,
             instances,
-            &key_states[0],
-            &key_states[1],
+            &current,
+            &mut key_states[1],
             &choice,
         )?)?;
         for property in &properties {
@@ -908,7 +903,7 @@ async fn step_obligation_cti<S: SmtSolver>(
         return Ok(None);
     }
     let properties = properties(model);
-    let def_states = vec![
+    let mut def_states = vec![
         symbolic_state_with_suffix(solver, model, "def0")?,
         symbolic_state_with_suffix(solver, model, "def1")?,
     ];
@@ -1046,6 +1041,15 @@ async fn step_obligation_cti<S: SmtSolver>(
 
         // Two-state obligations: transition-property definedness, and
         // reached-ensures definedness and truth (#1217).
+        let current = def_states[0].clone();
+        let transition = transition_constraint(
+            solver,
+            model,
+            instances,
+            &current,
+            &mut def_states[1],
+            &choice,
+        )?;
         let mut transition_statuses = Vec::new();
         for property in &model.transitions {
             let status = property_evaluation_status(
@@ -1065,14 +1069,7 @@ async fn step_obligation_cti<S: SmtSolver>(
         }
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
         solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
-        solver.assert(&transition_constraint(
-            solver,
-            model,
-            instances,
-            &def_states[0],
-            &def_states[1],
-            &choice,
-        )?)?;
+        solver.assert(&transition)?;
         for property in &properties {
             let assumption = property_condition(solver, model, *property, &def_states[1], None)?;
             solver.assert(&assumption)?;
@@ -1403,6 +1400,18 @@ pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
     solver: &mut S,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> BTreeSet<usize> {
+    // Closed collection grids require each Set/relation root bound to be checked.
+    // Otherwise keep the ordinary lasso probes; scalar bounds are not assumed.
+    if checked_bounds.is_some_and(|selected| {
+        model.state.iter().any(|(name, ty)| {
+            matches!(
+                ty,
+                fsl_core::TypeRef::Set(_) | fsl_core::TypeRef::Relation(_, _)
+            ) && !selected.contains(&fsl_core::SyntheticName::Bounds { state: name }.internal())
+        })
+    }) {
+        return BTreeSet::new();
+    }
     let ranked = model
         .leadstos
         .iter()
@@ -1791,7 +1800,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
 ) -> Result<RankedLeadstoResult, VerifyError> {
     let instances = action_instances(solver, model)?;
     let state0 = symbolic_state_with_suffix(solver, model, "rank0")?;
-    let state1 = symbolic_state_with_suffix(solver, model, "rank1")?;
+    let mut state1 = symbolic_state_with_suffix(solver, model, "rank1")?;
     // The no_deadlock obligation ranges over every invariant state, so it is
     // asked about a state the transition below does not constrain: `state0`
     // always has its selected action enabled, which would hide exactly the
@@ -1816,7 +1825,12 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
     solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
     solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
     solver.assert(&transition_constraint(
-        solver, model, &instances, &state0, &state1, &choice,
+        solver,
+        model,
+        &instances,
+        &state0,
+        &mut state1,
+        &choice,
     )?)?;
 
     let mut proofs = Vec::new();

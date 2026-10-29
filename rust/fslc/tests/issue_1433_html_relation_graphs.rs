@@ -114,9 +114,10 @@ fn preservation_real_relation_report_is_byte_identical_to_base() {
     let html = relation_html(false);
     assert!(html.contains("<h3>Relation Graphs</h3>"));
     assert!(html.contains("<span class=\"edge\">0 -&gt; 1</span>"));
+    // Relation bounds are now checked in the embedded report inventory.
     assert_eq!(
         format!("{:x}", Sha256::digest(html.as_bytes())),
-        "c2d5150e82d5a4615b61d088e4a8793596d185ed7b77c510517a625083848848"
+        "d5abdc3db97ec62855fa938bcc5fc46a290b4479845d99ff473cf5ac0ca26d21"
     );
 }
 
@@ -130,8 +131,9 @@ fn preservation_empty_relation_report_is_byte_identical_to_base() {
         html.contains("Representative reachable trace"),
         "live empty witness"
     );
+    // Relation bounds are now checked in the embedded report inventory.
     assert_eq!(
         format!("{:x}", Sha256::digest(html.as_bytes())),
-        "5c0119b47e7d44329bfcd23d2ca045621a4270605952930bb45afbd298731a6c"
+        "dbe85f46ffb560513cd13ee225941ffb0fe16458256c3e4699747c9b70734139"
     );
 }

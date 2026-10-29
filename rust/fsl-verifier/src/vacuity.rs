@@ -29,7 +29,9 @@ use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
 use crate::eval::eval;
-use crate::transition::{ActionInstance, action_guards, init_constraints, transition_constraint};
+use crate::transition::{
+    ActionInstance, action_guards, init_constraints, initial_state, transition_constraint,
+};
 use crate::value::{
     Bindings, SymbolicState, bool_term, bounds, i64_index, logical_equal,
     symbolic_state_with_suffix,
@@ -388,7 +390,7 @@ async fn frozen_tautologies<S: SmtSolver>(
     // invariants. Allocating per invariant instead would multiply the Z3 term
     // count by the invariant count for no gain, which matters most in the
     // browser backend's bounded heap.
-    let init = symbolic_state_with_suffix(solver, model, "vac_frozen_init")?;
+    let init = initial_state(solver, model, "vac_frozen_init")?;
     let state = symbolic_state_with_suffix(solver, model, "vac_frozen")?;
     let bound_terms = all_bounds(solver, model, &state)?;
     let init_terms = init_constraints(solver, model, &init)?;
@@ -567,8 +569,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
         }
 
         solver.set_query_context("vacuity", &property.name);
-        let init =
-            symbolic_state_with_suffix(solver, model, &format!("vac_deadline_init_{index}"))?;
+        let init = initial_state(solver, model, &format!("vac_deadline_init_{index}"))?;
         let mut base = init_constraints(solver, model, &init)?;
         base.push(solver.not(&strengthened_deadline_zero(solver, model, property, &init)?)?);
         if !proven_unsat(solver, &base).await? {
@@ -577,7 +578,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
 
         let current =
             symbolic_state_with_suffix(solver, model, &format!("vac_deadline_cur_{index}"))?;
-        let next =
+        let mut next =
             symbolic_state_with_suffix(solver, model, &format!("vac_deadline_next_{index}"))?;
         let choice = solver.constant(
             &format!("__vac_deadline_choice_{index}"),
@@ -587,7 +588,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
             solver.ge(&choice, &solver.int_value(0))?,
             solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?,
             strengthened_deadline_zero(solver, model, property, &current)?,
-            transition_constraint(solver, model, instances, &current, &next, &choice)?,
+            transition_constraint(solver, model, instances, &current, &mut next, &choice)?,
         ];
         step.push(solver.not(&strengthened_deadline_zero(solver, model, property, &next)?)?);
         if proven_unsat(solver, &step).await? {
@@ -633,7 +634,7 @@ async fn urgency_freeze<S: SmtSolver>(
     }
 
     solver.set_query_context("vacuity", "tick");
-    let init = symbolic_state_with_suffix(solver, model, "vac_urgency_init")?;
+    let init = initial_state(solver, model, "vac_urgency_init")?;
     let mut base = init_constraints(solver, model, &init)?;
     base.push(solver.not(&strengthened_urgent(solver, model, urgent, &init)?)?);
     if !proven_unsat(solver, &base).await? {
@@ -641,13 +642,13 @@ async fn urgency_freeze<S: SmtSolver>(
     }
 
     let current = symbolic_state_with_suffix(solver, model, "vac_urgency_cur")?;
-    let next = symbolic_state_with_suffix(solver, model, "vac_urgency_next")?;
+    let mut next = symbolic_state_with_suffix(solver, model, "vac_urgency_next")?;
     let choice = solver.constant("__vac_urgency_choice", &fsl_solver::Sort::Int)?;
     let mut step = vec![
         solver.ge(&choice, &solver.int_value(0))?,
         solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?,
         strengthened_urgent(solver, model, urgent, &current)?,
-        transition_constraint(solver, model, instances, &current, &next, &choice)?,
+        transition_constraint(solver, model, instances, &current, &mut next, &choice)?,
     ];
     step.push(solver.not(&strengthened_urgent(solver, model, urgent, &next)?)?);
     if !proven_unsat(solver, &step).await? {

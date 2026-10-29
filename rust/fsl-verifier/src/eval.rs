@@ -12,8 +12,9 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, concrete_value, i64_index, int_term,
-    ite_value, logical_equal, select_finite, solver_sort,
+    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, collection_contains,
+    collection_entries, collection_key_equal, concrete_value, distinct_entries, i64_index,
+    int_term, is_collection, ite_value, literal_key, logical_equal, select_finite, solver_sort,
 };
 
 type BinderCandidates<T> = Vec<(String, SymbolicValue<T>)>;
@@ -208,67 +209,54 @@ fn eval_inner<S: SmtSolver>(
             }
             "rel_functional" | "rel_injective" => {
                 let value = eval(solver, model, expr, state, bindings, old_state)?;
-                let SymbolicValue::Relation { entries, .. } = value else {
-                    return Err(VerifyError::new(format!("{name}() requires a relation")));
-                };
-                let same_key = |left: &(FslValue, FslValue), right: &(FslValue, FslValue)| {
-                    if name == "rel_functional" {
-                        left.0 == right.0
-                    } else {
-                        left.1 == right.1
-                    }
+                let (_, entries) = collection_entries(solver, model, &value)?;
+                let (shared, distinct) = if name == "rel_functional" {
+                    (0, 1)
+                } else {
+                    (1, 0)
                 };
                 let mut clauses = Vec::new();
                 for (index, (key, present)) in entries.iter().enumerate() {
                     for (other_key, other_present) in entries.iter().skip(index + 1) {
-                        if same_key(key, other_key) {
-                            clauses
-                                .push(solver.not(
-                                    &solver.and(&[present.clone(), other_present.clone()])?,
-                                )?);
-                        }
+                        let same = solver.equal(&key[shared], &other_key[shared])?;
+                        let different =
+                            solver.not(&solver.equal(&key[distinct], &other_key[distinct])?)?;
+                        clauses.push(solver.not(&solver.and(&[
+                            same,
+                            different,
+                            present.clone(),
+                            other_present.clone(),
+                        ])?)?);
                     }
                 }
                 Ok(bool_value(solver, solver.and(&clauses)?))
             }
             "rel_domain" | "rel_range" => {
                 let value = eval(solver, model, expr, state, bindings, old_state)?;
-                let SymbolicValue::Relation { ty, entries } = value else {
-                    return Err(VerifyError::new(format!("{name}() requires a relation")));
-                };
+                let (ty, entries) = collection_entries(solver, model, &value)?;
                 let TypeRef::Relation(source_ty, target_ty) = &ty else {
                     unreachable!();
                 };
-                let (element_ty, values) = if name == "rel_domain" {
-                    (source_ty.as_ref().clone(), model.domain_values(source_ty)?)
+                let (element_ty, endpoint) = if name == "rel_domain" {
+                    (source_ty.as_ref().clone(), 0)
                 } else {
-                    (target_ty.as_ref().clone(), model.domain_values(target_ty)?)
+                    (target_ty.as_ref().clone(), 1)
                 };
-                let mut element_entries = Vec::with_capacity(values.len());
-                for element in values {
-                    let present_terms = entries
-                        .iter()
-                        .filter(|((source, target), _)| {
-                            if name == "rel_domain" {
-                                source == &element
-                            } else {
-                                target == &element
-                            }
-                        })
-                        .map(|(_, present)| present.clone())
-                        .collect::<Vec<_>>();
-                    element_entries.push((element, solver.or(&present_terms)?));
-                }
-                Ok(SymbolicValue::Set {
+                let entries = distinct_entries(
+                    solver,
+                    entries
+                        .into_iter()
+                        .map(|(key, present)| (vec![key[endpoint].clone()], present))
+                        .collect(),
+                )?;
+                Ok(SymbolicValue::Collection {
                     ty: TypeRef::Set(Box::new(element_ty)),
-                    entries: element_entries,
+                    entries,
                 })
             }
             "rel_acyclic" => {
                 let value = eval(solver, model, expr, state, bindings, old_state)?;
-                let SymbolicValue::Relation { ty, entries } = value else {
-                    return Err(VerifyError::new("acyclic() requires a relation"));
-                };
+                let (ty, entries) = collection_entries(solver, model, &value)?;
                 let TypeRef::Relation(source_ty, target_ty) = &ty else {
                     unreachable!();
                 };
@@ -277,13 +265,10 @@ fn eval_inner<S: SmtSolver>(
                         "acyclic() requires a self-relation (relation T -> T)",
                     ));
                 }
-                let reach = relation_reachability_table(solver, model, &entries, source_ty)?;
+                let reach = relation_reachability_table(solver, model, source_ty, &entries)?;
                 let mut cyclic_terms = Vec::new();
-                for ((source, target), present) in &entries {
-                    let back = reach
-                        .get(&(target.clone(), source.clone()))
-                        .ok_or_else(|| VerifyError::new("relation reachability table gap"))?;
-                    cyclic_terms.push(solver.and(&[present.clone(), back.clone()])?);
+                for (index, _) in reach.vertices.iter().enumerate() {
+                    cyclic_terms.push(reach.paths[index][index].clone());
                 }
                 let cyclic = solver.or(&cyclic_terms)?;
                 Ok(bool_value(solver, solver.not(&cyclic)?))
@@ -316,9 +301,7 @@ fn eval_inner<S: SmtSolver>(
             third,
         } if name == "rel_reachable" => {
             let relation = eval(solver, model, first, state, bindings, old_state)?;
-            let SymbolicValue::Relation { ty, entries } = relation else {
-                return Err(VerifyError::new("reachable() requires a relation"));
-            };
+            let (ty, entries) = collection_entries(solver, model, &relation)?;
             let TypeRef::Relation(source_ty, target_ty) = &ty else {
                 unreachable!();
             };
@@ -329,14 +312,26 @@ fn eval_inner<S: SmtSolver>(
             }
             let source = eval(solver, model, second, state, bindings, old_state)?;
             let target = eval(solver, model, third, state, bindings, old_state)?;
-            let reach = relation_reachability_table(solver, model, &entries, source_ty)?;
-            let mut terms = Vec::with_capacity(reach.len());
-            for ((from, to), reachable) in &reach {
-                let from_term = concrete_value(solver, model, source_ty, from)?;
-                let to_term = concrete_value(solver, model, target_ty, to)?;
-                let same_source = logical_equal(solver, model, &source, &from_term)?;
-                let same_target = logical_equal(solver, model, &target, &to_term)?;
-                terms.push(solver.and(&[same_source, same_target, reachable.clone()])?);
+            let reach = relation_reachability_table(solver, model, source_ty, &entries)?;
+            let mut terms = Vec::new();
+            for (from_index, from) in reach.vertices.iter().enumerate() {
+                for (to_index, to) in reach.vertices.iter().enumerate() {
+                    let from = SymbolicValue::Scalar {
+                        ty: source_ty.as_ref().clone(),
+                        term: from.clone(),
+                    };
+                    let to = SymbolicValue::Scalar {
+                        ty: target_ty.as_ref().clone(),
+                        term: to.clone(),
+                    };
+                    let same_source = logical_equal(solver, model, &source, &from)?;
+                    let same_target = logical_equal(solver, model, &target, &to)?;
+                    terms.push(solver.and(&[
+                        same_source,
+                        same_target,
+                        reach.paths[from_index][to_index].clone(),
+                    ])?);
+                }
             }
             Ok(bool_value(solver, solver.or(&terms)?))
         }
@@ -346,48 +341,65 @@ fn eval_inner<S: SmtSolver>(
     }
 }
 
-/// Bounded-hop symbolic reachability closure over a relation's finite
-/// (source, target) domain grid, memoized by iterative relaxation (hop bound
-/// = domain size, sound for both `reachable()` and `acyclic()`'s cycle
-/// check). Ports the frozen Python symbolic reference's
-/// `bmc.py::_relation_reachable_expr` (path of at least one edge -- see the
-/// base-case note below for why this intentionally does not match the
-/// concrete Monitor's own trivial-self-reachability convention).
+struct RelationReachability<T> {
+    vertices: Vec<T>,
+    paths: Vec<Vec<T>>,
+}
+
+/// Positive-length path closure, including actual out-of-carrier endpoints.
 fn relation_reachability_table<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
-    entries: &[((FslValue, FslValue), S::Term)],
     domain_ty: &TypeRef,
-) -> Result<BTreeMap<(FslValue, FslValue), S::Term>, VerifyError> {
+    entries: &[(Vec<S::Term>, S::Term)],
+) -> Result<RelationReachability<S::Term>, VerifyError> {
     let values = model.domain_values(domain_ty)?;
-    let direct: BTreeMap<(FslValue, FslValue), S::Term> = entries.iter().cloned().collect();
-    // Base case: a path of exactly one hop (a direct edge). Unlike the
-    // concrete Monitor's BFS oracle (which treats a node as trivially
-    // "reachable" from itself with zero hops), the frozen Python symbolic
-    // reference (`bmc.py::_relation_reachable_expr`) requires at least one
-    // edge -- `reachable(r, a, a)` is only true when `a` has an actual path
-    // back to itself (e.g. a self-loop or a cycle through it). Matching the
-    // symbolic reference here (not the concrete one) is what this port's
-    // `--engine bmc`/`induction` verdicts are graded against.
-    let mut reach: BTreeMap<(FslValue, FslValue), S::Term> = direct.clone();
-    for _ in 0..values.len() {
-        let mut next = BTreeMap::new();
-        for a in &values {
-            for b in &values {
-                let mut terms = vec![reach[&(a.clone(), b.clone())].clone()];
-                for c in &values {
-                    let via_c = solver.and(&[
-                        reach[&(a.clone(), c.clone())].clone(),
-                        direct[&(c.clone(), b.clone())].clone(),
-                    ])?;
-                    terms.push(via_c);
-                }
-                next.insert((a.clone(), b.clone()), solver.or(&terms)?);
+    let mut vertices: Vec<_> = values
+        .iter()
+        .map(|value| {
+            let SymbolicValue::Scalar { term, .. } =
+                concrete_value(solver, model, domain_ty, value)?
+            else {
+                return Err(VerifyError::new("relation endpoints must be scalar"));
+            };
+            Ok(term)
+        })
+        .collect::<Result<_, VerifyError>>()?;
+    // Every relation keeps the finite pair grid prefix. Only appended slots
+    // introduce candidate vertices; duplicating all grid endpoints is quadratic.
+    vertices.extend(
+        entries
+            .iter()
+            .skip(values.len() * values.len())
+            .flat_map(|(key, _)| key.iter().cloned()),
+    );
+    let mut reach = vertices
+        .iter()
+        .map(|source| {
+            vertices
+                .iter()
+                .map(|target| {
+                    collection_contains(solver, entries, &[source.clone(), target.clone()])
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // Warshall closure over actual candidate endpoints, not just the carrier.
+    // As before, reachability requires at least one edge.
+    for via in 0..vertices.len() {
+        for source in 0..vertices.len() {
+            for target in 0..vertices.len() {
+                reach[source][target] = solver.or(&[
+                    reach[source][target].clone(),
+                    solver.and(&[reach[source][via].clone(), reach[via][target].clone()])?,
+                ])?;
             }
         }
-        reach = next;
     }
-    Ok(reach)
+    Ok(RelationReachability {
+        vertices,
+        paths: reach,
+    })
 }
 
 /// Build the condition under which concrete evaluation of `expr` completes
@@ -1413,52 +1425,83 @@ fn eval_method<S: SmtSolver>(
         .iter()
         .map(|arg| eval(solver, model, arg, state, bindings, old_state))
         .collect::<Result<Vec<_>, _>>()?;
-    match receiver {
-        SymbolicValue::Set { ty, entries } => {
-            let TypeRef::Set(element_ty) = &ty else {
-                unreachable!();
-            };
-            match (name, values.as_slice()) {
-                ("contains", [value]) => {
-                    let terms = entries
-                        .iter()
-                        .map(|(element, present)| {
-                            let element = concrete_value(solver, model, element_ty, element)?;
-                            let same = logical_equal(solver, model, value, &element)?;
-                            Ok(solver.and(&[same, present.clone()])?)
-                        })
-                        .collect::<Result<Vec<_>, VerifyError>>()?;
-                    Ok(bool_value(solver, solver.or(&terms)?))
-                }
-                ("add" | "remove", [value]) => {
-                    let added = name == "add";
-                    let entries = entries
-                        .into_iter()
-                        .map(|(element, present)| {
-                            let symbolic = concrete_value(solver, model, element_ty, &element)?;
-                            let same = logical_equal(solver, model, value, &symbolic)?;
-                            Ok((
-                                element,
-                                solver.ite(&same, &solver.bool_value(added), &present)?,
-                            ))
-                        })
-                        .collect::<Result<_, VerifyError>>()?;
-                    Ok(SymbolicValue::Set { ty, entries })
-                }
-                ("size", []) => {
-                    let terms = entries
-                        .iter()
-                        .map(|(_, present)| {
-                            solver
-                                .ite(present, &solver.int_value(1), &solver.int_value(0))
-                                .map_err(VerifyError::from)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(int_value(solver, sum_terms(solver, &terms)?))
-                }
-                _ => Err(VerifyError::new(format!("invalid Set method '{name}'"))),
-            }
+    if is_collection(&receiver) {
+        let (ty, mut entries) = collection_entries(solver, model, &receiver)?;
+        if name == "size" && values.is_empty() {
+            let terms = entries
+                .iter()
+                .map(|(_, present)| solver.ite(present, &solver.int_value(1), &solver.int_value(0)))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(int_value(solver, sum_terms(solver, &terms)?));
         }
+        let key = values
+            .iter()
+            .map(|value| match value {
+                SymbolicValue::Scalar { term, .. } => Ok(term.clone()),
+                _ => Err(VerifyError::new("collection members must be scalar")),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let grid = matches!(
+            receiver,
+            SymbolicValue::Set { .. } | SymbolicValue::Relation { .. }
+        );
+        // A nominal bounded type alone is not proof: a state value or a
+        // collection binder can escape it when that bound is unselected.
+        let known = literal_key(solver, &key);
+        let inside = name == "remove"
+            || known.as_ref().is_some_and(|known| {
+                entries.iter().any(|(candidate, _)| {
+                    candidate
+                        .iter()
+                        .zip(known)
+                        .all(|(term, value)| solver.literal_value(term).as_ref() == Some(value))
+                })
+            });
+        // Known in-carrier adds and grid removals need no new candidate slot.
+        // Unknown/outside values still take the complete retention path below.
+        if grid && matches!(name, "add" | "remove") && inside {
+            return match receiver {
+                SymbolicValue::Set { ty, entries: grid } => Ok(SymbolicValue::Set {
+                    ty,
+                    entries: update_grid(solver, &key, grid, &entries, name == "add")?,
+                }),
+                SymbolicValue::Relation { ty, entries: grid } => Ok(SymbolicValue::Relation {
+                    ty,
+                    entries: update_grid(solver, &key, grid, &entries, name == "add")?,
+                }),
+                _ => unreachable!(),
+            };
+        }
+        let contains = collection_contains(solver, &entries, &key)?;
+        return match name {
+            "contains" => Ok(bool_value(solver, contains)),
+            "add" => {
+                if let Some(known) = &known
+                    && let Some((_, present)) = entries.iter_mut().find(|(candidate, _)| {
+                        literal_key(solver, candidate).as_ref() == Some(known)
+                    })
+                {
+                    *present = solver.or(&[present.clone(), solver.not(&contains)?])?;
+                    return Ok(SymbolicValue::Collection { ty, entries });
+                }
+                entries.push((key, solver.not(&contains)?));
+                Ok(SymbolicValue::Collection { ty, entries })
+            }
+            "remove" => {
+                for (candidate, present) in &mut entries {
+                    *present = solver.and(&[
+                        present.clone(),
+                        solver.not(&collection_key_equal(solver, candidate, &key)?)?,
+                    ])?;
+                }
+                Ok(SymbolicValue::Collection { ty, entries })
+            }
+            _ => Err(VerifyError::new(format!(
+                "invalid collection method '{name}'"
+            ))),
+        };
+    }
+    match receiver {
         SymbolicValue::Seq { ty, slots, len } => {
             let TypeRef::Seq(element_ty, capacity) = &ty else {
                 unreachable!();
@@ -1512,51 +1555,29 @@ fn eval_method<S: SmtSolver>(
                 ))),
             }
         }
-        SymbolicValue::Relation { ty, entries } => {
-            let TypeRef::Relation(source_ty, target_ty) = &ty else {
-                unreachable!();
-            };
-            match (name, values.as_slice()) {
-                ("contains", [source, target]) => {
-                    let mut terms = Vec::with_capacity(entries.len());
-                    for ((entry_source, entry_target), present) in &entries {
-                        let source_term = concrete_value(solver, model, source_ty, entry_source)?;
-                        let target_term = concrete_value(solver, model, target_ty, entry_target)?;
-                        let same_source = logical_equal(solver, model, source, &source_term)?;
-                        let same_target = logical_equal(solver, model, target, &target_term)?;
-                        terms.push(solver.and(&[same_source, same_target, present.clone()])?);
-                    }
-                    Ok(bool_value(solver, solver.or(&terms)?))
-                }
-                ("add" | "remove", [source, target]) => {
-                    let added = name == "add";
-                    let entries = entries
-                        .into_iter()
-                        .map(|((entry_source, entry_target), present)| {
-                            let source_term =
-                                concrete_value(solver, model, source_ty, &entry_source)?;
-                            let target_term =
-                                concrete_value(solver, model, target_ty, &entry_target)?;
-                            let same_source = logical_equal(solver, model, source, &source_term)?;
-                            let same_target = logical_equal(solver, model, target, &target_term)?;
-                            let matches = solver.and(&[same_source, same_target])?;
-                            Ok((
-                                (entry_source, entry_target),
-                                solver.ite(&matches, &solver.bool_value(added), &present)?,
-                            ))
-                        })
-                        .collect::<Result<_, VerifyError>>()?;
-                    Ok(SymbolicValue::Relation { ty, entries })
-                }
-                _ => Err(VerifyError::new(format!(
-                    "invalid relation method '{name}'"
-                ))),
-            }
-        }
         _ => Err(VerifyError::new(
             "method receiver has no collection methods",
         )),
     }
+}
+
+fn update_grid<S: SmtSolver, K>(
+    solver: &S,
+    key: &[S::Term],
+    grid: Vec<(K, S::Term)>,
+    symbolic: &[(Vec<S::Term>, S::Term)],
+    added: bool,
+) -> Result<Vec<(K, S::Term)>, VerifyError> {
+    grid.into_iter()
+        .zip(symbolic)
+        .map(|((key_value, present), (candidate, _))| {
+            let same = collection_key_equal(solver, candidate, key)?;
+            Ok((
+                key_value,
+                solver.ite(&same, &solver.bool_value(added), &present)?,
+            ))
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1893,6 +1914,28 @@ pub(crate) fn binder_values<S: SmtSolver>(
     let mut local = bindings.clone();
     let collection = eval(solver, model, collection, state, &mut local, old_state)?;
     match collection {
+        SymbolicValue::Collection { ty, entries } => {
+            let TypeRef::Set(element_ty) = ty else {
+                return Err(VerifyError::new("collection binder requires a Set"));
+            };
+            ordered_set_candidates(
+                solver,
+                model,
+                name,
+                entries
+                    .into_iter()
+                    .map(|(key, present)| {
+                        (
+                            SymbolicValue::Scalar {
+                                ty: element_ty.as_ref().clone(),
+                                term: key[0].clone(),
+                            },
+                            present,
+                        )
+                    })
+                    .collect(),
+            )
+        }
         SymbolicValue::Set { ty, mut entries } => {
             let TypeRef::Set(element_ty) = ty else {
                 unreachable!();
@@ -1938,24 +1981,43 @@ fn set_literal_candidates<S: SmtSolver>(
     name: &str,
     items: Vec<SymbolicValue<S::Term>>,
 ) -> Result<ConditionalBinderCandidates<S::Term>, VerifyError> {
+    ordered_set_candidates(
+        solver,
+        model,
+        name,
+        items
+            .into_iter()
+            .map(|value| (value, solver.bool_value(true)))
+            .collect(),
+    )
+}
+
+fn ordered_set_candidates<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    name: &str,
+    items: Vec<(SymbolicValue<S::Term>, S::Term)>,
+) -> Result<ConditionalBinderCandidates<S::Term>, VerifyError> {
     let mut ordered = items
         .into_iter()
-        .map(|value| Ok((set_order_key(solver, model, &value)?, value)))
+        .map(|(value, present)| Ok((set_order_key(solver, model, &value)?, value, present)))
         .collect::<Result<Vec<_>, VerifyError>>()?;
     // A fixed insertion network orders symbolic values even when their
     // relative order depends on the current state or action arguments.
     for end in 1..ordered.len() {
         for index in (1..=end).rev() {
-            let (left_key, left) = &ordered[index - 1];
-            let (right_key, right) = &ordered[index];
+            let (left_key, left, left_present) = &ordered[index - 1];
+            let (right_key, right, right_present) = &ordered[index];
             let swap = solver.gt(left_key, right_key)?;
             let lower = (
                 solver.ite(&swap, right_key, left_key)?,
                 ite_value(solver, model, &swap, right, left)?,
+                solver.ite(&swap, right_present, left_present)?,
             );
             let upper = (
                 solver.ite(&swap, left_key, right_key)?,
                 ite_value(solver, model, &swap, left, right)?,
+                solver.ite(&swap, left_present, right_present)?,
             );
             ordered[index - 1] = lower;
             ordered[index] = upper;
@@ -1964,16 +2026,16 @@ fn set_literal_candidates<S: SmtSolver>(
     ordered
         .iter()
         .enumerate()
-        .map(|(index, (_, value))| {
-            let membership = index
-                .checked_sub(1)
-                .map(|previous| {
-                    solver
-                        .not(&logical_equal(solver, model, value, &ordered[previous].1)?)
-                        .map_err(VerifyError::from)
-                })
-                .transpose()?;
-            Ok((name.to_owned(), value.clone(), membership))
+        .map(|(index, (_, value, present))| {
+            let mut membership = present.clone();
+            for (_, previous, previous_present) in &ordered[..index] {
+                let duplicate = solver.and(&[
+                    previous_present.clone(),
+                    logical_equal(solver, model, value, previous)?,
+                ])?;
+                membership = solver.and(&[membership, solver.not(&duplicate)?])?;
+            }
+            Ok((name.to_owned(), value.clone(), Some(membership)))
         })
         .collect()
 }

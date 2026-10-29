@@ -3429,14 +3429,16 @@ pub fn sorted_by_published<V>(
     entries
 }
 
-fn invariant_names_selected(
+/// Published invariant inventory, with only this run's selected implicit bounds.
+#[must_use]
+pub fn invariant_names_selected(
     model: &KernelModel,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Vec<String> {
     let mut names = model
         .state
         .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
+        .filter(|(_, ty)| model.type_has_bounds(ty))
         .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
         .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
         .map(|name| model.names().public_violation(&name, None).into_string())
@@ -3448,20 +3450,6 @@ fn invariant_names_selected(
             .map(|property| model.names().public_property(&property.name).into_string()),
     );
     names
-}
-
-fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
-    }
 }
 
 /// Shared with `main.rs::run_scenarios_mode`, which faces the same

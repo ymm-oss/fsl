@@ -3,7 +3,7 @@
 //! Which properties a verification run checks (`--property`,
 //! `--exclude-property`), the bounds they imply, and the `--vacuity` mode.
 
-use fsl_core::{KernelModel, TypeDef, TypeRef};
+use fsl_core::KernelModel;
 use serde_json::{Value, json};
 
 use crate::cli_output::envelope;
@@ -23,7 +23,7 @@ pub(crate) fn select_properties(
     let available = model
         .state
         .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
+        .filter(|(_, ty)| model.type_has_bounds(ty))
         .map(|(name, _)| {
             let bound = fsl_core::SyntheticName::Bounds { state: name };
             names.public_synthetic(&bound).into_string()
@@ -102,7 +102,7 @@ pub(crate) fn selected_implicit_bounds(
     let mut bounds = model
         .state
         .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
+        .filter(|(_, ty)| model.type_has_bounds(ty))
         .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
         .collect::<std::collections::BTreeSet<_>>();
     if let Some(selected) = selected {
@@ -173,37 +173,4 @@ pub(crate) fn invariant_names(model: &KernelModel) -> Vec<String> {
     invariant_names_selected(model, None)
 }
 
-pub(crate) fn invariant_names_selected(
-    model: &KernelModel,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-) -> Vec<String> {
-    let mut names = model
-        .state
-        .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
-        .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
-        .map(|name| model.names().public_violation(&name, None).into_string())
-        .collect::<Vec<_>>();
-    names.extend(
-        model
-            .invariants
-            .iter()
-            .map(|property| model.names().public_property(&property.name).into_string()),
-    );
-    names
-}
-
-pub(crate) fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
-    }
-}
+pub(crate) use fslc_rust::verification_output::invariant_names_selected;

@@ -15,8 +15,10 @@ use crate::eval::{
     index_access_status, index_accessible, safe_status, sequence_statuses,
 };
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
-    select_finite, store_finite,
+    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, collection_contains,
+    collection_entries, collection_types, concrete_value, i64_index, ite_value, literal_key,
+    logical_equal, map_collections, select_finite, solver_sort, store_finite,
+    symbolic_state_with_suffix,
 };
 
 type GuardEvaluation<T> = (Vec<T>, Bindings<T>);
@@ -444,26 +446,123 @@ pub(crate) fn init_constraints<S: SmtSolver>(
 ) -> Result<Vec<S::Term>, VerifyError> {
     let mut constraints = Vec::new();
     let mut bindings = Bindings::new();
+    let mut state = state.clone();
     for statement in &model.init {
         collect_init_statement(
             solver,
             model,
             statement,
-            state,
+            &mut state,
             &mut bindings,
             &mut constraints,
+            &mut |_, _| Ok(()),
         )?;
     }
     Ok(constraints)
 }
 
+/// Reserve open collection slots, then apply the ordinary relational init
+/// constraints. Repeated assignments still have to agree; this is not an
+/// action-style last-writer initializer. Only fresh shape is propagated in
+/// checked dependency order; scalar values and membership remain unconstrained.
+pub(crate) fn initial_state<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    suffix: &str,
+) -> Result<SymbolicState<S::Term>, VerifyError> {
+    let mut state = symbolic_state_with_suffix(solver, model, suffix)?;
+    let mut index = 0;
+    for statement in &model.init {
+        collect_init_statement(
+            solver,
+            model,
+            statement,
+            &mut state,
+            &mut Bindings::new(),
+            &mut Vec::new(),
+            &mut |state, assigned| {
+                for (name, value) in assigned {
+                    extend_initial_collections(
+                        solver,
+                        model,
+                        suffix,
+                        &mut index,
+                        state.get_mut(name).unwrap(),
+                        value,
+                    )?;
+                }
+                Ok(())
+            },
+        )?;
+    }
+    Ok(state)
+}
+
+fn extend_initial_collections<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    suffix: &str,
+    index: &mut usize,
+    state: &mut SymbolicValue<S::Term>,
+    assigned: &SymbolicValue<S::Term>,
+) -> Result<(), VerifyError> {
+    map_collections(state, assigned, &mut |state, assigned| {
+        let SymbolicValue::Collection {
+            entries: candidates,
+            ..
+        } = assigned
+        else {
+            return Ok(());
+        };
+        let (ty, mut entries) = collection_entries(solver, model, state)?;
+        let (_, grid) = collection_entries(
+            solver,
+            model,
+            &concrete_value(solver, model, &ty, &model.default_value(&ty)?)?,
+        )?;
+        let extra = candidates
+            .iter()
+            .filter(|(candidate, _)| {
+                literal_key(solver, candidate).is_none_or(|key| {
+                    !grid
+                        .iter()
+                        .any(|(candidate, _)| literal_key(solver, candidate).as_ref() == Some(&key))
+                })
+            })
+            .count();
+        for _ in entries.len()..grid.len() + extra {
+            let name = format!("__init_collection_{suffix}_{}", *index);
+            *index += 1;
+            let key = collection_types(&ty)?
+                .into_iter()
+                .enumerate()
+                .map(|(part, ty)| {
+                    Ok(solver.constant(&format!("{name}_{part}"), &solver_sort(model, ty)?)?)
+                })
+                .collect::<Result<Vec<_>, VerifyError>>()?;
+            let present = solver.and(&[
+                solver.constant(&name, &fsl_solver::Sort::Bool)?,
+                solver.not(&collection_contains(solver, &entries, &key)?)?,
+            ])?;
+            entries.push((key, present));
+        }
+        *state = SymbolicValue::Collection { ty, entries };
+        Ok(())
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_init_statement<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     statement: &Statement,
-    state: &SymbolicState<S::Term>,
+    state: &mut SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     constraints: &mut Vec<S::Term>,
+    on_assignment: &mut impl FnMut(
+        &mut SymbolicState<S::Term>,
+        &SymbolicState<S::Term>,
+    ) -> Result<(), VerifyError>,
 ) -> Result<(), VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
@@ -473,6 +572,7 @@ fn collect_init_statement<S: SmtSolver>(
             let value = eval_expected(solver, model, value, &target_ty, state, bindings, None)?;
             let mut assigned = state.clone();
             assign(solver, model, target, value, state, &mut assigned, bindings)?;
+            on_assignment(state, &assigned)?;
             constraints.extend(state_equalities(solver, model, state, &assigned)?);
         }
         Statement::If {
@@ -492,6 +592,7 @@ fn collect_init_statement<S: SmtSolver>(
                     state,
                     &mut bindings.clone(),
                     &mut then_constraints,
+                    on_assignment,
                 )?;
             }
             constraints.extend(
@@ -510,6 +611,7 @@ fn collect_init_statement<S: SmtSolver>(
                     state,
                     &mut bindings.clone(),
                     &mut else_constraints,
+                    on_assignment,
                 )?;
             }
             constraints.extend(
@@ -543,6 +645,7 @@ fn collect_init_statement<S: SmtSolver>(
                         state,
                         &mut local,
                         &mut body_constraints,
+                        on_assignment,
                     )?;
                 }
                 constraints.extend(
@@ -562,10 +665,10 @@ pub(crate) fn transition_constraint<S: SmtSolver>(
     model: &KernelModel,
     instances: &[ActionInstance<S::Term>],
     current: &SymbolicState<S::Term>,
-    next: &SymbolicState<S::Term>,
+    next: &mut SymbolicState<S::Term>,
     choice: &S::Term,
 ) -> Result<S::Term, VerifyError> {
-    let mut clauses = Vec::new();
+    let mut candidates = Vec::new();
     for (instance_index, instance) in instances.iter().enumerate() {
         let action = &model.actions[instance.action_index];
         let (guards, mut bindings) =
@@ -578,12 +681,37 @@ pub(crate) fn transition_constraint<S: SmtSolver>(
             current.clone(),
             &mut bindings,
         )?;
-        let mut body = guards;
-        body.extend(state_equalities(solver, model, next, &pending)?);
         let selected = solver.equal(choice, &solver.int_value(i64_index(instance_index)?))?;
+        for (name, value) in &pending {
+            retain_collections(solver, model, &selected, next.get_mut(name).unwrap(), value)?;
+        }
+        candidates.push((selected, guards, pending));
+    }
+    let mut clauses = Vec::new();
+    for (selected, mut body, pending) in candidates {
+        body.extend(state_equalities(solver, model, next, &pending)?);
         clauses.push(solver.implies(&selected, &solver.and(&body)?)?);
     }
     Ok(solver.and(&clauses)?)
+}
+
+/// Fresh finite grids cannot represent an escaped member. Carry complete
+/// collection expressions into the successor, leaving other fresh fields alone.
+fn retain_collections<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    selected: &S::Term,
+    next: &mut SymbolicValue<S::Term>,
+    pending: &SymbolicValue<S::Term>,
+) -> Result<(), VerifyError> {
+    map_collections(next, pending, &mut |next, pending| {
+        if matches!(next, SymbolicValue::Collection { .. })
+            || matches!(pending, SymbolicValue::Collection { .. })
+        {
+            *next = ite_value(solver, model, selected, pending, next)?;
+        }
+        Ok(())
+    })
 }
 
 pub(crate) fn compute_updates<S: SmtSolver>(

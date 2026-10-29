@@ -812,7 +812,11 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   <code>count(x: T where p)</code>、<code>count(x in queue where p)</code>、
   <code>sum(x in queue of x.amount where p)</code> と、それらの範囲の等価形。空のドメインは
   <code>0</code> を生みます。Seq の重複は live な位置ごとに 1 回ずつ寄与し、Set のメンバー
-  シップは異なるメンバーごとに 1 回寄与します。</li>
+  シップは異なるメンバーごとに 1 回寄与します。
+  Public Kernel v1/v2 の export も、<code>add</code>、関係の射影、コレクションの <code>let</code> alias を
+  通じて実際の候補を保持します。宣言されたドメインだけを列挙するのではなく、既存の
+  スカラー値の capture を使うため、後続の shadowing や状態更新で束縛済みの候補は
+  変わりません。sum を包む <code>min</code>/<code>max</code> は二項算術のままで、集約 JSON の形は増やしません。</li>
 <li>濃度の述語: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>。<code>unique</code> は一致する束縛が
   高々 1 つ、<code>exactlyOne</code> はちょうど 1 つという意味です。</li>
 <li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>。
@@ -827,7 +831,18 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   順序は定義されません。</li>
 <li>struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
   <code>==</code> はフィールドごとの等値</li>
-<li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>、<code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code></li>
+<li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>、<code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
+  受理された <code>add</code> は、計算結果が宣言されたドメインの外でもメンバーを保持します。
+  一時値の <code>contains</code>、<code>size</code>、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
+  メンバーや遷移を消さずに <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code> を報告します。静的な型検査と
+  受理範囲は変えず、非有界 Set や複合コレクションの型推論を追加するものではありません。
+  より広いドメインの Set/関係を丸ごと代入する操作は、base と同様に BMC/induction が
+  <code>cannot coerce symbolic value</code> (exit 2)で拒否します。
+  記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
+  保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
+  ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
+  ことの証明が必要です。この re-frame の検査は省いた境界を仮定せず、本当に増え続ける
+  support は保持します。</li>
 <li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>、<code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
   <code>.contains(e)</code> <code>.size()</code>、<code>==</code> は長さとすべての要素の等値</li>
 <li>Relation: <code>r.contains(a, b)</code>、<code>r.add(a, b)</code>、<code>r.remove(a, b)</code>、
@@ -835,6 +850,8 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   <code>domain(r)</code>、<code>range(r)</code>。<code>reachable</code> と <code>acyclic</code> は自己関係
   (<code>relation T -&gt; T</code>)を要求します。端点の型/アリティのエラーは修復ヒントを
   含みます。
+  受理された関係の add も、どちらかの端点のドメイン外にあるペアを保持し、domain/range と
+  グラフ操作はそのペアを参照します。add の結果を元の有界の関係へ戻すと <code>_bounds_&lt;var&gt;</code> 違反になります。
   <code>r: relation A -&gt; B</code> の <code>contains</code>、<code>add</code>、<code>remove</code>、<code>reachable</code> は、
   <code>a</code> を <code>A</code>、<code>b</code> を <code>B</code> に対して独立に型検査します。不適合な端点は
   check 時の <code>kind: "semantics"</code> エラー(終了コード 2)となり、代入可能性の
@@ -1324,7 +1341,7 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 <tbody>
 <tr>
 <td>型境界</td>
-<td>すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素を含む)が範囲内にある</td>
+<td>すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素、Set のメンバー、関係の端点を含む)が範囲内にある</td>
 <td><code>violated</code> / <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code></td>
 </tr>
 <tr>
@@ -1637,7 +1654,11 @@ Public Kernel v2 はオプトインで、
 指名された invariant、<code>trans</code>、<code>leadsTo</code>、<code>reachable</code> プロパティを、実行と、検査済み
 プロパティの出力(<code>invariants_checked</code>、<code>transitions_checked</code>、<code>leads_to</code>、
 <code>reachables</code>)から取り除きます。<code>--property</code> と <code>--exclude-property</code> が同じ
-プロパティを指名した場合は、除外が勝ちます。</p>
+プロパティを指名した場合は、除外が勝ちます。
+暗黙の型境界も <code>--property _bounds_&lt;var&gt;</code> で選択でき、関係の境界も含みます。
+これらは <code>invariants_checked</code> と、induction で証明された場合の <code>k_used</code> に現れます。
+既存の除外制限は変えません: <code>--exclude-property _bounds_&lt;var&gt;</code> は <code>no such property</code>
+(exit 2)で拒否されます。除外の対象は上記の宣言済みプロパティ種別であり、暗黙の境界ではありません。</p>
 <p><strong>選択した run が評価しない検査(#1008)。</strong> 検査を実行しなかったことは、それが成り立つ
 証拠にはなりません。<code>verify</code> のオプションによって宣言済みの検査が飛ばされるとき、
 エンベロープはその検査のキーを省略せず、<code>result: "not_evaluated"</code> と原因を入れて

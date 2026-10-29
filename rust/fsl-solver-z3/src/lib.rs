@@ -238,6 +238,14 @@ fn evaluate_model(model: &Model, term: &Z3Term) -> SolverResult<Option<ModelValu
 impl SmtSolver for Z3Solver {
     type Term = Z3Term;
 
+    fn literal_value(&self, term: &Self::Term) -> Option<ModelValue> {
+        match term {
+            Z3Term::Bool(value) => value.as_bool().map(ModelValue::Bool),
+            Z3Term::Int(value) => value.as_i64().map(ModelValue::Int),
+            Z3Term::Array { .. } => None,
+        }
+    }
+
     fn version(&self) -> &str {
         &self.version
     }
