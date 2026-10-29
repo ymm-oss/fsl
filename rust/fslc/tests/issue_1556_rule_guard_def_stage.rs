@@ -586,12 +586,11 @@ fn detector_never_def_empties_decision_row() {
 }
 
 #[test]
-fn limitation_binder_named_like_generated_state_map_fails_closed() {
-    // Pin today's approved fail-closed limitation: the guard copy does not
-    // rename these binders like the main path does. This is a false rejection,
-    // never a false ok; the follow-up issue will change this expectation.
+fn detector_binder_named_like_generated_state_map_matches_main_alpha_renaming() {
+    // #1584 fixed the generated-name binder limitation that #1556 pinned:
+    // the guard copy now renames these binders like the main path does.
     for binder in ["claim_amount", "claim_stage"] {
-        let label = format!("limitation_binder_named_like_generated_state_map-{binder}");
+        let label = format!("detector_binder_named_like_generated_state_map-{binder}");
         let outputs = run(
             &label,
             &round3_capture_source(
@@ -600,28 +599,24 @@ fn limitation_binder_named_like_generated_state_map_fails_closed() {
             ),
         );
         for (mode, exit, value) in &outputs {
+            let expected = if *mode == "check" { "ok" } else { "verified" };
             assert_eq!(
                 (
                     *exit,
                     value["result"].as_str(),
-                    value["kind"].as_str(),
-                    value["diagnostic_code"].as_str()
+                    value.get("diagnostic_code")
                 ),
-                (
-                    2,
-                    Some("error"),
-                    Some("semantics"),
-                    Some("rule_conflict_unsatisfiable_guard")
-                ),
+                (0, Some(expected), None),
                 "{binder} {mode}: {outputs:#?}"
             );
-            assert!(
-                value["message"]
-                    .as_str()
-                    .expect("message")
-                    .ends_with("unexpanded predicate call 'same'"),
-                "{binder} {mode}: {value:#}"
-            );
+            if *mode == "verify" {
+                assert_eq!(value["checked_to_depth"], 2, "{binder}: {value:#}");
+                assert_eq!(value["completeness"], "bounded", "{binder}: {value:#}");
+                assert_eq!(
+                    value["action_coverage"]["approve"], true,
+                    "{binder}: {value:#}"
+                );
+            }
         }
     }
 }

@@ -1719,6 +1719,7 @@ struct RequirementsProcess {
 /// The main path's stage lowering and predicate expansion for rule guards.
 pub(crate) struct RuleGuardLowering {
     processes: Vec<Process>,
+    fields: BTreeMap<String, Vec<ProcessField>>,
     expander: crate::PredicateExpander,
 }
 
@@ -1727,6 +1728,10 @@ impl RuleGuardLowering {
         requirements: &SurfaceRequirements,
         processes: &[RequirementsProcess],
     ) -> Result<Self, CoreError> {
+        let fields = processes
+            .iter()
+            .map(|p| (p.process.entity.clone(), p.fields.clone()))
+            .collect();
         let processes = processes
             .iter()
             .map(|p| p.process.clone())
@@ -1756,6 +1761,7 @@ impl RuleGuardLowering {
         Ok(Self {
             expander: crate::PredicateExpander::new(&definitions)?,
             processes,
+            fields,
         })
     }
 
@@ -1771,9 +1777,17 @@ impl RuleGuardLowering {
             .collect::<BTreeMap<_, _>>();
         let binder = crate::naming::entity_binder(entity);
         environment.insert(binder.clone(), entity.to_owned());
-        // Match the main field substitution's capture avoidance without changing
-        // spelled fields. The empty key cannot match a source identifier.
-        let renaming = std::collections::HashMap::from([(String::new(), Expr::Var(binder))]);
+        // The unused set mentions all main-path capture names without replacing
+        // spelled fields: the empty key cannot match a source identifier.
+        let mut names = vec![Expr::Var(binder), Expr::Var(process_state(entity))];
+        names.extend(
+            self.fields
+                .get(entity)
+                .into_iter()
+                .flatten()
+                .map(|field| Expr::Var(process_field_state(entity, &field.name))),
+        );
+        let renaming = std::collections::HashMap::from([(String::new(), Expr::Set(names))]);
         let renamed = substitute_expr(condition.clone(), &renaming);
         // Preserve the surface condition on failure: the main path reports the
         // real error, while an unlowered obligation continues to fail closed.
