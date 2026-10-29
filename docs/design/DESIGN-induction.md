@@ -166,9 +166,9 @@ See the [Kernel contract's projection and fallback policy](DESIGN-kernel-contrac
 - Include `_bounds_*` in Inv too. Since variables of bounded type become free
   variables in the step case, without assuming the bounds a large number of false
   CTIs originating from "ghost states out of range" appear. (The **check** of the
-  bounds is borne by the base case, so putting them into the step premise causes
-  no masking — because bounds violations across all reachable states are already
-  detected in the base.)
+  bounds is borne by the base case, and the step proves their preservation;
+  together these establish the bounds across all reachable states, so assuming
+  them in the step premise does not mask violations.)
 - Among the physical-encoding constraints of enum / Option (e.g. enum value ∈
   [0, n-1], value is don't-care when `present == false`), add those that should
   always hold as a type to the step premise. Otherwise CTIs that are impossible
@@ -370,7 +370,50 @@ selected invariant, so a division that only a dropped invariant protects is
 reported as `_partial_<action>` there — a sound-side change, since the
 narrowed run claims nothing the dropped invariant would have to carry.
 Selecting a `trans` keeps every invariant as hypothesis
-(`selected_transition_induction_model`). Of the non-partial undefinedness BMC
+(`selected_transition_induction_model`). In every induction run, the base case
+checks all implicit `_bounds_*` that the step assumes, even under `--property P`.
+User-property selection still removes sibling user invariants; it does not remove
+these bound dependencies. The same checked bounds support definedness, key-domain,
+and ranking premises. Standalone BMC and explicit selection are unchanged.
+
+**Contract change (#1598).** Previously, `--engine induction --property P` could
+check only P in the base while assuming every bound in the step. If a bound fails
+within the base depth, the run now returns `violated` / `bounded`,
+`violation_kind: "type_bound"`, naming that `_bounds_*` (exit 1). The intentional
+verdict transitions are:
+
+| Selected-induction form | Before #1598 | After #1598 |
+|---|---|---|
+| Initial bound omitted at every base depth; a shallow run can also miss P | exit 0 `proved` / `unbounded` (false proof) | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` |
+| Deterministic initial Seq overflow reaching the pre-pass, or an overflowing Seq successor within the base depth | exit 2 `error`, `kind: "semantics"` | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` |
+| Same base via `sweep --engine induction --property P` or a `verify --lemma` target | exit 0 `sweep_passed`, or exit 0 `proved` for the lemma-assisted target | exit 1 `sweep_failed`, or exit 1 `violated` / `type_bound` for the target |
+| Bound fails at or before the selected property's failing step | exit 1 `unknown_cti`, or exit 1 `violated P` at the same or a later step | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` at the first failing base step |
+
+The old selected base never checked the initial bound at any depth; a shallow
+depth only hid P's failure. Sweep and lemma-assisted verification share the new
+base check: for a spec that initializes `v: 0..3` to 5,
+`sweep --engine induction --property P --depth 2..3` changes
+from exit 0 `sweep_passed` to exit 1 `sweep_failed`, with `_bounds_v` at step 0;
+adding `--lemma` does not bypass the target's bound check.
+
+Two same-step attribution examples under `--engine induction --property P`:
+
+- `n: 0..1`, init 0, increment, `P { n <= 1 }`, depth 2:
+  before `violated P` at step 2, after `violated` / `type_bound`, `_bounds_n` at step 2.
+- Set initial copy, `K = 0..1`, `init { x = 2 t = Set { x } s = t }`,
+  `P { not s.contains(2) }`: before `violated P` at step 0, after
+  `violated` / `type_bound`, `_bounds_s` at step 0.
+
+The deterministic `InitIdle` Seq form now reports `_bounds_xs` at step 0; the
+range example `n: 0..1`, init 0, increment, `P { n <= 2 }` reports `_bounds_n`
+at step 2 when the base depth is at least 2. The engine/path and transition tables
+in [the Kernel contract](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget)
+record the selected Seq paths. Base failure evidence and replay use the same
+all-bound selection. On a **`proved` envelope**, `invariants_checked` includes
+those implicit bounds; a **`violated` envelope has no `invariants_checked`**.
+Valid bounds still support the same inductive proofs.
+
+Of the non-partial undefinedness BMC
 fails closed on, a finite `Map` index outside its key domain is asked by
 §2.6.1; checked i64 overflow is not asked, and `proved` reports it in
 `not_covered` (§2.6.2, #1263).

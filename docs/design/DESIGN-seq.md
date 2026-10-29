@@ -106,10 +106,14 @@ Tail values beyond len are **don't-care** (not constrained, not read, not displa
   used. For deterministic init with no supplied initial state, bmc/induction
   runs with `checked_bounds: None` can instead report `type_bound` from the
   concrete pre-pass at step 0 with the initial state alone, even at depth 0
-  (#1591), provided the model has actions. Every `--property` selection except
-  selected-trans induction bypasses the pre-pass and still fails closed on an
-  unrepresentable symbolic initial frame. Selected-trans induction retains all
-  bounds in its base case; `--exclude-property <user property>` alone also keeps
+  (#1591), provided the model has actions. Standalone BMC `--property` selections
+  bypass the pre-pass and still fail closed on an unrepresentable symbolic initial
+  frame. Induction's base checks every implicit bound its step assumes, including
+  under `--property P` or a selected `_bounds_q` (#1598); its deterministic
+  initial-overflow runs can enter the pre-pass and report the step-0 bound
+  violation instead of the former exit-2 `semantics` error. Selected-trans
+  induction additionally retains all user invariant hypotheses.
+  `--exclude-property <user property>` alone also keeps
   the pre-pass and receives the initial step-0 correction. Explicit
   retains the concrete initial elements and reports the initial bound violation
   at step 0. Before #1591 the pre-pass waited for an action and labelled the idle

@@ -1665,14 +1665,34 @@ two are never conflated.
 
 `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
 `reachable` declarations and checks only the named property kind in isolation.
-There is one induction-specific dependency rule: with
+Induction also checks every implicit `_bounds_*` in its base case because its
+step assumes them. Thus `--engine induction --property P` can report a violated
+`_bounds_*` (`violation_kind: "type_bound"`, exit 1), even when P is selected;
+the **`proved` envelope's** `invariants_checked` includes those bounds, but
+**`violated` envelopes omit `invariants_checked`**. The intentional #1598
+transitions are exit 0 false `proved` / `unbounded` → exit 1 `violated` /
+`type_bound`, exit 2 `error` / `kind: "semantics"` → exit 1 `violated` /
+`type_bound` (for an overflowing Seq frame).
+The shared base also applies to `sweep --engine induction --property P`
+(exit 0 `sweep_passed` → exit 1 `sweep_failed`) and `verify --lemma` targets
+(exit 0 `proved` → exit 1 `violated` / `type_bound`).
+In addition, `unknown_cti` or `violated P` at the same or a later step becomes
+`violated _bounds_*` at the first failing base step.
+Same-step examples: `n: 0..1`, init 0, increment, `P { n <= 1 }` at depth 2
+changes `P`@2 to `_bounds_n`@2; a Set initial copy with `K = 0..1`,
+`init { x = 2 t = Set { x } s = t }`, `P { not s.contains(2) }` changes `P`@0 to
+`_bounds_s`@0 (both remain exit 1 `violated`, now `type_bound`).
+For example, a deterministic overflowing Seq init now reports the bound at
+step 0; `n: 0..1`, init 0, increment, `P { n <= 2 }` reports `_bounds_n` at
+step 2 when the base depth is at least 2. Standalone BMC and explicit property
+selection are unchanged. In addition, with
 `--engine induction --property <trans>`, the named `trans` is the only transition
 obligation, but all user invariants and implicit type bounds remain in the base
 case and the induction hypothesis. This preserves proofs whose two-state safety
 argument depends on established state invariants and makes the selected
 transition's verdict match the same transition in an all-properties induction
-run. Existing `--property <invariant>` behavior is unchanged: it still restricts
-the model to that invariant rather than retaining sibling invariants. The
+run. `--property <invariant>` still restricts user invariants to the selected
+one rather than retaining sibling invariants. The
 induction selector continues to reject selected `leadsTo` and `reachable`
 properties with a usage error.
 `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
