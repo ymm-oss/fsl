@@ -894,15 +894,15 @@ the message; a live count requires all three controls to execute.
 With #1638's preserved-progress capture gate, the existing map-expression type
 check runs before the progress preflight. A map with retained-name reuse and a
 mapping/abstract-binder capture therefore changes from the declaration's capture
-error at 1:130 (span129..136) to the earlier map-expression collision. Both remain
-kind type/exit2. When that expression error has only the unknown zero-width span,
+error at 1:130 (span 129..136) to the earlier map-expression collision. Both remain
+kind type/exit 2. When that expression error has only the unknown zero-width span,
 it now uses the map declaration span when available: the regression's map keyword at 1:33,
-span32..35. Meaningful expression spans are preserved. Renaming only the later
-q-pattern/read z→w restores the complete base capture packet, including1:130 and
+span 32..35. Meaningful expression spans are preserved. Renaming only the later
+q-pattern/read z→w restores the complete base capture packet, including 1:130 and
 its nonempty span. This fourth priority row is separate from acceptance removals.
 The same origin repair updates the existing enum-to-numeric-set map rejection
-from the unknown 1:1 origin to its authored map keyword at 4:3, span40..43;
-the error message, type kind and exit2 remain unchanged.
+from the unknown 1:1 origin to its authored map keyword at 4:3, span 40..43;
+the error message, type kind and exit 2 remain unchanged.
 
 ### Source-separated syntax is an output contract change
 
