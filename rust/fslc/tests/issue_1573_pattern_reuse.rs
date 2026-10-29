@@ -6,6 +6,8 @@
 
 #[path = "support/issue_1573_forms.rs"]
 mod forms;
+#[path = "support/mutate_progress.rs"]
+mod mutate_progress;
 #[path = "support/scratch_identity.rs"]
 mod scratch_identity;
 
@@ -103,16 +105,19 @@ impl Fixture {
             .current_dir(&self.root)
             .output()
             .expect("run native fslc");
-        assert!(output.stderr.is_empty(), "{label}/{consumer}: {output:?}");
         let value: Value = serde_json::from_slice(&output.stdout).expect("native JSON");
+        if consumer == "mutate" {
+            mutate_progress::assert_report_progress(&output, &value);
+        } else {
+            assert!(output.stderr.is_empty(), "{label}/{consumer}: {output:?}");
+        }
         let exit = output.status.code().expect("native exit");
         // libtest status/panic output can interleave with stderr JSON. Keep
         // byte-complete CLI outputs in separate files, not only a mixed log.
-        std::fs::write(
-            self.root.join(format!("{consumer}.stdout.json")),
-            &output.stdout,
-        )
-        .expect("retain full native output");
+        for (stream, bytes) in [("stdout.json", &output.stdout), ("stderr", &output.stderr)] {
+            std::fs::write(self.root.join(format!("{consumer}.{stream}")), bytes)
+                .expect("retain full native output");
+        }
         std::fs::write(
             self.root.join(format!("{consumer}.record.json")),
             json!({"binary": binary, "args": args, "exit": exit}).to_string(),
@@ -467,7 +472,7 @@ fn source_inventory_keeps_foreign_conjunctive_guard_enabled() {
 
 #[test]
 fn source_inventory_preserves_s1_mutation_outcomes() {
-    // Recalibrated against 299ac3df: source separation must not invalidate mutants.
+    // Recalibrated against 47aaa48c, including its stderr-only engine progress.
     let case = Case {
         name: "s1-mutation".into(),
         source: include_str!("fixtures/issue_1547_guard_reservations/a.fsl").into(),
