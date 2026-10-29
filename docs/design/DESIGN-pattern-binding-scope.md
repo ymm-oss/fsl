@@ -518,3 +518,65 @@ outputs also agree across repetitions; there are no other observed differences.
 Six sync/foreign-argument guard controls additionally remain exit 0 with full
 byte equality in two runs. The full historical check sweep above was not rerun
 for this revision and must not be relabeled as current evidence.
+
+### Synchronization measurement on e0b4cbae
+
+The accepted Rust topic patch was transplanted unchanged onto BASE
+`e0b4cbae39569de8008a8eb049588aa84d8c1a42`, measured HEAD
+`3ae20a93296d36089f7860957a0a0b601f96932a`. Base binary SHA256 is
+`3b72163b471ae00c304b86fbdc8c8d9e724391c377dc2a2088eae0d5c111fd28`;
+head is `a874111d79e4835c874d86f03f8fa5bdf5037392771b0f3ea0f4271f24bd155e`.
+`<binary> check <path>` ran twice in each SHA's own archived tree at the same
+absolute execution address. Complete stdout, stderr and exits were compared,
+with no excluded fields and zero repeat differences.
+
+| Group | Forms/routes | Base exits 0 / 1 / 2 | Head exits 0 / 1 / 2 | `ok`→`error` | Full output changes |
+|---|---:|---:|---:|---:|---:|
+| Corpus across the three required roots | 601 | 402 / 6 / 193 | 402 / 6 / 193 | 0 | 0 |
+| Existing complete static Rust-test document literals | 1,777 | 1,024 / 0 / 753 | 1,024 / 0 / 753 | 0 | 0 |
+| Authored inputs | 147 | 72 / 0 / 75 | 15 / 0 / 132 | 57 | 70 |
+| Independent-review inputs | 110 | 72 / 0 / 38 | 48 / 0 / 62 | 24 | 26 |
+| Original priority probes | 4 | 0 / 0 / 4 | 0 / 0 / 4 | 0 | 4 |
+
+The corpus comprises 598 baseline files plus the three new reservation fixtures
+`a.fsl`, `c.fsl`, `c_if.fsl` under
+`rust/fslc/tests/fixtures/issue_1547_guard_reservations/`. Those three authored
+inputs were explicitly materialized in the base tree too; no existing baseline
+input or Rust source was replaced. The static inventory scans 540 base / 544
+head test sources; 1,783 further candidates (230 interpolated formats, 1,552
+incomplete fragments and one unterminated FSL string/comment) are inventoried,
+not executed. Runtime-generated templates and test-created sibling files still
+have the bounded coverage described above.
+
+All 81 breaking removals are the same shapes/routes enumerated above; the
+corpus and existing-static-literal transition sets remain empty. All 75 base
+collision inputs still reject, with zero acceptance expansions. The original
+18 message-change rows match the historical sweep's complete base/head packets
+exactly, including all seven location changes. A nineteenth row is the authored
+direct-only `def-call-implies-free-name` occurrence: its source and both packets
+are byte-identical to the already-reviewed `review/def/d06.fsl` example. This
+increases authored routes from 146 to 147 and message-change occurrences from
+18 to 19, not the diagnostic classes or removals. All 15 collision-return
+controls still restore the entire original base packet twice on both binaries.
+
+The newer baseline adds AI-component validation routes, constant/enum lookup
+for helpful arguments, an initial-state bound pre-pass, lazy mutant
+materialization, and static filtered/collection init-forall coverage. The named
+walks (`validate_ai_component`, `helpful_matches`, `check_state_bounds`,
+`BuiltinMutant::materialize`, and `explicit::walk_init`/
+`init_binder_static_values`) add no Option-payload visibility decision or
+pattern-name collector. Init coverage tracks forall keys and static values;
+its existing dependency/filter walkers do not replace the checked pattern-scope
+boundary. No extra scope implementation was introduced during synchronization.
+
+The independent review's 100 two-source compose inputs were also compared
+afresh on these same binaries through default-depth `explain`, `analyze`, and
+`html --no-timing`, twice: all 600 base/head comparisons are byte-identical,
+including stderr and exit 0. Both repetitions agree in full, with no excluded
+fields; the input and binary hashes remain fixed. The earlier bounded corpus
+explanation measurements above are not substituted for this complete set.
+Both whole native rechecks pass (8 focused, 133 core and 288 CLI tests per run),
+including S1/d06/collision/location pins and the newer baseline's explicit/init
+coverage controls; workspace Clippy, fmt, native build and generated-page
+freshness pass twice. Six guard-inventory controls additionally agree in full
+on the final normal binary in two runs.
