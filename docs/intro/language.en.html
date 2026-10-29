@@ -3627,7 +3627,8 @@ the lowered event.</p>
   when several processes correspond to <code>Claim</code>; use
   <code>claims.Claim.stage(c)</code> (arbitrary-depth <code>SymbolPath</code>) to select one. A
   missing process, non-entity argument, unknown stage member, or unresolved
-  qualifier is a source-located type error.</p>
+  qualifier is reported as <code>kind: "semantics"</code>, with a source position in the
+  message and no diagnostic code.</p>
 <p><strong>Breaking removal (#1569):</strong> in legacy requirements with a process field
 <code>amount</code>, <code>check</code> now rejects a transition guard such as
 <code>exists c: Amount { stage(c) == Approved and amount == c }</code>. The non-entity

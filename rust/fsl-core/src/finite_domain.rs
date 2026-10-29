@@ -343,12 +343,13 @@ pub fn solver_obligations(
     requirements: &SurfaceRequirements,
     model: &KernelModel,
 ) -> Vec<SolverObligation> {
+    let guard_lowering = crate::dialect::rule_guard_lowering(requirements);
     crate::decision_table::Tables::of(requirements)
         .obligations(model)
         .into_iter()
         .map(SolverObligation::Table)
         .chain(
-            crate::rule_guards::RuleGuards::of(requirements)
+            crate::rule_guards::RuleGuards::of(requirements, guard_lowering.as_ref())
                 .obligations(model)
                 .into_iter()
                 .map(SolverObligation::Guards),
