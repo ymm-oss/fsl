@@ -64,9 +64,9 @@ use spec_loading::{
     run_admitted_roots,
 };
 use spec_loading::{
-    load_kernel_model_from_source, load_model, load_model_from_source, load_model_scoped,
-    load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
-    validate_requirement_trace_source,
+    load_kernel_model_from_source, load_model, load_model_from_source,
+    load_model_scoped_from_source, load_snapshot_value_object, read_spec_source,
+    require_trace_gate, snapshot_value, validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
 use verification::{run_verify_cli, run_verify_cli_admitted, run_verify_cli_from_source};
@@ -16852,7 +16852,6 @@ fn public_scope(scope: &ScopeBounds) -> Value {
     })
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_diff(
     old: &Path,
     new: &Path,
@@ -16860,28 +16859,69 @@ fn run_diff(
     mapping: Option<&Path>,
     forbid: &[String],
 ) -> (Value, i32) {
-    let old_source = match std::fs::read_to_string(old) {
+    let mut roots = vec![
+        (old, read_unprefixed_spec_source(old)),
+        (new, read_unprefixed_spec_source(new)),
+    ];
+    roots.extend(mapping.map(|path| (path, read_unprefixed_spec_source(path))));
+    run_admitted_roots(roots, None, false, |sources, editions| {
+        finish_admitted(
+            run_diff_from_sources(
+                [(old, &sources[0]), (new, &sources[1])],
+                depth,
+                sources.get(2).map(String::as_str),
+                forbid,
+            ),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_historical_diff(
+    old: &Path,
+    new: &Path,
+    depth: usize,
+    mapping_source: Option<&str>,
+    forbid: &[String],
+) -> (Value, i32) {
+    let old_source = match read_unprefixed_spec_source(old) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let new_source = match std::fs::read_to_string(new) {
+    let new_source = match read_unprefixed_spec_source(new) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
+    run_diff_from_sources(
+        [(old, &old_source), (new, &new_source)],
+        depth,
+        mapping_source,
+        forbid,
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_diff_from_sources(
+    [(old, old_source), (new, new_source)]: [(&Path, &str); 2],
+    depth: usize,
+    mapping_source: Option<&str>,
+    forbid: &[String],
+) -> (Value, i32) {
     // The declared scope's `values` bounds are resolved against each spec's
     // own built model (the same evaluator `check` uses for
     // `SpecItem::Type`), not re-folded from the raw AST here, so a const
     // bound compares and overrides the same way a literal one does.
-    let old_model_declared = match load_model(old) {
+    let old_model_declared = match load_model_from_source(old, old_source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let new_model = match load_model(new) {
+    let new_model = match load_model_from_source(new, new_source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let old_scope = resolve_scope(declared_raw_scope(&old_source), &old_model_declared);
-    let new_scope = resolve_scope(declared_raw_scope(&new_source), &new_model);
+    let old_scope = resolve_scope(declared_raw_scope(old_source), &old_model_declared);
+    let new_scope = resolve_scope(declared_raw_scope(new_source), &new_model);
     let scope_changed = old_scope != new_scope;
     let overrides = ScopeBounds {
         instances: new_scope
@@ -16908,7 +16948,7 @@ fn run_diff(
     // in the re-scoped old model; dropping it keeps the old document's bound.
     let old_model = if scope_changed {
         let loadable = match fsl_core::retain_dialect_scope_overrides_with_options(
-            &old_source,
+            old_source,
             &overrides.instances,
             &overrides.values,
             crate::parse_options(),
@@ -16917,7 +16957,7 @@ fn run_diff(
             Err(error) => {
                 return (
                     spec_load_error_output(&kernel_load_error(
-                        &old_source,
+                        old_source,
                         &error,
                         crate::parse_options(),
                     )),
@@ -16925,19 +16965,15 @@ fn run_diff(
                 );
             }
         };
-        match load_model_scoped(old, &loadable) {
+        match load_model_scoped_from_source(old, old_source, &loadable) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         }
     } else {
         old_model_declared
     };
-    let mapping_source = match mapping.map(std::fs::read_to_string).transpose() {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
     let mut explicit_direction = None;
-    if let Some(source) = mapping_source.as_deref() {
+    if let Some(source) = mapping_source {
         let surface = match fsl_syntax::parse_surface_document_with(source, crate::parse_options())
         {
             Ok(fsl_syntax::SurfaceDocument::Refinement(surface)) => surface,
@@ -16976,7 +17012,7 @@ fn run_diff(
         &old_model,
         depth,
         (explicit_direction == Some("new_to_old"))
-            .then_some(mapping_source.as_deref())
+            .then_some(mapping_source)
             .flatten(),
     ) {
         Ok(result) => result,
@@ -16987,7 +17023,7 @@ fn run_diff(
         &new_model,
         depth,
         (explicit_direction == Some("old_to_new"))
-            .then_some(mapping_source.as_deref())
+            .then_some(mapping_source)
             .flatten(),
     ) {
         Ok(result) => result,
@@ -17034,7 +17070,7 @@ fn run_diff(
         }
     }
     findings.extend(compare_diff_invariants(&old_model, &new_model));
-    match forbidden_diff_findings((&old_source, &old_model), (&new_source, &new_model)) {
+    match forbidden_diff_findings((old_source, &old_model), (new_source, &new_model)) {
         Ok(forbidden_findings) => findings.extend(forbidden_findings),
         Err(error) => return (error_output("type", &error), 2),
     }
@@ -17407,8 +17443,38 @@ fn run_diff_git(
                 }
             }
         });
-        let (mut comparison, comparison_status) =
-            run_diff(&old, &new, depth, resolved_mapping.as_deref(), forbid);
+        let (mut comparison, comparison_status) = if let Some(path) = resolved_mapping.as_deref() {
+            if path.starts_with(&head_tree) {
+                match read_unprefixed_spec_source(path) {
+                    Ok(source) => run_historical_diff(&old, &new, depth, Some(&source), forbid),
+                    Err(error) => (spec_load_error_output(&error), 2),
+                }
+            } else {
+                run_admitted_roots(
+                    vec![(path, read_unprefixed_spec_source(path))],
+                    None,
+                    false,
+                    |sources, editions| {
+                        editions[0].warnings_only().finish(run_historical_diff(
+                            &old,
+                            &new,
+                            depth,
+                            Some(&sources[0]),
+                            forbid,
+                        ))
+                    },
+                )
+            }
+        } else {
+            run_historical_diff(&old, &new, depth, None, forbid)
+        };
+        if comparison_status == 2
+            && comparison.get("edition").is_some()
+            && comparison["findings"].is_array()
+        {
+            let _ = std::fs::remove_dir_all(&root);
+            return (comparison, comparison_status);
+        }
         status = status.max(comparison_status);
         if let Value::Object(output) = &mut comparison {
             output.insert(
