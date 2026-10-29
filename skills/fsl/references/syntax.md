@@ -1198,7 +1198,8 @@ message begins `relation role name '__owner' contains '__', ...` (or
   `_bounds_<root>`, not a dropped transition. Existing static typing and
   finite-scalar admission still apply.
   BMC/induction still fail closed on whole-collection assignments from a wider
-  Set/relation carrier (`cannot coerce symbolic value`, exit 2), as on base.
+  Set carrier (`cannot coerce symbolic value`, exit 2), as on base; relation
+  carrier compatibility is checked before evaluation as described below.
   Symbolic init copies preserve introduced support in checked dependency order;
   repeated assignments remain relational equalities. In BMC, re-framing a root
   whose bound is omitted requires proof that no live key escapes the new frame's
@@ -1212,6 +1213,23 @@ message begins `relation role name '__owner' contains '__', ...` (or
   Accepted adds retain pairs outside either endpoint carrier, including through
   domain/range and graph operations; storing the add result back exposes that
   receiver's bound.
+  Breaking removal (#1522, related #1524): compatible relation values require
+  equal source and target carriers, comparing resolved numeric lower/upper
+  bounds rather than alias names. `N = 0..2` and `M = 0..2` remain compatible; mixing
+  `A = 0..1` and `B = 0..2` in if arms, Set/Seq items (nested included), or
+  assignments is now a located check-time assignability error (`semantics`,
+  exit 2), shared by verify/replay. Scalar Int/Range compatibility, Map keys,
+  nominal enums and declared self-relation identity are unchanged. Equal-bound
+  literals still check; #1467 owns their remaining engine support. The same gate
+  rejects action `r = q`, init `q = Set {} r = q`, `let x = q` followed by
+  `r = x`, and mixed relation conditionals in a let; plain aliases remain valid.
+  Even narrow-to-wide relation copies are refused in action assignment, init
+  and let uses because BMC/induction could not coerce them while explicit
+  decided action/let and Monitor agreed; init also failed explicit. Numeric
+  `Set<A>` → `Set<B>` assignment with A's carrier inside B's still checks;
+  Set's symbolic disagreement remains #1627.
+  See the [compatibility decision](../../../docs/design/DESIGN-relation-endpoint-compatibility.md)
+  for breaking-removal evidence. Do not treat this as key union.
   For `r: relation A -> B`, `contains`/`add`/`remove`/`reachable` require
   source `a` assignable to `A` and target `b` assignable to `B` independently.
   A mismatch is `kind: "semantics"`, exit 2, with the existing assignability
