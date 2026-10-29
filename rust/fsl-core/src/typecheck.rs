@@ -489,6 +489,28 @@ fn carrier_type(ty: &TypeRef, model: &KernelModel) -> Result<TypeRef, TypecheckE
     })
 }
 
+// Int carries no finite domain, including when inferred from a literal (#1467).
+fn has_int(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Int => true,
+        TypeRef::Set(item) | TypeRef::Seq(item, _) | TypeRef::Option(item) => has_int(item),
+        TypeRef::Map(key, value) | TypeRef::Relation(key, value) => has_int(key) || has_int(value),
+        _ => false,
+    }
+}
+
+fn compatible_carrier(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<bool, TypecheckError> {
+    if has_int(actual) || has_int(expected) {
+        types_compatible(actual, expected, model)
+    } else {
+        same_carrier(actual, expected, model)
+    }
+}
+
 pub(crate) fn types_compatible(
     actual: &TypeRef,
     expected: &TypeRef,
@@ -503,12 +525,18 @@ pub(crate) fn types_compatible(
         (TypeRef::Option(actual), TypeRef::Option(expected)) => {
             types_compatible(actual, expected, model)?
         }
-        (TypeRef::Set(actual), TypeRef::Set(expected)) => same_carrier(actual, expected, model)?,
-        (TypeRef::Seq(actual, actual_capacity), TypeRef::Seq(expected, expected_capacity)) => {
-            actual_capacity == expected_capacity && same_carrier(actual, expected, model)?
+        (TypeRef::Set(actual), TypeRef::Set(expected)) => {
+            compatible_carrier(actual, expected, model)?
         }
-        (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value))
-        | (
+        (TypeRef::Seq(actual, actual_capacity), TypeRef::Seq(expected, expected_capacity)) => {
+            (actual_capacity == expected_capacity || has_int(actual) || has_int(expected))
+                && compatible_carrier(actual, expected, model)?
+        }
+        (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value)) => {
+            compatible_carrier(actual_key, expected_key, model)?
+                && compatible_carrier(actual_value, expected_value, model)?
+        }
+        (
             TypeRef::Relation(actual_key, actual_value),
             TypeRef::Relation(expected_key, expected_value),
         ) => {
