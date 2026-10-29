@@ -131,4 +131,5 @@ fn bare_enum_member_helpful_argument_proves() {
 fn preservation_state_dependent_helpful_argument_is_refused() {
     let source = INTEGER.replace("helpful flip(ONE)", "helpful flip(n)");
     outcomes(&source, true);
+    outcomes(&source.replace("const ONE", "const n"), true);
 }
