@@ -163,7 +163,7 @@ T03|sweep|sweep|outer owner; cells borrow; ranking inactive/read0|no multiplicat
 T04|fslc/src/main.rs:run_chain_step_isolated|chain jobs 1|fresh check owner|precise child refusal
 T05|fslc/src/main.rs:run_chain_steps|chain jobs 2|pool inactive/read0; verify owner; ranking inactive/read0|parallel logs separate
 T06|chain refine|chain jobs 1/2|step inactive strict loader|fail closed
-T07|mutation baseline|mutate|outer owner; ranking inactive/read0|no mutants after refusal
+T07|fslc/src/main.rs:run_mutate_from_source|mutate|outer owner; BMC rerun inactive strict loader; ranking inactive/read0|no mutants after refusal
 T08|counterexample ranking|counterexample export|owner; ranking inactive/read0|no output after refusal
 T09|html ranking|html|report owner; ranking inactive/read0|file/raw guarded
 T10|ledger ranking|ledger|nested owner; ranking inactive/read0|one delivery
