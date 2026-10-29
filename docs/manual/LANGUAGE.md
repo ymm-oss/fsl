@@ -3942,8 +3942,8 @@ Project semantic coordinates remain component-block-relative (#1574); missing
 LSP project-component diagnostics remain tracked separately (#1575).
 
 **Measured boundary sweep (#1545):** B
-`c32e7f5a88b412056210ee66f0cff9765001fed9` and H
-`7be60c922c3d4f719746fda0d9763b075d1fa2a0` were built separately in their own
+`d37a215e8df6c00222e6aafd94bc9b556c445521` and H
+`99810256faca086360c6ca4233f935b9b56b1ec8` were built separately in their own
 git-archive trees. `<B-binary> check <relative-path>` in B and
 `<H-binary> check <relative-path>` in H checked all 597 corpus `.fsl` files and
 30 Markdown files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, plus

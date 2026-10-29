@@ -150,8 +150,8 @@ Project semantic positions retain their component-block coordinate frame
 
 ### Boundary sweep evidence (#1545)
 
-Base B `c32e7f5a88b412056210ee66f0cff9765001fed9` and head H
-`7be60c922c3d4f719746fda0d9763b075d1fa2a0` were independently built in their
+Base B `d37a215e8df6c00222e6aafd94bc9b556c445521` and head H
+`99810256faca086360c6ca4233f935b9b56b1ec8` were independently built in their
 own git-archive trees. The command `<B-binary> check <relative-path>` in B's
 tree and `<H-binary> check <relative-path>` in H's tree covered all 597 `.fsl`
 and 30 Markdown files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`,

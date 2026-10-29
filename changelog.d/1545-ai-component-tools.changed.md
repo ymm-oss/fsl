@@ -12,8 +12,8 @@ unknown tool/rule semantics errors; the Markdown project reports type,
 exit2. Project semantic coordinates remain
 block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
 Measured using independently built B
-`c32e7f5a88b412056210ee66f0cff9765001fed9` and H
-`7be60c922c3d4f719746fda0d9763b075d1fa2a0` in their own git-archive trees:
+`d37a215e8df6c00222e6aafd94bc9b556c445521` and H
+`99810256faca086360c6ca4233f935b9b56b1ec8` in their own git-archive trees:
 `<B-binary> check <relative-path>` in B and `<H-binary> check <relative-path>`
 in H, all 597 FSL and 30 Markdown corpus files plus twelve new inline occurrences
 per tree, 1,278 checks, cache/unstable overrides unset and no excluded output

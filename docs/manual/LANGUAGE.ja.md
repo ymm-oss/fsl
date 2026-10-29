@@ -3764,8 +3764,8 @@ project の意味論的な座標は引き続き component block 内が基準で�
 LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
 
 **境界 sweep の実測 (#1545):** B
-`c32e7f5a88b412056210ee66f0cff9765001fed9` と H
-`7be60c922c3d4f719746fda0d9763b075d1fa2a0` を、それぞれ独立した git archive の
+`d37a215e8df6c00222e6aafd94bc9b556c445521` と H
+`99810256faca086360c6ca4233f935b9b56b1ec8` を、それぞれ独立した git archive の
 tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
 tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
 `rust/fslc/tests/fixtures/` の全597 `.fsl`、Markdown 30件、新しい test の inline 入力
