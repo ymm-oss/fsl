@@ -748,7 +748,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   整数への変換ではありません。型が正しい `not (c == Red)`、`-(-1)`、数値の
   `- n` は引き続き有効です。
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
-  分岐が検査され、同じ論理型を持たなければなりません。ガード、代入、プロパティ、
+  分岐が検査され、互換な型を持たなければなりません。スカラーの整数・範囲互換は保ち、
+  有限の入れ物の値全体は後述の同じドメイン(Seq は容量も同じ)を要求します。ガード、代入、プロパティ、
   関数引数、ランキング式、定数、refinement マッピングを含む、式が受理される任意の
   場所で使えます。条件式は右結合し、各分岐は囲むデリミタまで延びます。後続の演算子
   を条件式全体に適用したいときは括弧を使ってください。具象評価は選択された分岐だけ
@@ -906,11 +907,36 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
 - Set: `Set {}` / `Set { 1, 2 }`、`.add(e)` `.remove(e)` `.contains(e)` `.size()`
   受理された `add` は、計算結果が宣言されたドメインの外でもメンバーを保持します。
   一時値の `contains`、`size`、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
-  メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。静的な型検査と
-  受理範囲は変えず、非有界 Set や複合コレクションの型推論を追加するものではありません。
-  より広いドメインの Set を丸ごと代入する操作は、base と同様に BMC/induction が
-  `cannot coerce symbolic value` (exit 2)で拒否します。
-  関係のドメイン互換性は、後述のとおり評価前に検査します。
+  メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。スカラー引数の
+  型検査は変えず、非有界 Set や複合リテラルを追加するものではありません。
+  **破壊的な受理範囲の縮小(#1472、#1627):** Set、Seq、Map、relation の値全体は、
+  対応するドメインが同じときだけ互換です。数値別名は下限・上限が同じなら互換のままです。
+  Seq は容量も一致し、Map はキーと値の両方のドメインが一致する必要があります。
+  代入、比較、条件式の分岐、射影、refinement の全体 map はこの規則を共有します。
+  広い Set から狭い Set だけでなく、狭い Set から広い Set への全体代入も、記号変換で
+  後から失敗するのでなく check が既存の位置付き代入可能性エラー(`semantics`、終了コード2)
+  で拒否し、全 verify engine が共有します。スカラー・Option の数値互換と
+  add/contains/push の引数は変えません。refinement は両モデルの型を独立に解決し、
+  既存の `type` エラーと不明位置の固定値1:1を保ちます。
+  `Int`は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
+  Set/Seq/Mapは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。
+  リテラルの型付けを変更するものではありません。
+  base `5536ebc1` と実装の祖先 `fbaab589` を各 archive で build し、603 corpus形と
+  元の inline 16形を各2回 check しました。corpusの除去0、error→errorの診断変更0、
+  inlineのok→errorは3形です。`FALSE_VACUITY` / `CondMap` (Mapキー0..0対0..2、20:41)、
+  #1522の`MAP` (Mapキー0..2対0..1、7:35)、`SET_WIDENING` (Setの0..2から0..4、6:48)。
+  さらに、受理されていた全体Seq mapのruntime `SeqWide`→`SeqAbs`、
+  runtime `SeqWider`→`SeqGuarded`、CLI単独`SEQ_WIDE_IMPL`→`SEQ_ABS`、inline
+  `seq_req(-1)`を除去します。容量2、モデルごとの要素範囲-1..2または0..3対0..2の形で、
+  従来の実行時refinement失敗を1:1の静的エラーに変えます。
+  別途リテラル境界の18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
+  [単一のドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)を参照してください。
+  リテラルの型付けは#1467に残ります。
+  mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
+  checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、
+  集計上`errored`から`invalid`へ移り、`kill_rate`から除かれ、gateに`oracle_errors`を
+  追加しません。solver・評価の失敗はerrored、budgetによる打切りはinconclusiveのままです。
+  自動・明示map、単独refinement、governanceの事前検査、composeのモデルは型付きのmap検査を共有します。
   記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
   保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
   ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
@@ -931,7 +957,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   異なる関係ドメインを混ぜる条件式の分岐、Set/Seq の要素(入れ子を含む)、代入は、
   `check` が位置付きの代入可能性エラー(`semantics`、終了コード 2)で拒否します。
   `verify` と `replay` も同じ検査を共有します。通常のスカラー Int/Range 互換、
-  Map のキー互換、公称 enum、宣言された自己関係の判定は変更しません。
+  公称 enum、宣言された自己関係の判定は変更しません。
   同じ境界を持つ関係のリテラルは引き続き check を通りますが、記号エンジンの残る対応は
   #1467 に属し、この変更は key-union の実装ではありません。
   同じ検査で action の `r = q`、init の `q = Set {} r = q`、`let x = q` に続く
@@ -939,8 +965,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   単なる別名は引き続き受理します。narrow→wide の関係のコピーも action の代入・init・
   let 経由で拒否します。従来は BMC/induction が変換できず、action/let を判定する
   explicit と Monitor に一致しなかったためです。init は explicit も終了コード 2 でした。
-  対照的に、A のドメインが B に含まれる数値型の `Set<A>` → `Set<B>` の代入は今も
-  check を通ります。Set の記号評価の不一致は #1627 に残ります。
+  #1472はこの規則をSet、Seq、Mapの値全体にも適用し、狭いSetから広いSetへのコピー
+  (#1627)も拒否します。上のドメイン互換の決定を参照してください。
   破壊的な受理範囲の縮小の証拠は
   [互換性の設計決定](../design/DESIGN-relation-endpoint-compatibility.md)を参照してください。
   `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、

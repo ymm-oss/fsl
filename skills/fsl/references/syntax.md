@@ -1292,9 +1292,33 @@ when checking a file, the message suffix changes from `at L:C` to
   the add result back to that bounded receiver reports `type_bound` /
   `_bounds_<root>`, not a dropped transition. Existing static typing and
   finite-scalar admission still apply.
-  BMC/induction still fail closed on whole-collection assignments from a wider
-  Set carrier (`cannot coerce symbolic value`, exit 2), as on base; relation
-  carrier compatibility is checked before evaluation as described below.
+  Breaking removal (#1472, #1627): whole Set/Seq/Map/relation values require
+  equal corresponding carriers; equal-range numeric aliases remain compatible.
+  Seq capacity must match; both Map keys and values must match. Assignments,
+  comparisons, if arms, projections and whole refinement maps share this rule.
+  Narrow-to-wide and wide-to-narrow Set copies now fail at check with the existing
+  located assignability error (semantics, exit 2), not later symbolic coercion.
+  Scalar/Option numeric compatibility and scalar method arguments are unchanged.
+  Int has no finite carrier: Set/Seq/Map involving it retain prior compatibility,
+  including inferred Seq literal capacity; literal inference itself is unchanged.
+  Refinement resolves both models independently, retaining its type error at 1:1.
+  Mutate classifies statically ill-typed implements maps by typed error kind as
+  invalid, using the check-invalid path: numeric-range mutants of whole-container
+  maps move from summary.errored to summary.invalid, outside kill_rate and without
+  oracle_errors in the gate. Evaluation/solver failures stay errored; cutoffs
+  stay inconclusive. Auto/explicit maps, standalone refinement, governance
+  preflight and composed models share the map validator, not a new mutation oracle.
+  Base 5536ebc1 vs ancestor fbaab589, independently built archives, twice checked
+  603 corpus + 16 original inline forms: zero corpus removals, zero error→error
+  diagnostic changes. Three inline ok→error removals: FALSE_VACUITY/CondMap
+  (Map keys 0..0 vs 0..2, 20:41), #1522 MAP (keys 0..2 vs 0..1, 7:35),
+  SET_WIDENING (Set 0..2 to 0..4, 6:48). Also removed: whole Seq maps in runtime
+  SeqWide→SeqAbs, SeqWider→SeqGuarded, CLI SEQ_WIDE_IMPL→SEQ_ABS and inline
+  seq_req(-1), capacity 2, elements -1..2 or 0..3 vs 0..2; former refinement
+  failures now reject statically at 1:1. Use matching carriers, not weakened
+  properties. Another 18 literal-boundary forms keep identical check outputs.
+  Literal typing remains #1467. Full commands/inventory:
+  [carrier decision](../../../docs/design/DESIGN-finite-container-carriers.md).
   Symbolic init copies preserve introduced support in checked dependency order;
   repeated assignments remain relational equalities. In BMC, re-framing a root
   whose bound is omitted requires proof that no live key escapes the new frame's
@@ -1313,16 +1337,16 @@ when checking a file, the message suffix changes from `at L:C` to
   bounds rather than alias names. `N = 0..2` and `M = 0..2` remain compatible; mixing
   `A = 0..1` and `B = 0..2` in if arms, Set/Seq items (nested included), or
   assignments is now a located check-time assignability error (`semantics`,
-  exit 2), shared by verify/replay. Scalar Int/Range compatibility, Map keys,
+  exit 2), shared by verify/replay. Scalar Int/Range compatibility,
   nominal enums and declared self-relation identity are unchanged. Equal-bound
   literals still check; #1467 owns their remaining engine support. The same gate
   rejects action `r = q`, init `q = Set {} r = q`, `let x = q` followed by
   `r = x`, and mixed relation conditionals in a let; plain aliases remain valid.
   Even narrow-to-wide relation copies are refused in action assignment, init
   and let uses because BMC/induction could not coerce them while explicit
-  decided action/let and Monitor agreed; init also failed explicit. Numeric
-  `Set<A>` → `Set<B>` assignment with A's carrier inside B's still checks;
-  Set's symbolic disagreement remains #1627.
+  decided action/let and Monitor agreed; init also failed explicit. #1472 extends
+  this rule to whole Set/Seq/Map values and resolves Set widening disagreement
+  #1627, while preserving equal-range aliases.
   See the [compatibility decision](../../../docs/design/DESIGN-relation-endpoint-compatibility.md)
   for breaking-removal evidence. Do not treat this as key union.
   For `r: relation A -> B`, `contains`/`add`/`remove`/`reachable` require

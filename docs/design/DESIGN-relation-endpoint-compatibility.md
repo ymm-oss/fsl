@@ -6,12 +6,13 @@
 
 Use a located check-time refusal, not symbolic key-union grids. Relation values
 are compatible only when both corresponding finite endpoint carriers agree.
-`types_compatible` uses the private `same_carrier` helper to resolve each numeric
+`types_compatible` uses the shared `same_carrier` helper to resolve each numeric
 alias to its lower and upper bounds and compare those carriers without enumerating
-their values. Only the relation arm calls it here. Different aliases
-with equal bounds remain compatible. This is separate from ordinary scalar
-assignability: Int/Range compatibility, Map key compatibility, nominal enums,
-and `reachable`/`acyclic`'s identical-declared-endpoint rule are unchanged.
+their values. Different aliases with equal bounds remain compatible. The
+[whole-container decision](DESIGN-finite-container-carriers.md) (#1472, #1627)
+extends this helper to Set, Seq and Map carriers, including Map keys and Seq
+capacity. Scalar Int/Range compatibility, nominal enums and
+`reachable`/`acyclic`'s identical-declared-endpoint rule are unchanged.
 
 The shared compatibility rule reaches conditional arms, Set/Seq items and
 nested expression positions, state/init assignments, and public Kernel expected
@@ -32,9 +33,9 @@ check, but BMC/induction refused with `cannot coerce symbolic value`, while
 explicit decided correctly and Monitor replay agreed with that verdict. For
 init, BMC/induction and explicit all exited 2 while Monitor replay evaluated the
 form correctly. This engine disagreement justifies a uniform check-time refusal
-rather than treating widening as supported. Numeric `Set<A>` → `Set<B>`
-assignment, with A's carrier inside B's, still passes check: the relation rule
-does not tighten Set compatibility. Set's symbolic disagreement remains #1627.
+rather than treating widening as supported. #1472 applies the same refusal to
+numeric `Set<A>` → `Set<B>` assignment when the carriers differ, even with A's
+carrier inside B's, resolving #1627. Equal-bound aliases remain compatible.
 
 ## Breaking removal and explicit remainder
 
@@ -60,7 +61,8 @@ scalar arguments, and must not replace retained values with silent drops.
 
 `rust/fslc/tests/issue_1522_relation_endpoint_bounds.rs` v2 pins relation
 refusals and preservation controls, including action/init/let widening and a
-Set-widening check-ok control. Conditional errors retain arm location 11:60;
+Set-widening control, subsequently migrated to a refusal by #1472. Conditional
+errors retain arm location 11:60;
 literal/nested errors retain the existing enclosing authored location 11:3.
 No verdict, message, location or exit difference is allowlisted.
 
