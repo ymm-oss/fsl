@@ -2228,6 +2228,7 @@ pub(super) fn run_verify_cli_from_source(
     source: &str,
     options: &CliVerifyOptions,
 ) -> CommandResult {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let edition = match fslc_rust::migration::admit_source(
         source,
         &cache_identity_path.to_string_lossy(),
@@ -2239,7 +2240,10 @@ pub(super) fn run_verify_cli_from_source(
         Ok(edition) => edition,
         Err(refusal) => return refusal,
     };
-    run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition))
+    dependencies.finish(
+        run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition)),
+        false,
+    )
 }
 
 /// Consume a captured, admitted root. Specialized outer owners pass `None`;
@@ -2303,11 +2307,20 @@ fn run_verify_cli_kernel_from_source(
     {
         return crate::causal::causal_parse_error_output(&error, false);
     }
-    let recorder = RecordingResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let recorder = fslc_rust::migration::DependencyResolver::native(
+        RecordingResolver::new(base),
+        base,
+        *parse_options(),
+        &envelope,
+    );
     let prepared = match prepare_cli_verification_from_source(path, source, options, &recorder) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
+    if let Some(refusal) = recorder.refusal() {
+        return refusal;
+    }
     if !options.lemmas.is_empty() {
         let (mut output, mut status) = run_induction_with_lemmas(path, options, &prepared);
         // The `--lemma` path returns before `execute_cli_verification`, so the
@@ -2378,7 +2391,7 @@ fn run_verify_cli_kernel_from_source(
             Err(_) => None,
         }
     };
-    let sources = recorder.take_sources();
+    let sources = recorder.inner().take_sources();
     // `auto` never keys a cache entry under the literal string "auto": a
     // lookup consults the explicit/bmc keys directly
     // (`cached_auto_verification`) and a store writes under whichever engine
@@ -2425,7 +2438,7 @@ fn prepare_cli_verification_from_source(
     path: &Path,
     source: &str,
     options: &CliVerifyOptions,
-    recorder: &RecordingResolver,
+    recorder: &dyn fsl_core::FileResolver,
 ) -> Result<PreparedCliVerification, CommandResult> {
     let is_agent_document = match fsl_syntax::parse_surface_document_with(source, parse_options()) {
         Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,

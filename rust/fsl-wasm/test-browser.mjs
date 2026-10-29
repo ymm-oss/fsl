@@ -36,9 +36,9 @@ const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 const repository = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const nativeCommandTimeoutMs = 60_000;
 
-async function command(executable, args, timeoutMs = 300_000) {
+async function command(executable, args, timeoutMs = 300_000, environment = process.env) {
   return new Promise((resolveCommand, reject) => {
-    const process = spawn(executable, args, { cwd: repository, stdio: ["ignore", "pipe", "pipe"] });
+    const process = spawn(executable, args, { cwd: repository, env: environment, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -73,7 +73,8 @@ async function nativeEnvelope(testCase) {
       "--deadlock", testCase.options.deadlock,
       "--no-cache",
     ];
-  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
+  const result = await command(nativeBinary, args, nativeCommandTimeoutMs,
+    testCase.dependency_edition ? { ...process.env, FSLC_UNSTABLE: "fsl5", FSLC_CACHE: "off" } : process.env);
   if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
     throw new Error(
       `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
@@ -320,6 +321,27 @@ for (const binder of ["seq_literal", "set_statement"]) {
     });
   }
 }
+// Exact issue-pair rejection and one-time warning, Linux WASM integration only.
+// The native test seam cannot run the pre-fix main browser BMC. Read the same
+// fixture files as the shared Rust table, rather than maintaining byte copies.
+// The existing batch protocol retains explicit unstable options; no product
+// transport or solver-injection surface is changed here.
+const dependencyRoot = await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_root.txt"), "utf8");
+const dependencyVerify = JSON.parse(await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_verify.json"), "utf8"));
+delete dependencyVerify._license;
+const dependencyLegacy = await readFile(join(repository, editionWarningCase), "utf8");
+const dependencyCases = [];
+for (const [variant, header, expected_status] of [["N", 5, 2], ["W", 4, 0]]) {
+  const dependencyChild = `fsl ${header}\n${dependencyLegacy}`;
+  const directory = await mkdtemp(join(dist, "dependency-edition-"));
+  const path = relative(repository, join(directory, "root_compose.fsl")).split("\\").join("/");
+  await writeFile(join(repository, path), dependencyRoot, "utf8");
+  await writeFile(join(directory, "dep_next_colon.fsl"), dependencyChild, "utf8");
+  dependencyCases.push({
+    id: `E01/${variant}/worker-verify`, variant, dependency_edition: true, cmd: "verify", path, source: dependencyRoot, source_file: path,
+    files: { "dep_next_colon.fsl": dependencyChild }, unstable: ["fsl5"], options: { depth: 2, deadlock: "warn" }, expected_status,
+  });
+}
 await writeFile(
   join(dist, "parity-cases.json"),
   `${JSON.stringify([...parityCases, ...exclusionProbes])}\n`,
@@ -488,6 +510,7 @@ function rejectPending(error) {
   }
 }
 let details;
+let dependencyEnvelopes;
 {
   const debugPort = await devtoolsPort();
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
@@ -521,6 +544,25 @@ let details;
       },
     });
     logPhase("client-completion", `client=${details.phase ?? "unknown"}`);
+    const requests = dependencyCases.map(({ cmd, source, source_file, files, unstable, options }) => (
+      { cmd, source, source_file, files, unstable, options }
+    ));
+    const evaluated = await cdp(socket, "Runtime.evaluate", {
+      expression: `new Promise((resolve, reject) => {
+        const worker = new Worker('./worker.js');
+        const timer = setTimeout(() => { worker.terminate(); reject(new Error('dependency edition timeout')); }, 120000);
+        worker.onmessage = ({data}) => {
+          if (data.envelopes || data.envelope || data.transportError) {
+            clearTimeout(timer); worker.terminate();
+            if (data.envelopes) resolve(data.envelopes); else reject(new Error(JSON.stringify(data)));
+          }
+        };
+        worker.onerror = (event) => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
+        worker.postMessage({id:'dependency-edition',batch:${JSON.stringify(requests)}});
+      })`, awaitPromise: true, returnByValue: true,
+    });
+    if (evaluated.exceptionDetails) throw new Error(JSON.stringify(evaluated.exceptionDetails));
+    dependencyEnvelopes = evaluated.result.value;
   } finally {
     socket.close();
   }
@@ -535,6 +577,41 @@ for (const testCase of parityCases) {
   native.push(await nativeEnvelope(testCase));
 }
 const mismatches = [];
+if (!Array.isArray(dependencyEnvelopes) || dependencyEnvelopes.length !== dependencyCases.length) {
+  throw new ParityViolationError("dependency edition cases did not execute");
+}
+for (const [index, testCase] of dependencyCases.entries()) {
+  const native = await nativeEnvelope(testCase);
+  const worker = dependencyEnvelopes[index];
+    // Exact independent finding, including every edit.
+    // Display the reference spelling on both surfaces; do not exclude locations.
+    for (const actual of [native, worker]) {
+      const file = "dep_next_colon.fsl";
+      const frontend = actual === native ? "fslc-rust" : "fsl-wasm";
+      const backend = actual === native ? "native-z3" : "z3-solver-wasm";
+      if (actual.versions?.verifier?.name !== frontend || actual.versions?.solver?.backend !== backend) {
+        throw new ParityViolationError(`dependency runtime identity drift for ${frontend}`);
+      }
+       const finding = { code: "legacy_string_metadata", kind: "legacy_string_metadata", taxonomy: "deprecated",
+           severity: testCase.variant === "N" ? "error" : "warning", edition: testCase.variant === "N" ? "next" : "current",
+          message: "legacy string metadata is deprecated; use a typed annotation",
+          loc: { file, line: 38, column: 38, end_line: 38, end_column: 85 },
+          canonical_replacement: '@requirement("REQ-2", "only eligible claims are auto-approved")', machine_applicable: true,
+          edits: [{ start: 770, end: 770, replacement: '@requirement("REQ-2", "only eligible claims are auto-approved")\n  ' },
+             { start: 805, end: 852, replacement: "" }] };
+       let expected = { fsl: "1.0", result: "error", kind: "unsupported_in_edition", edition: "next", fsl_edition: 5,
+         findings: [finding], versions: actual.versions };
+       if (testCase.variant === "W") {
+          expected = structuredClone(dependencyVerify);
+          expected.versions = actual.versions;
+          expected.warnings.push(finding);
+       }
+       // Normalization validates runtime identity/cost and shapes non-unique
+       // witnesses/state text; loc, verdict, assurance and extra keys stay exact.
+      const drift = differences(normalizeEnvelope(actual), normalizeEnvelope(expected));
+      if (drift.length) throw new ParityViolationError(JSON.stringify({ case: testCase.id, drift }));
+    }
+}
 for (let index = 0; index < parityCases.length; index += 1) {
   const nativeEnvelope = native[index];
   const wasmEnvelope = browser.parityEnvelopes[index];

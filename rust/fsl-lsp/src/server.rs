@@ -555,6 +555,20 @@ fn to_lsp_diagnostic(
         None,
     );
     diagnostic.data = Some(serde_json::json!({"kind": item.kind}));
+    if let Some(related) = item.related {
+        diagnostic.severity = Some(if related.error {
+            DiagnosticSeverity::ERROR
+        } else {
+            DiagnosticSeverity::WARNING
+        });
+        diagnostic.related_information = Some(vec![lsp_types::DiagnosticRelatedInformation {
+            location: Location::new(
+                Url::from_file_path(related.file).expect("dependency source path"),
+                span_range(&related.source, related.span),
+            ),
+            message: diagnostic.message.clone(),
+        }]);
+    }
     diagnostic
 }
 
@@ -1127,6 +1141,14 @@ fn code_actions(state: &ServerState, uri: &Url) -> Option<Vec<CodeActionOrComman
         &resolver,
         &state.parse_options,
     );
+    if diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .related
+            .as_ref()
+            .is_some_and(|related| related.error)
+    }) {
+        return None;
+    }
     let semantic_fixes = diagnostics
         .into_iter()
         .filter_map(|diagnostic| {
@@ -1281,6 +1303,9 @@ fn offset_at_position(source: &str, position: Position) -> usize {
 
 #[cfg(test)]
 mod tests {
+    mod dependency_edition {
+        include!("../tests/support/edition_dependency_adapter.rs");
+    }
     use super::*;
     use lsp_server::RequestId;
 

@@ -1,0 +1,2 @@
+  @requirement("REQ-2", "only eligible claims are auto-approved")
+  invariant OnlyEligibleAutoApproved {

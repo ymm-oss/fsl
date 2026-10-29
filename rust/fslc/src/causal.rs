@@ -385,7 +385,7 @@ fn load_causal_model_from_source(
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = crate::spec_loading::dependency_resolver(&base);
     let legacy_literate = path.extension().and_then(std::ffi::OsStr::to_str) == Some("md");
     fsl_tools::build_causal_model_with_options(source, &resolver, crate::process::parse_options())
         .map_err(|error| causal_error_output(&error, legacy_literate))
@@ -615,7 +615,7 @@ fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (V
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = crate::spec_loading::dependency_resolver(&base);
     let compiled = match fsl_tools::compile_expectations(
         &surface,
         &model,
@@ -749,7 +749,7 @@ fn run_causal_observe_expectations(
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = crate::spec_loading::dependency_resolver(&base);
     let compiled = match fsl_tools::compile_expectations(
         &surface,
         &model,

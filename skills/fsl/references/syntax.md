@@ -416,9 +416,52 @@ The approval-check scope includes ledger `--approval` overlay root rereads.
 Deferred controls still execute and must reject; this does not close #1449.
 Existing baselines and ledger migration rows are retained;
 migration-only rows use 🟡 移行候補 / risk —, mixed/non-migration rows 🔴 要確認 / 要確認.
-Dependencies are not recursively admitted. Git-revision roots (#1513), example
+Actually read dependencies are admitted as described below. Git-revision roots (#1513), example
 warning cleanup (#608), lint dialect support (#609) and other ledger warning
 classifications (#1497) are separate; do not infer full reader coverage.
+
+Dependency admission (#1452) uses each consumed child's own header/current default,
+never the parent's requested edition; canonical mixed editions are allowed.
+Compose use, implements, causal uses and governance delegate/before/after/mapping
+reads, including nested and repeated reads, admit before their bytes enter lowering,
+model/solver/cache or output. There is no unused-file or speculative-reference scan. Owned commands
+retain the full child refusal/exit 2; an owner-free strict loader still refuses
+through its ordinary read-error renderer, naming child path and finding codes.
+The remaining root-intake modes above are still separate work.
+
+Dependency findings use warnings-only finalization once per provider resource and
+complete finding within each outer native owner (or explicit local log), preserving
+primary-root metadata and explicit-root slot counts. Native keys are real canonical
+paths, but child `loc.file` retains reference spelling; virtual lookup preserves provider keys.
+Existing raw/closed stdout and stderr delivery stay unchanged. Worker/editor logs
+are call-local. The editor makes its own key/related path absolute and lexically
+normalized, not the Store lookup or symlink target; labels without file paths are not
+directories. Complete findings and child ranges/severity relate to the first parent use
+in read order. Refusal means no model/analysis or parent quick-fix. Repair tools only
+report child findings and preserve root edits/exits; they do not edit children.
+Parse reports are findings, not nested command envelopes. Native lemma-mode
+implements and governance reads may follow root solver work: this is not a global
+preflight, but refused child bytes never reach solver/cache. Worker ordinary
+governance errors preserve native kernel-error precedence; only refusal returns early.
+
+Breaking removal: headerless compose plus a next-edition legacy-colon child
+previously checked `ok`/0 without a message, but now returns the complete child
+`unsupported_in_edition`/2 and finding message
+`legacy colon quantifier syntax is deprecated`. The braced canonical twin retains
+the complete successful check envelope. This inline form remains in
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
+and the `edition_dispatch_inventory` contexts
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
+`deferred_modes_have_live_disagreements_across_the_complete_native_adapters`;
+it is a consumer removal, not new grammar.
+
+Materialized-tree `fslc check <path>` evidence (`bc14d885` → corrected Rust
+source/test tree `a65eddd5`): **603 corpus forms × two parser configurations =1206 checks per
+tree**, plus **368 required-test inline/included occurrences per tree**, **3148
+checks total**. The **6 `ok`→`error` occurrences** are exactly that legacy-compose
+cell, three required-test contexts twice each. **0 other transitions; 0 corpus
+transitions**; canonical twins stay accepted. Exact source-tree identity/scope are recorded
+in the dependency amendment of `docs/design/DESIGN-migration.md`.
 
 ```fsl
 domain <Name> {

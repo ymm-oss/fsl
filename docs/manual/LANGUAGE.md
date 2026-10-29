@@ -1716,10 +1716,56 @@ Their deferred controls still execute and must retain rejecting evidence; #1449
 is not closed by these 21 completed modes.
 Report baselines and ledger migration rendering are retained; migration-only rows
 use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
-🔴 要確認 / 要確認. Dependencies are not recursively admitted; historical Git roots
+🔴 要確認 / 要確認. Dependency admission is described below; historical Git roots
 remain #1513. Repair projections/exits stay unchanged, including lint's existing
 dialect limits (#609); this does not remove public-example warnings (#608) or fix
 other ledger warning classifications (#1497).
+
+Actually read dependencies use **their own** header or the current default
+(#1452), not a parent's requested edition. Canonical mixed editions remain valid.
+Compose `use`, `implements from`, causal `uses` and governance delegates,
+before/after documents and refinement mappings all pass the same admission rule,
+including nested reads and rereads, before their bytes enter model/solver or output work. Unused
+virtual files and declared references a consumer does not read are not scanned.
+Owned commands return the child's complete edition refusal/exit 2; owner-free
+strict loaders retain their read-error envelope with the child path/codes in its
+cause and still fail closed. This does not complete the deferred root modes above.
+
+Dependency migration warnings finish once per provider-resource/complete finding
+within each outer native owner, or each explicit local log, without replacing
+primary-root edition metadata or merging explicit root slots. Native keys use
+real canonical paths; child `loc.file` keeps the reference spelling. Virtual lookup keeps its
+provider keys. Existing closed/raw stdout and stderr-warning rules remain.
+Worker/editor records are local to their call. The editor makes its own key and
+related link absolute and lexically normalized, without changing Store lookup or
+resolving symlinks; labels without file paths are not directories. It relates the child's own
+text/severity to the first parent use in read order. A child refusal prevents model/analysis
+and parent quick-fix delivery. Repair tools report child findings without consumer
+rejection or child edits, preserving their root planner/formatter exits. Parse
+reports are findings, not nested command envelopes. This is not a global preflight:
+native lemma-mode implements and governance reads may follow root solver work;
+refused child bytes still never enter that solver/cache. Ordinary Worker governance
+errors retain native kernel-error precedence; only dependency refusal returns early.
+
+**Breaking removal:** a headerless compose root importing a next-edition child
+with a legacy colon quantifier formerly returned `ok`/0 with no message. It now
+returns the complete child `unsupported_in_edition` refusal/2, whose finding
+message is `legacy colon quantifier syntax is deprecated`. A braced canonical
+twin still succeeds with the complete `fsl:1.0,result:ok,spec:C,warnings:[]`
+check envelope (plus validated runtime versions). The inline shape is retained by
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
+and the `edition_dispatch_inventory` contexts
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
+`deferred_modes_have_live_disagreements_across_the_complete_native_adapters`.
+
+The materialized-tree `fslc check <path>` comparison from `bc14d885` to corrected
+Rust source/test tree `a65eddd5` checked all **603 corpus forms in both parser
+configurations (1206 checks per tree)** and **368 required-test inline/included
+occurrences per tree**, for **3148 checks**. It found **6 `ok`→`error`
+occurrences**, only the legacy-compose cell above in three contexts twice each;
+**0 other transitions**, including **0 corpus transitions**. All canonical twins
+remain accepted. See the dependency amendment in
+[`DESIGN-migration.md`](../design/DESIGN-migration.md) for the exact source-tree identity and scope.
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while
