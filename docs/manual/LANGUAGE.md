@@ -1795,6 +1795,16 @@ remain #1513. Repair projections/exits stay unchanged, including lint's existing
 dialect limits (#609); this does not remove public-example warnings (#608) or fix
 other ledger warning classifications (#1497).
 
+The multi-root type-boundary audit compares base
+`796876558b83f2dedd7dafdf04ef77fced3de033` with Rust/source-test revision
+`8796f19d9646a4edffbac0719c3693a8f88c1405`, built in separate materialized trees.
+`fslc check FORM` covers 606 corpus files and 35,611 captured inline occurrences,
+both parser configurations and observed edition requests (72,859 pairs).
+The additional `e16f65bfeae773218d23f425376ea7c23b895bff` comparison covers its
+603 corpus files and the same inline inputs: 218,571 commands overall, empty
+ok-to-error sets and empty full base/head JSON/stderr/exit differences, with no
+excluded fields. Repeated occurrences and rewritten dependency-test inputs remain.
+
 Actually read dependencies use **their own** header or the current default
 (#1452), not a parent's requested edition. Canonical mixed editions remain valid.
 Compose `use`, `implements from`, causal `uses` and governance delegates,

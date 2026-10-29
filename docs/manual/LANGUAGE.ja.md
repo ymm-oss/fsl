@@ -1670,6 +1670,15 @@ ledger の移行表示は維持します。移行 finding だけの行は vacuit
 終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
 警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
 
+複数 root の型境界監査では、BASE
+`796876558b83f2dedd7dafdf04ef77fced3de033` と Rust/source-test revision
+`8796f19d9646a4edffbac0719c3693a8f88c1405` を別々の materialized tree で build し、
+`fslc check FORM` を corpus 全606 file と捕捉済み inline 35,611出現に適用しました。
+両 parser 設定と観測された edition 指定を含む72,859組です。追加の
+`e16f65bfeae773218d23f425376ea7c23b895bff` はその corpus 603 file と同じ inline 入力を
+検査し、全218,571コマンドとなります。両 ok→error 集合と BASE/HEAD の完全な
+JSON/stderr/exit の差は空で、除外 field はありません。反復出現と変更した依存先 test の入力も保持します。
+
 実際に読まれる依存先は、親が要求した edition を継承せず、**自分の**ヘッダーまたは
 現行の既定 edition で判定します(#1452)。canonical な異なる edition の混在は許します。
 compose の `use`、`implements from`、causal の `uses`、governance の delegates、

@@ -357,6 +357,17 @@ warning classification (#1497) are not part of this delivery.
 
 ## Amendment: dependency edition admission (#1452)
 
+The multi-root completion's type-boundary audit uses base
+`796876558b83f2dedd7dafdf04ef77fced3de033` and Rust/source-test revision
+`8796f19d9646a4edffbac0719c3693a8f88c1405`, each built in its own materialized
+tree. `fslc check FORM` covers all 606 corpus files and 35,611 captured inline
+occurrences (including rewritten dependency tests), both parser configurations
+and observed edition requests: 72,859 configuration pairs. The additional
+`e16f65bfeae773218d23f425376ea7c23b895bff` binary covers its 603 corpus files
+and the same inline occurrences, for 218,571 commands overall. Both ok-to-error
+sets and the complete base/head JSON/stderr/exit difference set are empty;
+no output fields are excluded. Duplicate fixture occurrences remain counted.
+
 Every FSL dependency actually read by a consumer is classified by its own header
 or the current default before its bytes reach lowering, a model, a solver or an
 output producer. The parent's requested edition is not inherited; canonical mixed

@@ -76,3 +76,11 @@ retaining per-cell warning ownership without finishing the aggregate. Success
 controls compare one complete finding where the dialect has migration forms and
 require warning absence for AI/DB dialects without those forms. No planner or
 language behavior is added by those controls.
+
+The multi-root audit compares main base 796876558b83f2dedd7dafdf04ef77fced3de033
+and Rust/source-test revision 8796f19d9646a4edffbac0719c3693a8f88c1405, each in
+its own materialized tree: 606 corpus files, 35,611 inline occurrences, both
+parser modes and observed edition requests, 72,859 pairs. Additional base
+e16f65bfeae773218d23f425376ea7c23b895bff covers its 603 files and the same inline
+inputs, yielding 218,571 commands overall. Both ok-to-error sets and complete
+base/head JSON/stderr/exit difference sets are empty; no fields are excluded.

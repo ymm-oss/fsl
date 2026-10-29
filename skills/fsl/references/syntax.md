@@ -440,6 +440,14 @@ Actually read dependencies are admitted as described below. Git-revision roots (
 warning cleanup (#608), lint dialect support (#609) and other ledger warning
 classifications (#1497) are separate; historical-root coverage is not implied.
 
+Multi-root audit: base `796876558b83f2dedd7dafdf04ef77fced3de033` versus Rust/source-test
+revision `8796f19d9646a4edffbac0719c3693a8f88c1405`, independently materialized/built;
+`fslc check FORM`, 606 corpus files +35,611 inline occurrences, both parser modes
+and observed edition requests, 72,859 pairs. Additional base
+`e16f65bfeae773218d23f425376ea7c23b895bff` covers its 603 files and the same inline
+inputs: 218,571 commands overall. Both ok-to-error sets and full base/head
+JSON/stderr/exit differences are empty, no excluded fields; duplicates retained.
+
 Dependency admission (#1452) uses each consumed child's own header/current default,
 never the parent's requested edition; canonical mixed editions are allowed.
 Compose use, implements, causal uses and governance delegate/before/after/mapping
