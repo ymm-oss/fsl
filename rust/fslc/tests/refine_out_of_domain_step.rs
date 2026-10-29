@@ -46,19 +46,24 @@ fn old_seq_req(lo: i32) -> String {
 }
 
 fn argument_source(source: &str) -> String {
-    source
+    let source = source
         .replace("state {", "type S = 0..2\n  state {")
         .replace("Seq<V, 2>", "Seq<S, 2>")
-        .replace("seq.push(v)", "seq.push(0)")
+        .replace("seq.push(v)", "seq.push(0)");
+    if source.starts_with("spec SeqAbs") {
+        source.replace("type V", "type AV").replace("v: V", "v: AV")
+    } else {
+        source
+    }
 }
 
 fn seq_req(lo: i32) -> String {
     argument_source(&old_seq_req(lo))
 }
 
-const MAP_ABS: &str = "spec MapAbs {\n  type K = 0..2\n  state { m: Map<K, Bool> }\n  \
-     init { forall k: K { m[k] = false } }\n  action set(k: K) { m[k] = true }\n  \
-     invariant Total { forall k: K { m[k] or not m[k] } }\n}\n";
+const MAP_ABS: &str = "spec MapAbs {\n  type AK = 0..2\n  state { m: Map<AK, Bool> }\n  \
+     init { forall k: AK { m[k] = false } }\n  action set(k: AK) { m[k] = true }\n  \
+     invariant Total { forall k: AK { m[k] or not m[k] } }\n}\n";
 const MAP_NARROW_REQ: &str = "requirements MapReq {\n  \
      implements MapAbs from \"abs.fsl\" { maps auto }\n\n  type K = 0..1\n  \
      state { m: Map<K, Bool> }\n  init { forall k: K { m[k] = false } }\n  \
