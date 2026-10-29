@@ -848,7 +848,8 @@ which is the only cache any pull request could ever share.
 **Queue adoption qualification (2026-10-29).** The decision's premise that only `main` saves
 no longer holds: the unchanged event guard also permits `merge_group` saves on queue refs.
 The original #747 incident and decision above remain history; see the known open cache risk in
-"Merge queue adoption (2026-10-29)" below for the current consequence and audit blind spot.
+"Merge queue adoption (2026-10-29)" below for the current consequence and audit blind spot,
+tracked in #1615.
 
 **That is no longer a description of every step -- the current contract has two shapes, not one, and
 which key a restore-only step reads is not the same for all of them.** A step that saves its own
@@ -1678,11 +1679,16 @@ only `main` saving shared caches. With the queue active, `ci.yml`'s unchanged
 to save under `refs/heads/gh-readonly-queue/...`. Other refs cannot restore those entries, but
 they still count toward the repository's 10 GiB budget: the same ref-isolated eviction pressure
 as #747. An exact cache hit does not save again; a changed key or an evicted `main` entry can
-expose this path. This is a configuration-derived risk, not a measurement of queue-cache bytes.
+expose this path.
+On the first product-gate `merge_group` run (`40840541665`), `save-if` evaluated true for
+`rust checks`, all three `rust tests` and all three `mutation operators`; the `rust tests` jobs
+did not save because their primary keys hit. At 18:05 on 2026-10-29, none of the repository's
+30 caches were on a `gh-readonly-queue` ref; this does not eliminate the risk, because a key
+change or eviction can allow a save.
 The cache audit's rules 3 and 4 currently filter only `refs/pull/`, so they do not attribute
 queue-ref entries, although those bytes still contribute to the total-budget judgment.
-A follow-up must exclude `merge_group` from the save-enabled steps and extend both audit ref
-filters to `refs/heads/gh-readonly-queue/`. Neither executable behavior changes in this decision.
+Follow-up #1615 covers excluding `merge_group` from the save-enabled steps and extending both
+audit ref filters to `refs/heads/gh-readonly-queue/`. Neither executable behavior changes in this decision.
 
 **First queued merge evidence.** #1608 was merged by the queue to `main` commit
 `625698621cadfd842a90b6b921e51eb8a9591b79`. The queue branch was
