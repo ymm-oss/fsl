@@ -954,7 +954,7 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         diagnostic::annotated(diagnostic::LEAF)
                     },
                 );
-                // Documents do not consume implements children or scan them speculatively.
+                // A1 oracle, not a behavior change: documents do not consume implements children.
                 let findings = if legacy && kind != "requirements_document" {
                     vec![warning(diagnostic::LEGACY_LEAF, "dep.fsl")]
                 } else {
