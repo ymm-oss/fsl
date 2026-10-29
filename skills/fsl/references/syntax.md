@@ -1771,6 +1771,29 @@ prefix) / partial operations (`_partial_<action>`, Seq pop/head/at and nonzero
 divisor) / action coverage (+ unsat-core diagnostics) / deadlock (warning, with
 state, `deadlock reachable at step N (state: …)`, violated under
 `--deadlock error`) / leadsTo (lasso + stall).
+
+**Selected induction (#1598):** `verify --engine induction --property P` still
+checks every implicit `_bounds_*` in its base because the step assumes them.
+Sibling user invariants stay unselected (a selected `trans` retains all user
+invariant hypotheses). Intentional verdict transitions are exit 0 false
+`proved` / `unbounded` → exit 1 `violated` / `type_bound`, exit 2 `error` /
+`kind: "semantics"` for an overflowing Seq frame → exit 1 `violated` /
+`type_bound`.
+The shared base also applies to `sweep --engine induction --property P`
+(exit 0 `sweep_passed` → exit 1 `sweep_failed`) and `verify --lemma` targets
+(exit 0 `proved` → exit 1 `violated` / `type_bound`).
+Also, `unknown_cti` or `violated P` at the same or a later step becomes
+`violated _bounds_*` at the first failing base step.
+Same-step examples: `n: 0..1`, init 0, increment, `P { n <= 1 }` at depth 2
+changes `P`@2 to `_bounds_n`@2; a Set initial copy with `K = 0..1`,
+`init { x = 2 t = Set { x } s = t }`, `P { not s.contains(2) }` changes `P`@0 to
+`_bounds_s`@0 (exit 1 `violated` in both cases, now `type_bound`).
+A deterministic overflowing Seq init reports the bound at step 0; `n: 0..1`, init 0, increment,
+`P { n <= 2 }` reports `_bounds_n` at step 2 when base depth is at least 2.
+Only the **`proved` envelope's** `invariants_checked` includes those checked
+bounds; **`violated` envelopes omit that field**. Standalone BMC and explicit
+property selection are unchanged.
+
 An **intended terminal state** (processing complete, etc. — a state where stopping
 is correct) is declared with `terminal { <predicate> }` — a stop satisfying the
 predicate is excluded from the deadlock check, while other unexpected deadlocks

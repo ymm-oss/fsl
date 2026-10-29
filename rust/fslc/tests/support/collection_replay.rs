@@ -19,7 +19,7 @@ pub struct ReplayCase {
     directory: PathBuf,
     verify_options: Vec<String>,
     expected_trace_state: Option<(String, Value)>,
-    expected_property: Option<String>,
+    expected_property: Option<(String, Option<String>)>,
 }
 
 impl ReplayCase {
@@ -58,8 +58,8 @@ impl ReplayCase {
         self
     }
 
-    pub fn with_expected_property(mut self, property: &str) -> Self {
-        self.expected_property = Some(property.to_owned());
+    pub fn with_expected_property(mut self, property: &str, induction_bound: Option<&str>) -> Self {
+        self.expected_property = Some((property.to_owned(), induction_bound.map(str::to_owned)));
         self
     }
 
@@ -338,10 +338,16 @@ impl ReplayCase {
                 exit == 1 && report["result"] == "violated"
             };
             require(errors, agrees, &self.name, engine, &report, exit);
-            if let Some(property) = &self.expected_property {
+            if let Some((property, induction_bound)) = &self.expected_property {
                 require(
                     errors,
-                    report["invariant"] == *property,
+                    if engine == "induction"
+                        && let Some(bound) = induction_bound
+                    {
+                        has_named_bound(&report, bound)
+                    } else {
+                        report["invariant"] == *property
+                    },
                     &self.name,
                     &format!("{engine} selected property"),
                     &report,

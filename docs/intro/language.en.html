@@ -1776,14 +1776,34 @@ response ever closed gets "has no response scenario within depth K" — the
 two are never conflated.</p>
 <p><code>verify --property Name</code> resolves across invariant, <code>trans</code>, <code>leadsTo</code>, and
 <code>reachable</code> declarations and checks only the named property kind in isolation.
-There is one induction-specific dependency rule: with
+Induction also checks every implicit <code>_bounds_*</code> in its base case because its
+step assumes them. Thus <code>--engine induction --property P</code> can report a violated
+<code>_bounds_*</code> (<code>violation_kind: "type_bound"</code>, exit 1), even when P is selected;
+the <strong><code>proved</code> envelope's</strong> <code>invariants_checked</code> includes those bounds, but
+<strong><code>violated</code> envelopes omit <code>invariants_checked</code></strong>. The intentional #1598
+transitions are exit 0 false <code>proved</code> / <code>unbounded</code> → exit 1 <code>violated</code> /
+<code>type_bound</code>, exit 2 <code>error</code> / <code>kind: "semantics"</code> → exit 1 <code>violated</code> /
+<code>type_bound</code> (for an overflowing Seq frame).
+The shared base also applies to <code>sweep --engine induction --property P</code>
+(exit 0 <code>sweep_passed</code> → exit 1 <code>sweep_failed</code>) and <code>verify --lemma</code> targets
+(exit 0 <code>proved</code> → exit 1 <code>violated</code> / <code>type_bound</code>).
+In addition, <code>unknown_cti</code> or <code>violated P</code> at the same or a later step becomes
+<code>violated _bounds_*</code> at the first failing base step.
+Same-step examples: <code>n: 0..1</code>, init 0, increment, <code>P { n &lt;= 1 }</code> at depth 2
+changes <code>P</code>@2 to <code>_bounds_n</code>@2; a Set initial copy with <code>K = 0..1</code>,
+<code>init { x = 2 t = Set { x } s = t }</code>, <code>P { not s.contains(2) }</code> changes <code>P</code>@0 to
+<code>_bounds_s</code>@0 (both remain exit 1 <code>violated</code>, now <code>type_bound</code>).
+For example, a deterministic overflowing Seq init now reports the bound at
+step 0; <code>n: 0..1</code>, init 0, increment, <code>P { n &lt;= 2 }</code> reports <code>_bounds_n</code> at
+step 2 when the base depth is at least 2. Standalone BMC and explicit property
+selection are unchanged. In addition, with
 <code>--engine induction --property &lt;trans&gt;</code>, the named <code>trans</code> is the only transition
 obligation, but all user invariants and implicit type bounds remain in the base
 case and the induction hypothesis. This preserves proofs whose two-state safety
 argument depends on established state invariants and makes the selected
 transition's verdict match the same transition in an all-properties induction
-run. Existing <code>--property &lt;invariant&gt;</code> behavior is unchanged: it still restricts
-the model to that invariant rather than retaining sibling invariants. The
+run. <code>--property &lt;invariant&gt;</code> still restricts user invariants to the selected
+one rather than retaining sibling invariants. The
 induction selector continues to reject selected <code>leadsTo</code> and <code>reachable</code>
 properties with a usage error.
 <code>--exclude-property Name</code> is repeatable and acts as the cross-kind inverse:

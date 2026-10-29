@@ -224,19 +224,19 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         auxiliary,
         skip_vacuity_probe,
     } = request;
-    let selected_transition_model = match selected_transition_induction_model(selection) {
+    let selected_model = match selected_transition_induction_model(selection)
+        .and_then(|model| model.map_or_else(|| load_selected_model(selection), Ok))
+    {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let selection = selected_transition_model
-        .as_ref()
-        .map_or(selection, |model| ModelSelection {
-            path: selection.path,
-            model: Some(model),
-            scope: None,
-            property: None,
-            excluded: &[],
-        });
+    let selection = ModelSelection {
+        path: selection.path,
+        model: Some(&selected_model),
+        scope: None,
+        property: None,
+        excluded: &[],
+    };
     let started = Instant::now();
     let base_request = BmcRequest {
         selection,

@@ -1578,13 +1578,33 @@ Public Kernel v2 はオプトインで、
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
-ただし induction には依存関係に関する規則が 1 つあります:
+ただし induction は step が仮定するすべての暗黙の `_bounds_*` をベースケースでも検査します。
+このため `--engine induction --property P` でも、選択した P ではなく `_bounds_*` の違反
+(`violation_kind: "type_bound"`、exit 1)を返すことがあります。
+**`proved` エンベロープの** `invariants_checked` にもこれらの型境界を含めますが、
+**`violated` エンベロープに `invariants_checked` はありません**。#1598 では意図的に、
+exit 0 の偽の `proved` / `unbounded` → exit 1 の `violated` / `type_bound`、
+exit 2 の `error` / `kind: "semantics"` → exit 1 の `violated` / `type_bound`
+(Seq frame の容量超過)へ変更します。
+同じベースケースを通る `sweep --engine induction --property P`
+(exit 0 `sweep_passed` → exit 1 `sweep_failed`) と `verify --lemma` の検証対象
+(exit 0 `proved` → exit 1 `violated` / `type_bound`) にも適用されます。
+さらに、`unknown_cti`、または同じ step かそれより後の `violated P` は、
+base で最初に違反する step の `violated _bounds_*` に変わります。
+同じ step の例: `n: 0..1`、init 0、インクリメント、`P { n <= 1 }`、深さ 2 では
+`P`@2 → `_bounds_n`@2。Set の初期コピーで `K = 0..1`、
+`init { x = 2 t = Set { x } s = t }`、`P { not s.contains(2) }` なら `P`@0 → `_bounds_s`@0
+です(どちらも exit 1 の `violated` のままで、種別が `type_bound` になります)。
+たとえば、決定的な Seq init の容量超過は step 0 の型境界違反になります。
+`n: 0..1`、init 0、インクリメント、`P { n <= 2 }` なら、base の深さが 2 以上のとき
+step 2 の `_bounds_n` 違反になります。単独の BMC と explicit のプロパティ選択は
+変更しません。さらに、
 `--engine induction --property <trans>` では、指名した `trans` だけが遷移の証明義務に
 なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
 仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
 維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
-既存の `--property <invariant>` の挙動は変更しません: sibling invariant は保持せず、
-指名した invariant だけにモデルを制限します。induction selector は、選択された
+`--property <invariant>` は引き続き sibling invariant を保持せず、ユーザー invariant を
+指名したものだけに制限します。induction selector は、選択された
 `leadsTo` と `reachable` を引き続き usage error として拒否します。
 `--exclude-property Name` は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、`trans`、`leadsTo`、`reachable` プロパティを、実行と、検査済み

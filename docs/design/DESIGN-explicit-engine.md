@@ -218,7 +218,11 @@ verdict semantics:
 Witness replay uses the same implicit-bound selection as the verification run.
 An omitted range bound does not roll back a concrete replay step: for
 `n: 0..1`, init `n = 0`, action `n = n + 1`, and invariant `P { n <= 2 }`,
-`--property P` reports `violated` at step 3 (exit 1), not a replay mismatch.
+standalone BMC and explicit with `--property P` report `violated P` at step 3
+(exit 1), not a replay mismatch. Induction checks every implicit bound in its
+base (#1598): with base depth at least 2 it instead reports `violated`,
+`type_bound`, `_bounds_n` at step 2 (exit 1), replacing the former `unknown_cti`
+or later `violated P` result.
 
 An omitted Seq bound is different: if an explored successor exceeds the root
 state's `Seq<T, N>` capacity, explicit fails closed with exit 2,
@@ -267,8 +271,12 @@ spec InitIdle {
 Selecting P, at depth 0 explicit remains exit 0 `verified`; at depth at least 1
 it changes from exit 0 `proved` to exit 2 `semantics` with the same capacity
 message. The recorded depths 1 and 3 are two changed cells of this one additional
-literal form, with one unchanged depth-0 control. BMC and induction already
-return that error on this form, including at depth 0. Other initial-overflow
+literal form, with one unchanged depth-0 control. Standalone BMC returns that
+error on this form, including at depth 0. Induction now checks all implicit
+bounds in its selected base (#1598), so it returns exit 1 `violated` /
+`type_bound`, `_bounds_xs` at step 0 with the initial state alone, including
+at depth 0; it no longer returns the former exit-2 `semantics` error.
+Other explicit initial-overflow
 forms that previously remained bounded `verified`, or later failed replay,
 likewise error when an explored successor still exceeds capacity.
 These counts describe selected acceptance cases, not a corpus-wide transition
@@ -318,9 +326,10 @@ find_boundary_violation`'s `CONCRETE_PROBE_BUDGET` (issue #697,
 `docs/design/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget") bounds
 the *internal* concrete pre-pass native BMC/induction makes ahead of the symbolic
 engine when the prepared request has `checked_bounds: None`, supplies no initial
-state, and has deterministic init. Every `--property` selection skips it except
-selected-trans induction, which retains all bounds in its base case and can
-still enter it. `--exclude-property <user property>` alone keeps the pre-pass
+state, and has deterministic init. Standalone BMC `--property` selections skip
+it. Induction's base retains all implicit bounds even with `--property` (#1598)
+and can still enter it; selected-trans induction also retains all user invariant
+hypotheses. `--exclude-property <user property>` alone keeps the pre-pass
 and receives its initial step-0 correction. The probe looks only for a
 `partial_op`/`type_bound` boundary outcome; its initial-state check evaluates
 only type bounds for models with actions and reports a violation at step 0 even

@@ -701,10 +701,15 @@ fn initial_collection_copies_agree_with_concrete_execution() {
   invariant P {{ {condition} }}
 }}\n"
         );
-        // The selected invariant must fail, not merely an unselected bound.
+        // Standalone selection reports P; induction first checks its bounds.
+        let induction_bound = if name == "initial-relation-copy" {
+            "_bounds_t"
+        } else {
+            "_bounds_s"
+        };
         ReplayCase::new(name, &source, &["go"])
             .with_verify_options(&["--property", "P"])
-            .with_expected_property("P")
+            .with_expected_property("P", Some(induction_bound))
             .agreement(3, false, None, &mut errors);
     }
     finish(&errors);

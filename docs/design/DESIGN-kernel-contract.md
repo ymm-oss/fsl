@@ -176,12 +176,14 @@ Seq, or after a reachable target was already witnessed, if a later explored
 frame overflows.
 
 The native `prepare_bmc` pre-pass runs when `selected_implicit_bounds` returns
-`None`, no initial state is supplied, and init is deterministic. Every public
-CLI `--property` selection skips the pre-pass except selected-trans induction,
-which instead retains all bounds and invariant hypotheses in its base-case
-model and clears the
-property selection before `prepare_bmc`, so it can still enter the pre-pass and
-receives the same initial step-0 correction. Dispatch conditions are unchanged.
+`None`, no initial state is supplied, and init is deterministic. Standalone BMC
+`--property` selections skip it. Induction instead materializes the selected user
+properties and clears selector metadata before preparing its base: every implicit
+bound assumed by its step is checked even under `--property P` or
+`--property _bounds_xs` (#1598). These induction runs can enter the pre-pass and
+receive the initial step-0 correction. Selected-trans induction additionally
+retains all user invariant hypotheses. The pre-pass's own dispatch conditions
+are unchanged.
 `--exclude-property <user property>` alone leaves all implicit bounds checked
 and still enters the pre-pass: its initial-bound evidence also moves from
 step 1 / two states to step 0 / one state when the old probe found an idle
@@ -286,7 +288,27 @@ action, the engine and path matter (`E` below is exit 2 / `semantics` /
 |---|---|---|---|
 | Default, depth 0 | TB@0 (concrete initial check) | TB@0 (concrete initial check) | TB@0 |
 | Default, depth at least 1 | TB@0 (concrete initial check) | TB@0 (concrete initial check) | TB@0 |
-| `--property _bounds_xs` (pre-pass skipped) | E (symbolic initial projection) | E (symbolic initial projection) | TB@0 |
+| `--property _bounds_xs` (only BMC skips the pre-pass) | E (symbolic initial projection) | TB@0 (concrete initial check, #1598) | TB@0 |
+
+**Selected-induction verdict transitions (#1598).** These are intentional
+selection-contract changes, not changes to standalone BMC or explicit:
+
+| Form under `--engine induction --property P` (or a selected bound) | Before #1598 | After #1598 |
+|---|---|---|
+| Initial bound omitted at every base depth; a shallow run can also miss P | exit 0 `proved` / `unbounded` (false proof) | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` |
+| Deterministic initial Seq overflow reaching the pre-pass (including `InitIdle` and the selected `_bounds_xs` row above), or an overflowing Seq successor within the base depth | exit 2 `error`, `kind: "semantics"` | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_xs` (step 0 for init) |
+| Bound fails at or before the selected property's failing step | exit 1 `unknown_cti`, or exit 1 `violated P` at the same or a later step | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` at the first failing base step |
+| The same base through `sweep --engine induction --property P`, or a `verify --lemma` target | exit 0 `sweep_passed`, or exit 0 `proved` for the lemma-assisted target | exit 1 `sweep_failed`, or exit 1 `violated` / `type_bound` for the target |
+
+Same-step examples under selected induction: `n: 0..1`, init 0, increment,
+`P { n <= 1 }` at depth 2 changes `violated P`@2 to `type_bound _bounds_n`@2.
+For a Set initial copy with `K = 0..1`, `init { x = 2 t = Set { x } s = t }`,
+`P { not s.contains(2) }` changes `violated P`@0 to `type_bound _bounds_s`@0.
+In both cases the exit stays 1; attribution changes at the same step.
+
+The `proved` envelope's `invariants_checked` includes all implicit bounds;
+`violated` envelopes omit that field. They identify the failed bound using
+`violation_kind` and `invariant`, with the corresponding base-state evidence.
 
 Each default TB@0 above has the one-state trace `[{step: 0, state: {xs: [0, 1]}}]`
 and `last_action: null`. This replaces the former depth-at-least-1 default
@@ -316,8 +338,10 @@ induction at depths 1/2 (four example cells) from exit 2 / `semantics` /
 `integer overflow in addition` to exit 1 / `type_bound` / step 0 / one state.
 The no-actions case is deliberately not an exit-code change.
 
-Selecting a supported user invariant instead leaves the Seq bound unchecked:
-the symbolic engines reject the initial frame via the guard. Explicit retains
+Selecting a supported user invariant leaves the Seq bound unchecked in standalone
+BMC, which rejects the initial frame via the guard. Induction checks that bound
+in its base and, for this deterministic initial overflow, reports TB@0 instead
+of the former exit-2 `semantics` error (#1598). Explicit retains
 the concrete elements and evaluates the selected predicate at depth 0. If that
 predicate holds and an idle successor preserves the initial overflow, depth at
 least 1 now returns the same capacity `semantics` error, before closure can

@@ -2353,9 +2353,9 @@ mod symbolic_bounds {
 
 // Selected-property fail-closed detectors: an overflowing state frame must not
 // lose the appended value and emit a wrong verdict (false violated for SF1,
-// false verified for SF2; both polarities for SF3). Keep all 145 existing tests
-// unchanged. The identical
-// sources without property selection also pin concrete type-bound evidence.
+// false verified for SF2; both polarities for SF3). Induction checks its bound
+// dependencies first (#1598); standalone selection still fails closed.
+// The identical sources without selection pin the same type-bound evidence.
 mod selected_overflow {
     use super::*;
 
@@ -2390,7 +2390,7 @@ mod selected_overflow {
 
     fn assert_default(value: &Value, exit: i32, two_step: bool, label: &str) {
         // Independently: [0,1] (SF1/SF2) or [1,0] (SF3) exceeds N=1.
-        // All-properties checking must report the bound, not P or R.
+        // All-properties checking and selected induction report the bound first.
         assert_eq!(
             (
                 exit,
@@ -2457,7 +2457,7 @@ mod selected_overflow {
         let (value, exit) = model.run(&cell, &args);
         let label =
             format!("{name} {engine} property={property} selected={selected}: exit={exit} {value}");
-        if !selected {
+        if !selected || (engine == "induction" && property == "P") {
             assert_default(&value, exit, two_step, &label);
         } else if engine == "induction" && property == "R" {
             // Selecting a reachable is unsupported by induction, independent
@@ -2477,7 +2477,7 @@ mod selected_overflow {
             // ANS-1519selected option F: bounds are not selected, but a state
             // frame of capacity 1 cannot represent length 2. Fail closed at
             // that boundary instead of proving anything using a lost suffix.
-            // Explicit now fails closed like bmc and induction when a
+            // Explicit now fails closed like bmc when a
             // successor exceeds an unchecked Seq capacity (#1531).
             assert_eq!(
                 (exit, &value["result"], &value["kind"]),
