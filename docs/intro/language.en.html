@@ -759,8 +759,7 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 may call earlier or later definitions but cannot be directly or mutually
 recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
-variable capture instead of inventing internal binder names, with the known
-<code>leadsTo</code> property-binder exception below. See
+variable capture instead of inventing internal binder names. See
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
 <p><strong>Breaking removal (#1450):</strong> a call is rejected when an action parameter,
 <code>let</code>, expression quantifier/aggregate binder, or statement <code>forall</code> at the call
@@ -774,22 +773,23 @@ rejections are unchanged. This applies to direct specs and source-local defs
 in compose components and synchronized actions.
 A non-global <code>is some(v)</code> binding exported by a <code>requires</code> guard or the left
 operand of a binary expression is also a caller binding for this check.</p>
-<p><strong>Remaining soundness risk (Refs #1528):</strong> a binder declared directly by a
-<code>leadsTo</code> property is not propagated into the property's before/after expressions,
-<code>helpful</code> arguments, <code>decreases</code>, or <code>within</code> by this capture check. Such a binder
-can still capture a def-body free name and produce a false green. Rename that
-binder; do not treat a successful check or verification of the capturing form
-as evidence of the intended state reference. Expression quantifiers and
-aggregates inside the property's expressions are covered by #1450.
-The declaration binder's own <code>where</code> expression is checked for capture; an
-earlier capture error can therefore precede the existing rejection of unsupported
-property-wrapper <code>where</code> filters.</p>
-<p>The final implementation's <code>check</code> sweep of all 597 <code>.fsl</code> files under
-<code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code>, using base
-<code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code> and built implementation
-<code>dd7b47885680076412ab2f0b46ebe8854ff6758b</code> in their respective materialized
-trees, has an empty ok-to-error transition set. The newly rejected inline
-forms and the still-open #1528 path are not negated by that corpus result.</p>
+<p><strong>Breaking removal (#1528):</strong> binders declared directly by a <code>leadsTo</code> property
+also participate in this capture check for before/after expressions, <code>helpful</code>
+arguments, <code>decreases</code>, and <code>within</code>. A call capturing a def-body free name now
+rejects with exit 2, <code>kind: "semantics"</code>, and <code>would capture variable</code> at the
+call, in direct specs and compose components. Rename the declaration binder.
+Binder ranges and the binder's own <code>where</code> expansion are unchanged; capture in
+<code>where</code> can still precede the unsupported-property-wrapper-where rejection.
+An already-invalid state-reading <code>within</code> call can now report <code>would capture</code>
+at the call instead of <code>unknown constant</code>, still with exit 2 / semantics.</p>
+<p>The #1528 <code>check</code> sweep used separately built <code>git archive</code> trees for base
+<code>f5f3f1942220ad6c1e1802fe9bc523fabe2155ae</code> and implementation
+<code>2c955b9756b5fd8f5d0650ffef650ba9952571bc</code>. All 598 <code>.fsl</code> files under
+<code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code> agree in full stdout/stderr
+and exits: zero ok-to-error transitions and zero error-to-error diagnostic
+changes. The one migrated inline test source (599 forms total) is the only
+ok-to-error transition: a declaration binder captures a def-body free state
+name in a <code>decreases</code> call. There are no unrelated breaking removals.</p>
 <ul>
 <li>Arithmetic: <code>+ - * / %</code>, unary <code>-</code>, <code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (since <code>a//b</code> would turn everything after <code>//</code> into a comment, write division
