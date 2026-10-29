@@ -43,7 +43,17 @@ fn ai_project_components_are_rejected_with_the_full_worker_envelope() {
         ),
         (
             rule,
-            json!({"result":"error","kind":"semantics","message":"unknown ai hard-contract rule 'unregistered_hard_rule' at 7:3",
+            json!({"result":"error","kind":"semantics","message":"unknown ai hard-contract rule 'unregistered_hard_rule' at 9:3",
+            "hint":"supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"}),
+        ),
+        (
+            include_str!("fixtures/ai_project_inline_invalid_rule.fsl"),
+            json!({"result":"error","kind":"semantics","message":"unknown ai hard-contract rule 'unregistered_inline_rule' at 4:33",
+            "hint":"supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"}),
+        ),
+        (
+            include_str!("fixtures/ai_project_later_invalid_rule.fsl"),
+            json!({"result":"error","kind":"semantics","message":"unknown ai hard-contract rule 'unregistered_later_rule' at 12:7",
             "hint":"supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"}),
         ),
         (

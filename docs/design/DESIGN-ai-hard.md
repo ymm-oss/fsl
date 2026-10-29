@@ -145,8 +145,14 @@ exit 2), rather than `ok`. In particular, the previously accepted fixtures
 project checking. Standalone #1546 no-tools envelopes remain unchanged on
 check and specialized-preflight paths; the lowering-only duplicate-fallback
 priority exception is measured below.
-Project semantic positions retain their component-block coordinate frame
-(#1574); LSP project-component diagnostics remain separate work (#1575).
+Embedded component locations use the original document's one-based lines and
+Unicode-scalar columns, not component-block coordinates or UTF-16 units. The
+project parser translates token spans once before constructing component IR,
+including nested locations and annotation UTF-8 byte offsets. Unknown hard-rule
+messages remain anchored at `check hard`, not the `rule` token; parse errors are
+not translated twice. Only coordinates change: validity, diagnostic kind,
+envelope fields, exit status and assurance remain unchanged. LSP project-component
+diagnostics remain separate work (#1575).
 
 ### Boundary sweep evidence (#1545)
 

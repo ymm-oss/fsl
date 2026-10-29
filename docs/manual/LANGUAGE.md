@@ -3940,8 +3940,14 @@ with an undeclared authority tool or unknown hard rule, matching project
 `ai check` (semantics, exit 2), rather than reporting `ok`. This removes the
 former acceptance of the fixtures `error_envelope_ai_project_unknown_tool.fsl`
 and `error_envelope_ai_project_invalid_rule.fsl` under generic project checking.
-Project semantic coordinates remain component-block-relative (#1574); missing
-LSP project-component diagnostics remain tracked separately (#1575).
+Embedded component locations refer to the original document: lines and columns
+are one-based, and columns count Unicode scalar values, not bytes or UTF-16 units.
+The project parser translates token spans once before building component IR,
+including nested locations and annotation UTF-8 byte offsets. Unknown hard-rule
+messages point to `check hard`; existing parse errors are not translated twice.
+This corrects coordinates only, without changing validity, diagnostic kind,
+envelope fields, exit status or assurance. Missing LSP project-component
+diagnostics remain tracked separately (#1575).
 
 **Measured boundary sweep (#1545):** B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` and H

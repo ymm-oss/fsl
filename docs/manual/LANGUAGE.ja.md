@@ -3762,8 +3762,13 @@ hard rule を持つ project 内のすべての component も拒否し、`ok` で
 `ai check` と同じ診断(semantics、exit 2)を返します。generic な project 検査で従来
 受理した fixture `error_envelope_ai_project_unknown_tool.fsl` と
 `error_envelope_ai_project_invalid_rule.fsl` の受理も削除されます。
-project の意味論的な座標は引き続き component block 内が基準です(#1574)。
-LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
+埋め込まれた component の位置は元の文書全体を指します。行と列は 1 始まりで、
+列は byte や UTF-16 単位ではなく Unicode scalar value を数えます。project parser は
+component IR を作る前に token の span を一度だけ移し、ネストした位置と annotation の
+UTF-8 byte offset も元の文書に揃えます。未知の hard rule の message は `check hard` を
+指し、既存の parse error を二重には移しません。座標だけの修正であり、受理・拒否、
+診断の kind、envelope の field、exit status、assurance は変えません。LSP が project 内の
+component の診断を出さない問題は別に追跡します(#1575)。
 
 **境界 sweep の実測 (#1545):** B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` と H

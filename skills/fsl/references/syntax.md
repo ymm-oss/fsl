@@ -613,8 +613,13 @@ Native `check` and shared Worker stages now also
 reject undeclared authority tools and unknown hard rules in every project
 component, matching project `ai check` (semantics / exit 2). Generic checking no
 longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
-`error_envelope_ai_project_invalid_rule.fsl`. Project semantic positions remain
-block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
+`error_envelope_ai_project_invalid_rule.fsl`.
+Embedded component locations use the original document's one-based lines and
+Unicode-scalar columns, not bytes or UTF-16 units. Token spans are translated
+once before constructing IR, including nested locations and annotation UTF-8 byte
+offsets. Unknown hard-rule messages point to `check hard`; parse errors are not
+double-translated. Validity, diagnostic kind, envelope fields, exit status and
+assurance do not change. LSP project-component diagnostics remain separate (#1575).
 
 Measured #1545 breaking-removal sweep: independently built B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` and H
