@@ -1243,9 +1243,10 @@ whole root; choosing formerly free values is a model-strengthening decision.
   all Map keys/fields; never-assigned roots remain free. Incomplete assigned
   roots retain the legacy ownership error. All legacy-probe-accepted partial
   forms keep symbolic free components, including single-field/branch-split
-  writes, key subsets and one-path whole-root writes. Refine's legacy free-root
-  default-fill limitation is tracked in #1521; partial admission is not expanded
-  until that is fixed. Explicit/Monitor require all fields of every entry
+  writes, key subsets and one-path whole-root writes. Refine refuses incomplete
+  assigned roots on either side instead of defaulting missing components (#1521);
+  bmc and induction retain free-value verdicts. Partial-component enumeration is
+  future work (#1579). Explicit/Monitor require all fields of every entry
   to be covered before reading the root or completing init. Resolved entry-field
   writes now count toward concrete coverage even in legacy-accepted shapes:
   complete single-field-entry maps become constructible; retained incomplete
@@ -1614,7 +1615,7 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    (including valid empty domains), and compose preserves original-global
    refusals without adding foreign-name refusals.
    Induction additionally requires state-independent helpful arguments: leadsTo
-   binders, integer/Boolean literals, and integer `+`, `-`, `*` (including unary `-`).
+   binders, constants, enum members, integer/Boolean literals, and integer `+`, `-`, `*` (including unary `-`).
    `check` and BMC accept well-typed state reads; induction refuses them.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.

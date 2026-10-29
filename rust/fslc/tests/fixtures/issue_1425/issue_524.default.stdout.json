@@ -1,0 +1,2477 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "MutantCardinality",
+  "depth": 2,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_stage",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 10
+      },
+      "target": "init assignment S00->S21",
+      "status": "killed",
+      "killed_by": "NeverFinal",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 17,
+        "column": 5
+      },
+      "target": "step00 requires #1 S00->S21",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 18,
+        "column": 5
+      },
+      "target": "step00 assignment S01->S21",
+      "status": "killed",
+      "killed_by": "NeverFinal",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 22,
+        "column": 5
+      },
+      "target": "step01 requires #1 S01->S21",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 23,
+        "column": 5
+      },
+      "target": "step01 assignment S02->S21",
+      "status": "killed",
+      "killed_by": "NeverFinal",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 27,
+        "column": 5
+      },
+      "target": "step02 requires #1 S02->S21",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 28,
+        "column": 5
+      },
+      "target": "step02 assignment S03->S21",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S04",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S16",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S17",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S18",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S19",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S20",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 32,
+        "column": 5
+      },
+      "target": "step03 requires #1 S03->S21",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S00",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S01",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S02",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S03",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S05",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S06",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S07",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S08",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S09",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S10",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S11",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S12",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S13",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S14",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 33,
+        "column": 5
+      },
+      "target": "step03 assignment S04->S15",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin",
+      "note": "action dead at baseline — survival expected"
+    }
+  ],
+  "summary": {
+    "total": 200,
+    "killed": 4,
+    "survived": 196,
+    "invalid": 0,
+    "kill_rate": 0.02,
+    "by_source": {
+      "builtin": {
+        "total": 200,
+        "killed": 4,
+        "survived": 196,
+        "invalid": 0,
+        "kill_rate": 0.02
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure",
+    "mutant cap 200 reached: 374 dropped"
+  ]
+}

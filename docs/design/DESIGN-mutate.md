@@ -21,8 +21,14 @@ mutants at all. Since #1002 a failed inline `implements` seam is such a baseline
 (`refinement_failed` / `impl_violated`, exit 1).
 
 `--from` adds every external JSONL record after the selected built-in catalog.
-`--max-mutants` caps only built-in enumeration; `--max-mutants 0 --from ...`
-is the external-only adjudication form.
+Built-in mutants visit items in deterministic source order. Within an action,
+the passes visit `requires` and `let` parts first, then statement parts, then
+`fair_remove`; within each part-visiting pass, part order precedes operator
+order. There is no global part-index order across these passes.
+`--max-mutants N` judges the first N built-ins; `--max-mutants 0 --from ...`
+is the external-only adjudication form. Internally, `discovered` is the full
+catalog size, including unjudged built-ins; it drives the cap note in §5 and
+`gate.dropped` in the opt-in gate below. The cap does not truncate discovery.
 
 ## 2. Mutate the **dialect-expanded kernel AST**, not the spec dict
 
@@ -92,6 +98,20 @@ Consequences that follow from mutating the rendered text rather than the domain 
   domain document.
 
 ### Mutation operators (deterministic enumeration, no randomness)
+
+Native built-in mutants are retained as edits: a replacement item, a replacement
+action part, or a removed action part. Only selected mutants are materialized,
+one at a time, by cloning the enumerated base spec and applying one edit; explain
+counterfactuals likewise materialize only their selected operators. Discovery
+avoids a full spec clone for every candidate. Residual: edits are not minimal
+expression-path patches. Expression mutations retain whole rewritten expressions;
+each init mutant retains a rewritten copy of the entire init statement vector,
+and mutants of a whole top-level `if` statement retain a rewritten copy of that
+entire statement, including its branches. For these init and `if` mutants,
+retained memory still scales with that block or statement's size times its
+mutant count, so a large block can still have quadratic retained-edit cost.
+Selection order and the full discovery count remain the §1 contract; §5's cap
+note and gate accounting are unchanged.
 
 | op | error simulated | AST operation |
 |---|---|---|
@@ -269,7 +289,9 @@ With `--oracle-attribution` only:
  "attribution":{"mode":"all_killers","order_independent":true}}
 ```
 
-New `src/fslc/mutate.py`. Deterministic enumeration + `--max-mutants` truncation is made
+Native mutation is implemented in `rust/fsl-tools/src/mutate.rs` and
+`rust/fslc/src/main.rs`; `src/fslc/mutate.py` is the frozen compatibility reference.
+The first-N selection from the full deterministic catalog (§1) is made
 explicit in `notes` (no silent cap). Survivors of coverage-false actions are annotated as
 "dead at baseline," and equivalent mutants go to a review queue (not a hard failure).
 The combined and per-source kill rates use `killed / (killed + survived)`;
@@ -323,8 +345,9 @@ reproduced from the JSON alone:
 - `--min-kill-rate R` adds `kill_rate_below_min` unless the published,
   four-decimal `summary.kill_rate` is `>= R` (so `0.75` passes `R = 0.75` and
   fails `R = 0.7501`).
-- Built-in mutants beyond `--max-mutants` are not judged; their count is
-  recorded as `gate.dropped` (and in `notes`) but does not fail the gate.
+- Built-in mutants beyond `--max-mutants` are not materialized or judged (§1);
+  their count, `discovered - min(discovered, max_mutants)`, is recorded as
+  `gate.dropped` (and in `notes`) but does not fail the gate.
 - Because survivors can now fail the run, the first `notes` entry no longer
   says they are "a review queue, not a hard failure"; it says the run
   requested a gate and that `gate.passed` decides the exit code. The ungated

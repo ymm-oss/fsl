@@ -171,9 +171,9 @@ earlier. Ownership validation still inspects the body, and the existing
 conservative binder-key coverage classification is unchanged. Thus an
 unexecuted write cannot initialize state computed by `Monitor::new` or explicit
 through an arbitrary default. Refinement's free-root `concrete_initial_states`
-path does not use `Monitor::new`: #1518 adds the ownership and read-order gate
-there, but its empty-domain coverage remains a soundness limitation tracked in
-#1521.
+path does not use `Monitor::new`: it checks ownership and read order, then
+refuses incomplete assigned roots on either side (#1521), including forall domains
+not proven nonempty. Partial-component enumeration is future work (#1579).
 Explicit and Monitor reject missing deterministic assignments with exit 2;
 symbolic init retains its free-value semantics, so it may violate a type bound
 or invariant with exit 1, or verify when all admissible values satisfy the
@@ -218,8 +218,10 @@ assignment keeps recursive coverage per map key and per struct field, joins succ
 `if` branches component-wise. Only complete coverage of every field of every
 entry permits a root read or concrete Monitor construction; these deterministic
 paths reject partial initialization rather than filling it from defaults.
-Refinement's legacy free-root path can still default missing components in
-previously accepted shapes (#1521), including a single-field partial init.
+Refinement also refuses incomplete assigned roots on either side (#1521),
+including a single-field partial init, rather than defaulting missing components.
+bmc and induction retain their free-value verdicts; partial-component enumeration
+is future work (#1579).
 The existing concrete field updater and symbolic init constraints consume these same checked lvalues;
 no solver dependency is added to the runtime.
 These component identities remain subject to the forall read-order and
@@ -235,8 +237,10 @@ not a union of field names written somewhere. Missing keys or fields retain the
 legacy probe's original ownership error and location, preventing new partial
 initialization from entering refinement's free-root path. The legacy probe still
 exempts all previously accepted partial forms (including branch-split fields,
-whole-entry key subsets and one-path whole-root writes); their #1521 limitation is not fixed
-here, and partial-field admission is deferred until that issue is resolved.
+whole-entry key subsets and one-path whole-root writes) from this ownership rule.
+Refinement separately refuses incomplete assigned roots (#1521), while bmc and
+induction retain free-value verdicts. Partial-component enumeration is future
+work (#1579).
 
 Only the new admission/read analysis uses scope-aware static proofs. A forall
 source, filter or range bound that freely depends on an enclosing binder cannot
@@ -274,13 +278,13 @@ span, as the #1518 read-order gate does. The implementation first validates
 per-field ownership, then probes the previous root-granularity ownership rule;
 only a form that needs the new ownership granularity runs the full-coverage
 admission and extra all-assigned-root read checks. Previously accepted shapes
-retain their ownership-check admission. Refinement's free-root constructor default-fills
-roots before executing init in program order, without the deterministic read
-gate. Requiring assigned roots to be complete before a read prevents newly
-admitted shapes from reading those defaults instead of their relational init
-values, on both the implementation and abstraction sides. Never-assigned roots
-remain free; legacy-accepted whole-value read-before-assignment is not repaired
-by this admission-only rule. The separate #1451 gate below addresses those reads.
+retain their ownership-check admission. Refinement checks ownership and read order,
+then refuses incomplete assigned roots before replaying init in program order
+(#1521), on both implementation and abstraction sides. Never-assigned roots remain
+free and are enumerated; bmc and induction retain free-value verdicts for partial
+init. Partial-component enumeration is future work (#1579). This admission-only
+rule does not itself reject legacy-accepted whole-value reads before assignment;
+the separate #1451 gate below addresses those reads.
 
 Concrete coverage now counts resolved map-entry-field writes even when the legacy
 ownership probe succeeds. A complete map of single-field entries can therefore
