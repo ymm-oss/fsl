@@ -728,14 +728,14 @@ strings remain unchanged, and other partial-init ownership controls remain.
 Additional admission removals include visible implicit process/entity/relation
 locals and the nested-init source with `const i = 1` and
 `forall i in 0..0 { forall j in 0..i { m[j] = true } }`. That source checked on
-base e0b4cbae; the refusal locates the outer forall at **5:10**. A local-name
+base f5f3f194; the refusal locates the outer forall at **5:10**. A local-name
 rewrite must update its bound uses; it does not add general dependent ranges.
 
 ### Verification snapshot
 
 Native `check <form>` compared base
-`e0b4cbae39569de8008a8eb049588aa84d8c1a42` with measurement commit
-`f1e2767f3a58d78c826b393ea723becf5768afde`, each in its own archived tree,
+`f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` with measurement commit
+`bc70487f76c8e180014c96d22d6aabc6cbbc40b4`, each in its own archived tree,
 with cache off and no ambient unstable features. All **598 corpus forms** in
 `specs/` (23), `examples/` (191) and `rust/fslc/tests/fixtures/` (384) have
 byte-identical exit/stdout/stderr triples: **0 `ok`→`error` and 0 other output

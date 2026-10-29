@@ -24,10 +24,10 @@ binders instead freshen only on collision: only then does the projection's
 Kernel AST JSON name change; the public Kernel export is unchanged.
 Nested init with const i=1 and
 `forall i in 0..0 { forall j in 0..i { m[j] = true } }` is an additional removal:
-it checked on base e0b4cbae and now refuses the outer forall at 5:10. Rename the
+it checked on base f5f3f194 and now refuses the outer forall at 5:10. Rename the
 local and its bound uses. Def-call argument binders are checked before expansion
 even if an unused formal erases them, with the same owner/message as retained
-arguments. Fresh native check at base e0b4cbae versus measured ancestor f1e2767f
+arguments. Fresh native check at base f5f3f194 versus measured ancestor bc70487f
 finds zero removals/other output differences across 598 corpus forms, with the
 original 152 inline removals, 126 fresh accepted and five diagnostic changes.
 Another 70 removal witnesses and 70 renamed controls cover the additional
