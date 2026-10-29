@@ -3924,8 +3924,9 @@ UTF-8 byte offset も元の文書に揃えます。ただし literate Markdown �
 抽出後の FSL text が基準であり、文書の行と code 行内の列を保ちます。
 未知の hard rule の message は `check hard` を
 指し、既存の parse error を二重には移しません。座標だけの修正であり、受理・拒否、
-診断の kind、envelope の field、exit status、assurance は変えません。LSP が project 内の
-component の診断を出さない問題は別に追跡します(#1575)。
+診断の kind、envelope の field、exit status、assurance は変えません。エディタは共有
+validator による project 内の component の検査結果を文書全体の位置で表示し、model は
+`None` のままです。
 
 **境界 sweep の実測 (#1545):** B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` と H

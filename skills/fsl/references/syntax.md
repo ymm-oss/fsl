@@ -633,7 +633,8 @@ offsets. For literate Markdown, byte offsets refer to the extracted FSL text,
 not the Markdown file; document lines and code-line columns are preserved.
 Unknown hard-rule messages point to `check hard`; parse errors are not
 double-translated. Validity, diagnostic kind, envelope fields, exit status and
-assurance do not change. LSP project-component diagnostics remain separate (#1575).
+assurance do not change. The editor publishes project-component validation
+through the shared validator at document positions, with model `None`.
 
 Measured #1545 breaking-removal sweep: independently built B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` and H
