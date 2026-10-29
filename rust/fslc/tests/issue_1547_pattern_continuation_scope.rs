@@ -462,16 +462,15 @@ fn sibling_pattern_names_preserve_collisions_and_public_spelling() {
     );
 }
 
-#[test]
-fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
-    let report = scratch::scratch("issue-1547-priority-report", &[]);
+fn priority_observations(
+    cases: impl IntoIterator<Item = (forms::Case, Value)>,
+) -> (Vec<Value>, Vec<Value>, usize) {
     let mut inputs = Vec::new();
     let mut rows = Vec::new();
     let mut failures = 0;
-    for case in reuse::priority_cases() {
+    for (case, location) in cases {
         let dir = fixture(&case);
         let renamed = matches!(case.role, Role::Collision);
-        let location = point(&case.source, case.marker);
         let mut expected = baseline_collision_packet(&location);
         if !renamed {
             expected["message"] = json!(format!(
@@ -489,6 +488,42 @@ fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
             }
         }
     }
+    (inputs, rows, failures)
+}
+
+fn finish_priority_report(
+    report: &Path,
+    label: &str,
+    cells: usize,
+    inputs: &[Value],
+    rows: &[Value],
+    failures: usize,
+) {
+    std::fs::write(
+        report.join("report.json"),
+        serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"failures":failures}))
+            .unwrap(),
+    )
+    .unwrap();
+    eprintln!(
+        "{label} cells={cells} observations={} failures={failures} report={}",
+        rows.len(),
+        report.display()
+    );
+    assert_eq!(
+        failures, 0,
+        "earlier invalid reads and collision-return controls"
+    );
+}
+
+#[test]
+fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
+    let report = scratch::scratch("issue-1547-priority-report", &[]);
+    let (mut inputs, mut rows, mut failures) =
+        priority_observations(reuse::priority_cases().into_iter().map(|case| {
+            let location = point(&case.source, case.marker);
+            (case, location)
+        }));
     // Two receiver scopes force a fresh pattern name. The and result must carry
     // that rename to ensures, independently of the RHS rename inside the guard.
     let files = reuse::renamer_export_files();
@@ -502,20 +537,36 @@ fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
     failures += usize::from(!ok);
     inputs.push(json!({"id":"renamer-export-and-control","files":files,"directory":dir}));
     rows.push(json!({"id":"renamer-export-and-control","route":"compose","consumer":"check","class":"export-admission-control","ok":ok,"expected_packet":{"exit":0,"result":"ok"},"output":actual.0,"exit":actual.1}));
-    std::fs::write(
-        report.join("report.json"),
-        serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"failures":failures}))
-            .unwrap(),
-    )
-    .unwrap();
-    eprintln!(
-        "PATTERN_PRIORITY_RESULT cells=5 observations={} failures={failures} report={}",
-        rows.len(),
-        report.display()
+    finish_priority_report(
+        &report,
+        "PATTERN_PRIORITY_RESULT",
+        5,
+        &inputs,
+        &rows,
+        failures,
     );
-    assert_eq!(
-        failures, 0,
-        "a prior invalid read wins, but renaming it restores the collision"
+}
+
+#[test]
+fn conditional_arm_errors_precede_condition_freshness_errors() {
+    let report = scratch::scratch("issue-1547-conditional-priority-report", &[]);
+    let (inputs, rows, failures) =
+        priority_observations(reuse::conditional_priority_cases().into_iter().map(
+            |(case, column)| {
+                assert_eq!(
+                    point(&case.source, case.marker),
+                    json!({"line":6,"column":12})
+                );
+                (case, json!({"line":6,"column":column}))
+            },
+        ));
+    finish_priority_report(
+        &report,
+        "PATTERN_CONDITIONAL_PRIORITY_RESULT",
+        6,
+        &inputs,
+        &rows,
+        failures,
     );
 }
 

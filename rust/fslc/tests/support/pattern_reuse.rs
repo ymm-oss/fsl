@@ -323,3 +323,65 @@ pub fn renamer_export_files() -> Vec<(&'static str, String)> {
         })
         .collect()
 }
+
+pub fn conditional_priority_cases() -> Vec<(Case, u64)> {
+    let source = "spec A {\n  state { o: Option<Int>, p: Option<Int>, x: Int, y: Int }\n  init { o = some(1) p = some(2) x = 0 y = 0 }\n  action a() {\n    requires (o is some(v)) => true\n    y = if (p is some(v)) then v else 0\n  }\n  invariant P { y == 0 or y == 2 }\n}\n";
+    [
+        (
+            "conditional-then",
+            "conditional-then-renamed",
+            source.to_owned(),
+            "then v else 0",
+            "then x else 0",
+            32,
+        ),
+        (
+            "conditional-else",
+            "conditional-else-renamed",
+            source.replace("then v else 0", "then 0 else v"),
+            "else v",
+            "else x",
+            39,
+        ),
+        (
+            "conditional-nested",
+            "conditional-nested-renamed",
+            source.replace("then v else 0", "then (if x == 0 then v else 0) else 0"),
+            "then v else 0",
+            "then x else 0",
+            48,
+        ),
+    ]
+    .into_iter()
+    .flat_map(|(id, renamed_id, source, from, to, column)| {
+        assert_eq!(
+            source.matches(from).count(),
+            1,
+            "one newly illegal arm read"
+        );
+        let renamed = source.replacen(from, to, 1);
+        [
+            (
+                super::forms::case(
+                    id,
+                    "conditional-priority",
+                    Role::Refuse,
+                    source,
+                    "(p is some(v))",
+                ),
+                column,
+            ),
+            (
+                super::forms::case(
+                    renamed_id,
+                    "conditional-priority",
+                    Role::Collision,
+                    renamed,
+                    "(p is some(v))",
+                ),
+                12,
+            ),
+        ]
+    })
+    .collect()
+}
