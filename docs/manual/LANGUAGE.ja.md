@@ -2699,6 +2699,31 @@ compose OrderSystem {
   `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`
   と報告します。役割・resource・measure を `__` を含まない名前に変え、その参照も
   更新してください。
+  破壊的な削除 (#1602/#1603): goal と policy の ID、requirement の ID
+  (次のエディションでは `rule`)、scenario の ID (legacy では `acceptance`)、
+  forbidden の ID、決定表の ID (`decide`)、glossary の alias にも適用します。
+  両エディションで、その構文が存在する位置が対象です。これらは以前は `check` を
+  通っていましたが、今は exit 2、`kind:"name"`、ID または alias の位置の構造化された
+  `loc` で拒否します。ただし、後述の legacy の位置の制限があります。
+  既存の separator のメッセージで使う位置の語は `goal`、
+  `policy`、`requirement`、`scenario`、`forbidden`、`decision`、`glossary alias` です。
+  ID または alias を `__` を含まない名前に変え、その参照も更新してください。
+  次のエディションの rule の ID は header の token の span だけから位置を求めます。
+  deadline がある rule や ID の前にコメントがある場合も同じです。明示の `requirement`
+  block も両エディションで引き続き使え、その ID を検査します。
+  deadline の有無を問いません。重複する ID の検査から外すのは rule から生成された
+  requirement の複製だけです。
+  既存構文の位置に関する既知の制限 (明示の block も対象):
+  requirement、acceptance、forbidden の ID を `REQ - __1` のように分けて
+  書いた場合も拒否しますが、fallback の位置探索は ID の token ではなく、宣言の
+  キーワードや後で繰り返された正規化済みの綴りを指す場合があります。この構文に
+  固有の位置の制限は今回の修正では直していません。
+  次のエディションの rule の property のラベルに `__` を含む場合、またはリテラルを
+  名前に使う場合 (`none:` など) は、引き続き exit 2、
+  `diagnostic_code:"invalid_rule_property_name"` で拒否します。kind は `semantics` から
+  `name` に変わり、ラベルではなく文の先頭を示す構造化された `loc` が付きます。
+  診断の文言は変わりません。ファイルを検査する場合、ほかの位置付き名前エラーと
+  同様に、メッセージの末尾は `at L:C` から `at <source-file>:L:C` に変わります。
 - JSON の表示: 作られた名前は `__` を `.` に置き換えた 1 つの綴りで、すべての
   出力に出ます。物理名 `alias__x` は `alias.x`、`branches` で分けた
   `submit__b1` は `submit.b1` です(状態のキー、action 名、invariant /

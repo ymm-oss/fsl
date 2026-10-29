@@ -109,6 +109,7 @@ struct Located {
 /// `rule REQ "text" { statement+ }`, as read.
 pub(in crate::parser) struct RuleDeclaration {
     id: String,
+    id_span: Span,
     text: String,
     span: Span,
     statements: Vec<Located>,
@@ -118,7 +119,9 @@ impl Parser<'_> {
     /// `rule REQ "text" { … }`.
     pub(in crate::parser) fn rule_declaration(&mut self) -> Result<RuleDeclaration, ParseError> {
         let start = self.bump_kw(Kw::Rule);
+        let id_start = self.peek().span;
         let id = self.req_id()?;
+        let id_span = join_span(id_start, self.last_span());
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
         self.expect_symbol("{")?;
@@ -171,6 +174,7 @@ impl Parser<'_> {
         }
         Ok(RuleDeclaration {
             id,
+            id_span,
             text,
             span,
             statements,
@@ -894,6 +898,7 @@ pub(in crate::parser) fn apply(
 ) -> Result<RulesOutcome, ParseError> {
     let mut outcome = RulesOutcome::default();
     for (position, rule) in rules {
+        next.rule_headers.push((rule.id.clone(), rule.id_span));
         let mut guarded = BTreeSet::new();
         let mut probed = false;
         let mut deadlines = Vec::new();

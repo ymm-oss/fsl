@@ -233,6 +233,46 @@ Previously the walk missed these three, so they passed `check`. No spec or
 example in the repository has such a name. Migration: rename the role,
 resource, or measure without `__` and update its references.
 
+**Breaking removal (#1602/#1603):** the same #1256 reservation also covers
+goal and policy IDs in business and requirements documents, requirement IDs
+(`rule` in the next edition), scenario IDs (`acceptance` in legacy), forbidden
+IDs, decision-table IDs (`decide`), and glossary aliases. Both editions apply
+the rule wherever the construct exists. Names containing `__` in these positions
+previously passed `check`; they now fail with exit 2, `kind: "name"`, and a
+structured `loc` at the written ID or alias, subject to the legacy locator
+limitation below. The existing separator message uses the position `goal`,
+`policy`, `requirement`, `scenario`, `forbidden`,
+`decision`, or `glossary alias`. Rename the ID or alias without `__` and update
+its references; generated-name references remain allowed.
+
+Next-edition rule headers retain their IDs and source ID spans before statement
+desugaring. Only those headers supply next-edition rule IDs to the declaration
+check, not deadline requirement copies, guard annotations or property effects.
+Lifecycle-implied rules and rules already covered by an event are still checked
+at the exact written header ID. A preceding `covers` reference
+is not the rule declaration and cannot supply its error location.
+
+Explicitly written `requirement` blocks remain supported and their IDs are
+checked in both editions, including `fsl 5` documents with or without deadlines.
+Only a generated requirement copy is excluded: its ID must match a retained
+rule header whose ID token span is contained in that requirement's span.
+
+Known legacy-syntax location limitation (including explicit blocks in `fsl 5`):
+split-spelled requirement, acceptance and
+forbidden IDs such as `REQ - __1` are normalized before the fallback locator
+searches for them. Rejection is unchanged, but `loc` may point to the declaration
+keyword or a later repeated normalized spelling instead of the ID tokens. This
+limitation is not fixed here; it follows the written syntax, not the edition.
+Next-edition `rule` headers use exact token spans instead.
+
+Written next-edition rule-property names containing `__` or naming a literal
+(such as `none:`) were already rejected. Their diagnostic changes from
+`kind: "semantics"` without `loc` to `kind: "name"` with structured `loc` at
+the statement's start (`RuleProperty.span`), not the label. Exit 2,
+`diagnostic_code: "invalid_rule_property_name"`, and the diagnostic wording are
+unchanged. When checking a file, the new origin also changes the message suffix
+from `at L:C` to `at <source-file>:L:C`, like other located name errors.
+
 The transition's implicit c is a source-visible local under #1515: a same-named
 const is rejected, even when the source never declares a local c. Rename the
 const and its constant references; retain `stage(c)` for the entity instance.

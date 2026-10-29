@@ -200,6 +200,20 @@ fn property_name<'a>(
         if let Some(reason) = crate::naming::invalid_rule_property_name(written) {
             return Err(CoreError {
                 diagnostic_code: Some(INVALID_RULE_PROPERTY_NAME),
+                kind: crate::CoreErrorKind::NameResolution,
+                origin: Some(Box::new(OriginChain {
+                    id: OriginId(format!("naming:rule:{}", property.span.start.offset)),
+                    dialect: "requirements".to_owned(),
+                    primary: Some(OriginSite {
+                        source_file: None,
+                        span: Some(property.span),
+                        dialect: "requirements".to_owned(),
+                        declaration_path: Vec::new(),
+                    }),
+                    secondary: Vec::new(),
+                    lowering_steps: Vec::new(),
+                    generated: false,
+                })),
                 ..core_error(
                     format!(
                         "rule {} names its property '{written}', which {reason}",

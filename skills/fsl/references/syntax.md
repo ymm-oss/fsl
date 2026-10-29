@@ -1127,6 +1127,30 @@ a resource name (`resource __r: Amount = 0`), and a measure name
 message begins `relation role name '__owner' contains '__', ...` (or
 `resource name`, `measure name`). Rename it without `__` and update its references.
 
+Breaking removal (#1602/#1603): the reservation also covers goal and policy IDs,
+requirement IDs (`rule` in the next edition), scenario IDs (`acceptance` in legacy),
+forbidden IDs, decision-table IDs (`decide`), and glossary aliases. Both editions
+apply it wherever the construct exists. These previously passed check; they now
+fail with exit 2, `kind: "name"`, and structured `loc` at the ID or alias, subject
+to the legacy locator limitation below. The existing separator message uses
+`goal`, `policy`, `requirement`, `scenario`,
+`forbidden`, `decision`, or `glossary alias` as its position. Rename the ID or
+alias without `__` and update references; generated-name references remain allowed.
+Next-edition rule IDs use only header token spans, including deadline rules and
+IDs preceded by comments. Explicit `requirement` blocks and their ID checks
+remain supported in both editions, with or without deadlines;
+only generated copies of rule headers lose the duplicate ID candidate.
+Known legacy-syntax limitation (also for explicit blocks): split-spelled requirement,
+acceptance and forbidden IDs such as `REQ - __1` are rejected, but the fallback
+locator may point to the declaration keyword or a later repeated normalized
+spelling instead of the ID tokens. This syntax-specific location limitation is not fixed.
+A next-edition rule-property label containing `__` or naming a literal (`none:`)
+is still rejected with exit 2 and `diagnostic_code: "invalid_rule_property_name"`.
+Its kind changes from `semantics` without `loc` to `name` with structured `loc`
+at the statement's start, not the label. Diagnostic wording is unchanged;
+when checking a file, the message suffix changes from `at L:C` to
+`at <source-file>:L:C`, like other located name errors.
+
 - Arithmetic: `+ - * / %`, unary `-`, `min(a,b)` `max(a,b)` `abs(a)`
   (in `a//b` everything after `//` becomes a comment, so write division with a
   space: `a / b`)

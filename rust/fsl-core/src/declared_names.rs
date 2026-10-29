@@ -33,6 +33,7 @@ struct Declared<'a> {
     name: &'a str,
     position: &'static str,
     span: Option<Span>,
+    exact_span: bool,
 }
 
 #[derive(Default)]
@@ -46,6 +47,7 @@ impl<'a> Walk<'a> {
             name,
             position,
             span,
+            exact_span: false,
         });
     }
 
@@ -165,10 +167,9 @@ impl<'a> Walk<'a> {
                 }
             }
             BusinessItem::Kpi { name, span, .. } => self.name(name, "kpi", Some(*span)),
-            BusinessItem::Control { .. }
-            | BusinessItem::Policy { .. }
-            | BusinessItem::Goal { .. }
-            | BusinessItem::VerifyBounds { .. } => {}
+            BusinessItem::Goal { id, span, .. } => self.name(id, "goal", Some(*span)),
+            BusinessItem::Policy { id, span, .. } => self.name(id, "policy", Some(*span)),
+            BusinessItem::Control { .. } | BusinessItem::VerifyBounds { .. } => {}
         }
     }
 
@@ -193,7 +194,18 @@ impl<'a> Walk<'a> {
         self.name(&requirements.name, "requirements", None);
         for item in &requirements.items {
             match item {
-                RequirementsItem::Requirement { items, .. } => {
+                RequirementsItem::Requirement {
+                    id, items, span, ..
+                } => {
+                    if !requirements.next.as_ref().is_some_and(|next| {
+                        next.rule_headers.iter().any(|(rule_id, id_span)| {
+                            rule_id == id
+                                && span.start.offset <= id_span.start.offset
+                                && id_span.end.offset <= span.end.offset
+                        })
+                    }) {
+                        self.name(id, "requirement", Some(*span));
+                    }
                     for item in items {
                         match item {
                             RequirementBlockItem::Action(action) => self.requirement_action(action),
@@ -216,10 +228,18 @@ impl<'a> Walk<'a> {
                     }
                 }
                 RequirementsItem::Common(item) => self.spec_item(item),
-                RequirementsItem::Glossary(_)
-                | RequirementsItem::Implements { .. }
-                | RequirementsItem::Acceptance { .. }
-                | RequirementsItem::Forbidden { .. } => {}
+                RequirementsItem::Glossary(glossary) => {
+                    for entry in &glossary.entries {
+                        self.name(&entry.alias, "glossary alias", Some(entry.alias_span));
+                    }
+                }
+                RequirementsItem::Acceptance { id, span, .. } => {
+                    self.name(id, "scenario", Some(*span));
+                }
+                RequirementsItem::Forbidden { id, span, .. } => {
+                    self.name(id, "forbidden", Some(*span));
+                }
+                RequirementsItem::Implements { .. } => {}
             }
         }
         if let Some(next) = &requirements.next {
@@ -237,6 +257,20 @@ impl<'a> Walk<'a> {
             }
             for measure in &next.measures {
                 self.name(&measure.name, "measure", Some(measure.span));
+            }
+            for goal in &next.goals {
+                self.business_item(goal);
+            }
+            for decision in &next.decisions {
+                self.name(&decision.id, "decision", Some(decision.span));
+            }
+            for (id, span) in &next.rule_headers {
+                self.names.push(Declared {
+                    name: id,
+                    position: "requirement",
+                    span: Some(*span),
+                    exact_span: true,
+                });
             }
         }
     }
@@ -341,6 +375,9 @@ fn separator_message(name: &str, position: &str) -> String {
 /// declaration keeps no span. The declaration's own span when the name cannot
 /// be found (a name a parser normalised), and the first character otherwise.
 fn locate(source: &str, declared: &Declared<'_>) -> Span {
+    if declared.exact_span {
+        return declared.span.expect("exact declaration span");
+    }
     let start = declared.span.map_or(0, |span| span.start.offset);
     let found = source
         .get(start..)
