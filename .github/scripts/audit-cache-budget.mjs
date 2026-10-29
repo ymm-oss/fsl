@@ -51,10 +51,9 @@ export const BUDGET_WARN_FRACTION = 0.85;
 // generation rule); it is simply the enumerated set rule 3 checks. Do not
 // infer a rule for membership from the list's current contents. A
 // `refs/pull/*` or `refs/heads/gh-readonly-queue/*` entry for one of these three
-// is a violation of the current
-// invariant; it may predate the guard or indicate a later guard regression, so
-// inspect `created_at` and workflow provenance. This is the calibrated
-// rejecting signal for the fix itself, not merely a hygiene check.
+// violates the current invariant; it may predate the guard or indicate a later
+// regression. Inspect `created_at` and workflow provenance. This is the
+// calibrated rejecting signal for the fix itself, not merely a hygiene check.
 //
 // Every other `v<N>-rust-*` key, including `rust-native-z3` and `fsl-logic`, is
 // still covered against appearing on either ref family -- by rule 4 below,

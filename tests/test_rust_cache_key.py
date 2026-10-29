@@ -111,7 +111,10 @@ def test_rejecting_cache_step_inputs(tmp_path: Path, old: str, new: str, expecte
 
 @pytest.mark.parametrize("restore_only,value", [(False, "false"), (True, validator.SAVE_GUARD)] + [
     (restore_only, value) for restore_only in (False, True)
-    for value in ("true", '"false"', "${{ false }}", None, validator.SAVE_GUARD.replace("&&", "||"))
+    for value in (
+        "true", '"false"', "${{ false }}", None,
+        validator.SAVE_GUARD.replace("&&", "||"), "${{ github.event_name != 'pull_request' }}",
+    )
 ])
 def test_rejecting_save_if(tmp_path: Path, restore_only: bool, value: str | None) -> None:
     replacement = "" if value is None else f"          save-if: {value}\n"
@@ -161,6 +164,13 @@ def test_rejecting_duplicate_prefix_key(tmp_path: Path) -> None:
     assert len(errors) == 3, errors
     assert "duplicate key 'prefix-key'" in errors[0]
     assert "fewer than the 1" in errors[1]
+
+
+def test_rejecting_absent_restore_only_step(tmp_path: Path) -> None:
+    root = write_repository(tmp_path, {"ci.yml": workflow(HASH_STEP)})
+    audited, errors = validator.audit_repository(root, minimum_audited_steps=0, restore_only_jobs=RESTORE_ONLY_FIXTURE)
+    assert audited == 0
+    assert len(errors) == 1 and "absent" in errors[0], errors
 
 
 def test_rejecting_fewer_steps_than_the_floor(tmp_path: Path) -> None:

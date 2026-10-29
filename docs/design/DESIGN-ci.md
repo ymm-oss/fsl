@@ -1262,7 +1262,8 @@ every `CI_SHARED_KEYS` key missing from `main`; and direct live-wrapper controls
 HTTP failure, malformed ordinary pages, the 900-request cap, and rate-limit headers/headroom.
 There are also rejecting fixtures for a non-`ci.yml` rust cache on a pull-request ref and for each
 half of `rust-native-z3` missing from `main`. Small, below-threshold PR/queue injections cover
-known shared keys, generic `v0-rust-*` keys and superseded prefixes independently of budget pressure.
+known shared keys, generic `v<N>-rust-*` keys (including current `v1`) and superseded prefixes
+independently of budget pressure.
 `tools/check-merge-readiness.sh`'s `check_automation` lane runs that suite on every pull request, so
 a change to the checker is covered pre-merge even though the live audit deliberately is not a
 required context: the shared cache state can change after a pull request's own checks pass, so
@@ -1492,13 +1493,12 @@ two jobs, `fsl-logic`, `semantic-mutation-mutants`) still match their saver beca
 two inputs and compute the same hash from the same checkout; a pull request that edits the profiles
 misses on purpose, since `main`'s entry was built under the old ones.
 `.github/scripts/validate_rust_cache_key.py` (parser-backed, calibrated by
-`tests/test_rust_cache_key.py` and `--selftest`, run by the automation lane) fails closed when any rust-cache step lacks
-either input, when the step before it is not the hash step or has a different `if:`, or when the
-workflows' `prefix-key` and the audit's `CURRENT_KEY_PREFIX` differ. The plain check also enforces
-the save-if rule and exact four-job restore-only set; `--selftest` calibrates guard and role mutations.
-`rust/Cargo.toml` itself carries
-no note: a profile edit needs no manual step, and a comment there would make this CI-only change a
-product-surface diff.
+`tests/test_rust_cache_key.py` and `--selftest`, run by the automation lane) fails closed when
+any rust-cache step lacks either input, when the step before it is not the hash step or has a
+different `if:`, or when the workflows' `prefix-key` and the audit's `CURRENT_KEY_PREFIX` differ.
+The plain check also enforces the save-if rule and exact four-job restore-only set; `--selftest`
+calibrates guard and role mutations. `rust/Cargo.toml` itself carries no note: a profile edit needs
+no manual step, and a comment there would make this CI-only change a product-surface diff.
 
 **Audit consequence.** `audit-cache-budget.mjs` exports `CURRENT_KEY_PREFIX`. The default-branch
 presence rule counts only current-generation entries: a leftover `v0-rust` entry is unreachable by
@@ -1696,8 +1696,9 @@ because under the old guard a key change or eviction could allow a save.
 All seven save-enabled `Swatinem/rust-cache` steps now exclude both `pull_request` and
 `merge_group`; push, schedule and `workflow_dispatch` retain saving. The two `ci.yml` and two
 `merge-readiness.yml` restore-only steps stay `save-if: false`. Native-Z3 job conditions are
-unchanged. The parser-backed Rust-cache validator and its automation-lane selftest enumerate
-every guard, check the five-event truth table and reject a PR-only mutation of each saver.
+unchanged. The plain parser-backed Rust-cache validator owns the save-guard and restore-only
+role contract. Its automation-lane selftest reports the five-event tables and rejects PR-only
+and saver-to-false mutations for every saver, plus restore-only-to-saver mutations for consumers.
 Audit rules 3 and 4 now attribute both ref families, deduplicating entries that match both;
 queue bytes still count toward the unchanged physical budget. This closes the configuration
 risk; it is not evidence of a measured queue-cache eviction or of current live cache usage.

@@ -2115,7 +2115,7 @@ test("rejecting: a pull-request save under a superseded prefix is still a violat
 
 // The parser-backed `.github/scripts/validate_rust_cache_key.py` checks key/hash
 // inputs, save-if policy and the exact restore-only set; tests/test_rust_cache_key.py
-// and its --selftest calibrate it, not a line scan here (docs/design/DESIGN-ci.md,
+// and the validator's --selftest calibrate it (docs/design/DESIGN-ci.md,
 // "Automation contracts use parser-backed workflow inspection").
 
 // Profile states of rust/Cargo.toml around #1379 and #1380, abridged to the

@@ -189,7 +189,7 @@ def audit_repository(
 
 
 def calibrate_save_policy(repository: Path) -> list[str]:
-    """Exercise each live guard, its event truth table, and its isolated mutation."""
+    """Report live guard event tables and calibrate isolated guard/role mutations."""
     prefix = read_constant(repository / AUDIT_SCRIPT, PREFIX_CONSTANT)
     env_var = read_constant(repository / HASH_SCRIPT, ENV_CONSTANT)
     errors = []
