@@ -4485,13 +4485,17 @@ DESIGN-*.md).
   The baseline uses auto (default 1,000,000-state budget), accepting `verified`
   or `proved`; a nonaccepted auto result reruns BMC on a fresh thread, continuing
   if verified or returning that baseline envelope otherwise. JSON retains
-  `baseline:"verified"`. For each mutant, a finding-free, non-exhausted boundary
-  probe permits explicit exploration (50,000 states) to certify clean through K
-  only when every reachable is witnessed; all other cases retain the existing
-  BMC path and kill labels. Secondary checks still run. Stderr reports the
-  accepted baseline and each evaluated mutant, with `engine=explicit|bmc|probe|none`
+  `baseline:"verified"`. For each mutant, a boundary-probe finding wins first;
+  a completed empty probe then permits explicit exploration (50,000 states) to
+  certify clean through K only when every reachable is witnessed; if neither
+  decides, the existing BMC path chooses the verdict/killer. Secondary checks
+  still run. Stderr reports the accepted baseline and each evaluated mutant,
+  with `engine=explicit|bmc|probe|none`
   and elapsed seconds; the engine names the main-oracle route, not later checks.
-  Stdout is unchanged, and baseline refusals/command errors emit no progress.
+  Stdout is unchanged except for the encoding-only residual in
+  [`DESIGN-mutate` §3](../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate):
+  explicit-clean can survive where BMC alone reported `build_spec`.
+  Baseline refusals/command errors emit no progress.
   `--from mutants.jsonl` additionally adjudicates externally generated
   mutations expressed as a full `mutated_spec` or an exact
   `replace:{target,replacement,occurrence?}` instruction. Valid external

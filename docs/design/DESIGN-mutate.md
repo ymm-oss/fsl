@@ -292,7 +292,9 @@ per isolated model.
 
 ## 5. Output / ripple
 
-Stdout JSON is unchanged. Mutation reports emit live progress on stderr only:
+Stdout JSON is unchanged except for the encoding-only residual in §3: an
+explicit-clean mutant can survive where BMC alone reported `build_spec`.
+Mutation reports emit live progress on stderr only:
 
 ```text
 mutate baseline: proved (engine=explicit, 0.100s)

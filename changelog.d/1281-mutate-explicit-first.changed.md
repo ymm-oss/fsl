@@ -1,1 +1,1 @@
-Changed (#1281): explicit decides clean mutant survivors first, the baseline uses auto, and progress lines go to stderr. Existing BMC fallback and kill labels are retained; stdout is unchanged.
+Changed (#1281): explicit decides clean mutant survivors first, the baseline uses auto, and progress lines go to stderr. The BMC fallback retains its kill labels; stdout is unchanged except for the encoding-only residual in DESIGN-mutate §3, where explicit-clean can survive a BMC-only `build_spec` rejection.
