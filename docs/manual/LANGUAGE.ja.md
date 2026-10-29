@@ -1244,9 +1244,10 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
   (exit 2)です(init の `if`・条件式・`and`/`or`/`=>` の到達しない側の演算は
   到達しません)。初期状態より前のステップが無いため、`partial_op` 違反には
-  なりません。`bmc` と `induction`(base case が `bmc`)は、init が非決定的な
-  場合も含め、失敗と init の文を名指しします(例: `division by zero in init at
-  9:5`)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
+  なりません。どのエンジンも同じ ` in init at L:C` の接尾辞で失敗と init の文を
+  名指しします(例: `division by zero in init at 9:5`)(#1543)。`bmc` と
+  `induction`(base case が `bmc`)は、init が非決定的な場合も同様です(#1258)。
+  例外が 1 つあります。init が状態変数の型の外の値も代入する
   とき、`bmc` と `induction` は step 0 の型境界を仮定して init を問うため、
   その step 0 の `type_bound` 違反(exit 1)を報告します。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:

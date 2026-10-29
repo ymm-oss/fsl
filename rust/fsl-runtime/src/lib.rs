@@ -4430,6 +4430,47 @@ fn execute_init_statement(
     model: &KernelModel,
     written: &mut BTreeMap<String, Value>,
 ) -> Result<(), RuntimeError> {
+    execute_init_statement_inner(statement, state, bindings, model, written).map_err(|mut error| {
+        // Exact stems keep other init errors and already-located inner errors unchanged.
+        if matches!(
+            error.message.as_str(),
+            "map index outside finite key domain"
+                | "sequence index out of range"
+                | "map assignment index outside key domain"
+                | "sequence assignment index out of range"
+                | "integer overflow in negation"
+                | "integer overflow in abs"
+                | "integer overflow in addition"
+                | "integer overflow in subtraction"
+                | "integer overflow in multiplication"
+                | "integer overflow in sum"
+                | "head() on empty sequence"
+                | "pop() on empty sequence"
+                | "at() index out of range"
+                | "division by zero"
+                | "remainder by zero"
+        ) {
+            let span = match statement {
+                Statement::Assign { span, .. }
+                | Statement::If { span, .. }
+                | Statement::ForAll { span, .. } => span,
+            };
+            error.message = format!(
+                "{} in init at {}:{}",
+                error.message, span.start.line, span.start.column
+            );
+        }
+        error
+    })
+}
+
+fn execute_init_statement_inner(
+    statement: &Statement,
+    state: &mut State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    written: &mut BTreeMap<String, Value>,
+) -> Result<(), RuntimeError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, state, bindings, model, None)?;
