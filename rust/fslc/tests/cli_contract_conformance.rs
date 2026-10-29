@@ -560,6 +560,46 @@ fn finite_positional_capacity_is_enforced() {
 }
 
 #[test]
+fn property_help_pins_induction_bounds() {
+    let contract = contract();
+    for (command, expected) in [
+        (
+            "verify",
+            concat!(
+                "                        select one named property obligation; resolves across\n",
+                "                        invariant/trans/leadsTo/reachable declarations; under\n",
+                "                        induction, a selected trans keeps all invariant\n",
+                "                        hypotheses, and every implicit type bound is still\n",
+                "                        checked in the base case\n",
+            ),
+        ),
+        (
+            "sweep",
+            concat!(
+                "                        check a single named property in isolation; under\n",
+                "                        induction, every implicit type bound is still checked\n",
+                "                        in the base case\n",
+            ),
+        ),
+    ] {
+        let node = nodes(&contract)
+            .into_iter()
+            .find(|node| label(node) == command)
+            .expect("command node");
+        let description = node["help"]
+            .as_str()
+            .unwrap()
+            .split_once("  --property PROPERTY_NAME\n")
+            .expect("property help")
+            .1
+            .split_once("\n  --")
+            .expect("next option")
+            .0;
+        assert_eq!(format!("{description}\n"), expected, "{command}");
+    }
+}
+
+#[test]
 fn metadata_help_and_stable_gate_controls_are_live() {
     let contract = contract();
     assert_eq!(decoded(&run(&["--cli-contract".to_owned()])), contract);

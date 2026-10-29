@@ -1506,6 +1506,7 @@ fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexa
                [--property <Name>]               # check one named property obligation —
                                                  #   invariant / trans / leadsTo / reachable;
                                                  #   induction keeps all invariants for a selected trans
+                                                 #   induction still checks every implicit type bound in its base case
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
