@@ -1582,9 +1582,54 @@ approval check の transport には ledger `--approval` overlay の root の読�
 今回の21 mode の完成だけでは #1449 を閉じません。report baseline と
 ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
 🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
-依存先を再帰的に admission せず、履歴 Git root は #1513 の範囲です。修復の投影と
+依存先の admission は下記の拡張で扱い、履歴 Git root は #1513 の範囲です。修復の投影と
 終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
 警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
+
+実際に読まれる依存先は、親が要求した edition を継承せず、**自分の**ヘッダーまたは
+現行の既定 edition で判定します(#1452)。canonical な異なる edition の混在は許します。
+compose の `use`、`implements from`、causal の `uses`、governance の delegates、
+before/after 文書と refinement mapping は、入れ子や読み直しも含め、子の bytes がモデル・
+solver・出力へ入る前に同じ admission を通します。未使用の virtual file や、consumer が読まない
+宣言上の参照を先回りして走査しません。owner のあるコマンドは子の完全な edition 拒否と
+exit 2 を返します。owner の外の strict loader も、子の path/code を原因文に含む既存の
+read-error envelope で閉じる側に倒れます。上記の延期された root mode の完了ではありません。
+
+依存先の移行警告は、外側の native owner ごと(または明示的な局所 log ごと)に、
+provider resource と完全な finding の組を一度だけ仕上げ、
+主 root の edition metadata を置き換えず、明示的な root slot をまとめません。filesystem
+では実の canonical path を key とし、子の `loc.file` は参照に書いた綴りを維持します。
+virtual lookup は provider の key を維持します。
+閉じた/raw stdout と stderr 警告の既存規則も維持します。Worker/editor の記録は呼び出しに
+局所です。editor は自分の key と関連 link の path だけを絶対化・字句正規化します。
+Store の lookup や symlink は正規化せず、file path のない buffer の label を directory と見なしません。
+完全な finding で重複を除き、読込順で最初の
+親の use と、子自身の本文による範囲・severity を関連付けます。子を拒むと
+モデル構築・解析・親への quick-fix 配信を行いません。修復ツールは consumer として子を
+拒まず、子の edit を適用せずに finding を報告し、root の planner/formatter と終了コードを維持します。
+parse の報告も command envelope を入れ子にせず finding の形にします。全参照を先に読むという
+保証ではなく、native の lemma mode の implements と governance の read は root の solver の
+後にも行われますが、拒んだ子の bytes は solver/cache に入りません。Worker の通常の governance
+error は native と同じく kernel error を優先し、依存先の拒否がある場合だけ早く返します。
+
+**破壊的な受理の削除:** ヘッダーのない compose root が、legacy なコロン量化子を持つ
+次 edition の子を import すると、以前は message のない `ok`/0 を返していました。今は
+finding の message が `legacy colon quantifier syntax is deprecated` である、子の完全な
+`unsupported_in_edition`/2 を返します。波括弧の canonical twin は、完全な
+`fsl:1.0,result:ok,spec:C,warnings:[]` の check envelope と検証済み runtime version を
+保って成功します。この inline 形は
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` と、
+`edition_dispatch_inventory` の
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`、
+`deferred_modes_have_live_disagreements_across_the_complete_native_adapters` の各 context に残します。
+
+各 materialized tree の `fslc check <path>` による `bc14d885` から修正後の Rust
+source/test tree `a65eddd5` への比較では、**corpus の全603形を両 parser 設定で検査(各 tree 1206回)**し、
+**required test の inline/included 入力を各 tree 368回**、合計 **3148回**検査しました。
+`ok`→`error` は、上記の legacy-compose の形を3 context で各2回実行した **6回だけ**で、
+**その他の遷移は0件、corpus 内も0件**です。canonical twin はすべて受理を維持します。
+正確な source tree の identity と範囲は
+[`DESIGN-migration.md`](../design/DESIGN-migration.md) の依存先 admission の節を参照してください。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの
