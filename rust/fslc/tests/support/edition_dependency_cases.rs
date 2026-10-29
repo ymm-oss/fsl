@@ -150,7 +150,7 @@ A06|approval signed|approval create|no outer scope; strict loader|no signature o
 A07|causal evidence|causal observe-expectations|owner|single output guarded
 A08|causal lifecycle|causal observe-expectations|owner|all suffixes guarded
 A09|chain marker|chain jobs 1/2|fresh step owner; refine inactive|no implementation marker
-A10|raw delivery|kernel/conformance/testplan/typestate/explain/analyze|owner|no successful raw output
+A10|raw delivery|kernel/conformance/testplan/typestate/explain/analyze|owner|testplan rejects compose before reading children; other readers refuse before raw delivery
 A11|document generate|document generate|owner nonreader|no speculative dependency scan
 A12|document claims|document claims|owner nonreader|no speculative dependency scan
 A13|document check|document check|owner nonreader|root before artifact IO
@@ -176,7 +176,7 @@ T15|testgen fallback|testgen|owner; ranking inactive/read0|violation stays exit1
 T16|domain fallback|domain testgen|owner; ranking inactive/read0|canonical nonreader
 T17|explain witness|explain|owner; ranking inactive/read0|swallowed status does not hide refusal
 T18|approval rerender|approval create|initial inactive strict loader; renderer owner|all solver kinds guarded
-T19|approval evaluation|approval check|direct inactive strict loader; renderer owner|live input only
+T19|approval evaluation|approval check|direct inactive strict loader; renderer owner|approval_spec_digest flattens CoreError to unlocated semantic; no loc
 T20|approval difference|approval diff|direct inactive strict loader; renderer owner|separate invocation logs
 T21|fsl-lsp/src/server.rs:requirements_diagnostics|publish_diagnostics|local log; solver inactive/read0|no model means no solver
 I01|inventory|source discovery|test only|all endpoints and incidences accounted
@@ -539,27 +539,24 @@ pub fn refusal(source: &str, path: &str, envelope: serde_json::Map<String, Value
     expected
 }
 
-// Owner-free renderers have no agreed complete diagnostic envelope yet. Check
-// this exact refusal projection, including *all* non-diagnostic payload keys,
-// rather than accepting any nonzero status or sampling a successful output.
-pub fn unowned(value: &Value, status: Option<i32>) -> Value {
-    let mut payload = value.as_object().unwrap().clone();
-    for key in [
-        "fsl",
-        "result",
-        "kind",
-        "message",
-        "loc",
-        "edition",
-        "fsl_edition",
-        "findings",
-    ] {
-        payload.remove(key);
+// Without an owner, component_error reanchors the resolver's one-line error at
+// the fixture's use declaration. Compare the entire existing renderer contract.
+pub fn unowned_expected(file: &str, root: &str) -> Value {
+    // approval_spec_digest uses parse_kernel_source_with_options and flattens
+    // its CoreError with unlocated_semantic; other loaders retain their origin.
+    let prefix = if root.is_empty() {
+        String::new()
+    } else {
+        format!("{root}:")
+    };
+    let mut expected = json!({"fsl":"1.0","result":"error","kind":"semantics","message":format!("component \"dep.fsl\" could not be read (dependency \"{file}\" rejected by edition: legacy_string_metadata) at {prefix}1:13")});
+    if !root.is_empty() {
+        expected["loc"] = json!({"line":1,"column":13});
     }
-    json!({"exit":status,"result":value["result"],"kind":value["kind"],"file":value.pointer("/loc/file"),"non_diagnostic_payload":payload})
+    expected
 }
-pub fn unowned_expected(file: &str) -> Value {
-    json!({"exit":2,"result":"error","kind":"unsupported_in_edition","file":file,"non_diagnostic_payload":{}})
+pub fn testplan_compose_refusal() -> Value {
+    json!({"fsl":"1.0","result":"error","kind":"semantics","message":"advanced test planning requires truthful Public Kernel export; compose unsupported"})
 }
 
 pub fn expected_check(

@@ -433,16 +433,11 @@ T17|explain root.fsl --depth 2|true"
             } else {
                 "v1"
             };
-            let message = if command.starts_with("testplan ") {
-                "advanced test planning requires truthful Public Kernel export; compose unsupported"
-                    .into()
+            let expected = if command.starts_with("testplan ") {
+                cases::testplan_compose_refusal()
             } else {
-                format!(
-                    "public Kernel {version} cannot preserve component source filenames after compose lowering"
-                )
+                json!({"fsl":"1.0","result":"error","kind":"semantics","message":format!("public Kernel {version} cannot preserve component source filenames after compose lowering")})
             };
-            let expected =
-                json!({"fsl":"1.0","result":"error","kind":"semantics","message":message});
             observations.eq(
                 &format!("{id}/canonical-export"),
                 (canonical.status.code(), &value),
@@ -487,14 +482,24 @@ T17|explain root.fsl --depth 2|true"
         }
         let rejected = cases::next(&cases::legacy(&body));
         s.write("dep.fsl", &rejected);
-        reject(
-            &mut observations,
-            &format!("{id}/{command}"),
-            &s,
-            command,
-            "dep.fsl",
-            &rejected,
-        );
+        if command.starts_with("testplan ") {
+            // Compose is rejected before the loader: this is not a child reader.
+            let actual = run(&s, command);
+            observations.eq(
+                &format!("{id}/{command}"),
+                (actual.status.code(), payload(&actual), actual.stderr),
+                (Some(2), cases::testplan_compose_refusal(), Vec::<u8>::new()),
+            );
+        } else {
+            reject(
+                &mut observations,
+                &format!("{id}/{command}"),
+                &s,
+                command,
+                "dep.fsl",
+                &rejected,
+            );
+        }
         let after = tree(&s.0.join("output"));
         observations.eq(&format!("{id}/sentinel/{command}"), &after, &before);
         if command.contains("-o") {
@@ -834,6 +839,9 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
             "valid-record.json",
             &std::fs::read_to_string(s.0.join("record.json")).unwrap(),
         );
+        let record: Value =
+            serde_json::from_str(&std::fs::read_to_string(s.0.join("valid-record.json")).unwrap())
+                .unwrap();
         let trust = if signed {
             "--trust-key test-public.pem"
         } else {
@@ -878,35 +886,43 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         ] {
             git(&s, &args);
         }
-        // These entry points have no outer owner before their direct digest
-        // load: precise findings are not assumed, but fail-closed is required.
+        // Direct digest loads have no owner; the existing read-error renderer
+        // carries the path/code in its message, not a new edition envelope.
         let actual = run(&s, &command);
         let value = payload(&actual);
         let id = if signed { "A06" } else { "A05" };
         observations.eq(
             id,
             (
-                cases::unowned(&value, actual.status.code()),
+                (actual.status.code(), &value),
                 std::fs::read(s.0.join("record.json")).unwrap(),
             ),
             (
-                cases::unowned_expected(&cases::identity(&s, "dep.fsl")),
+                (
+                    Some(2),
+                    &cases::unowned_expected(&cases::identity(&s, "dep.fsl"), "root.fsl"),
+                ),
                 b"sentinel\n".to_vec(),
             ),
         );
         for (id, command) in [("T18", command), ("T19", evaluation), ("T20", difference)] {
             let actual = run(&s, &command);
             let value = payload(&actual);
+            let mut expected = cases::unowned_expected(
+                &cases::identity(&s, "dep.fsl"),
+                if id == "T19" { "" } else { "root.fsl" },
+            );
+            if id == "T20" {
+                // Diff appends this fixture-bound metadata to ordinary errors too.
+                expected["approval"] = json!({"record":"valid-record.json","baseline_digest":record["spec"]["digest"],"baseline_commit":record["spec"]["git_commit"],"signature_status":if signed {"signed"} else {"unsigned"},"key_id":if signed {record["signature"]["key_id"].clone()} else {Value::Null}});
+            }
             observations.eq(
                 id,
                 (
-                    cases::unowned(&value, actual.status.code()),
+                    (actual.status.code(), &value),
                     std::fs::read(s.0.join("record.json")).unwrap(),
                 ),
-                (
-                    cases::unowned_expected(&cases::identity(&s, "dep.fsl")),
-                    b"sentinel\n".to_vec(),
-                ),
+                ((Some(2), &expected), b"sentinel\n".to_vec()),
             );
         }
         if let Some(command) = overlay {
@@ -916,9 +932,13 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
             for id in ["A03/approval-overlay", "T10/approval-overlay"] {
                 observations.eq(
                     id,
-                    (cases::unowned(&value, actual.status.code()), &bytes),
+                    ((actual.status.code(), &value), &bytes),
                     (
-                        cases::unowned_expected(&cases::identity(&s, "dep.fsl")),
+                        // The report owner reads before the overlay: exact E/N envelope.
+                        (
+                            Some(2),
+                            &cases::cli_refusal(&child, &cases::identity(&s, "dep.fsl")),
+                        ),
                         &b"overlay sentinel\n".to_vec(),
                     ),
                 );
