@@ -731,8 +731,7 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 <p>呼び出しは、同一ソースファイル内の <code>def</code> を名指しし、そのアリティに一致しなければ
 なりません。定義は前後の定義を呼べますが、直接・相互の再帰はできません。定義は意味
 検査の前に展開され、検証器とランタイムは手で展開したのと同じカーネル式を見ます。
-展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。ただし、以下の
-<code>leadsTo</code> のプロパティ宣言直下のバインダーには既知の例外があります。
+展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a> を参照。</p>
 <p><strong>破壊的な受理の削除 (#1450):</strong> 呼び出し側の action 引数、<code>let</code>、式内の量化子・
 集約のバインダー、statement <code>forall</code> が、展開した def 本体の自由な名前を捕まえる
@@ -745,20 +744,30 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 部品・同期アクション内のソースローカルな def に適用します。
 <code>requires</code> のガード、または binary 式の左辺から後続へ出る、global でない
 <code>is some(v)</code> のパターン束縛も、この検査では呼び出し側の束縛に含めます。</p>
-<p><strong>残る健全性リスク (Refs #1528):</strong> <code>leadsTo</code> のプロパティ宣言直下のバインダーは
-この捕獲検査では before/after の式、<code>helpful</code> の引数、<code>decreases</code>、<code>within</code> へ
-渡されません。そのバインダーが def 本体の自由な名前を捕まえ、
-偽の green を返す経路は残っています。バインダーを改名し、捕獲する形の check や
-verify の成功を、意図した状態参照の証拠としないでください。プロパティの式内の
-量化子・集約は #1450 の検査対象です。
-宣言バインダー自身の <code>where</code> 式は捕獲を検査します。そのため、未対応の
-プロパティ外側バインダーの <code>where</code> を拒否する既存エラーより先に、捕獲エラーが
-出る場合があります。</p>
 <p>最終の実装では、base <code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code> と build 済みの実装
 <code>dd7b47885680076412ab2f0b46ebe8854ff6758b</code> の各 materialized tree で、
 <code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全597個の <code>.fsl</code> を
-<code>check</code> した結果、ok→error の遷移集合は空です。新たに拒否する inline の形や、
-未修正の #1528 経路が、この corpus の結果で解消されたことにはなりません。</p>
+<code>check</code> した結果、ok→error の遷移集合は空です。新たに拒否する inline の形は、この
+corpus の結果で否定されません。<code>leadsTo</code> 宣言バインダーの経路は後の #1528 で拒否しました。</p>
+<p><strong>破壊的な受理の削除 (#1528):</strong> <code>leadsTo</code> のプロパティ宣言直下のバインダーも、
+before/after の式、<code>helpful</code> の引数、<code>decreases</code>、<code>within</code> の捕獲検査に含めます。
+def 本体の自由な名前を捕まえる呼び出しは、通常の spec、compose 部品と root のプロパティ、
+<code>leadsTo</code> に下ろされる dialect のプロパティ (requirements など) で、
+呼び出し位置の <code>would capture variable</code> エラー (exit 2、<code>kind: "semantics"</code>)
+になります。宣言バインダーを改名してください。バインダーの範囲と自身の <code>where</code>
+式の展開は変わりません。<code>where</code> の捕獲エラーが、未対応のプロパティ外側バインダーの
+<code>where</code> を拒否する既存エラーより先に出る場合があります。
+元から不正な、状態を読む <code>within</code> の呼び出しでは、<code>unknown constant</code> の代わりに
+呼び出し位置の <code>would capture</code> を報告する場合があります。exit 2 / semantics は不変です。
+既に不正なパターン束縛のスコープ外参照 (#1547) もある <code>leadsTo</code> では、同様に
+<code>would capture</code> がその拒否より先に出る場合があります。exit 2 / semantics は不変です。</p>
+<p>#1528 の <code>check</code> sweep は、base <code>08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc</code> と実装
+<code>c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286</code> の別々に build した <code>git archive</code> tree で実施しました。
+<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の全601個の <code>.fsl</code> は、stdout/stderr の
+全内容と exit が一致し、ok→error と error→error の診断変化はともに0件でした。
+移した既存の inline テストの1形 (合計602形) だけが ok→error に変わりました。
+これは宣言バインダーが <code>decreases</code> 内の def 呼び出しの自由な状態名を捕まえる形です。
+捕獲と無関係な受理の削除はありません。</p>
 <ul>
 <li>算術: <code>+ - * / %</code>、単項 <code>-</code>、<code>min(a, b)</code> / <code>max(a, b)</code> / <code>abs(a)</code>
   (<code>a//b</code> は <code>//</code> 以降がすべてコメントになってしまうので、除算は空白を入れて

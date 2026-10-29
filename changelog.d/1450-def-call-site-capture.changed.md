@@ -11,12 +11,10 @@ diagnostic-order exceptions below still reject with the same exit and kind.
 Compose-source expansion now receives Common declarations for its
 global-name inventory and runs after component loading, still before rewriting.
 
-Exception / remaining soundness risk (Refs #1528): binders declared directly by
-a `leadsTo` property are not passed to this capture check in before/after,
-`helpful` arguments, `decreases`, or `within`, and can still produce
-a false green by capturing a def-body free name. Rename that binder before
-relying on verification; expression quantifiers/aggregates inside the property
-are covered, but the declaration-level path is not fixed here.
+The declaration-level `leadsTo` path is also rejected by #1528: before/after,
+`helpful` arguments, `decreases`, and `within` cannot capture a def-body free
+name through a declaration binder. These calls use the same exit 2 / semantics
+capture diagnostic; rename the declaration binder.
 The declaration binder's own `where` expression is checked for capture; this can
 precede the existing rejection of unsupported wrapper `where` filters. First
 error ordering can also change when both a component load and a compose def are

@@ -708,8 +708,7 @@ Calls must name a `def` in the same source file and match its arity. Definitions
 may call earlier or later definitions but cannot be directly or mutually
 recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
-variable capture instead of inventing internal binder names, with the known
-`leadsTo` property-binder exception below. See
+variable capture instead of inventing internal binder names. See
 [`DESIGN-def.md`](../design/DESIGN-def.md).
 
 **Breaking removal (#1450):** a call is rejected when an action parameter,
@@ -725,23 +724,35 @@ in compose components and synchronized actions.
 A non-global `is some(v)` binding exported by a `requires` guard or the left
 operand of a binary expression is also a caller binding for this check.
 
-**Remaining soundness risk (Refs #1528):** a binder declared directly by a
-`leadsTo` property is not propagated into the property's before/after expressions,
-`helpful` arguments, `decreases`, or `within` by this capture check. Such a binder
-can still capture a def-body free name and produce a false green. Rename that
-binder; do not treat a successful check or verification of the capturing form
-as evidence of the intended state reference. Expression quantifiers and
-aggregates inside the property's expressions are covered by #1450.
-The declaration binder's own `where` expression is checked for capture; an
-earlier capture error can therefore precede the existing rejection of unsupported
-property-wrapper `where` filters.
-
 The final implementation's `check` sweep of all 597 `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, using base
 `11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built implementation
 `dd7b47885680076412ab2f0b46ebe8854ff6758b` in their respective materialized
 trees, has an empty ok-to-error transition set. The newly rejected inline
-forms and the still-open #1528 path are not negated by that corpus result.
+forms are not negated by that corpus result; the `leadsTo` declaration-binder
+path was closed later by #1528.
+
+**Breaking removal (#1528):** binders declared directly by a `leadsTo` property
+also participate in this capture check for before/after expressions, `helpful`
+arguments, `decreases`, and `within`. A call capturing a def-body free name now
+rejects with exit 2, `kind: "semantics"`, and `would capture variable` at the
+call, in direct specs, compose components and root properties, and dialect
+properties lowered to `leadsTo` (such as requirements). Rename the declaration binder.
+Binder ranges and the binder's own `where` expansion are unchanged; capture in
+`where` can still precede the unsupported-property-wrapper-where rejection.
+An already-invalid state-reading `within` call can now report `would capture`
+at the call instead of `unknown constant`, still with exit 2 / semantics.
+When a `leadsTo` also contains an already-invalid pattern-scope escape (#1547),
+`would capture` can likewise precede that rejection; exit 2 / semantics is unchanged.
+
+The #1528 `check` sweep used separately built `git archive` trees for base
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286`. All 601 `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/` agree in full stdout/stderr
+and exits: zero ok-to-error transitions and zero error-to-error diagnostic
+changes. The one migrated inline test source (602 forms total) is the only
+ok-to-error transition: a declaration binder captures a def-body free state
+name in a `decreases` call. There are no unrelated breaking removals.
 
 - Arithmetic: `+ - * / %`, unary `-`, `min(a, b)` / `max(a, b)` / `abs(a)`
   (since `a//b` would turn everything after `//` into a comment, write division

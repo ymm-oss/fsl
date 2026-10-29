@@ -108,16 +108,17 @@ fn non_global_caller_patterns_in_guards_and_binary_left_capture_free_names() {
 }
 
 #[test]
-fn declaration_level_property_helper_capture_is_an_explicit_remaining_exception() {
+fn declaration_level_property_helper_capture_is_refused() {
     let source = spec(
         "on: K, seen: Bool",
         "on = 0 seen = false",
         "p() = on",
         "fair action g(k: K) { seen = true }\n  leadsTo L { forall on: K { seen ~> true } helpful g(p()) decreases p() }",
     );
-    // Preservation of the explicitly deferred path, not a capture detector.
-    let (output, status) = check(&source);
-    assert_eq!(status, 0, "{output}");
+    // Declaration binders must also protect free names in helper definitions.
+    let output = error(&source, "semantics");
+    let message = output["message"].as_str().unwrap();
+    assert!(message.contains("would capture variable 'on'"), "{output}");
 }
 
 #[test]

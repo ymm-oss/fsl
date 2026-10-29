@@ -56,16 +56,21 @@ keeps the kernel and cross-file name-resolution surface unchanged.
 The capture rules favor an explicit local repair over silently changing meaning
 or leaking compiler-generated names into counterexamples.
 
-**Exception / remaining soundness risk (Refs #1528):** the binders declared
-directly by a `leadsTo` property are not threaded into this def capture check for
-before/after expressions, `helpful` arguments, `decreases`, or `within`.
-They can still capture a def-body free name and produce a false green; rename
-the binder before relying on verification. Expression quantifiers and
-aggregates inside the property's expressions are covered. This change does
-not claim to close the declaration-level property-binder path.
-The binder's own `where` expression is checked, so capture may now reject before
-the existing unsupported-wrapper-where diagnostic. A capture in that `where`
-does not demonstrate that the wrapper's other positions are covered.
+**Breaking removal (#1528):** binders declared directly by a `leadsTo` property
+also protect before/after expressions, `helpful` arguments, `decreases`, and
+`within`. A def call whose expanded body has a free name captured by any of
+these declaration binders rejects with exit 2, `kind: "semantics"`, and
+`would capture variable` at the call; rename the declaration binder. This
+applies to direct specs, compose components and root properties, and dialect
+properties lowered to `leadsTo` (such as requirements), including later declaration
+binders. Definitions with no colliding free name remain accepted. The existing
+scope restoration and capture diagnostic are reused; binder ranges and the
+binder's own `where` expansion are unchanged. Capture in `where` can still
+precede the existing unsupported-wrapper-where diagnostic.
+An already-invalid state-reading `within` call can report `would capture` instead
+of `unknown constant`, still with exit 2 / semantics.
+When a `leadsTo` also contains an already-invalid pattern-scope escape (#1547),
+`would capture` can likewise precede that rejection; exit 2 / semantics is unchanged.
 
 ## Caller scope and compose source names (#1450)
 
@@ -144,10 +149,47 @@ both sides with finite, nonnegative values. Two same-base repeats over all 66
 pairs confirm those timing differences; only those numeric token spans are
 masked, preserving all other bytes. No verdict, location, assurance, solver
 counter, memory value or trace field is excluded. BMC agreement at depth 4 is
-bounded evidence and does not close #1528.
+bounded evidence; declaration-binder capture is rejected separately by #1528.
+
+## Declaration-binder boundary evidence (#1528)
+
+The command shapes `<base-binary> check <path>` and `<head-binary> check <path>`
+were run in separately built, fresh `git archive` trees for base
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286`. All 601 `.fsl` files under
+`specs/` (23), `examples/` (191), and `rust/fslc/tests/fixtures/` (387) agree
+in full stdout/stderr bytes and exit status: zero ok-to-error transitions and
+zero error-to-error diagnostic changes. No field is excluded.
+
+The one migrated inline source from `issue_1450_def_pattern_scope.rs` was also
+checked in each tree (602 forms total). It changes from exit 0 / ok to exit 2 /
+semantics: its `forall on: K` declaration captures the free state name `on` in
+`def p() = on`, called in `decreases p()` and `helpful g(p())`. The first error
+is `predicate 'p' call would capture variable 'on'; rename the binder at the call site at 7:70`.
+This is the only ok-to-error transition; there are no unrelated breaking removals.
+
+Independent acceptance controls cover all five expression positions, renamed
+binders, a second declaration binder, and compose. Removing only the new scoped
+expansion restores check ok, BMC verified, and induction proved for the capturing
+before/after/decreases/helpful controls. `within` was already fail-closed and
+changes only its diagnostic; for the acceptance source the exact changes are:
+
+| Route | Before #1528 | After #1528 |
+|---|---|---|
+| check | exit 2, semantics, `unknown constant 'c'`, loc 4:23 | exit 2, semantics, `predicate 'Bound' call would capture variable 'c'; rename the binder at the call site at 9:41`, no structured loc |
+| BMC / induction | exit 2, semantics, `unknown constant 'c'`, no structured loc | same call-site error as check, no structured loc |
+
+All three fixed routes have equal whole error envelopes. Renaming the `within`
+binder retains the existing unknown-constant rejection. Binder-where capture and
+the constant/enum `helpful` argument behavior from #1580 remain unchanged.
 
 ## Diagnostic-order exceptions
 
+- **#1528 — capture alongside another invalid `leadsTo` expression:** a
+  state-reading `within` can report `would capture` at the call instead of
+  `unknown constant` (acceptance-source details above); likewise capture can
+  precede #1547's rejection of a name outside its pattern's true continuation.
+  Both remain exit 2 / `semantics`; neither is a newly accepted form.
 - **v01 — invalid parameter range and action body:** if both contain undefined
   predicate calls, both versions reject with exit 2 and kind `name`, but the
   parameter-range error can become the action-body error. For the documented
