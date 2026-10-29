@@ -1,0 +1,1 @@
+Fixed (#1553): Make the #1475 chain regression expect layer-detail warning locations to carry the native path chain passes to check (`.\spec.fsl` on Windows), while the standalone check still expects its argument. Product output and Unix expectations are unchanged.
