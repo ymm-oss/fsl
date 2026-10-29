@@ -837,30 +837,18 @@ verify の成功を、意図した状態参照の証拠としないでくださ�
   action 位置を既定として使いますが、より具体的な腕の span が優先される場合があります。
   先に報告される新しい不正参照が後の衝突の message に優先しても、終了コード 2 と
   kind semantics の拒否は保ちます。式の <code>if</code> は腕から型を推論するため、条件の束縛衝突
-  より腕の参照エラーが先に出る場合があります。<code>requires (o is some(v)) =&gt; true</code> の後の
-  <code>y = if (p is some(v)) then v else 0</code> は、条件の衝突 <code>6:12</code> から then の unbound
-  <code>6:32</code> へ変わり、else/入れ子の対照は <code>6:39</code>/<code>6:48</code> です。その腕の参照だけを既存の
-  <code>x</code> に変えると、完全な衝突 packet <code>6:12</code> に戻ります。入力を受理する変更ではありません。
-  def 呼び出しの意図した診断変更も終了コード 2/kind semantics を保ちます: 直接の
-  <code>p()</code> capture の loc 無し → unbound <code>7:3</code>、compose の use <code>2:3</code> → <code>7:3</code>、
-  レビューした <code>k()</code> capture の loc 無し → unbound <code>6:3</code>。詳細は設計の診断節を参照。
+  より腕の未束縛参照エラーが先に出る場合があります。入力を受理する変更ではありません。
+  <code>def</code> 本体の自由名を、真の後続部分の外にあるパターンだけが捕捉する場合、従来の
+  predicate capture エラーではなく、使用を含む clause の未束縛参照として報告します。
+  この種類の診断は message や位置が変わり得ますが、終了コード 2 と kind semantics
+  を保ちます。
   未定義の <code>(o is some(v)) or v == 1</code> は、意図する <code>none</code> の扱いを決めて修復します。
   不在を許し、存在する場合だけ値 1 を要求するなら <code>(o is some(v)) =&gt; v == 1</code>、
   または等価な <code>o == none or (o is some(v) and v == 1)</code> と書きます。
   <code>and</code> だけにすると <code>none</code> を拒否します。元の未定義の式との等価性は主張しません。
-  境界測定は BASE <code>c32e7f5a88b412056210ee66f0cff9765001fed9</code> と測定 HEAD
-  <code>b9751830e76ba64ad402c982387232a39ff87c9a</code> の各 tree で
-  <code>&lt;binary&gt; check &lt;path&gt;</code> を 2 回実行し、stdout/stderr/終了コードを除外なしで
-  全文比較しました。コーパス597ファイルと、既存の Rust テスト内の静的で完全な
-  文書リテラル1,750出現の <code>ok</code> → <code>error</code> は<strong>0</strong>、出力はバイト単位で同一でした。
-  作成者テスト146経路は<strong>57件</strong>(28セル両経路と2 source compose 1件)、レビュー110入力は
-  <strong>24件</strong>、合計<strong>81件の除去</strong>を<a href="../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547">スコープ設計</a>
-  に列挙しています。base のローカル名衝突入力75件は全て拒否のままです。message 変更18件のうち
-  15件は完全な衝突復帰対照を持つ優先順位変更(うち7経路は上記の腕位置変更)、残る3件は
-  def 呼び出しの変更です。この限定測定で受理拡大・反復差はありません。別の文書候補
-  1,766件(補間のある format 222件、不完全な断片1,544件)は一覧化のみで実行していません。
-  任意の実行時生成ソースや、
-  テストが作る隣接ファイルの再構成は、このリテラル測定の範囲外です。
+  測定した除去と診断例は、
+  <a href="../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547">スコープ設計</a>
+  に記録しています。
   <code>v</code> は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
   引数・量化子の束縛変数・<code>let</code>・それより前のパターン束縛と同じ名前の <code>v</code> は
   <code>check</code> が拒否し、名前を変えるよう求めます。

@@ -826,36 +826,19 @@ forms and the still-open #1528 path are not negated by that corpus result.
   postconditions retain their action-level fallback, but a more specific arm
   span can take precedence. An earlier newly illegal reference can replace a
   later collision message while retaining exit 2 and kind semantics.
-  Expression-if arm inference can precede condition freshness validation:
-  after `requires (o is some(v)) => true`, the assignment
-  `y = if (p is some(v)) then v else 0` changes from condition collision `6:12`
-  to unbound then-arm `6:32`; the else/nested variants report `6:39`/`6:48`.
-  Renaming only that arm reference to the existing `x` restores the complete
-  collision packet at `6:12`. The source remains rejected, not reinterpreted.
-  Intentional def-call changes retain exit 2/kind semantics: direct `p()` capture
-  loc absent → unbound `7:3`, compose use loc `2:3` → `7:3`, and reviewed `k()`
-  capture loc absent → unbound `6:3` (see the design's diagnostic notes).
+  Expression-if arm inference can report an unbound arm reference before a
+  condition's freshness error; the source remains rejected, not reinterpreted.
+  A free name in a `def` body that only an out-of-continuation pattern would
+  capture is now reported as an unbound reference at the containing clause,
+  instead of a predicate-capture error. This diagnostic class changes messages
+  and possibly locations, but retains exit 2 and kind semantics.
   Repair the undefined `(o is some(v)) or v == 1` according to the intended
   treatment of `none`: if absence is allowed and a present payload must equal 1,
   write `(o is some(v)) => v == 1`, equivalently
   `o == none or (o is some(v) and v == 1)`. Using `and` alone instead rejects
   `none`; no equivalence with the old undefined expression is implied.
-  The boundary sweep ran `<binary> check <path>` in each commit's own tree,
-  BASE `c32e7f5a88b412056210ee66f0cff9765001fed9` and measured HEAD
-  `b9751830e76ba64ad402c982387232a39ff87c9a`, twice with full stdout/stderr/exit
-  comparison and no excluded fields. All 597 corpus files and 1,750 existing
-  static complete Rust-test literal occurrences had **zero** `ok` → `error`
-  transitions and byte-identical outputs. The 146 authored routes had **57**
-  removals (28 paired cells plus one two-source compose case); 110 reviewed
-  inputs had **24**, for **81 observed removals**, enumerated by shape/input in
-  the [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
-  All 75 base local-name collision inputs remain rejected. Of 18 message changes, 15 are
-  collision-priority cases with complete collision-return controls; seven have
-  the tested arm-location changes above. The other three are the def-call
-  changes. No acceptance expansions or repeat differences were observed in this
-  bounded sweep. Another 1,766 candidates (222 interpolated formats and 1,544 incomplete
-  snippets) were inventoried, not executed; arbitrary runtime-generated sources
-  and test-created sibling-file reconstruction are outside this literal sweep.
+  Measured removals and diagnostic examples are recorded in the
+  [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
   `v` must be a fresh name: `check` rejects a `v` that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, `let`, or an earlier pattern binding in scope, and asks you to rename

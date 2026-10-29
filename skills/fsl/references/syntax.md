@@ -1088,31 +1088,18 @@ never a state variable named `true`), so the declaration is rejected. No other w
   Location is the containing clause/if arm; guards/ensures retain the action-level
   fallback unless a specific arm span takes precedence. An earlier newly illegal
   reference may replace a later collision diagnostic, still exit 2/semantics.
-  Expression-if arm inference can precede condition freshness checking: after
-  `requires (o is some(v)) => true`, `y = if (p is some(v)) then v else 0`
-  moves collision `6:12` to unbound `6:32` (else `6:39`, nested `6:48`). Renaming
-  the arm reference to existing `x` restores the complete base packet `6:12`.
-  Intentional def-call changes also retain exit 2/semantics: direct `p()` capture
-  absent loc→`7:3`, compose use `2:3`→`7:3`, reviewed `k()` absent loc→`6:3`.
+  Expression-if arm inference can report an unbound arm reference before a
+  condition freshness error. A free name in a `def` body that only an
+  out-of-continuation pattern would capture is now reported as an unbound
+  reference at the containing clause rather than a predicate-capture error.
+  This class changes messages/possibly locations, not exit 2/kind semantics.
   For the intended policy
   "allow none; require payload 1 when present", repair the undefined
   `(o is some(v)) or v == 1` to `(o is some(v)) => v == 1`, equivalently
   `o == none or (o is some(v) and v == 1)`. `and` alone rejects `none` instead;
   do not claim equivalence with an undefined expression.
-  Sweep: `<binary> check <path>` in each commit's own tree, BASE
-  `c32e7f5a88b412056210ee66f0cff9765001fed9`, measured HEAD
-  `b9751830e76ba64ad402c982387232a39ff87c9a`, repeated twice, full stdout/stderr/exit,
-  no excluded fields. The 597 corpus files and 1,750 existing complete static
-  Rust-test literal occurrences had zero `ok`→`error` and zero byte changes.
-  The 146 authored routes contain 57 removals (28 paired cells + one two-source
-  compose); 110 reviewed inputs contain 24, totaling 81 observed removals, listed in
+  Measured removals and diagnostic examples are recorded in
   [the design](../../../docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
-  All 75 base local-name collision inputs still reject. Of 18 message changes, 15 have complete
-  collision-return controls (seven approved arm-location changes); the other three
-  are def-call changes. Measured acceptance expansions/repeat differences were 0,
-  not a global equivalence claim. Another 1,766 candidates (222 interpolated
-  formats, 1,544 incomplete snippets) were inventoried, not executed. This does
-  not cover arbitrary runtime-generated sources or reconstructed sibling files.
   `v` must be fresh: `check` rejects a `v` that names a state variable,
   constant, enum member, action parameter, binder, `let`, or an earlier pattern
   binding in scope.

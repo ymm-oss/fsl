@@ -2,14 +2,17 @@ Changed (#1547, breaking removal): native `check` rejects pattern variables
 outside their true continuation, including disjunctive/comparison/implication
 escapes and non-conjunctive `requires` exports. Ten logical scope consumers and
 the DDD frontend share one operator policy. Collision reservations remain
-separate and base-equivalent; #1573 remains separate work. Legal `and`/`=>` RHS
+separate and base-equivalent, including compose guard-name inventories so
+accepted output retains authored names; #1573 remains separate work. Legal `and`/`=>` RHS
 bindings and conjunctive guard exports remain supported. Earlier newly invalid
 references can precede legacy collision diagnostics, still exit 2/semantics.
 Expression-if arm inference can report unbound then/else/nested references at
 `6:32`/`6:39`/`6:48` before the former condition collision `6:12`; renaming only
-the arm reference restores the complete base packet `6:12`. Def-call capture
-diagnostics also intentionally become located unbound-reference diagnostics,
-with rejection preserved. Outer not/quantifier/aggregate escapes were already
+the arm reference restores the complete base packet `6:12`. When only an
+out-of-continuation pattern would capture a free name in a def body, the
+predicate-capture error becomes a located unbound-reference diagnostic. This
+class preserves exit 2/kind semantics while changing message/possibly location;
+it is not limited to the three examples measured below. Outer not/quantifier/aggregate escapes were already
 refused, not new removals. For a policy
 allowing `none` but requiring payload 1 when present, use
 `(o is some(v)) => v == 1`, equivalently

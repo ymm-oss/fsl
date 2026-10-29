@@ -288,11 +288,15 @@ Renamer's `Scope.locals` preserve the base's reservation inventory separately
 from readable names and rename mappings. The shared `extend_pattern_names`
 collector has a visible mode (the helper's rule) and a collision mode
 (`Is(Some)` and all `Binary` children). Only the latter feeds collision checks;
-it never supplies types or makes a name readable. The same phase reaches later
-guards, lets, statements, lvalue indices, ensures and binder children, including
-component rewriting before model validation. This prevents a narrower readable
-environment from admitting repeated names that the first-binding-wins
-evaluators would interpret incorrectly. Evaluators are unchanged.
+it never supplies types or makes a name readable. Typed model validation carries
+the collision phase through later guards, lets, statements, lvalue indices,
+ensures and binder children. Component rewriting uses this phase only within
+each expression: every action item starts a fresh normalized phase, and the
+readable scope carried across `requires` items contains only conjunctive
+exports. Subsequent model validation checks cross-item collisions; sync source
+hygiene separately carries its reserved locals. Together these checks prevent
+a narrower readable environment from admitting repeated names that the
+first-binding-wins evaluators would interpret incorrectly. Evaluators are unchanged.
 
 This inventory intentionally preserves the base boundary rather than claiming
 to inventory every possible evaluator binding. The existing not/if reuse
@@ -337,16 +341,21 @@ walk, and review found the Renamer as a tenth logical consumer:
 | Name export collector | `compose.rs` | Whole-expression export |
 | Source-owned Renamer | `compose/hygiene.rs` | RHS mapping flow and whole-result mapping export |
 
-The two DDD `domain_lowering.rs` decisions also delegate to the same helper,
-replacing equivalent frontend copies. Collision propagation is a separate
-reservation policy, not another visibility operator rule.
+The whole-export and RHS decisions in both DDD paths, `domain_lowering.rs` and
+`domain.rs`, also delegate to the same helper, replacing four equivalent
+frontend copies. Collision propagation is a separate reservation policy, not
+another visibility operator rule.
 
 The compose guard-name set is a syntactic capture-protection inventory, not a
-visible-value scope. It uses the existing general pattern-name collector so
-restricting visible bindings does not remove capture protections. Six focused
-sync/foreign-argument controls (ordinary, disjunctive, negated, quantified,
-conditional and aggregate patterns) stayed accepted on base/head in two runs;
-this is bounded evidence, not an exhaustive admission-equivalence proof.
+visible-value scope. It uses `extend_pattern_names` in collision mode, retaining
+the base's `Is(Some)`/all-`Binary` inventory. Using the broader general collector
+here incorrectly reserved names inside not/if/quantifier/aggregate children and
+introduced `__v_substitution_N` into accepted compose output. Full base-generated
+`explain` regressions for sibling negated guards and a conditional sync guard
+reject that regression. Acceptance checks alone do not detect this output drift.
+Six focused sync/foreign-argument controls cover ordinary, disjunctive, negated,
+quantified, conditional and aggregate patterns; they are bounded evidence, not
+an exhaustive admission-equivalence proof.
 
 The position/reuse/public-entry matrices include rejecting controls and legal
 `and`/`=>`/`requires` preservation controls. Twelve isolated inversions cover the
@@ -379,10 +388,17 @@ reports `6:39`, and the nested-if variant `6:48`. Direct and compose controls
 pin the entire message, exit 2, kind and these locations. Renaming the arm
 reference restores the base packet at `6:12`; rejection is preserved.
 
-The 18 measured message changes comprise 15 collision-family cases (eight
-unchanged locations and seven explicitly tested arm-location changes) and
-three earlier predicate-capture diagnostics. All 75 base local-name collision inputs
-remain rejected. Of the capture cases, direct `def-call-or-free-name` moves
+When a `def` body's free name would be captured only by an out-of-continuation
+pattern at its call site, the name is now reported as an unbound reference in
+the containing clause instead of as predicate capture. This is a diagnostic
+class, not a list of three special cases: messages and possibly locations
+change while exit 2 and kind semantics remain. Independent review exercised
+11 such shapes, including invariant comparisons and disjunctive action guards.
+
+The historical sweep below measured 18 message changes: 15 collision-family cases
+(eight unchanged locations and seven explicitly tested arm-location changes)
+and three examples of this predicate-capture class. All 75 base local-name
+collision inputs remain rejected. Among those examples, direct `def-call-or-free-name` moves
 from an absent loc to `7:3`, its compose route from use loc `2:3` to `7:3`, and
 the reviewed `k()` case from an absent loc to `6:3`; all retain exit 2 and kind
 semantics. They are outside the pattern-shadow collision family, not silently
@@ -411,9 +427,9 @@ head is `7d9eb9a60553f22fb0aaf4d99a4e6581396a341186f4bef9b385060a02f40a13`.
 Two complete runs compared stdout, stderr and exit code, with no excluded fields
 and zero repeat differences. Each SHA has its own materialized tree, executed
 at the same absolute address to control source/provenance paths without
-dropping fields. Documentation-only successors do not change these native
-sources. Diagnostic variations above are recorded contract changes, not fields
-removed from the comparison.
+dropping fields. These are historical observations at the named measured HEAD,
+not a sweep of later native revisions. Diagnostic variations above are recorded
+contract changes, not fields removed from the comparison.
 
 | Group | Forms/routes | Base exits 0 / 1 / 2 | Head exits 0 / 1 / 2 | `ok`→`error` | Full output changes |
 |---|---:|---:|---:|---:|---:|
