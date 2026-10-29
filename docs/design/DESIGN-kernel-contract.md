@@ -146,11 +146,13 @@ Init definedness is a verifier obligation instead: every engine (`explicit`,
 `auto`, `bmc`, `induction`) reports an init that some initial state cannot evaluate
 as a `semantics` error with exit code 2, and all engines locate it at the failing
 init statement with the same ` in init at L:C` suffix
-(e.g. `division by zero in init at 9:5`; #1258, #1543). The
-one exception is an init that also assigns a value outside a state variable's
-type: `bmc` and `induction` assume the step-0 type bounds when they ask the
-init question, so they report the search's step-0 `type_bound` violation
-(exit 1) instead, while the explicit engine reports the init failure (exit 2).
+(e.g. `division by zero in init at 9:5`; #1258, #1543).
+Even with out-of-type init assignments, `bmc` and `induction` prioritize init
+undefinedness over assigned-root bounds and retain this same located message (#1597).
+If a symbolic init failure is found only beyond a stored `Seq`'s represented
+capacity, for example when init stores an over-capacity sequence and reads beyond
+its slots, these engines instead refuse without a location as
+`model sequence length exceeds capacity`.
 The schema is unchanged. Publishing init failure conditions, should a Kernel
 consumer need them, would add a field with its own `state_effect_on_failure`
 value and so a minor schema version.

@@ -1709,8 +1709,11 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    error (exit 2) under every engine, with the same ` in init at L:C` suffix,
    e.g. `division by zero in init at 9:5` (#1543) — not a `partial_op` violation.
    Guard it with an init `if`.
-   Exception: if init also assigns a value outside a state's type, `bmc`/`induction`
-   report the step-0 `type_bound` violation (exit 1) instead.
+   Even if init assigns an out-of-type value, `bmc`/`induction` prioritize init
+   undefinedness and retain that same located message (#1597).
+   A symbolic init failure found only beyond a stored `Seq`'s represented capacity,
+   such as when init stores an over-capacity sequence and reads beyond its slots,
+   is instead refused without a location as `model sequence length exceeds capacity`.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
    counterexamples. Fairness applies to whole action instances; model conditional

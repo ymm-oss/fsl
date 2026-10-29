@@ -1385,10 +1385,13 @@ additional removals in #1463.
   the initial state. All engines name the failure and the init statement with
   the same ` in init at L:C` suffix, e.g. `division by zero in init at 9:5`
   (#1543). `bmc` and `induction` (whose base case is `bmc`) also do so when init
-  is nondeterministic (#1258). One exception: when init also
-  assigns a value outside a state variable's type, `bmc` and `induction`
-  report that step-0 `type_bound` violation (exit 1) instead, because they
-  ask the init question under the step-0 type bounds.
+  is nondeterministic (#1258). Even when init assigns an out-of-type value,
+  `bmc` and `induction` report undefined init before assigned-root bounds,
+  preserving the same located message as the other engines (#1597).
+  If a symbolic init failure is found only beyond a stored `Seq`'s represented
+  capacity, for example when init stores an over-capacity sequence and reads
+  beyond its slots, these engines instead refuse without a location:
+  `model sequence length exceeds capacity`.
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.
 - **Intended terminal states** (states where stopping is correct, such as
