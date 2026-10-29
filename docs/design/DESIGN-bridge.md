@@ -168,7 +168,7 @@ for its fixed targets. Static filters may establish nonemptiness using only
 the binder and constants (for example `where k == 0` over `0..1`). A
 state-dependent filter is not such a proof, even when its state was initialized
 earlier. Ownership validation still inspects the body, and the existing
-conservative binder-key coverage classification is unchanged. Thus an
+check-time conservative binder-key coverage classification is unchanged. Thus an
 unexecuted write cannot initialize state computed by `Monitor::new` or explicit
 through an arbitrary default. Refinement's free-root `concrete_initial_states`
 path does not use `Monitor::new`: it checks ownership and read order, then
@@ -183,13 +183,11 @@ This is also a conservative concrete-support breaking removal: after
 by explicit and Monitor with `init does not assign` even when its runtime
 domain is nonempty, rather than producing an incorrect verdict.
 
-A separate pre-existing explicit limitation remains: for a where-filtered or
-collection binder, reading the current key after writing it is allowed by the
-#1518 read-order rule, but explicit and Monitor still refuse with
-`before it is assigned` because their binder-key coverage is conservative.
-This refusal already occurred on the base; it is an unsupported concrete-init
-shape, not an incorrect verdict. `--engine auto` falls back to BMC for it.
-Improving that binder-key coverage is tracked in #1520, not part of #1518.
+Static filtered type/range and collection domains now supply exact binder-key
+coverage to explicit, Monitor and refinement (#1520), without changing check.
+Current-key reads after writes are accepted when selected keys cover the root;
+auto then uses explicit without fallback. Empty domains add no coverage, partial
+domains cover only selected keys, and state-dependent filters remain unresolved.
 
 Breaking-removal sweep (#1518): base
 `28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head

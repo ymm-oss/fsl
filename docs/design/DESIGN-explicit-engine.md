@@ -109,6 +109,8 @@ Singleton fixed-target assignments remain accepted when a state-independent filt
 is statically proven nonempty. State-reading filters do not establish nonemptiness
 and cannot establish complete init coverage. Never-assigned finite scalar roots
 remain free and are enumerated; Monitor construction is unchanged.
+Static filtered type/range and collection domains also establish binder-key
+coverage for assigned roots, using only their selected keys (#1520).
 For these incomplete inits, bmc and induction still return verdicts using free
 values, whereas refine refuses the init and explains that distinction in its error.
 

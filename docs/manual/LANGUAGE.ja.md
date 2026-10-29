@@ -1069,11 +1069,11 @@ Monitor は exit 2 で拒否し、既定値で埋めません。symbolic init �
 `where flag and k == 0` の固定 target の書き込みは、実行時の domain が非空でも
 explicit と Monitor が `init does not assign` で拒否するのであって、誤った verdict ではありません。
 
-別の既存の explicit の制限も残ります (#1520)。where の付いた binder や collection の
-binder では、今の key を書いた後に読む形は #1518 の読み出し規則では許しますが、
-explicit と Monitor は base と同じく `before it is assigned` で拒否します。
-これは binder-key の覆いの保守的な制限であり、誤った verdict ではありません。
-`--engine auto` は BMC へ回ります。これらの形への対応は #1520 で扱います。
+explicit、Monitor、refine は状態に依存しない filter 付きの型・range と collection の
+binder domain を静的に求め、init の key の覆いに使います (#1520)。選んだ key が root
+全体を覆えば、今の key を書いた後に読む形に対応し、`--engine auto` も fallback せず
+explicit を使います。空の domain は覆いを足さず、部分 domain は選んだ key だけを覆い、
+状態に依存する filter は未解決のままです。check 時の読み出し順の規則は変えません。
 
 breaking removal の sweep (#1518): base
 `28c4eab710f8d83e766bb0e7c7e006d09d7777d8` と、head
