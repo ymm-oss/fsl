@@ -2769,6 +2769,16 @@ is `refinement_failed` with `kind:"progress_lost"` and
 actions are review metadata and must name impl actions; they do not create
 fairness or prove implementation conformance. Fairness still comes from
 lower-layer `fair action` declarations.
+Abstract Int/Bool constants become literals in P/Q, `decreases`, domains and nested filters.
+Impl-constant/read const-state collisions are refused; `check` already rejects const-namesake locals.
+Property patterns matching free impl names from lexically used maps are refused outside
+readable continuations too. Used-map RHS patterns cannot reuse property binders or sibling pattern names.
+Rename the abstract or mapping pattern binder to repair these collisions. Ordinary source scope is unchanged.
+Direct refine gives exit 2, `kind:"type"`, `loc` at `respond`. The ambiguous const/state
+bound witness gives refine exit 2 versus abstract-only BMC exit 1 `violated`.
+Unused maps/legal locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
+For a violated abstract constant bound with the impl constant renamed, or a body constant
+without an impl namesake, former exit-2 errors now report exit 1 `progress_lost`.
 For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
 `verify --engine induction`.
 

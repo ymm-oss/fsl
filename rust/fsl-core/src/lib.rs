@@ -121,7 +121,7 @@ pub use public_kernel::{
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
     Refinement, RefinementError, StateMap, parse_refinement, parse_refinement_with_options,
-    requirements_implements, requirements_implements_with_bounds,
+    pull_refinement_leadsto, requirements_implements, requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
 pub use resolve_aliases::lower_requirements;
@@ -2254,9 +2254,9 @@ pub(crate) fn capture_avoiding_binding_with_names<S: std::hash::BuildHasher>(
     let captures = scoped
         .values()
         .any(|replacement| free_vars(replacement).contains(&binding))
-        || scoped_indexed
-            .values()
-            .any(|(_, state_expr)| free_vars(state_expr).contains(&binding));
+        || scoped_indexed.values().any(|(binder, state_expr)| {
+            binder_name(binder) != binding && free_vars(state_expr).contains(&binding)
+        });
     if !captures {
         return (binder, contents, scoped, scoped_indexed);
     }

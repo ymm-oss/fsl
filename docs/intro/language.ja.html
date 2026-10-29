@@ -2681,6 +2681,16 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 <code>fair action</code> 宣言から来ます。
+抽象の Int/Bool 定数は P/Q、<code>decreases</code>、範囲と入れ子のフィルターでリテラルになります。
+別モデルの impl 定数との binder 衝突と、読まれる抽象の const/state の同名は拒否します。
+const と同名の local は先に <code>check</code> が拒否します。性質の pattern が、字句 scope で使う map の
+自由な impl 名と同名なら、読める続きとは別に拒否します。使う map 式の pattern が性質の binder や
+他の使用 map 式の pattern と同名でも拒否します。抽象/写像の pattern を改名してください。通常の scope は不変です。
+直接の refine は <code>respond</code> の位置つきエラー(exit 2、<code>kind:"type"</code>、<code>loc</code> あり)です。
+抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が exit 1 です。
+未使用の map/合法な local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
+抽象の定数を範囲で読む違反で impl の定数を改名した形と、抽象の定数を本体で読み impl に
+同名がない違反は、従来の exit 2 エラーから exit 1 <code>progress_lost</code> に変わります。
 非有界の証明には、引き続き下位レイヤーの <code>leadsTo ... decreases ...</code> と
 <code>verify --engine induction</code> を使ってください。</p></div></details>
 <details id="11-composition-compose"><summary>11. 合成(compose)<span class="tree-blurb"> — 名前空間と同期アクションによるスペックの合成。</span></summary><div class="tree-body"><p>検証済みのいくつかのコンポーネント spec を、<strong>名前空間つきで</strong> 1 つのシステム仕様
