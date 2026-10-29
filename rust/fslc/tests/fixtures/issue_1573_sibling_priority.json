@@ -1,0 +1,77 @@
+{
+  "_license": "SPDX-License-Identifier: Apache-2.0",
+  "base_commit": "299ac3df220d8734be5dca15def4b84c9375264e",
+  "exit": 2,
+  "envelope": {
+    "fsl": "1.0",
+    "result": "error",
+    "kind": "semantics",
+    "versions": {
+      "verifier": {"name": "fslc-rust", "version": "4.12.0"},
+      "core": {"name": "fsl-core", "version": "4.12.0"},
+      "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+    }
+  },
+  "cases": [
+    {
+      "name": "pattern-before-const-binder",
+      "source": "spec A {\n  const N = 2\n  type K = 1..2\n  state { o: Option<K>, p: Option<K>, flag: Bool, k: K }\n  init { o = some(1) p = some(2) flag = true k = 1 }\n  action stay() {}\n  invariant P { ((not (o is some(v))) or ((p is some(v)) and v == 2)) and (forall N: K { true }) }\n}\n",
+      "routes": [
+        {
+          "composed": false,
+          "base": {"message": "invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at 7:3", "loc": {"line": 7, "column": 3}},
+          "head": {"message": "invalid model expression: pattern binding 'v' in 'is some(v)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable at 7:3", "loc": {"line": 7, "column": 3}}
+        },
+        {
+          "composed": true,
+          "base": {"message": "component \"a.fsl\" failed to lower (invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:7:3) at s.fsl:2:3", "loc": {"line": 2, "column": 3}},
+          "head": {"message": "invalid model expression: pattern binding 'v' in 'is some(v)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable at 7:3", "loc": {"line": 7, "column": 3}}
+        }
+      ]
+    },
+    {
+      "name": "const-binder-before-pattern",
+      "source": "spec A {\n  const N = 2\n  type K = 1..2\n  state { o: Option<K>, p: Option<K>, flag: Bool, k: K }\n  init { o = some(1) p = some(2) flag = true k = 1 }\n  action stay() {}\n  invariant P { (forall N: K { true }) and ((not (o is some(v))) or ((p is some(v)) and v == 2)) }\n}\n",
+      "routes": [
+        {"composed": false, "head": {"message": "invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at 7:3", "loc": {"line": 7, "column": 3}}},
+        {"composed": true, "head": {"message": "component \"a.fsl\" failed to lower (invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:7:3) at s.fsl:2:3", "loc": {"line": 2, "column": 3}}}
+      ]
+    },
+    {
+      "name": "pattern-before-const-let",
+      "source": "spec A {\n  const N = 2\n  type K = 1..2\n  state { o: Option<K>, p: Option<K>, flag: Bool, k: K }\n  init { o = some(1) p = some(2) flag = true k = 1 }\n  action stay() { requires not (o is some(v)) requires (p is some(v)) and v == 2 let N = 1 flag = true }\n  invariant P { flag }\n}\n",
+      "routes": [
+        {
+          "composed": false,
+          "base": {"message": "invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at 6:3", "loc": {"line": 6, "column": 3}},
+          "head": {"message": "invalid model expression: pattern binding 'v' in 'is some(v)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable at 6:3", "loc": {"line": 6, "column": 3}}
+        },
+        {"composed": true, "head": {"message": "component \"a.fsl\" failed to lower (invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:6:3) at s.fsl:2:3", "loc": {"line": 2, "column": 3}}}
+      ]
+    },
+    {
+      "name": "erased-argument-const-before-pattern",
+      "source": "spec A {\n  const N = 2\n  type K = 1..2\n  state { o: Option<K>, p: Option<K>, flag: Bool, k: K }\n  init { o = some(1) p = some(2) flag = true k = 1 }\n  def ignore(x: Bool) = true\n  action stay() {}\n  invariant P { ((not (o is some(v))) or ((p is some(v)) and v == 2)) and ignore(forall N: K { true }) }\n}\n",
+      "routes": [
+        {"composed": false, "head": {"message": "invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:8:3", "loc": {"line": 8, "column": 3}}},
+        {"composed": true, "head": {"message": "component \"a.fsl\" failed to lower (invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:8:3) at s.fsl:2:3", "loc": {"line": 2, "column": 3}}}
+      ]
+    },
+    {
+      "name": "unused-def-const-before-pattern",
+      "source": "spec A {\n  const N = 2\n  type K = 1..2\n  state { o: Option<K>, p: Option<K>, flag: Bool, k: K }\n  init { o = some(1) p = some(2) flag = true k = 1 }\n  def unused(N: Bool) = true\n  action stay() {}\n  invariant P { (not (o is some(v))) or ((p is some(v)) and v == 2) }\n}\n",
+      "routes": [
+        {"composed": false, "head": {"message": "local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:6:3", "loc": {"line": 6, "column": 3}}},
+        {"composed": true, "head": {"message": "component \"a.fsl\" failed to lower (local binding 'N' shadows a constant of the same name; rename the local binding at a.fsl:6:3) at s.fsl:2:3", "loc": {"line": 2, "column": 3}}}
+      ]
+    },
+    {
+      "name": "leadsto-capture-before-pattern",
+      "source": "spec A {\n  const N = 2\n  type K = 1..2\n  state { o: Option<K>, p: Option<K>, flag: Bool, k: K }\n  init { o = some(1) p = some(2) flag = true k = 1 }\n  def Low() = k == 1\n  action stay() {}\n  leadsTo L { forall k: K { (((not (o is some(v))) or ((p is some(v)) and v == 2)) and Low()) ~> true } }\n}\n",
+      "routes": [
+        {"composed": false, "head": {"message": "predicate 'Low' call would capture variable 'k'; rename the binder at the call site at 8:88"}},
+        {"composed": true, "head": {"message": "component \"a.fsl\" failed to lower (predicate 'Low' call would capture variable 'k'; rename the binder at the call site at a.fsl:8:88) at s.fsl:2:3", "loc": {"line": 2, "column": 3}}}
+      ]
+    }
+  ]
+}

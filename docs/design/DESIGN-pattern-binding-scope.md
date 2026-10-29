@@ -818,6 +818,15 @@ collision reservation does not make the name readable.
 | Statement-if condition → either arm or a later statement | A later match reuses the condition's name | Rename the later binding |
 | **Inside either statement-if arm → later statement**, including nested arms | A later statement reuses a possibly retained arm binding | Rename the later binding |
 
+Four further breaking-removal routes retain the two original generated-inline
+#1442 nested-if examples, each standalone and composed: an outer condition's
+`u` is rebound in a nested then statement or expression. They now reject with
+the complete collision packet at 5:39/5:53. Separate controls change only the
+inner declaration to `w`; they remain accepted and genuinely violate Seen in
+BMC, induction, explicit and Monitor. They are preservation controls, not the
+old rebinding-dependent visibility detectors, and the original sources remain
+in the base/head sweep.
+
 For example, replace the later `(p is some(v)) and v == 2` with
 `(p is some(w)) and w == 2`. Do not replace a binding with an out-of-scope read.
 The then-to-else reservation of an **expression** if is intentional: the
@@ -836,7 +845,19 @@ The collision diagnostic remains exit 2, kind semantics, with the existing
 `pattern binding 'v' in 'is some(v)' shadows a name already in scope ...; rename
 the pattern variable` message. The original and renamed acceptance pairs pin
 the full message and containing clause/arm location, including action-level
-requires/ensures locations. Existing earlier-error priority is preserved.
+requires/ensures locations. The existing #1547 earlier-error controls are preserved.
+With #1515's const-shadow gate, an earlier newly rejected pattern reuse may now
+precede a later const-shadow binder or let: the direct diagnostic changes from
+const to pattern at the same clause/action location. A component expression can
+move from the parent's use location to the source pattern's clause location.
+The inverse order, pre-expansion erased-argument/unused-def checks, and leadsTo
+definition capture retain their complete existing packets. The mixed-priority
+fixture pins all twelve direct/compose routes; these are error-to-error priority
+changes, not additional acceptance removals or new token-level span precision.
+For each of the three changed routes, alpha-renaming only the later pattern
+declaration and its bound reads restores the complete base const-shadow packet.
+The repair controls preserve the wrapped component use location 2:3 as well as
+the message; a live count requires all three controls to execute.
 
 ### Source-separated syntax is an output contract change
 
@@ -849,8 +870,9 @@ only this observed name substitution, not loss of counterfactuals or witnesses.
 The two explain goldens are regenerated from the native output.
 
 Mutation is also an acceptance anchor, not just a successful CLI exit. Against
-the calibrated baseline `08d9656c`, c.fsl has killed 14 / survived 12 / invalid 0
-and c_if.fsl has killed 7 / survived 8 / invalid 0 at depth 4. Keeping the old narrow source
+the recalibrated baseline `299ac3df`, c.fsl has killed 14 / survived 12 / invalid 0
+and c_if.fsl has killed 7 / survived 8 / invalid 0 at depth 4. Keeping the old
+narrow source
 inventory makes otherwise valid candidates fail their new collision check:
 invalid becomes 24/13. The regression test checks the outcome counts,
 and the fault that removes not/conditional from the source inventory must fail

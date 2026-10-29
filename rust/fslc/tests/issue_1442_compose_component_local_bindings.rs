@@ -2,9 +2,10 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! #1442: a use-only compose preserves component lexical binding AND refusal.
-//! Let/pattern tests are detectors; other binders and located errors are
-//! preservation controls. Rejected patterns need only `check`: they must never
-//! reach an engine. BMC, induction, BFS and Monitor replay exercise valid lets.
+//! Let/pattern refusal tests are detectors; renamed patterns, other binders and
+//! located errors are preservation controls. Rejected patterns need only
+//! `check`: they must never reach an engine. BMC, induction, BFS and Monitor
+//! replay exercise valid lets and renamed patterns.
 //! Output comparison retains every semantic field, including witnesses, public
 //! assurance and locations. Only observed run-resource measurements are masked,
 //! with live presence/type checks on BOTH outputs; see `mask_cost`.
@@ -557,15 +558,45 @@ fn detector_earlier_ensures_reads_the_later_let_binding() {
     assert_same(direct, compose_scratch::verify(&dir, "system.fsl"), true);
 }
 
-fn nested_then_patterns(body: &str) {
-    let source = format!(
+const THEN_STATEMENT_REUSE: &str = "if opt is some(u) { if opt is some(u) { seen = 1 } }";
+const THEN_EXPRESSION_REUSE: &str =
+    "seen = if opt is some(u) then (if opt is some(u) then 1 else 0) else 0";
+
+fn nested_then_source(body: &str) -> String {
+    format!(
         "spec Pattern {{\n  type K = 0..1\n  state {{ opt: Option<K>, seen: Int }}\n  init {{ opt = some(1) seen = 0 }}\n  action read() {{ {body} }}\n  invariant Seen {{ seen == 0 }}\n}}"
+    )
+}
+
+fn reject_nested_then_patterns(body: &str, column: u32) {
+    let dir = pair("Pattern", &nested_then_source(body));
+    let [direct, composed] = ["component.fsl", "system.fsl"].map(|file| check(&dir, file));
+    let message = format!(
+        "invalid model expression: pattern binding 'u' in 'is some(u)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable at 5:{column}"
     );
+    for actual in [&direct, &composed] {
+        assert_eq!(actual.1, 2, "{}", actual.0);
+        assert_eq!(actual.0["result"], "error");
+        assert_eq!(actual.0["kind"], "semantics");
+        assert_eq!(actual.0["message"], message);
+        assert_eq!(actual.0["loc"], json!({"line": 5, "column": column}));
+    }
+    assert_same(direct, composed, false);
+}
+
+fn renamed_inner_pattern(body: &str) -> String {
+    assert_eq!(body.matches("some(u)").count(), 2);
+    let (before, after) = body.split_once("some(u)").expect("outer pattern");
+    format!("{before}some(u){}", after.replacen("some(u)", "some(w)", 1))
+}
+
+fn preserve_nested_then_patterns(body: &str) {
+    let source = nested_then_source(&renamed_inner_pattern(body));
     let dir = pair("Pattern", &source);
     let direct = check(&dir, "component.fsl");
     assert_eq!(direct.1, 0, "{}", direct.0);
     assert_same(direct, check(&dir, "system.fsl"), false);
-    for engine in ["bmc", "explicit"] {
+    for engine in ["bmc", "induction", "explicit"] {
         let args = |file| {
             [
                 "verify",
@@ -589,16 +620,43 @@ fn nested_then_patterns(body: &str) {
         *composed.0.pointer_mut(formula).expect("live formula") = json!("seen == 0");
         assert_same(direct, composed, true);
     }
+    for (file, action, property) in [
+        ("component.fsl", "read", "Seen"),
+        ("system.fsl", "a.read", "a.Seen"),
+    ] {
+        let trace = format!("{file}.trace.json");
+        std::fs::write(
+            dir.join(&trace),
+            json!([{"action": action, "params": {}}]).to_string(),
+        )
+        .expect("write renamed-pattern replay");
+        let (value, exit) = run(&dir, &["replay", file, "--trace", &trace]);
+        assert_eq!(exit, 1, "{value}");
+        assert_eq!(value["result"], "nonconformant");
+        assert_eq!(value["failed_at_event"], 0);
+        assert_eq!(value["violation"]["kind"], "invariant");
+        assert_eq!(value["violation"]["name"], property);
+    }
 }
 
 #[test]
-fn detector_then_statement_does_not_export_the_outer_pattern_binding() {
-    nested_then_patterns("if opt is some(u) { if opt is some(u) { seen = 1 } }");
+fn detector_then_statement_rejects_condition_pattern_reuse() {
+    reject_nested_then_patterns(THEN_STATEMENT_REUSE, 39);
 }
 
 #[test]
-fn detector_then_expression_does_not_export_the_outer_pattern_binding() {
-    nested_then_patterns("seen = if opt is some(u) then (if opt is some(u) then 1 else 0) else 0");
+fn detector_then_expression_rejects_condition_pattern_reuse() {
+    reject_nested_then_patterns(THEN_EXPRESSION_REUSE, 53);
+}
+
+#[test]
+fn preservation_then_statement_renamed_inner_pattern() {
+    preserve_nested_then_patterns(THEN_STATEMENT_REUSE);
+}
+
+#[test]
+fn preservation_then_expression_renamed_inner_pattern() {
+    preserve_nested_then_patterns(THEN_EXPRESSION_REUSE);
 }
 
 fn sync_addition_free_name(addition: &str, engine: &str) {

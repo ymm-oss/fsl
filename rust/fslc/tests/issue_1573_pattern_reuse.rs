@@ -369,7 +369,7 @@ fn source_inventory_keeps_foreign_conjunctive_guard_enabled() {
 
 #[test]
 fn source_inventory_preserves_s1_mutation_outcomes() {
-    // Calibrated against 08d9656c: source separation must not invalidate mutants.
+    // Recalibrated against 299ac3df: source separation must not invalidate mutants.
     let case = Case {
         name: "s1-mutation".into(),
         source: include_str!("fixtures/issue_1547_guard_reservations/a.fsl").into(),
@@ -400,5 +400,64 @@ fn source_inventory_preserves_s1_mutation_outcomes() {
             failures.push(format!("{file}: expected {expected}, got {exit}: {value}"));
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn sibling_constant_and_definition_rejection_priority() {
+    let data: Value =
+        serde_json::from_str(include_str!("fixtures/issue_1573_sibling_priority.json"))
+            .expect("calibrated sibling packets");
+    let mut failures = Vec::new();
+    let mut counterfactuals = 0;
+    for row in data["cases"].as_array().expect("cases") {
+        let source = row["source"].as_str().expect("source");
+        for route in row["routes"].as_array().expect("routes") {
+            let composed = route["composed"].as_bool().expect("composition mode");
+            let mut forms = vec![("head", source.to_owned(), &route["head"])];
+            if let Some(base) = route.get("base") {
+                assert_eq!(source.matches("(p is some(v))").count(), 1);
+                assert_eq!(source.matches("v == 2").count(), 1);
+                let renamed = source
+                    .replacen("(p is some(v))", "(p is some(w))", 1)
+                    .replacen("v == 2", "w == 2", 1);
+                forms.push(("rename-reuse", renamed, base));
+                counterfactuals += 1;
+            }
+            for (form, source, packet) in forms {
+                let case = Case {
+                    name: format!(
+                        "sibling-priority/{}/{form}",
+                        row["name"].as_str().expect("name")
+                    ),
+                    source,
+                    expected: Expected::Check,
+                    params: json!({}),
+                };
+                let fixture = Fixture::new(&case, composed);
+                let mut expected = data["envelope"].clone();
+                expected
+                    .as_object_mut()
+                    .expect("envelope")
+                    .extend(packet.as_object().expect("packet").clone());
+                std::fs::write(
+                    fixture.root.join("case.json"),
+                    json!({"name": case.name, "composed": composed, "expected": "Error", "packet": expected}).to_string(),
+                )
+                .expect("retain complete rejection expectation");
+                let (value, exit) = fixture.observe(&case.name, "check");
+                if exit != 2 || value != expected {
+                    failures.push(format!(
+                        "{}/compose={composed}: expected {expected}, got {exit}: {value}",
+                        case.name
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        counterfactuals, 3,
+        "all changed routes need a live repair control"
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

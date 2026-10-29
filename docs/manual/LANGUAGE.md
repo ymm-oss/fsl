@@ -915,7 +915,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   statement arms remain independent, and candidate-local names do not escape
   a quantifier/aggregate. Rename the later binding, for example change
   `(p is some(v)) and v == 2` to `(p is some(w)) and w == 2`.
-  None of these reservations grants additional read visibility.
+  None of these reservations grants additional read visibility. This includes
+  four breaking-removal routes from the earlier #1442 nested-if examples
+  (standalone/compose): retain the original rejection, and rename only the inner
+  `u` binding to `w` for the accepted preservation control.
   Compose separates such bindings across independent sources; rendered guards
   may now use `__v_substitution_0/1` instead of the authored `v`. The explain
   result and ordinary verification verdicts of the guard-name regression cases

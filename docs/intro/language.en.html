@@ -962,7 +962,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   statement arms remain independent, and candidate-local names do not escape
   a quantifier/aggregate. Rename the later binding, for example change
   <code>(p is some(v)) and v == 2</code> to <code>(p is some(w)) and w == 2</code>.
-  None of these reservations grants additional read visibility.
+  None of these reservations grants additional read visibility. This includes
+  four breaking-removal routes from the earlier #1442 nested-if examples
+  (standalone/compose): retain the original rejection, and rename only the inner
+  <code>u</code> binding to <code>w</code> for the accepted preservation control.
   Compose separates such bindings across independent sources; rendered guards
   may now use <code>__v_substitution_0/1</code> instead of the authored <code>v</code>. The explain
   result and ordinary verification verdicts of the guard-name regression cases

@@ -1,7 +1,10 @@
 Changed (#1573): breaking removal of pattern-name reuse after matches inside
 `not`, expression-if conditions/arms, where-to-body/of, and statement-if
 conditions or arms flowing into later statements. Rename the later binding
-and its reads; visibility is not broadened, opposite statement arms remain
+and its reads; the four standalone/compose #1442 nested-if reuse routes are
+included, with original refusal inputs retained and only the inner `u` renamed
+to `w` for accepted preservation controls. Visibility is not broadened, opposite
+statement arms remain
 independent, and candidate-local names do not escape. Expression then-to-else
 reuse is also rejected while the symbolic expression evaluator shares bindings
 (#1577). Compose now gives independent sources distinct hygienic pattern names:

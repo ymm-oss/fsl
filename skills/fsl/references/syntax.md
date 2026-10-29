@@ -1243,7 +1243,10 @@ when checking a file, the message suffix changes from `at L:C` to
   Opposite statement arms stay independent; candidate-local bindings stay local.
   Repair by renaming the later declaration and its reads, e.g. replace
   `(p is some(v)) and v == 2` with `(p is some(w)) and w == 2`; do not treat a
-  reservation as permission to read a name. Compose may print hygienic
+  reservation as permission to read a name. Four formerly accepted #1442 nested
+  if routes (standalone/compose) are also breaking removals: keep the original
+  rejection inputs and rename only the inner `u` to `w` in preservation controls.
+  Compose may print hygienic
   `__v_substitution_0/1` instead of `v` to keep independent sources distinct.
   Guard-name regression examples retain their explain result/verify verdict.
   In the two-source statement-payload case, check remains accepted and erroneous
