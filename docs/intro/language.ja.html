@@ -964,20 +964,26 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   広い Set から狭い Set だけでなく、狭い Set から広い Set への全体代入も、記号変換で
   後から失敗するのでなく check が既存の位置付き代入可能性エラー(<code>semantics</code>、終了コード2)
   で拒否し、全 verify engine が共有します。スカラー・Option の数値互換と
-  add/contains/push の引数は変えません。refinement は両モデルの型を独立に解決し、
-  既存の <code>type</code> エラーと不明位置の固定値1:1を保ちます。
+   add/contains/push の引数は変えません。refinement は両モデルの数値型を独立に解決します。
+   同名structのfieldとenum/範囲の衝突は、#1599の共有merge規則とType-kindの引渡しに残る未解決です。
+   既存の <code>type</code> エラーは#1642の作成元map位置の回復を使い、作成元spanが無いときだけ1:1を保ちます。
+   移行した4つのソースアンカーはruntimeの1:40/1:45 (<code>map</code>)、単独の4:3 (<code>map</code>)、
+   inlineの2:3 (<code>implements</code>)で、以前は1:1でした。
   <code>Int</code>は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
   Set/Seq/Mapは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。
-  リテラルの型付けを変更するものではありません。
-  base <code>e4261ed3</code> と、そのbase上のこの変更を各 archive で build し、603 corpus形と
-  元の inline 16形を各2回 check しました。corpusの除去0、error→errorの診断変更0、
-  inlineのok→errorは3形です。<code>FALSE_VACUITY</code> / <code>CondMap</code> (Mapキー0..0対0..2、20:41)、
+   文脈の無いSet/Seq条件式は、既知の有限な腕のドメインと容量を両方の腕の順でletを通して保ちます。
+   リテラルの実体化は追加しません。base <code>79687655</code> とhead <code>3c99c93b</code> を各archiveでbuildし、
+   606 corpus形、元のinline16形、リテラル境界18形、bridge18形を各2回checkしました。
+   corpusの除去0、error→errorの診断変更0、ok→errorは9形です。元のinlineの3除去は
+   <code>FALSE_VACUITY</code> / <code>CondMap</code> (Mapキー0..0対0..2、20:41)、
   #1522の<code>MAP</code> (Mapキー0..2対0..1、7:35)、<code>SET_WIDENING</code> (Setの0..2から0..4、6:48)。
   さらに、受理されていた全体Seq mapのruntime <code>SeqWide</code>→<code>SeqAbs</code>、
   runtime <code>SeqWider</code>→<code>SeqGuarded</code>、CLI単独<code>SEQ_WIDE_IMPL</code>→<code>SEQ_ABS</code>、inline
   <code>seq_req(-1)</code>を除去します。容量2、モデルごとの要素範囲-1..2または0..3対0..2の形で、
-  従来の実行時refinement失敗を1:1の静的エラーに変えます。
-  別途リテラル境界の18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
+   従来の実行時refinement失敗を上記の作成元位置の静的エラーに変えます。
+   追加の6除去は、両方の腕の順の条件式/letコピーで、Setの0..2→0..4、容量2のSeqの0..2→0..4、
+   同じ要素ドメインのSeq容量2→3です(すべて8:3)。単独・同じドメインの対照はcheckを通り、
+   元のリテラル境界18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">単一のドメイン互換の決定</a>を参照してください。
   リテラルの型付けは#1467に残ります。
   mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく<code>invalid</code>として、
