@@ -603,7 +603,7 @@ rule in section 1 is preserved, not replaced by this narrower const rule.
 The location is the existing AST owner's span, **not a newly recovered name
 token**. No parser span carrier or source rereading is added.
 
-| Authored introduction | New const refusal | Diagnostic owner / reason |
+| Source-visible introduction or compiler exception | New const refusal | Diagnostic owner / reason |
 |---|---|---|
 | `forall`/`exists`, typed/range/collection | yes | enclosing expression or declaration retaining a span |
 | `count`, `sum`, `unique`, `exactlyOne` | yes | enclosing expression/declaration, before aggregate normalization |
@@ -615,6 +615,9 @@ token**. No parser span carrier or source rereading is added.
 | requirements action/branch params and lets | yes | source action retained by lowering |
 | requirements transition/event inputs | yes | transition retained by generated action |
 | requirements indexed age binder | yes | age keyword retained by generated init/tick forall |
+| legacy process implicit c; next entity instance first-letter name | yes | source process/entity declaration for generated init, including when no local declaration is written |
+| relation event implicit actor-instance parameter | yes | source event declaration; matching const must be renamed |
+| hidden KPI projection implementation binder | no | on collision only, use existing fresh_binding_name and rename the generated index consistently |
 | `is some(v)` pattern | existing refusal | existing owning-declaration precision, unchanged |
 | compose glue/sync locals using `part.N` | no same-name collision | bare local `N` and qualified const `part.N` are distinct declarations |
 | refinement indexed-map binder | no additional gate | concrete correspondence binds keys locally before const lookup |
@@ -628,6 +631,55 @@ before local hygiene/substitution can erase a collision. Def parameters and
 body binders are checked before inlining; body-name diagnostic selection is
 deterministic. Requirements aliases retain their existing owner spans through
 lowering, rather than claiming a token-level position they do not store.
+
+Visible implicit instances are part of the source interface: `stage(c)` can
+refer to a legacy process's instance; next-edition Request uses r and a relation
+to Agent takes a. A const with one of these local names is rejected even when
+the user never declares the local. For example, the generated init for
+`requirements R { const c = 2 process Case { ... } }` locates the process
+declaration (line 3:3 in the regression fixture), not a nonexistent local token.
+Rename the const and its constant references while retaining instance uses.
+This is distinct from the hidden KPI Count binder, which is not source-writable.
+
+For example, the following source declares no local c, but its generated init
+is refused at **3:3**, the process line. Rename `const c` to `const LIMIT`;
+there is no local declaration token to edit.
+
+```fsl
+requirements R {
+  const c = 2
+  process Case {
+    stages Idle, Done
+    initial Idle
+  }
+  action idle() { }
+  invariant P { true }
+}
+verify { instances Case = 1 }
+```
+
+### Behavior notes: erased arguments and hidden KPI names
+
+Def-call arguments are checked for constant-shadowing binders **before any
+argument is expanded or substituted**. With const N, a call such as
+`ignore(forall N in 0..1 { true })` is refused even when ignore's unused formal
+would erase the argument. Retaining, duplicating or passing that argument
+through another def has the same message and original property/action owner,
+or the existing call span where there is no such owner. The
+common diagnostic conversion preserves source origins; no token lookup or
+engine-specific rule is added.
+
+Only an actual const collision freshens a hidden KPI projection binder. The
+in-memory projection expression and its **expression-level Kernel AST JSON**
+then use a reserved generated name such as `__c_substitution_0`; without a
+collision, c and its JSON remain unchanged. This is not a public Kernel schema
+change. Exported public Kernel v1/v2 documents do not include KPI projections,
+so that hidden identifier does not appear there. Native traces contain the
+event's visible instance parameter, not this projection-local name; `explain`
+publishes KPI name/entity/stage metadata without its implementation binder.
+Projection values and verdicts are preserved. Do not classify the implicit
+process c or an authored age binder as hidden merely because lowering generated
+their enclosing statement/action.
 
 ### Migration and preserved behavior
 
@@ -647,8 +699,7 @@ reports or supported temporal capabilities are identical.
 
 ### Measured removal inventory and diagnostic priority
 
-Native `check`, base `173e5f97` versus implementation `76f665e3`, measured the
-original pre-migration inline sources. Counts below are
+The retained original pre-migration inline inventory is listed below. Counts are
 case-addressed forms; shared CLI/LSP/Worker consumers and repeated test products
 are counted once, not presented as byte-unique programs.
 
@@ -674,12 +725,16 @@ refusal, at the outer forall owner. This also supersedes the former unlocated
 Monitor/refine ownership diagnostics with located frontend errors. The source
 strings remain unchanged, and other partial-init ownership controls remain.
 
-The separate corpus sweep ran `check <form>` using base
-`173e5f970e571f46ef84f750287761919df2582e` and head
-`76f665e39b8805578af834bcd9739d6f70e67fd5`, each in its own archived tree:
-**597 forms** under `specs/` (23), `examples/` (191) and
-`rust/fslc/tests/fixtures/` (383), **0 `ok`→`error` transitions**, **0 other
-output differences**. Full exits/stdout/stderr were compared without exclusions;
-400 inputs exited 0, 191 exited 2 and 6 exited 1 on both binaries. This bounded
-corpus result does not erase the inline removals or claim all possible removed
-programs were enumerated.
+Additional admission removals include visible implicit process/entity/relation
+locals and the nested-init source with `const i = 1` and
+`forall i in 0..0 { forall j in 0..i { m[j] = true } }`. That source checked on
+base c32e7f5a; the refusal locates the outer forall at **5:10**. A local-name
+rewrite must update its bound uses; it does not add general dependent ranges.
+
+### Verification snapshot
+
+The integrated base/head archive and original-inline comparison is pending;
+no new verification snapshot is claimed by this paragraph. Before completion,
+record the reachable measurement commit, corpus count and source equivalence. The bounded
+corpus result is separate from the inline removals, not an exhaustive inventory
+of every removed program.

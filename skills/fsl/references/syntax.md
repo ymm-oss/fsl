@@ -1107,8 +1107,16 @@ message begins `relation role name '__owner' contains '__', ...` (or
   action-correspondence declarations have no additional const gate, but their
   source specs still undergo ordinary checking. General dependent ranges
   (#1480) are not added by this refusal.
-  Measured inline breaking removals, native `check` of original pre-migration
-  fixtures (base `173e5f97`, implementation `76f665e3`; shared consumers counted once):
+  Visible implicit instance names also reject const collisions: legacy process
+  `c`, next entity first-letter names (`r` for Request), and relation actor
+  parameters (`a` for Agent). Rename the conflicting const; keep source instance
+  uses such as `stage(c)`. The location can be the process/entity declaration
+  for an unwritten generated init binder, or the event for a relation parameter.
+  Hidden KPI projection binders instead freshen only on collision. Raw def-call
+  arguments are checked before expansion: `ignore(forall N in 0..1 { true })`
+  still refuses const N even when ignore returns true without using its param;
+  retained/erased/duplicated calls retain the same message/owner.
+  Original inline removal inventory (shared consumers counted once):
   **126** compose-capture forms (#1442: 63 cells × standalone/composed), e.g.
   `const x = false` with `action go(x: Bool) { requires x }`; **24** nested
   aggregate forms (#1463), e.g. `const x = false` with
@@ -1118,11 +1126,14 @@ message begins `relation role name '__owner' contains '__', ...` (or
   compose controls remain `ok`. Rename the local and its uses. Five partial-init
   forms (#1481) remain **error→error**: the outer `flag`/`limit` const-shadow
   error now precedes the previous ownership error, changing message/owner loc
-  priority rather than acceptance. The separate own-archive `check <form>`
-  corpus sweep (base `173e5f97`, head `76f665e3`) found **0** removals and **0**
-  other output differences in all **597** forms under `specs/` (23),
-  `examples/` (191), `rust/fslc/tests/fixtures/` (383); that does not negate the
-  inline restriction or establish completeness over all removed programs.
+  priority rather than acceptance. Additional removals include the implicit
+  names above and `const i = 1` with nested init
+  `forall i in 0..0 { forall j in 0..i { m[j] = true } }`: the fixture checked on
+  base `c32e7f5a`, but now rejects at the outer forall owner **5:10**. Rename the
+  local and its uses without promising general dependent-bound execution.
+  Fresh own-archive corpus/inline evidence is recorded in the design note's
+  verification snapshot; corpus agreement does not negate the inline restriction
+  or establish completeness over all removed programs.
   Position matters: `check` rejects collection domains and all `where` filters
   on outer `leadsTo` wrapper binders. Supported unfiltered typed/range wrappers
   and collection quantifiers inside P/Q remain distinct. This breaking removal

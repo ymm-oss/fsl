@@ -819,9 +819,24 @@ name in a `decreases` call. There are no unrelated breaking removals.
   freshness restrictions remain unchanged. This refusal prevents static-const
   and lexical-bound resolution from yielding opposite engine verdicts; it does
   not add general dependent range bounds (#1480).
-  **Measured breaking removals.** Native `check` of the original pre-migration
-  fixtures on base `173e5f97` and implementation `76f665e3` observed the following
-  case-addressed inline forms (shared consumers counted once): **126**
+  Source-visible implicit instance names obey the same rule: legacy process
+  `c`, a next-edition entity's lowercased first letter (`r` for Request), and
+  a relation event's implicit actor-instance parameter (`a` for Agent).
+  A matching const is rejected even if the source never spells that local
+  declaration. Rename the conflicting const and its constant references;
+  keep `stage(c)` when it means the process instance. For example, in
+  `requirements R { const c = 2 process Case { ... } }`, the generated init
+  rejection loc is the **process declaration**, not the const token or an
+  unwritten binder token. Relation-parameter refusal uses the source event.
+  Hidden KPI projection binders are different: on a const collision only,
+  their internal binder is freshened; a const `c` need not be renamed merely
+  because a KPI's implementation previously used `c`.
+  Def-call argument binders are checked before argument expansion, so an
+  ignored, retained or duplicated parameter cannot change the refusal's
+  message/owner. With `const N = 2`, `ignore(forall N in 0..1 { true })`
+  is rejected even if `def ignore(p: Bool) = true` discards the argument.
+  The retained original inline fixture inventory (shared consumers counted once)
+  contains **126**
   compose-capture forms (#1442: 63 standalone/composed cells), e.g.
   `const x = false` with `action go(x: Bool) { requires x }`, including nested
   binders; **24** nested-aggregate forms (#1463, shared CLI/LSP/Worker source),
@@ -834,11 +849,13 @@ name in a `decreases` call. There are no unrelated breaking removals.
   not acceptance removals: outer `flag`/`limit` binders over same-named consts
   now report the located const-shadow error before the former ownership error.
   This changes diagnostic priority; it does not make partial init valid.
-  Separately, `check <form>` in each SHA's own archived tree, base `173e5f97`
-  versus head `76f665e3`, found **0** `ok`→`error` transitions and no other
-  output differences across all **597** corpus forms in `specs/`, `examples/`
-  and `rust/fslc/tests/fixtures/` (23/191/383). That corpus result does not erase
-  the inline removals or promise acceptance of other const-shadowing sources.
+  Additional removals include the implicit-name cases above and nested init
+  `const i = 1` with `forall i in 0..0 { forall j in 0..i { m[j] = true } }`.
+  The nested init fixture checked on base `c32e7f5a` but now reports the outer
+  forall owner at **5:10**. Rename the local and its bound uses; dependent-range
+  execution limits remain separate. The fresh archived-corpus and original-inline
+  comparison is recorded in the design note's verification snapshot; a bounded
+  corpus result does not erase these removals or enumerate all removed programs.
   This expression rule does not promise executable `leadsTo` wrapper binders:
   `check` rejects a collection domain or any `where` filter on an outer
   `leadsTo` binder. Unfiltered supported typed/range wrappers remain available,
@@ -3597,6 +3614,15 @@ stage, use `exists n: Amount { stage(c) == Approved and amount == n }`, keeping
 guard passes `check`. No checked-in spec or example has the removed shape; the
 597-form base `1844fa74` / head `7b9b34b3` sweep found no corpus acceptance
 transitions.
+
+The implicit entity parameter `c` is a source-visible local for #1515's const
+rule: do not declare a same-named const in a requirements document using that
+process interface. Rename the const, not the instance reference `stage(c)`.
+Next-edition entity instance names use the entity's lowercased first letter;
+relation events similarly take an implicit instance of their target actor.
+Those visible names also reject matching consts, at the generated init's source
+process/entity declaration or the relation event declaration. Hidden KPI
+projection bindings are not source names and instead freshen on collision.
 
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 

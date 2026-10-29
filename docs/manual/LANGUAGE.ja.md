@@ -777,9 +777,20 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   元の spec には通常の検査を適用します。既存の pattern binding の freshness 制約は
   変えません。この拒否により、static const と字句的な束縛の読み方による engine の
   逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
-  **計測した breaking removal。** 移す前の回帰テストの fixture に対し、base `173e5f97` と
-  実装 `76f665e3` の native `check` で、次の inline の形の `ok`→`error` を確認しました。
-  数はケース単位で、共有 consumer は重複して数えません。compose の束縛 capture
+  source から参照できる暗黙の名前も同じ規則です。legacy process の `c`、next edition
+  の entity の頭文字を小文字にした名前(Request の `r`)、relation event の暗黙の
+  actor-instance 引数(Agent の `a`)が const と同名なら、局所の宣言が source に無くても
+  拒否します。衝突する const と、その定数を意味する参照を改名してください。instance を
+  意味する `stage(c)` は残します。`requirements R { const c = 2 process Case { ... } }`
+  の生成 init のエラー位置は process の宣言であり、const や書かれていない binder の
+  token ではありません。relation 引数のエラーは元の event の宣言を指します。見えない
+  KPI 射影の binder は別で、const と衝突するときだけ内部名を fresh にします。KPI の
+  実装が `c` を使っていたという理由だけで、利用者の const `c` を改名する必要はありません。
+  def の呼出し引数の binder は展開前に検査します。使わない・使う・複製する param の
+  違いで message や owner は変わりません。`const N = 2` があれば、
+  `def ignore(p: Bool) = true` が引数を捨てても `ignore(forall N in 0..1 { true })` を拒みます。
+  元の inline fixture の受理の縮小は次のとおりです。共有 consumer は重複して数えません。
+  compose の束縛 capture
   (#1442)は **126** 形(63 ケースの単独・compose)で、代表は `const x = false` と
   `action go(x: Bool) { requires x }`、入れ子の束縛も含みます。入れ子の集約(#1463、
   CLI/LSP/Worker の共有 source)は **24** 形で、代表は `const x = false` と
@@ -791,11 +802,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   のではありません。部分 init の 5 形(#1481)は **error→error** であり、受理の縮小
   ではありません。同名の const を隠す外側の `flag`/`limit` の束縛に対して、従来の
   所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
-  部分 init を有効にするものではありません。別の corpus 計測では、base `173e5f97` と
-  head `76f665e3` の各 SHA の archive tree で `check <form>` を実行し、`specs/`、
-  `examples/`、`rust/fslc/tests/fixtures/` の **597** 形(23/191/383)で `ok`→`error`
-  が **0**、その他の出力差も 0 でした。この corpus の結果は inline の受理の縮小を
-  否定せず、他の const と同名の局所束縛を受理すると約束するものでもありません。
+  部分 init を有効にするものではありません。追加の受理の縮小には上の暗黙の名前と、
+  `const i = 1` に対して `forall i in 0..0 { forall j in 0..i { m[j] = true } }` とする
+  init の入れ子があります。この fixture は base `c32e7f5a` で check を通り、今は外側
+  forall の owner **5:10** で拒みます。局所名と束縛された参照を改名してください。
+  依存する範囲境界の実行制限は別です。新しい archive tree の corpus・元の inline の
+  比較は design note の verification snapshot に記録します。有限の corpus の結果は、
+  この受理の縮小を否定せず、全ての除外されたプログラムを数えたという意味でもありません。
   この式の一般則は、`leadsTo` を外から包むバインダーの実行可能性までは約束しません。
   `leadsTo` の外側のコレクションバインダーと、`where` 付きバインダーは `check` が拒否します。
   対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は
@@ -3411,6 +3424,14 @@ exit 2、`kind: "semantics"`、
 書き換え後のガードは `check` を通ります。削除された形を持つチェックイン済みの
 spec や example はなく、base `1844fa74` / head `7b9b34b3` の 597 形式の sweep
 でも、コーパスでの受理から拒否への変化はありませんでした。
+
+暗黙のエンティティ引数 `c` は、#1515 の const 規則では source から見える局所名です。
+その process を使う requirements では同名の const を改名し、instance を意味する
+`stage(c)` は残してください。next edition の entity は頭文字を小文字にした名前を
+instance に使い、relation event は相手の actor の暗黙の instance も同じ規則で
+引数に取ります。これらも同名の const を拒み、生成 init は元の process/entity 宣言、
+relation 引数は元の event 宣言を指します。source から見えない KPI 射影の binder は
+この制限とは別で、衝突するときだけ fresh にします。
 
 ### 13.3 業務コンサルティングレイヤー: `business`(fsl-biz ダイアレクト)
 
