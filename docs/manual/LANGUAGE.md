@@ -819,8 +819,8 @@ name in a `decreases` call. There are no unrelated breaking removals.
   freshness restrictions remain unchanged. This refusal prevents static-const
   and lexical-bound resolution from yielding opposite engine verdicts; it does
   not add general dependent range bounds (#1480).
-  **Measured breaking removals.** Before regression-fixture migration, native
-  `check` on base `45a2de33` and implementation `d592ed9f` observed the following
+  **Measured breaking removals.** Native `check` of the original pre-migration
+  fixtures on base `173e5f97` and implementation `76f665e3` observed the following
   case-addressed inline forms (shared consumers counted once): **126**
   compose-capture forms (#1442: 63 standalone/composed cells), e.g.
   `const x = false` with `action go(x: Bool) { requires x }`, including nested
@@ -834,8 +834,8 @@ name in a `decreases` call. There are no unrelated breaking removals.
   not acceptance removals: outer `flag`/`limit` binders over same-named consts
   now report the located const-shadow error before the former ownership error.
   This changes diagnostic priority; it does not make partial init valid.
-  Separately, `check <form>` in each SHA's own archived tree, base `e856bbe0`
-  versus head `955bea60`, found **0** `ok`→`error` transitions and no other
+  Separately, `check <form>` in each SHA's own archived tree, base `173e5f97`
+  versus head `76f665e3`, found **0** `ok`→`error` transitions and no other
   output differences across all **597** corpus forms in `specs/`, `examples/`
   and `rust/fslc/tests/fixtures/` (23/191/383). That corpus result does not erase
   the inline removals or promise acceptance of other const-shadowing sources.

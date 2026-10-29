@@ -647,8 +647,8 @@ reports or supported temporal capabilities are identical.
 
 ### Measured removal inventory and diagnostic priority
 
-Native `check`, base `45a2de33` versus implementation `d592ed9f`, measured the
-original inline sources before regression-fixture migration. Counts below are
+Native `check`, base `173e5f97` versus implementation `76f665e3`, measured the
+original pre-migration inline sources. Counts below are
 case-addressed forms; shared CLI/LSP/Worker consumers and repeated test products
 are counted once, not presented as byte-unique programs.
 
@@ -674,9 +674,9 @@ refusal, at the outer forall owner. This also supersedes the former unlocated
 Monitor/refine ownership diagnostics with located frontend errors. The source
 strings remain unchanged, and other partial-init ownership controls remain.
 
-The separate pre-migration corpus sweep ran `check <form>` using base
-`e856bbe023f8fb64557658afbd365c355ac56715` and head
-`955bea60ea2463668fe1bc1bd14ff0d6909a353d`, each in its own archived tree:
+The separate corpus sweep ran `check <form>` using base
+`173e5f970e571f46ef84f750287761919df2582e` and head
+`76f665e39b8805578af834bcd9739d6f70e67fd5`, each in its own archived tree:
 **597 forms** under `specs/` (23), `examples/` (191) and
 `rust/fslc/tests/fixtures/` (383), **0 `ok`→`error` transitions**, **0 other
 output differences**. Full exits/stdout/stderr were compared without exclusions;

@@ -777,8 +777,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   元の spec には通常の検査を適用します。既存の pattern binding の freshness 制約は
   変えません。この拒否により、static const と字句的な束縛の読み方による engine の
   逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
-  **計測した breaking removal。** 回帰テストの fixture を移す前に、base `45a2de33` と
-  実装 `d592ed9f` の native `check` で、次の inline の形の `ok`→`error` を確認しました。
+  **計測した breaking removal。** 移す前の回帰テストの fixture に対し、base `173e5f97` と
+  実装 `76f665e3` の native `check` で、次の inline の形の `ok`→`error` を確認しました。
   数はケース単位で、共有 consumer は重複して数えません。compose の束縛 capture
   (#1442)は **126** 形(63 ケースの単独・compose)で、代表は `const x = false` と
   `action go(x: Bool) { requires x }`、入れ子の束縛も含みます。入れ子の集約(#1463、
@@ -791,8 +791,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   のではありません。部分 init の 5 形(#1481)は **error→error** であり、受理の縮小
   ではありません。同名の const を隠す外側の `flag`/`limit` の束縛に対して、従来の
   所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
-  部分 init を有効にするものではありません。別の corpus 計測では、base `e856bbe0` と
-  head `955bea60` の各 SHA の archive tree で `check <form>` を実行し、`specs/`、
+  部分 init を有効にするものではありません。別の corpus 計測では、base `173e5f97` と
+  head `76f665e3` の各 SHA の archive tree で `check <form>` を実行し、`specs/`、
   `examples/`、`rust/fslc/tests/fixtures/` の **597** 形(23/191/383)で `ok`→`error`
   が **0**、その他の出力差も 0 でした。この corpus の結果は inline の受理の縮小を
   否定せず、他の const と同名の局所束縛を受理すると約束するものでもありません。
