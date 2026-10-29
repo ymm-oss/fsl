@@ -117,12 +117,20 @@ macro_rules! engines {
             fn real_frozen_read_is_preserved() {
                 for state in ["w", "x"] {
                     for frozen in [true, false] {
-                        let action = if frozen { "y = not y".to_owned() }
-                            else { format!("y = not y {state} = not {state}") };
-                        let form = source(state, &action, &format!("{state} or not {state}"));
-                        let actual = verify(&form, stringify!($engine), "warn");
-                        assert_eq!(actual.1, 0, "{actual:?}");
-                        assert_eq!(kinds(&actual.0).contains("tautology_over_frozen"), frozen);
+                        for property in [format!("{state} or not {state}"),
+                            format!("({SUM}) and ({state} or not {state})")] {
+                            let action = if frozen { "y = not y".to_owned() }
+                                else { format!("y = not y {state} = not {state}") };
+                            let form = source(state, &action, &property);
+                            let actual = verify(&form, stringify!($engine), "warn");
+                            assert_eq!(actual.1, 0, "{actual:?}");
+                            assert_eq!(kinds(&actual.0).contains("tautology_over_frozen"), frozen);
+                            if frozen {
+                                assert!(actual.0["warnings"].as_array().expect("warnings").iter().any(|w|
+                                    w["kind"] == "tautology_over_frozen" && w["message"].as_str()
+                                        .expect("message").contains(&format!("frozen state ({state}):"))));
+                            }
+                        }
                     }
                 }
             }
