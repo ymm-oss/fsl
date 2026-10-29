@@ -617,6 +617,7 @@ pub fn apply_edition(
 
 /// One input slot's diagnostics, classified before consumption and shared by its
 /// distinct results. Each result is moved into its finalization site once.
+#[derive(Default)]
 pub struct SourceEdition {
     declared: Option<Edition>,
     next: bool,
@@ -662,6 +663,230 @@ impl SourceEdition {
             envelope.insert("edition".to_owned(), json!(Edition::Fsl5.as_str()));
         }
         (with_declared_edition(output, self.declared), status)
+    }
+}
+
+/// Diagnostics of consumed dependencies, shared by one outer owner or explicit local log.
+#[derive(Default)]
+pub struct DependencyLog {
+    pub refusal: Option<(Value, i32)>,
+    pub warnings: Vec<Value>,
+    pub sources: std::collections::BTreeMap<String, String>,
+    warning_keys: Vec<Value>,
+}
+
+impl DependencyLog {
+    #[must_use]
+    pub fn finish(&self, result: (Value, i32)) -> (Value, i32) {
+        self.refusal.clone().unwrap_or_else(|| {
+            SourceEdition {
+                additions: self.warnings.clone(),
+                ..SourceEdition::default()
+            }
+            .finish(result)
+        })
+    }
+}
+
+pub type DependencyRecords = std::rc::Rc<std::cell::RefCell<DependencyLog>>;
+
+thread_local! {
+    static DEPENDENCIES: std::cell::RefCell<Option<DependencyRecords>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Native owners borrow a nested invocation's log; only its outer owner delivers warnings.
+pub struct DependencyScope {
+    log: DependencyRecords,
+    outer: bool,
+}
+
+impl DependencyScope {
+    #[must_use]
+    pub fn enter() -> Self {
+        DEPENDENCIES.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let outer = slot.is_none();
+            let log = slot.get_or_insert_with(DependencyRecords::default).clone();
+            Self { log, outer }
+        })
+    }
+
+    #[must_use]
+    pub fn finish(&self, result: (Value, i32), stderr: bool) -> (Value, i32) {
+        let log = self.log.borrow();
+        if let Some(refusal) = &log.refusal {
+            return refusal.clone();
+        }
+        if !self.outer {
+            return result;
+        }
+        finish_dependency_reports(&self.log, result, stderr)
+    }
+}
+
+impl Drop for DependencyScope {
+    fn drop(&mut self) {
+        if self.outer {
+            DEPENDENCIES.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+}
+
+/// Deliver recorded dependency findings without replacing root edition metadata.
+pub fn finish_dependency_reports(
+    log: &DependencyRecords,
+    result: (Value, i32),
+    stderr: bool,
+) -> (Value, i32) {
+    let log = log.borrow();
+    if stderr {
+        for warning in &log.warnings {
+            eprintln!("warning: {warning}");
+        }
+        result
+    } else {
+        log.finish(result)
+    }
+}
+
+/// One admission boundary for filesystem, recording, virtual and editor providers.
+pub struct DependencyResolver<'a, R> {
+    inner: R,
+    log: Option<DependencyRecords>,
+    options: ParseOptions,
+    envelope: &'a dyn Fn() -> Map<String, Value>,
+    base: Option<std::path::PathBuf>,
+    repair: bool,
+}
+
+impl<'a, R> DependencyResolver<'a, R> {
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    pub fn refusal(&self) -> Option<(Value, i32)> {
+        self.log
+            .as_ref()
+            .and_then(|log| log.borrow().refusal.clone())
+    }
+
+    #[must_use]
+    pub fn new(
+        inner: R,
+        log: DependencyRecords,
+        options: ParseOptions,
+        envelope: &'a dyn Fn() -> Map<String, Value>,
+    ) -> Self {
+        Self {
+            inner,
+            log: Some(log),
+            options,
+            envelope,
+            base: None,
+            repair: false,
+        }
+    }
+
+    #[must_use]
+    pub fn native(
+        inner: R,
+        base: &Path,
+        options: ParseOptions,
+        envelope: &'a dyn Fn() -> Map<String, Value>,
+    ) -> Self {
+        let log = DEPENDENCIES.with(|slot| slot.borrow().clone());
+        Self {
+            base: Some(base.to_owned()),
+            inner,
+            log,
+            options,
+            envelope,
+            repair: false,
+        }
+    }
+
+    #[must_use]
+    pub fn report_only(mut self) -> Self {
+        self.repair = true;
+        self
+    }
+
+    #[must_use]
+    pub fn report_to(mut self, log: DependencyRecords) -> Self {
+        self.log = Some(log);
+        self.report_only()
+    }
+}
+
+impl<R: fsl_core::FileResolver> fsl_core::FileResolver for DependencyResolver<'_, R> {
+    fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+        let source = self.inner.read(path)?;
+        let key = match &self.base {
+            Some(base) => base
+                .join(path)
+                .canonicalize()
+                .map_err(|error| fsl_core::CoreError::unlocated(error.to_string()))?
+                .to_string_lossy()
+                .into_owned(),
+            None => path.to_owned(),
+        };
+        let admission = admit_source(&source, path, None, &self.options, self.envelope, false);
+        let findings = match admission {
+            Ok(edition) => edition.additions,
+            Err((mut refusal, status)) => {
+                if let Some(loc) = refusal.get_mut("loc").and_then(Value::as_object_mut) {
+                    loc.insert("file".into(), json!(path));
+                }
+                if !self.repair {
+                    let codes = match refusal.get("findings") {
+                        Some(Value::Array(findings)) => findings
+                            .iter()
+                            .map(|finding| finding["code"].as_str().expect("finding code"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        None => refusal["diagnostic_code"]
+                            .as_str()
+                            .expect("parse code")
+                            .to_owned(),
+                        Some(_) => unreachable!("findings are an array"),
+                    };
+                    if let Some(log) = &self.log {
+                        let mut log = log.borrow_mut();
+                        log.sources.insert(path.to_owned(), source.clone());
+                        log.refusal.get_or_insert((refusal, status));
+                    }
+                    return Err(fsl_core::CoreError::unlocated(format!(
+                        "dependency \"{path}\" rejected by edition: {codes}"
+                    )));
+                }
+                match refusal
+                    .as_object_mut()
+                    .expect("refusal envelope")
+                    .remove("findings")
+                {
+                    Some(Value::Array(findings)) => findings,
+                    None => vec![
+                        json!({"code":refusal["diagnostic_code"],"kind":"parse","severity":"warning","message":refusal["message"],"loc":refusal["loc"]}),
+                    ],
+                    Some(_) => unreachable!("findings are an array"),
+                }
+            }
+        };
+        if !findings.is_empty()
+            && let Some(log) = &self.log
+        {
+            let mut log = log.borrow_mut();
+            log.sources.insert(path.to_owned(), source.clone());
+            for finding in findings {
+                let mut identity = finding.clone();
+                identity["loc"]["file"] = json!(key);
+                if !log.warning_keys.contains(&identity) {
+                    log.warning_keys.push(identity);
+                    log.warnings.push(finding);
+                }
+            }
+        }
+        Ok(source)
     }
 }
 

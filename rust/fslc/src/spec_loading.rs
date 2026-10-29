@@ -23,6 +23,7 @@ pub(crate) fn run_admitted_roots(
     stderr_on_success: bool,
     run: impl FnOnce(&[String], &[SourceEdition]) -> (Value, i32),
 ) -> (Value, i32) {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let mut sources = Vec::new();
     let mut editions = Vec::new();
     for (path, source) in roots {
@@ -45,6 +46,8 @@ pub(crate) fn run_admitted_roots(
         editions.push(edition);
     }
     let result = run(&sources, &editions);
+    let stderr = stderr_on_success && raw_delivery_allowed(&result);
+    let result = dependencies.finish(result, stderr);
     if stderr_on_success && raw_delivery_allowed(&result) {
         for edition in editions {
             for warning in edition.warnings() {
@@ -53,6 +56,17 @@ pub(crate) fn run_admitted_roots(
         }
     }
     result
+}
+
+pub(crate) fn dependency_resolver(
+    base: &Path,
+) -> fslc_rust::migration::DependencyResolver<'static, fsl_core::FsResolver> {
+    fslc_rust::migration::DependencyResolver::native(
+        fsl_core::FsResolver::new(base),
+        base,
+        *crate::process::parse_options(),
+        &envelope,
+    )
 }
 
 pub(crate) fn finish_admitted(
@@ -221,7 +235,7 @@ pub(crate) fn load_declared_model_beside_scope(
     fslc_rust::check_stages::load_kernel_model(
         source,
         &path.to_string_lossy(),
-        &fsl_core::FsResolver::new(base),
+        &dependency_resolver(base),
         crate::process::parse_options(),
     )
     .map(|(_, model)| model)
@@ -257,7 +271,7 @@ pub(crate) fn load_kernel_model_from_source(
     source: &str,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     load_kernel_model_from_source_with_resolver(path, source, &resolver)
 }
 
