@@ -2602,13 +2602,16 @@ refinement DesignRefinesReq {
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 `fair action` 宣言から来ます。
-引き込んだ名前は抽象の scope を保ちます。抽象の Int/Bool 定数は P/Q、`decreases`、
-バインダーの範囲とフィルターでリテラルになり、バインダーは同名の抽象 state map を隠します。
-impl の定数と同名のバインダー、または map が導入する impl の名前を捕まえる外側の
-プロパティバインダーは、`respond` の位置つきエラー(exit 2、`kind:"type"`、`loc` あり)
-で拒否し、改名したバインダーを公開しません。抽象の定数を範囲で読む違反で impl の
-定数を改名した形と、抽象の定数を本体で読み impl に同名がない違反は、従来の exit 2
-エラーから exit 1 `progress_lost` に変わります。
+抽象の Int/Bool 定数は P/Q、`decreases`、バインダーの範囲と対応する入れ子の
+フィルターでリテラルになります。量化子・集約・pattern のバインダーが impl の定数と
+同名の場合、または性質内の state/local 名が抽象の定数と同名の場合は拒否します。
+直接の refine では `respond` の位置つきエラー(exit 2、`kind:"type"`、`loc` あり)です。
+抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が
+exit 1 `violated` です。外側の性質バインダーと pattern の後続 scope は map が
+実際に導入する名前の捕獲を拒否し、未使用の map だけでは拒否しません。外側の名前は
+維持しますが、入れ子の診断では改名することがあります。抽象の定数を範囲で読む違反で
+impl の定数を改名した形と、抽象の定数を本体で読み impl に同名がない違反は、従来の
+exit 2 エラーから exit 1 `progress_lost` に変わります。
 非有界の証明には、引き続き下位レイヤーの `leadsTo ... decreases ...` と
 `verify --engine induction` を使ってください。
 

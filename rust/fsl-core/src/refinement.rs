@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
@@ -377,6 +377,60 @@ fn build_refinement(
     })
 }
 
+fn progress_collision(
+    expr: &Expr,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    maps: &BTreeMap<String, StateMap>,
+) -> Option<String> {
+    fn captures(expr: &Expr, name: &str, maps: &BTreeMap<String, StateMap>) -> bool {
+        let used = crate::free_vars_bound(expr, &HashSet::from([name.to_owned()]));
+        maps.iter().any(|(key, map)| {
+            used.contains(key)
+                && map.binder.as_ref().map(crate::binder_name) != Some(name)
+                && crate::free_vars(&map.expr).contains(name)
+        })
+    }
+    recursion::guard(|| {
+        let binding = match expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
+                Some(crate::binder_name(binder))
+            }
+            Expr::Is {
+                pattern: fsl_syntax::Pattern::Some(name),
+                ..
+            } => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(name) = binding
+            && (implementation.consts.contains_key(name) || abstraction.consts.contains_key(name))
+        {
+            return Some(name.to_owned());
+        }
+        if let Expr::Var(name) = expr
+            && abstraction.consts.contains_key(name)
+            && maps.contains_key(name)
+        {
+            return Some(name.clone());
+        }
+        if let Expr::Binary { left, right, .. } = expr {
+            let mut names = HashSet::new();
+            crate::compose::extend_pattern_names(left, &mut names);
+            if let Some(name) = names.into_iter().find(|name| captures(right, name, maps)) {
+                return Some(name);
+            }
+        }
+        let mut found = None;
+        let _ = crate::visit_expr_children(expr, &mut |child| {
+            found = found
+                .take()
+                .or_else(|| progress_collision(child, implementation, abstraction, maps));
+            Ok(())
+        });
+        found
+    })
+}
+
 /// Pull a progress property through state maps without changing its abstract scope.
 ///
 /// # Errors
@@ -391,23 +445,6 @@ pub fn pull_refinement_leadsto(
     property: &LeadsToDef,
     span: Span,
 ) -> Result<LeadsToDef, RefinementError> {
-    fn collision(expr: &Expr, implementation: &KernelModel) -> Option<String> {
-        recursion::guard(|| {
-            if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr
-                && implementation
-                    .consts
-                    .contains_key(crate::binder_name(binder))
-            {
-                return Some(crate::binder_name(binder).to_owned());
-            }
-            let mut found = None;
-            let _ = crate::visit_expr_children(expr, &mut |child| {
-                found = found.take().or_else(|| collision(child, implementation));
-                Ok(())
-            });
-            found
-        })
-    }
     let mut replacements = HashMap::new();
     for (name, value) in &abstraction.consts {
         let literal = match value {
@@ -435,9 +472,9 @@ pub fn pull_refinement_leadsto(
             body: Box::new(expr),
         };
     }
-    if let Some(name) = collision(&expr, implementation) {
+    if let Some(name) = progress_collision(&expr, implementation, abstraction, state_maps) {
         return Err(refinement_error(
-            format!("progress binder '{name}' shadows an implementation constant"),
+            format!("progress name '{name}' has a constant or pattern capture collision"),
             Some(span),
         ));
     }
@@ -449,12 +486,16 @@ pub fn pull_refinement_leadsto(
             unreachable!()
         };
         let name = crate::binder_name(original);
-        if crate::binder_name(&binder) != name {
+        if crate::binder_name(&binder) != name && crate::free_vars(&body).contains(name) {
             return Err(refinement_error(
                 format!("progress binder '{name}' captures an implementation name"),
                 Some(span),
             ));
         }
+        let previous = crate::binder_name(&binder).to_owned();
+        let rename = HashMap::from([(previous, Expr::Var(name.to_owned()))]);
+        let binder = crate::rename_binder_binding(binder, name.to_owned(), &rename);
+        let body = Box::new(crate::substitute_expr(*body, &rename));
         pulled.binders.push(binder);
         expr = *body;
     }

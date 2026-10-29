@@ -16,12 +16,6 @@ struct Fixture(PathBuf);
 
 impl Fixture {
     fn new(impl_const: &str, abs_const: &str, property: &str) -> Self {
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
-            "fslc-1595-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&root).expect("create #1595 fixture directory");
         let implementation = format!(
             "spec Impl {{ {impl_const} state {{ x: Int = 0 }}
               fair action go() {{ requires x == 0 x = 1 }} }}"
@@ -31,18 +25,35 @@ impl Fixture {
               fair action step() {{ requires y == 0 y = 1 }}
               leadsTo L {{ {property} }} }}"
         );
-        for (file, source) in [
-            ("impl.fsl", implementation.as_str()),
-            ("abs.fsl", abstraction.as_str()),
-            (
-                "map.fsl",
-                "refinement R { impl Impl abs Abs map y = x action go() -> step()
+        Self::sources(
+            &implementation,
+            &abstraction,
+            "refinement R { impl Impl abs Abs map y = x action go() -> step()
                   preserve progress { respond L by go } }",
-            ),
+        )
+    }
+
+    fn sources(implementation: &str, abstraction: &str, mapping: &str) -> Self {
+        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "fslc-1595-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).expect("create #1595 fixture directory");
+        for (file, source) in [
+            ("impl.fsl", implementation),
+            ("abs.fsl", abstraction),
+            ("map.fsl", mapping),
         ] {
             std::fs::write(root.join(file), source).expect("write #1595 fixture");
         }
         Self(root)
+    }
+
+    fn observations(&self, cell: &str) -> Vec<((Value, i32), (Value, i32))> {
+        (0..2)
+            .map(|_| (self.observe(cell, "refine"), self.observe(cell, "bmc")))
+            .collect()
     }
 
     fn observe(&self, cell: &str, consumer: &str) -> (Value, i32) {
@@ -109,15 +120,7 @@ fn assert_lost(actual: &Value, exit: i32, result: &str, bindings: &Value) {
 
 fn run(cell: &str, impl_const: &str, abs_const: &str, property: &str, expected: &Expected) {
     let fixture = Fixture::new(impl_const, abs_const, property);
-    // Observe both commands twice before a failing regression can stop calibration.
-    let observations: Vec<_> = (0..2)
-        .map(|_| {
-            (
-                fixture.observe(cell, "refine"),
-                fixture.observe(cell, "bmc"),
-            )
-        })
-        .collect();
+    let observations = fixture.observations(cell);
     let static_bound = "'N' is not an integer const";
     for (_, (abs, exit)) in &observations {
         if matches!(expected, StaticBound | Located("N")) {
@@ -189,4 +192,68 @@ cells! {
     s3: ("", "", "forall x in 2..3 { y == 0 ~> y == x }", Located("x")),
     s3c: ("", "", "forall w in 2..3 { y == 0 ~> y == w }", Lost(json!({"w": 2}))),
     s4c: ("", "", "forall w in 2..3 { w == 2 ~> w == 3 }", Lost(json!({"w": 2}))),
+}
+
+fn review(
+    cell: &str,
+    implementation: &str,
+    abstraction: &str,
+    maps: &str,
+    expected: i32,
+    abs_exit: Option<i32>,
+) {
+    let mapping = format!(
+        "refinement R {{ impl Impl abs Abs {maps} preserve progress {{ respond L by go }} }}"
+    );
+    let fixture = Fixture::sources(implementation, abstraction, &mapping);
+    for ((actual, exit), (_, abstract_exit)) in fixture.observations(cell) {
+        if let Some(expected) = abs_exit {
+            assert_eq!(abstract_exit, expected);
+        }
+        assert_eq!(exit, expected, "{actual:#}");
+        match expected {
+            2 => {
+                assert_error(&actual, exit, "type");
+                assert_eq!(
+                    actual["loc"],
+                    json!({"line": 1, "column": mapping.find("respond").unwrap() + 1})
+                );
+            }
+            1 => {
+                assert_lost(&actual, exit, "refinement_failed", &json!({}));
+                assert_eq!(actual["kind"], "progress_lost");
+            }
+            0 => assert_eq!(actual["result"], "refines"),
+            _ => unreachable!(),
+        }
+    }
+}
+
+macro_rules! review_cells {
+    ($($name:ident: ($i:expr, $a:expr, $m:expr, $exit:expr, $abs:expr)),* $(,)?) => {
+        $(#[test] fn $name() { review(stringify!($name), $i, $a, $m, $exit, $abs); })*
+    };
+}
+review_cells! {
+    r1_pattern_capture: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
+        "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) and y==x)} }",
+        "map y=x map o=p action go()->step()", 2, Some(1)),
+    r1_pattern_const: ("spec Impl { type V=0..5 const N=1 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
+        "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(N)) and (forall k in 0..N {k<=1}))} }",
+        "map y=x map o=p action go()->step()", 2, Some(2)),
+    r1_ambiguous_const_state: ("spec Impl {state {x:Int=0} fair action go(){x=0}}",
+        "spec Abs {const N=3 state {N:Int=1} fair action step(){N=1} leadsTo L {forall z in 0..N {true ~> z<=1}}}",
+        "map N=1 action go()->step()", 2, None),
+    r1_unused_map: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
+        "spec Abs {state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall x in 0..3 {x==0 ~> x==0}}}",
+        "map y=x action go()->step()", 0, Some(0)),
+    r1_nested_const_binder: ("spec Impl {const k=1 state {x:Int=0} fair action go(){requires x==0 x=1}}",
+        "spec Abs {state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> count(k in 0..3 where k>=0)<=2}}",
+        "map y=x action go()->step()", 2, Some(1)),
+    r1_indexed_key_const: ("spec Impl {type K=0..1 const Z=1 state {d:Map<K,Int>} init {forall k:K {d[k]=0}} fair action go(k:K){requires d[k]==0 and k==1 d[k]=1}}",
+        "spec Abs {type K=0..1 const Z=0 state {m:Map<K,Int>} init {forall k:K {m[k]=0}} fair action step(k:K){requires m[k]==0 m[k]=1} leadsTo L {m[Z]==0 ~> m[Z]==1}}",
+        "map m[k:K]=d[k] action go(k)->step(k)", 1, Some(0)),
+    r1_indexed_own_binder: ("spec Impl {type K=0..1 state {d:Map<K,Int>} init {forall k:K {d[k]=0}} fair action go(k:K){requires d[k]==0 d[k]=1}}",
+        "spec Abs {type K=0..1 state {m:Map<K,Int>} init {forall k:K {m[k]=0}} fair action step(k:K){requires m[k]==0 m[k]=1} leadsTo L {forall k:K {m[k]==0 ~> m[k]==1}}}",
+        "map m[k:K]=d[k] action go(k)->step(k)", 0, Some(0)),
 }
