@@ -2769,6 +2769,13 @@ is `refinement_failed` with `kind:"progress_lost"` and
 actions are review metadata and must name impl actions; they do not create
 fairness or prove implementation conformance. Fairness still comes from
 lower-layer `fair action` declarations.
+Pulled names retain abstract scope: abstract Int/Bool constants become literals
+in P/Q, `decreases`, and binder domains/filters; binders shadow abstract state maps.
+A binder matching an impl constant, or an outer property binder capturing an impl
+name introduced by a map, is rejected at `respond` (exit 2, `kind:"type"`, `loc`
+present), without exposing renamed binders. For a violated abstract constant bound
+with the impl constant renamed, or a violated abstract constant body read with no
+impl namesake, the former exit-2 errors now report exit 1 `progress_lost`.
 For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
 `verify --engine induction`.
 

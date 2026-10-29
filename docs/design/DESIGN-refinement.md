@@ -97,6 +97,12 @@ refinement CartImplRefinesCart {
   `progress_failure:"lasso_blocks_progress"` or
   `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
   `progress:{leadsTo, actions}` so repair can target the lower-layer action.
+  Pulled names retain abstract scope: abstract Int/Bool constants become literals
+  in P/Q, `decreases`, and binder domains/filters; binders shadow abstract state
+  maps. A binder matching an impl constant, or an outer property binder capturing
+  an impl name introduced by a map, is rejected at `respond` (exit 2, `kind:"type"`,
+  `loc` present), rather than exposing a renamed binder. A map's own index binder
+  is not a free impl name.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
@@ -1108,6 +1114,7 @@ search on the implementation model (`check_refinement_progress` in
 `fsl-verifier`), surfacing `kind: "progress_lost"` directly in refine output
 (see §1 above). Without `preserve progress`, liveness failures still appear only
 as separate lower-layer `violated` / `leadsTo` verification results.
+The shared core pull enforces the abstract-scope and capture-refusal rules in §1.
 
 ## Frozen Python reference divergence
 

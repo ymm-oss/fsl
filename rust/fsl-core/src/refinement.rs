@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use fsl_syntax::{
@@ -11,8 +11,8 @@ use fsl_syntax::{
 
 use crate::recursion;
 use crate::{
-    ActionDef, FileResolver, KernelModel, ParamDef, TypeDef, TypeRef, build_model,
-    parse_abstraction_kernel_source_with_bounds_with_options,
+    ActionDef, FileResolver, FslValue, IndexedReplacements, KernelModel, LeadsToDef, ParamDef,
+    TypeDef, TypeRef, build_model, parse_abstraction_kernel_source_with_bounds_with_options,
 };
 
 #[derive(Clone, Debug)]
@@ -340,11 +340,19 @@ fn build_refinement(
         }
     }
     for declaration in &progress {
-        if !abstraction
+        if let Some(property) = abstraction
             .leadstos
             .iter()
-            .any(|property| property.name == declaration.leads_to)
+            .find(|property| property.name == declaration.leads_to)
         {
+            pull_refinement_leadsto(
+                implementation,
+                abstraction,
+                &state_maps,
+                property,
+                declaration.span,
+            )?;
+        } else {
             return Err(refinement_error(
                 format!("unknown abstract leadsTo '{}'", declaration.leads_to),
                 Some(declaration.span),
@@ -367,6 +375,97 @@ fn build_refinement(
         action_correspondences,
         progress,
     })
+}
+
+/// Pull a progress property through state maps without changing its abstract scope.
+///
+/// # Errors
+/// Returns a located error if preserving binder scope would require public renaming.
+///
+/// # Panics
+/// Panics if model constants or the internal substitution wrapper violate their invariants.
+pub fn pull_refinement_leadsto(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    state_maps: &BTreeMap<String, StateMap>,
+    property: &LeadsToDef,
+    span: Span,
+) -> Result<LeadsToDef, RefinementError> {
+    fn collision(expr: &Expr, implementation: &KernelModel) -> Option<String> {
+        recursion::guard(|| {
+            if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr
+                && implementation
+                    .consts
+                    .contains_key(crate::binder_name(binder))
+            {
+                return Some(crate::binder_name(binder).to_owned());
+            }
+            let mut found = None;
+            let _ = crate::visit_expr_children(expr, &mut |child| {
+                found = found.take().or_else(|| collision(child, implementation));
+                Ok(())
+            });
+            found
+        })
+    }
+    let mut replacements = HashMap::new();
+    for (name, value) in &abstraction.consts {
+        let literal = match value {
+            FslValue::Int(value) => Expr::Num(*value),
+            FslValue::Bool(value) => Expr::Bool(*value),
+            _ => unreachable!("constants are Int or Bool"),
+        };
+        replacements.insert(name.clone(), literal);
+    }
+    let mut indexed = IndexedReplacements::new();
+    for (name, state_map) in state_maps {
+        if let Some(binder) = &state_map.binder {
+            indexed.insert(name.clone(), (binder.clone(), state_map.expr.clone()));
+        } else {
+            replacements.insert(name.clone(), state_map.expr.clone());
+        }
+    }
+    let mut parts = vec![property.before.clone(), property.after.clone()];
+    parts.extend(property.decreases.clone());
+    let mut expr = Expr::Seq(parts);
+    for binder in property.binders.iter().rev() {
+        expr = Expr::Quantified {
+            quantifier: "forall".to_owned(),
+            binder: binder.clone(),
+            body: Box::new(expr),
+        };
+    }
+    if let Some(name) = collision(&expr, implementation) {
+        return Err(refinement_error(
+            format!("progress binder '{name}' shadows an implementation constant"),
+            Some(span),
+        ));
+    }
+    expr = crate::substitute_expr_indexed(expr, &replacements, &indexed);
+    let mut pulled = property.clone();
+    pulled.binders.clear();
+    for original in &property.binders {
+        let Expr::Quantified { binder, body, .. } = expr else {
+            unreachable!()
+        };
+        let name = crate::binder_name(original);
+        if crate::binder_name(&binder) != name {
+            return Err(refinement_error(
+                format!("progress binder '{name}' captures an implementation name"),
+                Some(span),
+            ));
+        }
+        pulled.binders.push(binder);
+        expr = *body;
+    }
+    let Expr::Seq(mut parts) = expr else {
+        unreachable!()
+    };
+    pulled.decreases = property.decreases.as_ref().and_then(|_| parts.pop());
+    pulled.after = parts.pop().expect("after");
+    pulled.before = parts.pop().expect("before");
+    pulled.helpful.clear();
+    Ok(pulled)
 }
 
 type SurfaceEnumMapping = (

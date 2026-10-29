@@ -2602,6 +2602,13 @@ refinement DesignRefinesReq {
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 `fair action` 宣言から来ます。
+引き込んだ名前は抽象の scope を保ちます。抽象の Int/Bool 定数は P/Q、`decreases`、
+バインダーの範囲とフィルターでリテラルになり、バインダーは同名の抽象 state map を隠します。
+impl の定数と同名のバインダー、または map が導入する impl の名前を捕まえる外側の
+プロパティバインダーは、`respond` の位置つきエラー(exit 2、`kind:"type"`、`loc` あり)
+で拒否し、改名したバインダーを公開しません。抽象の定数を範囲で読む違反で impl の
+定数を改名した形と、抽象の定数を本体で読み impl に同名がない違反は、従来の exit 2
+エラーから exit 1 `progress_lost` に変わります。
 非有界の証明には、引き続き下位レイヤーの `leadsTo ... decreases ...` と
 `verify --engine induction` を使ってください。
 
