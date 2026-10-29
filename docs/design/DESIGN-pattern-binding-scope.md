@@ -281,18 +281,36 @@ operand:
 - The right operand may use the left operand's true-result bindings for
   `and` and `=>` only.
 - A `requires` guard exports only these whole-expression bindings into later
-  guards and the action body. Existing lexical scopes and collision checks
-  remain in force; no pattern name becomes global.
+  guards and the action body; no pattern name becomes global.
+
+Visibility is not collision reservation. `ValidationPhase.collisions` and the
+Renamer's `Scope.locals` preserve the base's reservation inventory separately
+from readable names and rename mappings. The shared `extend_pattern_names`
+collector has a visible mode (the helper's rule) and a collision mode
+(`Is(Some)` and all `Binary` children). Only the latter feeds collision checks;
+it never supplies types or makes a name readable. The same phase reaches later
+guards, lets, statements, lvalue indices, ensures and binder children, including
+component rewriting before model validation. This prevents a narrower readable
+environment from admitting repeated names that the first-binding-wins
+evaluators would interpret incorrectly. Evaluators are unchanged.
+
+This inventory intentionally preserves the base boundary rather than claiming
+to inventory every possible evaluator binding. The existing not/if reuse
+problem is separate work in #1573. Adding its constructor cases to this one
+collector can extend reservations without introducing another validator.
 
 Previously accepted uses on the right of `or`, after a disjunctive or
 implicational antecedent, across comparison operands or out of comparison
-results, and bindings escaping negation, quantifiers or aggregates are breaking
-removals. Pattern names from an `if` condition are unavailable in both arms.
+results, and disjunctive flow into quantifier/aggregate bodies and filters are
+breaking removals. Escapes *outside* negation, quantifiers and aggregates, and
+names used in an `if` arm from its condition, were already refused on base:
+their controls preserve existing refusals, not new removals.
 An out-of-scope `v` reports `kind: "semantics"`, exit 2, with the existing message
 `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
-Its location is the containing clause or `if` arm; inside `requires` and
-`ensures`, it is the action location, matching existing type errors. More precise
-guard/postcondition clause locations remain separate work in #1550.
+Its location is the containing clause or `if` arm. Guards/postconditions retain
+the existing action-level fallback; an expression's more specific arm span can
+take precedence. More precise guard/postcondition clause locations remain
+separate work in #1550.
 
 The original baseline accepted
 `((o is some(v)) or x == 0) => v == 1` with `o = none` and `x = 0`;
@@ -304,7 +322,7 @@ counterexample for an ill-scoped formula. Evaluator semantics are unchanged.
 
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name
-walk; all nine consumers are now coupled:
+walk, and review found the Renamer as a tenth logical consumer:
 
 | Consumer | Source | Use |
 |---|---|---|
@@ -317,6 +335,11 @@ walk; all nine consumers are now coupled:
 | Def expansion | `lib.rs` | RHS flow |
 | Free-name analysis | `model.rs` | RHS flow |
 | Name export collector | `compose.rs` | Whole-expression export |
+| Source-owned Renamer | `compose/hygiene.rs` | RHS mapping flow and whole-result mapping export |
+
+The two DDD `domain_lowering.rs` decisions also delegate to the same helper,
+replacing equivalent frontend copies. Collision propagation is a separate
+reservation policy, not another visibility operator rule.
 
 The compose guard-name set is a syntactic capture-protection inventory, not a
 visible-value scope. It uses the existing general pattern-name collector so
@@ -325,13 +348,46 @@ sync/foreign-argument controls (ordinary, disjunctive, negated, quantified,
 conditional and aggregate patterns) stayed accepted on base/head in two runs;
 this is bounded evidence, not an exhaustive admission-equivalence proof.
 
-The 45-source position matrix, 18 public-entry probes and two supplemental
-def-call sources include rejecting controls and legal `and`/`=>`/`requires`
-preservation controls. On base `091cba49`, inverting each consumer separately
-was detected, with exact source restoration between runs. The original def-RHS
-mutation survived the first matrix; the two supplemental def-call sources then
-detected it. Publication/AST preservation controls detect some inversions but
-are not independent negative-admission semantic lineages.
+The position/reuse/public-entry matrices include rejecting controls and legal
+`and`/`=>`/`requires` preservation controls. Twelve isolated inversions cover the
+original nine consumers, collision propagation, and both Renamer decisions;
+each detected inversion produces cargo exit 101 in two runs with byte-exact
+source restoration between sites. The Renamer export inversion initially
+survived. A separate test-only legal two-source `and`-guard-to-`ensures` control
+forces a fresh name and detects its lost mapping; that control checks on base,
+the earlier implementation, and normal head, but fails under the inversion.
+The earlier def-RHS witness gap was similarly exposed and repaired with two
+def-call cases. Neither survivor is treated as a successful detector.
+Publication/admission controls detect some inversions but are not independent
+negative-admission semantic lineages.
+
+### Diagnostic priority and intentional location changes
+
+An earlier newly illegal reference can be reported before a later repeated-name
+collision. Such inputs still reject with exit 2 and `kind: "semantics"`.
+Message priority is an intentional change, not permission to reuse names: for
+every changed collision-family message in the sweep, changing only the reported
+reference `v` to the existing `x` restores the complete original base collision
+packet, twice on both binaries. Pattern declarations remain unchanged.
+
+Expression-if arm inference/assignability can report an arm reference error
+before freshness validation of the condition. With
+`requires (o is some(v)) => true` followed by
+`y = if (p is some(v)) then v else 0`, base reports the condition collision at
+`6:12`; head reports the unbound arm reference at `6:32`. The else-arm variant
+reports `6:39`, and the nested-if variant `6:48`. Direct and compose controls
+pin the entire message, exit 2, kind and these locations. Renaming the arm
+reference restores the base packet at `6:12`; rejection is preserved.
+
+The 18 measured message changes comprise 15 collision-family cases (eight
+unchanged locations and seven explicitly tested arm-location changes) and
+three earlier predicate-capture diagnostics. All 75 base local-name collision inputs
+remain rejected. Of the capture cases, direct `def-call-or-free-name` moves
+from an absent loc to `7:3`, its compose route from use loc `2:3` to `7:3`, and
+the reviewed `k()` case from an absent loc to `6:3`; all retain exit 2 and kind
+semantics. They are outside the pattern-shadow collision family, not silently
+excluded changes. Thus neither universal diagnostic equality nor universal
+location equality is claimed.
 
 ### Repair by intended absence policy
 
@@ -348,25 +404,30 @@ is not an automatic repair when absence must be accepted.
 ### Measured breaking removals
 
 The sweep ran `<binary> check <path>` in each commit's own archived tree:
-BASE `1844fa74a717ba9229e0b292d9421c0939016e5e`, implementation/test/comment
-HEAD `b47b72f06ec214038f57205699830e91a11b058a`. Base binary SHA256 is
-`1a4c1dc20c31fda70f76164fe2af40b7ad8be7e7a11d7438c2c4d135f574b599`;
-head is `c7037351f28169855eb7963a5119f3e244001a15a4a0d94b4f8c5ea227783807`.
+BASE `c32e7f5a88b412056210ee66f0cff9765001fed9`, measured
+HEAD `b9751830e76ba64ad402c982387232a39ff87c9a`. Base binary SHA256 is
+`c37d14304ababaa57d1b9637d93653f610078421ed3c3c805f2c3fcd8f268678`;
+head is `7d9eb9a60553f22fb0aaf4d99a4e6581396a341186f4bef9b385060a02f40a13`.
 Two complete runs compared stdout, stderr and exit code, with no excluded fields
-and zero repeat differences. Documentation-only successors do not change these
-measured native sources.
+and zero repeat differences. Each SHA has its own materialized tree, executed
+at the same absolute address to control source/provenance paths without
+dropping fields. Documentation-only successors do not change these native
+sources. Diagnostic variations above are recorded contract changes, not fields
+removed from the comparison.
 
 | Group | Forms/routes | Base exits 0 / 1 / 2 | Head exits 0 / 1 / 2 | `ok`→`error` | Full output changes |
 |---|---:|---:|---:|---:|---:|
 | Corpus: `specs/`, `examples/`, `rust/fslc/tests/fixtures/` | 597 | 400 / 6 / 191 | 400 / 6 / 191 | 0 | 0 |
-| Existing static complete Rust-test document literal occurrences | 1,713 | 982 / 0 / 731 | 982 / 0 / 731 | 0 | 0 |
-| New authored sources: 45 main + 2 def-call, direct/compose | 94 | 66 / 0 / 28 | 10 / 0 / 84 | 56 | 58 |
+| Existing static complete Rust-test document literal occurrences | 1,750 | 1,000 / 0 / 750 | 1,000 / 0 / 750 | 0 | 0 |
+| Authored inputs, including reuse/priority/counterfactual controls | 146 | 72 / 0 / 74 | 15 / 0 / 131 | 57 | 69 |
+| Independent-review inputs | 110 | 72 / 0 / 38 | 48 / 0 / 62 | 24 | 26 |
+| Original direct/compose priority probes | 4 | 0 / 0 / 4 | 0 / 0 / 4 | 0 | 4 |
 
-The existing-test inventory scans 522 base / 524 head Rust test source files
+The existing-test inventory scans 532 base / 535 head Rust test source files
 (integration sources plus test-attributed unit scopes). It decodes raw/escaped
 literals and static escaped format braces, but does not substitute interpolated
-placeholders or complete partial templates. Another 1,737 document-like
-candidates are inventoried, not executed: 214 interpolated formats, 1,522
+placeholders or complete partial templates. Another 1,766 document-like
+candidates are inventoried, not executed: 222 interpolated formats, 1,543
 incomplete fragments and one unterminated FSL string/comment fragment. Negative
 and invalid complete literals are checked, not silently dropped. This bounded
 sweep does not reconstruct arbitrary runtime-generated sources or sibling files
@@ -388,8 +449,12 @@ expectation, including message, location and version envelope:
 | Def expansion/caller | `def-body-or`, `def-argument-or`, `def-caller-or-right` |
 | Compose sync alias | `compose-sync-alias-or` |
 
-The other two full-output changes are `def-call-or-free-name`, direct and
-compose: both stay `2`→`2`, but report the out-of-scope `v` at `7:3` rather than
-the earlier call-capture diagnostic. The conjunctive def-call capture control
-retains its existing diagnostic. There are no observed acceptance expansions
-or removals outside the approved scope.
+The two-source `h1` adds one compose-only removal, for 57 authored routes.
+The 24 reviewed removals are `act/a07`, `comp/c05`, `docs/n4,n7,n8`,
+`guards/a3,h1,h2`, and `inv/i01,i03,i04,i05,i06,i09,i11,i12,i13,i15,i16,i17,i20,i21,i22,i25`.
+They exercise the same forbidden disjunctive/comparison/implication exports,
+including uses inside negation, quantifiers, filters and def arguments rather
+than previously rejected outer escapes. These are 81 observed removals total;
+the corpus and existing literal transition sets are empty. There are no
+observed acceptance expansions or unapproved parity changes in this bounded
+sweep, not a claim of exhaustive language-wide admission equivalence.

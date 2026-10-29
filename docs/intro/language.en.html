@@ -862,28 +862,46 @@ forms and the still-open #1528 path are not negated by that corpus result.</p>
   guards and the action body. Breaking removal (#1547): <code>check</code> now rejects
   previously accepted uses on the right of <code>or</code>, after an <code>or</code> or implication
   on the left of <code>=&gt;</code>, across comparison operands or out of comparison results,
-  and outside negated, quantified or aggregate expressions. An <code>if</code> condition
-  does not bind a name in either arm.
+  and disjunctive flow into quantifier/aggregate bodies and filters. Outer escapes
+  from negation, quantifiers and aggregates, and condition-to-<code>if</code>-arm bindings,
+  were already rejected on base; those are preservation controls, not removals.
+  Collision reservation remains base-equivalent and separate from visibility:
+  earlier <code>Is(Some)</code>/Binary names may forbid redeclaration without being readable.
+  The pre-existing not/if reuse issue remains separate work in #1573.
   Out-of-scope <code>v</code> is a <code>kind: "semantics"</code> error (exit 2), with message
   <code>invalid model expression: public Kernel cannot type identifier 'v' at &lt;line&gt;:&lt;column&gt;</code>.
-  The location identifies the clause or <code>if</code> arm containing the use; inside
-  <code>requires</code> and <code>ensures</code>, it identifies the action, as for existing type errors.
+  The location identifies the clause or <code>if</code> arm containing the use. Guards and
+  postconditions retain their action-level fallback, but a more specific arm
+  span can take precedence. An earlier newly illegal reference can replace a
+  later collision message while retaining exit 2 and kind semantics.
+  Expression-if arm inference can precede condition freshness validation:
+  after <code>requires (o is some(v)) =&gt; true</code>, the assignment
+  <code>y = if (p is some(v)) then v else 0</code> changes from condition collision <code>6:12</code>
+  to unbound then-arm <code>6:32</code>; the else/nested variants report <code>6:39</code>/<code>6:48</code>.
+  Renaming only that arm reference to the existing <code>x</code> restores the complete
+  collision packet at <code>6:12</code>. The source remains rejected, not reinterpreted.
+  Intentional def-call changes retain exit 2/kind semantics: direct <code>p()</code> capture
+  loc absent → unbound <code>7:3</code>, compose use loc <code>2:3</code> → <code>7:3</code>, and reviewed <code>k()</code>
+  capture loc absent → unbound <code>6:3</code> (see the design's diagnostic notes).
   Repair the undefined <code>(o is some(v)) or v == 1</code> according to the intended
   treatment of <code>none</code>: if absence is allowed and a present payload must equal 1,
   write <code>(o is some(v)) =&gt; v == 1</code>, equivalently
   <code>o == none or (o is some(v) and v == 1)</code>. Using <code>and</code> alone instead rejects
   <code>none</code>; no equivalence with the old undefined expression is implied.
   The boundary sweep ran <code>&lt;binary&gt; check &lt;path&gt;</code> in each commit's own tree,
-  BASE <code>1844fa74a717ba9229e0b292d9421c0939016e5e</code> and implementation HEAD
-  <code>b47b72f06ec214038f57205699830e91a11b058a</code>, twice with full stdout/stderr/exit
-  comparison and no excluded fields. All 597 corpus files and 1,713 existing
+  BASE <code>c32e7f5a88b412056210ee66f0cff9765001fed9</code> and measured HEAD
+  <code>b9751830e76ba64ad402c982387232a39ff87c9a</code>, twice with full stdout/stderr/exit
+  comparison and no excluded fields. All 597 corpus files and 1,750 existing
   static complete Rust-test literal occurrences had <strong>zero</strong> <code>ok</code> → <code>error</code>
-  transitions and byte-identical outputs. The 47 new authored sources had 94
-  direct/compose routes: <strong>56 breaking removals</strong> (28 cells on both routes),
-  listed in the <a href="../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547">scope design</a>.
-  Two already-error def-call routes changed diagnostics, not acceptance; there
-  were no acceptance expansions or repeat differences. Another 1,737
-  document-like candidates (214 interpolated formats and 1,523 incomplete
+  transitions and byte-identical outputs. The 146 authored routes had <strong>57</strong>
+  removals (28 paired cells plus one two-source compose case); 110 reviewed
+  inputs had <strong>24</strong>, for <strong>81 observed removals</strong>, enumerated by shape/input in
+  the <a href="../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547">scope design</a>.
+  All 75 base local-name collision inputs remain rejected. Of 18 message changes, 15 are
+  collision-priority cases with complete collision-return controls; seven have
+  the tested arm-location changes above. The other three are the def-call
+  changes. No acceptance expansions or repeat differences were observed in this
+  bounded sweep. Another 1,766 candidates (222 interpolated formats and 1,544 incomplete
   snippets) were inventoried, not executed; arbitrary runtime-generated sources
   and test-created sibling-file reconstruction are outside this literal sweep.
   <code>v</code> must be a fresh name: <code>check</code> rejects a <code>v</code> that is

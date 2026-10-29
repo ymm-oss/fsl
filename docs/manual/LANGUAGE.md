@@ -814,28 +814,46 @@ forms and the still-open #1528 path are not negated by that corpus result.
   guards and the action body. Breaking removal (#1547): `check` now rejects
   previously accepted uses on the right of `or`, after an `or` or implication
   on the left of `=>`, across comparison operands or out of comparison results,
-  and outside negated, quantified or aggregate expressions. An `if` condition
-  does not bind a name in either arm.
+  and disjunctive flow into quantifier/aggregate bodies and filters. Outer escapes
+  from negation, quantifiers and aggregates, and condition-to-`if`-arm bindings,
+  were already rejected on base; those are preservation controls, not removals.
+  Collision reservation remains base-equivalent and separate from visibility:
+  earlier `Is(Some)`/Binary names may forbid redeclaration without being readable.
+  The pre-existing not/if reuse issue remains separate work in #1573.
   Out-of-scope `v` is a `kind: "semantics"` error (exit 2), with message
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
-  The location identifies the clause or `if` arm containing the use; inside
-  `requires` and `ensures`, it identifies the action, as for existing type errors.
+  The location identifies the clause or `if` arm containing the use. Guards and
+  postconditions retain their action-level fallback, but a more specific arm
+  span can take precedence. An earlier newly illegal reference can replace a
+  later collision message while retaining exit 2 and kind semantics.
+  Expression-if arm inference can precede condition freshness validation:
+  after `requires (o is some(v)) => true`, the assignment
+  `y = if (p is some(v)) then v else 0` changes from condition collision `6:12`
+  to unbound then-arm `6:32`; the else/nested variants report `6:39`/`6:48`.
+  Renaming only that arm reference to the existing `x` restores the complete
+  collision packet at `6:12`. The source remains rejected, not reinterpreted.
+  Intentional def-call changes retain exit 2/kind semantics: direct `p()` capture
+  loc absent → unbound `7:3`, compose use loc `2:3` → `7:3`, and reviewed `k()`
+  capture loc absent → unbound `6:3` (see the design's diagnostic notes).
   Repair the undefined `(o is some(v)) or v == 1` according to the intended
   treatment of `none`: if absence is allowed and a present payload must equal 1,
   write `(o is some(v)) => v == 1`, equivalently
   `o == none or (o is some(v) and v == 1)`. Using `and` alone instead rejects
   `none`; no equivalence with the old undefined expression is implied.
   The boundary sweep ran `<binary> check <path>` in each commit's own tree,
-  BASE `1844fa74a717ba9229e0b292d9421c0939016e5e` and implementation HEAD
-  `b47b72f06ec214038f57205699830e91a11b058a`, twice with full stdout/stderr/exit
-  comparison and no excluded fields. All 597 corpus files and 1,713 existing
+  BASE `c32e7f5a88b412056210ee66f0cff9765001fed9` and measured HEAD
+  `b9751830e76ba64ad402c982387232a39ff87c9a`, twice with full stdout/stderr/exit
+  comparison and no excluded fields. All 597 corpus files and 1,750 existing
   static complete Rust-test literal occurrences had **zero** `ok` → `error`
-  transitions and byte-identical outputs. The 47 new authored sources had 94
-  direct/compose routes: **56 breaking removals** (28 cells on both routes),
-  listed in the [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
-  Two already-error def-call routes changed diagnostics, not acceptance; there
-  were no acceptance expansions or repeat differences. Another 1,737
-  document-like candidates (214 interpolated formats and 1,523 incomplete
+  transitions and byte-identical outputs. The 146 authored routes had **57**
+  removals (28 paired cells plus one two-source compose case); 110 reviewed
+  inputs had **24**, for **81 observed removals**, enumerated by shape/input in
+  the [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  All 75 base local-name collision inputs remain rejected. Of 18 message changes, 15 are
+  collision-priority cases with complete collision-return controls; seven have
+  the tested arm-location changes above. The other three are the def-call
+  changes. No acceptance expansions or repeat differences were observed in this
+  bounded sweep. Another 1,766 candidates (222 interpolated formats and 1,544 incomplete
   snippets) were inventoried, not executed; arbitrary runtime-generated sources
   and test-created sibling-file reconstruction are outside this literal sweep.
   `v` must be a fresh name: `check` rejects a `v` that is
