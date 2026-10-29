@@ -2035,7 +2035,10 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
             ActionItem::Requires(expr, _) => {
                 extend_pattern_names(expr, &mut names.guards, true);
             }
-            ActionItem::Statement(_) | ActionItem::Ensures(..) => {}
+            ActionItem::Statement(statement) => {
+                extend_statement_pattern_names(statement, &mut names.guards);
+            }
+            ActionItem::Ensures(..) => {}
         }
         Ok::<_, CoreError>(item)
     })?;
@@ -2457,7 +2460,36 @@ pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>, col
             extend_pattern_names(left, bound, collisions);
             extend_pattern_names(right, bound, collisions);
         }
+        Expr::Not(value) if collisions => extend_pattern_names(value, bound, true),
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } if collisions => {
+            for expr in [condition, then_expr, else_expr] {
+                extend_pattern_names(expr, bound, true);
+            }
+        }
         _ => {}
+    });
+}
+
+pub(super) fn extend_statement_pattern_names(statement: &Statement, bound: &mut HashSet<String>) {
+    crate::recursion::guard(|| match statement {
+        Statement::Assign { value, .. } => extend_pattern_names(value, bound, true),
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
+            ..
+        } => {
+            extend_pattern_names(condition, bound, true);
+            for statement in then_statements.iter().chain(else_statements) {
+                extend_statement_pattern_names(statement, bound);
+            }
+        }
+        Statement::ForAll { .. } => {}
     });
 }
 

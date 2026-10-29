@@ -24,6 +24,24 @@ struct Fixture {
 }
 
 impl Fixture {
+    fn joined(case: &Case, second: &str) -> Self {
+        let mut fixture = Self::new(case, false);
+        std::fs::write(fixture.root.join("b.fsl"), second).expect("write second source");
+        std::fs::write(
+            fixture.root.join("s.fsl"),
+            include_str!("fixtures/issue_1573_inventory/s.fsl"),
+        )
+        .expect("write two-source sync");
+        std::fs::write(
+            fixture.root.join("trace.json"),
+            json!([{"action": "joined", "params": {}}]).to_string(),
+        )
+        .expect("write joined replay");
+        fixture.file = "s.fsl";
+        fixture.property = "b.P";
+        fixture
+    }
+
     fn new(case: &Case, composed: bool) -> Self {
         let root = scratch_identity::unique(std::env::temp_dir().join(format!(
             "fslc-1573-{}-{}",
@@ -67,6 +85,7 @@ impl Fixture {
         let args = match consumer {
             "check" => vec!["check", self.file],
             "Monitor" => vec!["replay", self.file, "--trace", "trace.json"],
+            "mutate" => vec!["mutate", self.file, "--depth", "4", "--max-mutants", "128"],
             _ => vec![
                 "verify",
                 self.file,
@@ -252,4 +271,134 @@ fn statement_if_bindings_collide_in_arms_and_later_statements() {
 #[test]
 fn statement_if_arms_remain_independent_unlike_expression_arms() {
     matrix(forms::independent_statement_arms());
+}
+
+#[test]
+fn nested_statement_arm_names_are_reserved_in_later_statements() {
+    matrix(forms::nested_statement_arm_exports());
+}
+
+fn accepted_envelope(fixture: &Fixture, label: &str, spec: &str) -> bool {
+    let (value, exit) = fixture.observe(label, "check");
+    exit == 0
+        && value
+            == json!({
+                "fsl": "1.0", "result": "ok", "spec": spec, "warnings": [],
+                "versions": {
+                    "verifier": {"name": "fslc-rust", "version": "4.12.0"},
+                    "core": {"name": "fsl-core", "version": "4.12.0"},
+                    "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+                }
+            })
+}
+
+#[test]
+fn accepted_normalized_aggregates_keep_the_full_envelope() {
+    let mut failures = Vec::new();
+    for case in forms::normalized_aggregate_controls() {
+        for composed in [false, true] {
+            let fixture = Fixture::new(&case, composed);
+            if !accepted_envelope(&fixture, &case.name, if composed { "C" } else { "A" }) {
+                failures.push(format!("{}/compose={composed}", case.name));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:?}");
+}
+
+#[test]
+fn accepted_sync_sources_keep_independent_statement_bindings() {
+    let (case, second) = forms::sync_sources(false);
+    let fixture = Fixture::new(&case, false);
+    assert!(accepted_envelope(&fixture, "sync-source/A", "A"));
+    let fixture = Fixture::new(&second, false);
+    assert!(accepted_envelope(&fixture, "sync-source/B", "B"));
+    let fixture = sync_fixture(false);
+    assert!(accepted_envelope(&fixture, "sync-source/joined", "Joined"));
+}
+
+fn sync_fixture(negative: bool) -> Fixture {
+    let (case, second) = forms::sync_sources(negative);
+    Fixture::joined(&case, &second.source)
+}
+
+fn sync_verdicts(negative: bool) {
+    let fixture = sync_fixture(negative);
+    let label = format!("sync-source/negative={negative}");
+    assert!(accepted_envelope(&fixture, &label, "Joined"));
+    let mut failures = Vec::new();
+    for consumer in ["bmc", "induction", "explicit", "Monitor"] {
+        let (value, exit) = fixture.observe(&label, consumer);
+        if !verdict(&value, exit, consumer, !negative, "b.P") {
+            failures.push(format!("{consumer}: {exit}: {value}"));
+        }
+        if consumer == "Monitor" && !negative && value["final_state"]["b.flag"] != true {
+            failures.push(format!("concrete final b.flag must remain true: {value}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn sync_source_summary_detects_cross_source_payload_capture() {
+    sync_verdicts(false);
+}
+
+#[test]
+fn sync_source_negative_remains_violated_with_or_without_hygiene() {
+    sync_verdicts(true);
+}
+
+#[test]
+fn source_inventory_keeps_foreign_conjunctive_guard_enabled() {
+    let case = Case {
+        name: "inventory-probe".into(),
+        source: include_str!("fixtures/issue_1573_inventory/a.fsl").into(),
+        expected: Expected::Check,
+        params: json!({}),
+    };
+    let fixture = Fixture::joined(&case, include_str!("fixtures/issue_1573_inventory/b.fsl"));
+    assert!(accepted_envelope(&fixture, &case.name, "Joined"));
+    for consumer in ["bmc", "induction", "explicit", "Monitor"] {
+        let (value, exit) = fixture.observe(&case.name, consumer);
+        // An invariant failure after joined, not a disabled/failed requires,
+        // establishes that B's conjunctive guard really enabled the action.
+        assert!(verdict(&value, exit, consumer, false, "b.P"), "{value}");
+    }
+}
+
+#[test]
+fn source_inventory_preserves_s1_mutation_outcomes() {
+    // Calibrated against 08d9656c: source separation must not invalidate mutants.
+    let case = Case {
+        name: "s1-mutation".into(),
+        source: include_str!("fixtures/issue_1547_guard_reservations/a.fsl").into(),
+        expected: Expected::Check,
+        params: json!({}),
+    };
+    let mut failures = Vec::new();
+    for (file, composition, expected) in [
+        (
+            "c.fsl",
+            include_str!("fixtures/issue_1547_guard_reservations/c.fsl"),
+            json!([14, 12, 0]),
+        ),
+        (
+            "c_if.fsl",
+            include_str!("fixtures/issue_1547_guard_reservations/c_if.fsl"),
+            json!([7, 8, 0]),
+        ),
+    ] {
+        let mut fixture = Fixture::new(&case, false);
+        std::fs::write(fixture.root.join(file), composition).expect("write S1 composition");
+        fixture.file = file;
+        assert!(accepted_envelope(&fixture, file, "C"));
+        let (value, exit) = fixture.observe(file, "mutate");
+        let summary = &value["summary"];
+        let counts = json!([summary["killed"], summary["survived"], summary["invalid"]]);
+        if exit != 0 || value["result"] != "mutated" || counts != expected {
+            failures.push(format!("{file}: expected {expected}, got {exit}: {value}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

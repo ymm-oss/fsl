@@ -433,3 +433,77 @@ pub fn independent_statement_arms() -> Vec<Case> {
     }
     cases
 }
+
+pub fn nested_statement_arm_exports() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for outer in [false, true] {
+        for inner in [false, true] {
+            for truth in [false, true] {
+                for renamed in [false, true] {
+                    let arms =
+                        [(true, true), (true, false), (false, true), (false, false)].map(|route| {
+                            if route == (outer, inner) {
+                                "(o is some(v)) and v == 1"
+                            } else {
+                                "true"
+                            }
+                        });
+                    let name = if renamed { "w" } else { "v" };
+                    let payload = if truth { 2 } else { 1 };
+                    let source = format!(
+                        "spec S {{\n  type K = 1..2\n  state {{ o: Option<K>, p: Option<K>, flag: Bool, seen: Bool }}\n  init {{ o = some(1) p = some(2) flag = true seen = true }}\n  action stay() {{\n    if {outer} {{\n      if {inner} {{ flag = {} }}\n      else {{ flag = {} }}\n    }} else {{\n      if {inner} {{ flag = {} }}\n      else {{ flag = {} }}\n    }}\n    seen = (p is some({name})) and {name} == {payload}\n  }}\n  invariant Shape {{ o == some(1) and p == some(2) }}\n  invariant P {{ flag and seen }}\n}}\n",
+                        arms[0], arms[1], arms[2], arms[3]
+                    );
+                    cases.push(Case::new(
+                        format!(
+                            "nested-arm-export/outer={outer}/inner={inner}/truth={truth}/renamed={renamed}"
+                        ),
+                        source,
+                        if renamed {
+                            Expected::Truth(truth)
+                        } else {
+                            Expected::Reject(13, 5)
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    cases
+}
+
+pub fn normalized_aggregate_controls() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for source in ["0..2", "Seq { 0, 1, 2 }"] {
+        for kind in ["count", "sum"] {
+            let clause = if kind == "count" {
+                "where (o is some(v)) and v == 1"
+            } else {
+                "of (if (o is some(v)) and v == 1 then 1 else 0)"
+            };
+            cases.push(Case::new(
+                format!("normalization/{source}/{kind}"),
+                invariant(&format!("{kind}(i in {source} {clause}) == 3")),
+                Expected::Check,
+            ));
+        }
+    }
+    cases
+}
+
+pub fn sync_sources(negative: bool) -> (Case, Case) {
+    let first = Case::new(
+        "sync-source",
+        spec(
+            "  action stay() { flag = (o is some(v)) and v == 1 }\n  invariant Shape { o == some(1) }\n  invariant P { flag }",
+        ),
+        Expected::Check,
+    );
+    let mut second = Case::new("sync-source/B", first.source.clone(), Expected::Check);
+    second.source = second
+        .source
+        .replace("spec A", "spec B")
+        .replace("some(1)", "some(2)")
+        .replace("v == 1", if negative { "v < 1" } else { "v == 2" });
+    (first, second)
+}

@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+spec B {
+  type K = 1..2
+  state { o: Option<K>, hit: Bool }
+  init { o = some(2) hit = false }
+  action stay() {
+    requires (o is some(v)) and v == 2
+    hit = true
+  }
+  invariant P { hit == false }
+  invariant Q { true }
+}

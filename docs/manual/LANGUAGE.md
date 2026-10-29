@@ -902,9 +902,28 @@ name in a `decreases` call. There are no unrelated breaking removals.
   and disjunctive flow into quantifier/aggregate bodies and filters. Outer escapes
   from negation, quantifiers and aggregates, and condition-to-`if`-arm bindings,
   were already rejected on base; those are preservation controls, not removals.
-  Collision reservation remains base-equivalent and separate from visibility:
-  earlier `Is(Some)`/Binary names may forbid redeclaration without being readable.
-  The pre-existing not/if reuse issue remains separate work in #1573.
+  Collision reservation is separate from visibility: a name may forbid
+  redeclaration without being readable. Breaking removal (#1573): matches inside
+  `not` and expression `if` reserve their names for later operands, guards,
+  action statements and ensures. An expression-if condition reserves names in
+  both arms, and its **then arm also reserves names in the else arm** because
+  the symbolic evaluator shares their binding map (#1577). A quantifier/aggregate
+  `where` reserves names in its body or `of` expression, when present; count,
+  unique and exactlyOne have only a filter, not an independent body/of.
+  A statement-if condition reserves names in both arms and later statements;
+  bindings inside either arm also reserve names in later statements. Opposite
+  statement arms remain independent, and candidate-local names do not escape
+  a quantifier/aggregate. Rename the later binding, for example change
+  `(p is some(v)) and v == 2` to `(p is some(w)) and w == 2`.
+  None of these reservations grants additional read visibility.
+  Compose separates such bindings across independent sources; rendered guards
+  may now use `__v_substitution_0/1` instead of the authored `v`. The explain
+  result and ordinary verification verdicts of the guard-name regression cases
+  are unchanged. For two sources whose statement payloads were incorrectly
+  shared, check remains accepted but the previously false `violated` verdict
+  becomes holds after separation; a genuinely false payload condition remains
+  violated. These are checker/hygiene compensations, not an evaluator repair
+  (the remaining binding-lifetime work is tracked in #1622).
   Out-of-scope `v` is a `kind: "semantics"` error (exit 2), with message
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
   The location identifies the clause or `if` arm containing the use. Guards and
@@ -924,6 +943,8 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `none`; no equivalence with the old undefined expression is implied.
   Measured removals and diagnostic examples are recorded in the
   [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  The [reservation amendment](../design/DESIGN-pattern-binding-scope.md#5-retained-pattern-reservations-1573)
+  records the additional removals and source-separated output contract.
   `v` must be a fresh name: `check` rejects a `v` that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, `let`, or an earlier pattern binding in scope, and asks you to rename

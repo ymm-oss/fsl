@@ -38,6 +38,12 @@ struct Scope {
 }
 
 impl Scope {
+    fn after(&self, expr: &Expr) -> Self {
+        let mut scope = self.clone();
+        super::extend_pattern_names(expr, &mut scope.locals, true);
+        scope
+    }
+
     fn new() -> Self {
         Self {
             renamed: HashMap::new(),
@@ -120,6 +126,7 @@ pub(super) fn rewrite(
         inserted: HashSet::new(),
         used,
     };
+    let mut statement_scope = None;
     map_normalized_action_items(items, &mut scope, |item, scope| {
         Ok(match item {
             ActionItem::Let(name, expr, item_span) => {
@@ -137,6 +144,7 @@ pub(super) fn rewrite(
                 ActionItem::Ensures(renamer.local_at(expr, scope, span)?, item_span)
             }
             ActionItem::Statement(statement) => {
+                let scope = statement_scope.get_or_insert_with(|| scope.clone());
                 ActionItem::Statement(renamer.statement(statement, scope)?)
             }
         })
@@ -411,6 +419,21 @@ impl<'a> Renamer<'a> {
                         .transpose()?,
                 }
             }
+            Expr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                spans,
+            } => {
+                let then_scope = scope.after(&condition);
+                let else_scope = then_scope.after(&then_expr);
+                Expr::Conditional {
+                    condition: Box::new(self.local_at(*condition, scope, spans.condition)?),
+                    then_expr: Box::new(self.local_at(*then_expr, &then_scope, spans.then_expr)?),
+                    else_expr: Box::new(self.local_at(*else_expr, &else_scope, spans.else_expr)?),
+                    spans,
+                }
+            }
             expr => map_children(expr, |child, span| match span {
                 Some(span) => self.local_at(child, scope, span),
                 None => self.local(child, scope),
@@ -433,6 +456,10 @@ impl<'a> Renamer<'a> {
             &mut nested,
             Binding::Closed(patterned),
         )?;
+        let mut body_scope = nested.clone();
+        if let Some(expr) = crate::model::binder_scope(&binder).1 {
+            super::extend_pattern_names(expr, &mut body_scope.locals, true);
+        }
         let binder = match binder {
             Binder::Typed {
                 type_name,
@@ -467,15 +494,19 @@ impl<'a> Renamer<'a> {
                     .transpose()?,
             },
         };
-        Ok((binder, nested))
+        Ok((binder, body_scope))
     }
 
     fn statement(
         &mut self,
         statement: Statement,
-        scope: &Scope,
+        scope: &mut Scope,
     ) -> Result<Statement, TypecheckError> {
-        crate::recursion::guard(|| self.statement_inner(statement, scope))
+        let mut locals = scope.locals.clone();
+        super::extend_statement_pattern_names(&statement, &mut locals);
+        let statement = crate::recursion::guard(|| self.statement_inner(statement, scope))?;
+        scope.locals = locals;
+        Ok(statement)
     }
 
     fn statement_inner(
@@ -501,9 +532,9 @@ impl<'a> Renamer<'a> {
                 else_statements,
                 span,
             } => Statement::If {
-                condition: self.local_at(condition, scope, span)?,
-                then_statements: self.statements(then_statements, scope)?,
-                else_statements: self.statements(else_statements, scope)?,
+                condition: self.local_at(condition.clone(), scope, span)?,
+                then_statements: self.statements(then_statements, &scope.after(&condition))?,
+                else_statements: self.statements(else_statements, &scope.after(&condition))?,
                 span,
             },
             Statement::ForAll {
@@ -528,9 +559,10 @@ impl<'a> Renamer<'a> {
         statements: Vec<Statement>,
         scope: &Scope,
     ) -> Result<Vec<Statement>, TypecheckError> {
+        let mut scope = scope.clone();
         statements
             .into_iter()
-            .map(|statement| self.statement(statement, scope))
+            .map(|statement| self.statement(statement, &mut scope))
             .collect()
     }
 

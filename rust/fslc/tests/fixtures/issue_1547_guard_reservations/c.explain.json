@@ -46,8 +46,8 @@
         "name": "s",
         "params": [],
         "requires_text": [
-          "requires not l.o is some(v)",
-          "requires not r.o is some(v)"
+          "requires not l.o is some(__v_substitution_0)",
+          "requires not r.o is some(__v_substitution_1)"
         ],
         "ensures_text": [],
         "writes": [
