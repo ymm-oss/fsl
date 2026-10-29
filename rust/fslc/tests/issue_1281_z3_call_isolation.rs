@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Mutation BMC results must not depend on earlier queries on the same thread.
-//! The Seq-init-removal case from #1251 exposes this on the pre-isolation CLI:
-//! at depth 1 the external mutant alone is killed by `_bounds_q`, but following
-//! the built-in catalog it is killed by `build_spec` (including `killers`).
+//! The Seq-init-removal case from #1251 exposes this on pre-isolation builds.
+//! At f5f3f194, preceding built-ins change `_bounds_q` to `build_spec`. At
+//! 08d9656c, that order control passes, but repeating the same full mutant model
+//! still changes the killer (including `killers`) within one process.
 //! Compare the entire external record, not a selected set of outcome fields.
 
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -115,6 +117,70 @@ fn external_mutant_is_independent_of_builtin_bmc_history() {
 #[test]
 fn oracle_attribution_is_independent_of_builtin_bmc_history() {
     assert_history_independent(true);
+}
+
+fn assert_repeated_history_independent(attribution: bool) {
+    let mutant_source = SPEC.replace("q = Seq {}", "");
+    let records = (0..12)
+        .map(|index| {
+            json!({
+                "id": format!("probe-{index}"),
+                "description": "identical model",
+                "spec": mutant_source,
+            })
+        })
+        .collect::<Vec<_>>();
+    let dir = fixture(
+        if attribution {
+            "repeated-attribution"
+        } else {
+            "repeated-default"
+        },
+        &records[0],
+    );
+    let mut catalog = String::new();
+    for record in &records {
+        writeln!(catalog, "{record}").expect("write catalog record");
+    }
+    std::fs::write(dir.join("mutants.jsonl"), catalog).expect("write repeated models");
+    let repeated = mutate(&dir, "0", attribution);
+    let mutants = repeated["mutants"].as_array().expect("mutants");
+    assert_eq!(mutants.len(), records.len(), "{repeated}");
+    for (index, (mutant, record)) in mutants.iter().zip(&records).enumerate() {
+        assert_eq!(mutant["source"], "external", "{mutant}");
+        assert_eq!(mutant["status"], "killed", "{mutant}");
+        assert_eq!(mutant["id"], record["id"], "{mutant}");
+        assert_eq!(mutant["line"], index + 1, "{mutant}");
+        if attribution {
+            assert!(!mutant["killers"].as_array().expect("killers").is_empty());
+        } else {
+            assert!(mutant.get("killers").is_none(), "{mutant}");
+        }
+        // IDs must be unique in a catalog. Keep each copy's entire returned
+        // record comparable by using that same ID and JSONL line when alone.
+        // Blank lines add no earlier mutation queries. No fields are stripped.
+        std::fs::write(
+            dir.join("mutants.jsonl"),
+            format!("{}{record}\n", "\n".repeat(index)),
+        )
+        .expect("write same record alone at the same line");
+        let alone = mutate(&dir, "0", attribution);
+        assert_eq!(
+            external(&alone),
+            mutant,
+            "earlier identical mutant queries changed record {index}"
+        );
+    }
+}
+
+#[test]
+fn repeated_external_mutant_is_independent_of_earlier_identical_models() {
+    assert_repeated_history_independent(false);
+}
+
+#[test]
+fn repeated_oracle_attribution_is_independent_of_earlier_identical_models() {
+    assert_repeated_history_independent(true);
 }
 
 #[test]
