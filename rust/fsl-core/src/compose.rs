@@ -1268,7 +1268,7 @@ pub(super) fn map_scoped_action_items<E>(
     map_normalized_action_items(items, bound, |item, bound| {
         let item = rewrite(item, bound)?;
         match &item {
-            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals),
+            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals, None),
             ActionItem::Let(name, ..) => {
                 bound.insert(name.clone());
             }
@@ -1447,11 +1447,17 @@ fn rewrite_expr_in_phase(
             )?,
             Expr::Binary { op, left, right } => {
                 let left = rewrite(*left)?;
-                let nested = pattern_scope(&left, bound, &HashSet::new());
+                let nested = pattern_scope(&left, bound, &HashSet::new(), Some(&op));
+                let right_phase = phase.after_patterns(&left);
                 Expr::Binary {
                     op,
                     left: Box::new(left),
-                    right: Box::new(rewrite_expr_in_phase(*right, component, &nested, phase)?),
+                    right: Box::new(rewrite_expr_in_phase(
+                        *right,
+                        component,
+                        &nested,
+                        &right_phase,
+                    )?),
                 }
             }
             Expr::Is { expr, pattern } => {
@@ -1463,7 +1469,7 @@ fn rewrite_expr_in_phase(
                         component.names.state.iter().map(String::as_str),
                         component.names.consts.iter().map(String::as_str),
                         component.names.enum_members.keys().map(String::as_str),
-                        bound.iter().map(String::as_str),
+                        bound.iter().chain(&phase.collisions).map(String::as_str),
                     )?;
                 }
                 Expr::Is {
@@ -2004,7 +2010,7 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
                 names.guards.insert(name.clone());
             }
             ActionItem::Requires(expr, _) => {
-                extend_pattern_names(expr, &mut names.guards);
+                extend_pattern_names(expr, &mut names.guards, true);
             }
             ActionItem::Statement(_) | ActionItem::Ensures(..) => {}
         }
@@ -2338,7 +2344,7 @@ fn resolve_alias_expr_scoped(
             }
             Expr::Binary { op, left, right } => {
                 let left = resolve(*left)?;
-                let nested = pattern_scope(&left, bound, &HashSet::new());
+                let nested = pattern_scope(&left, bound, &HashSet::new(), Some(&op));
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -2397,32 +2403,39 @@ fn resolve_alias_expr_scoped(
 }
 
 /// Match the public Kernel's Is/Binary pattern continuation scope.
+/// `None` denotes continuation after a true requires guard, not a Binary RHS.
 pub(super) fn pattern_scope(
     expr: &Expr,
     bound: &HashSet<String>,
     globals: &HashSet<String>,
+    op: Option<&str>,
 ) -> HashSet<String> {
+    let active = op.is_none_or(|op| crate::pattern_binding_flows(op, true));
     let mut patterns = HashSet::new();
-    extend_pattern_names(expr, &mut patterns);
+    extend_pattern_names(expr, &mut patterns, false);
     let mut nested = bound.clone();
-    nested.extend(patterns.difference(globals).cloned());
+    nested.extend(patterns.difference(globals).filter(|_| active).cloned());
     nested
 }
 
-pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>) {
-    match expr {
+/// Visible exports use true continuations; collision exports retain all Binary names.
+/// Extend collision traversal here when additional constructors retain bindings (#1573).
+pub(super) fn extend_pattern_names(expr: &Expr, bound: &mut HashSet<String>, collisions: bool) {
+    crate::recursion::guard(|| match expr {
         Expr::Is {
             pattern: fsl_syntax::Pattern::Some(name),
             ..
         } => {
             bound.insert(name.clone());
         }
-        Expr::Binary { left, right, .. } => {
-            extend_pattern_names(left, bound);
-            extend_pattern_names(right, bound);
+        Expr::Binary { op, left, right }
+            if collisions || crate::pattern_binding_flows(op, false) =>
+        {
+            extend_pattern_names(left, bound, collisions);
+            extend_pattern_names(right, bound, collisions);
         }
         _ => {}
-    }
+    });
 }
 
 fn resolve_alias_action_items(

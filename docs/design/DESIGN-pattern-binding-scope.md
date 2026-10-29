@@ -262,3 +262,321 @@ which `docs/design/DESIGN-def.md` rejects on the ground that synthetic binder na
 would surface in counterexamples. Overturning this decision means
 overturning that one, with evidence that generated names in traces are
 acceptable.
+
+## 3. True-continuation enforcement (#1547)
+
+This amendment makes the native check boundary enforce the language reference's
+true-continuation rule. The measurements and pending-work descriptions above
+are historical; the blanket reference to a match occurring in `requires` does
+not authorize exporting a binding through a disjunction.
+
+### Invariant and boundary
+
+One operator policy governs both the bindings exported by a true whole
+expression and those available while visiting a binary expression's right
+operand:
+
+- Whole-expression export traverses `and` only. A true disjunction or
+  implication does not establish that its pattern matched.
+- The right operand may use the left operand's true-result bindings for
+  `and` and `=>` only.
+- A `requires` guard exports only these whole-expression bindings into later
+  guards and the action body; no pattern name becomes global.
+
+Visibility is not collision reservation. `ValidationPhase.collisions` and the
+Renamer's `Scope.locals` preserve the base's reservation inventory separately
+from readable names and rename mappings. The shared `extend_pattern_names`
+collector has a visible mode (the helper's rule) and a collision mode
+(`Is(Some)` and all `Binary` children). Only the latter feeds collision checks;
+it never supplies types or makes a name readable. Typed model validation carries
+the collision phase through later guards, lets, statements, lvalue indices,
+ensures and binder children. Component rewriting uses this phase only within
+each expression: every action item starts a fresh normalized phase, and the
+readable scope carried across `requires` items contains only conjunctive
+exports. Subsequent model validation checks cross-item collisions; sync source
+hygiene separately carries its reserved locals. Together these checks prevent
+a narrower readable environment from admitting repeated names that the
+first-binding-wins evaluators would interpret incorrectly. Evaluators are unchanged.
+
+This inventory intentionally preserves the base boundary rather than claiming
+to inventory every possible evaluator binding. The existing not/if reuse
+problem is separate work in #1573. Adding its constructor cases to this one
+collector can extend reservations without introducing another validator.
+
+Previously accepted uses on the right of `or`, after a disjunctive or
+implicational antecedent, across comparison operands or out of comparison
+results, and disjunctive flow into quantifier/aggregate bodies and filters are
+breaking removals. Escapes *outside* negation, quantifiers and aggregates, and
+names used in an `if` arm from its condition, were already refused on base:
+their controls preserve existing refusals, not new removals.
+An out-of-scope `v` reports `kind: "semantics"`, exit 2, with the existing message
+`invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
+Its location is the containing clause or `if` arm. Guards/postconditions retain
+the existing action-level fallback; an expression's more specific arm span can
+take precedence. More precise guard/postcondition clause locations remain
+separate work in #1550.
+
+The original baseline accepted
+`((o is some(v)) or x == 0) => v == 1` with `o = none` and `x = 0`;
+BMC and induction could report `violated` using the unbound payload name.
+Rejecting the source is necessary: that verdict cannot establish a valid
+counterexample for an ill-scoped formula. Evaluator semantics are unchanged.
+
+### Shared policy and sibling consumers
+
+`fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
+decision. The initial eight-consumer estimate omitted the separate free-name
+walk, and review found the Renamer as a tenth logical consumer:
+
+| Consumer | Source | Use |
+|---|---|---|
+| Typed export collector | `typecheck.rs` | Whole-expression export |
+| Typed expression validation | `typecheck.rs` | RHS flow |
+| Public Kernel serialization | `public_kernel.rs` | RHS flow |
+| Partial-operation classification | `partial_operation.rs` | RHS flow |
+| Component rewrite | `compose.rs` | RHS flow |
+| Compose alias resolution | `compose.rs` | RHS flow |
+| Def expansion | `lib.rs` | RHS flow |
+| Free-name analysis | `model.rs` | RHS flow |
+| Name export collector | `compose.rs` | Whole-expression export |
+| Source-owned Renamer | `compose/hygiene.rs` | RHS mapping flow and whole-result mapping export |
+
+The whole-export and RHS decisions in both DDD paths, `domain_lowering.rs` and
+`domain.rs`, also delegate to the same helper, replacing four equivalent
+frontend copies. Collision propagation is a separate reservation policy, not
+another visibility operator rule.
+
+The compose guard-name set is a syntactic capture-protection inventory, not a
+visible-value scope. It uses `extend_pattern_names` in collision mode, retaining
+the base's `Is(Some)`/all-`Binary` inventory. Using the broader general collector
+here incorrectly reserved names inside not/if/quantifier/aggregate children and
+introduced `__v_substitution_N` into accepted compose output. Full base-generated
+`explain` regressions for sibling negated guards and a conditional sync guard
+reject that regression. Acceptance checks alone do not detect this output drift.
+Six focused sync/foreign-argument controls cover ordinary, disjunctive, negated,
+quantified, conditional and aggregate patterns; they are bounded evidence, not
+an exhaustive admission-equivalence proof.
+
+The position/reuse/public-entry matrices include rejecting controls and legal
+`and`/`=>`/`requires` preservation controls. Twelve isolated inversions cover the
+original nine consumers, collision propagation, and both Renamer decisions;
+each detected inversion produces cargo exit 101 in two runs with byte-exact
+source restoration between sites. The Renamer export inversion initially
+survived. A separate test-only legal two-source `and`-guard-to-`ensures` control
+forces a fresh name and detects its lost mapping; that control checks on base,
+the earlier implementation, and normal head, but fails under the inversion.
+The earlier def-RHS witness gap was similarly exposed and repaired with two
+def-call cases. Neither survivor is treated as a successful detector.
+Publication/admission controls detect some inversions but are not independent
+negative-admission semantic lineages.
+
+### Diagnostic priority and intentional location changes
+
+An earlier newly illegal reference can be reported before a later repeated-name
+collision. Such inputs still reject with exit 2 and `kind: "semantics"`.
+Message priority is an intentional change, not permission to reuse names: for
+every changed collision-family message in the sweep, changing only the reported
+reference `v` to the existing `x` restores the complete original base collision
+packet, twice on both binaries. Pattern declarations remain unchanged.
+
+Expression-if arm inference/assignability can report an arm reference error
+before freshness validation of the condition. With
+`requires (o is some(v)) => true` followed by
+`y = if (p is some(v)) then v else 0`, base reports the condition collision at
+`6:12`; head reports the unbound arm reference at `6:32`. The else-arm variant
+reports `6:39`, and the nested-if variant `6:48`. Direct and compose controls
+pin the entire message, exit 2, kind and these locations. Renaming the arm
+reference restores the base packet at `6:12`; rejection is preserved.
+
+When a `def` body's free name would be captured only by an out-of-continuation
+pattern at its call site, the name is now reported as an unbound reference in
+the containing clause instead of as predicate capture. This is a diagnostic
+class, not a list of three special cases: messages and possibly locations
+change while exit 2 and kind semantics remain. Independent review exercised
+11 such shapes, including invariant comparisons and disjunctive action guards.
+
+The historical sweep below measured 18 message changes: 15 collision-family cases
+(eight unchanged locations and seven explicitly tested arm-location changes)
+and three examples of this predicate-capture class. All 75 base local-name
+collision inputs remain rejected. Among those examples, direct `def-call-or-free-name` moves
+from an absent loc to `7:3`, its compose route from use loc `2:3` to `7:3`, and
+the reviewed `k()` case from an absent loc to `6:3`; all retain exit 2 and kind
+semantics. They are outside the pattern-shadow collision family, not silently
+excluded changes. Thus neither universal diagnostic equality nor universal
+location equality is claimed.
+
+### Repair by intended absence policy
+
+The undefined `(o is some(v)) or v == 1` has no sound equivalence claim. For
+the policy "absence is allowed; a present payload must equal 1", write
+`(o is some(v)) => v == 1`, equivalently
+`o == none or (o is some(v) and v == 1)`. Both total formulas agree over `none`,
+`some(0)` and `some(1)`: their equivalence checks and is BMC-verified to depth 3,
+inductively proved and explicit-state proved. Repeating with `and` alone in
+place of the explicit absence allowance produces a violation at initial
+`none` in all three engines. Thus choosing `and` alone changes the policy; it
+is not an automatic repair when absence must be accepted.
+
+### Measured breaking removals
+
+The sweep ran `<binary> check <path>` in each commit's own archived tree:
+BASE `c32e7f5a88b412056210ee66f0cff9765001fed9`, measured
+HEAD `b9751830e76ba64ad402c982387232a39ff87c9a`. Base binary SHA256 is
+`c37d14304ababaa57d1b9637d93653f610078421ed3c3c805f2c3fcd8f268678`;
+head is `7d9eb9a60553f22fb0aaf4d99a4e6581396a341186f4bef9b385060a02f40a13`.
+Two complete runs compared stdout, stderr and exit code, with no excluded fields
+and zero repeat differences. Each SHA has its own materialized tree, executed
+at the same absolute address to control source/provenance paths without
+dropping fields. These are historical observations at the named measured HEAD,
+not a sweep of later native revisions. Diagnostic variations above are recorded
+contract changes, not fields removed from the comparison.
+
+| Group | Forms/routes | Base exits 0 / 1 / 2 | Head exits 0 / 1 / 2 | `ok`→`error` | Full output changes |
+|---|---:|---:|---:|---:|---:|
+| Corpus: `specs/`, `examples/`, `rust/fslc/tests/fixtures/` | 597 | 400 / 6 / 191 | 400 / 6 / 191 | 0 | 0 |
+| Existing static complete Rust-test document literal occurrences | 1,750 | 1,000 / 0 / 750 | 1,000 / 0 / 750 | 0 | 0 |
+| Authored inputs, including reuse/priority/counterfactual controls | 146 | 72 / 0 / 74 | 15 / 0 / 131 | 57 | 69 |
+| Independent-review inputs | 110 | 72 / 0 / 38 | 48 / 0 / 62 | 24 | 26 |
+| Original direct/compose priority probes | 4 | 0 / 0 / 4 | 0 / 0 / 4 | 0 | 4 |
+
+The existing-test inventory scans 532 base / 535 head Rust test source files
+(integration sources plus test-attributed unit scopes). It decodes raw/escaped
+literals and static escaped format braces, but does not substitute interpolated
+placeholders or complete partial templates. Another 1,766 document-like
+candidates are inventoried, not executed: 222 interpolated formats, 1,543
+incomplete fragments and one unterminated FSL string/comment fragment. Negative
+and invalid complete literals are checked, not silently dropped. This bounded
+sweep does not reconstruct arbitrary runtime-generated sources or sibling files
+that a test would create. Source-line movement in the inventories is recorded
+separately from CLI output; the literal contents are unchanged.
+
+Each of the following **28 cells has two breaking removals**, direct and compose
+`0`→`2`. Each removal's complete head packet also matches its authored check
+expectation, including message, location and version envelope:
+
+| Rejected flow | Authored cells (each direct and compose) |
+|---|---|
+| Disjunction | `type-or-right`, `type-nested-and-or-right`, `type-not-inside`, `issue-exact` |
+| Comparison escape | `type-equality-escape`, `type-inequality-escape`, `type-equality-right-operand` |
+| Implication/export escape | `type-implies-left-or`, `type-implies-left-implies`, `type-implies-escape-to-and`, `false-verdict-implies-left-or` |
+| Disjunctive flow into quantifier/aggregate/method | `type-forall-body`, `type-exists-body`, `type-forall-where`, `type-sum-body`, `type-sum-where`, `type-count-where`, `type-method-argument` |
+| Disjunctive flow into partial operations | `partial-seq-index`, `partial-map-key` |
+| Requires export | `requires-or-value`, `requires-or-ensures`, `requires-or-later-requires`, `requires-implies-value` |
+| Def expansion/caller | `def-body-or`, `def-argument-or`, `def-caller-or-right` |
+| Compose sync alias | `compose-sync-alias-or` |
+
+The two-source `h1` adds one compose-only removal, for 57 authored routes.
+The 24 reviewed removals are `act/a07`, `comp/c05`, `docs/n4,n7,n8`,
+`guards/a3,h1,h2`, and `inv/i01,i03,i04,i05,i06,i09,i11,i12,i13,i15,i16,i17,i20,i21,i22,i25`.
+They exercise the same forbidden disjunctive/comparison/implication exports,
+including uses inside negation, quantifiers, filters and def arguments rather
+than previously rejected outer escapes. These are 81 observed removals total;
+the corpus and existing literal transition sets are empty. There are no
+observed acceptance expansions or unapproved parity changes in this bounded
+sweep, not a claim of exhaustive language-wide admission equivalence.
+
+### Guard-reservation output recheck
+
+The subsequent native revision `8eef04058d51105c7788e17eb0c7baf328439ff3`
+restores the base guard-name collector and consolidates the remaining domain
+operator copies. Output was measured at its documentation-only successor
+`5ec10a0f00fd4cbfb5842ab94f0aa0ee88917f8b`, with head binary SHA256
+`66e7d99c10d195398b2d1c1897ed0c9a9569889cd46c5089086ef950ba235d80`
+and the same named c32 base binary above. Both binaries read the same source
+paths; their hashes and the input hashes stayed fixed throughout two runs.
+
+| Group | Commands | Two-run comparisons | Raw byte-equal | Timing-only differences |
+|---|---|---:|---:|---:|
+| Three reservation probes: component, sibling negated guards, conditional sync guard | `check`, `explain`, `analyze`, `html --no-timing`, `verify --engine explicit --depth 8 --no-cache` | 30 | 24 | 6 |
+| Every top-level compose in the three corpus roots: 20 existing and two new regression fixtures | `check`, `explain --depth 2`, `analyze` | 132 | 128 | 4 |
+
+The corpus inventory contains 22 compose files: two under `specs/`, one under
+`examples/`, and 19 under `rust/fslc/tests/fixtures/`. Invalid compose inputs are
+compared too, not excluded. The initial default-depth corpus attempt timed out
+after 180 seconds in the unchanged base's `explain specs/order_system.fsl`.
+Depth 2 is therefore an explicit uniform bound for corpus explanation, not a
+per-file bypass or a claim of default-depth completion. The reservation probes
+and both full base-generated regression goldens retain default explain depth 8;
+the guard/action rendering exercised by this fix is not pruned by search depth.
+
+Raw bytes, stderr and exits were retained. Observed wall-clock timers alone
+prevent byte equality for the six verification comparisons and the four
+bank/order explanation comparisons. The exact observed timer paths are:
+
+- `/cost/elapsed_s` for each of the three reservation probes' `verify` results;
+- `/counterfactuals/i/violation/cost/elapsed_s` for `specs/bank_system.fsl`,
+  only at indices `0, 1, 2, 4, 5, 6`;
+- the same counterfactual path for `specs/order_system.fsl`, only at indices
+  `1, 2, 3, 4`.
+
+These are measured elapsed times, not semantic outputs. Every exact timer key
+must exist and be numeric/nonnegative on both binaries; removing it from both
+sides is rejected (52 missing-key negative controls across two runs). The entire
+remaining JSON packet is compared, not a selected field list. No verdict,
+location, assurance, trace, exit, or other cost field is excluded. All stable
+outputs also agree across repetitions; there are no other observed differences.
+Six sync/foreign-argument guard controls additionally remain exit 0 with full
+byte equality in two runs. The full historical check sweep above was not rerun
+for this revision and must not be relabeled as current evidence.
+
+### Synchronization measurement on e0b4cbae
+
+The accepted Rust topic patch was transplanted unchanged onto BASE
+`e0b4cbae39569de8008a8eb049588aa84d8c1a42`, measured HEAD
+`3ae20a93296d36089f7860957a0a0b601f96932a`. Base binary SHA256 is
+`3b72163b471ae00c304b86fbdc8c8d9e724391c377dc2a2088eae0d5c111fd28`;
+head is `a874111d79e4835c874d86f03f8fa5bdf5037392771b0f3ea0f4271f24bd155e`.
+`<binary> check <path>` ran twice in each SHA's own archived tree at the same
+absolute execution address. Complete stdout, stderr and exits were compared,
+with no excluded fields and zero repeat differences.
+
+| Group | Forms/routes | Base exits 0 / 1 / 2 | Head exits 0 / 1 / 2 | `ok`→`error` | Full output changes |
+|---|---:|---:|---:|---:|---:|
+| Corpus across the three required roots | 601 | 402 / 6 / 193 | 402 / 6 / 193 | 0 | 0 |
+| Existing complete static Rust-test document literals | 1,777 | 1,024 / 0 / 753 | 1,024 / 0 / 753 | 0 | 0 |
+| Authored inputs | 147 | 72 / 0 / 75 | 15 / 0 / 132 | 57 | 70 |
+| Independent-review inputs | 110 | 72 / 0 / 38 | 48 / 0 / 62 | 24 | 26 |
+| Original priority probes | 4 | 0 / 0 / 4 | 0 / 0 / 4 | 0 | 4 |
+
+The corpus comprises 598 baseline files plus the three new reservation fixtures
+`a.fsl`, `c.fsl`, `c_if.fsl` under
+`rust/fslc/tests/fixtures/issue_1547_guard_reservations/`. Those three authored
+inputs were explicitly materialized in the base tree too; no existing baseline
+input or Rust source was replaced. The static inventory scans 540 base / 544
+head test sources; 1,783 further candidates (230 interpolated formats, 1,552
+incomplete fragments and one unterminated FSL string/comment) are inventoried,
+not executed. Runtime-generated templates and test-created sibling files still
+have the bounded coverage described above.
+
+All 81 breaking removals are the same shapes/routes enumerated above; the
+corpus and existing-static-literal transition sets remain empty. All 75 base
+collision inputs still reject, with zero acceptance expansions. The original
+18 message-change rows match the historical sweep's complete base/head packets
+exactly, including all seven location changes. A nineteenth row is the authored
+direct-only `def-call-implies-free-name` occurrence: its source and both packets
+are byte-identical to the already-reviewed `review/def/d06.fsl` example. This
+increases authored routes from 146 to 147 and message-change occurrences from
+18 to 19, not the diagnostic classes or removals. All 15 collision-return
+controls still restore the entire original base packet twice on both binaries.
+
+The newer baseline adds AI-component validation routes, constant/enum lookup
+for helpful arguments, an initial-state bound pre-pass, lazy mutant
+materialization, and static filtered/collection init-forall coverage. The named
+walks (`validate_ai_component`, `helpful_matches`, `check_state_bounds`,
+`BuiltinMutant::materialize`, and `explicit::walk_init`/
+`init_binder_static_values`) add no Option-payload visibility decision or
+pattern-name collector. Init coverage tracks forall keys and static values;
+its existing dependency/filter walkers do not replace the checked pattern-scope
+boundary. No extra scope implementation was introduced during synchronization.
+
+The independent review's 100 two-source compose inputs were also compared
+afresh on these same binaries through default-depth `explain`, `analyze`, and
+`html --no-timing`, twice: all 600 base/head comparisons are byte-identical,
+including stderr and exit 0. Both repetitions agree in full, with no excluded
+fields; the input and binary hashes remain fixed. The earlier bounded corpus
+explanation measurements above are not substituted for this complete set.
+Both whole native rechecks pass (8 focused, 133 core and 288 CLI tests per run),
+including S1/d06/collision/location pins and the newer baseline's explicit/init
+coverage controls; workspace Clippy, fmt, native build and generated-page
+freshness pass twice. Six guard-inventory controls additionally agree in full
+on the final normal binary in two runs.

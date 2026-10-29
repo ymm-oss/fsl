@@ -605,7 +605,7 @@ impl<'a> Context<'a> {
                 Self::collect_pattern_bindings(value, source_scope, target_scope)
             }
             SyntaxExprKind::Binary { op, left, right }
-                if matches!(op.canonical.as_str(), "and") =>
+                if crate::pattern_binding_flows(&op.canonical, false) =>
             {
                 Self::collect_pattern_bindings(left, source_scope, target_scope)?;
                 let after_left = target_scope.clone();
@@ -762,7 +762,7 @@ impl<'a> Context<'a> {
                 let (left_norm, right_norm) = match left_value {
                     Ok(left_norm) => {
                         let mut right_scope = scope.clone();
-                        if matches!(op.canonical.as_str(), "and" | "=>") {
+                        if crate::pattern_binding_flows(&op.canonical, true) {
                             Self::collect_pattern_bindings(left, scope, &mut right_scope)?;
                         }
                         let right_norm = self.normalize_expr(

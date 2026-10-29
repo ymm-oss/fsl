@@ -829,7 +829,7 @@ impl<'a> Resolver<'a> {
                 let (left, right) = match left_value {
                     Ok(left_value) => {
                         let mut right_scope = scope.clone();
-                        if matches!(op.canonical.as_str(), "and" | "=>") {
+                        if crate::pattern_binding_flows(&op.canonical, true) {
                             self.collect_pattern_bindings(
                                 left,
                                 scope,
@@ -1597,7 +1597,9 @@ impl<'a> Resolver<'a> {
                 );
                 Ok(())
             }
-            SyntaxExprKind::Binary { op, left, right } if op.canonical == "and" => {
+            SyntaxExprKind::Binary { op, left, right }
+                if crate::pattern_binding_flows(&op.canonical, false) =>
+            {
                 self.collect_pattern_bindings(
                     left,
                     source_scope,

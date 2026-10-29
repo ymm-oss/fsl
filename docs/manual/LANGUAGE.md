@@ -814,7 +814,37 @@ forms and the still-open #1528 path are not negated by that corpus result.
   that binds `v`; equality never introduces a binding. The binding is available
   only in the logical continuation where the match is true, such as the
   right-hand side of `(x is some(v)) => ...` or `(x is some(v)) and ...`; it is
-  not a global binding. `v` must be a fresh name: `check` rejects a `v` that is
+  not a global binding. Only `and` exports bindings from a true whole expression;
+  consequently only conjunctive `requires` matches export bindings to later
+  guards and the action body. Breaking removal (#1547): `check` now rejects
+  previously accepted uses on the right of `or`, after an `or` or implication
+  on the left of `=>`, across comparison operands or out of comparison results,
+  and disjunctive flow into quantifier/aggregate bodies and filters. Outer escapes
+  from negation, quantifiers and aggregates, and condition-to-`if`-arm bindings,
+  were already rejected on base; those are preservation controls, not removals.
+  Collision reservation remains base-equivalent and separate from visibility:
+  earlier `Is(Some)`/Binary names may forbid redeclaration without being readable.
+  The pre-existing not/if reuse issue remains separate work in #1573.
+  Out-of-scope `v` is a `kind: "semantics"` error (exit 2), with message
+  `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
+  The location identifies the clause or `if` arm containing the use. Guards and
+  postconditions retain their action-level fallback, but a more specific arm
+  span can take precedence. An earlier newly illegal reference can replace a
+  later collision message while retaining exit 2 and kind semantics.
+  Expression-if arm inference can report an unbound arm reference before a
+  condition's freshness error; the source remains rejected, not reinterpreted.
+  A free name in a `def` body that only an out-of-continuation pattern would
+  capture is now reported as an unbound reference at the containing clause,
+  instead of a predicate-capture error. This diagnostic class changes messages
+  and possibly locations, but retains exit 2 and kind semantics.
+  Repair the undefined `(o is some(v)) or v == 1` according to the intended
+  treatment of `none`: if absence is allowed and a present payload must equal 1,
+  write `(o is some(v)) => v == 1`, equivalently
+  `o == none or (o is some(v) and v == 1)`. Using `and` alone instead rejects
+  `none`; no equivalence with the old undefined expression is implied.
+  Measured removals and diagnostic examples are recorded in the
+  [scope design](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  `v` must be a fresh name: `check` rejects a `v` that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, `let`, or an earlier pattern binding in scope, and asks you to rename
   it. Ordering is not defined.

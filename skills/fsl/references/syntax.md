@@ -1084,6 +1084,32 @@ message begins `relation role name '__owner' contains '__', ...` (or
   required when `v` must be bound for the rest of the formula; equality creates
   no binding. The binding is scoped to the logical continuation where the match
   is true, such as the guarded RHS of `=>` or `and`, and is not global.
+  Only `and` exports bindings from a true whole expression, including across
+  conjunctive `requires` guards into later guards and the action body.
+  Breaking removal (#1547): `check` rejects uses on an `or` RHS, after a
+  disjunctive/implicational antecedent of `=>`, across comparison operands or
+  out of comparison results, and disjunctive flow into quantifier/aggregate
+  bodies and filters. Outer not/quantifier/aggregate escapes and condition-to-if-arm
+  bindings already failed on base, so are not new removals. Visibility remains
+  separate from base-equivalent Is/Binary collision reservations; the pre-existing
+  not/if reuse issue stays in #1573. Out-of-scope `v` reports
+  `kind: "semantics"`, exit 2, and
+  `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
+  Location is the containing clause/if arm; guards/ensures retain the action-level
+  fallback unless a specific arm span takes precedence. An earlier newly illegal
+  reference may replace a later collision diagnostic, still exit 2/semantics.
+  Expression-if arm inference can report an unbound arm reference before a
+  condition freshness error. A free name in a `def` body that only an
+  out-of-continuation pattern would capture is now reported as an unbound
+  reference at the containing clause rather than a predicate-capture error.
+  This class changes messages/possibly locations, not exit 2/kind semantics.
+  For the intended policy
+  "allow none; require payload 1 when present", repair the undefined
+  `(o is some(v)) or v == 1` to `(o is some(v)) => v == 1`, equivalently
+  `o == none or (o is some(v) and v == 1)`. `and` alone rejects `none` instead;
+  do not claim equivalence with an undefined expression.
+  Measured removals and diagnostic examples are recorded in
+  [the design](../../../docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
   `v` must be fresh: `check` rejects a `v` that names a state variable,
   constant, enum member, action parameter, binder, `let`, or an earlier pattern
   binding in scope.

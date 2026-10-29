@@ -1,0 +1,112 @@
+{
+  "fsl": "1.0",
+  "result": "explained",
+  "spec": "C",
+  "depth": 8,
+  "counterfactual_scope": {
+    "properties": [
+      "invariant",
+      "reachable"
+    ],
+    "liveness": "skipped",
+    "reason": "counterfactual weakening is safety/reachability analysis; leadsTo remains verified by the normal verify command"
+  },
+  "skeleton": {
+    "spec_kind": "compose",
+    "state": {
+      "l.o": [
+        "option",
+        [
+          "domain",
+          0,
+          1
+        ]
+      ],
+      "l.y": [
+        "domain",
+        0,
+        1
+      ]
+    },
+    "actions": [
+      {
+        "name": "s",
+        "params": [],
+        "requires_text": [
+          "requires not l.o is some(v)",
+          "requires if l.o is some(v) then true else true"
+        ],
+        "ensures_text": [],
+        "writes": [
+          "l.y"
+        ],
+        "requirement": null
+      }
+    ],
+    "properties": [
+      {
+        "name": "l.PA",
+        "kind": "invariant",
+        "body_text": "l.y == 0",
+        "requirement": null
+      }
+    ],
+    "auto_checks": [
+      {
+        "kind": "type_bound",
+        "name": "_bounds_l.o",
+        "target": "l.o",
+        "requirement": null
+      },
+      {
+        "kind": "type_bound",
+        "name": "_bounds_l.y",
+        "target": "l.y",
+        "requirement": null
+      }
+    ],
+    "domains": [
+      "l.K: values 0..1 (2 values)"
+    ],
+    "enums": {},
+    "stage_flows": [],
+    "kpis": []
+  },
+  "witnesses": [
+    {
+      "name": "cover_s",
+      "kind": "action_coverage",
+      "target": "s",
+      "requirement": null,
+      "requirements": [],
+      "steps": [
+        {
+          "action": "s",
+          "params": {}
+        }
+      ],
+      "narration": [
+        "1. s()"
+      ],
+      "initial_state": {
+        "l.o": null,
+        "l.y": 0
+      },
+      "expected_states": [
+        {
+          "l.o": null,
+          "l.y": 0
+        }
+      ]
+    }
+  ],
+  "counterfactuals": [
+    {
+      "invariant": "l.PA",
+      "weakening": null,
+      "trace": null,
+      "requirement": null,
+      "note": "no counterfactual within depth 8; init-assignment removal of bounded state l.o was not analyzed (skipped: nondeterministic initialization is unsupported by concrete search); init-assignment removal of bounded state l.y was not analyzed (skipped: nondeterministic initialization is unsupported by concrete search)"
+    }
+  ]
+}

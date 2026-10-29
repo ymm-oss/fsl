@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+spec A {
+  type K = 0..1
+  state { o: Option<K>, y: K }
+  init { o = none y = 0 }
+  action n() {
+    requires not (o is some(v))
+    y = 0
+  }
+  invariant PA { y == 0 }
+}
