@@ -57,7 +57,7 @@ use process::{STACK_SIZE, block_on_native, parse_options};
 use property_selection::is_bounds_name;
 use refinement::{
     abs_violation_json, fold_governance_from_source, implements_error_output,
-    implements_result_from_source_with_bounds, mismatch_paths, run_refine,
+    implements_result_from_source_with_bounds, mismatch_paths, run_refine, run_refine_from_sources,
 };
 use spec_loading::{
     dependency_resolver, finish_admitted, raw_delivery_allowed, run_admitted_root,
@@ -1370,7 +1370,7 @@ fn command() -> Result<(Value, i32), String> {
                 }
             }
             if options.rest.is_empty() {
-                Ok(run_refine(
+                Ok(run_refine_admitted(
                     &options.path,
                     &options.abstraction,
                     &options.mapping,
@@ -17561,6 +17561,35 @@ fn implements_result_from_source(
     implements_result_from_source_with_bounds(path, source, model, depth, &ScopeBounds::default())
 }
 
+fn run_refine_admitted(
+    implementation: &Path,
+    abstraction: &Path,
+    mapping: &Path,
+    depth: usize,
+) -> (Value, i32) {
+    run_admitted_roots(
+        vec![
+            (implementation, read_spec_source(implementation)),
+            (abstraction, read_spec_source(abstraction)),
+            (mapping, read_unprefixed_spec_source(mapping)),
+        ],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_refine_from_sources(
+                    implementation,
+                    abstraction,
+                    [&sources[0], &sources[1], &sources[2]],
+                    depth,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
 fn run_refine_chain(
     implementation: &Path,
     first_abstraction: &Path,
@@ -17577,13 +17606,41 @@ fn run_refine_chain(
         specifications.push(pair[0].clone());
         mappings.push(pair[1].clone());
     }
+    let mut roots = specifications
+        .iter()
+        .map(|path| (path.as_path(), read_spec_source(path)))
+        .collect::<Vec<_>>();
+    roots.extend(
+        mappings
+            .iter()
+            .map(|path| (path.as_path(), read_unprefixed_spec_source(path))),
+    );
+    run_admitted_roots(roots, None, false, |sources, editions| {
+        finish_admitted(
+            run_refine_chain_from_sources(&specifications, &mappings, sources, depth),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_refine_chain_from_sources(
+    specifications: &[PathBuf],
+    mappings: &[PathBuf],
+    sources: &[String],
+    depth: usize,
+) -> (Value, i32) {
     let mut names = Vec::new();
     let mut composed = std::collections::BTreeMap::<String, String>::new();
     for index in 0..mappings.len() {
-        let (link, status) = run_refine(
+        let (link, status) = run_refine_from_sources(
             &specifications[index],
             &specifications[index + 1],
-            &mappings[index],
+            [
+                &sources[index],
+                &sources[index + 1],
+                &sources[specifications.len() + index],
+            ],
             depth,
         );
         let impl_name = link
