@@ -9,7 +9,7 @@
       "enforcement": "active",
       "ref_name_include": ["refs/heads/main"],
       "ref_name_exclude": [],
-      "rule_types": ["deletion", "non_fast_forward", "pull_request", "required_status_checks"],
+      "rule_types": ["deletion", "non_fast_forward", "pull_request", "required_status_checks", "merge_queue"],
       "strict_required_status_checks_policy": false,
       "do_not_enforce_on_create": false,
       "required_status_checks": [

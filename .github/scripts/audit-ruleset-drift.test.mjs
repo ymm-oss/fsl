@@ -257,14 +257,23 @@ test("fail-closed: an added bypass actor yields bypass-actor-added", () => {
   assert.ok(findingClasses(comparison).includes("bypass-actor-added"));
 });
 
-test("fail-closed: an added merge_queue rule yields rule-type-unexpected", () => {
-  const mutated = structuredClone(fixture);
-  mutated.rules.push({ type: "merge_queue", parameters: {} });
-  const comparison = compareRuleset(contractEntry, mutated);
+test("fail-closed: omitting merge_queue from the contract yields rule-type-unexpected", () => {
+  const mutated = structuredClone(contractEntry);
+  mutated.rule_types = mutated.rule_types.filter((type) => type !== "merge_queue");
+  const comparison = compareRuleset(mutated, fixture);
   assert.equal(comparison.verdict, "drift");
   const unexpected = comparison.findings.filter((f) => f.class === "rule-type-unexpected");
   assert.equal(unexpected.length, 1);
   assert.match(unexpected[0].detail, /merge_queue/);
+});
+
+test("fail-closed: removing merge_queue from the observation yields rule-type-missing", () => {
+  const mutated = structuredClone(fixture);
+  mutated.rules = mutated.rules.filter((rule) => rule.type !== "merge_queue");
+  const comparison = compareRuleset(contractEntry, mutated);
+  assert.equal(comparison.verdict, "drift");
+  assert.deepEqual(findingClasses(comparison), ["rule-type-missing"]);
+  assert.match(comparison.findings[0].detail, /merge_queue/);
 });
 
 test("fail-closed: enforcement other than active yields an enforcement finding", () => {

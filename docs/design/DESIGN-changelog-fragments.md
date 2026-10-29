@@ -873,7 +873,7 @@ unchanged. In particular, the **section-alignment enforcement between `docs/manu
 - `.github/workflows/site-reference-freshness.yml` runs all three exact test files on every
   pull request with no path filter; its `site reference freshness` context is required
   on the `main safety and CI` ruleset (`.github/ruleset-contract.json`;
-  `docs/design/DESIGN-ci.md`, "Required pre-merge contexts, and why the merge queue was rejected").
+  `docs/design/DESIGN-ci.md`, "Required pre-merge contexts and merge queue adoption").
   A stale generated page, a `docs/manual/LANGUAGE.ja.md` misalignment that makes the generator refuse to produce one, or a broken bounded manual-chain contract therefore blocks merge.
 
 None of these read `CHANGELOG.md` or the future `changelog.d/`, and C1 writes to nothing they
