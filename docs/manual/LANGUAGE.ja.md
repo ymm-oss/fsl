@@ -804,11 +804,12 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
   部分 init を有効にするものではありません。追加の受理の縮小には上の暗黙の名前と、
   `const i = 1` に対して `forall i in 0..0 { forall j in 0..i { m[j] = true } }` とする
-  init の入れ子があります。この fixture は base `08d9656c` で check を通り、今は外側
+  init の入れ子があります。この fixture は base `46031415` で check を通り、今は外側
   forall の owner **5:10** で拒みます。局所名と束縛された参照を改名してください。
-  依存する範囲境界の実行制限は別です。base `08d9656c` と計測した祖先 `0d01044c` の
+  依存する範囲境界の実行制限は別です。base `46031415` と計測した祖先 `65bf2876` の
   各 archive で native `check` を実行し、`issue_1425/interleaved.fsl` と追加された
-  `issue_1547_guard_reservations/` の3形を含む **601** corpus 形で受理の縮小 **0**、
+  `issue_1547_guard_reservations/` の3形、追加の `ai_project_*_invalid_rule.fsl` の2形を含む
+  **603** corpus 形で受理の縮小 **0**、
   その他の出力差 **0** を確認しました。元の
   inline は152形の縮小、126形の fresh な受理維持、5形の診断変更です。さらに暗黙名・
   init の入れ子、実引数、未使用 def の70形を拒み、改名した70形と hidden KPI の2形は

@@ -1129,11 +1129,12 @@ message begins `relation role name '__owner' contains '__', ...` (or
   priority rather than acceptance. Additional removals include the implicit
   names above and `const i = 1` with nested init
   `forall i in 0..0 { forall j in 0..i { m[j] = true } }`: the fixture checked on
-  base `08d9656c`, but now rejects at the outer forall owner **5:10**. Rename the
+  base `46031415`, but now rejects at the outer forall owner **5:10**. Rename the
   local and its uses without promising general dependent-bound execution.
-  Fresh native `check`, base `08d9656c` versus measured ancestor `0d01044c`,
-  in their own archives: **601** corpus forms (including interleaved.fsl and
-  three added issue_1547_guard_reservations fixtures), **0**
+  Fresh native `check`, base `46031415` versus measured ancestor `65bf2876`,
+  in their own archives: **603** corpus forms (including interleaved.fsl,
+  three issue_1547_guard_reservations fixtures and two added
+  ai_project_*_invalid_rule.fsl fixtures), **0**
   removals/other output differences; original inline **152** removals, **126**
   fresh accepted, **5** diagnostic changes. Another **70** removal witnesses
   cover implicit/nested sources, raw arguments and unused defs, with **70**

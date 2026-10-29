@@ -851,13 +851,14 @@ name in a `decreases` call. There are no unrelated breaking removals.
   This changes diagnostic priority; it does not make partial init valid.
   Additional removals include the implicit-name cases above and nested init
   `const i = 1` with `forall i in 0..0 { forall j in 0..i { m[j] = true } }`.
-  The nested init fixture checked on base `08d9656c` but now reports the outer
+  The nested init fixture checked on base `46031415` but now reports the outer
   forall owner at **5:10**. Rename the local and its bound uses; dependent-range
-  execution limits remain separate. Native `check` at base `08d9656c` versus
-  measured ancestor `0d01044c`, each in its own archive, found **0** removals
-  and **0** other output differences in **601** corpus forms, including
+  execution limits remain separate. Native `check` at base `46031415` versus
+  measured ancestor `65bf2876`, each in its own archive, found **0** removals
+  and **0** other output differences in **603** corpus forms, including
   `issue_1425/interleaved.fsl` and three added `issue_1547_guard_reservations/`
-  fixtures. The original inline counts remain 152
+  fixtures and two added `ai_project_*_invalid_rule.fsl` fixtures. The original
+  inline counts remain 152
   removals, 126 fresh accepted and 5 diagnostic changes. Another 70 removal
   witnesses cover implicit/nested sources, raw arguments and unused definitions;
   70 renamed controls and both hidden-KPI cases remain accepted. The measurement
