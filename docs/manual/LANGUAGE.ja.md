@@ -806,9 +806,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `const i = 1` に対して `forall i in 0..0 { forall j in 0..i { m[j] = true } }` とする
   init の入れ子があります。この fixture は base `c32e7f5a` で check を通り、今は外側
   forall の owner **5:10** で拒みます。局所名と束縛された参照を改名してください。
-  依存する範囲境界の実行制限は別です。新しい archive tree の corpus・元の inline の
-  比較は design note の verification snapshot に記録します。有限の corpus の結果は、
-  この受理の縮小を否定せず、全ての除外されたプログラムを数えたという意味でもありません。
+  依存する範囲境界の実行制限は別です。base `cfdf2d51` と計測した祖先 `1cb268ec` の
+  各 archive で native `check` を実行し、追加の `issue_1425/interleaved.fsl` を含む
+  **598** corpus 形で受理の縮小 **0**、その他の出力差 **0** を確認しました。元の
+  inline は152形の縮小、126形の fresh な受理維持、5形の診断変更です。さらに暗黙名・
+  init の入れ子、実引数、未使用 def の70形を拒み、改名した70形と hidden KPI の2形は
+  受理を維持します。計測した祖先とこの文書更新の Rust 実装・corpus source は同一です。
+  完全な比較は design note に記録し、全ての除外されたプログラムの列挙とはしません。
   この式の一般則は、`leadsTo` を外から包むバインダーの実行可能性までは約束しません。
   `leadsTo` の外側のコレクションバインダーと、`where` 付きバインダーは `check` が拒否します。
   対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は

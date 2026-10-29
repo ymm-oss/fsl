@@ -853,9 +853,16 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `const i = 1` with `forall i in 0..0 { forall j in 0..i { m[j] = true } }`.
   The nested init fixture checked on base `c32e7f5a` but now reports the outer
   forall owner at **5:10**. Rename the local and its bound uses; dependent-range
-  execution limits remain separate. The fresh archived-corpus and original-inline
-  comparison is recorded in the design note's verification snapshot; a bounded
-  corpus result does not erase these removals or enumerate all removed programs.
+  execution limits remain separate. Native `check` at base `cfdf2d51` versus
+  measured ancestor `1cb268ec`, each in its own archive, found **0** removals
+  and **0** other output differences in **598** corpus forms, including the
+  added `issue_1425/interleaved.fsl`. The original inline counts remain 152
+  removals, 126 fresh accepted and 5 diagnostic changes. Another 70 removal
+  witnesses cover implicit/nested sources, raw arguments and unused definitions;
+  70 renamed controls and both hidden-KPI cases remain accepted. The measurement
+  ancestor has identical Rust implementation and corpus sources to this docs
+  update. The design note records the full comparison; it does not enumerate
+  every removed program.
   This expression rule does not promise executable `leadsTo` wrapper binders:
   `check` rejects a collection domain or any `where` filter on an outer
   `leadsTo` binder. Unfiltered supported typed/range wrappers remain available,

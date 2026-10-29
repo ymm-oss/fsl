@@ -733,8 +733,34 @@ rewrite must update its bound uses; it does not add general dependent ranges.
 
 ### Verification snapshot
 
-The integrated base/head archive and original-inline comparison is pending;
-no new verification snapshot is claimed by this paragraph. Before completion,
-record the reachable measurement commit, corpus count and source equivalence. The bounded
-corpus result is separate from the inline removals, not an exhaustive inventory
-of every removed program.
+Native `check <form>` compared base
+`cfdf2d51c67fa3cd8a6dd2b443bbb5f132d4cf6d` with measurement commit
+`1cb268ecfa4430b3b03e688957f02d495dcda3e5`, each in its own archived tree,
+with cache off and no ambient unstable features. All **598 corpus forms** in
+`specs/` (23), `examples/` (191) and `rust/fslc/tests/fixtures/` (384) have
+byte-identical exit/stdout/stderr triples: **0 `ok`→`error` and 0 other output
+differences**, without exclusions. The increase from 597 is the added
+`rust/fslc/tests/fixtures/issue_1425/interleaved.fsl`, not an acceptance change.
+Both sides have 401 exit-0 inputs, 191 exit-2 inputs and 6 exit-1 inputs.
+
+The original pre-migration inline sources were rematerialized independently
+of the migrated tests: **126+24+2=152** `ok`→`error` forms, **126** fresh forms
+remaining `ok`, and **5** `error`→`error` diagnostic-priority changes. Additional
+specimens extracted from the fixed regression source give **70** more removal
+witnesses: **6** implicit-name/bound-use/nested-init forms, **60** argument forms
+(six expressions × five use/erase/duplicate bodies × direct/composed), and
+**4** unused-definition/body/parameter forms. Their **70** const-renamed controls
+and **2** hidden-KPI collision/control sources remain `ok`. These are bounded,
+case-addressed witnesses, not byte-unique programs or a claim that every check
+was newly introduced by the latest repair.
+
+A no-collision KPI source also has **byte-identical exported Kernel v1/v2**
+across the binaries, twice, with the same input file identity, cwd and arguments;
+no fields are removed or normalized. Kernel v2's file/provenance fields make
+matching source identity essential to that full-byte comparison.
+
+The measurement commit is an ancestor of this documentation update. Its Rust
+implementation sources and swept corpus inputs are identical to those of the
+documentation update; no rebase-only hash is substituted for an unperformed
+run. This bounded corpus result is separate from the inline removals and is
+not an exhaustive inventory of every removed program.

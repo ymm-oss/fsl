@@ -1131,9 +1131,14 @@ message begins `relation role name '__owner' contains '__', ...` (or
   `forall i in 0..0 { forall j in 0..i { m[j] = true } }`: the fixture checked on
   base `c32e7f5a`, but now rejects at the outer forall owner **5:10**. Rename the
   local and its uses without promising general dependent-bound execution.
-  Fresh own-archive corpus/inline evidence is recorded in the design note's
-  verification snapshot; corpus agreement does not negate the inline restriction
-  or establish completeness over all removed programs.
+  Fresh native `check`, base `cfdf2d51` versus measured ancestor `1cb268ec`,
+  in their own archives: **598** corpus forms (one added interleaved.fsl), **0**
+  removals/other output differences; original inline **152** removals, **126**
+  fresh accepted, **5** diagnostic changes. Another **70** removal witnesses
+  cover implicit/nested sources, raw arguments and unused defs, with **70**
+  renamed controls and **2** hidden-KPI sources accepted. The ancestor's Rust
+  implementation and corpus sources match this docs update. Full evidence is
+  in the design note; corpus agreement does not enumerate all removed programs.
   Position matters: `check` rejects collection domains and all `where` filters
   on outer `leadsTo` wrapper binders. Supported unfiltered typed/range wrappers
   and collection quantifiers inside P/Q remain distinct. This breaking removal
