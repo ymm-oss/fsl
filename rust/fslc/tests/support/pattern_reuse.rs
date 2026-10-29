@@ -302,3 +302,24 @@ pub const RENAMER_FILES: &[(&str, &str)] = &[
 ",
     ),
 ];
+
+pub fn renamer_export_files() -> Vec<(&'static str, String)> {
+    RENAMER_FILES
+        .iter()
+        .map(|&(name, source)| {
+            (
+                name,
+                source
+                    .replace("o = none", "o = some(1)")
+                    .replace(
+                        "requires not (o is some(v))",
+                        "requires (o is some(v)) => true",
+                    )
+                    .replace(
+                        "requires (l.o is some(v)) or v == 1",
+                        "requires (l.o is some(v)) and v == 1\n    ensures v == 1",
+                    ),
+            )
+        })
+        .collect()
+}

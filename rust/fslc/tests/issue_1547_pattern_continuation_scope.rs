@@ -489,6 +489,19 @@ fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
             }
         }
     }
+    // Two receiver scopes force a fresh pattern name. The and result must carry
+    // that rename to ensures, independently of the RHS rename inside the guard.
+    let files = reuse::renamer_export_files();
+    let borrowed = files
+        .iter()
+        .map(|(name, source)| (*name, source.as_str()))
+        .collect::<Vec<_>>();
+    let dir = fixture_files("renamer-export-and-control", &borrowed);
+    let actual = observe(&dir, "h1.fsl", "check");
+    let ok = actual.1 == 0 && actual.0["result"] == "ok";
+    failures += usize::from(!ok);
+    inputs.push(json!({"id":"renamer-export-and-control","files":files,"directory":dir}));
+    rows.push(json!({"id":"renamer-export-and-control","route":"compose","consumer":"check","class":"export-admission-control","ok":ok,"expected_packet":{"exit":0,"result":"ok"},"output":actual.0,"exit":actual.1}));
     std::fs::write(
         report.join("report.json"),
         serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"failures":failures}))
@@ -496,7 +509,7 @@ fn earlier_invalid_read_has_priority_and_renaming_restores_collision() {
     )
     .unwrap();
     eprintln!(
-        "PATTERN_PRIORITY_RESULT cells=4 observations={} failures={failures} report={}",
+        "PATTERN_PRIORITY_RESULT cells=5 observations={} failures={failures} report={}",
         rows.len(),
         report.display()
     );
