@@ -825,9 +825,20 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   元の spec には通常の検査を適用します。既存の pattern binding の freshness 制約は
   変えません。この拒否により、static const と字句的な束縛の読み方による engine の
   逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
-  <strong>計測した breaking removal。</strong> 移す前の回帰テストの fixture に対し、base <code>173e5f97</code> と
-  実装 <code>76f665e3</code> の native <code>check</code> で、次の inline の形の <code>ok</code>→<code>error</code> を確認しました。
-  数はケース単位で、共有 consumer は重複して数えません。compose の束縛 capture
+  source から参照できる暗黙の名前も同じ規則です。legacy process の <code>c</code>、next edition
+  の entity の頭文字を小文字にした名前(Request の <code>r</code>)、relation event の暗黙の
+  actor-instance 引数(Agent の <code>a</code>)が const と同名なら、局所の宣言が source に無くても
+  拒否します。衝突する const と、その定数を意味する参照を改名してください。instance を
+  意味する <code>stage(c)</code> は残します。<code>requirements R { const c = 2 process Case { ... } }</code>
+  の生成 init のエラー位置は process の宣言であり、const や書かれていない binder の
+  token ではありません。relation 引数のエラーは元の event の宣言を指します。見えない
+  KPI 射影の binder は別で、const と衝突するときだけ内部名を fresh にします。KPI の
+  実装が <code>c</code> を使っていたという理由だけで、利用者の const <code>c</code> を改名する必要はありません。
+  def の呼出し引数の binder は展開前に検査します。使わない・使う・複製する param の
+  違いで message や owner は変わりません。<code>const N = 2</code> があれば、
+  <code>def ignore(p: Bool) = true</code> が引数を捨てても <code>ignore(forall N in 0..1 { true })</code> を拒みます。
+  元の inline fixture の受理の縮小は次のとおりです。共有 consumer は重複して数えません。
+  compose の束縛 capture
   (#1442)は <strong>126</strong> 形(63 ケースの単独・compose)で、代表は <code>const x = false</code> と
   <code>action go(x: Bool) { requires x }</code>、入れ子の束縛も含みます。入れ子の集約(#1463、
   CLI/LSP/Worker の共有 source)は <strong>24</strong> 形で、代表は <code>const x = false</code> と
@@ -839,11 +850,17 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   のではありません。部分 init の 5 形(#1481)は <strong>error→error</strong> であり、受理の縮小
   ではありません。同名の const を隠す外側の <code>flag</code>/<code>limit</code> の束縛に対して、従来の
   所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
-  部分 init を有効にするものではありません。別の corpus 計測では、base <code>173e5f97</code> と
-  head <code>76f665e3</code> の各 SHA の archive tree で <code>check &lt;form&gt;</code> を実行し、<code>specs/</code>、
-  <code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> の <strong>597</strong> 形(23/191/383)で <code>ok</code>→<code>error</code>
-  が <strong>0</strong>、その他の出力差も 0 でした。この corpus の結果は inline の受理の縮小を
-  否定せず、他の const と同名の局所束縛を受理すると約束するものでもありません。
+  部分 init を有効にするものではありません。追加の受理の縮小には上の暗黙の名前と、
+  <code>const i = 1</code> に対して <code>forall i in 0..0 { forall j in 0..i { m[j] = true } }</code> とする
+  init の入れ子があります。この fixture は base <code>c32e7f5a</code> で check を通り、今は外側
+  forall の owner <strong>5:10</strong> で拒みます。局所名と束縛された参照を改名してください。
+  依存する範囲境界の実行制限は別です。base <code>cfdf2d51</code> と計測した祖先 <code>1cb268ec</code> の
+  各 archive で native <code>check</code> を実行し、追加の <code>issue_1425/interleaved.fsl</code> を含む
+  <strong>598</strong> corpus 形で受理の縮小 <strong>0</strong>、その他の出力差 <strong>0</strong> を確認しました。元の
+  inline は152形の縮小、126形の fresh な受理維持、5形の診断変更です。さらに暗黙名・
+  init の入れ子、実引数、未使用 def の70形を拒み、改名した70形と hidden KPI の2形は
+  受理を維持します。計測した祖先とこの文書更新の Rust 実装・corpus source は同一です。
+  完全な比較は design note に記録し、全ての除外されたプログラムの列挙とはしません。
   この式の一般則は、<code>leadsTo</code> を外から包むバインダーの実行可能性までは約束しません。
   <code>leadsTo</code> の外側のコレクションバインダーと、<code>where</code> 付きバインダーは <code>check</code> が拒否します。
   対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は
@@ -3581,6 +3598,13 @@ exit 2、<code>kind: "semantics"</code>、
 書き換え後のガードは <code>check</code> を通ります。削除された形を持つチェックイン済みの
 spec や example はなく、base <code>1844fa74</code> / head <code>7b9b34b3</code> の 597 形式の sweep
 でも、コーパスでの受理から拒否への変化はありませんでした。</p>
+<p>暗黙のエンティティ引数 <code>c</code> は、#1515 の const 規則では source から見える局所名です。
+その process を使う requirements では同名の const を改名し、instance を意味する
+<code>stage(c)</code> は残してください。next edition の entity は頭文字を小文字にした名前を
+instance に使い、relation event は相手の actor の暗黙の instance も同じ規則で
+引数に取ります。これらも同名の const を拒み、生成 init は元の process/entity 宣言、
+relation 引数は元の event 宣言を指します。source から見えない KPI 射影の binder は
+この制限とは別で、衝突するときだけ fresh にします。</p>
 <h3 id="133-businessfsl-biz">13.3 業務コンサルティングレイヤー: <code>business</code>(fsl-biz ダイアレクト)</h3>
 <p>業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
 <code>DESIGN-dialects.md</code> §3)。process は enum+Map+transition の action へ、policy は
