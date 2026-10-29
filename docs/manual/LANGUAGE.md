@@ -936,8 +936,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Assigning the result back to that bounded receiver reports `type_bound` /
   `_bounds_<var>` instead of dropping the member or transition. Static typing/admission is unchanged;
   this does not enable unbounded Sets or composite-collection inference.
-  BMC/induction still reject whole-collection assignments from a wider Set or
-  relation carrier with `cannot coerce symbolic value` (exit 2), as on base.
+  BMC/induction still reject whole-collection assignments from a wider Set
+  carrier with `cannot coerce symbolic value` (exit 2), as on base.
+  Relation carrier compatibility is checked before evaluation as described below.
   Symbolic init preserves introduced members through copies, copy chains and
   conditions in the checked dependency order, without replacing relational init
   with sequential execution. In BMC, re-framing a root whose bound is omitted
@@ -953,6 +954,26 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Accepted relation adds likewise retain pairs outside either endpoint carrier;
   domain/range and graph operations see those pairs. Storing the add result back
   to that bounded relation reports its `_bounds_<var>` violation.
+  Breaking removal (#1522, related #1524): relation values are compatible only
+  when both corresponding endpoint carriers agree. Numeric aliases compare their
+  resolved lower and upper bounds, not their names: `N = 0..2` and `M = 0..2` remain
+  compatible, but `A = 0..1` and `B = 0..2` do not. Conditional arms, Set/Seq
+  items (including nested items), and assignments mixing these relation carriers
+  now fail `check` with a located assignability error (`semantics`, exit 2),
+  shared by `verify` and `replay`. Ordinary scalar Int/Range compatibility,
+  Map key compatibility, nominal enums, and the declared self-relation gate are
+  unchanged. Equal-bound relation literals still check, but their remaining
+  symbolic engine support belongs to #1467; this is not key-union support.
+  The shared gate also rejects action assignment `r = q`, init
+  `q = Set {} r = q`, `let x = q` followed by `r = x`, and mixed relation
+  conditionals in a let. A plain alias without an incompatible use stays valid.
+  Narrow-to-wide relation copies are also refused in action assignment, init
+  and let uses: previously BMC/induction could not coerce these forms while
+  explicit decided action/let and Monitor agreed; init also failed explicit.
+  In contrast, numeric `Set<A>` → `Set<B>` assignment with A's carrier inside
+  B's still passes check; Set's symbolic disagreement remains #1627.
+  See [the compatibility decision](../design/DESIGN-relation-endpoint-compatibility.md)
+  for the breaking-removal evidence.
   For `r: relation A -> B`, `contains`, `add`, `remove`, and `reachable`
   check `a` against `A` and `b` against `B` independently. Incompatible
   endpoints are check-time `kind: "semantics"` errors (exit 2), with the
