@@ -93,7 +93,14 @@ fn mutate_empty_membership_after_a_verified_baseline_returns_mutation_evidence()
     // no requested gate, outcome::classify makes that exit 0 even if mutants
     // survive a tautological invariant. Do not invent a kill count or rate.
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert!(output.stderr.is_empty(), "{output:?}");
+    let stderr = std::str::from_utf8(&output.stderr).expect("UTF-8 progress");
+    assert!(!stderr.is_empty(), "successful mutate must report progress");
+    assert!(
+        stderr.lines().all(|line| line.starts_with("mutate ")
+            && line.contains(" (engine=")
+            && line.ends_with("s)")),
+        "{stderr}"
+    );
     let output: Value = serde_json::from_slice(&output.stdout).expect("mutate JSON");
     assert_eq!(output["result"], "mutated");
     assert_eq!(output["baseline"], "verified");

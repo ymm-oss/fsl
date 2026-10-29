@@ -125,9 +125,18 @@ fn supported_options_remain_command_local() {
         "--by-requirement",
         "--oracle-attribution",
     ]);
-    let value = json_output(&mutated);
+    // Only this successful mutation report may carry stderr progress.
+    let value: Value = serde_json::from_slice(&mutated.stdout).expect("mutate JSON");
     assert_eq!(mutated.status.code(), Some(0), "{value}");
     assert_eq!(value["result"], "mutated", "{value}");
+    let stderr = std::str::from_utf8(&mutated.stderr).expect("UTF-8 progress");
+    assert!(!stderr.is_empty(), "successful mutate must report progress");
+    assert!(
+        stderr.lines().all(|line| line.starts_with("mutate ")
+            && line.contains(" (engine=")
+            && line.ends_with("s)")),
+        "{stderr}"
+    );
     assert_eq!(value["summary"]["total"], 3, "{value}");
     assert_eq!(value["summary"]["killed"], 3, "{value}");
     assert_eq!(value["attribution"]["mode"], "all_killers", "{value}");

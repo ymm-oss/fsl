@@ -1,0 +1,4 @@
+{"id":"healthy","replace":{"target":"balance <= 3","replacement":"balance <= 3"}}
+{"id":"broken","replace":{"target":"balance <= 3","replacement":"balance < 0"}}
+[]
+{"id":"healthy","replace":{"target":"balance <= 3","replacement":"balance <= 3"}}
