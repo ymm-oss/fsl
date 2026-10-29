@@ -807,7 +807,8 @@ decreases_cell!(
 
 // CF: capacity-zero frames with len>0 must reach #1519's F/missing-slot gates.
 // If those gates disappear, read definedness can be true and a fresh slot can
-// decide a property/rank verdict. Do not replace these errors with that verdict.
+// decide a property/rank verdict. Standalone selection must still fail closed;
+// induction first reports any reachable bound its base now checks (#1598).
 const CF1_EXCLUDED_BOUNDS: &str = "spec F04 {
   type K = 0..1
   state { xs: Seq<K, 0> }
@@ -873,6 +874,20 @@ fn cf2_induction_step_successor() {
 }
 
 #[test]
+fn cf2_selected_induction_step_successor() {
+    // The reachable base is safe; selected induction must still reject the
+    // arbitrary step's overflowing frame rather than fabricating a head value.
+    for _ in 0..2 {
+        assert_frame_closed(
+            "cf2_selected",
+            CF2_STEP_SUCCESSOR,
+            "induction",
+            &["--property", "P"],
+        );
+    }
+}
+
+#[test]
 fn cf3_ranked_leadsto_successor_k2() {
     // k=2 reaches the ranked obligation rather than the k=1 bound CTI. Missing
     // successor storage must not turn a free head into ranked proof/failure.
@@ -886,12 +901,31 @@ fn cf4_property_overflow_bmc() {
 
 #[test]
 fn cf4_property_overflow_induction() {
-    assert_frame_closed(
+    // #1598: the base rejects the reachable bound before evaluating I there.
+    let (value, exit) = run_rank_or_frame(
         "cf4",
         CF4_PROPERTY_OVERFLOW,
         "induction",
         &["--property", "I"],
     );
+    assert_eq!(
+        (
+            exit,
+            &value["result"],
+            &value["violation_kind"],
+            &value["invariant"],
+            &value["violated_at_step"]
+        ),
+        (
+            1,
+            &json!("violated"),
+            &json!("type_bound"),
+            &json!("_bounds_xs"),
+            &json!(1)
+        ),
+        "{value}"
+    );
+    assert_eq!(value["completeness"], "bounded", "{value}");
 }
 
 // DM7/DM8 exercise the reached direction of conditional/or path selection.

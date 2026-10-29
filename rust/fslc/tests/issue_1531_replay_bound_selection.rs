@@ -122,6 +122,13 @@ fn assert_violation(value: &Value, exit: i32, fixture: Fixture, selected: bool) 
     } else {
         ("type_bound", fixture.bound(), 2)
     };
+    assert_violation_at(value, exit, kind, name, step);
+    assert_eq!(value["trace"], fixture.trace(step), "{value}");
+    assert_eq!(value["last_action"]["name"], fixture.action(), "{value}");
+    assert_eq!(value["last_action"]["params"], json!({}), "{value}");
+}
+
+fn assert_violation_at(value: &Value, exit: i32, kind: &str, name: &str, step: usize) {
     assert_eq!(
         (
             exit,
@@ -141,9 +148,6 @@ fn assert_violation(value: &Value, exit: i32, fixture: Fixture, selected: bool) 
     );
     assert_eq!(value["message"], Value::Null, "{value}");
     assert_eq!(value["cti"], Value::Null, "{value}");
-    assert_eq!(value["trace"], fixture.trace(step), "{value}");
-    assert_eq!(value["last_action"]["name"], fixture.action(), "{value}");
-    assert_eq!(value["last_action"]["params"], json!({}), "{value}");
 }
 
 fn assert_shallow_cti(value: &Value, exit: i32, fixture: Fixture) {
@@ -203,7 +207,11 @@ fn selected(fixture: Fixture, engine: &str, depth: usize) {
         "--property",
         "P",
     ]);
-    if fixture == Fixture::Range && depth >= 3 {
+    if engine == "induction" && depth >= 2 {
+        // #1598: the selected base establishes the step's implicit bounds first.
+        assert_violation(&value, exit, fixture, false);
+        assert_eq!(value["completeness"], "bounded", "{value}");
+    } else if fixture == Fixture::Range && depth >= 3 {
         // Detector: replay must not roll back n=2 and diverge at step three.
         assert_violation(&value, exit, fixture, true);
     } else if fixture == Fixture::Multi && depth >= 2 {
@@ -292,6 +300,16 @@ mod review_coverage {
 
     fn initial_overflow(engine: &str, depth: usize) {
         let (value, exit) = verify(INIT_IDLE, engine, depth, "P");
+        if engine == "induction" {
+            assert_violation_at(&value, exit, "type_bound", "_bounds_xs", 0);
+            assert_eq!(value["completeness"], "bounded", "{value}");
+            assert_eq!(
+                value["trace"],
+                json!([{"step": 0, "state": {"xs": [0, 1], "t": false}}]),
+                "{value}"
+            );
+            return;
+        }
         assert_eq!(
             (exit, &value["result"], &value["kind"], &value["message"]),
             (

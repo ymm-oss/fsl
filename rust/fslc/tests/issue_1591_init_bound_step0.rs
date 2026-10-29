@@ -219,27 +219,6 @@ macro_rules! preservation {
             }
 
             #[test]
-            fn selected_p_preserves_success() {
-                for _ in 0..2 {
-                    // P is true regardless of n; property selection excludes
-                    // the synthetic bound and therefore the boundary pre-pass.
-                    let (exit, value) = verify(INITRANGE, $engine, 2, true);
-                    success(exit, &value, $engine);
-                    // Induction's proved envelope also lists implicit bounds;
-                    // the selected base case still bypasses the pre-pass.
-                    assert_eq!(
-                        value["invariants_checked"],
-                        if $engine == "induction" {
-                            json!(["_bounds_n", "P"])
-                        } else {
-                            json!(["P"])
-                        },
-                        "{value}"
-                    );
-                }
-            }
-
-            #[test]
             fn valid_init_first_step_overflow_stays_step_1() {
                 for _ in 0..2 {
                     let (exit, value) = verify(FIRST_STEP, $engine, 2, false);
@@ -274,6 +253,28 @@ macro_rules! preservation {
 preservation!(control_bmc, "bmc");
 preservation!(control_induction, "induction");
 preservation!(control_explicit, "explicit");
+
+#[test]
+fn selected_p_preserves_success() {
+    for engine in ["bmc", "explicit"] {
+        for _ in 0..2 {
+            // Standalone selection still excludes implicit bounds.
+            let (exit, value) = verify(INITRANGE, engine, 2, true);
+            success(exit, &value, engine);
+            assert_eq!(value["invariants_checked"], json!(["P"]), "{value}");
+        }
+    }
+}
+
+#[test]
+fn selected_p_induction_reports_the_initial_bound() {
+    for _ in 0..2 {
+        // #1598: induction must establish every bound its step assumes.
+        let (exit, value) = verify(INITRANGE, "induction", 2, true);
+        assert_bound(exit, &value, "_bounds_n", 0);
+        assert_eq!(value["completeness"], "bounded", "{value}");
+    }
+}
 
 const INVARIANT_OVERFLOW_NEXT_BOUND: &str = r"spec ReviewInvariantOverflowNextBound {
   state { n: 0..9223372036854775807 }
