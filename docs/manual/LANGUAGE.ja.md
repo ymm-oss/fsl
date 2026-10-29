@@ -2614,14 +2614,20 @@ init 対応関係の違反により)`refinement_failed` を報告するように
 別の、なお有効な abs の初期分岐と一致するため)`refines` を報告するようになる
 場合があります。
 
-状態変数のペアが 1:1 でマップされる場合でも、impl と abs には**別々の enum/struct
-型名**を与えてください。型メタデータは refinement 検査のために名前でマージされ
-ます。両側で異なるメンバーリスト(またはフィールド集合)を持って宣言された同名の
-enum(または struct)は、マージされるのではなく `kind: "type"`(exit 2)として拒否
-されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
-メンバーとして黙って再解釈されかねないからです。ドメイン型
-(`type X = lo..hi`)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として `map_out_of_bounds`/`abs_state_mismatch` として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合。抽象の guard が偽ならこれまでどおり先に `abs_requires_failed` になります)と、impl の `Map` を定義域の外のキーで読む状態マッピングの式(impl のキー型が狭い場合など)も、`kind: "type"` のエラーではなく `map_out_of_bounds`(exit 1)になります。
+impl/abs の同名の型は、種類、解決後の domain 境界、enum の member と順序、
+struct の field と型が一致しなければなりません。`symmetric` は比較せず、一致すれば
+impl の定義を残します。未使用でも異なる定義は `kind: "type"`(exit 2)で拒み、
+`refinement` または inline `implements` の宣言位置と両 spec の名前を示します。
+governance では外側の preservation の位置を保ちます。異なる定義には別名を付けて
+ください。**破壊的 removal (#1599):** 異なる境界の型は同名にできません。
+boundary gallery の従来の exit 1 `refinement_failed/abs_state_mismatch` は
+exit 2 `error/type` に変わります。
+progress がなければ別 enum の同名 member 宣言は引き続き可能です。曖昧な bare 参照は
+拒み、型付き conversion/abstraction は受け入れます。`preserve progress` がある
+refinement では ordinal が一致していてもこの宣言を拒みます。pulled model の safety
+違反は property 名と pulled model を示す exit 2 `error/semantics` となり、trace は
+付けず、`refines` や `progress_lost` とはしません。別の型名を使った mapping/引数の
+範囲外は従来の `map_out_of_bounds` のままで、偽の abstract guard が引き続き優先します。
 
 ### チェーン検査(マッピングの合成)
 

@@ -1015,13 +1015,18 @@ are a separate set. See `docs/design/DESIGN-refinement.md`, section
 policy and correct the action itself, not enclosing prose. No general automatic
 migration, bypass or grace period; if problems occur, return to a 4.x binary.
 
-Give impl and abs distinct enum/struct type names. Refinement merges type
-metadata by name; a same-named enum/struct with a different member list/field
-set on each side is rejected as `kind: "type"` (exit 2) rather than silently
-merged (merging would let an impl-only member get reinterpreted as whichever
-abs member sits at the same ordinal index). Same-named domain types
-(`lo..hi`) with different bounds are fine — an out-of-range value there is
-still caught as `map_out_of_bounds`/`abs_state_mismatch`.
+Same-named impl/abs types must agree in kind, resolved bounds, ordered enum
+members and struct fields/types. Ignore `symmetric`, retain the impl entry.
+Different definitions, even unused, fail type/exit2 at the refinement or inline
+implements declaration; governance retains the preservation location. Messages
+name both specs and the conflict. Breaking removal (#1599): different bounds
+may no longer share a name; boundary gallery exit1/refinement_failed becomes
+exit2/error/type. Use distinct type names for distinct definitions.
+Different enums' shared member names are rejected only with preserve progress,
+even at equal ordinals. Without progress, typed conversions/abstractions remain
+accepted and ambiguous bare uses remain errors. Pulled safety violations return
+error/semantics/exit2 without a trace, naming the property and pulled model;
+they are neither refines nor progress_lost.
 
 Distinct nominal enums stay incompatible without an explicit named enum
 mapping. Use `enum conversion` plus `convert(name, expr)` for a bijection. Both

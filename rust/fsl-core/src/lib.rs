@@ -120,7 +120,7 @@ pub use public_kernel::{
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
-    Refinement, RefinementError, RefinementErrorKind, StateMap, parse_refinement,
+    Refinement, RefinementError, RefinementErrorKind, StateMap, merge_refinement_model, parse_refinement,
     parse_refinement_with_options, pull_refinement_leadsto, requirements_implements,
     requirements_implements_with_bounds, requirements_implements_with_bounds_with_options,
     requirements_implements_with_options,

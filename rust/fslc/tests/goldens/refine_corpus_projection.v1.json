@@ -1,4 +1,28 @@
 {
+  "examples/refinement_liveness/design_merge_collision_refines.fsl": {
+    "fsl": "1.0",
+    "result": "error",
+    "kind": "type",
+    "message": "type 'Carrier1599' is declared differently in impl 'Impl1599Spec' and abs 'Abs1599Spec'",
+    "loc": {
+      "line": 6,
+      "column": 4
+    },
+    "span": {
+      "start": {
+        "offset": 219,
+        "line": 6,
+        "column": 4
+      },
+      "end": {
+        "offset": 229,
+        "line": 6,
+        "column": 14
+      }
+    },
+    "impl": "Impl1599Spec",
+    "abs": "Abs1599Spec"
+  },
   "specs/cart_refines.fsl": {
     "fsl": "1.0",
     "impl": "CartImpl",
@@ -75,36 +99,27 @@
   },
   "examples/gallery/adversarial/refine_mapping_boundary_map.fsl": {
     "fsl": "1.0",
-    "impl": "GalleryAdversarialRefineImpl",
-    "abs": "GalleryAdversarialRefineAbs",
-    "result": "refinement_failed",
-    "kind": "abs_state_mismatch",
-    "at": "step",
-    "violated_at_step": 1,
-    "impl_action": {
-      "name": "jump",
-      "params": {
-        "i": 0
+    "result": "error",
+    "kind": "type",
+    "message": "type 'N' is declared differently in impl 'GalleryAdversarialRefineImpl' and abs 'GalleryAdversarialRefineAbs'",
+    "loc": {
+      "line": 4,
+      "column": 1
+    },
+    "span": {
+      "start": {
+        "offset": 184,
+        "line": 4,
+        "column": 1
       },
-      "loc": {
-        "line": 7,
-        "column": 3
+      "end": {
+        "offset": 194,
+        "line": 4,
+        "column": 11
       }
     },
-    "abs_before": {
-      "n": 0
-    },
-    "abs_after_expected": {
-      "n": 1
-    },
-    "abs_after_actual": {
-      "n": 2
-    },
-    "mismatch": [
-      "n"
-    ],
-    "trace_type": "refinement",
-    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+    "impl": "GalleryAdversarialRefineImpl",
+    "abs": "GalleryAdversarialRefineAbs"
   },
   "examples/gallery/adversarial/governance_semantic_mapping.fsl": {
     "fsl": "1.0",

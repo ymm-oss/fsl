@@ -717,17 +717,24 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    out-of-domain key inside an action-correspondence argument expression, and
    an abstract guard whose evaluation fails at the mapped state for reasons
    other than an out-of-domain argument.
-8. **conflicting same-named type**: impl and abs both declare a type with the
-   same name but a different shape (an enum with different members, or a
-   struct with different fields) → kind: type, exit 2. Type metadata is
-   merged by name for refinement checking (`_merge_types_meta`); a same name
-   with a different member list would otherwise let an impl-only member get
-   silently reinterpreted as whichever abs member sits at the same ordinal
-   index, turning a real refinement violation into a false "refines". Domain
-   types with different bounds are still allowed to share a name — an
-   out-of-range impl value there is already caught downstream as
-   `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
-   layers distinct type names.
+8. **conflicting same-named declarations (#1599)**: one core
+   `merge_refinement_model` owns the typecheck, runtime and progress inventories.
+   Same-named types must have the same kind, resolved domain bounds, ordered enum
+   members, or struct fields/types; `symmetric` is ignored and the impl entry stays.
+   Differences, including unused declarations, are type errors (exit 2) at the
+   `refinement`/inline `implements` declaration, naming both specs and the conflict.
+   Governance retains the outer preservation location. Use distinct type names
+   for different definitions. Previously permitted same-name unequal bounds are
+   a breaking removal: the boundary gallery changes from exit 1
+   `refinement_failed/abs_state_mismatch` to exit 2 `error/type`.
+   Different enums may share member spellings without progress; ambiguous bare
+   uses still fail, while typed conversions/abstractions remain supported. With
+   `preserve progress`, shared spellings with different nominal owners are rejected
+   even at equal ordinals, so impl bodies cannot be reinterpreted in the pulled model.
+   A pulled-model safety violation is a non-solver `VerifyError`, not progress
+   success or `progress_lost`: native refine returns exit 2 `error/semantics`, names
+   the property and pulled model, and emits no trace. Existing impl self-violation
+   and progress-loss reporting remain separate.
 9. **impl self-violation (precondition, issue #466)**: an impl whose own
    guard/type-bound weakening lets it violate itself within depth K (e.g. a
    dropped `requires` that lets a state variable step outside its declared

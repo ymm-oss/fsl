@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{KernelModel, Refinement, pull_refinement_leadsto};
+use fsl_core::{KernelModel, Refinement, merge_refinement_model, pull_refinement_leadsto};
 use fsl_solver::SmtSolver;
 
 use crate::{BmcViolation, VerifyError, verify_bounded};
@@ -40,13 +40,8 @@ pub async fn check_refinement_progress<S: SmtSolver>(
             checked: BTreeMap::new(),
         });
     }
-    let mut pulled = implementation.clone();
-    for (name, definition) in &abstraction.types {
-        pulled.types.insert(name.clone(), definition.clone());
-    }
-    for (name, value) in &abstraction.enum_members {
-        pulled.enum_members.insert(name.clone(), value.clone());
-    }
+    let mut pulled = merge_refinement_model(implementation, abstraction, true)
+        .map_err(|error| VerifyError::new(error.message))?;
     pulled.reachables.clear();
     pulled.leadstos = mapping
         .progress
@@ -73,6 +68,12 @@ pub async fn check_refinement_progress<S: SmtSolver>(
         })
         .collect::<Result<Vec<_>, VerifyError>>()?;
     let result = verify_bounded(&pulled, solver, depth).await?;
+    if let Some(violation) = result.violation {
+        return Err(VerifyError::new(format!(
+            "pulled refinement model violates safety property '{}' ({}) at step {}",
+            violation.name, violation.kind, violation.step
+        )));
+    }
     let checked = mapping
         .progress
         .iter()

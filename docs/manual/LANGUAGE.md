@@ -2786,20 +2786,21 @@ branch was missed before); a refinement that previously reported
 equal the mapped impl state may now report `refines` (the impl state
 matches a different, still-valid, abs initial branch).
 
-Give impl and abs **distinct enum/struct type names**, even when a state
-variable pair is mapped 1:1. Type metadata is merged by name for refinement
-checking; a same-named enum (or struct) declared with a different member
-list (or field set) on each side is rejected as `kind: "type"` (exit 2)
-rather than merged — merging would let an impl-only member get silently
-reinterpreted as whichever abs member sits at the same ordinal index. Domain
-types (`type X = lo..hi`) may safely share a name with different bounds; an
-out-of-range value there is still caught as `map_out_of_bounds`/
-`abs_state_mismatch`. That includes an action-correspondence argument outside
-the abstract action's parameter domain (a wider impl parameter type; a false
-abstract guard is still reported first as `abs_requires_failed`) and a
-state-mapping expression that reads an impl `Map` at a key outside its domain
-(for example a narrower impl key type): both are `map_out_of_bounds` (exit 1),
-not a `kind: "type"` error.
+Same-named impl/abs types must agree in kind, resolved domain bounds, ordered
+enum members, and struct fields/types. `symmetric` is ignored; equal definitions
+keep the impl entry. Different definitions, even unused ones, are `kind: "type"`
+errors (exit 2), located at the `refinement` or inline `implements` declaration
+and naming both specs. Governance retains the outer preservation location.
+Give different definitions distinct names. **Breaking removal (#1599):** unequal
+bounds may no longer share a type name; the boundary gallery's former exit 1
+`refinement_failed/abs_state_mismatch` becomes exit 2 `error/type`.
+Different enums may share member names without progress: ambiguous bare uses
+still fail, while typed conversions/abstractions remain accepted. A refinement
+with `preserve progress` rejects those declarations even if ordinals coincide.
+Pulled-model safety violations fail closed as exit 2 `error/semantics`, naming
+the property and pulled model without a trace, never as `refines`/`progress_lost`.
+With distinct type names, out-of-domain mapping/argument errors retain their
+`map_out_of_bounds` behavior and false abstract guards still take precedence.
 
 ### Chain checking (composition of mappings)
 

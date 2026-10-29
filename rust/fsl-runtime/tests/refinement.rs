@@ -461,7 +461,7 @@ const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
 #[test]
 fn an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds() {
     let implementation = argument_model(SEQ_WIDE);
-    let abstraction = argument_model(SEQ_ABS);
+    let abstraction = argument_model(&SEQ_ABS.replace("type V", "type AV").replace("v: V", "v: AV"));
     let mapping =
         parse_refinement(SEQ_WIDE_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
@@ -480,7 +480,7 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
         "spec MapNarrow { type K = 0..1 state { m: Map<K, Bool> } \
          init { forall k: K { m[k] = false } } action set(k: K) { m[k] = true } }",
     );
-    let abstraction = model(MAP_ABS);
+    let abstraction = model(&MAP_ABS.replace('K', "AK"));
     let mapping = parse_refinement(
         "refinement M { impl MapNarrow abs MapAbs maps auto }",
         &implementation,
@@ -502,7 +502,7 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
 #[test]
 fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
     let implementation = argument_model(SEQ_WIDER);
-    let abstraction = argument_model(SEQ_GUARDED);
+    let abstraction = argument_model(&SEQ_GUARDED.replace("type V", "type AV").replace("v: V", "v: AV"));
     let mapping =
         parse_refinement(SEQ_WIDER_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
@@ -510,6 +510,34 @@ fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
     let failure = failure(&checked);
     assert_eq!(failure.kind, "abs_requires_failed");
     assert_eq!(failure.step, 1);
+}
+
+fn colliding_used_domain(body: &str) {
+    let implementation = model(&format!("spec Impl1599Spec {{ type T = 0..1 {body} }}"));
+    let abstraction = model(&format!("spec Abs1599Spec {{ type T = 0..2 {body} }}"));
+    let error = parse_refinement(
+        "refinement R { impl Impl1599Spec abs Abs1599Spec maps auto }",
+        &implementation,
+        &abstraction,
+    )
+    .expect_err("used domains must obey the same declaration rule");
+    let span = error.span.expect("located type error");
+    assert_eq!((span.start.line, span.start.column), (1, 1));
+    identifiers::assert_names(&error.message, &["T", "Impl1599Spec", "Abs1599Spec"]);
+}
+
+#[test]
+fn issue_1599_rejects_colliding_scalar_parameter_domains() {
+    colliding_used_domain(
+        "state { seq: Seq<T, 2> } init { seq = Seq {} } action push(v: T) { requires seq.size() < 2 seq = seq.push(v) }",
+    );
+}
+
+#[test]
+fn issue_1599_rejects_colliding_map_key_domains() {
+    colliding_used_domain(
+        "state { m: Map<T, Bool> } init { forall k: T { m[k] = false } } action set(k: T) { m[k] = true }",
+    );
 }
 
 const BOOL_ABS: &str =
