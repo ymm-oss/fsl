@@ -1074,6 +1074,8 @@ binder domain を静的に求め、init の key の覆いに使います (#1520)
 全体を覆えば、今の key を書いた後に読む形に対応し、`--engine auto` も fallback せず
 explicit を使います。空の domain は覆いを足さず、部分 domain は選んだ key だけを覆い、
 状態に依存する filter は未解決のままです。check 時の読み出し順の規則は変えません。
+同名の const を隠す外の binder に依存した入れ子の固定 target の初期化は、以前は誤って
+`refines` になりましたが、今は refine が拒否します。
 
 breaking removal の sweep (#1518): base
 `28c4eab710f8d83e766bb0e7c7e006d09d7777d8` と、head

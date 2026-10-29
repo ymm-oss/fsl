@@ -1135,6 +1135,8 @@ after its write is supported when the selected keys establish full-root coverage
 `--engine auto` then uses explicit without fallback. Empty domains contribute no
 coverage, partial domains cover only selected keys, and state-dependent filters
 remain unresolved. The check-time read-order rule is unchanged.
+Refinement now refuses nested fixed-target initialization depending on an outer binder
+that shadows a same-named constant, previously incorrectly accepted as `refines`.
 
 Breaking-removal sweep (#1518): base
 `28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head

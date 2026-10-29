@@ -12,18 +12,20 @@ const EMPTY: &str = "spec RImpl { type K = 0..1 state { m: Map<K, Bool>, free: B
 const SHADOW: &str = "spec RImpl { const outer = 1 type K = 0..1 state { m: Map<K, Bool>, free: Bool } init { forall outer in 0..0 { forall k: K where outer == 1 { m[k] = true } } } action idle() {} }";
 const ENUM_SHADOW: &str = "spec RImpl { enum E { P, Q } type K = 0..1 state { m: Map<K, Bool>, free: Bool } init { forall P: E where P == Q { forall k: K where P != Q { m[k] = true } } } action idle() {} }";
 const OUTER: &str = "spec RImpl { type K = 0..1 state { m: Map<K, Bool>, free: Bool } init { forall o in 0..1 { forall k: K where k == o { m[k] = true } } } action idle() {} }";
+const FIXED: &str = "spec RImpl { type K = 0..1 const i = 0 state { x: Bool, free: Bool } init { forall i: K where i == 1 { forall j: K where i == 0 { x = true } } } action idle() {} invariant NoX { not x } }";
 
-fn observe(id: &str, source: &str, args: &[&str], filter: Option<bool>) {
+fn observe(id: &str, source: &str, args: &[&str], filter: Option<bool>, mapped: &str) {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("fslc-1520-{id}-{}", std::process::id()));
     std::fs::create_dir(&dir).expect("fresh fixture directory");
     let init = filter.is_some();
     let abstraction = format!("spec RAbs{{state{{a:Bool}}init{{a={init}}}action idle(){{}}}}");
-    let mapping = "refinement R { impl RImpl abs RAbs map a = m[0] action idle() -> idle() }";
+    let mapping =
+        format!("refinement R {{ impl RImpl abs RAbs map a = {mapped} action idle() -> idle() }}");
     for (name, text) in [
         ("model.fsl", source),
         ("abs.fsl", abstraction.as_str()),
-        ("map.fsl", mapping),
+        ("map.fsl", mapping.as_str()),
         ("empty.json", "[]"),
     ] {
         std::fs::write(dir.join(name), text).expect("write fixture");
@@ -63,15 +65,15 @@ fn observe(id: &str, source: &str, args: &[&str], filter: Option<bool>) {
 
 #[test]
 fn r1_free_root() {
-    observe("r1_free_root", FREE, REFINE, Some(true));
+    observe("r1_free_root", FREE, REFINE, Some(true), "m[0]");
 }
 #[test]
 fn r1_no_free_root() {
-    observe("r1_no_free_root", NO_FREE, REFINE, Some(true));
+    observe("r1_no_free_root", NO_FREE, REFINE, Some(true), "m[0]");
 }
 #[test]
 fn r2_empty_free_root() {
-    observe("r2_empty_free_root", EMPTY, REFINE, Some(false));
+    observe("r2_empty_free_root", EMPTY, REFINE, Some(false), "m[0]");
 }
 
 #[test]
@@ -82,7 +84,18 @@ fn outer_binder_domains_stay_unresolved() {
             &["verify", "model.fsl", "--engine", "explicit", "--no-cache"],
             &["replay", "model.fsl", "--trace", "empty.json"],
         ] {
-            observe(&format!("{id}-{}", args[0]), source, args, None);
+            observe(&format!("{id}-{}", args[0]), source, args, None, "m[0]");
         }
+    }
+}
+
+#[test]
+fn outer_binder_fixed_target_stays_unresolved() {
+    for args in [
+        REFINE,
+        &["verify", "model.fsl", "--engine", "explicit", "--no-cache"],
+        &["replay", "model.fsl", "--trace", "empty.json"],
+    ] {
+        observe(&format!("fixed-{}", args[0]), FIXED, args, None, "x");
     }
 }

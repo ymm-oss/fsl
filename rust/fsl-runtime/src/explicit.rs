@@ -695,7 +695,7 @@ fn meet_branches(
 /// and non-constant range bounds return `None`, so assignments at the binder key
 /// cannot prove coverage through this function. Fixed targets are separate:
 /// `init_binder_is_nonempty` can prove a static filtered domain nonempty
-/// (including a singleton); concrete/refinement leave outer-dependent sources/filters unresolved.
+/// (including a singleton); scoped static supplementation/nonemptiness leaves legacy range resolution unchanged.
 fn compute_binder_values(
     binder: &Binder,
     model: &KernelModel,
@@ -738,7 +738,7 @@ fn init_binder_is_nonempty(
 }
 
 /// Select only filter `Ok(true)` values; filter errors are not selected.
-/// Source errors and state/outer-binder dependencies return `None`.
+/// Source errors, state reads and dependencies on supplied outer names return `None`.
 fn init_binder_static_values(
     binder: &Binder,
     model: &KernelModel,
